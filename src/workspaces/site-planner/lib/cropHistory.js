@@ -38,14 +38,3 @@ export function redoHistory(h, current) {
 
 export const canUndo = (h) => h.past.length > 0;
 export const canRedo = (h) => h.future.length > 0;
-
-// Zoom slider ↔ scale. Zoom is multiplicative, so the slider is logarithmic: equal travel is an
-// equal zoom RATIO (a linear slider would spend nearly all its length between 1× and 16×).
-export function scaleToSlider(scale, min, max) {
-  const s = Math.min(max, Math.max(min, scale));
-  return Math.log(s / min) / Math.log(max / min);
-}
-export function sliderToScale(t, min, max) {
-  const c = Math.min(1, Math.max(0, t));
-  return min * Math.pow(max / min, c);
-}

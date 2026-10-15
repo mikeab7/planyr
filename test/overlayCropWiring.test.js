@@ -1,7 +1,7 @@
 /* B719779 — CROP A PLACED OVERLAY, the wiring half. `test/overlayCrop.test.js` proves the pure
  * geometry (overlayCrop.js); this suite is a SOURCE GUARD proving `SitePlanner.jsx` actually uses
  * it — the clip-path applied to the drawn image (and carried into the export by the SAME clone the
- * rest of this SVG's PDF-PARITY relies on), and the panel's four-field trim editor.
+ * rest of this SVG's PDF-PARITY relies on), and the panel's crop entry points (the four-field trim editor was removed 2026-10-15).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -36,18 +36,13 @@ describe("the Overlays panel exposes a non-destructive, reversible crop editor",
   const panel = readFileSync("src/workspaces/site-planner/components/OverlaysPanel.jsx", "utf8");
   const dlg = readFileSync("src/workspaces/site-planner/components/OverlayCropDialog.jsx", "utf8");
 
-  it("offers four edge-trim fields, in FEET, inside the Crop dialog (not the panel)", () => {
-    for (const edge of ["left", "top", "right", "bottom"]) expect(dlg).toContain(`"${edge}"`);
-    expect(dlg).toContain("overlay-crop-trim");
+  it("has NO Trim-by-feet strip: no edge fields in the dialog, no trim wiring in the planner (NEW-1, 2026-10-15)", () => {
+    expect(dlg).not.toMatch(/overlay-crop-trim|Trim by feet|onTrim/);
+    expect(src).not.toMatch(/cropTrimFeet|cropFromTrimFeet|onTrimFocus/);
     expect(panel).not.toMatch(/Crop (Left|Top|Right|Bottom) edge/);
   });
-  it("reads/writes through the pure module (cropTrimFeet / cropFromTrimFeet), not inline arithmetic", () => {
-    expect(src).toMatch(/trim=\{cropTrimFeet\(o\)\}/);
-    expect(src).toMatch(/cropFromTrimFeet\(next, o\)/);
-  });
   it("commits through setOverlayCrop (lock check + undo history + persistence via patchOverlay)", () => {
-    expect(src).toMatch(/setOverlayCrop\(o\.id, cropFromTrimFeet\(next, o\), false\)/);
-    expect(src).toMatch(/onTrimFocus=\{\(\) => pushHistory\(\)\}/);
+    expect(src).toMatch(/onCommit=\{\(crop\) => \{ if \(setOverlayCrop\(o\.id, crop\)\) setOvCropId\(null\); \}\}/);
   });
   it('offers a "Reset" action that restores the full image (crop: null, not a re-import)', () => {
     expect(panel).toContain('data-testid="overlay-crop-reset"');

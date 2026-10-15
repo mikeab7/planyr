@@ -51,7 +51,7 @@ const done = async () => { await dlg.locator('[data-testid="crop-done"]').click(
 await openCrop();
 const probe = await page.evaluate(() => {
   const q = (s) => document.querySelector(s);
-  const tb = q('[data-testid="crop-toolbar"]'), ft = q('[data-testid="crop-footer"]'), cv = q('[data-testid="crop-canvas"]');
+  const tb = q('[data-testid="crop-toolbar"]'), ft = q('[data-testid="crop-header"]'), cv = q('[data-testid="crop-canvas"]');
   const modal = q('[data-crop-modal]'), shell = modal.firstElementChild;
   const tops = (el) => Array.from(el.children).filter((c) => c.getBoundingClientRect().width > 0).map((c) => { const b = c.getBoundingClientRect(); return Math.round(b.top + b.height / 2); }); // row CENTRES — a wrapped item lands a whole row lower; differing control heights do not move a centre
   const spread = (a) => Math.max(...a) - Math.min(...a);
@@ -74,10 +74,10 @@ if (!probe.topmost[0]) { console.log("  ⛔ VOID — probe cannot see a known an
 check("NEW-1 the modal is topmost at the toolbar, the canvas, and all four window corners/edges", probe.topmost.every(Boolean), JSON.stringify(probe.topmost));
 check("NEW-1 the modal is a direct child of <body> (no host stacking context can outrank it)", probe.bodyChild);
 check("NEW-3 toolbar is ONE line (all controls share a row)", probe.toolbarRowSpread <= 3, `spread ${probe.toolbarRowSpread}px`);
-check("NEW-3 footer is ONE line", probe.footerRowSpread <= 3, `spread ${probe.footerRowSpread}px`);
+check("NEW-1 (2026-10-15) the header (name · shape switch · Cancel/Done) is ONE row", probe.footerRowSpread <= 3, `spread ${probe.footerRowSpread}px`);
 check("NEW-3 no separate zoom readout; the zoom control shows the live zoom", probe.zoomPctNodes === 0 && /^\d+%$/.test(probe.zoomBtn), probe.zoomBtn);
 check("NEW-3 the canvas takes the height (≥ 80% of the modal)", probe.canvasFrac >= 0.8, `${probe.canvasH}/${probe.shellH}`);
-check("NEW-5 exactly one reset action, no Clear polygon", JSON.stringify(probe.resets) === JSON.stringify(["Reset to full page"]), JSON.stringify(probe.resets));
+check("NEW-5 exactly one reset action, no Clear polygon", JSON.stringify(probe.resets) === JSON.stringify(["Reset"]), JSON.stringify(probe.resets));
 { const before = await dlg.locator('[data-testid="crop-zoom-100"]').textContent(); await dlg.locator('[data-testid="crop-zoom-100"]').click(); await page.waitForTimeout(200);
   check("the zoom control jumps to 100% when pressed", (await dlg.locator('[data-testid="crop-zoom-100"]').textContent()).trim() === "100%", `${before.trim()} → 100%`);
   await dlg.locator('[data-testid="crop-zoom-fit"]').click(); await page.waitForTimeout(200); }
@@ -151,7 +151,7 @@ await page.keyboard.press("Control+Shift+z");
 await page.waitForTimeout(250);
 // existing gestures still work: click an edge adds a point + drag; Delete key removes the selected one
 await page.screenshot({ path: OUT + "crop-ux-poly.png" });
-check("NEW-4 hint mentions right-click", /right-click/i.test(await dlg.locator('[data-testid="crop-poly-hint"]').textContent()));
+check("NEW-1 (2026-10-15) the closed-ring hint is the short one", /Click an edge to add a point · Drag a point to move it · Delete removes the selected point/.test(await dlg.locator('[data-testid="crop-poly-hint"]').textContent()));
 await done();
 const sPoly = await waitStored((s) => s && s.crop && s.crop.kind === "poly");
 check("Done stores a polygon crop with the 4 points", !!(sPoly && sPoly.crop.kind === "poly" && sPoly.crop.pts.length === 4), JSON.stringify(sPoly && sPoly.crop));
@@ -160,7 +160,7 @@ check("NEW-5 the stored crop carries ONLY the polygon (no hidden rectangle x/y/w
 /* ---- NEW-5 reset + rect-only storage ---------------------------------------------------------------- */
 await openCrop();
 check("reopening shows the saved polygon (4 points)", (await nVerts()) === 4);
-check("Reset to full page is available on a cropped overlay", await dlg.locator('[data-testid="crop-reset"]').isEnabled());
+check("Reset is available on a cropped overlay", await dlg.locator('[data-testid="crop-reset"]').isEnabled());
 await dlg.locator('[data-testid="crop-reset"]').click();
 await page.waitForTimeout(250);
 await done();

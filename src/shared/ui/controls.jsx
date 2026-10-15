@@ -179,6 +179,41 @@ export function SegmentedControl({ options, value, onChange, accent = "var(--acc
   );
 }
 
+/* FloatingToolbar / FloatingToolButton / FloatingToolDivider — the DARK variant (NEW-1, 2026-10-15, owner-approved crop
+ * mockup): a small pill of tools that floats OVER a photo or drawing (the crop dialog's undo / reset / pan / zoom row).
+ * Like the crop tool's scrim and handles, its skin is deliberately fixed dark and does NOT follow the app theme — it
+ * has to read over an arbitrary uploaded picture, not over the app's own surfaces, so no theme token applies. The
+ * caller positions it (absolute, bottom-centre); these only own the look. A button is icon-only (aria-label required
+ * at the call site) or icon + word; `active` is a pressed toggle; a disabled button dims its icon colour. */
+const FT_BG = "rgba(24,26,32,0.95)"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_BORDER = "1px solid rgba(255,255,255,0.10)"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_SHADOW = "0 4px 16px rgba(0,0,0,0.4)"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_TEXT = "#E8EAED"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_TEXT_OFF = "#6B7079"; // design-exempt: fixed over-the-drawing chrome — dimmed icon colour for a disabled tool
+const FT_ON = "rgba(255,255,255,0.18)"; // design-exempt: fixed over-the-drawing chrome — a pressed toggle
+const FT_RULE = "rgba(255,255,255,0.16)"; // design-exempt: fixed over-the-drawing chrome — divider hairline
+export const FloatingToolbar = forwardRef(function FloatingToolbar({ style, children, ...rest }, ref) {
+  return (
+    <div ref={ref} role="toolbar" style={{
+      display: "flex", alignItems: "center", gap: 2, padding: 4, background: FT_BG, border: FT_BORDER,
+      borderRadius: 10, boxShadow: FT_SHADOW, ...style, // design-exempt: 10 = the pill's own shell, one step over the 8 control radius it holds (nested 7)
+    }} {...rest}>{children}</div>
+  );
+});
+export const FloatingToolButton = forwardRef(function FloatingToolButton({ active = false, disabled = false, compact = false, style, children, ...rest }, ref) {
+  const h = compact ? 30 : 34;
+  return (
+    <button ref={ref} type="button" disabled={disabled} aria-pressed={active ? true : undefined} style={{
+      minWidth: h, height: h, padding: "0 8px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, flex: "none",
+      border: "none", borderRadius: 7, background: active ? FT_ON : "transparent", color: disabled ? FT_TEXT_OFF : FT_TEXT, // design-exempt: 7 = concentric inner radius of the pill shell
+      fontFamily: "inherit", fontSize: FONT.md, fontWeight: 500, fontVariantNumeric: "tabular-nums", cursor: disabled ? "default" : "pointer", ...style,
+    }} {...rest}>{children}</button>
+  );
+});
+export function FloatingToolDivider() {
+  return <span aria-hidden="true" style={{ width: 1, height: 20, background: FT_RULE, margin: "0 6px", flex: "none" }} />;
+}
+
 /* IconButton — the square icon slot (the Site Planner iconBtn, token-only). Ref-forwarding so
  * it can anchor an AnchoredMenu directly, like any other trigger element. */
 export const IconButton = forwardRef(function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, className, children, ...rest }, ref) {

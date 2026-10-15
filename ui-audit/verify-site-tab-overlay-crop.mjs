@@ -95,6 +95,13 @@ const pixelAt = async (pt) => {
 };
 const isSheet = (px) => Math.abs(px[0] - SHEET[0]) < 22 && Math.abs(px[1] - SHEET[1]) < 22 && Math.abs(px[2] - SHEET[2]) < 22;
 // Triangle in image fractions: (0.1,0.1) (0.9,0.1) (0.5,0.9). Inside/outside probe points:
+// NEW-1 (2026-10-15): "Trim by feet" is gone — a rect crop is made the way a person makes one, by dragging an edge grip.
+const dragEdgeIn = async (dlgLoc, handle, dx, dy) => {
+  const b = await dlgLoc.locator(`[data-testid="crop-handle-${handle}"]`).boundingBox();
+  const x = b.x + b.width / 2, y = b.y + b.height / 2;
+  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + dx / 2, y + dy / 2, { steps: 4 }); await page.mouse.move(x + dx, y + dy, { steps: 4 }); await page.mouse.up();
+  await page.waitForTimeout(150);
+};
 const IN = [[0.5, 0.35], [0.5, 0.7], [0.3, 0.2]];
 const OUTSIDE = [[0.1, 0.8], [0.9, 0.8], [0.05, 0.05]];
 
@@ -211,12 +218,10 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
   await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
   const ld = page.locator('[data-testid="overlay-crop-dialog"]');
   check("locked: Crop… opens the crop tool", (await ld.count()) === 1);
-  const lf = ld.locator('input[aria-label="Crop Left edge"]');
-  check("locked: the trim fields are enabled", await lf.isEnabled());
-  await lf.fill("150");
-  const sL = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "rect" && s.crop.x === 150);
-  check("locked: a trim field edit writes a rect crop to the locked overlay", !!(sL && sL.locked && sL.crop && sL.crop.kind === "rect" && sL.crop.x === 150), JSON.stringify(sL));
+  await dragEdgeIn(ld, "l", 90, 0);
   await ld.locator("button", { hasText: "Done" }).click(); await page.waitForTimeout(400);
+  const sL = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "rect" && s.crop.x > 0);
+  check("locked: dragging an edge grip and pressing Done writes a rect crop to the locked overlay", !!(sL && sL.locked && sL.crop && sL.crop.kind === "rect" && sL.crop.x > 0), JSON.stringify(sL));
   check("locked: Done closes the dialog and the crop stays applied (rect clipPath)", (await ld.count()) === 0 && (await clipInfo("ovA")).shape === "rect");
   // …and lock itself still holds for placement: the lock toggle state is untouched by cropping
   check("locked: the overlay is still locked after cropping (lock only guards move/resize)", !!(await stored("ovA")).locked);
@@ -283,15 +288,13 @@ await openPlan();
   await d.locator("button", { hasText: "Done" }).click();
   const sR = await waitStored("ovA", (s) => s && (s.crop === null || (s.crop && s.crop.kind !== "poly")));
   check("Rectangle → Reset to full page → Done commits no crop — full sheet (polygon cleared too)", sR && sR.crop === null, JSON.stringify(sR && sR.crop));
-  // A real rect via the trim fields, then Reset crop.
-  // NEW-1: the four trim fields live INSIDE the Crop dialog now; typing one writes the crop and the dialog stays open.
+  // A real rect by dragging an edge grip, then Reset crop.
   await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
-  const f = page.locator('[data-testid="overlay-crop-dialog"] input[aria-label="Crop Left edge"]');
-  await f.fill("200");
+  await dragEdgeIn(page.locator('[data-testid="overlay-crop-dialog"]'), "l", 120, 0);
+  await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Done" }).click(); await page.waitForTimeout(400);
   const sT = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "rect");
-  check("trim field writes a kind-stamped rect crop", !!(sT && sT.crop && sT.crop.kind === "rect" && sT.crop.x === 200), JSON.stringify(sT && sT.crop));
+  check("an edge-grip drag writes a kind-stamped rect crop", !!(sT && sT.crop && sT.crop.kind === "rect" && sT.crop.x > 0), JSON.stringify(sT && sT.crop));
   check("…drawn as a rect <clipPath>", (await clipInfo("ovA")).shape === "rect");
-  await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Cancel" }).click(); await page.waitForTimeout(300);
   await page.locator('[data-testid="overlay-crop-reset"]').click();
   const s0 = await waitStored("ovA", (s) => s && !s.crop);
   check("Reset crop returns the full sheet (crop cleared, no clipPath)", !!(s0 && !s0.crop) && !(await clipInfo("ovA")).hasClip);
@@ -361,13 +364,13 @@ await openPlan();
     if (!(await page.locator(`[data-testid="overlay-crop-${pd.id}"]`).count())) await page.locator('[data-testid^="reference-open-"]', { hasText: pd.name }).first().click();
     await page.waitForTimeout(400);
     const row = page.locator(`[data-testid="reference-row-${pd.id}"]`);
-    // NEW-1: the trim-by-feet fields live in the Crop dialog now.
     await row.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
-    await page.locator('[data-testid="overlay-crop-dialog"] input[aria-label="Crop Bottom edge"]').fill("40");
+    await dragEdgeIn(page.locator('[data-testid="overlay-crop-dialog"]'), "b", 0, -40);
+    await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Done" }).click();
     const cropOf = () => page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop || null, ko: o.knockout, srcLen: (o.src || "").length } : null; }, pd.id);
     const t0 = Date.now(); let c0; while (Date.now() - t0 < 4000) { c0 = await cropOf(); if (c0 && c0.crop) break; await page.waitForTimeout(150); }
-    check("PDF overlay: a trim-field crop is stored", !!(c0 && c0.crop && c0.crop.kind === "rect"), JSON.stringify(c0 && c0.crop));
-    await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Cancel" }).click(); await page.waitForTimeout(300);
+    check("PDF overlay: an edge-grip crop is stored", !!(c0 && c0.crop && c0.crop.kind === "rect"), JSON.stringify(c0 && c0.crop));
+    await page.waitForTimeout(300);
     const ko = row.locator("text=Knock out white paper");
     if (await ko.count()) {
       await ko.click();

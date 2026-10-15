@@ -81,30 +81,8 @@ export function cropClipRectScreen(o, tl, ftPerPx, rppf) {
   return { x: tl.x + c.x * k, y: tl.y + c.y * k, width: c.w * k, height: c.h * k };
 }
 
-// The panel's four trim fields, in FEET (never px — this app is feet-everywhere-internal at the UI
-// boundary), derived from the overlay's current crop (or zero trim, full image, when unset).
-export function cropTrimFeet(o) {
-  const c = effectiveCropRect(o);
-  const ftPerPx = (o && o.ftPerPx) || 0;
-  const imgW = (o && o.imgW) || 0, imgH = (o && o.imgH) || 0;
-  return {
-    left: c.x * ftPerPx,
-    top: c.y * ftPerPx,
-    right: (imgW - c.x - c.w) * ftPerPx,
-    bottom: (imgH - c.y - c.h) * ftPerPx,
-  };
-}
-
-// Inverse of cropTrimFeet: four edge trims in feet -> a normalized crop rect (or null, if the trims
-// amount to no crop at all). Negative/NaN trims read as 0 (never expand past the image edge).
-export function cropFromTrimFeet(trim, o) {
-  const imgW = (o && o.imgW) || 0, imgH = (o && o.imgH) || 0, ftPerPx = (o && o.ftPerPx) || 0;
-  if (!(imgW > 0) || !(imgH > 0) || !(ftPerPx > 0)) return null;
-  const clean = (v) => (Number.isFinite(v) && v > 0 ? v / ftPerPx : 0); // feet -> image px
-  const left = clean(trim && trim.left), top = clean(trim && trim.top);
-  const right = clean(trim && trim.right), bottom = clean(trim && trim.bottom);
-  return normalizeCrop({ x: left, y: top, w: imgW - left - right, h: imgH - top - bottom }, imgW, imgH);
-}
+// NEW-1 (2026-10-15): the panel's four "Trim by feet" fields (cropTrimFeet / cropFromTrimFeet) were REMOVED — the owner
+// wanted the crop drawn on the picture and nothing else. A rect crop is still {kind:'rect',x,y,w,h}; stored crops are untouched.
 
 /* ---- Polygon crop (NEW-1, B1783328) --------------------------------------------------------
  * Discriminated union, additive to the rect shape above: `{kind:'rect', x,y,w,h}` |

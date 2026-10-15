@@ -1637,7 +1637,7 @@ export default function SitePlansSection({
     {cropTarget && (
       <CropModal testId="site-plan-crop-modal" title={`Crop “${cropTarget.overlay.docTitle || "this site plan"}”`} onCancel={() => setCropTarget(null)}>
         <ImageCropTool
-          fill
+          fill fileName={cropTarget.overlay.docTitle || ""}
           src={cropTarget.src} imgW={cropTarget.overlay.imgW} imgH={cropTarget.overlay.imgH} crop={cropTarget.overlay.crop}
           onCommit={commitCrop} onCancel={() => setCropTarget(null)}
         />

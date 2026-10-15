@@ -390,7 +390,7 @@ import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
 import { scaledPatch } from "./lib/overlayPanelModel.js";
-import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
+import { hasCrop, cropClipShapeScreen, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
@@ -29827,9 +29827,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return (
           <Suspense fallback={null}>
             <OverlayCropDialog overlay={o} onCancel={() => setOvCropId(null)}
-              onCommit={(crop) => { if (setOverlayCrop(o.id, crop)) setOvCropId(null); }}
-              trim={cropTrimFeet(o)} isPoly={cropKind(o.crop) === "poly"} onTrimFocus={() => pushHistory()}
-              onTrim={(edge, val) => { const next = { ...cropTrimFeet(o), [edge]: Math.max(0, +val || 0) }; setOverlayCrop(o.id, cropFromTrimFeet(next, o), false); }} />
+              onCommit={(crop) => { if (setOverlayCrop(o.id, crop)) setOvCropId(null); }} />
           </Suspense>
         );
       })()}

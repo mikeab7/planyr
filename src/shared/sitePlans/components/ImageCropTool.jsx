@@ -51,7 +51,7 @@
  * whole original picture with no re-import.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Button, ToggleChip, MenuItem, menuPanelStyle } from "../../ui/controls.jsx";
+import { Button, SegmentedControl, MenuItem, menuPanelStyle, FloatingToolbar, FloatingToolButton, FloatingToolDivider } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import {
@@ -62,10 +62,11 @@ import {
   addPointAtNearestEdge, deletePointAt, canDeletePoint,
 } from "../../overlay/overlayCrop.js";
 import {
-  emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo, scaleToSlider, sliderToScale,
+  emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo,
 } from "../../../workspaces/site-planner/lib/cropHistory.js";
 import { worldToScreen, screenToWorld, zoomAround, panBy, fitView } from "../../viewport/viewportTransform.js";
 import { wheelZoomFactor } from "../../viewport/viewAnchor.js";
+import { armCropWatchdog } from "../lib/cropDiag.js";
 
 const HANDLE_SIZE = 12;
 const EDGE_LONG = 24; // the four mid-edge grips share ONE footprint: EDGE_LONG along the edge ...
@@ -83,6 +84,9 @@ const K_MAX = 16;
 // Fit fills the space it is given, so a small image is enlarged to it (zoom is only a view; the
 // stored crop is in image px). K_MAX still bounds a wheel/slider zoom.
 const FIT_MAX = 8;
+// Fit leaves this much room round the picture: the canvas is full-bleed in the dialog now (NEW-1, 2026-10-15), so a grip
+// sitting on the picture's own edge would otherwise be half outside the clipped dialog and lose half its grab area.
+const FIT_PAD = 16;
 const KEY_PAN_PX = 80; // one arrow-key press; Shift = four steps
 const ZOOM_STEP = 1.25; // the +/- buttons and keys
 
@@ -105,12 +109,25 @@ const HANDLE_CURSOR = {
 
 const fullRect = (imgW, imgH) => ({ x: 0, y: 0, w: imgW, h: imgH });
 const clampToImage = (v, max) => Math.min(Math.max(0, v), max);
-// Style for the footer's small underlined text action (Reset to full page).
-const linkButtonStyle = (disabled) => ({
-  border: "none", background: "none", padding: 0, cursor: disabled ? "default" : "pointer",
-  fontSize: FONT_SIZE.label, color: disabled ? "var(--text-secondary)" : "var(--accent)",
-  opacity: disabled ? 0.5 : 1, textDecoration: "underline",
-});
+
+// Small inline icons for the header switch and the floating toolbar (module scope — MODULE-SCOPE-COMPONENTS).
+const ICON_PROPS = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
+const RectIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" {...ICON_PROPS}><rect x="4" y="6" width="16" height="12" rx="1" /></svg>;
+const PolyIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M12 3 21 9.5 17.5 20h-11L3 9.5Z" /></svg>;
+const UndoIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>;
+const RedoIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="m15 14 5-5-5-5" /><path d="M20 9H9a5 5 0 0 0 0 10h3" /></svg>;
+const ResetIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>;
+const HandIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M18 11V6a2 2 0 0 0-4 0v5" /><path d="M14 10V4a2 2 0 0 0-4 0v6" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.3l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15" /></svg>;
+const MinusIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M5 12h14" /></svg>;
+const PlusIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M5 12h14M12 5v14" /></svg>;
+const FitIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>;
+const SegLabel = ({ icon, children }) => <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>{icon}{children}</span>;
+const MODE_OPTIONS = [
+  { key: "rect", label: <SegLabel icon={<RectIcon />}>Rectangle</SegLabel>, testid: "crop-mode-rect" },
+  { key: "poly", label: <SegLabel icon={<PolyIcon />}>Polygon</SegLabel>, testid: "crop-mode-poly" },
+];
+// The selected segment is a dark neutral, never the accent (same convention as the Overlays panel's Draws toggle).
+const MODE_SEG_STYLE = { display: "inline-flex", alignItems: "center", padding: "0 14px" };
 
 // This tool's chrome (scrim / handles / rule-of-thirds) is DELIBERATELY fixed dark-on-photo,
 // independent of the app's light/dark theme — the same convention every competent photo
@@ -123,6 +140,8 @@ const CROP_BG = "#111"; // design-exempt: fixed photo-editor chrome — see comm
 const CROP_WHITE = "#fff"; // design-exempt: fixed photo-editor chrome — see comment above
 const CROP_RECT_SHADOW = "0 0 0 1px rgba(0,0,0,0.6)"; // design-exempt: fixed photo-editor chrome — see comment above
 const CROP_GRID_LINE = "rgba(255,255,255,0.6)"; // design-exempt: fixed photo-editor chrome — see comment above
+const CROP_PILL_BG = "rgba(24,26,32,0.95)"; // design-exempt: fixed photo-editor chrome — same dark pill as the floating toolbar (controls.jsx)
+const CROP_PILL_TEXT = "#E8EAED"; // design-exempt: fixed photo-editor chrome — same dark pill as the floating toolbar (controls.jsx)
 const CROP_HANDLE_RADIUS = 2; // design-exempt: matches overlayPlacementHandles.js's map-side corner-square rx (11px handle, 2px round) — below the RADIUS scale's floor by design, a grip not a surface
 
 /** `src` — the image URL to crop (full resolution). `imgW`/`imgH` — its natural pixel size.
@@ -134,8 +153,14 @@ const CROP_HANDLE_RADIUS = 2; // design-exempt: matches overlayPlacementHandles.
  * not a shrink-to-fit box — the caller should hand it as much real screen space as it has).
  * `fill` (NEW-5) — instead of the fixed maxWidth/maxHeight box, the viewport takes whatever room
  * its parent leaves (the parent must give this component a definite height), measured live, and Fit
- * re-runs on resize until the user has zoomed or panned by hand. */
-export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCancel, maxWidth = 720, maxHeight = 520, fill = false }) {
+ * re-runs on resize until the user has zoomed or panned by hand.
+ *
+ * NEW-1 (2026-10-15, owner-approved mockup) — the chrome is ONE header row (Crop + file name · Rectangle|Polygon
+ * switch · Cancel / Done) and ONE floating dark pill over the drawing (Undo · Redo · Reset | Pan | − 19% + Fit);
+ * there is no footer. `fileName` is the header's second label. The small pre-placement box (`!fill`, ~420 wide)
+ * cannot hold the whole header, so THAT variant alone keeps the shape switch on top and Cancel / Done at the bottom.
+ * The old "Trim by feet" strip and the zoom slider are gone. */
+export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCancel, maxWidth = 720, maxHeight = 520, fill = false, fileName = "" }) {
   const initialKind = crop ? cropKind(crop) : "rect";
   const [mode, setMode] = useState(initialKind);
 
@@ -180,7 +205,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   // crop shapes above are stored in image px and never read it, which is what makes panning and
   // zooming unable to move a crop relative to the picture (VIEW-INDEPENDENT-ONCE in spirit — the
   // shape's own geometry has no view term).
-  const [view, setView] = useState(() => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: 0, min: K_MIN, max: FIT_MAX, mode: "page" }));
+  const [view, setView] = useState(() => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" }));
   const userMovedRef = useRef(false); // true once the user zooms/pans by hand; Fit resets it
   const [handTool, setHandTool] = useState(false); // NEW-3: the on-screen Pan tool (left-drag pans)
   const [spaceDown, setSpaceDown] = useState(false);
@@ -550,11 +575,10 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       beginPan(e);
     }
   };
-  const fitNow = () => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: 0, min: K_MIN, max: FIT_MAX, mode: "page" });
+  const fitNow = () => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" });
   const doFit = () => { userMovedRef.current = false; setView(fitNow()); };
   const do100 = () => { userMovedRef.current = true; setView((v) => zoomAround(v, 1 / v.scale, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
   const zoomBy = (f) => { userMovedRef.current = true; setView((v) => zoomAround(v, f, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
-  const zoomTo = (scale) => { userMovedRef.current = true; setView((v) => zoomAround(v, scale / v.scale, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
 
   // NEW-5 — fill mode: measure the room the parent leaves and keep the picture fitted to it until
   // the user takes over the view by hand.
@@ -590,37 +614,58 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   const polyPointsAttr = polyPtsScreen.map(([x, y]) => `${x},${y}`).join(" ");
   const zoomPct = Math.round(view.scale * 100);
 
+  // NEW-2 (2026-10-15) — self-capturing diagnostics (cropDiag.js): the owner's "couldn't click anything" freeze has not
+  // reproduced, so the dialog reports its own open state and watches for dead / blocked pointers and stalls.
+  const imgElRef = useRef(null);
+  const diagRef = useRef({});
+  diagRef.current = { imgW, imgH, view, viewW: VIEW_W, viewH: VIEW_H, fill, mode, renders: (diagRef.current.renders || 0) + 1, rev: diagRef.current.rev || 0 };
+  useEffect(() => { diagRef.current.rev = (diagRef.current.rev || 0) + 1; }, [mode, draft, polyPts, polyClosed, selectedVertex, view, hist, handTool, menu, dragType, draggingVertex]);
+  useEffect(() => armCropWatchdog({ root: rootRef.current, get: () => ({ ...diagRef.current, imgEl: imgElRef.current }) }), []);
+
+  const modeSwitch = (
+    <SegmentedControl options={MODE_OPTIONS} value={mode} onChange={setMode} data-testid="crop-mode"
+      accent="var(--text-primary)" onAccent="var(--surface-raised)" aria-label="Crop shape" segmentStyle={MODE_SEG_STYLE} />
+  );
+  const cancelBtn = <Button size="md" variant="ghost" onClick={onCancel} data-testid="crop-cancel">Cancel</Button>;
+  const doneBtn = <Button size="md" onClick={commit} disabled={!canCommit} title={doneWhy || undefined} data-testid="crop-done">Done</Button>;
+  const doneWhyEl = doneWhy ? <span data-testid="crop-done-why" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{doneWhy}</span> : null;
+  const hintText = mode !== "poly" ? "" : (!polyClosed
+    ? "Click to place points · Click the first point or press Enter to close"
+    : "Click an edge to add a point · Drag a point to move it · Delete removes the selected point");
+
   return (
     <div ref={rootRef} tabIndex={-1} style={{ outline: "none", ...(fill ? { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 } : {}) }}>
-      {/* NEW-3 — ONE toolbar line: the polygon hint moved onto the canvas and the separate zoom readout was
-          folded into the zoom control (the button shows the live zoom; pressing it jumps to 100%). */}
-      <div data-testid="crop-toolbar" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-        <ToggleChip active={mode === "rect"} onClick={() => setMode("rect")}>Rectangle</ToggleChip>
-        <ToggleChip active={mode === "poly"} onClick={() => setMode("poly")}>Polygon</ToggleChip>
-        <span style={{ flex: 1 }} />
-        <Button size="sm" variant="ghost" onClick={undo} disabled={!canUndo(hist)} data-testid="crop-undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶ Undo</Button>
-        <Button size="sm" variant="ghost" onClick={redo} disabled={!canRedo(hist)} data-testid="crop-redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo">↷ Redo</Button>
-        <ToggleChip active={handTool} onClick={() => setHandTool((v) => !v)} data-testid="crop-pan-tool" title="Pan tool — drag the picture to move it (or hold Space, or use the arrow keys). Scroll to zoom.">✋ Pan</ToggleChip>
-        <Button size="sm" variant="ghost" onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="crop-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</Button>
-        <input type="range" min={0} max={1} step={0.001} aria-label="Zoom" data-testid="crop-zoom-slider"
-          value={scaleToSlider(view.scale, K_MIN, K_MAX)} onChange={(e) => zoomTo(sliderToScale(parseFloat(e.target.value), K_MIN, K_MAX))}
-          style={{ width: 90, accentColor: "var(--accent)" }} />
-        <Button size="sm" variant="ghost" onClick={() => zoomBy(ZOOM_STEP)} data-testid="crop-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</Button>
-        <Button size="sm" variant="ghost" onClick={doFit} data-testid="crop-zoom-fit">Fit</Button>
-        <Button size="sm" variant="ghost" onClick={do100} data-testid="crop-zoom-100" aria-label={`Zoom ${zoomPct}% — press for 100%`} title="Current zoom — press to jump to 100%"
-          style={{ minWidth: 52, fontVariantNumeric: "tabular-nums" }}>{zoomPct}%</Button>
-      </div>
+      {fill ? (
+        // ONE header row replaces the old title line, toolbar row and footer: name left, shape switch centre,
+        // Cancel / Done right. The side columns are minmax(0, 1fr) so a long file name truncates instead of
+        // pushing the switch off-centre.
+        <div data-testid="crop-header" style={{
+          flex: "none", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)", alignItems: "center", gap: 16,
+          padding: "10px 16px", borderBottom: "1px solid var(--border-default)",
+        }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
+            <h1 style={{ margin: 0, flex: "none", fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>Crop</h1>
+            {fileName && <span title={fileName} data-testid="crop-file-name" style={{ minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fileName}</span>}
+          </div>
+          {modeSwitch}
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
+            {doneWhyEl}{cancelBtn}{doneBtn}
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 6 }}>{modeSwitch}</div>
+      )}
 
+      <div style={{ position: "relative", ...(fill ? { flex: 1, minHeight: 0, width: "100%" } : { width: VIEW_W, height: VIEW_H }) }}>
       <div ref={boxRef} onPointerDownCapture={onViewportPointerDownCapture} onContextMenu={(e) => e.preventDefault()} data-testid="crop-canvas" style={{
-        position: "relative", userSelect: "none",
-        ...(fill ? { flex: 1, minHeight: 0, width: "100%" } : { width: VIEW_W, height: VIEW_H }),
-        border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, background: CROP_BG,
+        position: "absolute", inset: 0, userSelect: "none",
+        ...(fill ? {} : { border: "1px solid var(--border-default)", borderRadius: RADIUS.sm }), background: CROP_BG, boxSizing: "border-box",
         cursor: (spaceDown || handTool) ? (isPanning ? "grabbing" : "grab") : "default", touchAction: "none",
       }}>
         {/* image layer — clipped to the viewport so a pan/zoom can never spill the picture past
             the dialog's own edge; NOT the layer scrims/handles render in (see below) */}
         <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-          <img src={src} alt="" draggable={false} style={{
+          <img ref={imgElRef} src={src} alt="" draggable={false} style={{
             position: "absolute", left: 0, top: 0, width: imgW, height: imgH, transformOrigin: "0 0",
             transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
           }} />
@@ -737,30 +782,42 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
           )}
         </div>
 
-        {/* NEW-3/NEW-4 — the polygon hint lives ON the canvas (it used to cost a toolbar row). */}
-        {mode === "poly" && (
-          <div data-testid="crop-poly-hint" style={{
-            position: "absolute", left: 8, bottom: 8, maxWidth: "calc(100% - 16px)", padding: "3px 8px", borderRadius: RADIUS.sm,
-            background: CROP_SCRIM, color: CROP_WHITE, fontSize: FONT_SIZE.label, pointerEvents: "none",
-          }}>
-            {!polyClosed
-              ? "Click to place points (Shift: snap to 0/45/90°) · click the first point or press Enter to close, or press Done once you have three"
-              : "Click an edge to add a point · drag a point to move it · right-click to add or delete a point · Delete removes the selected point"}
-          </div>
-        )}
       </div>
 
-      <div data-testid="crop-footer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 12, flexWrap: "nowrap" }}>
-        <button onClick={resetAll} disabled={nothingToReset} style={linkButtonStyle(nothingToReset)} data-testid="crop-reset"
-          title="Removes the crop so the full page shows">
-          Reset to full page
-        </button>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" }}>
-          {doneWhy && <span data-testid="crop-done-why" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)" }}>{doneWhy}</span>}
-          <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={commit} disabled={!canCommit} title={doneWhy || undefined} data-testid="crop-done">Done</Button>
-        </div>
+      {/* The polygon hint — a small dark pill at the TOP-LEFT of the drawing; chrome that never takes a press. */}
+      {hintText && (
+        <div data-testid="crop-poly-hint" style={{
+          position: "absolute", left: 12, top: 12, maxWidth: "calc(100% - 24px)", padding: "6px 12px", borderRadius: RADIUS.md,
+          background: CROP_PILL_BG, color: CROP_PILL_TEXT, fontSize: FONT_SIZE.label, pointerEvents: "none",
+        }}>{hintText}</div>
+      )}
+
+      {/* The floating view toolbar — bottom-centre over the drawing. A sibling of the canvas box (not a child), so
+          the box's capture-phase pan handler can never swallow a press on these buttons. */}
+      <FloatingToolbar aria-label="View and history" data-testid="crop-toolbar" style={{ position: "absolute", left: "50%", bottom: fill ? 16 : 8, transform: "translateX(-50%)", zIndex: 2 }}>
+        <FloatingToolButton compact={!fill} onClick={undo} disabled={!canUndo(hist)} data-testid="crop-undo" title="Undo (Ctrl+Z)" aria-label="Undo"><UndoIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={redo} disabled={!canRedo(hist)} data-testid="crop-redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo"><RedoIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={resetAll} disabled={nothingToReset} data-testid="crop-reset" title="Back to the whole sheet" aria-label="Reset — back to the whole sheet">
+          <ResetIcon />{fill && "Reset"}
+        </FloatingToolButton>
+        <FloatingToolDivider />
+        <FloatingToolButton compact={!fill} active={handTool} onClick={() => setHandTool((v) => !v)} data-testid="crop-pan-tool" aria-label="Pan"
+          title="Pan — drag the picture to move it (or hold Space, or use the arrow keys). Scroll to zoom."><HandIcon /></FloatingToolButton>
+        <FloatingToolDivider />
+        <FloatingToolButton compact={!fill} onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="crop-zoom-out" aria-label="Zoom out" title="Zoom out (−)"><MinusIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={do100} data-testid="crop-zoom-100" aria-label={`Zoom ${zoomPct}% — press for 100%`} title="Current zoom — press to jump to 100%"
+          style={{ minWidth: 52 }}>{zoomPct}%</FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={() => zoomBy(ZOOM_STEP)} data-testid="crop-zoom-in" aria-label="Zoom in" title="Zoom in (+)"><PlusIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={doFit} data-testid="crop-zoom-fit" aria-label="Fit sheet" title="Fit the whole sheet"><FitIcon /></FloatingToolButton>
+      </FloatingToolbar>
       </div>
+
+      {!fill && (
+        // The small pre-placement box can't hold Cancel / Done in a header, so for THIS variant they stay at the bottom.
+        <div data-testid="crop-footer" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 6, gap: 8 }}>
+          {doneWhyEl}{cancelBtn}{doneBtn}
+        </div>
+      )}
 
       {menu && (
         <div ref={menuRef} role="menu" data-testid="crop-context-menu" onContextMenu={(e) => e.preventDefault()}

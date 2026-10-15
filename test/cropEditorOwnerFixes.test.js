@@ -59,18 +59,41 @@ describe("NEW-4 — right-click add/delete point rules", () => {
   it("a right-PRESS never starts a drag or inserts a point (button !== 0 is ignored by all three starters)", () => {
     expect((tool.match(/if \(e\.button != null && e\.button !== 0\) return;/g) || []).length).toBe(3);
   });
-  it("the hint mentions right-click", () => { expect(tool).toMatch(/right-click to add or delete a point/); });
+  it("right-click add/delete still wired (the hint pill no longer advertises it — NEW-1 2026-10-15)", () => { expect(tool).toContain("onCanvasContext"); expect(tool).toContain("crop-menu-add-point"); });
 });
 
-describe("NEW-3 — one toolbar line, one zoom readout, canvas gets the height", () => {
-  it("the separate zoom readout is gone; the zoom control shows the live zoom", () => {
+describe("NEW-3 / NEW-1 (2026-10-15) — one header row, a floating view toolbar, no footer, canvas gets the height", () => {
+  it("the zoom slider and the separate zoom readout are gone; the zoom control shows the live zoom", () => {
     expect(tool).not.toContain("crop-zoom-pct");
-    expect(tool).toMatch(/data-testid="crop-zoom-100"[\s\S]{0,260}\{zoomPct\}%<\/Button>/);
+    expect(tool).not.toContain("crop-zoom-slider");
+    expect(tool).toMatch(/data-testid="crop-zoom-100"[\s\S]{0,260}\{zoomPct\}%<\/FloatingToolButton>/);
   });
-  it("the polygon hint and the footer hint no longer cost a row", () => {
-    expect(tool).toContain('data-testid="crop-poly-hint"');
-    expect(tool).not.toContain("Scroll to zoom · Pan tool, Space+drag");
-    expect(tool).toMatch(/data-testid="crop-footer" style=\{\{[^}]*flexWrap: "nowrap"/);
+  it("Cancel / Done live in the ONE header row (fill) — and only the small inline box keeps a footer", () => {
+    expect(tool).toContain('data-testid="crop-header"');
+    expect(tool).toMatch(/\{doneWhyEl\}\{cancelBtn\}\{doneBtn\}/);
+    expect((tool.match(/data-testid="crop-footer"/g) || []).length).toBe(1);
+    expect(tool).toMatch(/\{!fill && \(\s*\/\/[^\n]*\n\s*<div data-testid="crop-footer"/);
+  });
+  it("Undo · Redo · Reset | Pan | zoom out · % · zoom in · Fit all sit in the floating toolbar, a SIBLING of the canvas box", () => {
+    const pill = tool.slice(tool.indexOf("<FloatingToolbar"), tool.indexOf("</FloatingToolbar>"));
+    for (const id of ["crop-undo", "crop-redo", "crop-reset", "crop-pan-tool", "crop-zoom-out", "crop-zoom-100", "crop-zoom-in", "crop-zoom-fit"]) expect(pill).toContain(`data-testid="${id}"`);
+    expect(tool.indexOf("</FloatingToolbar>")).toBeGreaterThan(tool.indexOf('data-testid="crop-canvas"'));
+    // not inside the canvas box: the box's capture-phase pan handler must never see a press on a toolbar button
+    const box = tool.slice(tool.indexOf('data-testid="crop-canvas"'), tool.indexOf("</FloatingToolbar>"));
+    expect(box.match(/<\/div>\s*\n\s*\n?\s*\{\/\* The polygon hint/)).not.toBeNull();
+  });
+  it("the Rectangle | Polygon switch is a dark-neutral SegmentedControl, never the accent", () => {
+    expect(tool).toMatch(/accent="var\(--text-primary\)" onAccent="var\(--surface-raised\)"/);
+  });
+  it("the polygon hint is a short pill at the TOP-LEFT of the drawing", () => {
+    expect(tool).toMatch(/data-testid="crop-poly-hint"[\s\S]{0,120}left: 12, top: 12/);
+    expect(tool).toContain("Click an edge to add a point · Drag a point to move it · Delete removes the selected point");
+    expect(tool).toContain("Click to place points · Click the first point or press Enter to close");
+  });
+  it("the CropModal has no title line of its own; the tool's header carries the name", () => {
+    expect(modal).not.toMatch(/\{title\}\s*<\/div>/);
+    expect(section).toMatch(/fileName=\{cropTarget\.overlay\.docTitle/);
+    expect(siteDialog).toContain("fileName={overlay.name");
   });
   it("both surfaces size the tool with `fill` inside the shared 96vw × 94vh modal", () => {
     expect(modal).toMatch(/width: "96vw", height: "94vh"/);

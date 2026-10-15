@@ -7,8 +7,8 @@
  * panel) painted over it. At the body level nothing the map owns can outrank it — only the transient
  * tiers above (confirm dialogs, 4000) do, and those are meant to.
  *
- * SIZE: 96% × 94% of the window, the crop tool FILLS everything under the title, so every spare bit of
- * height goes to the canvas.
+ * SIZE: 96% × 94% of the window, the crop tool FILLS the whole shell (its own header row + the drawing), so every
+ * spare bit of height goes to the canvas.
  *
  * Keyboard: the tool's own Escape / Enter / Backspace must not ALSO reach the host's window listeners
  * (Escape would deselect the overlay behind the dialog), so key events stop at this shell, and the tool
@@ -16,11 +16,10 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { RADIUS } from "../../ui/radius.js";
-import { FONT_SIZE } from "../../ui/designTokens.js";
 
 export const CROP_MODAL_Z = 3000;
 
-export default function CropModal({ testId, title, onCancel, header = null, children }) {
+export default function CropModal({ testId, title, onCancel, children }) {
   const shellRef = useRef(null);
   useEffect(() => {
     const el = shellRef.current && shellRef.current.querySelector('[tabindex="-1"]');
@@ -33,15 +32,14 @@ export default function CropModal({ testId, title, onCancel, header = null, chil
     }}
       onPointerDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
       onKeyDown={(e) => e.stopPropagation()}>
-      <div ref={shellRef} style={{
-        background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: 12,
+      <div ref={shellRef} role="dialog" aria-modal="true" aria-label={title} style={{
+        background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: 0, overflow: "hidden",
         boxShadow: "0 8px 32px rgba(0,0,0,0.35)", // design-exempt: no shadow-color token yet repo-wide
         width: "96vw", height: "94vh", display: "flex", flexDirection: "column", boxSizing: "border-box",
       }}>
-        <div style={{ fontSize: FONT_SIZE.control, fontWeight: 600, marginBottom: 6, color: "var(--text-primary)", overflowWrap: "anywhere" }}>
-          {title}
-        </div>
-        {header}
+        {/* NEW-1 (2026-10-15): no title line here any more — the crop tool's own ONE header row carries "Crop" + the
+            file name + the shape switch + Cancel / Done, so every spare bit of height goes to the drawing. `title` is
+            the dialog's accessible name. */}
         <div style={{ flex: 1, minHeight: 0 }}>{children}</div>
       </div>
     </div>,
