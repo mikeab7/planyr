@@ -94,7 +94,7 @@ export function mouthDarkness(img, view, dpr, drive) {
   }
   const lRoad = median(roads), lPad = median(pads), lMin = median(mins), lMax = median(maxs);
   const dark = lMin - Math.min(lRoad, lPad), light = lMax - Math.max(lRoad, lPad);
-  return { lRoad, lPad, lMin, lMax, dark, light, excess: Math.max(-dark, light, 0) };
+  return { lRoad, lPad, lMin, lMax, dark, light, excess: Math.max(-dark, light, 0), mins: mins.map((v) => Math.round(v)) };
 }
 
 /** distance from `p` to a polyline's nearest segment */

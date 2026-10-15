@@ -90,7 +90,7 @@ export function* roadNetSteps(inp) {
    * is a different statement — a hidden road contributes nothing at all, including its junctions —
    * so it is filtered, and the two filters stay distinct. */
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), mouths: new Map(), memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
   const strip = new Map();
   for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))); yield; }
@@ -283,14 +283,15 @@ export function* roadNetSteps(inp) {
   }
   /* NEW-1 (B1783376 ×3) — the pad-face run each drive's pavement opens on the field it enters: between the two curb-return tangent points, which lie ON the field's edge.
    * The field's own ink (its outline and its stall rows' outlines) is cut by exactly this span (roadNetwork's `edgeInkPieces`), not by a polygon clip. Map<targetId, [{a,b}]>. */
-  const mouths = new Map();
+  const mouths = new Map(), seams = [];
   for (const dj of driveJunctions) {
     const [a, b] = (dj.geom && dj.geom.throughTangents) || [];
     if (!a || !b || !byId.has(dj.sideId)) continue;
     if (!mouths.has(dj.targetId)) mouths.set(dj.targetId, []);
     mouths.get(dj.targetId).push({ a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } });
+    seams.push({ sideId: dj.sideId, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } });
   }
-  return { regions, stripes, outlineCuts, mouths, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  return { regions, stripes, outlineCuts, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
 }
 export const driveSteps = (gen) => { for (;;) { const r = gen.next(); if (r.done) return r.value; } };
 
