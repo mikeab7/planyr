@@ -58,7 +58,7 @@ export async function onRequestPost(context) {
       if (!planyrKey) return json({ ok: false, error: "Missing planyrKey." }, 400);
       const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
       const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
-      const r = await moveKeyToTree({ userId: c.user.id, projectId, planyrKey, discipline, client: c.client, store: c.store, idStore });
+      const r = await moveKeyToTree({ userId: c.user.id, projectId, planyrKey, discipline, folderId, client: c.client, store: c.store, idStore });
       return json(r, r.ok ? 200 : 502);
     }
     if (action === "migrate-files") {
