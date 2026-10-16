@@ -17,6 +17,15 @@ describe("autofillStamp — no contact AutoFill on a field that isn't a contact 
     expect(autofillStamp({ tagName: "INPUT", autocomplete: "off", name: "q" })).toEqual({ autocomplete: "x-planyr" });
     expect(autofillStamp({ tagName: "TEXTAREA", autocomplete: "on" })).toEqual({ autocomplete: "x-planyr", name: "planyr-field" });
   });
+  // NEW-1 (2026-10-16): Chrome keeps its saved-entry dropdown for an UNKNOWN token and pools history by `name`.
+  it("off iOS: a genuine autocomplete=off (the one Chrome honours), and NO shared name", () => {
+    expect(autofillStamp({ tagName: "INPUT", autocomplete: "", ios: false })).toEqual({ autocomplete: "off" });
+    expect(autofillStamp({ tagName: "INPUT", autocomplete: "x-planyr", ios: false })).toEqual({ autocomplete: "off" });
+    expect(autofillStamp({ tagName: "INPUT", autocomplete: "on", ios: false })).toEqual({ autocomplete: "off" });
+    expect(autofillStamp({ tagName: "INPUT", type: "number", autocomplete: "off", ios: false })).toBe(null); // already right
+    expect(autofillStamp({ tagName: "INPUT", autocomplete: "email", ios: false })).toBe(null); // sign-in keeps autofill
+    expect(autofillStamp({ tagName: "INPUT", autocomplete: "x-food-dish-pick", ios: false })).toBe(null);
+  });
   it("leaves a REAL contact / credential field alone — AutoFill is wanted there", () => {
     for (const ac of ["email", "given-name", "family-name", "organization", "current-password", "new-password", "username"]) {
       expect(autofillStamp({ tagName: "INPUT", autocomplete: ac, type: /password/.test(ac) ? "password" : "text" })).toBe(null);

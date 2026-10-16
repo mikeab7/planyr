@@ -29,8 +29,21 @@
 // on the owner's iPhone, B2046224 ×2), so the token is a deliberately NON-STANDARD one instead: browsers
 // that honour the attribute read an unknown token as "no known kind of data". The app-wide
 // shared/ui/phoneTyping.js stamps the same token on any field that has none.
+//
+// ⛔ NEW-1 (2026-10-16, owner, Chrome on Windows): a NON-standard token is the wrong answer on every browser EXCEPT
+// iOS. Chrome reads an unknown token as "no opinion" and keeps its saved-entry (form history) dropdown — it offered
+// "1502 FELLOWS", "10", "15"… under Site › Land › "Your name for it", all drawn from ONE history bucket because the app
+// also stamped every nameless field with the same `name`. Chrome DOES honour `autocomplete="off"` for that history
+// list, so off-iOS the token is "off" (and no shared `name` is stamped); iOS keeps `x-planyr` because it ignores "off".
+export function isIosLike(nav = typeof navigator !== "undefined" ? navigator : undefined) {
+  if (!nav) return false;
+  return /iP(hone|ad|od)/.test(nav.userAgent || "") || (nav.platform === "MacIntel" && (nav.maxTouchPoints || 0) > 1);
+}
+/** The autocomplete value every non-contact field carries on THIS browser. */
+export function autofillToken(nav) { return isIosLike(nav) ? "x-planyr" : "off"; }
+
 export const NO_AUTOFILL = Object.freeze({
-  autoComplete: "x-planyr",
+  autoComplete: autofillToken(),
   "data-1p-ignore": true,
   "data-lpignore": "true",
   "data-bwignore": true,

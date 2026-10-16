@@ -3101,7 +3101,7 @@ const GANTT_SCROLL_MEMO = new Map();
 // has no login/signup form, so nothing here needs autofill. Kept byte-identical to
 // src/shared/ui/noAutofill.js (guarded by test/noAutofill.test.js).
 const NO_AUTOFILL = {
-  autoComplete: "x-planyr",
+  autoComplete: (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) ? "x-planyr" : "off",
   "data-1p-ignore": true,
   "data-lpignore": "true",
   "data-bwignore": true,
