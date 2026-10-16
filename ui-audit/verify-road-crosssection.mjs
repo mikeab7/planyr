@@ -68,7 +68,7 @@ await page.screenshot({ path: OUT + "01-plain-road.png" });
 // ---- 2. Open "Design cross-section..." from the Road tool flyout -------------------------
 await page.locator('[aria-label="Road presets"]').click();
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /Design cross-section…/ }).click();
+await page.getByRole("button", { name: /Design cross-section/ }).click();
 await page.waitForTimeout(400);
 const dlgOpen = await page.locator('[data-testid="road-xsection-dialog"]').count();
 check(dlgOpen === 1, "NEW-1 the cross-section dialog opens from the Road tool's own flyout (never a popover that gates drawing — this is a deliberate menu item)");
@@ -143,7 +143,7 @@ check(await clickElement(boulevard.id), "the boulevard road's own rendered node 
 await page.waitForTimeout(300);
 await ensurePropertiesOpen();
 const panelText = await page.evaluate(() => document.body.innerText);
-check(/68′\s*curb to curb/.test(panelText), "Properties shows the section's read-only curb-to-curb width", panelText.match(/68[^\n]*/)?.[0]);
+check(/68\s*ft\s*set by cross-section/.test(panelText.replace(/\n/g, " ")), "Properties shows the section's read-only curb-to-curb width", panelText.match(/68[^\n]*/)?.[0]);
 check(page.locator('[data-testid="edit-road-xsection"]').first(), "Edit cross-section… entry point exists in Properties");
 const editLabel = await page.locator('[data-testid="edit-road-xsection"]').first().innerText();
 check(/Edit cross-section/.test(editLabel), "the button reads \"Edit cross-section...\" for a road that already has one", editLabel);
@@ -162,19 +162,13 @@ site = await readSite();
 const afterCancel = (site.els || []).find((e) => e.id === boulevard.id);
 check(afterCancel && afterCancel.xsection.bands.length === 5 && afterCancel.travelW === 68, "Cancel makes no change to the stored road", JSON.stringify({ bands: afterCancel && afterCancel.xsection.bands.length, travelW: afterCancel && afterCancel.travelW }));
 
-// ---- 8. Paving cost excludes the median (asphalt only) ------------------------------------
-check(await clickElement(boulevard.id), "reselected the boulevard road for the cost check");
+// ---- 8. (road-panel redesign NEW-2) cost does NOT live on the road panel any more ----------
+check(await clickElement(boulevard.id), "reselected the boulevard road for the no-cost check");
 await page.waitForTimeout(300);
 await ensurePropertiesOpen();
 const costText = await page.evaluate(() => document.body.innerText);
-const paveMatch = costText.match(/Paving\s+([\d,]+)\s*SY\s*\((\d+)′/);
-check(!!paveMatch, "the Curb & paving cost line renders", costText.match(/Paving[^\n]*/)?.[0]);
-if (paveMatch) {
-  const fcfcFt = +paveMatch[2];
-  check(fcfcFt === 48, "the priced asphalt width excludes the 20′ median (48′, not 68′)", `pavingWidth=${fcfcFt}`);
-}
-check(/asphalt bands only.*median.*excluded/i.test(costText.replace(/\n/g, " ")), "the panel states the median is excluded from the priced asphalt", costText.match(/Paving is[^.]*\./)?.[0]);
-await page.screenshot({ path: OUT + "06-cost-panel.png" });
+check(!/Curb & paving|Curb type|Gutter pan/.test(costText), "the road panel carries no curb & paving cost block");
+await page.screenshot({ path: OUT + "06-no-cost-panel.png" });
 
 // ---- 9. Presets: save one, reload, confirm it persisted (signed-out local mirror) ---------
 await page.locator('[data-testid="edit-road-xsection"]').first().click();

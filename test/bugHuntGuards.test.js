@@ -543,11 +543,11 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).not.toMatch(/setSelMarkup\(\{ labelSize/);
   });
 
-  it("B682: label spacing has a LIVE slider (coalesced to one undo frame) beside the number box", () => {
+  it("B682 → road-panel NEW-1: label spacing is ONE stepper box (the live slider was dropped, owner-approved); the coalescing writer is unchanged", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // a range input driving labelSpacing live, closing its undo session on release/blur
-    expect(src).toMatch(/<input type="range"[\s\S]{0,220}write\(\{ labelSpacing: \+e\.target\.value \}, \{ live: true \}\)/);
-    expect(src).toMatch(/onPointerUp=\{\(e\) => write\(\{ labelSpacing: \+e\.target\.value \}, \{ live: false \}\)\}/);
+    // the old live slider is GONE; spacing is a single boxed stepper that commits through the same writer
+    expect(src).not.toMatch(/<input type="range"[\s\S]{0,220}labelSpacing/);
+    expect(src).toMatch(/testid="label-spacing"[\s\S]{0,200}onCommit=\{\(n\) => write\(\{ labelSpacing: n \}\)\}/);
     // the coalescing writer pushes history only when the live session opens, and stays NON-STICKY
     expect(src).toMatch(/const coalesceLabelWrite = \(key, applyFn\) =>/);
     expect(src).toMatch(/if \(opts\.live\) \{ if \(labelSessionRef\.current !== key\) \{ pushHistory\(\); labelSessionRef\.current = key; \}/);
