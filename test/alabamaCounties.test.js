@@ -20,15 +20,16 @@ beforeAll(async () => {
 
 /* The honest gaps — each is a county for which NO usable public parcel service was found (docs/STATEWIDE-PARCELS.md "Alabama" holds
  * what was searched per county). Adding a county here is a claim; removing one requires wiring it. */
-const GAPS = {
-  Bibb: "flagship", Butler: "flagship", Chambers: "flagship", Chilton: "flagship", Choctaw: "flagship", Clarke: "flagship",
-  Clay: "private-app", Coffee: "flagship", Colbert: "kcs-unreachable", Conecuh: "flagship", Covington: "flagship", Crenshaw: "flagship",
-  Cullman: "kcs-stopped", Dale: "flagship", Escambia: "flagship", Fayette: "flagship", Franklin: "kcs-stopped", Geneva: "flagship",
-  Jackson: "kcs-unreachable", Lamar: "flagship", Lowndes: "flagship", Marengo: "flagship", Marion: "flagship", Perry: "flagship",
-  Pickens: "flagship", Pike: "flagship", Randolph: "flagship", Talladega: "kcs-unreachable", Tallapoosa: "flagship",
-  Walker: "flagship", Washington: "flagship", Winston: "kcs-unreachable",
-};
+const GAPS = Object.fromEntries(FX.gaps.map((n) => [n, true]));
 const bare = (n) => n.replace(/ County$/, "");
+
+describe("the county-line and state-line points land on the county they name", () => {
+  it.each(FX.lines.map((l) => [l.name, l]))("%s", (_n, l) => {
+    const id = countyIdentity(l.lat, l.lng);
+    if (l.state === "MS") { expect(id.state).toBe("MS"); expect(id.status).toBe("ok"); }
+    else { expect(id.name).toBe(l.county); expect(id.state).toBe("AL"); }
+  });
+});
 
 describe("the computed county list", () => {
   it("is Alabama's 67 counties", () => {
