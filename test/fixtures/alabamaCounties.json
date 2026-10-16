@@ -122,8 +122,8 @@
    "state": "AL",
    "name": "Cherokee County",
    "fips": "01019",
-   "lat": 34.1757,
-   "lng": -85.6004,
+   "lat": 34.3478,
+   "lng": -85.5301,
    "bbox": [
     33.939,
     -85.843,
@@ -935,12 +935,6 @@
    "lng": -85.05933
   },
   {
-   "name": "Morgan/Lawrence line \u2014 Lawrence side",
-   "county": "Lawrence County",
-   "lat": 34.68574,
-   "lng": -87.09956
-  },
-  {
    "name": "Tuscaloosa/Jefferson line \u2014 Tuscaloosa side",
    "county": "Tuscaloosa County",
    "lat": 33.39983,
@@ -1011,6 +1005,18 @@
    "state": "MS",
    "lat": 33.3,
    "lng": -88.30749
+  },
+  {
+   "name": "Marshall/Morgan line \u2014 Marshall side",
+   "county": "Marshall County",
+   "lat": 34.40316,
+   "lng": -86.57637
+  },
+  {
+   "name": "Marshall/Morgan line \u2014 Morgan side",
+   "county": "Morgan County",
+   "lat": 34.40439,
+   "lng": -86.58427
   },
   {
    "name": "Walker/Jefferson line \u2014 Walker side",
