@@ -17,10 +17,12 @@ describe("unnamed lots stay unnamed", () => {
     expect(rows.find((r) => r.id === "a").unnamed).toBe(true);
     expect(rows.find((r) => r.id === "b").unnamed).toBe(false);
   });
-  it("the list and page render the grey Unnamed placeholder and an empty name field", () => {
+  it("the page renders the grey Unnamed placeholder and an empty name field; the LIST reads an unnamed lot by its stable number (owner 2026-10-16)", () => {
     const panel = readFileSync("src/workspaces/site-planner/components/ParcelsPanel.jsx", "utf8");
     const page = readFileSync("src/workspaces/site-planner/components/ParcelPage.jsx", "utf8");
-    expect(panel).toMatch(/row\.unnamed \? "Unnamed"/);
+    // the list: never a row of identical "Unnamed" labels — the number (siteModel.parcelNumbers) is the handle; nothing is derived from address / owner / legal
+    expect(panel.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/["'`]Unnamed["'`]/);
+    expect(panel).toMatch(/label: row\.name, sub, muted: false/);
     expect(page).toMatch(/unnamed \? "Unnamed"/);
     expect(page).toMatch(/placeholder=""/);
   });

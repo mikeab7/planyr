@@ -161,6 +161,47 @@ export function withLockSemantics(parcels) {
   return changed ? out : parcels;
 }
 
+/* NEW-1 (owner 2026-10-16, B2289936) — A LOT'S NUMBER IS STABLE: "Parcel 4" stays "Parcel 4" when "Parcel 2" is deleted.
+ * The number a ROOT parcel (one that is nobody's child) shows on the canvas and in the list used to be its POSITION in the
+ * array, so removing a lot renumbered every lot after it. A number is now the parcel's own stamped `parcelNo`.
+ * `parcelNumbers` is THE one answer (a Map of id → number) and is a pure function of the list:
+ *   · a stamped number is kept — unless an earlier root already holds it (a pasted copy carries its source's number), in
+ *     which case the later one is treated as unstamped;
+ *   · every other root takes the next number above the highest one held, in array order.
+ * On a plan nobody has stamped yet that rule gives 1..n by array order — exactly the numbers the positional rule showed — so no
+ * existing plan changes what it reads. `stampParcelNumbers` writes the answer into the records (identity-preserving when there
+ * is nothing to write), so the number freezes the first time the plan is read by someone who may write it. Additive: no
+ * migration, an older build ignores the field. A parcel with a typed name still holds a number — a position is a position. */
+export function parcelNumbers(parcels) {
+  const list = arr(parcels);
+  const byId = new Set(list.map((p) => p && p.id));
+  const isRoot = (p) => !(p && p.parentId != null && byId.has(p.parentId));
+  const out = new Map();
+  const taken = new Set();
+  let max = 0;
+  for (const p of list) {
+    if (!p || !isRoot(p)) continue;
+    const n = p.parcelNo;
+    if (Number.isInteger(n) && n > 0 && !taken.has(n)) { taken.add(n); out.set(p.id, n); if (n > max) max = n; }
+  }
+  for (const p of list) {
+    if (!p || !isRoot(p) || out.has(p.id)) continue;
+    out.set(p.id, ++max);
+  }
+  return out;
+}
+export function stampParcelNumbers(parcels) {
+  const list = arr(parcels);
+  const nums = parcelNumbers(list);
+  let changed = false;
+  const out = list.map((p) => {
+    if (!p || !nums.has(p.id) || p.parcelNo === nums.get(p.id)) return p;
+    changed = true;
+    return { ...p, parcelNo: nums.get(p.id) };
+  });
+  return changed ? out : parcels;
+}
+
 /* B2225425 (round 3) — THE READ NORMALIZERS, as ONE table, because there are two read paths and
  * only one of them ran these. `createSiteModel` (the on-device copy) applies them on every read; the
  * rows seed (`SitePlanner.refetchReplace` over `elementRows.rowsToModel`) did not. So a plan whose
@@ -174,7 +215,7 @@ export function withLockSemantics(parcels) {
  * converge. Each entry is identity-preserving on an already-normal list (no churn, no write). */
 export const READ_NORMALIZE = Object.freeze({
   els: (list) => ensureZ(migrateBandForce(list)),
-  parcels: (list) => ensureZ(withLockSemantics(withStableParcelIds(list))),
+  parcels: (list) => ensureZ(stampParcelNumbers(withLockSemantics(withStableParcelIds(list)))),
   markups: (list) => ensureZ(list),
   measures: (list) => ensureZ(list),
   callouts: (list) => ensureZ(list),
@@ -1603,9 +1644,7 @@ export function parcelDisplayInfo(parcels) {
   const byId = new Map(list.map((p) => [p && p.id, p]));
   const kids = parcelChildrenMap(list);
   const isRoot = (p) => !(p && p.parentId != null && byId.has(p.parentId));
-  const rootNum = new Map();
-  let rn = 0;
-  for (const p of list) if (isRoot(p)) rootNum.set(p.id, ++rn);
+  const rootNum = parcelNumbers(list);   // NEW-1 (B2289936): a root's number is its stamped `parcelNo`, never its position
   const memo = new Map();
   const compute = (p, seen) => {
     if (!p) return { tag: "?", depth: 0 };

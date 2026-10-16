@@ -68,11 +68,10 @@ describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)"
     expect(overlapAcres(rows, rows.reduce((t, r) => t + r.acres, 0))).toBe(0);
     expect(overlapAcres(rows, rows.reduce((t, r) => t + r.acres, 0) - 0.01)).toBe(0);
   });
-  it("the icon slot is one width for the whole list: two icons, three once anything is locked", () => {
+  it("the icon slot is one width for the whole list: padlock + eye + ⋯ always, one more seat once anything overlaps", () => {
     expect(slotWidth(false)).toBeLessThan(slotWidth(true));
-    // one seat per marker kind, the same width each: padlock seat === overlap seat
-    expect(slotWidth(true, false) - slotWidth(false, false)).toBe(slotWidth(false, true) - slotWidth(false, false));
-    expect(slotWidth(true, true)).toBeGreaterThan(slotWidth(true, false));
+    expect(slotWidth(true) - slotWidth(false)).toBe(18); // one icon seat
+    expect(slotWidth()).toBe(slotWidth(false));
   });
   it("source guard: the padlock is rendered inside the icon slot, never in the name cell; rename is a menu item", () => {
     const src = readFileSync("src/workspaces/site-planner/components/ParcelsPanel.jsx", "utf8");
@@ -87,9 +86,90 @@ describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)"
     expect(src).toMatch(/AC overlaps, counted once/);
     // FIXED COLUMNS: seats are rendered for the whole list (not per row) and the slot is left-aligned, so an icon never shifts when
     // a neighbour seat is empty (the 8 South Tract A report)
-    expect(src).toMatch(/seatLock && <span/);
+    expect(src).not.toMatch(/seatLock/);        // the padlock seat is ALWAYS there now (the table's lock column)
+    expect(src).not.toMatch(/anyLocked/);
     expect(src).toMatch(/seatOverlap && <span/);
     expect(src).toMatch(/justifyContent: "flex-start", width: slotW/);
     expect(src).toMatch(/parcels-summary-line/);
+  });
+});
+
+
+describe("parcel list — a real table (owner 2026-10-16)", () => {
+  const src = readFileSync("src/workspaces/site-planner/components/ParcelsPanel.jsx", "utf8");
+  it("one column-heading row sits above the list: Acres, a lock icon, an eye icon (and the overlap icon only while a column exists)", () => {
+    expect(src).toMatch(/function ColumnHeader/);
+    expect(src.match(/<ColumnHeader/g)).toHaveLength(1);        // once, above the first group — never per group
+    expect(src).toMatch(/parcels-col-acres/);
+    expect(src).toMatch(/seat\("parcels-col-lock"/);
+    expect(src).toMatch(/seat\("parcels-col-eye"/);
+    expect(src).toMatch(/anyOverlap && seat\("parcels-col-overlap"/);
+    expect(src).toMatch(/>Acres</);
+  });
+  it("every row shows its padlock (closed / open) and its eye (open / struck) all the time; only ⋯ waits for hover", () => {
+    const row = src.slice(src.indexOf("function ParcelRow"), src.indexOf("function ColumnHeader"));
+    expect(row).toMatch(/row\.locked \? <LockGlyph size=\{13\} \/> : <UnlockGlyph size=\{13\} \/>/);
+    expect(row).toMatch(/row\.included \? <EyeIcon \/> : <EyeOffIcon \/>/);
+    const lockBtn = row.slice(row.indexOf("parcel-row-lock-"), row.indexOf("parcel-row-eye-"));
+    expect(lockBtn).not.toMatch(/land-row-hover/);
+    const eyeBtn = row.slice(row.indexOf("parcel-row-eye-"), row.indexOf("<RowMenu"));
+    expect(eyeBtn).not.toMatch(/land-row-hover/);
+    expect(src.match(/land-row-hover/g)).toHaveLength(1);        // ⋯ only
+  });
+  it("the summary figure is the same weight as the words around it", () => {
+    const at = src.indexOf('data-testid="parcels-site-acres"');
+    const tag = src.slice(at, src.indexOf(">", at + 40));
+    expect(tag).not.toMatch(/fontWeight/);
+  });
+  it("an unnamed drawn / other lot reads by its number, never 'Unnamed'; a county lot keeps 'Acct …'", () => {
+    const r = rows([sq(0, "d1", { source: "drawn" }), sq(300, "d2", { source: "drawn" }), county(600, "c1"), sq(900, "o1")]);
+    const labels = r.map((x) => rowText(x).label);
+    expect(labels).toEqual(["Parcel 1", "Parcel 2", "Acct 0421c1", "Parcel 4"]);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels).not.toContain("Unnamed");
+    expect(src.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/["'`]Unnamed["'`]/);   // no string literal left (comments may still name it)
+  });
+});
+
+import { parcelNumbers, stampParcelNumbers, parcelDisplayInfo, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
+
+describe("parcel numbers are stable (owner 2026-10-16: 'not renumbered when one is deleted')", () => {
+  const unnamed = (n) => Array.from({ length: n }, (_, i) => sq(i * 300, `p${i + 1}`, { source: "drawn" }));
+  it("an unstamped plan reads 1..n in list order — exactly what the positional rule showed, so no plan changes", () => {
+    const n = parcelNumbers(unnamed(4));
+    expect([...n.values()]).toEqual([1, 2, 3, 4]);
+    expect(parcelDisplayInfo(unnamed(4)).get("p3").name).toBe("Parcel 3");
+  });
+  it("stamping freezes them: deleting Parcel 2 leaves Parcel 3 and 4 where they were", () => {
+    const stamped = stampParcelNumbers(unnamed(4));
+    const afterDelete = stamped.filter((p) => p.id !== "p2");
+    const info = parcelDisplayInfo(afterDelete);
+    expect(info.get("p3").name).toBe("Parcel 3");
+    expect(info.get("p4").name).toBe("Parcel 4");
+    // …whereas an UNSTAMPED plan would have closed the gap — the bug this fixes
+    expect(parcelDisplayInfo(unnamed(4).filter((p) => p.id !== "p2")).get("p3").name).toBe("Parcel 2");
+  });
+  it("a new lot takes the next number above the highest held, never a freed one in the middle", () => {
+    const stamped = stampParcelNumbers(unnamed(3)).filter((p) => p.id !== "p2");
+    const grown = stampParcelNumbers([...stamped, sq(2000, "p9", { source: "drawn" })]);
+    expect(grown.find((p) => p.id === "p9").parcelNo).toBe(4);
+  });
+  it("a pasted copy that carries its source's number is renumbered, never shown twice", () => {
+    const stamped = stampParcelNumbers(unnamed(2));
+    const pasted = [...stamped, { ...stamped[0], id: "copy", parcelNo: 1 }];
+    const n = parcelNumbers(pasted);
+    expect(n.get("p1")).toBe(1);
+    expect(n.get("copy")).toBe(3);
+  });
+  it("is identity-preserving once stamped (no churn, no loop) and children never take a root number", () => {
+    const stamped = stampParcelNumbers(unnamed(2));
+    expect(stampParcelNumbers(stamped)).toBe(stamped);
+    const withKid = [...stamped, sq(900, "kid", { parentId: "p1" })];
+    expect(parcelNumbers(withKid).has("kid")).toBe(false);
+    expect(stampParcelNumbers(withKid).find((p) => p.id === "kid").parcelNo).toBeUndefined();
+  });
+  it("a stored plan arrives stamped (createSiteModel's read normalizer)", () => {
+    const m = createSiteModel({ parcels: unnamed(3) });
+    expect(m.parcels.map((p) => p.parcelNo)).toEqual([1, 2, 3]);
   });
 });
