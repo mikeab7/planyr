@@ -76,6 +76,9 @@ const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
 export default function LayerPanel({
   overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
+  /* Owner-only grading layer: `{ rows: [{id,label,on,sub,info}], onToggle(id,on) }` — two extra Topography rows. Only
+   * the site planner passes it, and only for the account the grading gate allows; undefined everywhere else. */
+  gradingRows = undefined,
   /* B427410 (×2/×3) — the basemap's ROAD-NAMES overlay, when the host has one:
    * `{ value, onChange, opacity, onOpacityChange }`. Rendered under the source it belongs to
    * (see `basemapControl`), never as its own row — it is drawn BY the basemap and means nothing
@@ -1099,6 +1102,18 @@ export default function LayerPanel({
       {!collapsed.basemap && <>
         {basemapControl}
         {groupRows(basemapEntries(), "basemap")}
+        {gradingRows && gradingRows.rows && gradingRows.rows.map((g) => (
+          <div key={g.id} data-testid={`layer-row-grading-${g.id}`} style={{ marginBottom: 5 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+                <input type="checkbox" checked={!!g.on} onChange={(e) => gradingRows.onToggle(g.id, e.target.checked)} />
+                <span title={g.label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
+              </label>
+              <RowInfo label={g.label} sections={[{ text: g.info }]} />
+            </div>
+            {g.on && g.sub && <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "1px 0 0 22px" }}>{g.sub}</div>}
+          </div>
+        ))}
       </>}
 
       {/* A county contributing ≥2 layers of its OWN gets a labeled group (B762) — none do
