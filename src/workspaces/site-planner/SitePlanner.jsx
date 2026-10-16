@@ -347,6 +347,10 @@ import WatchOutChip from "./components/WatchOutChip.jsx";
 import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
 import Collapse from "./components/Collapse.jsx";
 import NumberBox, { NUMBOX_INPUT_STYLE } from "../../shared/ui/NumberBox.jsx";
+import { SegmentedControl, Button as UiButton } from "../../shared/ui/controls.jsx";
+import { roadRadiusReviewOn } from "./lib/roadRadiusFeature.js";
+import { roadPanelTitle, roadPanelSubtitle, xsStripBands, xsCaption, xsSummary, labelSummary as roadLabelSummary, xsButtonLabel } from "./lib/roadPanelModel.js";
+import { RoadGlyph, RoadXSectionStrip, RoadStripCaption } from "./components/RoadPanelParts.jsx";
 import WallKindIcon from "./components/WallKindIcon.jsx";
 import Chip from "../../shared/ui/Chip.jsx";
 import RowInfo from "../../shared/ui/RowInfo.jsx";
@@ -377,7 +381,7 @@ import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
   wallStripBox, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
   sideParkStack } from "./lib/dogEar.js";
-import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
+import { costRollup } from "./lib/costTakeoff.js";
 import {
   bandTypeOf, normalizeBands, makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth,
   bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
@@ -10120,7 +10124,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setRoadSnapTarget(null);
       setRoadDragBearing(null);
       const r = els.find((x) => x.id === d.id);
-      const stt = !d.connect && r && roadRadiusStatus(r, settings); // a connect already reconciles the radius
+      const stt = radiusReviewOn && !d.connect && r && roadRadiusStatus(r, settings); // a connect already reconciles the radius (NEW-3: the tight-corner toast is hidden with the rest of the review)
       if (stt) flashWarn(`⚠ ${f0(stt.minR)}′ radius — below ${f0(stt.threshold)}′ min for ${stt.label}`, 6000);
       if (d.moved) setSelVtx(null); // NEW-1: after actually reshaping a dot, Delete deletes the whole road; a plain click (no move) still arms the dot for a targeted vertex-delete
     }
@@ -10268,7 +10272,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const dk = (drive || startDrive).targetKind;
       flashWarn(dk === "truckcourt" ? "Connected to the truck court — truck-scale curb returns." : "Connected to the parking drive — car-scale curb returns.", 5000);
     } else {
-      const st = roadRadiusStatus(el, settings); // B599/NEW-4: warn loudly on commit, never block
+      const st = radiusReviewOn && roadRadiusStatus(el, settings); // B599/NEW-4: warn loudly on commit, never block (NEW-3: hidden with the review)
       if (st) flashWarn(`⚠ ${f0(st.minR)}′ radius — below ${f0(st.threshold)}′ min for ${st.label}`, 7000);
     }
   };
@@ -19593,41 +19597,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const chipSm = { ...chip, padding: "2px 8px", fontSize: 10.5 };
   const textInput = { ...numInput, width: 150, fontFamily: "inherit" };
   const subHead = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
-  // B678/B682 — the per-label style controls (repeat spacing · text size · background halo) shown under an
-  // "Inline label" field once the feature actually carries a label. `write(patch, {live})` is the
+  // B678/B682 — the per-label style controls (text size · repeat spacing · background halo · position) shown under a
+  // name field once the feature actually carries a label. `write(patch, {live})` is the
   // feature-specific, NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never
-  // bleeds into the next drawn shape. `{live:true}` (the slider drag) coalesces the whole drag into ONE
-  // undo frame via `labelSessionRef`; a plain commit pushes one frame. A plain render-body function
+  // bleeds into the next drawn shape. A plain commit pushes one undo frame; `{live:true}` (the retired slider's drag)
+  // is still honoured by `coalesceLabelWrite` and would coalesce into ONE frame via `labelSessionRef`. A plain render-body function
   // (NOT a component) so it can't remount its inputs. Defaults keep the per-type spacing / size 11 /
   // halo on; the anti-overlap min-gap in inlineLabelEls only thins labels that would otherwise collide.
   const inlineLabelControls = (feat, typeKey, write) => {
     if (!feat || !(feat.inlineLabel || "").trim()) return null;
     const haloOn = feat.labelHalo !== false;
     const spacing = feat.labelSpacing ?? INLINE_LABEL_SPACING[typeKey];
+    // Road-panel redesign (NEW-1): the four per-label controls as single-line rows — a stepper box with its
+    // unit INSIDE for size and spacing (the old live slider is gone; a plain commit is one undo frame, and
+    // `write`'s coalescing is unchanged), a Halo / None segmented switch, and a placement select. Shared by
+    // roads, easements and markups, so all three read the same.
     return (<>
-      {/* B682 — a LIVE slider (updates the plan as you drag) next to the number box, both editing the
-          same value, so the effect of a spacing change is immediately visible. Range spans utility-dense
-          → road-sparse; onChange fires live (coalesced), onPointerUp/onBlur closes the undo session. */}
-      <Field label="Label spacing (ft)"><span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-        <input type="range" min={30} max={2000} step={10} value={spacing} aria-label="Label spacing (ft)"
-          onChange={(e) => write({ labelSpacing: +e.target.value }, { live: true })}
-          onPointerUp={(e) => write({ labelSpacing: +e.target.value }, { live: false })}
-          onBlur={(e) => write({ labelSpacing: +e.target.value }, { live: false })}
-          style={{ width: 92, accentColor: PAL.accent }} />
-        <NumInput style={{ ...numInput, width: 58 }} value={spacing} min={10} step={10} coarse={50} onCommit={(n) => write({ labelSpacing: n })} />
-      </span></Field>
-      <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => write({ labelSize: n })} /></Field>
-      <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => write({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
+      <Field gutter={ROAD_GUTTER_W} oneLine label="Text size">
+        <NumInput boxed unit="pt" boxWidth={96} ariaLabel="Label text size" testid="label-text-size" value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => write({ labelSize: n })} />
+      </Field>
+      <Field gutter={ROAD_GUTTER_W} oneLine label="Repeat every" title="How far apart the name repeats along the line">
+        <NumInput boxed unit="ft" boxWidth={96} ariaLabel="Label spacing" testid="label-spacing" value={spacing} min={10} step={50} coarse={200} onCommit={(n) => write({ labelSpacing: n })} />
+      </Field>
+      <Field gutter={ROAD_GUTTER_W} oneLine label="Background" title="A halo keeps the name legible over the aerial">
+        <SegmentedControl aria-label="Label background" data-testid="label-background" value={haloOn ? "halo" : "none"}
+          style={{ height: CONTROL_H.md, width: "100%" }} segmentStyle={{ flex: 1, padding: 0 }}
+          onChange={(k) => write({ labelHalo: k === "halo" })}
+          options={[{ key: "halo", label: "Halo", testid: "label-halo-on" }, { key: "none", label: "None", testid: "label-halo-off" }]} />
+      </Field>
       {/* NEW-9 — placement is a THREE-way choice, and it now shows for EVERY label-bearing feature.
           It used to be a checkbox between "just off the stroke" and "inside the body" — and neither
           rides the alignment itself, which is the classic street-name look and the one the owner
           expected "Inside" to give him. "Inside the body" still only makes sense for a feature that
           HAS a body (a paved width, a strip, a bounded area), so that option alone stays road/easement.
           (B935 introduced the pair; this supersedes it without changing what either old value drew.) */}
-      <Field label="Label position">
-        <select style={{ ...numInput, width: 190, fontFamily: "inherit" }} value={labelPlaceOf(feat)}
-          onChange={(e) => write({ labelPlace: e.target.value, labelInside: e.target.value === "inside" })}
-          title="Where the repeating name rides: centred on the line itself, just beside it, or tucked into the body">
+      <Field gutter={ROAD_GUTTER_W} oneLine label="Position" title="Where the repeating name rides: centred on the line itself, just beside it, or tucked into the body">
+        <select style={ROAD_SELECT_STYLE} aria-label="Label position" data-testid="label-position" value={labelPlaceOf(feat)}
+          onChange={(e) => write({ labelPlace: e.target.value, labelInside: e.target.value === "inside" })}>
           <option value="center">On the centre line</option>
           <option value="off">Just beside the line</option>
           {(typeKey === "road" || typeKey === "easement") && <option value="inside">{`Inside the ${typeKey}`}</option>}
@@ -20883,9 +20889,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (`xsection.rowDesignFt`), same "presence is the signal" contract as `designatedRowFt` — clearing
   // the field (NumInput's `allowClear`) removes the key entirely rather than writing a falsy value.
   const setRoadRowFt = (el, ft) => {
+    const want = Number.isFinite(+ft) && +ft > 0;
+    if (!el.xsection && !want) return; // nothing designated, nothing to clear — no history frame for a no-op
     pushHistory();
     setEls((a) => a.map((x) => {
-      if (x.id !== el.id || !x.xsection) return x;
+      if (x.id !== el.id) return x;
+      // Redesigned panel (NEW-1) shows Right-of-way on EVERY drawn road. A road that has never been through the
+      // cross-section dialog has no section yet; designating a ROW gives it the dialog's own single-band wrapper
+      // (`xsectionFromRoad`), which `hasXSection` still reads as "plain" — width, paving and cost are unchanged.
+      if (!x.xsection) return { ...x, xsection: makeXSection(xsectionFromRoad(x).bands, +ft) };
       const next = { ...x.xsection };
       if (Number.isFinite(+ft) && +ft > 0) next.rowDesignFt = +ft; else delete next.rowDesignFt;
       return { ...x, xsection: next };
@@ -20968,7 +20980,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const threshold = classMinRadius(cls);
     let patch = { roadClass: key };
     let toast = null;
-    if (threshold > 0 && isCenterlineRoad(el)) {
+    if (radiusReviewOn && threshold > 0 && isCenterlineRoad(el)) { // road-panel NEW-3: the automatic corner re-cut is part of the hidden review — a class change just sets the class
       // NEW-3, owner rule 2026-07-25: picking a class is an INSTRUCTION, not a claim to be graded.
       // Pick "Truck route" and the road is re-cut to hold a truck route's turn — never warned at.
       const res = solveRoadCorners(el, cls);
@@ -21008,7 +21020,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Road cost attributes (B181): curb type / curbed sides / gutter-pan width drive the
   // separately-priced Paving (SY) + Curb (LF) quantities. Geometry is untouched — these
   // only steer the cost takeoff (the drawn curb band still reads off el.curb).
-  const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
   // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
   const roadLengthOf = (el) => isCenterlineRoad(el) ? roadCenterlineLength(el, settings, sharpFor(el)) : Math.max(el.w, el.h);
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
@@ -21260,6 +21271,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1/NEW-7/NEW-8 — a real (rectangular or reshaped) building gets the redesigned inspector: the
   // header carries its number, lock and ⋯ menu, and Footprint / Loading / Structure / Appearance are Collapse sections.
   const bldgPanel = !multiStyleable && !!selEl && isBuilding(selEl) && (!selEl.points || !!selEl.footEdit);
+  // Road-panel redesign (NEW-1): a centerline or rectangular road (not a freehand polygon "road") gets the
+  // building-style inspector — header (name · padlock · ⋯ · ✕ + one summary line) and Road / Cross-section /
+  // Label / Intersection sections. `radiusReviewOn` is the ONE flag behind the hidden min-radius feature (NEW-3).
+  const roadPanel = !multiStyleable && !!selEl && selEl.type === "road" && !selEl.points;
+  const radiusReviewOn = roadRadiusReviewOn();
   // NEW-8 — the two outline props the Appearance rows edit (outline opacity, outline width), shared by
   // the building's Appearance, the pond's, the parking Display group and the generic Properties section.
   const strokeOpacityCell = curStyle ? <PercentField value={curStyle.strokeOpacity} min={0} onCommit={(v) => { pushHistory(); setSelEl({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" /> : null;
@@ -23425,6 +23441,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // on the canvas, without having to select the road first. Review chrome — never exported.
   const roadRadiusFlags = useMemo(() => {
     const out = [];
+    if (!radiusReviewOn) return out; // NEW-3 — the min-radius review is hidden (one flag, default OFF): no corner dot, no pill
     for (const el of els || []) {
       // NEW-1 — a hidden road raises no review flags: chrome about an object you cannot see is a
       // marker floating on empty ground, and its corner dot is a live one-click Fix (B278577).
@@ -23434,7 +23451,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       for (const c of conflicts) out.push({ id: el.id, label: cls && cls.label ? cls.label : "Road", ...c });
     }
     return out;
-  }, [els, settings, hiddenGroups]);
+  }, [els, settings, hiddenGroups, radiusReviewOn]);
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
   // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
   // instead of inferring it from pixels.
@@ -26752,7 +26769,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             );
           })()}
-          {!bldgPanel && (
+          {roadPanel && (() => {
+            // Road-panel redesign (NEW-1) — the building inspector's header, for a road: [glyph] name (or "Road") ·
+            // padlock (= Pin) · ⋯ (Duplicate · Bring to front · Delete road) · ✕, then ONE summary line:
+            // length · width · ROW (only when a ROW is designated). The title truncates ONLY when the panel is
+            // genuinely narrow (flex-shrink on the title, never on the buttons).
+            const r = selEl;
+            const HB = CONTROL_H.lg;
+            const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none", flex: "none" };
+            const title = roadPanelTitle(r);
+            const sub = roadPanelSubtitle(r, { lengthFt: roadLengthOf(r), widthFt: roadTravel(r) });
+            const menuRow = { ...chip, width: "100%", border: "none", textAlign: "left", display: "block" };
+            return (
+              <div data-testid="road-header" style={{ padding: "2px 0 8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
+                  <RoadGlyph />
+                  <span data-testid="road-title" title={title} style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)", flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+                  <button type="button" data-testid="road-lock" className="bldg-hdr-btn" style={hdrBtn} aria-pressed={!!r.locked}
+                    aria-label={r.locked ? "Unlock — allow moving and resizing" : "Pin in place"}
+                    title="Pin in place so it can't be moved or resized by accident" onClick={() => toggleLock(r.id)}>
+                    <LockGlyph locked={!!r.locked} size={16} />
+                  </button>
+                  <InspectorMoreMenu testId="road-more" label="More road actions" btnStyle={hdrBtn} btnClassName="bldg-hdr-btn"
+                    panelStyle={{ minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                    {(close) => (<>
+                      <button type="button" data-testid="road-duplicate" style={menuRow} onClick={() => { close(); duplicateEl(r.id); }}>Duplicate</button>
+                      <button type="button" data-testid="road-front" style={menuRow} onClick={() => { close(); arrangeSel("front", { kind: "el", id: r.id }); }}>Bring to front</button>
+                      <button type="button" data-testid="road-delete" style={{ ...menuRow, color: "var(--danger)" }} onClick={() => { close(); deleteSel(null, { entry: "panel:element" }); }}>Delete road</button>
+                    </>)}
+                  </InspectorMoreMenu>
+                  <button type="button" data-testid="road-close" className="bldg-hdr-btn" style={{ ...hdrBtn, color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
+                </div>
+                <div data-testid="road-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>{sub}</div>
+              </div>
+            );
+          })()}
+          {!bldgPanel && !roadPanel && (
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -26794,7 +26846,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           )}
-          {(bldgPanel || !propsCollapsed) && (<>
+          {(bldgPanel || roadPanel || !propsCollapsed) && (<>
           {/* B740 — SHARED properties for a multi-selection: only the style props common to every
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
@@ -26971,7 +27023,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
                     easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
                     onFocus pushes one undo frame per edit. */}
-                <Field label="Inline label"><input value={e.inlineLabel || ""} maxLength={120}
+                <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input value={e.inlineLabel || ""} maxLength={120}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: ev.target.value } : m)))}
                   placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
@@ -27059,7 +27111,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {isOpenPath && (<>
                   {/* NEW-3 — the drawn line/polyline's LENGTH, off the same points the renderer draws. */}
                   <Field label="Length"><span style={valStyle}>{fmtFeet(openMarkupLength(selMarkup) || 0)}</span></Field>
-                  <Field label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
+                  <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
                     onFocus={() => pushHistory()}
                     onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
                     placeholder={'e.g. 18" SANITARY SEWER'} style={textInput} /></Field>
@@ -27619,72 +27671,121 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </>
                     );
                   })() : selEl.type === "road" ? (() => {
+                    // Road-panel redesign (NEW-1) — Road · Cross-section · Label · (Intersection), each a <Collapse>,
+                    // every row ONE line. Length is READ-ONLY for a drawn (centerline) road: it follows the line, so a
+                    // typed value could only distort the alignment (a rect road keeps its editable length).
                     const cl = isCenterlineRoad(selEl);
-                    const warn = cl ? roadRadiusStatus(selEl, settings) : null;
-                    // B946/NEW-2 — dry-run the corrective fix so the panel can promise what a click will
-                    // achieve: how many corners it can round, and which (if any) are truly unreachable.
+                    const designed = hasXSection(selEl);
+                    const travelFt = Math.round(roadTravel(selEl));
+                    const rowFt = designatedRowFt(selEl.xsection);
+                    const showRow = cl || !!selEl.xsection;
+                    const muted = { fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" };
+                    const readout = { display: "flex", alignItems: "baseline", gap: SPACE.sm, minWidth: 0, overflow: "hidden", fontSize: FONT_SIZE.control, color: "var(--text-primary)", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" };
+                    const mutedEll = { ...muted, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }; // the muted tail may ellipsise at the narrowest panel; the number never does
+                    // NEW-3 — everything below named *Review* is the hidden min-radius feature (flag default OFF).
+                    const warn = radiusReviewOn && cl ? roadRadiusStatus(selEl, settings) : null;
                     const fixCls = warn ? roadClassOf(settings, selEl.roadClass) : null;
                     const fixPrev = warn ? fixRoadRadii(selEl.pts, selEl.vtx, warn.threshold, { targetRadius: classDefaultRadius(fixCls), maxNudgeFt: ROAD_FIX_MAX_NUDGE_FT }) : null;
-                    const vsel = cl && roadVtxSel && roadVtxSel.id === selEl.id && roadVtxSel.idx > 0 && roadVtxSel.idx < selEl.pts.length - 1 ? roadVtxSel.idx : null;
+                    const vsel = radiusReviewOn && cl && roadVtxSel && roadVtxSel.id === selEl.id && roadVtxSel.idx > 0 && roadVtxSel.idx < selEl.pts.length - 1 ? roadVtxSel.idx : null;
                     const vtreat = vsel != null ? ((selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].treatment) || "arc") : null;
+                    const myTees = cl ? teeJunctions.filter((tj) => tj.sideId === selEl.id) : [];
+                    const dj = cl ? driveJunctions.find((x) => x.sideId === selEl.id) : null;
+                    const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
-                      <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
-                      {/* NEW-2/NEW-4 — "Road width", never "travel width", and the hover states the
-                          dimension explicitly: it is the pavement between the curb faces (B180).
-                          NEW-1 — once a road carries a REAL designed cross-section, one number can no
-                          longer describe it (which of the five bands would a typed width resize?), so
-                          the field becomes a read-only summary and "Edit cross-section..." is the only
-                          way to change it. A plain road (no section, or the dialog's own single-band
-                          wrapper) keeps the ordinary editable field, byte-identical to before. */}
-                      {hasXSection(selEl) ? (
-                        <Field label="Road width (ft)" title="Set by this road's cross-section — a designed section can't be resized by one number.">
-                          <span style={{ fontSize: 13, fontWeight: 600, color: PAL.ink }}>{Math.round(roadTravel(selEl))}′ <span style={{ fontWeight: 400, color: PAL.muted, fontSize: 11 }}>curb to curb</span></span>
+                      <Collapse sectionId="road-size" title="Road" defaultOpen>
+                        <Field gutter={ROAD_GUTTER_W} oneLine label="Length">
+                          {cl ? (
+                            <span data-testid="road-length" title="Follows the line you drew. Drag its ends or corners on the plan to change it." style={readout}><span style={{ flex: "none" }}>{f0(roadLengthOf(selEl))} ft</span><span style={mutedEll}>follows the line</span></span>
+                          ) : stepBox({ ariaLabel: "Road length", testid: "road-length-input", value: Math.round(roadLengthOf(selEl)), min: 1, step: 1, coarse: 10, onCommit: (n) => setRoadLength(selEl, n) })}
                         </Field>
-                      ) : (
-                        <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
-                      )}
-                      {/* NEW-1 (owner: "id like to designate the ROW to like a 100' row should be
-                          shown") — read/write here too, since this is where he'll look for it once
-                          the road is already on the plan, not only in the design dialog. Any road
-                          that has been through the dialog at least once carries `xsection` (even the
-                          single-band wrapper), so this doesn't require a REAL multi-band design —
-                          gated separately from the read-only-vs-editable width split above. Blank the
-                          field (NumInput's allowClear) to un-designate; it reverts to the modeled
-                          section's own total and the ROW boundary stops drawing on the canvas. */}
-                      {selEl.xsection && (
-                        <Field label="Right-of-way (ft)" title="A designated legal ROW, drawn as a boundary line on the plan — wider than the modeled section, with the remainder an undesignated margin each side. Blank = not designated.">
-                          <NumInput style={numInput} value={designatedRowFt(selEl.xsection) ?? Math.round(rowWidth(selEl.xsection))} min={1} allowClear forceCommit onCommit={(n) => setRoadRowFt(selEl, n)} />
+                        {/* NEW-2/NEW-4 — "Road width", never "travel width": the pavement between the curb faces (B180).
+                            NEW-1 — once a road carries a REAL designed cross-section, one number can no longer describe
+                            it (which of the bands would a typed width resize?), so the row becomes a read-only summary
+                            and the cross-section button is the only way to change it. A plain road keeps the editable box. */}
+                        <Field gutter={ROAD_GUTTER_W} oneLine label="Width" title={designed ? "Set by this road's cross-section — a designed section can't be resized by one number." : "Curb face to curb face — the pavement between the curbs. The curb is added outside this width."}>
+                          {designed ? (
+                            <span data-testid="road-width-readonly" style={readout}><span style={{ flex: "none" }}>{travelFt} ft</span><span style={mutedEll}>set by cross-section</span></span>
+                          ) : stepBox({ ariaLabel: "Road width", testid: "road-width", value: travelFt, min: 1, step: 2, coarse: 10, onCommit: (n) => setRoadTravel(selEl, n) })}
                         </Field>
-                      )}
+                        {/* Right-of-way — blank = not designated (the key is removed, the boundary stops drawing). An
+                            undesignated field steps from the section's own width (`seed`), never from 0. */}
+                        {showRow && (
+                          <Field gutter={ROAD_GUTTER_W} oneLine label="Right-of-way" title="A designated legal ROW, drawn as a boundary line on the plan — wider than the modeled section, with the remainder an undesignated margin each side. Blank = not designated.">
+                            {stepBox({ ariaLabel: "Right-of-way width", testid: "road-row", placeholder: "—", value: rowFt, seed: selEl.xsection ? Math.round(rowWidth(selEl.xsection)) : travelFt, min: 1, step: 5, coarse: 20, allowClear: true, onCommit: (n) => setRoadRowFt(selEl, n) })}
+                          </Field>
+                        )}
+                        {cl && (
+                          <Field gutter={ROAD_GUTTER_W} oneLine label="Class">
+                            <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+                              <select style={ROAD_SELECT_STYLE} data-testid="road-class" aria-label="Road class" value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
+                                {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                              </select>
+                              <button type="button" title="Class defaults — edit in Standards" aria-label="Edit road class defaults in Standards" onClick={() => jumpToStandards("roads")} style={{ ...linkBtn, fontSize: FONT_SIZE.control, flex: "none" }}>↗</button>
+                            </span>
+                          </Field>
+                        )}
+                      </Collapse>
                       {cl && (
-                        <button style={{ ...chip, width: "100%", marginTop: 2 }} data-testid="edit-road-xsection"
-                          onClick={() => setXsDialog({ mode: "edit", elId: selEl.id })}>
-                          {hasXSection(selEl) ? "Edit cross-section…" : "Design cross-section…"}
-                        </button>
+                        <Collapse sectionId="road-xsection" title="Cross-section" defaultOpen summary={xsSummary(selEl)}>
+                          <RoadXSectionStrip bands={xsStripBands(selEl, { travelFt: roadTravel(selEl), curbFt: roadCurbOf(selEl) })} />
+                          <RoadStripCaption>{xsCaption(selEl, { travelFt })}</RoadStripCaption>
+                          <UiButton type="button" variant="ghost" data-testid="edit-road-xsection" style={{ width: "100%" }}
+                            onClick={() => setXsDialog({ mode: "edit", elId: selEl.id })}>{xsButtonLabel(selEl)}</UiButton>
+                        </Collapse>
                       )}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
-                      {cl && (<>
-                        <Field label="Inline label"><input value={selEl.inlineLabel || ""} maxLength={120}
-                          onFocus={() => pushHistory()}
-                          onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
-                          placeholder="e.g. MAIN STREET" style={textInput} /></Field>
-                        {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
-                        {inlineLabelControls(selEl, "road", coalesceLabelWrite(selEl.id, (p) => setSelEl(p)))}
-                      </>)}
                       {cl && (
-                        <Field label="Road class">
-                          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <select style={textInput} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
-                              {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                            </select>
-                            <button title="Class defaults (radius, design speed) — edit in Standards" onClick={() => jumpToStandards("roads")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
-                          </span>
-                        </Field>
+                        <Collapse sectionId="road-label" title="Label" defaultOpen summary={roadLabelSummary(selEl)}>
+                          <Field gutter={ROAD_GUTTER_W} oneLine label="Name"><input data-testid="road-name" aria-label="Road name" value={selEl.inlineLabel || ""} maxLength={120}
+                            onFocus={() => pushHistory()}
+                            onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
+                            placeholder="e.g. MAIN STREET" style={ROAD_SELECT_STYLE} /></Field>
+                          {/* B678 — text size / repeat spacing / background halo / position (only once a name is typed) */}
+                          {inlineLabelControls(selEl, "road", coalesceLabelWrite(selEl.id, (p) => setSelEl(p)))}
+                        </Collapse>
                       )}
-                      {warn && (
-                        <div style={{ fontSize: 11.5, color: PAL.danger, fontWeight: 600, marginTop: 2, lineHeight: 1.4 }}>
+                      {/* B953/NEW-1 + B955/NEW-1 — clean-tee and road→drive params (curb return radius + throat flare),
+                          shown ONLY when this road has a junction, collapsed by default. Seeded from the road class /
+                          junction kind; the render re-solves live. */}
+                      {cl && (myTees.length > 0 || dj) && (
+                        <Collapse sectionId="road-intersection" title="Intersection">
+                          {myTees.length > 0 && (() => {
+                            const tj = myTees[0];
+                            const seedR = classReturnRadius(roadClassOf(settings, selEl.roadClass));
+                            const curR = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.returnR > 0 ? selEl.tee.returnR : seedR;
+                            const curFlare = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.flare > 0 ? selEl.tee.flare : 0;
+                            return (
+                              <div data-testid="road-tee-params" style={{ marginBottom: SPACE.md }}>
+                                <div style={{ ...subHead, marginTop: 0 }}>Tee intersection</div>
+                                <Field gutter={ROAD_GUTTER_W} oneLine label="Curb return">{stepBox({ ariaLabel: "Curb return", value: Math.round(curR), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadTee(selEl, tj.throughId, { returnR: n }) })}</Field>
+                                <Field gutter={ROAD_GUTTER_W} oneLine label="Throat flare">{stepBox({ ariaLabel: "Throat flare", value: Math.round(curFlare), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadTee(selEl, tj.throughId, { flare: n }) })}</Field>
+                                <div style={{ ...muted, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
+                              </div>
+                            );
+                          })()}
+                          {dj && (() => {
+                            const kindLbl = dj.kind === "truckcourt" ? "truck court" : "parking drive";
+                            const seedR = DRIVE_RETURN[dj.kind] ?? 20;
+                            const curR = selEl.driveTee && selEl.driveTee.returnR > 0 ? selEl.driveTee.returnR : seedR;
+                            const curFlare = selEl.driveTee && selEl.driveTee.flare > 0 ? selEl.driveTee.flare : 0;
+                            return (
+                              <div data-testid="road-drive-params">
+                                <div style={{ ...subHead, marginTop: 0 }}>Drive intersection · {kindLbl}</div>
+                                <Field gutter={ROAD_GUTTER_W} oneLine label="Curb return">{stepBox({ ariaLabel: "Curb return", value: Math.round(curR), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { returnR: n }) })}</Field>
+                                <Field gutter={ROAD_GUTTER_W} oneLine label="Throat flare">{stepBox({ ariaLabel: "Throat flare", value: Math.round(curFlare), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { flare: n }) })}</Field>
+                                <div style={{ ...muted, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
+                              </div>
+                            );
+                          })()}
+                        </Collapse>
+                      )}
+                      {/* NEW-3 (road-panel redesign) — HIDDEN, NOT DELETED: the min-radius review (the warning + Fix radius,
+                          and "Curve at vertex") renders only behind `roadRadiusReviewOn()`, default OFF. Owner: "it should
+                          just let me be wrong; it's not good enough yet, keep it in the background". */}
+                      {radiusReviewOn && warn && (
+                        <div data-testid="road-radius-warning" style={{ fontSize: 11.5, color: PAL.danger, fontWeight: 600, marginTop: 2, lineHeight: 1.4 }}>
                           ⚠ {f0(warn.minR)}′ radius — below {f0(warn.threshold)}′ min for {warn.label}
                           {/* B946/NEW-2 — the passive warning becomes an ACTION: round the tight corners up to spec. */}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 5 }}>
@@ -27702,8 +27803,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 400, marginTop: 3 }}>Screening only — verify against the adopted code.</div>
                         </div>
                       )}
-                      {cl && (
-                        <div style={{ marginTop: 8 }}>
+                      {radiusReviewOn && cl && (
+                        <div data-testid="road-curve-at-vertex" style={{ marginTop: 8 }}>
                           <div style={subHead}>Curve at vertex</div>
                           {vsel == null ? (
                             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>Click a road vertex on the canvas to set it sharp · arc · smooth.{selEl.pts.length <= 2 ? " A straight 2-point road has no interior vertex." : ""}</div>
@@ -27723,43 +27824,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           )}
                         </div>
                       )}
-                      {/* B953/NEW-1 — clean-tee params, shown only when THIS road tees into another
-                          (its endpoint on the through road's side). Curb return radius + throat flare,
-                          seeded from the road class, editable per junction; the render re-solves live. */}
-                      {cl && (() => {
-                        const myTees = teeJunctions.filter((tj) => tj.sideId === selEl.id);
-                        if (!myTees.length) return null;
-                        const tj = myTees[0];
-                        const seedR = classReturnRadius(roadClassOf(settings, selEl.roadClass));
-                        const curR = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.returnR > 0 ? selEl.tee.returnR : seedR;
-                        const curFlare = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.flare > 0 ? selEl.tee.flare : 0;
-                        return (
-                          <div style={{ marginTop: 8 }}>
-                            <div style={subHead}>Tee intersection</div>
-                            <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { returnR: n })} /></Field>
-                            <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { flare: n })} /></Field>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
-                          </div>
-                        );
-                      })()}
-                      {/* B955/NEW-1 — road → parking-drive / truck-court connect params (curb return + throat
-                          flare), shown only when THIS road connects to a parking field or a dock court. */}
-                      {cl && (() => {
-                        const dj = driveJunctions.find((x) => x.sideId === selEl.id);
-                        if (!dj) return null;
-                        const kindLbl = dj.kind === "truckcourt" ? "truck court" : "parking drive";
-                        const seedR = DRIVE_RETURN[dj.kind] ?? 20;
-                        const curR = selEl.driveTee && selEl.driveTee.returnR > 0 ? selEl.driveTee.returnR : seedR;
-                        const curFlare = selEl.driveTee && selEl.driveTee.flare > 0 ? selEl.driveTee.flare : 0;
-                        return (
-                          <div style={{ marginTop: 8 }}>
-                            <div style={subHead}>Drive intersection · {kindLbl}</div>
-                            <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadDrive(selEl, { returnR: n })} /></Field>
-                            <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadDrive(selEl, { flare: n })} /></Field>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
-                          </div>
-                        );
-                      })()}
                     </>
                     );
                   })() : isDockZone(selEl) ? (() => {
@@ -28076,37 +28140,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       dog-ear path keeps its standalone Docks control. Car parking's own "Parking layout"
                       group (Stall depth / Drive aisle / Set as standard / rows / Split / Aisle side) now
                       renders entirely inside the B1790016 spec-sheet branch above — see NEW-1/NEW-2. */}
-                  {selEl.type === "road" && !selEl.points && (() => {
-                    const ct = roadCurbType(selEl), sides = roadCurbedSides(selEl);
-                    const hasPan = CURB_TYPE_META[ct].hasPan;
-                    const q = roadQuantities(selEl, roadPavedWidth(selEl), roadLengthOf(selEl));
-                    return (
-                      <div style={{ marginTop: 8 }}>
-                        <div style={subHead}>Curb &amp; paving (cost)</div>
-                        <Field label="Curb type">
-                          <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={ct} onChange={(e) => setRoadCost(selEl, { curbType: e.target.value })}>
-                            {COST_CURB_TYPES.map((k) => <option key={k} value={k}>{CURB_TYPE_META[k].label}</option>)}
-                          </select>
-                        </Field>
-                        {ct !== "none" && (
-                          <Field label="Curbed sides">
-                            <span style={{ display: "flex", gap: 4 }}>
-                              {[2, 1].map((n) => (
-                                <button key={n} style={{ ...chip, flex: 1, ...(sides === n ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setRoadCost(selEl, { curbedSides: n })}>{n === 2 ? "Both" : "One"}</button>
-                              ))}
-                            </span>
-                          </Field>
-                        )}
-                        {hasPan && (
-                          <Field label="Gutter pan (ft)"><NumInput style={numInput} value={roadPanWidth(selEl)} min={0} onCommit={(n) => setRoadCost(selEl, { panWidth: n })} /></Field>
-                        )}
-                        <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6, lineHeight: 1.55 }}>
-                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′{hasXSection(selEl) ? " asphalt" : " FC-FC"}{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
-                          <br /><span style={{ fontSize: 10.5 }}>{hasXSection(selEl) ? "Paving is the section's asphalt bands only — a median or curb-and-gutter band is excluded, priced separately per LF." : "Paving is face-of-curb to face-of-curb — curb is priced separately per LF."} Set unit prices in the Yield panel.</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {/* NEW-2 (road-panel redesign) — the "Curb & paving (cost)" block (curb type · curbed sides · gutter pan ·
+                      SY / LF readout · its explanation · the Yield link) is GONE from the road panel: cost will be its
+                      own module. The DATA and the MATH are untouched — curbType / curbedSides / panWidth stay stored with
+                      their defaults, and roadQuantities / the Yield cost rows compute exactly as before. */}
                   {selEl.type === "trailer" && !selEl.points && (
                     <div style={{ marginTop: 4 }}>
                       <div style={subHead}>Terminal curb</div>
@@ -28194,7 +28231,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* Car parking's own Footprint/Stalls readout is now the spec-sheet's stat strip
                   (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {selEl.type !== "pond" && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
+              {selEl.type !== "pond" && !bldgPanel && !roadPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const poly = !!selEl.points;
                 const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
@@ -28294,7 +28331,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   chords — see arrangeSel/arrangePeers and /CLAUDE.md's owner-constraints entry 10. */}
               {/* Car parking carries its own Pin/Delete footer at the bottom of the spec sheet
                   above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {selEl.type !== "pond" && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
+              {selEl.type !== "pond" && !bldgPanel && !roadPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
@@ -32024,18 +32061,24 @@ function Section({ title, children, collapsed, accent }) {
  * rejected — the owner's mockup calls for one shared left edge across the whole panel, paired rows
  * included, so the width has to be a single constant every row in every panel reads. */
 const PROP_GUTTER_W = 64;
+// The road panel's wider label column (redesign NEW-1): "Right-of-way" / "Repeat every" / "Background" must
+// never wrap, and the road panel's rows are single-line by contract. Other panels keep PROP_GUTTER_W.
+const ROAD_GUTTER_W = 92;
+// A native <select> at the same height / outline as the stepper boxes beside it (CONTROL_H.md, the strong border).
+const ROAD_SELECT_STYLE = { width: "100%", minWidth: 0, boxSizing: "border-box", height: CONTROL_H.md, padding: "0 6px", fontSize: FONT_SIZE.control, fontFamily: "inherit", color: "var(--text-primary)", background: "var(--surface-raised)", border: "1px solid var(--border-strong)", borderRadius: RADIUS.sm };
 const PROP_GRID_GAP = SPACE.sm; // 6 — tight on purpose: two ~84px value columns at the 268px panel width
 
 /* The row label — wraps up to 2 lines (a handful of longer single-row labels do; the paired-row
  * vocabulary never does) and always carries its own text as a hover title, so nothing is ever lost
  * to the clamp even in the rare case a label runs past 2 lines. */
-function PropLabel({ children, title }) {
+function PropLabel({ children, title, oneLine = false }) {
   const full = title ?? (typeof children === "string" ? children : undefined);
   return (
     <span
       style={{
         fontSize: FONT_SIZE.control, lineHeight: 1.25, color: "var(--text-secondary)",
-        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+        ...(oneLine ? { display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }
+          : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }),
         ...(full ? { cursor: "help" } : null),
       }}
       title={full}
@@ -32054,10 +32097,10 @@ function PropDash() {
  * user, and pressing any of them means "I am editing this number" — so Delete and Backspace
  * belong to the number, not to the plan, until the user touches the drawing again. Two of the
  * seven measured ways the owner's building could be destroyed were presses on those steppers. */
-function Field({ label, children, title }) {
+function Field({ label, children, title, gutter = PROP_GUTTER_W, oneLine = false }) {
   return (
-    <div data-field-group="1" data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
-      <PropLabel title={title}>{label}</PropLabel>
+    <div data-field-group="1" data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${gutter}px 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
+      <PropLabel title={title} oneLine={oneLine}>{label}</PropLabel>
       <div style={{ minWidth: 0 }}>{children}</div>
     </div>
   );
@@ -32641,7 +32684,7 @@ function LineSample({ weight }) {
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
 /* `boxed` (Building panel v3, NEW-2) draws the field as the shared NumberBox: ONE bordered box holding the value,
  * `unit` and a stacked ▲▼ (when `step` is set). Same commit/clamp/"Using N" logic — only the chrome changes. */
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid }) {
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid, seed }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
    * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
@@ -32734,7 +32777,8 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   // drift, rounds to kill float dust (0.1+0.2 → 0.30000000000000004), and commits immediately.
   const nudge = (d) => {
     if (step == null) return;
-    const base = Number.isFinite(value) ? value : (parseFloat(draft) || 0);
+    // `seed`: where a stepper starts from when the field is BLANK (e.g. an undesignated right-of-way steps from the section's own width, not from 0).
+    const base = Number.isFinite(value) ? value : (parseFloat(draft) || (Number.isFinite(seed) ? seed : 0));
     const v = clampNum(Math.round((base + d) * 1000) / 1000);
     if (v == null) return;
     editing.current = false;

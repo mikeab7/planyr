@@ -141,6 +141,9 @@ test.describe("NEW-1 — snap-and-connect road endpoints", () => {
 
 test.describe("NEW-2 — auto-fix sub-minimum road radius on class change", () => {
   test("assigning a stricter class rounds a tight corner up to its minimum", async ({ page }) => {
+    // road-panel redesign NEW-3 — the min-radius review (incl. this automatic corner re-cut) is hidden behind ONE flag,
+    // default OFF; this spec is the feature's own regression guard, so it opts in.
+    await page.addInitScript(() => localStorage.setItem("planyr:flag:roadRadiusReview", "1"));
     await startBlank(page);
     await canvas(page).click({ position: { x: 20, y: 20 } });
     await page.keyboard.press("s"); // Snap ON so the clicked points land on the grid

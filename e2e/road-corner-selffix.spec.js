@@ -30,6 +30,9 @@ async function loadOwnerPlan(page) {
   await page.addInitScript(([id, rec]) => {
     localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [id]: rec }));
     localStorage.setItem("planarfit:currentSite:v1", id);
+    // road-panel redesign NEW-3 — the min-radius review (flags + Fix) is hidden behind ONE flag, default OFF;
+    // this spec is that feature's own regression guard, so it opts in.
+    localStorage.setItem("planyr:flag:roadRadiusReview", "1");
   }, [SITE_ID, site]);
   await page.goto("/");
   await expect(canvas(page)).toBeVisible();
