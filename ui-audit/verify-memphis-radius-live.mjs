@@ -35,7 +35,7 @@ const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
 const MSFX = MS_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/mississippiCounties.json", import.meta.url), "utf8")) : null;
 const ALFX = AL_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/alabamaCounties.json", import.meta.url), "utf8")) : null;
-const ARMS = AL_ALL ? [
+const ARMS_ALL = AL_ALL ? [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
   { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
@@ -63,7 +63,8 @@ const ARMS = AL_ALL ? [
     return { name: `${c.state} ${c.name}`, state: c.state, lat, lng, expect: NO_SOURCE.has(k) ? "gap" : "lot", county: c.name };
   }),
   { name: "MS Webster (was outside 100 mi; wired 2026-10-16)", state: "MS", lat: 33.5409, lng: -89.2631, expect: "lot", county: "Webster County" },
-].filter((a) => !STATES || a.control || STATES.has(a.state));
+];
+const ARMS = ARMS_ALL.filter((a) => !STATES || a.control || STATES.has(a.state)).filter((a) => !flag("--match") || a.control || new RegExp(flag("--match")).test(a.name)); // --match <regex> re-runs just the named rows
 // Interior offsets (degrees) tried until one lands on a lot — a centroid can sit on a road, river or lake.
 const DOFF = [[0, 0], [0.002, 0.002], [-0.002, -0.002], [0.004, -0.003], [-0.004, 0.003], [0.008, 0], [0, -0.008]];
 
