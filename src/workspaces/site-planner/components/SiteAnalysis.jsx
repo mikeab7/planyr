@@ -33,6 +33,7 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
  *   onOpenDrainage — the "Open in Drainage →" link
  *   onFindings(findings) — the legacy wetlands status the buildability card reads
  *   runAnalysis — injectable (defaults to runSiteScreen)
+ *   groundSlot — owner-only grading layer: a node rendered under "Who governs this site" (null for everyone else)
  */
 
 const SEV = {
@@ -59,7 +60,7 @@ const linkBtn = {
 export default function SiteAnalysis({
   rings, holes = [], acres, parcelCount, isLayerOn, onToggleLayer, layerStatus = {}, layerZoomNote = null,
   callsChecked = null, onToggleCall = null, onOpenDrainage = null, onFindings = null,
-  runAnalysis = runSiteScreen, layers = ALL_LAYERS,
+  runAnalysis = runSiteScreen, layers = ALL_LAYERS, groundSlot = null,
 }) {
   const [state, setState] = useState({ loading: false, result: null, error: null, empty: !rings || !rings.length });
   const [openIds, setOpenIds] = useState({});   // detail open per row id (several rows can be on at once)
@@ -210,6 +211,9 @@ export default function SiteAnalysis({
           </div>
         </div>
       )}
+
+      {/* Owner-only Ground group (grading layer) — sits under Who governs this site; null for everyone else. */}
+      {groundSlot}
 
       {/* ── Checked for you ───────────────────────────────────────────────────────────────── */}
       <div data-section="checked" style={{ opacity: state.loading && rows.length ? 0.5 : 1 }}>

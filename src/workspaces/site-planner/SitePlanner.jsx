@@ -123,6 +123,11 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
  * source), and MapFinder's own copy is converted in the same commit — see that file's header
  * comment for why both hosts have to move together. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
+const GradingController = lazy(() => import("./components/GradingController.jsx"));
+const GradingTabs = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingTabs })));
+const GroundSection = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GroundSection })));
+const BuildingGradeTab = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.BuildingTab })));
+const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
 import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
@@ -481,6 +486,10 @@ import {
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
+// Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
+// and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
+import { useGradingEnabled } from "./lib/gradingGate.js";
+import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
   pondFloodplainTier,
@@ -14174,8 +14183,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const gsShrinkPct = Number.isFinite(gsSettings.shrinkPct) ? gsSettings.shrinkPct : null;
   const gsDockDrop = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
   const gsMedianGrade = fmElev.existGradeFt;
-  const gsExistAt = fmGradeAt || (gsMedianGrade != null ? () => gsMedianGrade : null);
-  const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
+  // Owner-only grading layer: the gate, then the small always-loaded glue (settings, the setback polygon, a
+  // ground sampler that does not need a drainage check to have run). All inert for every other account.
+  const gradingOn = useGradingEnabled();
+  const grBase = useGradingBase({ enabled: gradingOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback });
+  const grOn = grBase.on;
+  const grHosts = grOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const gsExistAt = fmGradeAt || (grOn && grBase.existAt) || (gsMedianGrade != null ? () => gsMedianGrade : null);
+  const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : (grOn && grBase.existAt) ? grBase.existKey : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
   const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type)).map((e) => {
     const r = ringOf(e);
     if (!r || r.length < 3) return null;
@@ -14190,6 +14205,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       accessible: !!g.accessible,
       slopeOverridePct: Number.isFinite(g.slopePct) ? g.slopePct : null,
       padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt : null,
+      ...(grOn && e.type !== "building" ? { hostId: grHosts.get(e.id) ?? null } : {}),
     };
   }).filter(Boolean);
   // Drainage target: the largest pond's centroid (the outfall/low side when no pond is
@@ -14219,6 +14235,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fieldT: gsFieldT, drainTarget: gsTarget, daylightAsap: gsDaylightAsap, existAt: gsExistAt,
     parcelRings: gsParcelRings, pondRings: gsPondRings, easementRings: gsEasementRings,
     opts: { existKey: gsExistKey, apronRatio: gsApronRatio },
+    ...(grOn && grBase.pack ? { grading: grBase.pack } : {}),
   };
   const gsSig = [
     fmEffectivePadFt ?? "", gsDockDrop, gsFieldT, gsExistKey,
@@ -14226,9 +14243,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     gsTarget ? `${Math.round(gsTarget.x)},${Math.round(gsTarget.y)}` : "",
     gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}`).join("|"),
     gsPondRings.map((r) => ringHash(r)).join(","), gsParcelRings.map((r) => ringHash(r)).join(","),
+    ...(grOn ? [`gr:${grBase.sig}`, gsEls.map((e) => e.hostId ?? "").join(",")] : []),
   ].join("~");
+  // Owner-only: a building carrying its OWN finish elevation (the FFE chips) prices a surface even when the plan has
+  // no site-wide FFE; for every other account this is exactly the old `fmEffectivePadFt == null` test.
+  const grAnyFfe = grOn && gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   const gradeSurface = useMemo(() => {
-    if (fmEffectivePadFt == null || !gsEls.length) return null;
+    if ((fmEffectivePadFt == null && !grAnyFfe) || !gsEls.length) return null;
     return buildProposedSurface(gsInputs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gsSig]);
@@ -14244,6 +14265,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, gradeSurface, gsExistKey]);
+  /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
+   * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
+   * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
+   * path exists. Inert (null) for any account the gate refuses. */
+  const [grModel, setGrModel] = useState(null);
+  const [grTab, setGrTab] = useState("analysis");
+  const grBuildingsAll = grOn ? els.filter((e) => e.type === "building") : null;
+  const grSelIds = grOn ? (multi.length ? multi : sel ? [sel] : []).filter((r) => r.kind === "el" && grBuildingsAll.some((b) => b.id === r.id)).map((r) => r.id) : [];
+  const grSelBuildingId = grSelIds[0] || null;
+  const grPrevSelB = useRef(null);
+  useEffect(() => {
+    // The Inspector rule: selecting a building switches the Site Analysis panel to its Building tab; deselecting returns to Analysis.
+    if (grSelBuildingId && !grPrevSelB.current) setGrTab("building");
+    if (!grSelBuildingId) setGrTab("analysis");
+    grPrevSelB.current = grSelBuildingId;
+  }, [grSelBuildingId]);
+  const grSetCfg = (patch) => { pushHistory(); setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } })); };
+  const grSetLayer = (id, on) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), layers: { ...((sx.grading || {}).layers || {}), [id]: !!on } } }));
+  const grPatchBuilding = (id, patch, opt) => {
+    if (opt && opt.history) pushHistory();
+    setEls((a) => a.map((e) => {
+      if (e.id !== id) return e;
+      const n = { ...e };
+      for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; }
+      return n;
+    }));
+  };
+  const grMoveAssembly = (id, dx, dy) => {
+    pushHistory();
+    const ids = new Set(assemblyOf(id).map((x) => x.id));
+    // The fix was proven at THIS finish elevation, so applying it freezes an active chip to "typed": a live chip would
+    // re-solve for the new spot and could walk the slope back across the line.
+    setEls((a) => a.map((e) => {
+      if (!ids.has(e.id)) return e;
+      const m = elTranslate(e, dx, dy);
+      return e.id === id && e.ffeBasis && e.ffeBasis !== "typed" && Number.isFinite(e.padElevFt) ? { ...m, ffeBasis: "typed" } : m;
+    }));
+  };
+  const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
+  const grInput = grOn ? {
+    base: grBase, origin, gsInputs, gsSig, gradeSurface, selBuildingId: grSelBuildingId, multiBuildings: grSelIds.length,
+    rawBuilding: grSelBuildingId ? grBuildingsAll.find((b) => b.id === grSelBuildingId) || null : null,
+    rawBuildings: new Map(grBuildingsAll.map((b) => [b.id, b])),
+    buildingName: grSelBuildingId ? grBldgName(grSelBuildingId) : null,
+    dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
+    accent: PAL.accent, isDragging: () => !!drag.current,
+    actions: { patchBuilding: grPatchBuilding },
+  } : null;
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -22345,14 +22414,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   .map((h) => (h && Array.isArray(h.pts) ? h.pts : Array.isArray(h) ? h : null))
                   .filter((pts) => pts && pts.length >= 3)
                   .map((pts) => pts.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; })));
+                const analysisNode = (
+                  <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
+                    isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
+                    callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
+                    onOpenDrainage={() => setLeftPanel("drainage")}
+                    onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }}
+                    groundSlot={grOn && grModel ? (
+                      <Suspense fallback={null}>
+                        <GroundSection model={grModel} onShowBuildable={() => { grSetLayer("buildable", true); setLayersOpen(true); }} />
+                      </Suspense>
+                    ) : null} />
+                );
+                // Owner-only: a selected building adds a second, "Building" tab to this panel (grading controls only —
+                // everything else reads from the real building element). Every other account renders exactly SiteAnalysis.
+                const gb = grOn && grModel && grModel.building ? grBuildingsAll.find((x) => x.id === grModel.building.id) : null;
                 return (
                   <>
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
-                      <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
-                        isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
-                        callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
-                        onOpenDrainage={() => setLeftPanel("drainage")}
-                        onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
+                      {gb ? (
+                        <Suspense fallback={null}>
+                          <GradingTabs tab={grTab} onTab={setGrTab} showBuilding>
+                            {grTab === "building" ? (
+                              <BuildingGradeTab model={grModel} dockDropFt={gsDockDrop}
+                                renderNumber={(
+                                  <BuildingNumberField id={gb.id} value={buildingNumbers(els).get(gb.id)} className="bldg-num-box"
+                                    style={{ width: 40, height: CONTROL_H.sm, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, borderRadius: RADIUS.sm, color: "var(--text-primary)", flex: "none" }}
+                                    resetToken={bldgNumResetSeq} onAttempt={(n) => attemptBuildingNumber(gb.id, n)} onCancelConflict={() => setBldgNumConflict(null)} />
+                                )}
+                                wallRows={wallRowPlan(gb).map((r) => ({ key: r.key, badge: r.badge, role: r.role, layers: wallLayersOn(gb, r.sides[0]).map((l) => ({ label: KIND_LABEL[l.kind] || l.kind, depth: l.depth })) }))}
+                                onCfg={grSetCfg}
+                                onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
+                                onApplyFfeFix={(fx) => grPatchBuilding(gb.id, { padElevFt: fx.ffe, ffeBasis: "typed" }, { history: true })}
+                                onApplyMoveFix={(mv) => grMoveAssembly(gb.id, mv.dx, mv.dy)} />
+                            ) : analysisNode}
+                          </GradingTabs>
+                        </Suspense>
+                      ) : analysisNode}
                     </LazyPanel>
                   </>
                 );
@@ -25106,6 +25204,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ))}
                 </g>
               )}
+              {/* Owner-only grading layers ("Buildable at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
+                  setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
+                  paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
+              {grOn && grModel && (grModel.buildable || grModel.cutfill) && (
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} /></Suspense>
+              )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;
                 const tl = f2p({ x: b.x, y: b.y });
@@ -25783,6 +25887,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        drainage context the Stormwater readout uses, so the panel and the
                        readout can never disagree about who governs drainage here. */
                     floodContext={drainCtxData}
+                    /* Owner-only (grading layer): the two extra Topography rows. Undefined for every other account. */
+                    gradingRows={grOn && grModel ? { rows: grModel.layerRows, onToggle: grSetLayer } : undefined}
                     /* B1091(×2) — the county this SITE is in, distinct from the `county` prop
                        above (the parcel-lookup registry key, which defaults to Harris).
                        The flood group's district scoping reasons over the identify county
@@ -26727,6 +26833,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })}
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
+          {grOn && grInput && (
+            <Suspense fallback={null}><GradingController input={grInput} onModel={setGrModel} /></Suspense>
+          )}
           {(leftPanel || companionOpen) && (<>
           <div data-testid="left-menu-panel" ref={sheetRef}
             data-bottom-sheet={phoneSheetSolo ? "properties" : undefined}

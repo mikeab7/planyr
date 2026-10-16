@@ -98,6 +98,18 @@ function getWorker() {
 }
 if (import.meta.hot) import.meta.hot.dispose(() => { try { worker && worker.terminate(); } catch (_) {} worker = null; });
 
+/* NEW-1 (owner-only grading layer) — a buildable-ground job on the SAME singleton worker the contours
+ * use (buildableGround.js / buildableLattice.js run inside terrainWorker.js). Structured-clones the payload
+ * (the DEM grid stays in the site-grid cache here); resolves with the worker's reply, rejects LOUDLY. */
+export function runBuildableJob(payload) {
+  return new Promise((resolve, reject) => {
+    const id = ++seq;
+    pending.set(id, { resolve, reject });
+    try { getWorker().postMessage({ id, kind: "buildable", ...payload }); }
+    catch (e) { pending.delete(id); reject(e); }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Grid registry (B706): the last few decoded grids, newest last. Distinguishes
 // "no grid covers this point" (undefined → the readout may fall back to a network
