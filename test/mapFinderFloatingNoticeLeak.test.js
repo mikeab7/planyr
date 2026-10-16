@@ -28,9 +28,9 @@ describe("NEW-1 (B1462256): every MapFinder FloatingNotice is gated on `visible`
   // Matches the `{<condition> && (\n  <FloatingNotice` shape every call site in this file uses.
   const CALL_SITE_RE = /\{([^{}]*?)&&\s*\(\s*\n\s*<FloatingNotice/g;
 
-  it("finds all three known call sites (select-parcels tip, backup notice, cached notice)", () => {
+  it("finds all four known call sites (select-parcels tip, backup notice, cached notice, parcel-source notice)", () => {
     const matches = [...MF.matchAll(CALL_SITE_RE)];
-    expect(matches.length, "expected MapFinder to render exactly 3 FloatingNotice call sites").toBe(3);
+    expect(matches.length, "expected MapFinder to render exactly 4 FloatingNotice call sites (B2293536 added the parcel-source notice)").toBe(4);
   });
 
   it("every <FloatingNotice call site's guarding condition checks `visible` — a future notice added without it fails here", () => {
