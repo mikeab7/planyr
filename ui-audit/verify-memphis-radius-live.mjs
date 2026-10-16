@@ -25,15 +25,24 @@ const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : n
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const ONLY = flag("--only");
 const STATES = flag("--states") ? new Set(flag("--states").split(",")) : null;
-const OUT = flag("--out") || "memphis-radius-live.json";
+const OUT = flag("--out") || (args.includes("--al-all") ? "alabama-live.json" : "memphis-radius-live.json");
 const MS_ALL = args.includes("--ms-all"); // NEW-1 Mississippi: all 82 MS counties + 20 near-county-line points, + the Texas controls
+const AL_ALL = args.includes("--al-all"); // NEW-1 (B2302784) Alabama: all 67 AL counties (35 lots + 32 named gaps) + county-line / AL-MS state-line points, + the Texas controls
 
 const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
 // The honest gaps (no public source wired) — must SAY so; everything else must select a lot. Kept in step with test/memphisRadius.test.js.
 const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
 const MSFX = MS_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/mississippiCounties.json", import.meta.url), "utf8")) : null;
-const ARMS_ALL = MS_ALL ? [
+const ALFX = AL_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/alabamaCounties.json", import.meta.url), "utf8")) : null;
+const ARMS_ALL = AL_ALL ? [
+  { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
+  { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
+  { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
+  { name: "TX Waller (Brookshire)", state: "TX", lat: 29.786, lng: -95.951, expect: "lot", control: true },
+  ...ALFX.counties.map((c) => ({ name: `AL ${c.name}`, state: "AL", lat: c.lat, lng: c.lng, expect: ALFX.gaps.includes(c.name.replace(/ County$/, "")) ? "gap" : "lot", county: c.name })),
+  ...ALFX.lines.map((c) => ({ name: c.name, state: c.state || "AL", lat: c.lat, lng: c.lng, expect: c.state === "MS" || !ALFX.gaps.includes(c.county.replace(/ County$/, "")) ? "lot" : "gap", county: c.county })),
+] : MS_ALL ? [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
   { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
@@ -86,9 +95,9 @@ const bodyText = () => page.evaluate(() => document.body.innerText);
 const sleep = (ms) => page.waitForTimeout(ms);
 const waitFor = async (fn, ms = 10000) => { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await fn(); if (v) return v; await sleep(250); } return v; };
 
-const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name|gpdata__ow)$/i; // gpdata__ow = Chester TN (CaptureCAMA) owner
+const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name|gpdata__ow|owner_all|propertyowner|fullname|name1|name_1|pconame|pcloname)$/i; // AL (B2302784): OWNER_ALL (CARPDC), PropertyOwner (Madison), FULLNAME (Greene), Name1/NAME_1 (Mobile/Shelby/St. Clair), pcloNAME (Tuscaloosa) // gpdata__ow = Chester TN (CaptureCAMA) owner
 const ownerOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => OWNER_KEY.test(x) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
-const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id|l15parce_2)$/i; // l15parce_2 = Chester TN (CaptureCAMA) parcel id
+const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id|l15parce_2|apn_2017|parcelid_gislink|parcelnumber|parcel_number|pclnum|key_|parcelid_long)$/i; // + Alabama (B2302784) // l15parce_2 = Chester TN (CaptureCAMA) parcel id
 const idOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => ID_KEY.test(x.split(".").pop()) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
 // Geodesic-enough polygon area (spherical excess) of the returned rings, in acres — what the app received.
 function ringsAcres(g, sr) {

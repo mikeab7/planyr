@@ -12,7 +12,10 @@
  * promote it in `counties.js` AND replace its row here with a `verifiedOn` in the same commit — a
  * promoted endpoint has a date, not a provenance excuse.
  */
+import { ALABAMA_VERIFICATION } from "./alabamaProvenance.js"; // NEW-1 (B2302784)
+
 export const COUNTY_VERIFICATION = {
+  ...ALABAMA_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
@@ -1290,8 +1293,10 @@ export const COUNTY_VERIFICATION = {
   al_jefferson: {
     publisher: "own",
     publisherName: "Jefferson County Commission, AL",
-    verifiedNote: "jccgis.jccal.org is blocked by this build environment's egress policy. Endpoint, feature count (652ms/68 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
+    verifiedOn: "2026-10-16",
+    verifiedNote: "MEASURED through planyr.io/gis-proxy 2026-10-16 (B2302784; the sandbox cannot reach jccgis.jccal.org): the layer the county's own 'Parcel Look-up' web app queries; polygon, point queries at 5 spread points inside the county hit real parcels with PARCELID / ParcelNo, OWNERNAME, ADDR_PSPR and GIS_ACRES populated. Replaces the 2026-09-10 'unconfirmed' note.",
   },
+
   /* ═══ B1551617 — Tier 1 counties, all discovered + verified LIVE from this sandbox 2026-09-11 by
    * ui-audit/discover-county-parcels.mjs (routes 1/2 — hub.arcgis.com / www.arcgis.com, both
    * reachable here). Every one passed 3 geometry-verified spread points across the WHOLE county
