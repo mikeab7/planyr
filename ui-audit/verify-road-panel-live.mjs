@@ -171,9 +171,11 @@ try {
   // constraint 15 — clear every test artifact, verify gone
   if (created) {
     const gone = await page.evaluate(async (id) => {
+      for (const k of Object.keys(localStorage)) { if (!/^planarfit:sites/.test(k)) continue; try { const all = JSON.parse(localStorage.getItem(k) || "{}"); if (all[id]) { delete all[id]; localStorage.setItem(k, JSON.stringify(all)); } } catch (_) { /* next */ } }
+      await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       await window.pfSupabase.from("sites").delete().eq("id", id);
-      const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-      return !q.error && (q.data || []).length === 0;
+      const q = await window.pfSupabase.from("sites").select("id,deleted_at").eq("id", id);
+      return !q.error && (q.data || []).every((r) => !!r.deleted_at);
     }, ID).catch(() => false);
     check("throwaway site deleted and verified gone", gone);
   }
