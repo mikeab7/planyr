@@ -1644,3 +1644,13 @@ Two owner reports, one session: a OneNote table pasted into a box a third as wid
 - Guard: `ui-audit/verify-notes-box-width.mjs` (8 clipboard fixtures × 3 landings, start width on 5 page widths + zoom + right edge,
   click-out, hand-resize kept, legacy kept, typing-past-the-edge, undo, reload; two known-good arms that VOID the run) and
   `test/notesBoxSelfSizing.test.js` + `test/notesTablePaste.test.js`.
+
+## A tombstoned orphan body is a purge to finish, never a lost note (B2297936 / NEW-1, 2026-10-16)
+
+**The family:** a bar that asserts an outcome it never observed. The amber "N notes are filed nowhere and could NOT be put back — this browser refused the write" bar appeared on the owner's Grand Port for two notes that were deliberately PURGED (ids in `tree.tombs`; only their body bytes lingered on the device). No write had been attempted. Three holes combined: `unreachableNotes` treated tombstoned ids as unreachable; the auto-adoption effect returned early when it had nothing to change (`nextTree === base`) and so never cleared the finding; and `IntegrityBanner` rendered the refused-write sentence off `unreachable.length`.
+
+**Rules that came out of it:**
+1. A tombstoned id is never "lost" — it is a purge to finish, silently (`scanOrphanBodies().purgedLeftovers` → `purgePages`, then re-read `listStoredPageIds`). Only a body still present afterwards may reach the bar, and it says what failed.
+2. Every orphan ends in exactly one outcome — adopted / binned / purged / settled — decided by the pure `planOrphanResolution`; a finding is cleared for all of them. The only fifth state, write-refused, is decided by `persistTree`'s returned `writeTree` boolean. **The bar renders a write outcome only off that explicit signal, never off a count of things found.**
+3. The leak's source: the cloud seed (`planPageSeed`) must never adopt a row the local tree has tombstoned, nor upload a tombstoned local-only body; it reports `repurge` instead, and a failed cloud purge leaves the row un-purged so the id stays eligible on the next seed.
+4. **Instrument trap:** `ui-audit/verify-notes-project-integrity.mjs` has stale steps on main (§3 row click, §8 mutation arm, the project-switcher rows) — a failing row there is NOT evidence about your change; diff failure identities against a clean-main build (use `git worktree`, not `pkill -f`, which kills your own shell). Its §9 is the tombstoned-leftover guard, with a known-good arm.

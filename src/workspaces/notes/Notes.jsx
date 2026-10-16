@@ -26,9 +26,10 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import PriorityToolbar from "../../shared/ui/PriorityToolbar.jsx";
 import { notesSaveState } from "./lib/notesSaveState.js";
+import { planOrphanResolution } from "./lib/notesOrphanPlan.js";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  adoptDeletedOrphans, adoptUnreachable, allPageIds, ancestorIds, commitTitle, copyPageWithin, deleteNode, displayTitle, emptyTree, expiredTrashIds, findPage,
+  allPageIds, ancestorIds, commitTitle, copyPageWithin, deleteNode, displayTitle, emptyTree, expiredTrashIds, findPage,
   firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
   setPageProject, setPageOrgScope, subpagesPhrase, subtreePageIds, touchPage, trashEntries, trashPageIds,
   NO_PROJECT_LABEL, ORG_GROUP_LABEL, SCOPE_ALL, SCOPE_ORG, SCOPE_PROJECT,
@@ -44,7 +45,7 @@ import { listProjects, warmProjects, onProjectsChanged, ensureProjectExists } fr
 import {
   clearNotesStorageError, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
+  collectBinFacts, ignoreDuplicate, listStoredPageIds, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readNoteTemplates, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
   sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, writeActivePageId, writeNoteTemplates, writePage, writeTree,
@@ -474,7 +475,7 @@ export default function Notes({
   const [conflictIds, setConflictIds] = useState([]);
   /* What the integrity scan found, and whether it has been waved away for this visit
      (NEW-4). `null` means "not scanned yet", which is not the same as "nothing found". */
-  const [integrity, setIntegrity] = useState({ duplicates: [], unreachable: [] });
+  const [integrity, setIntegrity] = useState({ duplicates: [], unreachable: [], purgedLeftovers: [], writeRefused: 0, purgeFailed: 0 });
   const [integrityHidden, setIntegrityHidden] = useState(false);
   /* What auto-adoption actually rescued this visit — reported, never healed in a silence
      indistinguishable from the failure itself. */
@@ -710,7 +711,8 @@ export default function Notes({
   const persistTree = useCallback((next) => {
     treeRef.current = next;      // the LIVE tree: every mutator reads this, never a render's copy
     setTree(next);
-    if (!writeTree(next)) setStatus("error");
+    if (!writeTree(next)) setStatus("error"); else return true;
+    return false;                // the OBSERVED outcome — a caller may only claim a refusal off this
   }, []);
 
   /** ⛔ THE LIVE TREE, AND EVERY MUTATOR BELOW MUST READ IT RATHER THAN THE RENDER'S `tree`.
@@ -904,15 +906,18 @@ export default function Notes({
          * tombstone", while a failed one says nothing at all — and letting the second wear the
          * first's clothes would silently suppress a real finding, which is the one answer this
          * scan must never invent. */
-        setIntegrity({
+        const orphans = scan.scanOrphanBodies(tree, { binned: knownBinnedPages() });
+        setIntegrity((st) => ({
+          ...st,
+          purgedLeftovers: orphans.purgedLeftovers,
+          unreachable: orphans.unreachable,
           duplicates: scan.scanNoteDuplicates(tree, {
             liveProjectIds: projectList.state === "ready" ? projects.map((p) => p.id) : null,
             ignored: readIgnoredDuplicates(),
           }),
           // `binned` lets the scan tell a genuinely lost page from one whose bin entry went
           // missing after it was deliberately deleted — see unreachableNotes's own header.
-          unreachable: scan.unreachableNotes(tree, { binned: knownBinnedPages() }),
-        });
+        }));
       } catch (_) {
         // A scanner that could not load leaves the last finding on screen rather than
         // replacing it with a silent all-clear — the one answer it must never invent.
@@ -1461,36 +1466,34 @@ export default function Notes({
    * completing the purge that was interrupted if it has. Neither path shows a banner; both are
    * finishing something the user already decided, not reporting something new. */
   useEffect(() => {
-    if (!integrity.unreachable.length) return;
+    if (!integrity.unreachable.length && !integrity.purgedLeftovers.length) return;
     const base = treeRef.current || tree;
-    const live = integrity.unreachable.filter((o) => !Number.isFinite(o.deletedAt));
-    const deleted = integrity.unreachable.filter((o) => Number.isFinite(o.deletedAt));
-
-    let nextTree = base;
-    let adopted = [];
-    if (live.length) {
-      const r = adoptUnreachable(nextTree, live);
-      nextTree = r.tree;
-      adopted = r.adopted;
+    const plan = planOrphanResolution(base, integrity.unreachable, integrity.purgedLeftovers);
+    /* ⛔ EXHAUSTIVE (NEW-1, 2026-10-16): every orphan ends in adopted / binned / purged /
+     * settled, or — only when writeTree OBSERVABLY returned false — write-refused. The finding
+     * is cleared for all of them but that last one, and the bar claims a refused write off the
+     * `writeRefused` count alone, never off `unreachable.length`. */
+    let writeRefused = 0;
+    if (plan.changed) {
+      if (!persistTree(plan.tree)) writeRefused = plan.adopted.length + plan.binned.length;
     }
-    let purgeIds = [];
-    if (deleted.length) {
-      const r2 = adoptDeletedOrphans(nextTree, deleted);
-      nextTree = r2.tree;
-      purgeIds = r2.purge;
-    }
-    if (nextTree === base) return;
-    persistTree(nextTree);
-    if (adopted.length) {
-      const byId = new Map(live.map((o) => [o.pageId, o]));
+    if (!writeRefused && plan.adopted.length) {
+      const byId = new Map(integrity.unreachable.map((o) => [o.pageId, o]));
       setRecovered((prev) => [
         ...prev,
-        ...adopted.map((a) => ({ ...a, ...(byId.get(a.pageId) || {}) })),
+        ...plan.adopted.map((a) => ({ ...a, ...(byId.get(a.pageId) || {}) })),
       ]);
     }
-    if (purgeIds.length) purgePages(purgeIds).catch(() => {});
-    setIntegrity((st) => ({ ...st, unreachable: [] }));
-  }, [integrity.unreachable, tree, persistTree]);
+    setIntegrity((st) => ({ ...st, unreachable: [], purgedLeftovers: [], writeRefused }));
+    if (plan.purge.length) {
+      // Finish the purge SILENTLY (same body+assets+versions+merge-base+cloud path as a normal
+      // purge), then re-read storage: only a body that is still there reaches the bar.
+      purgePages(plan.purge).catch(() => {}).then(() => {
+        const left = plan.purge.filter((id) => listStoredPageIds().includes(id));
+        if (left.length) setIntegrity((st) => ({ ...st, purgeFailed: left.length }));
+      });
+    }
+  }, [integrity.unreachable, integrity.purgedLeftovers, tree, persistTree]);
 
   /** ⛔ THE THREE HONEST ANSWERS TO A DUPLICATE, IN THE BAR ITSELF (NEW-4). The previous
    *  version offered "Show me" and "Dismiss" — a finding with no resolution, which is how a
@@ -1695,7 +1698,8 @@ export default function Notes({
         <Suspense fallback={null}>
         <IntegrityBanner
           duplicates={integrity.duplicates}
-          unreachable={integrity.unreachable}
+          writeRefused={integrity.writeRefused}
+          purgeFailed={integrity.purgeFailed}
           recovered={recovered}
           projects={projects}
           projectNames={projectNames}

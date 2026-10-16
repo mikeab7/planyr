@@ -13,7 +13,7 @@
  */
 import { docToText } from "./notesMarkdown.js";
 import { findCrossProjectDuplicates } from "./notesDuplicates.js";
-import { trashEntries, walkPages } from "./notesModel.js";
+import { tombstoneIds, trashEntries, walkPages } from "./notesModel.js";
 import { listStoredPageIds, readPage } from "./notesStore.js";
 
 /**
@@ -82,7 +82,20 @@ export function duplicateKey(group) {
  *  way out, and the caller (`Notes.jsx`) routes it back into the BIN instead of onto the live
  *  page list — see `adoptDeletedOrphans` in `notesModel.js`. Nothing here decides that; this
  *  function only reports what it can see. */
-export function unreachableNotes(tree, { binned } = {}) {
+export function unreachableNotes(tree, opts = {}) {
+  return scanOrphanBodies(tree, opts).unreachable;
+}
+
+/** The same scan, reporting BOTH kinds of node-less body separately (NEW-1, 2026-10-16):
+ *  • `unreachable` — a body nobody deleted that lost its node: a real finding.
+ *  • `purgedLeftovers` — ids the tree's tombstone ledger says were deliberately PURGED, whose
+ *    body bytes were left behind on this device (an interrupted purge, or a body re-seeded
+ *    from a cloud row whose purge never completed). These are NOT lost notes: they are a purge
+ *    to finish, silently. Reported whatever their text, because "purged" outranks "has words".
+ *  ⛔ A tombstoned id never appears in `unreachable` — the bar must not call a decision "lost". */
+export function scanOrphanBodies(tree, { binned } = {}) {
+  const dead = tombstoneIds(tree);
+  const purgedLeftovers = [];
   const known = new Set();
   walkPages(tree, (pg) => { known.add(pg.id); });
   for (const e of trashEntries(tree)) for (const id of e.pageIds || []) known.add(id);
@@ -90,6 +103,7 @@ export function unreachableNotes(tree, { binned } = {}) {
   const out = [];
   for (const id of listStoredPageIds()) {
     if (known.has(id)) continue;
+    if (dead.has(id)) { purgedLeftovers.push(id); continue; }
     const text = docToText(readPage(id)).replace(/\s+/g, " ").trim();
     if (!text) continue;                              // an empty stray is not a lost note
     /* ⛔ EVERYTHING A PERSON NEEDS TO RECOGNISE IT, BECAUSE ITS NAME IS GONE. The TITLE lived
@@ -109,7 +123,7 @@ export function unreachableNotes(tree, { binned } = {}) {
       ...(Number.isFinite(deletedAt) ? { deletedAt } : {}),
     });
   }
-  return out;
+  return { unreachable: out, purgedLeftovers };
 }
 
 /** A page id is `pg_` + `Date.now().toString(36)` + a counter + noise, so the moment the page

@@ -430,10 +430,11 @@ const earlierOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? Math.min
  *  (harmless: the sweep is idempotent and will run again next load against the freshly
  *  adopted row). A genuinely dirty (non-`auto`) page keeps raising a real conflict — this
  *  narrows WHO gets asked, it does not touch what a real edit is owed. */
-export function planPageSeed({ index = [], state = emptySyncState(), localIds = [] } = {}) {
+export function planPageSeed({ index = [], state = emptySyncState(), localIds = [], tombstoned = [] } = {}) {
   const have = new Set(localIds);
+  const dead = new Set(tombstoned);
   const seen = new Set();
-  const adopt = [], conflicts = [], upload = [], purged = [];
+  const adopt = [], conflicts = [], upload = [], purged = [], repurge = [];
 
   for (const row of index) {
     const id = row?.id;
@@ -445,6 +446,14 @@ export function planPageSeed({ index = [], state = emptySyncState(), localIds = 
       if (have.has(id) || !st?.purged) purged.push(id);
       continue;
     }
+
+    /* ⛔ A ROW THIS DEVICE'S TREE HAS TOMBSTONED IS NEVER ADOPTED (a purge is a fact — see
+     * mergeTrees rule 0). The server row is simply a purge whose cloud half never completed
+     * (`purgePages`'s cloud call can fail or be interrupted). Adopting it re-seeds a body with
+     * no node: the "filed nowhere" leftover. Instead it is reported in `repurge` so the caller
+     * finishes the cloud purge; a failed attempt leaves the row un-purged, so the NEXT seed
+     * lists it again — the id is never forgotten. */
+    if (dead.has(id)) { repurge.push(id); continue; }
 
     const base = st && Number.isFinite(st.rev) ? st.rev : null;
     if (st?.dirty) {
@@ -460,10 +469,11 @@ export function planPageSeed({ index = [], state = emptySyncState(), localIds = 
   for (const id of localIds) {
     if (seen.has(id)) continue;
     if (state.pages[id]?.purged) continue;   // purged for real — never resurrect it
+    if (dead.has(id)) continue;               // tombstoned in the tree — a leftover body, never re-upload
     upload.push({ id, base: null });          // never seen by the server → local wins
   }
 
-  return { adopt, conflicts, upload, purged };
+  return { adopt, conflicts, upload, purged, repurge };
 }
 
 /* ---- pure: is a refused push actually a CONFLICT? (B1391) ----------------------------
