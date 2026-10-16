@@ -37,6 +37,9 @@ const ARMS = [
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
   { name: "TX Waller (Brookshire)", state: "TX", lat: 29.786, lng: -95.951, expect: "lot", control: true },
   { name: "TN Shelby — owner's spot (airport east)", state: "TN", lat: 35.03, lng: -89.95, expect: NO_SOURCE.has("TN:Shelby County") ? "gap" : "lot", county: "Shelby County" },
+  /* B2289169 ×3 — Chester TN, the two spots the owner's brief names: the town (Henderson) and a rural parcel (Silerton Rd, 36 ac). */
+  { name: "TN Chester — Henderson (town)", state: "TN", lat: 35.4398, lng: -88.6414, expect: NO_SOURCE.has("TN:Chester County") ? "gap" : "lot", county: "Chester County" },
+  { name: "TN Chester — rural (Silerton Rd)", state: "TN", lat: 35.3640, lng: -88.7190, expect: NO_SOURCE.has("TN:Chester County") ? "gap" : "lot", county: "Chester County" },
   ...FX.counties.map((c) => {
     const k = `${c.state}:${c.name}`; const [lat, lng] = NUDGE[k] || [c.lat, c.lng];
     return { name: `${c.state} ${c.name}`, state: c.state, lat, lng, expect: NO_SOURCE.has(k) ? "gap" : "lot", county: c.name };
