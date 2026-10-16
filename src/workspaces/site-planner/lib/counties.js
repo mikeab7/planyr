@@ -33,7 +33,7 @@ import { situsKey } from "./appraisal.js";
  * every query before that returns a `pending` verdict, so nothing here ever trades a rectangle's
  * guess for a real answer. See countyPolygons.js for why the geometry is bundled rather than
  * fetched on demand. */
-import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster } from "./countyPolygons.js";
+import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster, countiesNearPoint } from "./countyPolygons.js";
 /* NEW-4 — county ROUTING KEYS are normalised at the map itself, not at each call site.
  * See shared/gis/countyKeys.js for why (a raw `MAP[county]` missed the two production rows
  * spelled "Harris", silently). */
@@ -3807,6 +3807,47 @@ export function countyIdentity(lat, lng) {
 export async function ensureCountyGeometryAt(lat, lng) {
   if (countyIdentity(lat, lng).status !== "pending") return;
   try { await loadCountyPolygons(); } catch (_e) { /* reported by loadCountyPolygons */ }
+}
+
+/* ⛔ NEW-1 (Memphis line band, B2289168 ×3) — THE COUNTY ACROSS THE LINE, asked when a lot click comes back empty.
+ *
+ * Owner report 2026-10-16: "its still saying no lot here in memphis" — lots on the north side of Stateline Rd (Shelby County)
+ * between Swinnea and Tchulahoma. MEASURED: the bundled county polygons draw the Tennessee–Mississippi line ≈550 m north of the
+ * surveyed line along its whole length (DeSoto's northernmost parcel vertex and Shelby's southernmost meet at ≈34.995°N at
+ * -89.98, -89.82 and -89.74; the asset's line is at ≈35.000°N). A point in that strip resolved CONFIDENTLY to DeSoto
+ * (`nearEdge` false — that band is ~150 m), so `candidateCountiesForPoint` asked DeSoto ALONE, DeSoto truthfully had no lot,
+ * and the app said "No lot here" over a Shelby lot it had just drawn in purple. ×2's harness clicked interior points only.
+ *
+ * The geometry may decide which county is asked FIRST; it may never be the reason a real lot is refused. So after an empty
+ * answer every county whose line passes within `LINE_NEIGHBOUR_DEG` is asked too — through its own source (or its state's
+ * statewide layer, unless that layer declares the county excluded). A county's server only holds its own parcels, so a lot
+ * it returns at the point IS the lot there: this cannot hand back a wrong-county lot, which is why it is a SECOND pass and not
+ * a widened first one (NEW-6's race is not reopened). Pure; returns source keys, nearest county first. */
+export const LINE_NEIGHBOUR_DEG = 0.012; // ≈1.3 km — about twice the worst measured offset of the asset's line
+export function lineNeighbourKeysForPoint(lat, lng) {
+  const out = [];
+  const push = (k) => { if (k && COUNTIES_MAP[k] && !out.includes(k)) out.push(k); };
+  for (const c of countiesNearPoint(lat, lng, LINE_NEIGHBOUR_DEG)) {
+    const key = countyKeyForName(c.name, c.state);
+    if (key && COUNTIES_MAP[key] && !COUNTIES_MAP[key].cityScoped) {
+      if (!COUNTIES_MAP[key].statewide) { push(key); continue; }
+    }
+    statewideKeysForState(c.state).filter((k) => !statewideExcludesCounty(k, c.name)).forEach(push);
+  }
+  return out;
+}
+
+/* NEW-1 (Memphis line band) — a parcel SOURCE named for an owner-facing sentence ("Shelby County", "DeSoto County"), so an
+ * outage or slow-server message says WHICH server rather than "that county's". A statewide layer has no county name. Pure. */
+export function sourceDisplayName(key) {
+  const c = COUNTIES[key];
+  if (!c || (COUNTIES_MAP[key] && COUNTIES_MAP[key].statewide) || !c.label) return null;
+  return String(c.label).split(" · ")[0].replace(/,\s*[A-Z]{2}$/, "").trim() || null;
+}
+/* The silent sources of a failed click → one sentence subject: "Shelby County's parcel server" / "The county parcel server". */
+export function silentServerPhrase(keys) {
+  const names = [...new Set((keys || []).map(sourceDisplayName).filter(Boolean))];
+  return names.length === 1 ? `${names[0]}'s parcel server` : "The county parcel server";
 }
 
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is

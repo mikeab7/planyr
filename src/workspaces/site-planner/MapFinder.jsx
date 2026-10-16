@@ -4,7 +4,7 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
@@ -84,7 +84,6 @@ import { CompIcon, SitePlanIcon, NoteIcon } from "./components/icons.jsx";
 import DealDatesForm from "./components/DealDatesForm.jsx";
 import {
   resolveLayerUrl,
-  identifyParcelEager,
   outerRingsLngLat,
   geoJsonToEsriFeature,
   lngLatRingToFeet,
@@ -105,7 +104,8 @@ import { idAttrFor } from "./lib/parcelQuery.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
-import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js"; // NEW-1 — one rule for "may a parcel banner be raised right now"
+import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js";
+import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line // NEW-1 — one rule for "may a parcel banner be raised right now"
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { skipWhileHidden } from "./lib/hiddenRenderGate.js";
@@ -3042,7 +3042,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // county in view; never let it clobber that message with the generic one (the same
       // ordering problem the statewide handler above guards against).
       if (CLIENT_SNAPSHOT_COUNTIES.some((c) => downDisplaysRef.current.has(c) && getSnapshot(c))) return;
-      setSourceNotice({ county: key }, countyOutageMessage(statewideKeysForState(COUNTIES_MAP[key] && COUNTIES_MAP[key].state).length > 0));
+      setSourceNotice({ county: key }, countyOutageMessage(statewideKeysForState(COUNTIES_MAP[key] && COUNTIES_MAP[key].state).length > 0, sourceDisplayName(key)));
     };
     // Arm the hang-timer only once a request to the host is actually in flight, so we
     // never false-flag a county just because we're zoomed out below the outline zoom
@@ -3377,6 +3377,16 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
     return { candidates, realPrimaries };
   };
+  /* NEW-1 (Memphis line band, B2289168 ×3) — the sources of every county whose line passes near this point (and, when the
+     outline under the cursor came from a county's live display, that county too — what is DRAWN there is evidence of who owns
+     it). Asked only after the routed county found no lot; see lib/identifyWithFallback.js. */
+  const neighbourCandidates = (latlng, extraKeys = []) => {
+    const keys = [...extraKeys.filter(Boolean), ...lineNeighbourKeysForPoint(latlng.lat, latlng.lng)];
+    const list = [...new Set(keys)]
+      .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
+      .filter((c) => c.url);
+    return filterHealthyCandidates(list, STATEWIDE_KEYS);
+  };
   // A statewide-backup answer reports the parcel's true county in its `county` attr
   // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
   const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -3404,6 +3414,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // the first hit. Candidates with an unresolved URL (service still loading or
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
+    const nearSources = neighbourCandidates(latlng); // NEW-1 (Memphis line band) — a county across a nearby line may own it
     /* ⛔ B1597232 — "STILL LOADING" IS ONE OF *TWO* REASONS THERE IS NOTHING TO QUERY, AND SAYING IT
      * FOR THE OTHER ONE IS A LIE THAT NEVER RESOLVES. Since the Wayne→Oakland fix,
      * `candidateCountiesForPoint` returns an EMPTY list for a point whose county is confidently
@@ -3412,7 +3423,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * `countyIdentity` already knows the difference and already supplies the sentence; the outage
      * and pending cases keep their existing wording untouched. Same shape as the no-hits branch
      * below, which has named the county since B209502. */
-    if (!candidates.length) {
+    if (!candidates.length && !nearSources.length) {
       const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
       setErr(gap
         ? `${gap} You can still trace the lot from the Aerial underlay.`
@@ -3452,7 +3463,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // statewide layer) instead of stalling on a hung county server's full 8s timeout.
       // The breaker is fed for EVERY source via onSettled once they all finish — even
       // the slow ones we didn't wait for — so the next click skips a dead host (B244).
-      const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+      const res = await identifyWithLineFallback({
+        primary: candidates, lng: latlng.lng, lat: latlng.lat,
+        neighbours: () => neighbourCandidates(latlng, [opt && opt.county]),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
       if (!res.hits.length) {
@@ -3499,8 +3512,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * real answer about this point, and a county with no wired source (`gap`) is a coverage fact
          * — neither is a reason to offer "start the plan here anyway", which exists for the case
          * where the service that WOULD have answered is down. */
-        ack?.empty(res.responded === 0 ? "Couldn't reach the county server" : "No lot here");
-        if (res.responded === 0) failUnavailable("The county parcel server isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.", latlng);
+        // NEW-1 (Memphis line band) — when the county itself has no source, only a NEIGHBOUR was asked: its silence is not
+        // this county's outage, so the county's own gap sentence stands.
+        const outage = res.responded === 0 && !(gap && !candidates.length);
+        ack?.empty(outage ? "Couldn't reach the county server" : "No lot here");
+        if (outage) failUnavailable(`${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.`, latlng);
         else setErr(gap
           ? `${gap} You can still trace the lot from the Aerial underlay.`
           : "No parcel right there — zoom in and click directly on a lot.");
@@ -3517,7 +3533,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // healthy CAD was queried but statewide merely won the parallel race (B630). And
       // with B643's eager preference, a healthy CAD normally WINS the race, so hit.county
       // is the CAD itself here and this is false.
-      const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
+      const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: res.queried, statewideKeys: STATEWIDE_KEYS });
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
@@ -3549,6 +3565,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const live = () => tok == null || tok === addrTokRef.current;
     await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2)
     const { candidates, realPrimaries } = resolveCandidates(latlng);
+    const nearSources = neighbourCandidates(latlng); // NEW-1 (Memphis line band)
     /* ⛔ B1597232 — A COVERAGE GAP IS NOT AN OUTAGE, AND THIS IS THE SURFACE THE WAYNE COUNTY REPORT
      * CAME IN THROUGH ("search the address, let the automatic lot lookup run"). With no candidates
      * this card used to read `unavailable` — "the county parcel service couldn't be reached for
@@ -3559,14 +3576,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * `unavailable`, and only they keep the "start the plan here anyway" way out — per the NEW-4
      * rule the click path already follows: an OUTAGE carries the fallback, a coverage fact does not
      * (the aerial trace, offered in the copy, is the way forward for this one). */
-    if (!candidates.length) {
+    if (!candidates.length && !nearSources.length) {
       const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
       if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label });
       return;
     }
     let res;
     try {
-      res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+      res = await identifyWithLineFallback({
+        primary: candidates, lng: latlng.lng, lat: latlng.lat, neighbours: () => nearSources,
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })), // feed the circuit breaker
       });
     } catch (_) {
@@ -3591,12 +3609,17 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       }
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
+      if (!candidates.length) {
+        // NEW-1 — only a neighbour was asked (the routed county has no source) and it had nothing: the county's own gap stands.
+        const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
+        if (gap) { setParcelInfo({ status: "no-source", label, note: gap }); return; }
+      }
       setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
     }
     const hit = res.hits[0];
     // See handleClick (B630): a statewide answer flags a "backup" only when the real CAD
     // was actually unavailable, not when it lost the parallel race to a faster TxGIO.
-    const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
+    const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: res.queried, statewideKeys: STATEWIDE_KEYS });
     const added = addParcelHit(hit, latlng);
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
