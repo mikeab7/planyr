@@ -14,6 +14,7 @@ export const AL_ROWS = [
   ["cherokee","Cherokee","/gis-proxy/web3.kcsgis.com/kcsgis/rest/services/Cherokee/Public/MapServer/116","ParcelID_GISlink",null,null,1,34.176,-85.6,[33.909,-85.873,34.553,-85.366]],
   ["cleburne","Cleburne","/gis-proxy/maps.capturecama.com/arcgis/rest/services/Cleburne/CleburneParcels_06122024/MapServer/401","PARCEL_NUM",null,null,0,33.676,-85.519,[33.441,-85.919,33.99,-85.275]],
   ["coosa","Coosa","/gis-proxy/maps.capturecama.com/arcgis/rest/services/Coosa/Coosa11282023/MapServer/169","PARCELID",null,null,0,32.941,-86.247,[32.724,-86.557,33.141,-85.973]],
+  ["colbert","Colbert","/gis-proxy/al20portal.kcsgis.com/al20server/rest/services/Internal/Colbert_Public_ISV/MapServer/43","ParcelID_GISlink","SitusAddName",null,1,34.7016,-87.8034,[34.568,-88.136,34.908,-87.417]],
   ["dallas","Dallas","/gis-proxy/maps.capturecama.com/arcgis/rest/services/Dallas/Dallas_05272026/MapServer/163","PARCEL_ID","SITUS_ADDR",null,1,32.331,-87.104,[32.023,-87.498,32.734,-86.779]],
   ["elmore","Elmore","/gis-proxy/gis.capturecama.com/arcgis/rest/services/ElmoreAL/ElmoreCapture/MapServer/0","ParcelNo","PropertyAddr1",null,1,32.6,-86.15,[32.381,-86.446,32.804,-85.836]],
   ["etowah","Etowah","/gis-proxy/web3.kcsgis.com/kcsgis/rest/services/Etowah/Etowah_Revenue_Viewer_new/MapServer/64","ParcelID_GISlink",null,null,1,34.048,-86.037,[33.823,-86.401,34.237,-85.705]],

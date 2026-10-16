@@ -110,7 +110,7 @@ describe("a county name outside the configured states resolves to nothing, never
   it.each([
     ["Montgomery County", "PA"],
     ["Liberty County", "FL"],
-    ["Colbert County", "AL"], // B2302785 — Chambers AL is wired now (Flagship MapGuide); Colbert is the one Alabama county still a named gap
+    ["Colbert County", "TN"], // B2312352 — every Alabama county is wired now, so the same-named-key trap is asserted with the WRONG state instead
     ["Harris County", "GA"],
   ])("%s, %s → null", (name, state) => {
     expect(countyKeyForName(name, state)).toBeNull();
