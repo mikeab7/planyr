@@ -105,7 +105,13 @@ const screenOf = ([la, ln]) => page.evaluate(([a, b]) => { const m = window.__ma
  * once every point query it caused has settled (none in flight for 2 s). */
 let inflight = 0, lastNet = Date.now(), seenQueries = 0;
 const isPointQuery = (r) => { const u = r.url(); return /\/query(\?|$)/.test(u) && /esriGeometryPoint/.test(decodeURIComponent(u)); };
-page.on("request", (r) => { if (isPointQuery(r)) { inflight++; seenQueries++; lastNet = Date.now(); } });
+let lastQueryPt = null; // the point the APP actually asked about (a click lands on a whole screen pixel, not the exact coordinate)
+page.on("request", (r) => {
+  if (!isPointQuery(r)) return;
+  inflight++; seenQueries++; lastNet = Date.now();
+  const m = decodeURIComponent(r.url()).match(/"x":\s*(-?[\d.]+),\s*"y":\s*(-?[\d.]+)/);
+  if (m) lastQueryPt = { lng: +m[1], lat: +m[2] };
+});
 const netDone = (r) => { if (isPointQuery(r)) { inflight = Math.max(0, inflight - 1); lastNet = Date.now(); } };
 page.on("requestfinished", netDone); page.on("requestfailed", netDone);
 async function settle(maxMs = 45000) {
@@ -139,6 +145,7 @@ async function flowA(pt) {
   await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click();
   await sleep(1500);
   const c = await screenOf([p.lat, p.lng]);
+  lastQueryPt = null;
   await page.mouse.click(c.x, c.y);
   const settled = await settle();
   await sleep(500);
@@ -151,7 +158,11 @@ async function flowA(pt) {
   })();
   const build = await stamp();
   const gotId = got && got.kind === "lot" ? got.id : null;
-  const v = judge(t, gotId);
+  let v = judge(t, gotId);
+  /* A click lands on a whole screen pixel (≈1 m at z17), so beside a lot boundary the app can rightly ask about the lot next
+   * door. On a mismatch, re-ask the truth AT THE POINT THE APP QUERIED and judge against that (recorded in the row). */
+  let tq = null;
+  if (!v.pass && !v.void && gotId && lastQueryPt) { tq = await truthAt({ ...pt, lat: lastQueryPt.lat, lng: lastQueryPt.lng }); const v2 = judge(tq, gotId); if (v2.pass) v = { ...v2, atAppPoint: lastQueryPt }; }
   if (pt.control && !t.ids.length) v.pass = false; // a control with no lot to find proves nothing
   record({ flow: "map (no project)", name: pt.name, point: [p.lat, p.lng], truth: t.ids.map((x) => `${x.key}=${x.id}`).join(",") || `none (${t.raw})`, outcome: gotId ? "lot selected" : got ? "message" : "nothing happened", got: gotId, message: got && got.msg, build, ...v, control: !!pt.control });
 }
@@ -173,18 +184,25 @@ async function openPlan() {
   });
   await sleep(2000);
 }
-async function flowB(pt) {
-  const { p, t } = await resolvePoint(pt);
+async function addAt(p) {
   geoTarget = { lat: p.lat, lng: p.lng };
   await page.locator('[data-testid="land-add-btn"]').first().click();
   const input = page.locator('input[placeholder="123 Main St, Katy TX"]').first();
   await input.waitFor({ timeout: 8000 });
   await input.fill(`${p.lat}, ${p.lng}`);
   await input.press("Enter");
-  const txt = await waitFor(async () => page.evaluate(() => {
+  await sleep(400);
+  return (await waitFor(async () => page.evaluate(() => {
     const el = document.querySelector('[data-testid="identify-result"]'); if (!el) return null;
     const x = el.innerText.trim(); if (/Finding address|Querying county GIS/.test(x)) return null; return x;
-  }), 25000) || "";
+  }), 25000)) || "";
+}
+async function flowB(pt) {
+  const { p, t } = await resolvePoint(pt);
+  let txt = await addAt(p);
+  // Consecutive points can sit on the SAME lot: the second add toggles the first off (by design — "click it again to re-add").
+  // That proves the app identified the same lot; add it once more so the row reads the identified record itself.
+  if (/^Removed /.test(txt)) txt = await addAt(p);
   const build = await stamp();
   let gotId = null;
   if (/Added|already in this plan/.test(txt)) {
