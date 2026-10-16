@@ -875,139 +875,139 @@
  ],
  "lines": [
   {
-   "name": "Jefferson/Shelby line — Jefferson side",
+   "name": "Jefferson/Shelby line \u2014 Jefferson side",
    "county": "Jefferson County",
    "lat": 33.42603,
    "lng": -86.72385
   },
   {
-   "name": "Jefferson/Shelby line — Shelby side",
+   "name": "Jefferson/Shelby line \u2014 Shelby side",
    "county": "Shelby County",
    "lat": 33.42372,
    "lng": -86.72194
   },
   {
-   "name": "Madison/Limestone line — Madison side",
+   "name": "Madison/Limestone line \u2014 Madison side",
    "county": "Madison County",
    "lat": 34.55951,
    "lng": -86.78676
   },
   {
-   "name": "Madison/Limestone line — Limestone side",
+   "name": "Madison/Limestone line \u2014 Limestone side",
    "county": "Limestone County",
    "lat": 34.55987,
    "lng": -86.78974
   },
   {
-   "name": "Mobile/Baldwin line — Mobile side",
+   "name": "Mobile/Baldwin line \u2014 Mobile side",
    "county": "Mobile County",
    "lat": 31.04422,
    "lng": -87.9603
   },
   {
-   "name": "Mobile/Baldwin line — Baldwin side",
+   "name": "Mobile/Baldwin line \u2014 Baldwin side",
    "county": "Baldwin County",
    "lat": 31.04387,
    "lng": -87.95732
   },
   {
-   "name": "Montgomery/Autauga line — Montgomery side",
+   "name": "Montgomery/Autauga line \u2014 Montgomery side",
    "county": "Montgomery County",
    "lat": 32.40478,
    "lng": -86.42476
   },
   {
-   "name": "Montgomery/Autauga line — Autauga side",
+   "name": "Montgomery/Autauga line \u2014 Autauga side",
    "county": "Autauga County",
    "lat": 32.40653,
    "lng": -86.4272
   },
   {
-   "name": "Lee/Russell line — Lee side",
+   "name": "Lee/Russell line \u2014 Lee side",
    "county": "Lee County",
    "lat": 32.4834,
    "lng": -85.0608
   },
   {
-   "name": "Lee/Russell line — Russell side",
+   "name": "Lee/Russell line \u2014 Russell side",
    "county": "Russell County",
    "lat": 32.48078,
    "lng": -85.05933
   },
   {
-   "name": "Morgan/Lawrence line — Lawrence side",
+   "name": "Morgan/Lawrence line \u2014 Lawrence side",
    "county": "Lawrence County",
    "lat": 34.68574,
    "lng": -87.09956
   },
   {
-   "name": "Tuscaloosa/Jefferson line — Tuscaloosa side",
+   "name": "Tuscaloosa/Jefferson line \u2014 Tuscaloosa side",
    "county": "Tuscaloosa County",
    "lat": 33.39983,
    "lng": -87.22563
   },
   {
-   "name": "Tuscaloosa/Jefferson line — Jefferson side",
+   "name": "Tuscaloosa/Jefferson line \u2014 Jefferson side",
    "county": "Jefferson County",
    "lat": 33.40099,
    "lng": -87.22286
   },
   {
-   "name": "Lauderdale/Limestone line — Lauderdale side",
+   "name": "Lauderdale/Limestone line \u2014 Lauderdale side",
    "county": "Lauderdale County",
    "lat": 34.79354,
    "lng": -87.24401
   },
   {
-   "name": "Lauderdale/Limestone line — Limestone side",
+   "name": "Lauderdale/Limestone line \u2014 Limestone side",
    "county": "Limestone County",
    "lat": 34.79314,
    "lng": -87.24104
   },
   {
-   "name": "AL/MS state line — Mobile AL side",
+   "name": "AL/MS state line \u2014 Mobile AL side",
    "county": "Mobile County",
    "lat": 31.0007,
    "lng": -88.4262
   },
   {
-   "name": "AL/MS state line — MS side opposite Mobile",
+   "name": "AL/MS state line \u2014 MS side opposite Mobile",
    "state": "MS",
    "lat": 31.0007,
    "lng": -88.4322
   },
   {
-   "name": "AL/MS state line — Sumter AL side",
+   "name": "AL/MS state line \u2014 Sumter AL side",
    "county": "Sumter County",
    "lat": 32.6,
    "lng": -88.38723
   },
   {
-   "name": "AL/MS state line — MS side opposite Sumter",
+   "name": "AL/MS state line \u2014 MS side opposite Sumter",
    "state": "MS",
    "lat": 32.6,
    "lng": -88.39523
   },
   {
-   "name": "AL/MS state line — Colbert AL side",
+   "name": "AL/MS state line \u2014 Colbert AL side",
    "county": "Colbert County",
    "lat": 34.85,
    "lng": -88.09312
   },
   {
-   "name": "AL/MS state line — MS side opposite Colbert",
+   "name": "AL/MS state line \u2014 MS side opposite Colbert",
    "state": "MS",
    "lat": 34.85,
    "lng": -88.10112
   },
   {
-   "name": "AL/MS state line — Pickens AL side",
+   "name": "AL/MS state line \u2014 Pickens AL side",
    "county": "Pickens County",
    "lat": 33.3,
    "lng": -88.29949
   },
   {
-   "name": "AL/MS state line — MS side opposite Pickens",
+   "name": "AL/MS state line \u2014 MS side opposite Pickens",
    "state": "MS",
    "lat": 33.3,
    "lng": -88.30749
@@ -1026,13 +1026,10 @@
   "Conecuh",
   "Covington",
   "Crenshaw",
-  "Cullman",
   "Dale",
   "Escambia",
   "Fayette",
-  "Franklin",
   "Geneva",
-  "Jackson",
   "Lamar",
   "Lowndes",
   "Marengo",
@@ -1041,10 +1038,8 @@
   "Pickens",
   "Pike",
   "Randolph",
-  "Talladega",
   "Tallapoosa",
   "Walker",
-  "Washington",
-  "Winston"
+  "Washington"
  ]
 }
