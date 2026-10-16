@@ -2,7 +2,7 @@
  * GSA searched; only commercial resellers carry one — not used), so each county is wired to its own Revenue Commissioner / county GIS layer,
  * or to a regional host that publishes several counties. A county absent from this table has no usable public service and says so by
  * name ("<County> — no parcel data wired here yet"): docs/STATEWIDE-PARCELS.md "Alabama" has the per-county table and what was searched.
- * Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy), idField, addrField, scopeWhere, owner column?, centre lat, lng,
+ * Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy; /mg/<server>/<COUNTY>/FeatureServer/0 is the MapGuide adapter), idField, addrField, scopeWhere, owner column?, centre lat, lng,
  * padded bbox]. Provenance prose lives in alabamaProvenance.js (build-time only, never shipped to the browser). */
 export const AL_ROWS = [
   ["autauga","Autauga","https://services7.arcgis.com/jF2q3LPxL7PETdYk/arcgis/rest/services/PARCELS_REGION_061626_158_WFL1/FeatureServer/0","APN_2017","SITE_ADDRESS_","COUNTY='AUTAUGA COUNTY'",1,32.539,-86.641,[32.293,-86.942,32.74,-86.376]],
@@ -14,6 +14,7 @@ export const AL_ROWS = [
   ["cherokee","Cherokee","/gis-proxy/web3.kcsgis.com/kcsgis/rest/services/Cherokee/Public/MapServer/116","ParcelID_GISlink",null,null,1,34.176,-85.6,[33.909,-85.873,34.553,-85.366]],
   ["cleburne","Cleburne","/gis-proxy/maps.capturecama.com/arcgis/rest/services/Cleburne/CleburneParcels_06122024/MapServer/401","PARCEL_NUM",null,null,0,33.676,-85.519,[33.441,-85.919,33.99,-85.275]],
   ["coosa","Coosa","/gis-proxy/maps.capturecama.com/arcgis/rest/services/Coosa/Coosa11282023/MapServer/169","PARCELID",null,null,0,32.941,-86.247,[32.724,-86.557,33.141,-85.973]],
+  ["colbert","Colbert","/gis-proxy/al20portal.kcsgis.com/al20server/rest/services/Internal/Colbert_Public_ISV/MapServer/43","ParcelID_GISlink","SitusAddName",null,1,34.7016,-87.8034,[34.568,-88.136,34.908,-87.417]],
   ["dallas","Dallas","/gis-proxy/maps.capturecama.com/arcgis/rest/services/Dallas/Dallas_05272026/MapServer/163","PARCEL_ID","SITUS_ADDR",null,1,32.331,-87.104,[32.023,-87.498,32.734,-86.779]],
   ["elmore","Elmore","/gis-proxy/gis.capturecama.com/arcgis/rest/services/ElmoreAL/ElmoreCapture/MapServer/0","ParcelNo","PropertyAddr1",null,1,32.6,-86.15,[32.381,-86.446,32.804,-85.836]],
   ["etowah","Etowah","/gis-proxy/web3.kcsgis.com/kcsgis/rest/services/Etowah/Etowah_Revenue_Viewer_new/MapServer/64","ParcelID_GISlink",null,null,1,34.048,-86.037,[33.823,-86.401,34.237,-85.705]],
@@ -44,6 +45,33 @@ export const AL_ROWS = [
   ["mobile","Mobile","https://services8.arcgis.com/HND1NcQt6vgOGn1z/arcgis/rest/services/MCRC_Public_Parcels/FeatureServer/0","Parcel_Number","PropAddr1",null,1,30.8,-88.21,[30.307,-88.465,31.202,-87.9]],
   ["dekalb","DeKalb","https://services9.arcgis.com/NT45iGhs5xJWW8xQ/arcgis/rest/services/Parcel_Data/FeatureServer/0","PARCELNUMB","SitusAddNa",null,1,34.463,-85.803,[34.176,-86.161,34.892,-85.482]],
   ["houston","Houston","https://services.arcgis.com/UXN4FGWBfn79LLPC/arcgis/rest/services/Parcels_County_Current_050323/FeatureServer/0","PARCEL_ID","STREET_ADD",null,1,31.164,-85.296,[30.971,-85.738,31.364,-84.972]],
+  /* B2302785 — Flagship GIS / Autodesk MapGuide counties, served through functions/mg (src/shared/gis/mapguideAdapter.js speaks ArcGIS REST for them). */
+  ["bibb","Bibb","/mg/106/BIBB/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.0002,-87.1275,[32.832,-87.42,33.253,-86.883]],
+  ["butler","Butler","/mg/106/BUTLER/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.7581,-86.6847,[31.529,-86.915,31.971,-86.443]],
+  ["chambers","Chambers","/mg/105/CHAMBERS/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.9202,-85.39,[32.731,-85.595,33.12,-85.125]],
+  ["chilton","Chilton","/mg/104/CHILTON/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.8548,-86.7185,[32.665,-87.015,33.08,-86.375]],
+  ["choctaw","Choctaw","/mg/107/CHOCTAW/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.0234,-88.2627,[31.7,-88.473,32.317,-87.926]],
+  ["clarke","Clarke","/mg/107/CLARKE/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.6848,-87.8274,[31.193,-88.177,31.999,-87.498]],
+  ["clay","Clay","/mg/107/CLAY/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.2749,-85.8616,[33.093,-86.175,33.502,-85.642]],
+  ["coffee","Coffee","/mg/107/COFFEE/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.4109,-85.9881,[31.199,-86.194,31.63,-85.791]],
+  ["conecuh","Conecuh","/mg/101/CONECUH/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.4346,-86.9908,[31.191,-87.425,31.756,-86.661]],
+  ["covington","Covington","/mg/101/COVINGTON/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.2505,-86.4487,[30.992,-86.705,31.538,-86.181]],
+  ["crenshaw","Crenshaw","/mg/105/CRENSHAW/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.7378,-86.3147,[31.45,-86.502,32.059,-86.14]],
+  ["dale","Dale","/mg/101/DALE/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.4393,-85.6133,[31.204,-85.796,31.626,-85.416]],
+  ["escambia","Escambia","/mg/110/ESCAMBIA/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.1324,-87.1601,[30.998,-87.615,31.271,-86.702]],
+  ["fayette","Fayette","/mg/104/FAYETTE/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.726,-87.7377,[33.527,-87.95,33.925,-87.418]],
+  ["geneva","Geneva","/mg/106/GENEVA/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.1001,-85.8341,[30.993,-86.187,31.206,-85.481]],
+  ["lamar","Lamar","/mg/102/LAMAR/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.7831,-88.0945,[33.531,-88.275,34.059,-87.942]],
+  ["lowndes","Lowndes","/mg/104/LOWNDES/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.1608,-86.6494,[31.967,-86.911,32.412,-86.401]],
+  ["marengo","Marengo","/mg/100/MARENGO/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.2534,-87.7879,[31.996,-88.117,32.549,-87.467]],
+  ["marion","Marion","/mg/104/MARION/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,34.1408,-87.8849,[33.915,-88.203,34.324,-87.634]],
+  ["perry","Perry","/mg/105/PERRY/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.6397,-87.2926,[32.31,-87.526,32.877,-87.014]],
+  ["pickens","Pickens","/mg/105/PICKENS/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.2862,-88.0889,[32.987,-88.339,33.539,-87.834]],
+  ["pike","Pike","/mg/100/PIKE/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.8111,-85.9412,[31.623,-86.2,32.071,-85.663]],
+  ["randolph","Randolph","/mg/102/RANDOLPH/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.3008,-85.4579,[33.114,-85.651,33.508,-85.234]],
+  ["tallapoosa","Tallapoosa","/mg/100/TALLAPOOSA/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,32.8693,-85.7961,[32.501,-86.006,33.117,-85.59]],
+  ["walker","Walker","/mg/102/WALKER/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,33.8102,-87.2971,[33.521,-87.639,34.007,-86.956]],
+  ["washington","Washington","/mg/106/WASHINGTON/FeatureServer/0","PARCEL_ID","P_ADDRESS",null,1,31.4129,-88.2059,[31.121,-88.465,31.702,-87.886]],
 ];
 export const alRaw = () => Object.fromEntries(AL_ROWS.map(([k, n, url, id, addr, scope]) => ["al_" + k, {
   state: "AL", label: n + " County, AL", layerUrl: url, idField: id, ...(addr ? { addrField: addr } : {}), ...(scope ? { scopeWhere: scope } : {}),

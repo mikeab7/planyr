@@ -44,6 +44,8 @@ export const ALLOWED_HOSTS = new Set([
   "autaugagis.autauga.com", // Autauga County
   "arcweb.houstoncountyal.gov", // Houston County AL — the county's own parcel viewer server (NEW-1, Alabama round 2)
   "www.alabamagis.com", // Flagship GIS public viewers (~21 AL counties) — probed for an open REST/OGC endpoint (NEW-1, Alabama round 2)
+  "isv.kcsgis.com", // KCS GIS ISV3 viewer host (e.g. isv.kcsgis.com/al.colbert_revenue) — read to find the ArcGIS service behind a county viewer (B2312352)
+  "al20portal.kcsgis.com", // KCS GIS — Colbert County (named in the county viewer's own public config.js: al20server/…/Internal/Colbert_Public_ISV, B2312352)
   /* NEW-1 (B2302785) — Flagship GIS's Autodesk MapGuide servers behind the www.alabamagis.com county viewers. Exact hostnames, one per
    * server number the viewers name (cloudURL in each county's page); read-only anonymous queries only — never a key the viewer injects. */
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
