@@ -2163,6 +2163,19 @@ const COUNTIES_RAW = {
     idField: "PARCELID", addrField: "PAR_ADDR1",
     help: "Shelby County Assessor of Property certified parcels (county GIS) — covers Memphis, Bartlett, Germantown, Collierville, Lakeland, Arlington, Millington and the unincorporated county. Search by parcel ID or a site address.",
   },
+  /* NEW-1 (Memphis radius ×3) — CHESTER COUNTY, TN (Henderson), on the Chester County ASSESSOR OF PROPERTY's own parcel layer, served by
+   * CaptureCAMA (the Tennessee Comptroller's assessment system) — the layer behind the Assessor's public AGOL web map
+   * f214fb11968a4539bf128561ea61ecd6. B2289169's "no public source" was wrong. The Comptroller's statewide layer holds no Chester rows
+   * (still in tn_statewide.excludedCounties). Host refused by the build sandbox, so relayed through /gis-proxy (allow-listed); MEASURED
+   * THROUGH THE DEPLOYED RELAY 2026-10-16: MapServer layer 7 "Parcels_12", Map/Query/Data, 10,333 parcels, maxRecordCount 2000, token-free.
+   * Henderson CROOK AVENUE 111 → 012033M I 01500, CITY OF HENDERSON, 0.394 ac; rural SILERTON ROAD 1280 → 012076 02700, 36.30 ac. Columns are
+   * shapefile truncations: parcel id L15Parce_2 · owner GPDATA__OW · situs GPDATA__PR · GIS acres L15Parce_4 (appraisal.js reads them by name). */
+  tn_chester: {
+    state: "TN", label: "Chester County, TN",
+    layerUrl: "/gis-proxy/gis.capturecama.com/arcgis/rest/services/ChesterTN/ChesterCapture/MapServer/7",
+    idField: "L15Parce_2", addrField: "GPDATA__PR",
+    help: "Chester County Assessor of Property parcels (CaptureCAMA) — covers Henderson, Enville, Jacks Creek and the rest of the county. Search by parcel ID or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -3195,6 +3208,11 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [35.18, -89.89], zoom: 10,
     bbox: [34.98, -90.33, 35.43, -89.62],
     mapServer: null, layerUrl: COUNTIES.tn_shelby.layerUrl,
+  },
+  tn_chester: {
+    state: "TN", center: [35.42, -88.64], zoom: 11,
+    bbox: [35.27, -88.88, 35.58, -88.42],
+    mapServer: null, layerUrl: COUNTIES.tn_chester.layerUrl,
   },
 };
 

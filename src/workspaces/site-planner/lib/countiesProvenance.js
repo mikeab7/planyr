@@ -629,6 +629,12 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-10-15",
     verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE PR PREVIEW'S /gis-proxy RELAY: MapServer layer 0 'Parcel', description 'Shelby County Assessor of Property Parcels', copyright Shelby County Assessor of Property; token-free; maxRecordCount 1000; TAXYR 2026. Seven points across the county (Memphis airport-east + downtown, Bartlett, Millington, Lakeland, Germantown, Collierville) each returned PARCELID + OWNER + PAR_ADDR1.",
   },
+  tn_chester: {
+    publisher: "own",
+    publisherName: "Chester County, TN — Assessor of Property (CaptureCAMA, gis.capturecama.com)",
+    verifiedOn: "2026-10-16",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: ChesterTN/ChesterCapture MapServer layer 7 'Parcels_12' (the layer behind the Assessor's public AGOL web map f214fb11968a4539bf128561ea61ecd6), Map/Query/Data, 10,333 parcels, maxRecordCount 2000, token-free. Henderson point (35.4398,-88.6414) → 012033M I 01500 / CITY OF HENDERSON / CROOK AVENUE 111 / 0.394 ac; rural Silerton Rd → 36.30 ac. Columns are shapefile truncations (L15Parce_2 id, GPDATA__OW owner, GPDATA__PR situs, L15Parce_4 GIS acres).",
+  },
   mo_platte: {
     publisher: "third-party",
     publisherName: "City of Parkville (republishes Platte County tax parcels)",

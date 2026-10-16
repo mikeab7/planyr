@@ -29,7 +29,7 @@ const OUT = flag("--out") || "memphis-radius-live.json";
 
 const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
 // The honest gaps (no public source wired) — must SAY so; everything else must select a lot. Kept in step with test/memphisRadius.test.js.
-const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "TN:Chester County,KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
+const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
 const ARMS = [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
@@ -37,6 +37,9 @@ const ARMS = [
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
   { name: "TX Waller (Brookshire)", state: "TX", lat: 29.786, lng: -95.951, expect: "lot", control: true },
   { name: "TN Shelby — owner's spot (airport east)", state: "TN", lat: 35.03, lng: -89.95, expect: NO_SOURCE.has("TN:Shelby County") ? "gap" : "lot", county: "Shelby County" },
+  /* B2289169 ×3 — Chester TN, the two spots the owner's brief names: the town (Henderson) and a rural parcel (Silerton Rd, 36 ac). */
+  { name: "TN Chester — Henderson (town)", state: "TN", lat: 35.4398, lng: -88.6414, expect: NO_SOURCE.has("TN:Chester County") ? "gap" : "lot", county: "Chester County" },
+  { name: "TN Chester — rural (Silerton Rd)", state: "TN", lat: 35.3640, lng: -88.7190, expect: NO_SOURCE.has("TN:Chester County") ? "gap" : "lot", county: "Chester County" },
   ...FX.counties.map((c) => {
     const k = `${c.state}:${c.name}`; const [lat, lng] = NUDGE[k] || [c.lat, c.lng];
     return { name: `${c.state} ${c.name}`, state: c.state, lat, lng, expect: NO_SOURCE.has(k) ? "gap" : "lot", county: c.name };
