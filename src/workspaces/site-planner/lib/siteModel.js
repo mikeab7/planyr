@@ -799,6 +799,7 @@ export function impossibleStacks(list, { tol = ANCHOR_TOL_FT } = {}) {
   const out = [];
   for (const z of els) {
     if (!z || z.points || z.type !== "trailer" || z.attachedTo == null || !finiteBoxEl(z)) continue;
+    if (z.wallTrailer) continue;       // B2268801 — a rear / end wall's trailer row is a wall layer, not a dock-stack member: no court to find
     const host = byId.get(z.attachedTo);
     if (!host || host.type !== "building" || host.points || !finiteBoxEl(host)) continue;
     const side = sideOfBondedBox(host, z);

@@ -29,6 +29,21 @@ export const ALLOWED_HOSTS = new Set([
   "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
+  /* NEW-1 (Alabama, 2026-10-16) — county/vendor hosts the Alabama candidates sit on. The sandbox cannot reach any of
+   * them, so each is relayed (CORS unread) and MEASURED through this relay before a county is wired to it. */
+  "web1.kcsgis.com", "web2.kcsgis.com", "web3.kcsgis.com", "web4.kcsgis.com", "web5.kcsgis.com", "web6.kcsgis.com", // KCS GIS — Revenue Commissioner viewers (Etowah, Talladega, Cullman, Colbert, Baldwin…)
+  "al52portal.kcsgis.com", // KCS GIS — Morgan County
+  "maps.capturecama.com", // CaptureCAMA — Cleburne, Coosa, Russell, Monroe, Bullock, Henry, Hale, Wilcox, Sumter…
+  "map.stclairco.com", // St. Clair County
+  "maps.shelbyal.com", // Shelby County AL (Property Tax Office)
+  "jccgis.jccal.org", "gis.jccal.org", // Jefferson County AL
+  "gis.limestonecounty-al.gov", // Limestone County
+  "maps.madisonal.gov", // City of Madison (Madison County layer)
+  "gis.calhouncounty.org", // Calhoun County
+  "explore.opelika-al.gov", // City of Opelika (Lee County layer)
+  "autaugagis.autauga.com", // Autauga County
+  "arcweb.houstoncountyal.gov", // Houston County AL — the county's own parcel viewer server (NEW-1, Alabama round 2)
+  "www.alabamagis.com", // Flagship GIS public viewers (~21 AL counties) — probed for an open REST/OGC endpoint (NEW-1, Alabama round 2)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

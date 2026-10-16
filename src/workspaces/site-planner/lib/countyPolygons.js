@@ -72,6 +72,13 @@ export function resolveCounty(lat, lng) {
   return CORE.resolveIn(INDEX, lat, lng);
 }
 
+/* NEW-1 (Memphis line band) — counties whose line passes within `deg` of the point (see `countiesNearIn`); [] until the
+ * geometry is resident. */
+export function countiesNearPoint(lat, lng, deg) {
+  if (!INDEX || !CORE || !CORE.countiesNearIn) return [];
+  return CORE.countiesNearIn(INDEX, lat, lng, deg);
+}
+
 /* Whether the geometry is resident. Callers use this to decide whether to re-ask after the warm. */
 export const countyPolygonsReady = () => !!(INDEX && CORE);
 

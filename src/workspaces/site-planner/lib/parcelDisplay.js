@@ -41,7 +41,7 @@ import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.j
 import { routeQueryThroughWorker } from "./parcelQueryTransport.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
-import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers } from "./parcelDisplayZoom.js";
+import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers, outlineFieldsFor } from "./parcelDisplayZoom.js";
 
 export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
 
@@ -149,6 +149,26 @@ const ParcelTiles = L.GridLayer.extend({
 
 // `opts` overrides the defaults below (e.g. a tighter `minZoom` for the "close" regime of
 // `makeParcelAdaptiveLayer`); every existing single-argument caller is unaffected.
+/* NEW-1 (Memphis line band) — for a layer with NO lot-number gate: hold its first feature requests until its own metadata
+ * says what its id field is called (`outlineFieldsFor`), then release. A failed metadata read still releases. The lot-number
+ * gate in parcelLotLabelLayer.js does the same swap for layers that carry numbers. */
+function holdForIdField(layer) {
+  const orig = layer._requestFeatures;
+  if (typeof orig !== "function" || typeof layer.metadata !== "function") return;
+  let open = false, asked = false;
+  const held = [];
+  const release = () => { if (open) return; open = true; const todo = held.splice(0); if (layer._map) todo.forEach((a) => orig.apply(layer, a)); };
+  layer._requestFeatures = function (...args) {
+    if (open) return orig.apply(this, args);
+    held.push(args);
+    if (asked) return;
+    asked = true;
+    try { layer.metadata((err, meta) => { if (!err && meta) layer.options.fields = outlineFieldsFor(meta, layer.options.fields); release(); }); }
+    catch (_) { release(); }
+  };
+  layer.on("remove", () => { open = false; asked = false; held.length = 0; });
+}
+
 export function makeParcelLayer(url, opts) {
   /* NEW-1 (2026-10-04) — Planyr draws the lot NUMBERS too. `lotNumberHint` (default: the county's
    * `lotNumberField`/`idField` for this URL) names the attribute; `labels:false` opts out;
@@ -177,6 +197,7 @@ export function makeParcelLayer(url, opts) {
     ...layerOpts,
   });
   if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset });
+  else holdForIdField(layer); // NEW-1 — a source with no lot number still needs its real id field name (MARIS: FID)
   // NEW-1 — children are ghosts (no per-lot Path, no per-settle projection); see ParcelGhost above.
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
     ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })

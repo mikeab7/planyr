@@ -1,5 +1,5 @@
 {
- "source": "public/geo/county-polygons.json (Census-derived) \u2014 interior point nearest each MS county's bbox centre; 'lines' are points ~7% of the way in from a boundary vertex (NEW-1 Mississippi, 2026-10-16)",
+ "source": "public/geo/county-polygons.json (Census-derived) — interior point nearest each MS county's bbox centre; 'lines' are points ~7% of the way in from a boundary vertex (NEW-1 Mississippi, 2026-10-16)",
  "counties": [
   {
    "state": "MS",
