@@ -14,7 +14,7 @@
 import L from "leaflet";
 import { bestMeasurer } from "../../../shared/markup/textWrap.js";
 import { lotNumberItem, solveLotNumberItems, clipRingToRect, lotNumberText, resolveLotNumberField, lotBoxCanHost, LOT_NO_FONT_PX } from "./parcelLotNumbers.js";
-import { PARCEL_OUTLINE_COLOR } from "./parcelDisplayZoom.js";
+import { PARCEL_OUTLINE_COLOR, outlineFieldsFor } from "./parcelDisplayZoom.js";
 import { featureBbox } from "./parcelSnapshot.js";
 
 const RELAYOUT_DEBOUNCE_MS = 90;
@@ -195,6 +195,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
         try {
           layer.metadata((err, meta) => {
             if (!err && meta && Array.isArray(meta.fields)) {
+              layer.options.fields = outlineFieldsFor(meta, layer.options.fields); // NEW-1 — MARIS names its id FID, not OBJECTID
               const f = resolveLotNumberField(meta.fields, hint);
               if (f) {
                 field = f;

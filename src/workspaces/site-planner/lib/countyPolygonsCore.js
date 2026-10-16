@@ -87,6 +87,26 @@ export function distToRings(rings, x, y) {
  * have picked the right side of a county line. */
 export const NEAR_EDGE_DEG = 0.0015;
 
+/* NEW-1 (Memphis line band, B2289168 ×3) — every county whose boundary passes within `deg` of the point, nearest first,
+ * INCLUDING the county that contains it (flagged `inside`). Used only after a lot click came back empty, to ask the
+ * county just across the line: the asset is a generalised boundary, and along the Tennessee–Mississippi line it was
+ * MEASURED ~550 m north of the surveyed line for its whole length (DeSoto's northernmost parcel vertex and Shelby's
+ * southernmost meet at ≈34.995°N; the asset's line sits at ≈35.000°N), far outside the ~150 m `nearEdge` band. Pure. */
+export function countiesNearIn(index, lat, lng, deg) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !(deg > 0)) return [];
+  const s = index.scale;
+  const x = lng * s, y = lat * s, r = deg * s;
+  const out = [];
+  for (const c of index.counties) {
+    const [a, b, cx, d] = c.bbox;
+    if (x < a - r || x > cx + r || y < b - r || y > d + r) continue;
+    const dist = distToRings(c.rings, x, y);
+    const inside = c.rings.some((ring) => pointInRing(ring, x, y));
+    if (inside || dist < r) out.push({ name: c.name, state: c.state, fips: c.fips, inside, distDeg: dist / s });
+  }
+  return out.sort((p, q) => (q.inside - p.inside) || (p.distDeg - q.distDeg));
+}
+
 /* The containment search itself. Takes the index explicitly (no module state), so the gate owns
  * the lifecycle and this owns only the geometry. Returns the same `ok` / `outside` shapes the
  * gate documents. */

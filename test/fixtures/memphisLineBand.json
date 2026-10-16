@@ -1,0 +1,21 @@
+{
+  "_about": "NEW-1 (Memphis line band, B2289168 ×3). OWNER_SPOTS: real Shelby Assessor lots on the north side of Stateline Rd East between Swinnea and Tchulahoma (the owner's 2026-10-16 screenshot), inside the ≈550 m strip the bundled county polygons call DeSoto — PARCELID/owner read off scgis.shelbycountytn.gov CERTParcel 2026-10-16. LINES: every county/state line the brief names, each as two interior points (a in A, b in B, by the asset) and the parcel source on each side; a point ON the asset's line is found by bisection and points either side are clicked. Read by test/memphisLineBand.test.js and ui-audit/verify-memphis-line-band-live.mjs.",
+  "ownerSpots": [
+    { "name": "POOL 5 INDUSTRIAL (094100 00069)", "lat": 34.9955, "lng": -89.9330, "parcel": "094100  00069" },
+    { "name": "ECONOMIC DEV GROWTH ENGINE (094100 00070)", "lat": 34.9978, "lng": -89.9320, "parcel": "094100  00070" },
+    { "name": "ECONOMIC DEV GROWTH ENGINE (094100 00292), Swinnea side", "lat": 34.9965, "lng": -89.9400, "parcel": "094100  00292" },
+    { "name": "MALONE EAT (094100 00225), NW of Tchulahoma", "lat": 34.9962, "lng": -89.9230, "parcel": "094100  00225" },
+    { "name": "XTRA LEASE (094100 00300)", "lat": 34.9960, "lng": -89.9470, "parcel": "094100  00300" }
+  ],
+  "lines": [
+    { "name": "Shelby TN / DeSoto MS (Stateline Rd, W)", "a": [35.06, -90.02], "b": [34.93, -90.02], "A": "tn_shelby", "B": "ms_desoto" },
+    { "name": "Shelby TN / DeSoto MS (Stateline Rd, E)", "a": [35.06, -89.75], "b": [34.93, -89.75], "A": "tn_shelby", "B": "ms_desoto" },
+    { "name": "Fayette TN / Marshall MS (state line)", "a": [35.06, -89.45], "b": [34.93, -89.45], "A": "tn_statewide", "B": "ms_marshall" },
+    { "name": "Shelby / Fayette (TN)", "a": [35.10, -89.70], "b": [35.10, -89.58], "A": "tn_shelby", "B": "tn_statewide" },
+    { "name": "Shelby / Tipton (TN)", "a": [35.30, -89.90], "b": [35.42, -89.90], "A": "tn_shelby", "B": "tn_statewide" },
+    { "name": "Shelby TN / Crittenden AR (Mississippi River)", "a": [35.15, -90.02], "b": [35.15, -90.16], "A": "tn_shelby", "B": "ar_statewide" },
+    { "name": "DeSoto / Tate (MS, county vs MARIS)", "a": [34.80, -89.95], "b": [34.70, -89.95], "A": "ms_desoto", "B": "ms_tate" },
+    { "name": "DeSoto / Marshall (MS, county vs MARIS)", "a": [34.85, -89.82], "b": [34.85, -89.60], "A": "ms_desoto", "B": "ms_marshall" },
+    { "name": "Tate / Marshall (MS, MARIS vs MARIS)", "a": [34.65, -89.70], "b": [34.65, -89.60], "A": "ms_tate", "B": "ms_marshall" }
+  ]
+}

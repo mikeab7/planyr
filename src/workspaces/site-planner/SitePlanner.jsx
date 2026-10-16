@@ -234,18 +234,18 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
-  identifyParcelEager,
   largestRingLngLat,
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
-import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide } from "./lib/sourceHealth.js";
+import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
+import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
@@ -16562,6 +16562,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
     return { candidates, realPrimaries };
   };
+  /* NEW-1 (Memphis line band, B2289168 ×3) — the sources of every county whose line passes near the point, asked only after
+     the routed county found no lot (lib/identifyWithFallback.js); same list the Map's click uses. */
+  const neighbourCandidatesAt = async (lat, lng) => {
+    const keys = lineNeighbourKeysForPoint(lat, lng);
+    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
+    const list = keys.map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) })).filter((c) => c.url);
+    return filterHealthyCandidates(list, STATEWIDE_KEYS);
+  };
+  // NEW-1 (Memphis line band) — breaker-skipped sources for this point, asked once, last (lib/identifyWithFallback.js).
+  const skippedCandidatesAt = async (lat, lng) => {
+    const keys = [...new Set([...candidateCountiesForPoint(lat, lng), ...lineNeighbourKeysForPoint(lat, lng)])].filter((k) => isSourceOpen(k));
+    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
+    return keys.map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) })).filter((c) => c.url);
+  };
   // Stable per-lot key (lib/parcelIdentity.js — the ONE resolver, shared with the Map view): the CAD
   // OBJECTID (incl. table-prefixed joined-layer ids), else a hash of the whole ring set — never one vertex.
   const parcelGisKey = (attrs, rings) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}` });
@@ -16725,12 +16739,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
       const { candidates } = await candidatesAtPoint(lat, lng);
       if (tok !== identifyTok.current) return;
-      if (!candidates.length) {
+      const nearSources = await neighbourCandidatesAt(lat, lng); // NEW-1 (Memphis line band) — a county across a nearby line
+      if (tok !== identifyTok.current) return;
+      if (!candidates.length && !nearSources.length && !(await skippedCandidatesAt(lat, lng)).length) {
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
         setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
         return;
       }
-      const res = await identifyParcelEager(candidates, lng, lat, {
+      const res = await identifyWithLineFallback({
+        primary: candidates, lng, lat, neighbours: () => nearSources, skipped: () => skippedCandidatesAt(lat, lng),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
       if (tok !== identifyTok.current) return; // superseded by a newer click
@@ -16738,8 +16755,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // NEW-2 — say the TRUE reason instead of blaming the user's aim: a healthy source
         // genuinely found no lot here, this county has no parcel source wired at all, or every
         // source that could have answered this point was unreachable this click.
-        if (res.responded === 0) { setRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
+        // NEW-1 (Memphis line band) — a county with no source only asked a NEIGHBOUR; its silence is not this county's outage.
+        if (res.responded === 0 && !(gap && !candidates.length)) { setRes({ error: `${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment.` }); return; }
         setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing).", noLot: true });
         return;
       }

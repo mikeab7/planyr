@@ -32,8 +32,13 @@ export function isLiveDisplayLayer(displays, layer) {
  * for that state (`statewideKeysForState(state).length`). Elsewhere it would promise a picture nothing draws, so it
  * says only what is known: the county server is slow and outlines may be missing. (B629/V199's wording finding —
  * the cached-copy case — is already its own message, `cacheFallbackNotice`; this covers the remaining one.) */
-export function countyOutageMessage(hasStatewideBackup) {
+/* NEW-1 (Memphis line band, B2289168 ×3) — and it NAMES the county. The owner's Memphis screenshot carried "That county's
+ * parcel server is slow…" at the Shelby/DeSoto line, where two county servers are in view and nothing said which one (it was
+ * DeSoto: Mississippi has no statewide layer, the only wording that yields "outlines may be missing"). `countyName` is
+ * `counties.sourceDisplayName(key)`; without one the old subject stays. */
+export function countyOutageMessage(hasStatewideBackup, countyName = null) {
+  const who = countyName ? `${countyName}'s` : "That county's";
   return hasStatewideBackup
-    ? "That county's parcel server is slow right now — showing statewide outlines; clicking a lot still adds it."
-    : "That county's parcel server is slow right now — outlines may be missing until it recovers.";
+    ? `${who} parcel server is slow right now — showing statewide outlines; clicking a lot still adds it.`
+    : `${who} parcel server is slow right now — its outlines may be missing until it recovers; clicking a lot still asks it.`;
 }
