@@ -166,7 +166,10 @@ async function openPlan() {
     return error ? String(error.message) : null;
   }, [plan]);
   if (err) throw new Error("throwaway plan insert failed — " + err);
+  // After flow (a) the page is already on this origin, so a goto that changes only the hash is a same-document navigation —
+  // reload so the app boots straight into the plan (the combined run failed here on planyr.io; flow (b) alone did not).
   await page.goto(`${BASE}/?planyrDiag=1#/project/${PLAN_ID}/site`, { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="land-add-btn"]', { timeout: 60000 }).catch(async () => {
     // the Land tab may not be the open one — open it
     await page.getByRole("button", { name: /^Land$/ }).first().click().catch(() => {});
@@ -222,7 +225,16 @@ try {
       if (arm.control && !rows[rows.length - 1].pass) voided = true;
     }
   }
+} catch (e) {
+  // LOUD-FAILURE: an error outside a row (sign-in, opening the throwaway plan) must fail the run, never vanish into `finally`.
+  console.log(`\n⛔ harness error outside any row: ${String(e && e.stack || e).slice(0, 400)}`);
+  rows.push({ flow: "harness", name: "run", outcome: "harness error", message: String(e && e.message || e).slice(0, 200), pass: false });
 } finally {
+  // VACUITY GUARD: a flow that was asked for must have produced one row per arm, or the run proves nothing about it.
+  for (const [flow, on] of [["map (no project)", ONLY !== "b"], ["in project", ONLY !== "a"]]) {
+    const n = rows.filter((r) => r.flow === flow).length;
+    if (on && !voided && n < ARMS.length) rows.push({ flow, name: "coverage", outcome: `only ${n} of ${ARMS.length} rows ran`, pass: false });
+  }
   if (ONLY !== "a") {
     const cl = await cleanupLive(page, { planId: PLAN_ID }).catch((e) => ({ errors: [String(e)], left: {} }));
     console.log(`\ncleanup: throwaway plan ${PLAN_ID} → left ${JSON.stringify(cl.left)}${cl.errors && cl.errors.length ? " errors " + cl.errors.join("; ") : ""}`);
