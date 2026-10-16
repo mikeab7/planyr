@@ -784,6 +784,291 @@ export const COUNTY_VERIFICATION = {
     publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
     verifiedOn: "2026-10-15",
   },
+  ms_adams: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_amite: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_attala: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_carroll: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_choctaw: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_claiborne: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_clarke: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_clay: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_copiah: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_covington: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_forrest: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_franklin: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_george: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_greene: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_hancock: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_harrison: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_hinds: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_holmes: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_humphreys: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_issaquena: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jackson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jasper: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jefferson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jeffersondavis: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jones: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_kemper: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lamar: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lauderdale: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lawrence: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_leake: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lincoln: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lowndes: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_madison: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_marion: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_monroe: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_montgomery: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_neshoba: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_newton: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_noxubee: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_oktibbeha: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_pearlriver: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_perry: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_pike: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_rankin: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_scott: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_sharkey: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_simpson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_smith: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_stone: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_walthall: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_warren: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_washington: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_wayne: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_webster: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_wilkinson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_winston: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_yazoo: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
   ok_oklahoma: {
     publisher: "unverified",
     publisherName: "AGOL account artimcon (\"Tax Parcels Public\") — affiliation not established",

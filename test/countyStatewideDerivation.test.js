@@ -172,7 +172,9 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // generous ceiling, not a target.
     // ⛔ Bumped 180 → 240 (2026-09-30, NEW-1): 24 Louisiana parishes wired in one pass took it from 175
     // to 199 — again purely real counties being wired one at a time, not a blind expansion.
-    expect(keys.length).toBeLessThan(240);
+    // ⛔ Bumped 240 → 400 (2026-10-16, NEW-1): all 82 Mississippi counties wired from ONE measured MARIS table
+    // (57 new rows on top of 24) — real counties, one source, not a blind expansion.
+    expect(keys.length).toBeLessThan(400);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
