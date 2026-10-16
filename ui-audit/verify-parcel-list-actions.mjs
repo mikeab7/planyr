@@ -2,7 +2,7 @@
  *   delete — ⋯ menu -> Delete… -> inline confirm -> row gone + an Undo toast -> Undo brings it back · the Delete key on a
  *            focused row opens the same confirm · Cancel deletes nothing
  *   icons  — on EVERY row (incl. combined / renamed ones) no icon's box overlaps the name text's box (measured)
- *   lock   — the padlock is a click target on each row (unlocked rows show it on hover), toggles Lock with an Undo toast,
+ *   lock   — the padlock is a click target on each row (always shown — closed when locked, open when not), toggles Lock with an Undo toast,
  *            and the state survives a reload
  * KNOWN-GOOD ARM: VOID unless the seeded 6 rows (incl. 3 combined/renamed + 1 locked) are present.
  * Modes: BASE_URL (default local preview) · SIGNED_IN=1 -> ui-audit/lib/signedInSession.mjs.
@@ -66,7 +66,7 @@ try {
   await T("parcels-panel").waitFor({ timeout: 15000 });
   const ids0 = await rowIds();
   if (ids0.length !== 6) throw new Error(`VOID: expected 6 seeded rows, saw ${ids0.length}`);
-  ok("known-good arm: the 6 seeded rows (3 combined/renamed, 1 locked) are listed", /Parcel 3/.test(await T("parcel-row-c3").innerText()) && (await T("parcel-row-lock-k2").count()) === 1);
+  ok("known-good arm: the 6 seeded rows (3 combined/renamed, 1 locked) are listed", /Parcel 3/.test(await T("parcel-row-c3").innerText()) && (await T("parcel-row-lock-k2").getAttribute("data-locked")) === "1");
 
   // ---- icons never overlap a name (every row, plus each icon pair)
   const panelW = (await T("parcels-panel").boundingBox()).width;
@@ -87,20 +87,24 @@ try {
   ok(`measured at the real panel width (${Math.round(panelW)} px wide)`, panelW > 200);
   await shot("rows");
 
-  // ---- lock: the padlock exists only while locked (Layout C); locking is in the ⋯ menu, unlocking is one click on it
+  // ---- lock: the padlock is ALWAYS shown (closed = locked, open = not — the table's lock column, owner 2026-10-16); one click on it toggles, with an Undo toast; ⋯ → Lock does the same
   const lockBtn = (id) => T("parcel-row-lock-" + id);
-  ok("an unlocked row shows no padlock at all", (await lockBtn("k1").count()) === 0);
+  const isLocked = async (id) => (await lockBtn(id).getAttribute("data-locked")) === "1";
+  ok("an unlocked row shows an OPEN padlock (always there, not hover-only)", (await lockBtn("k1").count()) === 1 && !(await isLocked("k1")) && (await lockBtn("k1").locator('[data-lock-glyph="open"]').count()) === 1);
   await T("parcel-row-more-k1").click(); await T("parcel-row-menu-lock-k1").click(); await sleep(400);
-  ok("⋯ → Lock locks it: a padlock appears, state stored, toast with Undo", (await lockBtn("k1").getAttribute("aria-pressed")) === "true" && (await page.getByRole("button", { name: "Undo" }).count()) >= 1 && (await stored()).find((p) => p.id === "k1").locked === true);
+  ok("⋯ → Lock locks it: the padlock closes, state stored, toast with Undo", (await isLocked("k1")) && (await lockBtn("k1").getAttribute("aria-pressed")) === "true" && (await lockBtn("k1").locator('[data-lock-glyph="locked"]').count()) === 1 && (await page.getByRole("button", { name: "Undo" }).count()) >= 1 && (await stored()).find((p) => p.id === "k1").locked === true);
   await page.getByRole("button", { name: "Undo" }).first().click(); await sleep(400);
-  ok("Undo unlocks it again (the padlock goes away)", (await lockBtn("k1").count()) === 0 && !(await stored()).find((p) => p.id === "k1").locked);
+  ok("Undo unlocks it again (the padlock opens)", !(await isLocked("k1")) && !(await stored()).find((p) => p.id === "k1").locked);
   await lockBtn("k2").click(); await sleep(400);
-  ok("clicking a locked row's padlock unlocks it (with Undo)", (await lockBtn("k2").count()) === 0 && (await page.getByRole("button", { name: "Undo" }).count()) >= 1);
+  ok("clicking a locked row's padlock unlocks it (with Undo)", !(await isLocked("k2")) && (await page.getByRole("button", { name: "Undo" }).count()) >= 1);
+  await lockBtn("k2").click(); await sleep(400);
+  ok("clicking an open padlock locks it (the padlock closes, state stored)", (await isLocked("k2")) && (await stored()).find((p) => p.id === "k2").locked === true);
+  await lockBtn("k2").click(); await sleep(400); // back to unlocked for the reload check
   await T("parcel-row-more-k1").click(); await T("parcel-row-menu-lock-k1").click(); await sleep(600); // leave k1 LOCKED for the reload check
   await page.reload({ waitUntil: "load" }); await sleep(2500);
   if (!(await T("planner-canvas").isVisible().catch(() => false))) { await page.getByText("ZZ Row Actions", { exact: false }).first().click(); await T("planner-canvas").waitFor({ timeout: 25000 }); }
   await page.locator('[data-rail-tab="parcel"]').first().click(); await T("parcels-panel").waitFor();
-  ok("lock round-trips through a reload (k1 locked, k2 unlocked)", (await T("parcel-row-lock-k1").count()) === 1 && (await T("parcel-row-lock-k2").count()) === 0);
+  ok("lock round-trips through a reload (k1 locked, k2 unlocked)", (await isLocked("k1")) && !(await isLocked("k2")));
 
   // ---- delete: menu -> confirm -> gone -> Undo
   await T("parcel-row-more-c4").click();

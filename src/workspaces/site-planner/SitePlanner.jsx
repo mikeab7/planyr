@@ -38,7 +38,7 @@ import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
-import { mergeSiteContent, createSiteModel, READ_NORMALIZE } from "./lib/siteModel.js";
+import { mergeSiteContent, createSiteModel, READ_NORMALIZE, stampParcelNumbers } from "./lib/siteModel.js";
 import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
 import { groupCasEnabled } from "./lib/groupCas.js";
 import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
@@ -4546,6 +4546,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
     if (guarded !== els) setEls((cur) => (cur === els ? guarded : withMissingZ(assemblyIntegrity(cur).els)));
   }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* NEW-1 (B2289936) — a lot's number is STAMPED, so deleting one never renumbers the rest (siteModel.parcelNumbers). A plan read
+   * from storage arrives stamped (READ_NORMALIZE); this stamps what was created in this session. Identity-preserving once stamped,
+   * so it cannot loop, and skipped where this tab may not write the plan (it would only be adopted straight back). */
+  useEffect(() => {
+    if (readOnlyRef.current || !normalizeOnSeedRef.current) return;
+    const stamped = stampParcelNumbers(parcels);
+    if (stamped !== parcels) setParcels((cur) => (cur === parcels ? stamped : stampParcelNumbers(cur)));
+  }, [parcels]); // eslint-disable-line react-hooks/exhaustive-deps
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
   // pending local commit keep their LOCAL data (they re-commit through the rev-checked path).

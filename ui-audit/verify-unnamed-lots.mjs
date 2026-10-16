@@ -62,7 +62,7 @@ try {
   if (typed.text !== "Typed Lot") throw new Error("VOID: known-good arm — the typed-name lot does not read its name: " + typed.text);
   ok("known-good arm: a typed name still reads as typed", true, typed.text);
   const un = await nameOf("u1");
-  ok("the unnamed lot reads \"Unnamed\" in the list (not its owner/street)", un.text === "Unnamed", un.text);
+  ok("the unnamed COUNTY lot reads by its account in the list (Layout C) — never its owner/street, and never the word Unnamed (a drawn / other lot reads \"Parcel N\", see verify-parcel-list-layout)", /^Acct \d+$/.test(un.text), un.text);
   ok("…and in a quieter (grey) colour than a typed name", un.color !== typed.color, `${un.color} vs ${typed.color}`);
   ok("the list never shows the owner or street as a name", !/BAUER|KILGORE/i.test(await T("parcel-row-u1").innerText().then((t) => t.split("\n")[0])));
   await shot("list");

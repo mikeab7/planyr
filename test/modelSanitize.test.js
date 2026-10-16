@@ -76,7 +76,7 @@ describe("createSiteModel — the funnel drops junk entries from every collectio
   });
 
   it("clean collections stay reference-stable through the funnel (no save/state churn)", () => {
-    const parcels = [{ id: "p1", points: pts, z: 0 }];
+    const parcels = [{ id: "p1", points: pts, z: 0, parcelNo: 1 }]; // already stamped (NEW-1 B2289936 — an unstamped plan is stamped ONCE, then stays stable)
     const els = [{ id: "e1", type: "building", z: 0 }];
     const m = createSiteModel({ id: "s1", parcels, els });
     expect(m.parcels).toBe(parcels);

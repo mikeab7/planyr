@@ -29,7 +29,7 @@ export const Ico = ({ children, size = 15 }) => (
 export const EyeIcon = () => <Ico><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Ico>;
 export const EyeOffIcon = () => <Ico><path d="M3 3l18 18" /><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1" /><path d="M6.6 6.6A16.6 16.6 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 4.4-1" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></Ico>;
 export const LockGlyph = ({ size }) => <SharedLockGlyph locked size={size} />;
-export const UnlockGlyph = () => <SharedLockGlyph locked={false} size={14} />;
+export const UnlockGlyph = ({ size = 14 }) => <SharedLockGlyph locked={false} size={size} />;
 export const ZoomIcon = () => <Ico><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.2-4.2" /></Ico>;
 export const MoreIcon = () => <Ico><circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" /></Ico>;
 export const PencilIcon = ({ size }) => <Ico size={size}><path d="M4 20h4L19 9l-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></Ico>;
@@ -52,18 +52,19 @@ function Tag({ children }) {
   return <span style={{ flex: "none", padding: "0 6px", borderRadius: RADIUS.pill, border: LINE, background: "var(--surface-page)", color: "var(--text-secondary)", fontSize: FONT_SIZE.micro, fontWeight: 700, lineHeight: "16px" }}>{children}</span>;
 }
 
-/* Layout C (NEW-2): the list is grouped by where a parcel came from. Every row AND every group header share ONE
- * grid — check · name block · acres · actions — so the acres of every group line up on a single right edge and the
- * icons sit in the same narrow slot on every row (the slot is 3 icon-widths: padlock · eye · ⋯, right-aligned, so the
- * eye and ⋯ never move when the padlock is absent). There is no column-heading row; the group headers replace it. */
-const ACRES_W = 58; // fits "1,234.56" at the row's semibold figure size
+/* Layout C (NEW-2) as a TABLE (owner 2026-10-16, B2243424 ×5): the list is grouped by where a parcel came from, and it reads like a real
+ * table. ONE column-heading row sits above the whole list — "Acres" over the figures, a lock icon over the lock column, an eye icon over the
+ * visibility column (and the overlap icon over its column while any parcel overlaps) — and every row AND every group header share the same
+ * grid — check · name block · acres · icon slot — so the acres of every group line up on a single right edge and each icon kind sits in
+ * ONE column on every row. A row ALWAYS shows its lock (closed / open padlock) and its eye (open / struck); only the ⋯ menu waits for hover. */
+const ACRES_W = 54; // fits "1,234.56" at the row's semibold figure size
 const ICON = 18; // every row icon box
-/* The icon slot holds [overlap marker] · [padlock] · eye · ⋯ right-aligned, so the eye and ⋯ sit on one column on every row. It is two
- * icons wide, plus one seat for the padlock once any parcel in the list is locked and one for the overlap marker once any parcel
- * overlaps another — wider for EVERY row (never a per-row width), so a marker has a seat in the slot, never in the name block. */
-const SLOT_PAD = 6; // breathing room between the acres figure and the first icon seat
-export const slotWidth = (anyLocked, anyOverlap = false) => SLOT_PAD + ICON * (2 + (anyLocked ? 1 : 0) + (anyOverlap ? 1 : 0));
-const colsFor = (slotW) => `20px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
+/* The icon slot holds [overlap marker] · padlock · eye · ⋯, left-aligned in fixed seats so each kind has one column on every row. The padlock,
+ * eye and ⋯ seats always exist; the overlap seat exists once any parcel overlaps another — wider for EVERY row (never a per-row width), so a
+ * marker has a seat in the slot, never in the name block. */
+const SLOT_PAD = 3; // breathing room between the acres figure and the first icon seat
+export const slotWidth = (anyOverlap = false) => SLOT_PAD + ICON * (3 + (anyOverlap ? 1 : 0));
+const colsFor = (slotW) => `18px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
 const FIRST_LINE_H = 29; // one name line (17) + the row's 6px top/bottom padding: checkbox, acres and icons centre on the FIRST line of a wrapped row
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
 
@@ -106,14 +107,16 @@ export function overlapNamesOf(row, byId) {
 }
 
 /* The row's label + its optional second line. An unnamed COUNTY lot is labelled by its account (no second line — the
- * account IS the identity); a named county lot / a combined parcel says where it came from; a drawn one says nothing. */
+ * account IS the identity); a named county lot / a combined parcel says where it came from; a drawn one says nothing.
+ * Any OTHER parcel with no name the owner typed reads by its stable number ("Parcel 4", siteModel.parcelNumbers) — never a row of
+ * identical "Unnamed" labels, and never derived from an address, owner or legal description (constraint #19). */
 export function rowText(row) {
   const kind = row.origin && row.origin.kind;
-  if (row.superseded) return { label: row.unnamed ? "Unnamed" : row.name, sub: "Split into pieces", muted: row.unnamed };
+  if (row.superseded) return { label: row.name, sub: "Split into pieces", muted: false };
   const split = row.splitFrom && row.pc.splitFrom && row.pc.splitFrom.from ? `Split from ${row.pc.splitFrom.from.snapName || "the original"}` : "";
   if (row.unnamed && kind === "county" && row.apn && !split) return { label: `Acct ${row.apn}`, sub: "", muted: true };
   const sub = split || (kind === "drawn" ? "" : row.origin ? row.origin.line : "");
-  return { label: row.unnamed ? "Unnamed" : row.name, sub, muted: row.unnamed };
+  return { label: row.name, sub, muted: false };
 }
 
 /* The row's ⋯ menu (B2194741): Zoom to · Lock/Unlock · Delete. Delete is a TWO-STEP inline confirm (the same
@@ -159,11 +162,11 @@ function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm, renameabl
 /* A long account number never splits mid-digit: it drops whole onto its own line first (an inline-block), and only breaks if the column is narrower than the number itself. */
 const keepDigits = (text) => String(text).split(/(\d{6,})/).map((t, i) => (i % 2 ? <span key={i} style={{ display: "inline-block", maxWidth: "100%", overflowWrap: "anywhere" }}>{t}</span> : t));
 
-/* One row: checkbox (combine only) · name (+ source line, wraps, never cut) · acres · padlock / eye / ⋯ (all in the right-hand slot). The name block
- * opens the parcel page and uses the FULL name-block width (rename, constraint #18, is a ⋯ menu item — never an icon in the
- * name flow). The padlock exists only while the parcel is locked (click = unlock, Undo toast); the eye shows on row
- * hover / keyboard focus and always when inactive; ⋯ on hover / focus. On touch screens both are always shown. */
-function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, slotW, overlapNames, seatLock, seatOverlap }) {
+/* One row: checkbox (combine only) · name (+ source line, wraps, never cut) · acres · overlap / padlock / eye / ⋯ (all in the right-hand slot). The name
+ * block opens the parcel page and uses the FULL name-block width (rename, constraint #18, is a ⋯ menu item — never an icon in the name flow).
+ * The padlock (closed = locked, open = not) and the eye (open = counted, struck = left out) are ALWAYS shown, each a button with an Undo
+ * toast; ⋯ shows on row hover / keyboard focus (always on touch screens). */
+function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, slotW, overlapNames, seatOverlap }) {
   const dim = !row.included || row.superseded;
   const { label, sub, muted } = rowText(row);
   const [menu, setMenu] = useState(null); // null | "menu" | "confirm"
@@ -190,9 +193,10 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, s
         <span data-testid={`parcel-row-slot-${row.id}`} style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", width: slotW, height: FIRST_LINE_H, boxSizing: "border-box", paddingLeft: SLOT_PAD }}>
           {seatOverlap && <span style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex" }}>{overlapNames && <span role="img" tabIndex={0} aria-label={`Overlaps ${overlapNames}`} title={`Overlaps ${overlapNames}`} data-testid={`parcel-row-overlap-${row.id}`}
             style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", cursor: "default" }}><OverlapIcon /></span>}</span>}
-          {seatLock && <span style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex" }}>{row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
-            title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: ICON, height: ICON, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}</span>}
-          <button type="button" className={row.included ? `land-row-hover${menu ? " is-open" : ""}` : undefined} onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`}
+          <span style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex" }}><button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed={!!row.locked} data-testid={`parcel-row-lock-${row.id}`} data-locked={row.locked ? "1" : "0"}
+            aria-label={row.locked ? `Unlock ${label}` : `Lock ${label}`}
+            title={row.locked ? "Locked — even Edit parcels can't change it. Click to unlock." : "Not locked. Click to lock it against Edit parcels."} style={{ ...iconBtn, width: ICON, height: ICON }}>{row.locked ? <LockGlyph size={13} /> : <UnlockGlyph size={13} />}</button></span>
+          <button type="button" onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`} data-included={row.included ? "1" : "0"}
             aria-label={row.included ? `Make ${label} not active` : `Make ${label} active`}
             title={row.included ? "Active — counted in the site total. Click to leave it out." : "Not active — left out of the site total. Click to count it."}
             style={{ ...iconBtn, width: ICON, height: ICON, color: row.included ? "var(--text-primary)" : "var(--text-secondary)" }}>
@@ -201,6 +205,29 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, s
           <RowMenu row={row} renameable={!!renameable} handlers={handlers} open={menu !== null} armed={menu === "confirm"} onOpen={() => setMenu("menu")} onClose={() => setMenu(null)} onArm={() => setMenu("confirm")} />
         </span>
       </div>
+    </div>
+  );
+}
+
+/* The column-heading row (once, above the first group): "Acres" over the figures, and an ICON over each icon column — the
+ * same seats, in the same order and at the same x as every row's (it is built from the SAME grid and slot), so a header icon sits
+ * centred over the icons beneath it. The icons are headings, not buttons: they carry a hover/aria name and do nothing. */
+function ColumnHeader({ cols, slotW, anyOverlap }) {
+  const head = { fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" };
+  const seat = (testid, title, glyph) => (
+    <span data-testid={testid} role="img" aria-label={title} title={title} style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}>{glyph}</span>
+  );
+  return (
+    <div data-testid="parcels-columns" style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", padding: `${SPACE.xs}px 0`, borderBottom: "1px solid var(--border-strong)" }}>
+      <span />
+      <span data-testid="parcels-col-name" style={{ ...head, paddingLeft: SPACE.xxs }}>Name</span>
+      <span data-testid="parcels-col-acres" style={{ ...head, textAlign: "right", paddingRight: SPACE.xxs }}>Acres</span>
+      <span data-testid="parcels-col-slot" style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", width: slotW, height: ICON, boxSizing: "border-box", paddingLeft: SLOT_PAD }}>
+        {anyOverlap && seat("parcels-col-overlap", "Overlaps another parcel", <OverlapIcon />)}
+        {seat("parcels-col-lock", "Locked — even Edit parcels can't change it", <LockGlyph size={13} />)}
+        {seat("parcels-col-eye", "Active — counted in the site total", <EyeIcon />)}
+        <span style={{ width: ICON, flex: "none" }} />
+      </span>
     </div>
   );
 }
@@ -254,19 +281,18 @@ export default function ParcelsPanel({
     onRowClick: (id, picking) => { if (picking) { handlers.onPickRow(id); return; } handlers.onOpenPage(id); },
   }), [handlers]);
   // The row list only re-renders when something it shows changed — never on a pan / zoom frame.
-  const anyLocked = rows.some((r) => r.locked);
   const anyOverlap = rows.some((r) => !r.superseded && r.included && (r.overlaps || []).length > 0);
-  const slotW = slotWidth(anyLocked, anyOverlap), cols = colsFor(slotW);
+  const slotW = slotWidth(anyOverlap), cols = colsFor(slotW);
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const overlapAc = useMemo(() => overlapAcres(rows, siteAcres), [rows, siteAcres]);
   const rowList = useMemo(() => groupRows(shown).map((g) => (
     <div key={g.key} data-testid={`parcels-section-${g.key}`}>
       <GroupHeader group={g} cols={cols} />
       {g.rows.map((row) => (
-        <ParcelRow key={row.id} row={row} selected={selectedId === row.id} picked={!!pickedIds && pickedIds.has(row.id)} pickMode={!!pickMode} checked={checked.has(row.id)} handlers={H} cols={cols} slotW={slotW} overlapNames={overlapNamesOf(row, byId)} seatLock={anyLocked} seatOverlap={anyOverlap} />
+        <ParcelRow key={row.id} row={row} selected={selectedId === row.id} picked={!!pickedIds && pickedIds.has(row.id)} pickMode={!!pickMode} checked={checked.has(row.id)} handlers={H} cols={cols} slotW={slotW} overlapNames={overlapNamesOf(row, byId)} seatOverlap={anyOverlap} />
       ))}
     </div>
-  )), [shown, selectedId, pickedIds, pickMode, checked, H, cols, slotW, byId, anyLocked, anyOverlap]);
+  )), [shown, selectedId, pickedIds, pickMode, checked, H, cols, slotW, byId, anyOverlap]);
 
   return (
     <div ref={rootRef} data-testid="parcels-panel" style={{ display: "flex", flexDirection: "column", minWidth: 0, maxWidth: "100%", overflowX: "clip" }}>
@@ -281,7 +307,7 @@ export default function ParcelsPanel({
       ) : (
         <div data-testid="parcels-summary" style={{ padding: `${SPACE.xs}px 0 ${SPACE.xs}px`, fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
           <div data-testid="parcels-summary-line">
-            <span data-testid="parcels-site-acres" style={{ fontWeight: 650, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(siteAcres)}</span> AC in site
+            <span data-testid="parcels-site-acres" style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(siteAcres)}</span> AC in site
             <span style={{ color: "var(--text-secondary)" }}> · </span>
             <span data-testid="parcels-active-count">{inCount} of {counted.length} active</span>
           </div>
@@ -296,6 +322,7 @@ export default function ParcelsPanel({
       )}
 
       <div style={{ display: "flex", flexDirection: "column" }} data-testid="parcels-list">
+        {shown.length > 0 && <ColumnHeader cols={cols} slotW={slotW} anyOverlap={anyOverlap} />}
         {rowList}
         {!shown.length && <div style={{ padding: SPACE.xl, fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>No parcels match “{filter}”.</div>}
       </div>

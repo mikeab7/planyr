@@ -104,9 +104,9 @@ try {
   ok("Add parcels ▾ and Edit parcels buttons", (await T("land-add-btn").count()) === 1 && (await T("parcels-edit-btn").count()) === 1);
 
   // ---- alignment
-  // Layout C: no column-heading row — the group headers replace it (and the group total sits over the acres column).
+  // The TABLE (owner 2026-10-16): ONE column-heading row sits above the whole list — "Acres" over the figures, a lock icon and an eye icon over their columns.
   const eye = await box(T("parcel-row-eye-p1"));
-  ok("no column heading row (no 'Active' / 'Acres' heading)", (await T("parcels-active-head").count()) === 0 && (await T("parcels-panel").getByText(/^Acres$/i).count()) === 0);
+  ok("one column-heading row: Acres + a lock icon + an eye icon (and no old 'Active' heading)", (await T("parcels-active-head").count()) === 0 && (await T("parcels-columns").count()) === 1 && (await T("parcels-col-acres").count()) === 1 && (await T("parcels-col-lock").count()) === 1 && (await T("parcels-col-eye").count()) === 1);
   const chk = await box(T("parcel-row-check-p1")), nm = await box(T("parcel-row-p1")), ac = await box(T("parcel-row-acres-p1"));
   ok("checkbox, acres and eye share one centre line (the name block may be taller: it carries the source line)", chk && nm && ac && eye && [chk, ac].every((b) => Math.abs(b.cy - eye.cy) <= 3), `${[chk, nm, ac, eye].map((b) => b && b.cy.toFixed(1))}`);
   const l1 = await T("parcel-row-p1").innerText(), l3 = await T("parcel-row-p3").innerText();
