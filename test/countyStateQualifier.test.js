@@ -112,7 +112,7 @@ describe("a county name outside the configured states resolves to nothing, never
     ["Liberty County", "FL"],
     ["Chambers County", "AL"],
     ["Harris County", "GA"],
-    ["Montgomery County", "AL"],
+    ["Pickens County", "AL"], // B2302784 — Montgomery AL is wired now; Pickens is still a named gap
   ])("%s, %s → null", (name, state) => {
     expect(countyKeyForName(name, state)).toBeNull();
   });
