@@ -628,6 +628,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * a locate error…) is left alone even though nothing here resets this ref for those call sites.
    * Null once nothing outage-shaped is being shown (or once it's been cleared). */
   const sourceNoticeRef = useRef(null);
+  /* NEW-1 (B2288560 amendment, owner 2026-10-16: "it should be at the center bottom, and be removable") — the ✕ on a
+   * parcel-source notice sets this; while it is set no parcel-source notice is raised again, so a slow tile a second
+   * later cannot bring it back. It is the SESSION of the tool: `clearDisplays` (Select parcels ended) resets it, and a
+   * reload starts it false — never persisted, because the warning is useful the next time it is new. */
+  const sourceNoticeDismissedRef = useRef(false);
   /* NEW-1 — could the map's CURRENT view plausibly reach whatever this notice names? Read the
    * map live (never React state) so it's correct whether asked the instant a notice is about to
    * be shown or, later, on every pan/zoom settle. A county notice checks its bbox; a state-scoped
@@ -653,6 +658,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * `onMove`. Per the bug's EXPECTED behavior: a notice naming somewhere the view isn't near
    * simply isn't shown — never a corrected-but-still-wrong location, never a generic substitute. */
   const setSourceNotice = (notice, message) => {
+    if (sourceNoticeDismissedRef.current) return; // NEW-1 (B2288560 amendment) — the owner closed it; it stays closed for this Select-parcels session
     if (!sourceNoticeStillPlausible(notice)) return;
     setErr(message);
     sourceNoticeRef.current = { ...notice, message };
@@ -2827,6 +2833,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (n && errRef.current === n.message) setErr("");
     sourceNoticeRef.current = null;
   };
+  const dismissSourceNotice = () => {
+    sourceNoticeDismissedRef.current = true;
+    retractSourceNotice();
+  };
   const markDisplaySlow = (key, slow) => {
     setSlowDisplayKeys((prev) => {
       if (prev.has(key) === slow) return prev; // no-op — never a fresh Set (and a render) for nothing
@@ -3151,6 +3161,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     displaysRef.current = {};
     displaySrcRef.current = {};
     retractSourceNotice(); // NEW-1 — the tool is off; a parcel-source banner must not outlive it
+    sourceNoticeDismissedRef.current = false; // NEW-1 (amendment) — the session ended; a later outage is a new occasion
     // B1427664 — every layer is gone, so nothing is "still loading" until select mode reopens
     // them fresh; leaving stale keys here would light the tip immediately on re-entry.
     setSlowDisplayKeys((prev) => (prev.size ? new Set() : prev));
@@ -4346,6 +4357,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
 
   // (The parcel card's own label/value row moved to components/ParcelInfoCard.jsx — NEW-1.)
 
+  /* NEW-1 (B2288560 amendment) — is the text now in `err` a parcel-SOURCE notice (the slow / outage banner `setSourceNotice`
+   * raised, matched by its exact message so an address-search failure sharing `err` is left where it was)? Those float
+   * bottom-centre with a ✕; every other `err` stays in the bottom-left stack. A banner that carries an action button
+   * (`fallbackOffer`) or shares the slot with the locate offer keeps the stack, which owns those buttons. */
+  const sourceNoticeFloats = !!err && !fallbackOffer && !locateFar
+    && !!sourceNoticeRef.current && sourceNoticeRef.current.message === err;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
       {/* map — B1168128 (×2): touchAction/overscrollBehavior on the Leaflet host itself so a
@@ -5320,7 +5338,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         <div style={{ position: "absolute", left: 12, top: narrow ? SEARCH_BAR_CLEARANCE_PX : 0, bottom: ZOOM_CONTROL_CLEARANCE_PX, maxWidth: 380, zIndex: 1000, display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 8, pointerEvents: "none", overflow: "hidden" }}>
         {/* error toast — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
             from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
-        {(err || locateFar) && (
+        {((err && !sourceNoticeFloats) || locateFar) && (
           <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
             {err}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
@@ -5379,6 +5397,22 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             the other half of this fix (it now clears this state on the flip, in both directions,
             instead of relying on the gate alone). */}
         {visible && isActive && <ToastHost toasts={hiddenToasts} onDismiss={dismissHiddenToast} />}
+        {/* NEW-1 (B2288560 amendment, owner 2026-10-16: "it should be at the center bottom, and be removable") — the
+            parcel-source slow / outage banner. It was the bottom-LEFT `err` toast, just above the zoom +/-; it now rides
+            the shared bottom-centre slot (docs/DESIGN.md "Floating notifications") like its sibling notices, with a ✕.
+            The Sites / Layers panels OVERLAY this map (they do not narrow it), so the window centre IS the visible map's
+            centre. maxWidth is symmetric — the zoom stack (bottom-left) and scale bar (bottom-right) each need ~60 px —
+            so on a narrow window it WRAPS between them instead of covering either. The ✕ is the same glyph as the
+            locate notice's; its hit area is 28 px. Dismissal: see `sourceNoticeDismissedRef`. */}
+        {visible && isActive && sourceNoticeFloats && (
+          <FloatingNotice testId="parcel-source-notice" maxWidth="min(420px, calc(100vw - 120px))">
+            <div data-testid="map-status-toast" role="status" style={{ display: "flex", alignItems: "flex-start", gap: 4, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 4px 6px 11px", fontSize: FONT_SIZE.control, color: PAL.accent, lineHeight: 1.45 }}>
+              <span style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>{err}</span>
+              <button type="button" data-testid="map-status-toast-dismiss" onClick={dismissSourceNotice} aria-label="Dismiss" title="Dismiss"
+                style={{ flex: "none", width: 28, height: 28, display: "grid", placeItems: "center", cursor: "pointer", background: "transparent", color: PAL.muted, border: "none", borderRadius: RADIUS.sm, fontSize: FONT_SIZE.control, fontWeight: 800, padding: 0, lineHeight: 1, fontFamily: "inherit" }}>✕</button>
+            </div>
+          </FloatingNotice>
+        )}
         {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
