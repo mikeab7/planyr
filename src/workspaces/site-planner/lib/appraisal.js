@@ -265,10 +265,12 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 // B2191xxx — `owner_?name_?\d+` is HCAD's own spelling (`owner_name_1` / `owner_name_2`); without it the
 // Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
-/* Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
+/* Alabama (B2302784): `OWNER_ALL` (the Central Alabama commission's merged roll — Autauga, Montgomery), `PropertyOwner` (Madison), `FULLNAME` (Greene) and
+ * `Name1` (Mobile's Revenue Commission, Shelby's DOR roll, St. Clair's `NAME_1`) are the owner column of those sources; `name_?1` is as weak as bare `name`.
+ * Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
  * L15Parce_2, GIS-measured acres L15Parce_4 (GPDATA__DA / __CA are the deed / assessor acres, one of which is 0 on every row) —
  * matched by their EXACT names here (and in the situs / Account / Acreage patterns below); no other source uses them. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow)$/i;
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
 
@@ -291,7 +293,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
     if (lk !== key && /^name$/i.test(lk)) continue;
     // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
     // NUMBER), so any real owner column outranks it whatever order the service lists them in.
-    const seq = ownerSeq(lk) + (/^name$/i.test(lk) ? 1000 : 0);
+    const seq = ownerSeq(lk) + (/^name(_?1)?$/i.test(lk) ? 1000 : 0);
     if (seq < bestSeq) { best = key; bestSeq = seq; }
   }
   if (best) return best;

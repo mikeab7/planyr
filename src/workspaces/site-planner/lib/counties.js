@@ -47,6 +47,7 @@ import { cityScopeAnswer, CITY_SCOPE_COUNTIES } from "./cityScopes.js";
 // dynamic import of cityScopes.js from the admin chunk becomes its own shared chunk and breaches the Site-route allowlist.
 export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
+import { alRaw, alMap } from "./alabamaParcels.js"; // NEW-1 (B2302784) — the Alabama county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -974,6 +975,7 @@ const COUNTIES_RAW = {
     help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Benton County. Search by parcel number or a site address.",
   },
   ...msMarisRaw(),
+  ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -1307,11 +1309,14 @@ const COUNTIES_RAW = {
     help: "West Feliciana Parish parcels (parish government GIS, June 2022). Search by parcel ID or a street name.",
   },
   al_jefferson: {
+    // B2302784 — the layer the county's OWN "Parcel Look-up" web app queries (jccgis.jccal.org Basemap/Parcels layer 0), now
+    // MEASURED through the relay 2026-10-16 (it had shipped "unconfirmed"): ParcelNo / OWNERNAME / ADDR_PSPR / GIS_ACRES.
     state: "AL", label: "Jefferson County, AL",
-    layerUrl: "https://jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
-    idField: "PARCELID", // unconfirmed — jccgis.jccal.org is blocked from this build environment.
-    help: "Jefferson County (Birmingham) parcels (county GIS). Search by parcel ID or a site address.",
+    layerUrl: "/gis-proxy/jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
+    idField: "ParcelNo", addrField: "ADDR_PSPR",
+    help: "Jefferson County (Birmingham) parcels (county GIS). Search by parcel number or a site address.",
   },
+
   /* ═══ B1551617 — Tier 1 (Hillwood-market) counties, discovered + verified LIVE from this sandbox
    * 2026-09-11 by ui-audit/discover-county-parcels.mjs (routes: ArcGIS Hub dataset API / ArcGIS
    * Online item search — both *.arcgis.com, reachable here). Every one passed the harness's
@@ -3015,6 +3020,7 @@ const COUNTIES_MAP_RAW = {
   ky_jefferson: { state: "KY", center: [38.2527, -85.7585], zoom: 10, bbox: [38.05, -85.95, 38.40, -85.45], mapServer: null, layerUrl: COUNTIES.ky_jefferson.layerUrl },
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
   ...msMarisMap(),
+  ...alMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
