@@ -15,6 +15,8 @@
  * Kept pure + framework-free (its own rot2 / SIDE_N, matching dockZones.js) so the
  * resize-survives-a-host-refit contract is unit-testable; SitePlanner + siteModel wire it in.
  */
+import { anchoredAlongSpan } from "./dockZones.js";
+
 export const DOGEAR_W = 55; // default span along the dock wall
 export const DOGEAR_D = 60; // default projection out from the dock face
 
@@ -124,6 +126,69 @@ export function wallStripBox(b, side, bumps = [], depth) {
   return { ...wallKidBox(b, side, { depth, gap: 0, ...span }), ...span };
 }
 
+/* ---- B2268801 — per-layer ALONG-WALL extent on a rear / end wall ------------------------------------------------
+ * A dock-wall layer already carried `alongLen` + `alongAnchor` + `alongOff` (dockZones.anchoredAlongSpan). A rear / end
+ * wall's layers (Walk, Buffer, Road, Trailer) take the SAME three keys, resolved against the wall's extended-side span
+ * (`sidewalkSpanForBumps`: the wall plus any bump-out that lengthens it) — so one vocabulary, one resolver, on every wall.
+ * A layer with no `alongLen` runs the whole span (every plan saved before this loads full-length, unchanged). Side
+ * parking keeps its own stored run (`sideParkFit`, below); it is mapped to the same {run, alongShift} by the callers.
+ * Everything here is in the host's LOCAL frame (alongShift is +X on a top/bottom wall, +Y on a left/right one). */
+export const hasWallExtent = (k) => !!k && Number(k.alongLen) > 0;
+/** A layer's resolved { run, alongShift } against the wall span `{ run, alongShift }`. */
+export function wallKidExtent(kid, span) {
+  const e = anchoredAlongSpan({ stored: kid && kid.alongLen, anchor: kid && kid.alongAnchor, off: kid && kid.alongOff,
+    chainAlong: span.run, chainShift: span.alongShift || 0, fullAlong: span.run,
+    limitAlong: span.run, limitShift: span.alongShift || 0 });   // the clamp window IS the extended wall, wherever its centre sits
+  return { run: e.along, alongShift: e.shift };
+}
+const EXT_TOL = 0.5;
+/** The stored keys for a layer that should run `{ run, alongShift }` on a wall whose span is `span`. A layer on the span
+ *  default stores NOTHING (it keeps tracking the wall); one flush with the wall's start / end stores that anchor, so it
+ *  follows that end when a bump-out later lengthens the wall; anything else is a centre offset. `undefined` = drop key. */
+export function extentFieldsFor(ext, span) {
+  const clear = { alongLen: undefined, alongAnchor: undefined, alongOff: undefined };
+  const run = Math.max(1, Math.min(span.run, Number(ext.run) || span.run)), sh = Number(ext.alongShift) || 0;
+  const sStart = (span.alongShift || 0) - span.run / 2, sEnd = (span.alongShift || 0) + span.run / 2;
+  if (Math.abs(run - span.run) <= EXT_TOL) return clear;
+  const q = (n) => Math.round(n * 100) / 100;
+  if (Math.abs(sh - run / 2 - sStart) <= EXT_TOL) return { alongLen: q(run), alongAnchor: -1, alongOff: 0 };
+  if (Math.abs(sh + run / 2 - sEnd) <= EXT_TOL) return { alongLen: q(run), alongAnchor: 1, alongOff: 0 };
+  return { alongLen: q(run), alongAnchor: 0, alongOff: q(sh - (span.alongShift || 0)) };
+}
+/** What the edit box shows for a layer running `ext` on `span`: its length, whether it is the full wall, and which end
+ *  (if any) it is flush with — read off the GEOMETRY, so it is the same answer for strips, road, trailer and parking. */
+export function layerAlignOf(ext, span) {
+  const run = Number(ext.run) || 0, sh = Number(ext.alongShift) || 0, ss = Number(span.alongShift) || 0;
+  const full = Math.abs(run - span.run) <= EXT_TOL;
+  const start = Math.abs((sh - run / 2) - (ss - span.run / 2)) <= EXT_TOL, end = Math.abs((sh + run / 2) - (ss + span.run / 2)) <= EXT_TOL;
+  return { len: run, max: span.run, full, start: !full && start, end: !full && end, centre: !full && Math.abs(sh - ss) <= EXT_TOL };
+}
+/** The { run, alongShift } a layer should have after an edit-box change (`{ len }` · `{ align: -1|0|1 }` · `{ full }`).
+ *  A typed length keeps the end the layer is flush with (or its centre); Align moves the layer to that end of the wall. */
+export function wallExtentAfter(cur, change, span) {
+  const ss = Number(span.alongShift) || 0, sStart = ss - span.run / 2;
+  if (change.full) return { run: span.run, alongShift: ss };
+  const a = layerAlignOf(cur, span);
+  const run = change.len == null ? Math.min(span.run, cur.run) : Math.max(1, Math.min(span.run, Math.round(Number(change.len))));
+  let sh;
+  if (change.align != null) sh = change.align < 0 ? sStart + run / 2 : change.align > 0 ? ss + span.run / 2 - run / 2 : ss;
+  else if (a.start) sh = sStart + run / 2;
+  else if (a.end) sh = ss + span.run / 2 - run / 2;
+  else sh = cur.alongShift;
+  const lim = Math.max(0, (span.run - run) / 2);
+  return { run, alongShift: Math.min(ss + lim, Math.max(ss - lim, sh)) };
+}
+/** The box of a FLUSH road / wall-trailer layer with an along extent: its current perpendicular centre and depth kept,
+ *  its length and position along the wall resolved from its keys (host-local, same shape as `wallKidBox`). */
+export function flushKidBoxFor(b, side, bumps, kid) {
+  const span = sidewalkSpanForBumps(b, side, bumps), e = wallKidExtent(kid, span);
+  const isVert = side === "left" || side === "right";
+  const l = rot2(kid.cx - b.cx, kid.cy - b.cy, -(b.rot || 0));
+  const { dimBX, dimBY } = hostAxisExtents(b, kid);
+  const depth = isVert ? dimBX : dimBY;
+  return isVert ? { lx: l.x, ly: e.alongShift, dimBX: depth, dimBY: e.run } : { lx: e.alongShift, ly: l.y, dimBX: e.run, dimBY: depth };
+}
+
 /* NEW-1 (wall layers) — a landscape BUFFER added to a wall through the Docks & walls strip is a FLUSH LAYER: it sits
  * beyond whatever is inboard of it (sidewalk, parking), so only its length ALONG the wall is derived. Treating it as
  * a wall strip snapped it flush to the wall, on top of the sidewalk — the panel listed Walk + Buffer, the canvas
@@ -133,7 +198,13 @@ export const isFlushWallLayer = (x) => !!x && x.type === "landscape" && !x.sidew
 /* The derived box of a wall strip. A flush layer keeps its CURRENT perpendicular position (the caller repacks it
  * beyond what is inboard); everything else is flush to the wall as before. */
 export function wallStripBoxFor(b, side, bumps, depth, kid, minInner = 0) {
-  const box = wallStripBox(b, side, bumps, depth);
+  let box = wallStripBox(b, side, bumps, depth);
+  // B2268801 — a layer with its own along-wall extent (`alongLen`/`alongAnchor`/`alongOff`) runs THAT, resolved against
+  // the extended-side span; a layer with none runs the whole span exactly as before.
+  if (hasWallExtent(kid)) {
+    const e = wallKidExtent(kid, box);
+    box = { ...wallKidBox(b, side, { depth, gap: 0, run: e.run, alongShift: e.alongShift }), run: e.run, alongShift: e.alongShift };
+  }
   if (!isFlushWallLayer(kid) || !Number.isFinite(kid.cx) || !Number.isFinite(kid.cy)) return box;
   const l = rot2(kid.cx - b.cx, kid.cy - b.cy, -(b.rot || 0));
   const isVert = side === "left" || side === "right";

@@ -172,6 +172,7 @@ export function addOptions(isDock, layers) {
   if (!kinds.includes("sidewalk")) out.push(opt("sidewalk"));
   // Parking is placed just beyond the sidewalk, so it is offered only before a buffer / road sits there.
   if (!kinds.includes("parking") && !kinds.some((k) => k === "buffer" || k === "road")) out.push(opt("parking"));
+  out.push(opt("trailer"));                                      // B2268801 — trailer rows on a rear / end wall too, repeating
   out.push(opt("buffer"), opt("road"));
   return out;
 }

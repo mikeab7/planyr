@@ -380,6 +380,7 @@ import {
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
   wallStripBox, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
+  hasWallExtent, extentFieldsFor, layerAlignOf, wallExtentAfter, flushKidBoxFor,
   sideParkStack } from "./lib/dogEar.js";
 import { costRollup } from "./lib/costTakeoff.js";
 import {
@@ -11510,12 +11511,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addParkingRowSide = (b, name) => {
     if (sideParkingOn(b, name)) return;
     pushHistory();
-    setEls((a) => repackFlushBeyond(relayoutWallKids([...a, makeParkingRowEl(b, name, 1)], b), b, name));
+    // B2268801 — the new field runs the length / position of the layer just inboard of it (the Walk), else the whole wall.
+    setEls((a) => repackFlushBeyond(relayoutWallKids([...a, makeParkingRowEl(b, name, 1, wallOutermostExtent(a, b, name))], b), b, name));
     setSel({ kind: "el", id: b.id });
   };
   // The new side-parking field for wall `name`, `rows` stall rows deep (1 = the classic one row +
   // aisle). Pure over the current `els` (the sidewalk already on the wall sets how far out it starts).
-  const makeParkingRowEl = (b, name, rows = 1) => {
+  const makeParkingRowEl = (b, name, rows = 1, inherit = null) => {
     const [nx, ny] = SIDE_N[name];
     const sw = sidewalkOnSide(b, name);
     // Offset only by the sidewalk's THICKNESS (never its run) — swThick resolves the
@@ -11528,7 +11530,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the projection of any corner bump-out that lengthens it). A field still sitting on that
     // default counts as UNTOUCHED and keeps tracking the host; once the user slides or resizes it
     // along the wall, relayoutWallKids pins it there instead (NEW-3, owner amendment).
-    const { run: along, alongShift } = sidewalkSpanForBumps(b, name, bumpsOfHost(els, b));
+    const spanDef = sidewalkSpanForBumps(b, name, bumpsOfHost(els, b));
+    const { run: along, alongShift } = inherit || spanDef;
+    const inheritFit = inherit && (Math.abs(inherit.run - spanDef.run) > 0.5 || Math.abs(inherit.alongShift - spanDef.alongShift) > 0.5)
+      ? { sideParkFit: { run: inherit.run, alongShift: inherit.alongShift } } : {};   // recorded intent, so the refit carries it
     const perp = wallKidPerp(b, name, parkDepth, swDepth);
     const off = rot2(nx !== 0 ? perp : alongShift, ny !== 0 ? perp : alongShift, b.rot);
     // First stall row hugs the building face, drive aisle on the OUTSIDE (B119): the
@@ -11536,7 +11541,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // row there by default, so DON'T flip the depth (flipDepth would put the aisle against
     // the building). growParking then extends rows outward, away from the wall.
     return { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
-      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
+      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, ...inheritFit };
   };
   /* NEW-2 — "+" on a wall whose parking has been EXPLODED. The set is a stack of individual bands,
      so a new stall row is appended BEYOND the outermost piece rather than growing a band that has
@@ -11822,6 +11827,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     return maxOut;
   };
+  // B2268801 — the { run, alongShift } (host frame) of the layer a NEW layer on a rear / end wall would sit outside of: the
+  // outermost bonded layer on that wall (strip, road, trailer or parking), or null when the wall holds none.
+  const wallOutermostExtent = (arr, b, side) => {
+    const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
+    let best = null, bestOut = -Infinity;
+    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side
+      && (isWallStrip(x) || x.type === "road" || isWallTrailer(x) || x.sideParkSide || SIDE_PARK_PAD_TYPES.has(x.type))).forEach((x) => {
+      const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot), out = sg * (isH ? l.y : l.x);
+      if (out > bestOut) { bestOut = out; best = x; }
+    });
+    return best ? wallKidAlong(b, side, best) : null;
+  };
   // Append catalog layer `key` as a new OUTERMOST layer on `side`. Dock sides extend the relayout
   // chain (noFit, prevZone); non-dock sides place an ordinary wall-kid flush beyond the outermost
   // (the proven fitKid path follows building resize). Sidewalk/parking reuse the existing adders.
@@ -11829,7 +11846,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const c = ZONE_CATALOG[key]; if (!c) return;
     const { dockSides } = dockSidesOf(b);
     const isDock = dockSides.includes(side);
-    if (c.sides === "dock" && !isDock) return;
+    if (c.sides === "dock" && !isDock && key !== "trailer") return;   // B2268801 — trailer parking is offered on rear / end walls too
     if (c.sides === "nondock" && isDock) return;
     if (key === "sidewalk") { addSidewalkSide(b, side); return; }
     if (key === "parking") { if (!sideParkingOn(b, side)) addParkingRowSide(b, side); return; }
@@ -11851,9 +11868,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const [nx, ny] = SIDE_N[side]; const isH = ny !== 0;
       const outer = sideOuterPerp(a, b, side);
       const off = rot2(nx * (outer + depth / 2), ny * (outer + depth / 2), b.rot);
-      const along = isH ? b.w : b.h;
-      const z = { id: uid(), type: c.elType, cx: b.cx + off.x, cy: b.cy + off.y, w: isH ? along : depth, h: isH ? depth : along, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, stackSide: side, ...(c.tag || {}) };
+      // B2268801 — the new layer runs the LENGTH and POSITION of the layer just inboard of it (the outermost layer already
+      // on this wall); the first layer against the wall, or one after a full-length layer, runs the whole wall. Depth
+      // is the layer's own default, never copied. Only the layer's own box and its three extent keys are written.
+      const span = sidewalkSpanForBumps(b, side, bumpsOfHost(a, b));
+      const prev = wallOutermostExtent(a, b, side);
+      const ext = prev || { run: span.run, alongShift: span.alongShift };
+      const along = ext.run;
+      const shiftOff = rot2(isH ? ext.alongShift : 0, isH ? 0 : ext.alongShift, b.rot);
+      const z = key === "trailer"
+        ? { id: uid(), type: "trailer", wallTrailer: true, cx: b.cx + off.x + shiftOff.x, cy: b.cy + off.y + shiftOff.y, w: along, h: depth,
+            rot: ((b.rot + (isH ? 0 : 90)) % 360 + 360) % 360, attachedTo: b.id, stackSide: side,
+            cfg: { trailerW: settings.trailerW || OPP_TRAILER_W, trailerL: depth, trailerAisle: 0, single: true } }
+        : { id: uid(), type: c.elType, cx: b.cx + off.x + shiftOff.x, cy: b.cy + off.y + shiftOff.y, w: isH ? along : depth, h: isH ? depth : along, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, stackSide: side, ...(c.tag || {}) };
       if (key === "road") { z.travelW = catalogDepthDefault("road", settings); z.curb = (+settings.roadCurb || CURB); }
+      const keys = extentFieldsFor(ext, span);
+      Object.keys(keys).forEach((k) => { if (keys[k] !== undefined) z[k] = keys[k]; });
       return [...a, z];
     });
     setSel({ kind: "el", id: b.id });
@@ -12144,6 +12174,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * Explode piece used to fail this test and therefore never re-flushed when its host moved or was
    * resized — the "the parking is entirely separated from the building" class. */
   const ownedSidePark = (x, b) => isSideParkPad(x, b) && !!sideOfKid(b, x);
+  // B2268801 — a Road or Trailer layer on a rear / end wall: a FLUSH layer (placed beyond what is inboard, repacked by
+  // repackFlushBeyond), never a dock-chain member (no noFit / forCourt / prevZone).
+  const isWallTrailer = (x) => !!x && x.type === "trailer" && !!x.wallTrailer && !x.points;
+  const ownedFlushKid = (x, b) => !!x && (x.type === "road" || isWallTrailer(x)) && x.attachedTo === b.id && !x.points && !x.dogEar
+    && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && !isCenterlineRoad(x);
   const sideParkSideOf = (b, x) => x.sideParkSide || sideOfKid(b, x);
   /* Re-lay every wall-hugging child of `b` from the RULE rather than from a remembered box
      (NEW-2 / NEW-3). `sideRef` is the host box used only to infer an untagged child's side — on a
@@ -12195,6 +12230,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const placed = arr.map((x) => {
       if (ownedWallStrip(x, b)) return sidewalkFullRunPatch(arr, b, x, sideRef);
+      // B2268801 — a rear / end wall's Road or Trailer layer with its own along extent re-derives its length + position
+      // from it (a layer with none is left exactly as before: its stored box, scaled with the wall on a resize).
+      if (ownedFlushKid(x, b) && hasWallExtent(x)) {
+        const fside = sideOfKid(sideRef, x), fbox = flushKidBoxFor(b, fside, bumps, x);
+        const { cross: fcross } = hostAxisExtents(b, x), foff = rot2(fbox.lx, fbox.ly, b.rot);
+        return { ...x, ...ownExtents(fcross, fbox.dimBX, fbox.dimBY), cx: b.cx + foff.x, cy: b.cy + foff.y };
+      }
       if (!ownedSidePark(x, b)) return x;
       const side = sideParkSideOf(b, x);
       const { cross } = hostAxisExtents(b, x);
@@ -20410,7 +20452,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dockSidesOf(b).dockSides.includes(side)) {
       return dockChainOnSide(els, b, side).map((z, i) => {
         const kind = z.truckCourt ? "court" : z.type === "trailer" ? "trailer" : z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer";
-        const ext = i > 0 ? (() => { const cx = wallExtentCtx(els, b, side), r = resolveLayerExtent(z, false, cx); return { len: Math.round(r.along), max: Math.round(cx.fullAlong), full: !(z.alongLen > 0), anchor: (Number(z.alongAnchor) === 1 ? 1 : Number(z.alongAnchor) === -1 ? -1 : 0), centred: Math.abs(r.shift - cx.chainShift) < 0.5 }; })() : null;
+        const ext = i > 0 ? (() => { const cx = wallExtentCtx(els, b, side), r = resolveLayerExtent(z, false, cx), an = Number(z.alongAnchor), full = !(z.alongLen > 0);
+          return { len: Math.round(r.along), max: Math.round(cx.fullAlong), full, start: !full && an === -1, end: !full && an === 1, centre: !full && an !== -1 && an !== 1 && Math.abs(r.shift - cx.chainShift) < 0.5 }; })() : null;
         const base = { id: z.id, ids: [z.id], kind, index: i, extent: ext, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
         if (kind !== "trailer") return base;
         const sp = trailerSpec(z, settings.trailerAisle);
@@ -20423,14 +20466,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pads = sideParkPadsOn(b, side);
     const padIds = new Set(pads.map((p) => p.id));
     const out = [];
+    // B2268801 — what the edit box shows for a layer's length / position: read off its GEOMETRY against the wall's span
+    // (one answer for a strip, road, trailer and a parking field alike).
+    const wallSpan = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
+    const extentOf = (x) => { const a = layerAlignOf(wallKidAlong(b, side, x), wallSpan); return { len: Math.round(a.len), max: Math.round(a.max), full: a.full, start: a.start, end: a.end, centre: a.centre }; };
     els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
-      const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : null;
+      const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : isWallTrailer(x) ? "trailer" : null;
       if (!kind) return;
       const depth = kind === "road" ? (x.travelW ?? Math.max(1, depthOfKid(x) - 2 * (+x.curb || CURB))) : depthOfKid(x);
-      out.push({ id: x.id, ids: [x.id], kind, fill: elStyle(x, settings).fill, depth: Math.round(depth), perp: perpOf(x) });
+      out.push({ id: x.id, ids: [x.id], kind, wallKid: kind === "trailer" || undefined, fill: elStyle(x, settings).fill, depth: Math.round(depth), extent: extentOf(x), perp: perpOf(x) });
     });
     if (pads.length) {
       out.push({ id: pads[0].id, ids: pads.map((p) => p.id), kind: "parking", fill: elStyle(pads[0], settings).fill, split: pads.length > 1,
+        extent: pads.length === 1 ? extentOf(pads[0]) : null,
         rows: pads.reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0),
         depth: Math.round(pads.reduce((t, p) => t + depthOfKid(p), 0)), perp: Math.min(...pads.map(perpOf)) });
     }
@@ -20446,7 +20494,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
     const perp = (x) => { const l = local(x); return sg * (isH ? l.y : l.x); };
     const depth = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
-    const flush = (x) => (x.type === "landscape" && !x.sidewalkSide) || x.type === "road";
+    const flush = (x) => (x.type === "landscape" && !x.sidewalkSide) || x.type === "road" || isWallTrailer(x);
     let run = (isH ? b.h : b.w) / 2;
     const moves = new Map();
     // Derived layers (sidewalk, parking) keep their place; flush layers (buffer, road) pack beyond ALL of them.
@@ -20488,6 +20536,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const el = els.find((x) => x.id === layer.id);
     if (!el) return;
+    if (isWallTrailer(el)) {
+      // A rear / end wall's trailer row: its depth is its own `h` (the stripes run along `w`, whatever the wall); the
+      // layers outside it close in / move out through the shared flush repack.
+      pushHistory();
+      setEls((a) => repackFlushBeyond(a.map((x) => (x.id === el.id ? { ...x, h: nd, cfg: { ...(x.cfg || {}), trailerL: nd } } : x)), b, sides[0]));
+      return;
+    }
     if (layer.kind === "road") {
       pushHistory();
       setSidewalkWidth(el, nd + 2 * (+el.curb || CURB), { history: false });
@@ -20500,7 +20555,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // was held from), `{ align }` pins its start / centre / end to the court's span, `{ full: true }` hands it back to
   // tracking the court. Touches ONLY that layer — its neighbours keep their own extents.
   const setWallLayerExtent = (b, sides, layer, change) => {
-    if (!sidesAreDock(b, sides) || layer.index < 1) return;
+    if (!sidesAreDock(b, sides)) {
+      // B2268801 — a rear / end wall (one wall per row, never linked): the layer's length / position along the wall.
+      const side = sides[0];
+      const kidsOf = layer.ids.map((id) => els.find((x) => x.id === id)).filter(Boolean);
+      if (kidsOf.length !== 1) return;                                   // a split parking stack keeps its own per-piece runs
+      const el = kidsOf[0];
+      const span = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
+      const want = wallExtentAfter(wallKidAlong(b, side, el), change, span);
+      pushHistory();
+      setEls((a) => {
+        const cur = a.find((x) => x.id === el.id); if (!cur) return a;
+        const isVert = side === "left" || side === "right";
+        const { cross, dimBX, dimBY } = hostAxisExtents(b, cur);
+        const l = rot2(cur.cx - b.cx, cur.cy - b.cy, -b.rot);
+        const depth = isVert ? dimBX : dimBY;
+        const box = isVert ? { lx: l.x, ly: want.alongShift, dimBX: depth, dimBY: want.run } : { lx: want.alongShift, ly: l.y, dimBX: want.run, dimBY: depth };
+        const off = rot2(box.lx, box.ly, b.rot);
+        const placed = { ...cur, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
+        // A parking field keeps its own stored run (the refit below records the pin); every other layer stores the extent keys.
+        const moved = (cur.sideParkSide || SIDE_PARK_PAD_TYPES.has(cur.type)) ? placed : applyZonePatch(placed, extentFieldsFor(want, span));
+        return relayoutWallKids(a.map((x) => (x.id === el.id ? moved : x)), b, b, { pinFrom: el.id });
+      });
+      return;
+    }
+    if (layer.index < 1) return;
     pushHistory();
     setEls((a) => {
       let next = a;
@@ -32523,7 +32602,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
     if (layer.kind === "parking") {
       const en = !layer.split && !ops.footEdit;
       body = head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Parking rows" testid="wall-parking-rows" value={layer.rows} min={0} max={24} step={1} onCommit={(n) => { if (en) ops.parkingRows(row, n); }} />));
-    } else if (layer.kind === "trailer") {
+    } else if (layer.kind === "trailer" && !layer.wallKid) {
       body = (
         <>
           {head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Trailer rows" testid="wall-trailer-rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />))}
@@ -32541,8 +32620,9 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
       body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
     }
     const ex = layer.extent;
+    const alignOn = (a) => !!ex && (a < 0 ? ex.start : a > 0 ? ex.end : ex.centre);
     const alignBtn = (a, label) => (
-      <button key={a} type="button" data-testid={`wall-align-${a < 0 ? "start" : a > 0 ? "end" : "centre"}`} aria-pressed={!ex.full && ex.anchor === a && (a !== 0 || ex.centred)} style={toggleBtn(!ex.full && ex.anchor === a && (a !== 0 || ex.centred))}
+      <button key={a} type="button" data-testid={`wall-align-${a < 0 ? "start" : a > 0 ? "end" : "centre"}`} aria-pressed={alignOn(a)} style={toggleBtn(alignOn(a))}
         title={a < 0 ? "Run from the start of the wall" : a > 0 ? "Run from the end of the wall" : "Centre on the wall"} onClick={() => ops.extent(row, layer, { align: a })}>{label}</button>
     );
     const extentRow = ex ? (
@@ -32552,7 +32632,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
           <span style={muted}>Align</span>
           {alignBtn(-1, "Start")}{alignBtn(0, "Centre")}{alignBtn(1, "End")}
         </span>
-        <button type="button" data-testid="wall-extent-full" style={{ ...link, opacity: ex.full ? 0.5 : 1 }} disabled={ex.full} title="Run the full length of the truck court" onClick={() => ops.extent(row, layer, { full: true })}>Full length</button>
+        <button type="button" data-testid="wall-extent-full" style={{ ...link, opacity: ex.full ? 0.5 : 1 }} disabled={ex.full} title={row.isDock ? "Run the full length of the truck court" : "Run the full length of the wall"} onClick={() => ops.extent(row, layer, { full: true })}>Full length</button>
       </span>
     ) : null;
     return (

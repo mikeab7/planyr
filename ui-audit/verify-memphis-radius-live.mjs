@@ -26,12 +26,21 @@ const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const ONLY = flag("--only");
 const STATES = flag("--states") ? new Set(flag("--states").split(",")) : null;
 const OUT = flag("--out") || "memphis-radius-live.json";
+const MS_ALL = args.includes("--ms-all"); // NEW-1 Mississippi: all 82 MS counties + 20 near-county-line points, + the Texas controls
 
 const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
 // The honest gaps (no public source wired) — must SAY so; everything else must select a lot. Kept in step with test/memphisRadius.test.js.
 const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
-const ARMS = [
+const MSFX = MS_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/mississippiCounties.json", import.meta.url), "utf8")) : null;
+const ARMS = MS_ALL ? [
+  { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
+  { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
+  { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
+  { name: "TX Waller (Brookshire)", state: "TX", lat: 29.786, lng: -95.951, expect: "lot", control: true },
+  ...MSFX.counties.map((c) => ({ name: `MS ${c.name}`, state: "MS", lat: c.lat, lng: c.lng, expect: "lot", county: c.name })),
+  ...MSFX.lines.map((c) => ({ name: `MS ${c.name}`, state: "MS", lat: c.lat, lng: c.lng, expect: "lot", county: c.county })),
+] : [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
   { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
@@ -44,7 +53,7 @@ const ARMS = [
     const k = `${c.state}:${c.name}`; const [lat, lng] = NUDGE[k] || [c.lat, c.lng];
     return { name: `${c.state} ${c.name}`, state: c.state, lat, lng, expect: NO_SOURCE.has(k) ? "gap" : "lot", county: c.name };
   }),
-  { name: "MS Webster (just OUTSIDE 100 mi)", state: "MS", lat: 33.5409, lng: -89.2631, expect: "gap", county: "Webster County" },
+  { name: "MS Webster (was outside 100 mi; wired 2026-10-16)", state: "MS", lat: 33.5409, lng: -89.2631, expect: "lot", county: "Webster County" },
 ].filter((a) => !STATES || a.control || STATES.has(a.state));
 // Interior offsets (degrees) tried until one lands on a lot — a centroid can sit on a road, river or lake.
 const DOFF = [[0, 0], [0.002, 0.002], [-0.002, -0.002], [0.004, -0.003], [-0.004, 0.003], [0.008, 0], [0, -0.008]];
@@ -76,9 +85,9 @@ const bodyText = () => page.evaluate(() => document.body.innerText);
 const sleep = (ms) => page.waitForTimeout(ms);
 const waitFor = async (fn, ms = 10000) => { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await fn(); if (v) return v; await sleep(250); } return v; };
 
-const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name)$/i;
+const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name|gpdata__ow)$/i; // gpdata__ow = Chester TN (CaptureCAMA) owner
 const ownerOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => OWNER_KEY.test(x) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
-const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id)$/i;
+const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id|l15parce_2)$/i; // l15parce_2 = Chester TN (CaptureCAMA) parcel id
 const idOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => ID_KEY.test(x.split(".").pop()) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
 // Geodesic-enough polygon area (spherical excess) of the returned rings, in acres — what the app received.
 function ringsAcres(g, sr) {
