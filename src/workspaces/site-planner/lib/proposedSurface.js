@@ -24,6 +24,21 @@
  * registry rule — an owner slope override changes the plane, never the law (the
  * mergeGradeOverride provenance rule).
  *
+ * GRADING MODEL (owner-only, 2026-10-16) — an OPTIONAL `grading` argument (buildPlanes / surfaceGrid /
+ * buildProposedSurface; absent ⇒ every code path below is byte-for-byte the pre-existing engine):
+ *   • the building pad is FLAT at its FFE;
+ *   • the truck court (and a dock-chain trailer row, which CONTINUES the court's plane) starts at
+ *     FFE − dock drop on the dock face and FALLS AWAY from the building at the pavement slope
+ *     (default 1.5%, user-set, never below 0.5%);
+ *   • every other paved element attached to a building (car rows, a wall trailer row) starts at
+ *     FFE − 0.5′ at its curb and falls away at the pavement slope;
+ *   • where two paved elements meet the HIGHER one RAMPS down to the lower at the grading slope (no
+ *     vertical step; the dock wall — pad ↔ court — is the one exempt wall);
+ *   • off every graded edge the ground holds that edge's elevation for a 5′ SHOULDER, then slopes at the
+ *     grading slope (2:1 default) until it daylights on existing ground;
+ *   • graded cells outside the SETBACK polygon are counted and located (`grid.outside`) — the flag.
+ * Access and drive grading are out of scope; volumes are bank volumes (no shrink/swell).
+ *
  * Pure, Node-testable, no DOM. Feet everywhere; elevations ft NAVD88. Screening only —
  * confirm final grading with your civil engineer. */
 import { pointInRing } from "./pondGeom.js";
@@ -85,6 +100,43 @@ const ringHash = (ring) => {
   return Math.round(h);
 };
 
+/* ---- grading-model helpers (owner-only; see header) ---- */
+export const GRADING_DEFAULTS = Object.freeze({
+  pavementSlopePct: 1.5, minPavementSlopePct: 0.5, lotDropFt: 0.5,
+  slopeRatio: 2, shoulderFt: 5, apronSampleFt: 20, maxCells: 9000,
+});
+// Unit outward normal of a ring edge (away from the ring's centroid), for either winding.
+function outwardNormal(a, b, c) {
+  let n = norm(-(b.y - a.y), b.x - a.x);
+  if (n.x * (c.x - (a.x + b.x) / 2) + n.y * (c.y - (a.y + b.y) / 2) > 0) n = { x: -n.x, y: -n.y };
+  return n;
+}
+/* The host-building WALL an element sits against: the edge whose outward normal best matches the
+ * direction from the host's centroid to the element's centroid. Returns { A (a point on the wall line),
+ * n (unit outward normal), t (unit tangent along the wall) }. Depth of a point off the wall is
+ * (pt − A)·n, so a court and the trailer row stacked beyond it share ONE plane by construction. Pure. */
+export function wallFor(hostRing, elCentre) {
+  const hc = ringCentroid(hostRing);
+  const u = norm(elCentre.x - hc.x, elCentre.y - hc.y);
+  let best = null, bs = -Infinity;
+  for (let i = 0; i < hostRing.length; i++) {
+    const a = hostRing[i], b = hostRing[(i + 1) % hostRing.length];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-6) continue;
+    const n = outwardNormal(a, b, hc);
+    const sc = n.x * u.x + n.y * u.y;
+    if (sc > bs) { bs = sc; best = { A: a, n, t: { x: -n.y, y: n.x } }; }
+  }
+  return best;
+}
+/* The B833 wedge's elevation drop at distance `od` past an edge held at `zEdge` over ground `g0`:
+ * flat for the shoulder, then `ratio` ft of run per foot of rise until it daylights. Returns dz
+ * (proposed − existing, + fill / − cut). shoulder 0 ⇒ the original B833 taper, exactly. */
+export function wedgeDz(zEdge, g0, od, ratio, shoulder = 0) {
+  const delta = zEdge - g0;
+  const taper = od <= shoulder ? 0 : (od - shoulder) / ratio;
+  return Math.abs(delta) <= taper ? 0 : delta > 0 ? delta - taper : delta + taper;
+}
+
 /* ---- classing ---- */
 /* Element → surface class. Input is the PREPARED element (see buildPlanes):
  * dockStack truthy = a truckCourt/forCourt dock-stack member (any type). Unknown /
@@ -116,8 +168,11 @@ export function slopeBand(classId, rule) {
  * Returns { planes: Map(id → plane), skipped: [ids with no derivable elevation] }.
  * plane: { elId, classId, label, baseElevFt, anchor, dir, slopePct, floating,
  *          check (validateSlopeAgainstRule vs the BASE rule), zAt(pt) }. Pure. */
-export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false } = {}) {
+export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, grading = null } = {}) {
   const planes = new Map();
+  const byIdEl = grading ? new Map(els.filter((e) => e && e.id != null).map((e) => [e.id, e])) : null;
+  const pavSlopeG = grading ? Math.max(GRADING_DEFAULTS.minPavementSlopePct, Number.isFinite(grading.pavementSlopePct) ? grading.pavementSlopePct : GRADING_DEFAULTS.pavementSlopePct) : 0;
+  const lotDropG = grading && Number.isFinite(grading.lotDropFt) ? grading.lotDropFt : GRADING_DEFAULTS.lotDropFt;
   const skipped = [];
   const t = clamp01(fieldT);
   const drop = Number.isFinite(dockDropFt) ? dockDropFt : 4;
@@ -144,6 +199,28 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     const elPad = el.padElevFt != null && isFinite(el.padElevFt) ? el.padElevFt : null;
     const c = ringCentroid(el.ring);
     let baseElevFt = null, anchor = c, dir = { x: 1, y: 0 }, slopePct = 0, floating = false;
+    // GRADING MODEL — a paved layer attached to a host building: planes measured off the host's WALL.
+    const gHost = grading && classId !== "buildingPad" && el.hostId != null ? byIdEl.get(el.hostId) : null;
+    const gHostRing = gHost && gHost.type === "building" && Array.isArray(gHost.ring) && gHost.ring.length >= 3 ? gHost.ring : null;
+    if (gHostRing) {
+      const hostFfe = gHost.padElevFt != null && isFinite(gHost.padElevFt) ? gHost.padElevFt : ffeFt;
+      const wall = wallFor(gHostRing, c);
+      const isDock = classId === "dockApron";
+      slopePct = hasOverride ? el.slopeOverridePct : pavSlopeG;
+      let d0 = 0;
+      if (!isDock) { d0 = Infinity; for (const v of el.ring) d0 = Math.min(d0, (v.x - wall.A.x) * wall.n.x + (v.y - wall.A.y) * wall.n.y); }
+      baseElevFt = elPad ?? (hostFfe != null && isFinite(hostFfe) ? hostFfe - (isDock ? drop : lotDropG) : null);
+      if (baseElevFt == null || !isFinite(baseElevFt)) { skipped.push(el.id); continue; }
+      const sG = slopePct / 100, z0G = baseElevFt, Ax = wall.A.x, Ay = wall.A.y, nx = wall.n.x, ny = wall.n.y, d0G = d0;
+      planes.set(el.id, {
+        elId: el.id, classId, label: baseRule ? baseRule.label : classId,
+        baseElevFt, anchor: wall.A, dir: wall.n, slopePct, floating: false,
+        wall: { A: wall.A, n: wall.n, t: wall.t, d0 }, hostId: gHost.id, graded: true,
+        check: validateSlopeAgainstRule(slopePct, baseRule),
+        zAt: (pt) => z0G - sG * ((pt.x - Ax) * nx + (pt.y - Ay) * ny - d0G),
+      });
+      continue;
+    }
     if (classId === "buildingPad") {
       baseElevFt = elPad ?? ffeFt;
     } else if (classId === "dockApron") {
@@ -192,6 +269,7 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
  * priced. Retained cells: { x, y, wFt, hFt, dzFt (+fill/−cut | null), elId, cls }.
  * Also accumulates the PL fill checks and the dock-approach break scan. Pure. */
 export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {} } = {}) {
+  const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   const maxCells = opts.maxCells || 3000;
   const minCellFt = opts.minCellFt || 2;
   const prec = (el) => (el.type === "building" ? 0 : el.dockStack ? 1 : 2);
@@ -206,25 +284,77 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   // element's apron REACH = its worst edge |Δz| × ratio (sampled at ring vertices +
   // edge midpoints; DEM voids skipped). No ground sampler → no aprons (nothing to
   // daylight against — the grid prices nothing anyway).
-  const apronRatio = Number.isFinite(opts.apronRatio) && opts.apronRatio > 0 ? opts.apronRatio : GRADING_RULES.landscapeTieDown.maxSlopeRatio;
+  // GRADING MODEL (owner-only): the slope ratio IS the apron ratio, the slope holds a SHOULDER first, paved
+  // neighbours RAMP, and graded cells outside the setback are located. `G` absent ⇒ none of it runs.
+  const G = opts.grading || null;
+  const gShoulder = G ? (Number.isFinite(G.shoulderFt) ? Math.max(0, G.shoulderFt) : GRADING_DEFAULTS.shoulderFt) : 0;
+  const apronRatio = G
+    ? (Number.isFinite(G.slopeRatio) && G.slopeRatio > 0 ? G.slopeRatio : GRADING_DEFAULTS.slopeRatio)
+    : Number.isFinite(opts.apronRatio) && opts.apronRatio > 0 ? opts.apronRatio : GRADING_RULES.landscapeTieDown.maxSlopeRatio;
   const apronsOn = opts.aprons !== false && typeof existAt === "function";
   const APRON_MAX_FT = 200; // sanity clamp — a >66 ft drop is not a screening wedge
+  // Paved neighbours ramp: a paved cell is held to  min(own plane, zNeighbour(edge) + distance/ratio)  so the
+  // HIGHER of two meeting surfaces ramps down to the lower at the grading slope. The building pad never
+  // ramps (the dock wall — and the curb at a lot — are walls by design).
+  const paved = G && G.ramp !== false ? graded.filter((g) => g.plane.classId !== "buildingPad") : [];
+  const rampOn = paved.length > 1;
+  let rampR = 0;
+  if (rampOn) {
+    let lo = Infinity, hi = -Infinity;
+    for (const g of paved) for (const v of g.el.ring) { const z = g.plane.zAt(v); if (z < lo) lo = z; if (z > hi) hi = z; }
+    rampR = Math.min(400, (hi - lo) * apronRatio + 10);
+  }
+  const zOf = !rampOn ? (g, pt) => g.plane.zAt(pt) : (g, pt) => {
+    let z = g.plane.zAt(pt);
+    if (g.plane.classId === "buildingPad") return z;
+    for (const h of paved) {
+      if (h === g) continue;
+      if (pt.x < h.bbox[0] - rampR || pt.x > h.bbox[2] + rampR || pt.y < h.bbox[1] - rampR || pt.y > h.bbox[3] + rampR) continue;
+      const q = nearestOnRing(pt, h.el.ring);
+      if (!q) continue;
+      const zl = h.plane.zAt(q) + Math.hypot(pt.x - q.x, pt.y - q.y) / apronRatio;
+      if (zl < z) z = zl;
+    }
+    return z;
+  };
+  const sampleFt = G ? (Number.isFinite(G.apronSampleFt) ? G.apronSampleFt : GRADING_DEFAULTS.apronSampleFt) : 0;
   for (const g of graded) {
     let reach = 0;
     if (apronsOn) {
       const ring = g.el.ring;
       for (let i = 0; i < ring.length; i++) {
         const a = ring[i], b = ring[(i + 1) % ring.length];
-        for (const p of [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }]) {
+        let pts;
+        if (sampleFt > 0) {
+          const len = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.max(2, Math.min(60, Math.ceil(len / sampleFt)));
+          pts = []; for (let k = 0; k < steps; k++) pts.push({ x: a.x + (b.x - a.x) * k / steps, y: a.y + (b.y - a.y) * k / steps });
+        } else pts = [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }];
+        for (const p of pts) {
           const gz = existAt(p);
           if (gz == null || !isFinite(gz)) continue;
-          const r = Math.abs(g.plane.zAt(p) - gz) * apronRatio;
+          const r = Math.abs(zOf(g, p) - gz) * apronRatio;
           if (r > reach) reach = r;
         }
       }
+      if (G && reach > 0) reach += gShoulder;
     }
     g.apron = Math.min(APRON_MAX_FT, reach);
   }
+  const sbRings = G && Array.isArray(G.setbackRings) && G.setbackRings.length ? G.setbackRings : null;
+  const outAgg = sbRings ? { count: 0, sf: 0, maxPastFt: 0, sx: 0, sy: 0, beyondParcel: 0, cutSf: 0, fillSf: 0, perEl: {} } : null;
+  const noteOut = (pt, A, dz, elId, cell) => {
+    if (!outAgg || inAnyRing(pt, sbRings)) return;
+    const past = distToRingEdges(pt, sbRings) + Math.sqrt(A) / 2;
+    cell.out = true; cell.pastFt = past;
+    outAgg.count++; outAgg.sf += A; outAgg.sx += pt.x; outAgg.sy += pt.y;
+    if (past > outAgg.maxPastFt) outAgg.maxPastFt = past;
+    if (dz != null && dz > PL_FILL_EPS_FT) outAgg.fillSf += A; else if (dz != null && dz < -PL_FILL_EPS_FT) outAgg.cutSf += A;
+    if (parcelRings.length && !inAnyRing(pt, parcelRings)) outAgg.beyondParcel++;
+    const pe = outAgg.perEl[elId] || (outAgg.perEl[elId] = { count: 0, sf: 0, maxPastFt: 0, sx: 0, sy: 0, fillSf: 0, cutSf: 0 });
+    pe.count++; pe.sf += A; pe.sx += pt.x; pe.sy += pt.y;
+    if (past > pe.maxPastFt) pe.maxPastFt = past;
+    if (dz != null && dz > PL_FILL_EPS_FT) pe.fillSf += A; else if (dz != null && dz < -PL_FILL_EPS_FT) pe.cutSf += A;
+  };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const g of graded) {
     if (g.bbox[0] - g.apron < x0) x0 = g.bbox[0] - g.apron; if (g.bbox[1] - g.apron < y0) y0 = g.bbox[1] - g.apron;
@@ -243,7 +373,6 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   let plFillSf = 0, tieShortSf = 0;
   let wedgeFillCf = 0, wedgeCutCf = 0, wedgeSf = 0, wedgeEasementSf = 0;
   const perEl = {};
-  const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < ny; j++) {
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
@@ -276,13 +405,13 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
           cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: null, elId: own.el.id, cls: "transition", wedge: true });
           continue;
         }
-        const delta = own.plane.zAt(oq) - g0;
-        const taper = od / apronRatio;
-        const dz = Math.abs(delta) <= taper ? 0 : delta > 0 ? delta - taper : delta + taper;
+        const dz = wedgeDz(zOf(own, oq), g0, od, apronRatio, gShoulder);
         if (Math.abs(dz) < PL_FILL_EPS_FT) continue; // at/past the daylight line
         wedgeSf += A;
         pricedCells++;
-        cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: g0 + dz, gFt: g0, elId: own.el.id, cls: "transition", wedge: true });
+        const wcell = { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: g0 + dz, gFt: g0, elId: own.el.id, cls: "transition", wedge: true };
+        noteOut(pt, A, dz, own.el.id, wcell);
+        cells.push(wcell);
         const pw = perEl[own.el.id] || (perEl[own.el.id] = { cutCf: 0, fillCf: 0 });
         if (dz > 0) { fillCf += A * dz; wedgeFillCf += A * dz; pw.fillCf += A * dz; }
         else { cutCf += A * -dz; wedgeCutCf += A * -dz; pw.cutCf += A * -dz; }
@@ -298,11 +427,14 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
       for (const pr of pondRings) if (pointInRing(pt, pr)) { inPond = true; break; }
       if (inPond) continue;
       gradedSf += A;
-      const prop = hit.plane.zAt(pt);
+      const prop = zOf(hit, pt);
       const g0 = existAt ? existAt(pt) : null;
       const dz = g0 == null || !isFinite(g0) ? null : prop - g0;
       idx[i * ny + j] = { elId: hit.el.id, cls: hit.plane.classId, prop };
-      cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, elId: hit.el.id, cls: hit.plane.classId });
+      const fcell = { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, elId: hit.el.id, cls: hit.plane.classId };
+      if (G) fcell.propFt = prop;
+      noteOut(pt, A, dz, hit.el.id, fcell);
+      cells.push(fcell);
       if (hit.plane.floating) { floatAreaSf += A; floatPropSum += prop * A; }
       if (dz == null) { voidCells++; continue; }
       pricedCells++;
@@ -321,7 +453,9 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   // Dock-approach break scan: adjoining PAVEMENT stepping at a court edge. The dock
   // WALL itself (pad ↔ court, −dockDrop) is by design — buildingPad pairs are exempt.
   let breakCount = 0, maxBreakFt = 0;
-  for (let i = 0; i < nx; i++) {
+  // GRADING MODEL: paved neighbours RAMP at the grading slope by design — a ramp cell-to-cell step is the
+  // model working, not a dock-approach defect, so the scan only runs on the pre-existing engine.
+  if (!G) for (let i = 0; i < nx; i++) {
     for (let j = 0; j < ny; j++) {
       const a = idx[i * ny + j];
       if (!a) continue;
@@ -343,6 +477,15 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
     // through exactly the same precedence, planes and apron reaches. The map readout and
     // the earthwork rows therefore cannot disagree: they read one array.
     owners: graded, pondRings, apronsOn,
+    // GRADING MODEL: the SAME elevation function the lattice priced with, so a point readout / spot
+    // elevation can never disagree with the tiles (and the wedge shoulder rides along).
+    zOf, shoulderFt: gShoulder, grading: G ? { slopeRatio: apronRatio, shoulderFt: gShoulder, ramp: rampOn } : null,
+    outside: outAgg ? {
+      count: outAgg.count, sf: outAgg.sf, maxPastFt: outAgg.maxPastFt,
+      centroid: outAgg.count ? { x: outAgg.sx / outAgg.count, y: outAgg.sy / outAgg.count } : null,
+      beyondParcel: outAgg.beyondParcel, cutSf: outAgg.cutSf, fillSf: outAgg.fillSf,
+      perEl: Object.fromEntries(Object.entries(outAgg.perEl).map(([k, v]) => [k, { count: v.count, sf: v.sf, maxPastFt: v.maxPastFt, centroid: { x: v.sx / v.count, y: v.sy / v.count }, fillSf: v.fillSf, cutSf: v.cutSf }])),
+    } : null,
     gradedSf,
     pricedCells, voidCells,
     cutCf: priced ? cutCf : null, fillCf: priced ? fillCf : null,
@@ -380,7 +523,7 @@ export function sampleProposedAt(grid, pt, existAt) {
   for (const g of grid.owners) {
     if (pt.x < g.bbox[0] || pt.x > g.bbox[2] || pt.y < g.bbox[1] || pt.y > g.bbox[3]) continue;
     if (pointInRing(pt, g.el.ring)) {
-      return { status: "value", ft: g.plane.zAt(pt), elId: g.el.id, cls: g.plane.classId, wedge: false };
+      return { status: "value", ft: grid.zOf ? grid.zOf(g, pt) : g.plane.zAt(pt), elId: g.el.id, cls: g.plane.classId, wedge: false };
     }
   }
   if (!grid.apronsOn || typeof existAt !== "function") return { status: "none", reason: "outside" };
@@ -398,9 +541,7 @@ export function sampleProposedAt(grid, pt, existAt) {
   if (!own) return { status: "none", reason: "outside" };
   const g0 = existAt(pt);
   if (g0 == null || !isFinite(g0)) return { status: "none", reason: "void" };
-  const delta = own.plane.zAt(oq) - g0;
-  const taper = od / apronRatio;
-  const dz = Math.abs(delta) <= taper ? 0 : delta > 0 ? delta - taper : delta + taper;
+  const dz = wedgeDz(grid.zOf ? grid.zOf(own, oq) : own.plane.zAt(oq), g0, od, apronRatio, grid.shoulderFt || 0);
   return { status: "value", ft: g0 + dz, elId: own.el.id, cls: "transition", wedge: true };
 }
 
@@ -409,7 +550,7 @@ export function sampleProposedAt(grid, pt, existAt) {
  * offset outward along its edge normal by |proposed − existing| × ratio — the same
  * taper model the wedge cells price, so the line and the fringe agree by
  * construction. Screening polyline (a DEM void samples as zero offset). Pure. */
-export function daylightRings({ planes, els = [], existAt = null, apronRatio = GRADING_RULES.landscapeTieDown.maxSlopeRatio, perEdge = 3 } = {}) {
+export function daylightRings({ planes, els = [], existAt = null, apronRatio = GRADING_RULES.landscapeTieDown.maxSlopeRatio, perEdge = 3, shoulderFt = 0, zOf = null } = {}) {
   if (typeof existAt !== "function" || !planes) return [];
   const out = [];
   for (const el of els) {
@@ -424,10 +565,10 @@ export function daylightRings({ planes, els = [], existAt = null, apronRatio = G
         const t = k / perEdge;
         const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
         const gz = existAt(p);
-        const dz = gz == null || !isFinite(gz) ? 0 : Math.abs(plane.zAt(p) - gz);
+        const dz = gz == null || !isFinite(gz) ? 0 : Math.abs((zOf ? zOf({ plane, el }, p) : plane.zAt(p)) - gz);
         let n = norm(-(b.y - a.y), b.x - a.x); // edge normal…
         if (n.x * (c.x - p.x) + n.y * (c.y - p.y) > 0) n = { x: -n.x, y: -n.y }; // …pointing away from the centroid
-        const d = dz * apronRatio;
+        const d = dz * apronRatio + (dz > 0 ? shoulderFt : 0);
         pts.push({ x: p.x + n.x * d, y: p.y + n.y * d });
       }
     }
@@ -493,14 +634,16 @@ export function surfaceViolations({ planes, grid } = {}) {
  * identity key (memo/persist signatures — the B807 stale-memo discipline: the key must
  * change whenever any input that changes the surface changes). Returns null when no
  * element yields a plane (no FFE anywhere / nothing graded). Pure. */
-export function buildProposedSurface({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {} } = {}) {
-  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap });
+export function buildProposedSurface({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {}, grading = null } = {}) {
+  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading });
   if (!planes.size) return null;
-  const grid = surfaceGrid({ planes, els, existAt, parcelRings, pondRings, easementRings, opts });
+  // The grading model rides OPTS into the lattice (maxCells defaults up so a 520′ building keeps ~8′ cells).
+  const gridOpts = grading ? { maxCells: GRADING_DEFAULTS.maxCells, ...opts, grading } : opts;
+  const grid = surfaceGrid({ planes, els, existAt, parcelRings, pondRings, easementRings, opts: gridOpts });
   if (!grid) return null;
   const violations = surfaceViolations({ planes, grid });
   // B833(c) — the daylight boundary, per graded element (rendered as a subtle contour).
-  const daylight = daylightRings({ planes, els, existAt, apronRatio: grid.apronRatio });
+  const daylight = daylightRings({ planes, els, existAt, apronRatio: grid.apronRatio, shoulderFt: grid.shoulderFt || 0, zOf: grid.zOf || null });
   const surfaceKey = [
     "b826", ffeFt, dockDropFt, tieDropFt, clamp01(fieldT).toFixed(3),
     drainTarget ? `${Math.round(drainTarget.x)},${Math.round(drainTarget.y)}` : "",
@@ -508,7 +651,10 @@ export function buildProposedSurface({ els = [], ffeFt = null, dockDropFt = 4, t
     // B833 — apron + daylight inputs join the identity (the B807 stale-memo discipline).
     `ar:${grid.apronRatio}`, `dl:${daylightAsap ? 1 : 0}`,
     easementRings.length ? `es:${easementRings.map((r) => ringHash(r)).join(",")}` : "",
-    els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}`).join("|"),
+    // GRADING MODEL inputs join the identity (the B807 stale-memo discipline) — and only then, so an
+    // account without the model gets the key it always had.
+    grading ? `gr:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
+    els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}`).join("|"),
   ].join("~");
   return { planes, grid, violations, skipped, daylight, fieldT: clamp01(fieldT), surfaceKey };
 }

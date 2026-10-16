@@ -30,6 +30,11 @@ import { decodeGrid } from "./lercGrid.js";
 // the worker is its own bundle, so it costs the page nothing.
 import { buildContours } from "./contourTrace.js";
 import { flowArrows } from "./flowField.js";
+// NEW-1 (owner-only grading layer): the buildable-ground sweep rides this same worker. Both modules
+// are pure (no DOM, no Leaflet) — buildableLattice resamples the site DEM onto the 10-ft feet lattice
+// so even the resample stays off the main thread.
+import { latticeFromDem, sweepBBox } from "./buildableLattice.js";
+import { prepareSweep, summarizeCtx, cachedMaskAt } from "./buildableGround.js";
 
 // Smoothing sigmas are spec'd in GROUND METERS (same terrain detail at every zoom)
 // then converted to cells per grid — but CAPPED in cells so the kernel radius
@@ -43,8 +48,40 @@ const FLOW_SIGMA_M = 12;
 
 const round6 = (v) => Math.round(v * 1e6) / 1e6;
 
+/* NEW-1 — buildable-ground jobs. A prepared context (lattice + setback raster + boundary samples) is
+ * cached by the caller's key so a mask request for a new finish elevation does not re-ship the 4 MB DEM:
+ * the reply to an unknown key is the LOUD "no-context" and the caller re-sends the full payload. */
+const ctxCache = new Map();
+const CTX_MAX = 3;
+function buildableJob(id, d) {
+  let entry = ctxCache.get(d.key);
+  if (!entry) {
+    if (!d.dem) { self.postMessage({ id, ok: false, error: "no-context" }); return; }
+    const bbox = sweepBBox(d.parcelRings, d.marginFt ?? 200);
+    const lattice = latticeFromDem({ grid: d.dem.grid, req: d.dem.req, origin: d.origin, bbox, cell: d.cell });
+    const ctx = prepareSweep({ lattice, rings: d.rings, holes: d.holes || [] });
+    entry = { ctx };
+    ctxCache.set(d.key, entry);
+    while (ctxCache.size > CTX_MAX) ctxCache.delete(ctxCache.keys().next().value);
+  }
+  const { ctx } = entry;
+  if (d.op === "mask") {
+    const r = cachedMaskAt(ctx, d.E, d.s, d.D);
+    const mask = r.mask.slice();   // the cached copy stays; this one transfers
+    const { x0, y0, nx, ny, cell } = ctx.lattice;
+    self.postMessage({ id, ok: true, mask, x0, y0, nx, ny, cell, cells: r.cells, areaSf: r.areaSf, areaAc: r.areaAc }, [mask.buffer]);
+    return;
+  }
+  const sum = summarizeCtx(ctx, { parcelRings: d.parcelRings, holes: d.holes || [], s: d.s, D: d.D });
+  self.postMessage({ id, ok: true, summary: sum, lattice: { x0: ctx.lattice.x0, y0: ctx.lattice.y0, nx: ctx.lattice.nx, ny: ctx.lattice.ny, cell: ctx.lattice.cell }, zMin: ctx.zMin, zMax: ctx.zMax });
+}
+
 self.onmessage = (e) => {
   const { id, req, buffer, opts = {} } = e.data || {};
+  if (e.data && e.data.kind === "buildable") {
+    try { buildableJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+    return;
+  }
   try {
     const grid = decodeGrid(buffer, req);
     const { values, mask, width, height } = grid;

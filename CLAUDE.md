@@ -697,6 +697,18 @@ were split out of this file.
     "locked rotation is read-only — do NOT undo" note. A new panel control must not be gated on `locked`; a direct-drag starter must.
     Guard: `test/overlayLockPanelControls.test.js`. (B2262864.)
 
+25. **(2026-10-16) The grading layer is OWNER-ONLY until he says otherwise.** Michael, verbatim: "add it in, but only for me to use for now." Everything in "Grading model" below renders only when `is_admin()` is true, through the ONE selector `lib/gradingGate.js` (`gradingEnabled()` / `useGradingEnabled()`); no URL flag, env var, localStorage switch or second gate, and nobody is added to `admin_users`. For every other account the Site Planner is byte-for-byte unchanged. Guard: `test/gradingGate.test.js`. (B2312464–B2312466.)
+
+## Grading model (owner rules 2026-10-16)
+Owner-only (constraint #25). Code: `proposedSurface.js` (`grading` argument), `buildableGround.js`, `buildingGrade.js`, `gradingBase.js` — see `src/workspaces/site-planner/CLAUDE.md`.
+- The building pad is FLAT at FFE; the roof drains, the slab does not.
+- Truck court and every car lot FALL AWAY from the building at the pavement slope (default 1.5%, user-set, never below 0.5%): the court from FFE − dock drop at the dock face (a trailer row continues its plane), a lot from FFE − 0.5 ft at its curb.
+- The slope is shown on the map: one spot elevation at the face, one far-edge spot + fall arrow per station, a "1.5% fall" tag.
+- Where two paved elements meet they RAMP to each other at the grading slope — no vertical step. The dock wall is the one exempt wall.
+- Slopes start 5 ft past the pavement edge (a shoulder), then run at the grading slope (2:1 default; 3:1, 4:1 selectable) until they daylight on existing ground.
+- Access and drive grading are OUT of scope (no drive, no drive grade, no road tie-in). Volumes are bank volumes — no shrink or swell.
+- Setbacks: the parcel's setback polygon when the plan has one, else the property line (and the panel says so).
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
