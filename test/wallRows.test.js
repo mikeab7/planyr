@@ -66,11 +66,12 @@ describe("chips and the + catalog", () => {
     expect(keys(true, ["court", "trailer", "trailer"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);
     expect(keys(true, ["court", "trailer", "road"])).toEqual([]);
   });
-  it("any other wall offers sidewalk / car parking only when it has none, plus buffer and road; nothing after a road", () => {
-    expect(keys(false, [])).toEqual(["sidewalk", "parking", "buffer", "road"]);
-    expect(keys(false, ["sidewalk"])).toEqual(["parking", "buffer", "road"]);
-    expect(keys(false, ["sidewalk", "parking"])).toEqual(["buffer", "road"]);
-    expect(keys(false, ["buffer"])).toEqual(["sidewalk", "buffer", "road"]);          // parking sits beyond the sidewalk: not behind a buffer
+  it("any other wall offers sidewalk / car parking only when it has none, trailer parking always (B2268801), plus buffer and road; nothing after a road", () => {
+    expect(keys(false, [])).toEqual(["sidewalk", "parking", "trailer", "buffer", "road"]);
+    expect(keys(false, ["sidewalk"])).toEqual(["parking", "trailer", "buffer", "road"]);
+    expect(keys(false, ["sidewalk", "parking"])).toEqual(["trailer", "buffer", "road"]);
+    expect(keys(false, ["sidewalk", "trailer"])).toEqual(["parking", "trailer", "buffer", "road"]);   // trailer rows repeat on a rear / end wall too
+    expect(keys(false, ["buffer"])).toEqual(["sidewalk", "trailer", "buffer", "road"]);          // parking sits beyond the sidewalk: not behind a buffer
     expect(keys(false, ["sidewalk", "road"])).toEqual([]);
   });
   it("v3: Remove takes ONLY the piece, on a dock wall as on any other (the court's trailer is planDockPieceRemoval's)", () => {
