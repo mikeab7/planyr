@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { NO_AUTOFILL } from "../src/shared/ui/noAutofill.js";
+import { NO_AUTOFILL, autofillToken, isIosLike } from "../src/shared/ui/noAutofill.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SEQ = resolve(here, "../public/sequence/index.html");
@@ -24,7 +24,7 @@ const auth = readFileSync(AUTH, "utf8");
 describe("NO_AUTOFILL shared attribute bag", () => {
   it("carries exactly the four extension opt-outs + autocomplete off", () => {
     expect(NO_AUTOFILL).toEqual({
-      autoComplete: "x-planyr", // B2088384: iOS ignores "off" for contact AutoFill
+      autoComplete: "off", // node/desktop; iOS gets "x-planyr" (B2088384) — see the token tests below
       "data-1p-ignore": true,
       "data-lpignore": "true",
       "data-bwignore": true,
@@ -39,6 +39,22 @@ describe("NO_AUTOFILL shared attribute bag", () => {
   });
 });
 
+describe("autofillToken — NEW-1: the token Chrome honours, except on iOS", () => {
+  const chromeWin = { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130", platform: "Win32", maxTouchPoints: 0 };
+  const iphone = { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari", platform: "iPhone", maxTouchPoints: 5 };
+  const ipadDesktopUa = { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari", platform: "MacIntel", maxTouchPoints: 5 };
+  const mac = { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome", platform: "MacIntel", maxTouchPoints: 0 };
+  it("is genuine off on desktop Chrome / Mac (an unknown token leaves Chrome's saved-entry list on)", () => {
+    expect(autofillToken(chromeWin)).toBe("off");
+    expect(autofillToken(mac)).toBe("off");
+  });
+  it("is the non-standard token on iPhone and iPadOS-as-Mac (iOS ignores off)", () => {
+    expect(autofillToken(iphone)).toBe("x-planyr");
+    expect(autofillToken(ipadDesktopUa)).toBe("x-planyr");
+    expect(isIosLike(undefined)).toBe(false);
+  });
+});
+
 describe("Sequence iframe inline copy (drift guard)", () => {
   it("defines a NO_AUTOFILL constant identical to the shared module", () => {
     const m = seq.match(/const NO_AUTOFILL = \{([\s\S]*?)\};/);
@@ -46,7 +62,7 @@ describe("Sequence iframe inline copy (drift guard)", () => {
     const body = m[1];
     // Every module key/value must appear verbatim in the iframe object literal.
     const expectedLines = {
-      autoComplete: 'autoComplete: "x-planyr"',
+      autoComplete: 'autoComplete: (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) ? "x-planyr" : "off"',
       "data-1p-ignore": '"data-1p-ignore": true',
       "data-lpignore": '"data-lpignore": "true"',
       "data-bwignore": '"data-bwignore": true',
