@@ -30,11 +30,15 @@ const RADIUS = { control: 8, pill: 999 };
  *  ⛔ THE RECOVERY IS NOT A BUTTON, IT IS DONE. Auto-adoption runs on load, so the note is
  *  reachable before anyone reads this. A "Put it back" the user had to find was one more
  *  chance for a real note to sit lost while a banner talked about it. */
-export default function IntegrityBanner({ duplicates, unreachable, recovered, projectNames, projects, onOpen, onFile, onBin, onKeepOne, onKeepBoth, onDismiss }) {
+export default function IntegrityBanner({ duplicates, writeRefused = 0, purgeFailed = 0, recovered, projectNames, projects, onOpen, onFile, onBin, onKeepOne, onKeepBoth, onDismiss }) {
   const dupLine = duplicateNotice(duplicates);
   const lost = (recovered || []).length;
-  const stillLost = (unreachable || []).length;
-  if (!dupLine && !lost && !stillLost) return null;
+  /* ⛔ THE BAR NEVER ASSERTS A WRITE OUTCOME IT DID NOT OBSERVE (NEW-1, 2026-10-16). `writeRefused`
+   * is set only when `writeTree` actually returned false for that adoption attempt; `purgeFailed`
+   * only when a body was still in storage after the purge ran. Neither is derived from how many
+   * notes were *found*. */
+  const stillLost = writeRefused;
+  if (!dupLine && !lost && !stillLost && !purgeFailed) return null;
   const nameOf = (id) => projectNames.get(id) || "a project that no longer exists";
   const first = duplicates?.[0] || null;
   const pill = (extra = {}) => ({
@@ -48,6 +52,7 @@ export default function IntegrityBanner({ duplicates, unreachable, recovered, pr
       data-testid="notes-integrity-banner"
       data-duplicates={duplicates?.length || 0}
       data-unreachable={stillLost}
+      data-purge-failed={purgeFailed}
       data-recovered={lost}
       style={{
         flex: "none", display: "flex", flexDirection: "column", gap: 6, padding: "8px 16px",
@@ -105,7 +110,12 @@ export default function IntegrityBanner({ duplicates, unreachable, recovered, pr
 
       {stillLost ? (
         <span data-testid="notes-integrity-stuck">
-          {stillLost === 1 ? "One note is" : `${sentenceCase(numberWord(stillLost))} notes are`} filed nowhere and could NOT be put back — this browser refused the write, so nothing was changed.
+          Planyr couldn&apos;t save the fix for {stillLost === 1 ? "one note" : `${numberWord(stillLost)} notes`} — reload to try again; nothing was changed.
+        </span>
+      ) : null}
+      {purgeFailed ? (
+        <span data-testid="notes-purge-stuck">
+          {purgeFailed === 1 ? "One deleted note's" : `${sentenceCase(numberWord(purgeFailed))} deleted notes'`} leftover data couldn&apos;t be cleared from this browser — reload to try again.
         </span>
       ) : null}
 
