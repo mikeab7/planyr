@@ -42,6 +42,8 @@ export const ALLOWED_HOSTS = new Set([
   "gis.calhouncounty.org", // Calhoun County
   "explore.opelika-al.gov", // City of Opelika (Lee County layer)
   "autaugagis.autauga.com", // Autauga County
+  "arcweb.houstoncountyal.gov", // Houston County AL — the county's own parcel viewer server (NEW-1, Alabama round 2)
+  "www.alabamagis.com", // Flagship GIS public viewers (~21 AL counties) — probed for an open REST/OGC endpoint (NEW-1, Alabama round 2)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
