@@ -11,6 +11,7 @@ import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPoly
 import { countyRecord } from "../src/workspaces/site-planner/lib/appraisal.js";
 import { AL_ROWS } from "../src/workspaces/site-planner/lib/alabamaParcels.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
+import { parseMgPath } from "../src/shared/gis/mapguideAdapter.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/alabamaCounties.json", import.meta.url), "utf8"));
 const SAMPLES = JSON.parse(readFileSync(new URL("./fixtures/alabamaSamples.json", import.meta.url), "utf8")).rows;
@@ -68,6 +69,11 @@ describe("the wired Alabama rows", () => {
     for (const k of Object.keys(COUNTIES).filter((x) => x.startsWith("al_"))) {
       const u = COUNTIES[k].layerUrl;
       if (/^https:\/\/[^/]*arcgis\.com\//.test(u)) continue;
+      if (u.startsWith("/mg/")) { // B2302785 — a Flagship MapGuide county: served by functions/mg, which refuses anything but a listed server + county folder
+        const m = parseMgPath(u.split("/").filter(Boolean).slice(1));
+        expect(m.error, k).toBeUndefined(); expect(m.op, k).toBe("meta");
+        continue;
+      }
       expect(u, k).toMatch(/^\/gis-proxy\//);
       expect(ALLOWED_HOSTS.has(u.split("/")[2]), `${k} → ${u.split("/")[2]}`).toBe(true);
     }
