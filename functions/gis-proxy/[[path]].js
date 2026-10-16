@@ -44,6 +44,10 @@ export const ALLOWED_HOSTS = new Set([
   "autaugagis.autauga.com", // Autauga County
   "arcweb.houstoncountyal.gov", // Houston County AL — the county's own parcel viewer server (NEW-1, Alabama round 2)
   "www.alabamagis.com", // Flagship GIS public viewers (~21 AL counties) — probed for an open REST/OGC endpoint (NEW-1, Alabama round 2)
+  /* NEW-1 (B2302785) — Flagship GIS's Autodesk MapGuide servers behind the www.alabamagis.com county viewers. Exact hostnames, one per
+   * server number the viewers name (cloudURL in each county's page); read-only anonymous queries only — never a key the viewer injects. */
+  "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
+  "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
