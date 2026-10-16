@@ -244,7 +244,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
-import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide } from "./lib/sourceHealth.js";
+import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
@@ -16528,6 +16528,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const list = keys.map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) })).filter((c) => c.url);
     return filterHealthyCandidates(list, STATEWIDE_KEYS);
   };
+  // NEW-1 (Memphis line band) — breaker-skipped sources for this point, asked once, last (lib/identifyWithFallback.js).
+  const skippedCandidatesAt = async (lat, lng) => {
+    const keys = [...new Set([...candidateCountiesForPoint(lat, lng), ...lineNeighbourKeysForPoint(lat, lng)])].filter((k) => isSourceOpen(k));
+    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
+    return keys.map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) })).filter((c) => c.url);
+  };
   // Stable per-lot key (lib/parcelIdentity.js — the ONE resolver, shared with the Map view): the CAD
   // OBJECTID (incl. table-prefixed joined-layer ids), else a hash of the whole ring set — never one vertex.
   const parcelGisKey = (attrs, rings) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}` });
@@ -16693,13 +16699,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return;
       const nearSources = await neighbourCandidatesAt(lat, lng); // NEW-1 (Memphis line band) — a county across a nearby line
       if (tok !== identifyTok.current) return;
-      if (!candidates.length && !nearSources.length) {
+      if (!candidates.length && !nearSources.length && !(await skippedCandidatesAt(lat, lng)).length) {
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
         setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
         return;
       }
       const res = await identifyWithLineFallback({
-        primary: candidates, lng, lat, neighbours: () => nearSources,
+        primary: candidates, lng, lat, neighbours: () => nearSources, skipped: () => skippedCandidatesAt(lat, lng),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
       if (tok !== identifyTok.current) return; // superseded by a newer click

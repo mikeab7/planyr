@@ -3148,6 +3148,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.__mapSelectedParcels = hook;
     return () => { if (window.__mapSelectedParcels === hook) window.__mapSelectedParcels = null; };
   }, []);
+  /* NEW-1 (Memphis line band) — READ-ONLY: what the LAST lot click asked, in which round, and what answered. Under automation
+   * only, checked at CALL time; the live line-band audit reads it to say WHICH county a refused click went to. */
+  const lastIdentifyRef = useRef(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hook = () => (window.__PLANYR_E2E ? lastIdentifyRef.current : null);
+    window.__mapLastIdentify = hook;
+    return () => { if (window.__mapLastIdentify === hook) window.__mapLastIdentify = null; };
+  }, []);
   const clearDisplays = () => {
     wantedDisplaysRef.current = null;
     snapshotsWarmedRef.current.clear();
@@ -3387,6 +3396,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       .filter((c) => c.url);
     return filterHealthyCandidates(list, STATEWIDE_KEYS);
   };
+  /* NEW-1 (Memphis line band) — the sources this point could be in whose breaker is OPEN (so the rounds above skipped them):
+     asked once, last, before the app says "No lot here". */
+  const skippedCandidates = (latlng, extraKeys = []) => {
+    const keys = [...new Set([...candidateCountiesForPoint(latlng.lat, latlng.lng), ...extraKeys.filter(Boolean), ...lineNeighbourKeysForPoint(latlng.lat, latlng.lng)])];
+    return keys.filter((k) => isSourceOpen(k))
+      .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
+      .filter((c) => c.url);
+  };
   // A statewide-backup answer reports the parcel's true county in its `county` attr
   // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
   const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -3425,7 +3442,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * below, which has named the county since B209502. */
     if (!candidates.length) {
       const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      if (!nearSources.length) { // NEW-1 (Memphis line band) — else a county across a nearby line is still asked below
+      if (!nearSources.length && !skippedCandidates(latlng).length) { // NEW-1 (Memphis line band) — else a county across a nearby line (or a breaker-skipped one) is still asked below
         setErr(gap
           ? `${gap} You can still trace the lot from the Aerial underlay.`
           : "Parcel services are still loading — give it a second and click again.");
@@ -3468,8 +3485,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const res = await identifyWithLineFallback({
         primary: candidates, lng: latlng.lng, lat: latlng.lat,
         neighbours: () => neighbourCandidates(latlng, [opt && opt.county]),
+        skipped: () => skippedCandidates(latlng, [opt && opt.county]),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
+      lastIdentifyRef.current = { at: [latlng.lat, latlng.lng], routed: candidateCountiesForPoint(latlng.lat, latlng.lng).map((k) => ({ key: k, url: !!layerUrlsRef.current[k], open: isSourceOpen(k) })), primary: candidates.map((c) => c.county), queried: res.queried.map((c) => c.county), via: res.via, hits: res.hits.map((h) => h.county), silent: res.silent };
       if (!res.hits.length) {
         // Live returned nothing. If the optimistic highlight came from a loaded Drive snapshot
         // (the county server is down but our cached copy HAS this lot), KEEP it as the selection —
@@ -3580,12 +3599,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * (the aerial trace, offered in the copy, is the way forward for this one). */
     if (!candidates.length) {
       const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      if (!nearSources.length) { if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label }); return; }
+      if (!nearSources.length && !skippedCandidates(latlng).length) { if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label }); return; }
     }
     let res;
     try {
       res = await identifyWithLineFallback({
-        primary: candidates, lng: latlng.lng, lat: latlng.lat, neighbours: () => nearSources,
+        primary: candidates, lng: latlng.lng, lat: latlng.lat, neighbours: () => nearSources, skipped: () => skippedCandidates(latlng),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })), // feed the circuit breaker
       });
     } catch (_) {

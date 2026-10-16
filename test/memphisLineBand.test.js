@@ -15,6 +15,7 @@ import { COUNTIES_MAP, countyIdentity, candidateCountiesForPoint, lineNeighbourK
 import { setCountyPolygons, countiesNearPoint } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 import { identifyWithLineFallback } from "../src/workspaces/site-planner/lib/identifyWithFallback.js";
 import { countyOutageMessage } from "../src/workspaces/site-planner/lib/parcelOutageGate.js";
+import { outlineFieldsFor } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
 
 beforeAll(async () => {
   await setCountyPolygons(JSON.parse(readFileSync(new URL("../public/geo/county-polygons.json", import.meta.url), "utf8")));
@@ -145,3 +146,38 @@ describe("the slow-server message names the county", () => {
     expect(countyOutageMessage(false)).toMatch(/^That county's parcel server is slow/);
   });
 });
+
+/* Found by the line-band live run on the PR preview (2026-10-16): three DeSoto/Marshall points refused a real Marshall lot
+ * because Marshall was never asked — its breaker was open, fed by its OUTLINE layer, every request of which MARIS answered
+ * `{"error":{"code":400,"message":"Failed to execute query."}}` (the layer asks for OBJECTID; MARIS's id field is FID). */
+describe("MARIS outlines — the id field is asked for by its real name", () => {
+  const MARIS_META = { objectIdField: null, fields: [{ name: "FID", type: "esriFieldTypeOID" }, { name: "Shape", type: "esriFieldTypeGeometry" }, { name: "PARNO", type: "esriFieldTypeString" }] };
+  it("swaps OBJECTID for FID on a MARIS layer (the measured metadata shape)", () => {
+    expect(outlineFieldsFor(MARIS_META, ["OBJECTID"])).toEqual(["FID"]);
+    expect(outlineFieldsFor(MARIS_META, ["OBJECTID", "PARNO"])).toEqual(["FID", "PARNO"]);
+  });
+  it("leaves a layer that HAS OBJECTID (Shelby, DeSoto, HCAD…) untouched, and * untouched", () => {
+    const meta = { objectIdField: "OBJECTID", fields: [{ name: "OBJECTID", type: "esriFieldTypeOID" }, { name: "PARCELID", type: "esriFieldTypeString" }] };
+    expect(outlineFieldsFor(meta, ["OBJECTID", "PARCELID"])).toEqual(["OBJECTID", "PARCELID"]);
+    expect(outlineFieldsFor(MARIS_META, ["*"])).toEqual(["*"]);
+  });
+  it("uses objectIdField when the service declares one; no metadata → unchanged", () => {
+    expect(outlineFieldsFor({ objectIdField: "OID_1", fields: [{ name: "OID_1", type: "esriFieldTypeOID" }] }, ["OBJECTID"])).toEqual(["OID_1"]);
+    expect(outlineFieldsFor(null, ["OBJECTID"])).toEqual(["OBJECTID"]);
+  });
+});
+
+describe("a breaker-skipped source is still asked, last, before 'No lot here'", () => {
+  it("DeSoto/Marshall: DeSoto (routed) empty, Marshall skipped by its breaker → Marshall answers in the 'skipped' round", async () => {
+    const { identify, calls } = fakeIdentify(() => "ms_marshall");
+    const res = await identifyWithLineFallback({ primary: cand(["ms_desoto"]), neighbours: async () => [], skipped: async () => cand(["ms_marshall"]), lng: -89.7225, lat: 34.85, identify });
+    expect(res.via).toBe("skipped");
+    expect(calls).toEqual([["ms_desoto"], ["ms_marshall"]]);
+  });
+  it("a skipped source that was already asked this click is not asked twice", async () => {
+    const { identify, calls } = fakeIdentify(() => null);
+    await identifyWithLineFallback({ primary: cand(["ms_desoto"]), neighbours: async () => cand(["ms_marshall"]), skipped: async () => cand(["ms_marshall"]), lng: -89.7225, lat: 34.85, identify });
+    expect(calls).toEqual([["ms_desoto"], ["ms_marshall"]]);
+  });
+});
+
