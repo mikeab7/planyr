@@ -73,7 +73,7 @@ export const SITUS_LADDER = [
   /situs/i,
   // 2 — the land's own address under another name. `prop_?street(?!_)` matches CCAD's Prop_Street
   //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
-  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$)/i,
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$)/i,
   // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
   //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
   //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
@@ -265,7 +265,10 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 // B2191xxx — `owner_?name_?\d+` is HCAD's own spelling (`owner_name_1` / `owner_name_2`); without it the
 // Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d)$/i;
+/* Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
+ * L15Parce_2, GIS-measured acres L15Parce_4 (GPDATA__DA / __CA are the deed / assessor acres, one of which is 0 on every row) —
+ * matched by their EXACT names here (and in the situs / Account / Acreage patterns below); no other source uses them. */
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
 
@@ -327,7 +330,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
  * a GIS column whose value doesn't actually look like a number", which also protects any other
  * source that ever publishes a genuinely garbled GIS-area column. A malformed GIS value now falls
  * through to LEGAL_AREA exactly as if the GIS column were absent. */
-const GIS_ACRE_RE = /(gis_?acre|calc_?acre|^acre|acreage|deed_?acre|gis_?area|land_?size_?ac)/i;
+const GIS_ACRE_RE = /(gis_?acre|calc_?acre|^acre|acreage|deed_?acre|gis_?area|land_?size_?ac|^l15parce_4$)/i;
 const LEGAL_ACRE_RE = /(legal_?acre|legal_?area)/i;
 // A bare, fully-formed decimal number (optionally negative) — deliberately stricter than
 // `Number.isFinite(Number(v))` alone would read to a human: it exists to make the intent explicit
@@ -369,13 +372,13 @@ export const APPR_FIELDS = [
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
   // B2191xxx — + sched_?num (Denver), parcel_?(number|no|num) (Clackamas), ^pin$/taxpin (Montgomery, Gwinnett), assess…_num (E. Baton Rouge)
-  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num)/i, "Account / ID"],
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$)/i, "Account / ID"],
   // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
   // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
   [/^county_?name$/i, "County"],
   // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet);
   // ^acre matches CCAD's Acres.
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac)/i, "Acreage"],
+  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac|^l15parce_4$)/i, "Acreage"],
   [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
   [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
   // ...|market_?val matches CCAD's Market_Value (and TxGIO mkt_value).

@@ -29,7 +29,7 @@ const OUT = flag("--out") || "memphis-radius-live.json";
 
 const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
 // The honest gaps (no public source wired) — must SAY so; everything else must select a lot. Kept in step with test/memphisRadius.test.js.
-const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "TN:Chester County,KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
+const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
 const ARMS = [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },

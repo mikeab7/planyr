@@ -4,7 +4,7 @@
  * "No parcel right there — zoom in and click directly on a lot."
  *
  * After this change Shelby has a source (the Shelby County Assessor's own CERTParcel service, relayed), and a county that still
- * has none (Chester TN, which Tennessee's statewide layer excludes) names itself in every case. RED ON THE MERGED B2289168 CODE:
+ * has none (Fulton KY — Chester TN got its own source, ×3) names itself in every case. RED ON THE MERGED B2289168 CODE:
  *  · the owner's spot never reached a Shelby source (there was none; the click queried Tennessee's statewide layer, which holds
  *    none of Shelby) — here the Assessor's point query is answered with one lot and must be SELECTED;
  *  · an excluded county was still routed to the statewide layer that excludes it, so a dead layer printed an OUTAGE message
@@ -19,6 +19,8 @@ const GENERIC = /No parcel right there/i;
 const OUTAGE = /isn't responding|Couldn't reach/i;
 
 // One Shelby lot around the owner's point (WGS84), answered ONLY to the Assessor relay's point identify.
+const CHESTER_LOT = { attributes: { OBJECTID: 4451, L15Parce_2: "012033M I 01500", L15Parce_4: 0.394, GPDATA__OW: "CITY OF HENDERSON", GPDATA__PR: "CROOK AVENUE 111" },
+  geometry: { rings: [[[-88.6444, 35.4382], [-88.6384, 35.4382], [-88.6384, 35.4414], [-88.6444, 35.4414], [-88.6444, 35.4382]]] } };
 const LOT = { attributes: { OBJECTID: 1, PARCELID: "073088  00221", OWNER: "LIBERTY STREET MEMPHIS PARTNERS", PAR_ADDR1: "0 ARNOLD RD" },
   geometry: { rings: [[[-89.953, 35.027], [-89.947, 35.027], [-89.947, 35.033], [-89.953, 35.033], [-89.953, 35.027]]] } };
 
@@ -27,6 +29,9 @@ async function openMap(page, { delayPolygonsMs = 0 } = {}) {
     const u = decodeURIComponent(route.request().url() + " " + (route.request().postData() || ""));
     if (/scgis\.shelbycountytn\.gov/.test(u) && /\/query/.test(u) && /esriGeometryPoint/.test(u)) {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify({ spatialReference: { wkid: 4326 }, fields: [], features: [LOT] }) });
+    }
+    if (/gis\.capturecama\.com/.test(u) && /\/query/.test(u) && /esriGeometryPoint/.test(u)) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ spatialReference: { wkid: 4326 }, fields: [], features: [CHESTER_LOT] }) });
     }
     /* every other server never answers */
   });
@@ -80,20 +85,28 @@ test.describe("Memphis radius — the no-project lot picker: Shelby selects a lo
     expect(await body(page)).not.toMatch(GENERIC);
   });
 
-  test("Chester TN (no source; excluded from the statewide layer) — every server dead: the county gap, not an outage", async ({ page }) => {
+  test("Chester TN (Henderson) — the Assessor's CaptureCAMA source answers and ONE lot is selected (was: a county gap)", async ({ page }) => {
     await openMap(page);
     await page.waitForTimeout(2500);
-    await pickAt(page, 35.4398, -88.6420);
-    await expect.poll(() => body(page), { timeout: 15_000 }).toMatch(/Chester County — no parcel data wired here yet/);
+    await pickAt(page, 35.4398, -88.6414);
+    await expect.poll(() => page.evaluate(() => (document.querySelector('[data-testid="map-decide-summary"]') || {}).textContent || ""), { timeout: 20_000 }).toMatch(/^1 parcel/);
+    expect(await body(page)).not.toMatch(GENERIC);
+  });
+
+  test("Fulton KY (no source) — every server dead: the county gap, not an outage", async ({ page }) => {
+    await openMap(page);
+    await page.waitForTimeout(2500);
+    await pickAt(page, 36.5526, -89.1734);
+    await expect.poll(() => body(page), { timeout: 15_000 }).toMatch(/Fulton County — no parcel data wired here yet/);
     const t = await body(page);
     expect(t, "the generic message blames the click for a coverage gap").not.toMatch(GENERIC);
     expect(t, "an outage message for a county that has no source at all").not.toMatch(OUTAGE);
   });
 
-  test("Chester, clicked BEFORE the county polygons land: still names the county", async ({ page }) => {
+  test("Fulton, clicked BEFORE the county polygons land: still names the county", async ({ page }) => {
     await openMap(page, { delayPolygonsMs: 6000 });
-    await pickAt(page, 35.4398, -88.6420);
-    await expect.poll(() => body(page), { timeout: 20_000 }).toMatch(/Chester County — no parcel data wired here yet/);
+    await pickAt(page, 36.5526, -89.1734);
+    await expect.poll(() => body(page), { timeout: 20_000 }).toMatch(/Fulton County — no parcel data wired here yet/);
     expect(await body(page)).not.toMatch(GENERIC);
   });
 });

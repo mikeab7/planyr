@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { COUNTIES, COUNTIES_MAP, countyIdentity, noParcelSourceNote, candidateCountiesForPoint } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
+import { countyRecord } from "../src/workspaces/site-planner/lib/appraisal.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
@@ -18,7 +19,7 @@ beforeAll(async () => {
 });
 
 /* The honest gaps: no public parcel service exists (or none Planyr may reach) — each must SAY so. */
-const NO_SOURCE = new Set(["TN:Chester County", "KY:Fulton County", "MO:Butler County", "MO:Dunklin County",
+const NO_SOURCE = new Set(["KY:Fulton County", "MO:Butler County", "MO:Dunklin County",
   "MO:New Madrid County", "MO:Pemiscot County", "MO:Ripley County"]);
 // A centroid can fall just across a line on the simplified asset; these were nudged to a point the asset agrees on.
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
@@ -77,7 +78,7 @@ describe("Mississippi — one pinned MARIS layer per county", () => {
   });
 });
 
-describe("Tennessee — Shelby on the Assessor's own countywide service; Chester says it has no data", () => {
+describe("Tennessee — Shelby on the Assessor's own countywide service; Chester on the Chester County Assessor's CaptureCAMA layer", () => {
   it("Shelby (Memphis, Germantown, Collierville, Bartlett, Millington) resolves to tn_shelby, never the statewide layer", () => {
     for (const p of [[35.1495, -90.049], [35.03, -89.95], [35.0868, -89.81], [35.042, -89.664], [35.205, -89.87], [35.34, -89.90]]) {
       expect(countyIdentity(...p), String(p)).toMatchObject({ status: "ok", key: "tn_shelby", name: "Shelby County" });
@@ -86,10 +87,13 @@ describe("Tennessee — Shelby on the Assessor's own countywide service; Chester
     expect(ALLOWED_HOSTS.has("scgis.shelbycountytn.gov")).toBe(true);
     expect(COUNTIES.tn_shelby.idField).toBe("PARCELID");
   });
-  it("Chester reports no parcel data; Tipton rides the statewide layer", () => {
-    const chester = countyIdentity(35.4398, -88.6420);
-    expect(chester).toMatchObject({ status: "no-source", name: "Chester County" });
-    expect(noParcelSourceNote(chester)).toMatch(/Chester County — no parcel data/);
+  it("Chester (Henderson) resolves to tn_chester, never the statewide layer; Tipton rides the statewide layer", () => {
+    for (const p of [[35.4398, -88.6420], [35.36321, -88.71964], [35.397, -88.452]]) {
+      expect(countyIdentity(...p), String(p)).toMatchObject({ status: "ok", key: "tn_chester", name: "Chester County" });
+    }
+    expect(COUNTIES.tn_chester.layerUrl).toMatch(/^\/gis-proxy\/gis\.capturecama\.com\/.*ChesterCapture\/MapServer\/7$/);
+    expect(ALLOWED_HOSTS.has("gis.capturecama.com")).toBe(true);
+    expect(COUNTIES.tn_chester.idField).toBe("L15Parce_2");
     expect(countyIdentity(35.564, -89.6495).statewideKey).toBe("tn_statewide");
   });
   it("the owner-less Germantown/Collierville city scopes are gone (folded into tn_shelby)", () => {
@@ -117,9 +121,17 @@ describe("the owner's case: Shelby clicks reach Shelby's source; an excluded cou
     expect(c[0]).toBe("tn_shelby");
     expect(c).not.toContain("tn_statewide");
   });
-  it("Chester (Henderson TN): no candidate, the county gap sentence", () => {
-    expect(candidateCountiesForPoint(35.4398, -88.6420)).toEqual([]);
-    expect(noParcelSourceNote(countyIdentity(35.4398, -88.6420))).toBe("Chester County — no parcel data wired here yet.");
+  it("Chester (Henderson TN): routed to tn_chester, never the composite that holds none of it", () => {
+    const c = candidateCountiesForPoint(35.4398, -88.6420);
+    expect(c[0]).toBe("tn_chester");
+    expect(c).not.toContain("tn_statewide");
+  });
+  it("Chester's CaptureCAMA columns reach the parcel card (owner, situs, parcel id, GIS acres) — the real Henderson + rural rows", () => {
+    const rec = countyRecord({ L15Parce_2: "012033M I 01500", L15Parce_4: 0.39423707, GPDATA__OW: "CITY OF HENDERSON", GPDATA__PR: "CROOK AVENUE 111",
+      GPDATA__MA: "PO BOX 68", GPDATA__DA: "0.00", GPDATA__CA: "0.0" }, { idField: "L15Parce_2", addrField: "GPDATA__PR" });
+    expect(rec).toMatchObject({ owner: "CITY OF HENDERSON", account: "012033M I 01500", address: "CROOK AVENUE 111", deedAcres: 0.39423707 });
+    const rural = countyRecord({ L15Parce_2: "012076    02700", L15Parce_4: 36.30162137, GPDATA__OW: "SILLS THOMAS ETUX EDITH", GPDATA__PR: "SILERTON ROAD 1280" }, { idField: "L15Parce_2", addrField: "GPDATA__PR" });
+    expect(rural).toMatchObject({ owner: "SILLS THOMAS ETUX EDITH", deedAcres: 36.30162137 });
   });
   it("a covered TN county (Tipton) still routes to the statewide layer", () => {
     expect(candidateCountiesForPoint(35.564, -89.6495)).toContain("tn_statewide");
