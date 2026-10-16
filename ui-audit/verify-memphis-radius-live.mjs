@@ -76,9 +76,9 @@ const bodyText = () => page.evaluate(() => document.body.innerText);
 const sleep = (ms) => page.waitForTimeout(ms);
 const waitFor = async (fn, ms = 10000) => { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await fn(); if (v) return v; await sleep(250); } return v; };
 
-const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name)$/i;
+const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name|gpdata__ow)$/i; // gpdata__ow = Chester TN (CaptureCAMA) owner
 const ownerOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => OWNER_KEY.test(x) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
-const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id)$/i;
+const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id|l15parce_2)$/i; // l15parce_2 = Chester TN (CaptureCAMA) parcel id
 const idOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => ID_KEY.test(x.split(".").pop()) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
 // Geodesic-enough polygon area (spherical excess) of the returned rings, in acres — what the app received.
 function ringsAcres(g, sr) {
