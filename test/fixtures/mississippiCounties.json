@@ -1,0 +1,721 @@
+{
+ "source": "public/geo/county-polygons.json (Census-derived) — interior point nearest each MS county's bbox centre; 'lines' are points ~7% of the way in from a boundary vertex (NEW-1 Mississippi, 2026-10-16)",
+ "counties": [
+  {
+   "state": "MS",
+   "name": "Adams County",
+   "fips": "28001",
+   "lat": 31.48625,
+   "lng": -91.399
+  },
+  {
+   "state": "MS",
+   "name": "Alcorn County",
+   "fips": "28003",
+   "lat": 34.8825,
+   "lng": -88.582
+  },
+  {
+   "state": "MS",
+   "name": "Amite County",
+   "fips": "28005",
+   "lat": 31.18,
+   "lng": -90.8235
+  },
+  {
+   "state": "MS",
+   "name": "Attala County",
+   "fips": "28007",
+   "lat": 33.09,
+   "lng": -89.63925
+  },
+  {
+   "state": "MS",
+   "name": "Benton County",
+   "fips": "28009",
+   "lat": 34.797,
+   "lng": -89.17425
+  },
+  {
+   "state": "MS",
+   "name": "Bolivar County",
+   "fips": "28011",
+   "lat": 33.832,
+   "lng": -90.9425
+  },
+  {
+   "state": "MS",
+   "name": "Calhoun County",
+   "fips": "28013",
+   "lat": 33.9455,
+   "lng": -89.319
+  },
+  {
+   "state": "MS",
+   "name": "Carroll County",
+   "fips": "28015",
+   "lat": 33.45275,
+   "lng": -89.9065
+  },
+  {
+   "state": "MS",
+   "name": "Chickasaw County",
+   "fips": "28017",
+   "lat": 33.91225,
+   "lng": -88.946
+  },
+  {
+   "state": "MS",
+   "name": "Choctaw County",
+   "fips": "28019",
+   "lat": 33.3275,
+   "lng": -89.266
+  },
+  {
+   "state": "MS",
+   "name": "Claiborne County",
+   "fips": "28021",
+   "lat": 32.01025,
+   "lng": -90.9785
+  },
+  {
+   "state": "MS",
+   "name": "Clarke County",
+   "fips": "28023",
+   "lat": 32.03,
+   "lng": -88.677
+  },
+  {
+   "state": "MS",
+   "name": "Clay County",
+   "fips": "28025",
+   "lat": 33.6615,
+   "lng": -88.748
+  },
+  {
+   "state": "MS",
+   "name": "Coahoma County",
+   "fips": "28027",
+   "lat": 34.25925,
+   "lng": -90.67475
+  },
+  {
+   "state": "MS",
+   "name": "Copiah County",
+   "fips": "28029",
+   "lat": 31.87225,
+   "lng": -90.4215
+  },
+  {
+   "state": "MS",
+   "name": "Covington County",
+   "fips": "28031",
+   "lat": 31.61825,
+   "lng": -89.574
+  },
+  {
+   "state": "MS",
+   "name": "DeSoto County",
+   "fips": "28033",
+   "lat": 34.85625,
+   "lng": -90.0115
+  },
+  {
+   "state": "MS",
+   "name": "Forrest County",
+   "fips": "28035",
+   "lat": 31.17725,
+   "lng": -89.28925
+  },
+  {
+   "state": "MS",
+   "name": "Franklin County",
+   "fips": "28037",
+   "lat": 31.47325,
+   "lng": -90.8945
+  },
+  {
+   "state": "MS",
+   "name": "George County",
+   "fips": "28039",
+   "lat": 30.869,
+   "lng": -88.64425
+  },
+  {
+   "state": "MS",
+   "name": "Greene County",
+   "fips": "28041",
+   "lat": 31.21825,
+   "lng": -88.63175
+  },
+  {
+   "state": "MS",
+   "name": "Grenada County",
+   "fips": "28043",
+   "lat": 33.7875,
+   "lng": -89.81825
+  },
+  {
+   "state": "MS",
+   "name": "Hancock County",
+   "fips": "28045",
+   "lat": 30.42475,
+   "lng": -89.501
+  },
+  {
+   "state": "MS",
+   "name": "Harrison County",
+   "fips": "28047",
+   "lat": 30.49925,
+   "lng": -89.10375
+  },
+  {
+   "state": "MS",
+   "name": "Hinds County",
+   "fips": "28049",
+   "lat": 32.312,
+   "lng": -90.39625
+  },
+  {
+   "state": "MS",
+   "name": "Holmes County",
+   "fips": "28051",
+   "lat": 33.13425,
+   "lng": -90.087
+  },
+  {
+   "state": "MS",
+   "name": "Humphreys County",
+   "fips": "28053",
+   "lat": 33.12925,
+   "lng": -90.527
+  },
+  {
+   "state": "MS",
+   "name": "Issaquena County",
+   "fips": "28055",
+   "lat": 32.73,
+   "lng": -90.97505
+  },
+  {
+   "state": "MS",
+   "name": "Itawamba County",
+   "fips": "28057",
+   "lat": 34.28,
+   "lng": -88.34575
+  },
+  {
+   "state": "MS",
+   "name": "Jackson County",
+   "fips": "28059",
+   "lat": 30.53275,
+   "lng": -88.6365
+  },
+  {
+   "state": "MS",
+   "name": "Jasper County",
+   "fips": "28061",
+   "lat": 32.01925,
+   "lng": -89.11175
+  },
+  {
+   "state": "MS",
+   "name": "Jefferson County",
+   "fips": "28063",
+   "lat": 31.747,
+   "lng": -91.05125
+  },
+  {
+   "state": "MS",
+   "name": "Jefferson Davis County",
+   "fips": "28065",
+   "lat": 31.5855,
+   "lng": -89.778
+  },
+  {
+   "state": "MS",
+   "name": "Jones County",
+   "fips": "28067",
+   "lat": 31.63175,
+   "lng": -89.16425
+  },
+  {
+   "state": "MS",
+   "name": "Kemper County",
+   "fips": "28069",
+   "lat": 32.7555,
+   "lng": -88.63
+  },
+  {
+   "state": "MS",
+   "name": "Lafayette County",
+   "fips": "28071",
+   "lat": 34.366,
+   "lng": -89.478
+  },
+  {
+   "state": "MS",
+   "name": "Lamar County",
+   "fips": "28073",
+   "lat": 31.21375,
+   "lng": -89.49925
+  },
+  {
+   "state": "MS",
+   "name": "Lauderdale County",
+   "fips": "28075",
+   "lat": 32.40425,
+   "lng": -88.65525
+  },
+  {
+   "state": "MS",
+   "name": "Lawrence County",
+   "fips": "28077",
+   "lat": 31.5505,
+   "lng": -90.101
+  },
+  {
+   "state": "MS",
+   "name": "Leake County",
+   "fips": "28079",
+   "lat": 32.75575,
+   "lng": -89.52275
+  },
+  {
+   "state": "MS",
+   "name": "Lee County",
+   "fips": "28081",
+   "lat": 34.301,
+   "lng": -88.67575
+  },
+  {
+   "state": "MS",
+   "name": "Leflore County",
+   "fips": "28083",
+   "lat": 33.53,
+   "lng": -90.272
+  },
+  {
+   "state": "MS",
+   "name": "Lincoln County",
+   "fips": "28085",
+   "lat": 31.54,
+   "lng": -90.4905
+  },
+  {
+   "state": "MS",
+   "name": "Lowndes County",
+   "fips": "28087",
+   "lat": 33.518,
+   "lng": -88.4585
+  },
+  {
+   "state": "MS",
+   "name": "Madison County",
+   "fips": "28089",
+   "lat": 32.64625,
+   "lng": -90.08475
+  },
+  {
+   "state": "MS",
+   "name": "Marion County",
+   "fips": "28091",
+   "lat": 31.22325,
+   "lng": -89.8455
+  },
+  {
+   "state": "MS",
+   "name": "Marshall County",
+   "fips": "28093",
+   "lat": 34.75125,
+   "lng": -89.48025
+  },
+  {
+   "state": "MS",
+   "name": "Monroe County",
+   "fips": "28095",
+   "lat": 33.87375,
+   "lng": -88.457
+  },
+  {
+   "state": "MS",
+   "name": "Montgomery County",
+   "fips": "28097",
+   "lat": 33.486,
+   "lng": -89.58325
+  },
+  {
+   "state": "MS",
+   "name": "Neshoba County",
+   "fips": "28099",
+   "lat": 32.75775,
+   "lng": -89.1145
+  },
+  {
+   "state": "MS",
+   "name": "Newton County",
+   "fips": "28101",
+   "lat": 32.4055,
+   "lng": -89.11725
+  },
+  {
+   "state": "MS",
+   "name": "Noxubee County",
+   "fips": "28103",
+   "lat": 33.108,
+   "lng": -88.5575
+  },
+  {
+   "state": "MS",
+   "name": "Oktibbeha County",
+   "fips": "28105",
+   "lat": 33.4325,
+   "lng": -88.8735
+  },
+  {
+   "state": "MS",
+   "name": "Panola County",
+   "fips": "28107",
+   "lat": 34.3635,
+   "lng": -89.95775
+  },
+  {
+   "state": "MS",
+   "name": "Pearl River County",
+   "fips": "28109",
+   "lat": 30.74375,
+   "lng": -89.588
+  },
+  {
+   "state": "MS",
+   "name": "Perry County",
+   "fips": "28111",
+   "lat": 31.17575,
+   "lng": -88.982
+  },
+  {
+   "state": "MS",
+   "name": "Pike County",
+   "fips": "28113",
+   "lat": 31.181,
+   "lng": -90.40075
+  },
+  {
+   "state": "MS",
+   "name": "Pontotoc County",
+   "fips": "28115",
+   "lat": 34.2315,
+   "lng": -89.03
+  },
+  {
+   "state": "MS",
+   "name": "Prentiss County",
+   "fips": "28117",
+   "lat": 34.61475,
+   "lng": -88.52175
+  },
+  {
+   "state": "MS",
+   "name": "Quitman County",
+   "fips": "28119",
+   "lat": 34.299,
+   "lng": -90.2905
+  },
+  {
+   "state": "MS",
+   "name": "Rankin County",
+   "fips": "28121",
+   "lat": 32.3265,
+   "lng": -89.9855
+  },
+  {
+   "state": "MS",
+   "name": "Scott County",
+   "fips": "28123",
+   "lat": 32.43325,
+   "lng": -89.552
+  },
+  {
+   "state": "MS",
+   "name": "Sharkey County",
+   "fips": "28125",
+   "lat": 32.88875,
+   "lng": -90.807
+  },
+  {
+   "state": "MS",
+   "name": "Simpson County",
+   "fips": "28127",
+   "lat": 31.90775,
+   "lng": -89.94425
+  },
+  {
+   "state": "MS",
+   "name": "Smith County",
+   "fips": "28129",
+   "lat": 32.00775,
+   "lng": -89.52475
+  },
+  {
+   "state": "MS",
+   "name": "Stone County",
+   "fips": "28131",
+   "lat": 30.7835,
+   "lng": -89.1025
+  },
+  {
+   "state": "MS",
+   "name": "Sunflower County",
+   "fips": "28133",
+   "lat": 33.63325,
+   "lng": -90.607
+  },
+  {
+   "state": "MS",
+   "name": "Tallahatchie County",
+   "fips": "28135",
+   "lat": 33.93225,
+   "lng": -90.189
+  },
+  {
+   "state": "MS",
+   "name": "Tate County",
+   "fips": "28137",
+   "lat": 34.67175,
+   "lng": -89.95325
+  },
+  {
+   "state": "MS",
+   "name": "Tippah County",
+   "fips": "28139",
+   "lat": 34.80375,
+   "lng": -88.894
+  },
+  {
+   "state": "MS",
+   "name": "Tishomingo County",
+   "fips": "28141",
+   "lat": 34.735,
+   "lng": -88.22225
+  },
+  {
+   "state": "MS",
+   "name": "Tunica County",
+   "fips": "28143",
+   "lat": 34.656,
+   "lng": -90.393
+  },
+  {
+   "state": "MS",
+   "name": "Union County",
+   "fips": "28145",
+   "lat": 34.489,
+   "lng": -88.98225
+  },
+  {
+   "state": "MS",
+   "name": "Walthall County",
+   "fips": "28147",
+   "lat": 31.18325,
+   "lng": -90.0465
+  },
+  {
+   "state": "MS",
+   "name": "Warren County",
+   "fips": "28149",
+   "lat": 32.34025,
+   "lng": -90.85975
+  },
+  {
+   "state": "MS",
+   "name": "Washington County",
+   "fips": "28151",
+   "lat": 33.27875,
+   "lng": -90.95425
+  },
+  {
+   "state": "MS",
+   "name": "Wayne County",
+   "fips": "28153",
+   "lat": 31.66225,
+   "lng": -88.6905
+  },
+  {
+   "state": "MS",
+   "name": "Webster County",
+   "fips": "28155",
+   "lat": 33.6035,
+   "lng": -89.25675
+  },
+  {
+   "state": "MS",
+   "name": "Wilkinson County",
+   "fips": "28157",
+   "lat": 31.18875,
+   "lng": -91.34475
+  },
+  {
+   "state": "MS",
+   "name": "Winston County",
+   "fips": "28159",
+   "lat": 33.1055,
+   "lng": -89.06175
+  },
+  {
+   "state": "MS",
+   "name": "Yalobusha County",
+   "fips": "28161",
+   "lat": 34.033,
+   "lng": -89.718
+  },
+  {
+   "state": "MS",
+   "name": "Yazoo County",
+   "fips": "28163",
+   "lat": 32.7695,
+   "lng": -90.35775
+  }
+ ],
+ "lines": [
+  {
+   "state": "MS",
+   "name": "Adams County (county line 1)",
+   "county": "Adams County",
+   "lat": 31.37721,
+   "lng": -91.53432
+  },
+  {
+   "state": "MS",
+   "name": "Adams County (county line 2)",
+   "county": "Adams County",
+   "lat": 31.53903,
+   "lng": -91.45991
+  },
+  {
+   "state": "MS",
+   "name": "Forrest County (county line 1)",
+   "county": "Forrest County",
+   "lat": 30.93475,
+   "lng": -89.32761
+  },
+  {
+   "state": "MS",
+   "name": "Forrest County (county line 2)",
+   "county": "Forrest County",
+   "lat": 31.02729,
+   "lng": -89.34203
+  },
+  {
+   "state": "MS",
+   "name": "Harrison County (county line 1)",
+   "county": "Harrison County",
+   "lat": 30.64224,
+   "lng": -89.22163
+  },
+  {
+   "state": "MS",
+   "name": "Harrison County (county line 2)",
+   "county": "Harrison County",
+   "lat": 30.43531,
+   "lng": -88.89008
+  },
+  {
+   "state": "MS",
+   "name": "Hinds County (county line 1)",
+   "county": "Hinds County",
+   "lat": 32.30828,
+   "lng": -90.67269
+  },
+  {
+   "state": "MS",
+   "name": "Hinds County (county line 2)",
+   "county": "Hinds County",
+   "lat": 32.49847,
+   "lng": -90.51227
+  },
+  {
+   "state": "MS",
+   "name": "Jackson County (county line 1)",
+   "county": "Jackson County",
+   "lat": 30.36558,
+   "lng": -88.41563
+  },
+  {
+   "state": "MS",
+   "name": "Jackson County (county line 2)",
+   "county": "Jackson County",
+   "lat": 30.39116,
+   "lng": -88.58209
+  },
+  {
+   "state": "MS",
+   "name": "Lauderdale County (county line 1)",
+   "county": "Lauderdale County",
+   "lat": 32.24034,
+   "lng": -88.45274
+  },
+  {
+   "state": "MS",
+   "name": "Lauderdale County (county line 2)",
+   "county": "Lauderdale County",
+   "lat": 32.5677,
+   "lng": -88.89403
+  },
+  {
+   "state": "MS",
+   "name": "Lowndes County (county line 1)",
+   "county": "Lowndes County",
+   "lat": 33.52637,
+   "lng": -88.53755
+  },
+  {
+   "state": "MS",
+   "name": "Lowndes County (county line 2)",
+   "county": "Lowndes County",
+   "lat": 33.66727,
+   "lng": -88.40596
+  },
+  {
+   "state": "MS",
+   "name": "Madison County (county line 1)",
+   "county": "Madison County",
+   "lat": 32.65811,
+   "lng": -90.26726
+  },
+  {
+   "state": "MS",
+   "name": "Madison County (county line 2)",
+   "county": "Madison County",
+   "lat": 32.86038,
+   "lng": -89.97152
+  },
+  {
+   "state": "MS",
+   "name": "Rankin County (county line 1)",
+   "county": "Rankin County",
+   "lat": 32.16887,
+   "lng": -90.22684
+  },
+  {
+   "state": "MS",
+   "name": "Rankin County (county line 2)",
+   "county": "Rankin County",
+   "lat": 32.32697,
+   "lng": -90.13384
+  },
+  {
+   "state": "MS",
+   "name": "Washington County (county line 1)",
+   "county": "Washington County",
+   "lat": 33.15436,
+   "lng": -91.08608
+  },
+  {
+   "state": "MS",
+   "name": "Washington County (county line 2)",
+   "county": "Washington County",
+   "lat": 33.15297,
+   "lng": -90.7071
+  }
+ ]
+}
