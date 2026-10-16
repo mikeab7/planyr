@@ -57,14 +57,14 @@ function Tag({ children }) {
  * visibility column (and the overlap icon over its column while any parcel overlaps) — and every row AND every group header share the same
  * grid — check · name block · acres · icon slot — so the acres of every group line up on a single right edge and each icon kind sits in
  * ONE column on every row. A row ALWAYS shows its lock (closed / open padlock) and its eye (open / struck); only the ⋯ menu waits for hover. */
-const ACRES_W = 58; // fits "1,234.56" at the row's semibold figure size
+const ACRES_W = 54; // fits "1,234.56" at the row's semibold figure size
 const ICON = 18; // every row icon box
 /* The icon slot holds [overlap marker] · padlock · eye · ⋯, left-aligned in fixed seats so each kind has one column on every row. The padlock,
  * eye and ⋯ seats always exist; the overlap seat exists once any parcel overlaps another — wider for EVERY row (never a per-row width), so a
  * marker has a seat in the slot, never in the name block. */
-const SLOT_PAD = 6; // breathing room between the acres figure and the first icon seat
+const SLOT_PAD = 3; // breathing room between the acres figure and the first icon seat
 export const slotWidth = (anyOverlap = false) => SLOT_PAD + ICON * (3 + (anyOverlap ? 1 : 0));
-const colsFor = (slotW) => `20px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
+const colsFor = (slotW) => `18px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
 const FIRST_LINE_H = 29; // one name line (17) + the row's 6px top/bottom padding: checkbox, acres and icons centre on the FIRST line of a wrapped row
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
 
