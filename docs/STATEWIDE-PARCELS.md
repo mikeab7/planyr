@@ -1297,6 +1297,14 @@ omits Shelby and Chester (`excludedCounties` — a composite is never routed a c
 "no public source":** the Shelby County Assessor of Property's own `CERTParcel` service is on `scgis.shelbycountytn.gov` (NOT the
 Cloudflare-challenged `gis.` viewer), token-free, countywide incl. Germantown/Collierville with owners; wired as `tn_shelby` through
 `/gis-proxy` (the old Germantown/Collierville city scopes were folded in). Found by a pass-2 AGOL search — the item is registered by the City of
-Millington, not the county, which is why a county-org search missed it. **Honest gaps** (no reachable public source): Chester,
-Dunklin/Pemiscot/New Madrid/Butler/Ripley MO, Fulton KY — see B2289169. Live check: `ui-audit/verify-memphis-radius-live.mjs` (all 71 counties ×
+Millington, not the county, which is why a county-org search missed it. **Chester TN (×3, 2026-10-16) — ALSO a retracted "no source":** the
+Chester County Assessor of Property's own public AGOL web map (`f214fb11968a4539bf128561ea61ecd6`) reads its Parcels from
+`https://gis.capturecama.com/arcgis/rest/services/ChesterTN/ChesterCapture/MapServer/7` (CaptureCAMA = the Tennessee Comptroller's assessment
+system; token-free, Map/Query/Data, ~10,333 parcels); wiring and field mapping are on B2289169. **Missouri bootheel / Kentucky — corrected
+2026-10-16 (NEW-2):** Butler, Dunklin and Ripley MO each run a FREE PUBLIC county parcel map on Integrity GIS (Geocortex site ids
+`Butler_County_MO`, `Dunklin_County_MO`, `Ripley_County_MO` at `butlergis.integritygis.com`), so "no public source" was wrong for them — but the
+data behind the viewers (`services4.integritygis.com/arcgis/rest/services/MO/<County>_Assessor_Data/MapServer`) answers `Token Required` (499):
+the viewer injects its own key, which Planyr must NOT replay or harvest (same rule as the Shelby bot-challenged viewer). Record: **public viewer
+exists; data access needs a key from the county or Integrity GIS.** **Genuine gaps** (nothing public found): New Madrid and Pemiscot MO (no county
+viewer on Integrity GIS or AGOL) and Fulton KY (the PVA uses qPublic, a paid subscription) — see B2289169. Live check: `ui-audit/verify-memphis-radius-live.mjs` (all 71 counties ×
 both lot-picking flows; V1720784).
