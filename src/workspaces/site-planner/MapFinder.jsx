@@ -3423,13 +3423,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * `countyIdentity` already knows the difference and already supplies the sentence; the outage
      * and pending cases keep their existing wording untouched. Same shape as the no-hits branch
      * below, which has named the county since B209502. */
-    if (!candidates.length && !nearSources.length) {
+    if (!candidates.length) {
       const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      setErr(gap
-        ? `${gap} You can still trace the lot from the Aerial underlay.`
-        : "Parcel services are still loading — give it a second and click again.");
-      ack?.empty("No lot here");
-      return;
+      if (!nearSources.length) { // NEW-1 (Memphis line band) — else a county across a nearby line is still asked below
+        setErr(gap
+          ? `${gap} You can still trace the lot from the Aerial underlay.`
+          : "Parcel services are still loading — give it a second and click again.");
+        ack?.empty("No lot here");
+        return;
+      }
     }
     setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null); setLocateFar(false);
 
@@ -3514,9 +3516,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * where the service that WOULD have answered is down. */
         // NEW-1 (Memphis line band) — when the county itself has no source, only a NEIGHBOUR was asked: its silence is not
         // this county's outage, so the county's own gap sentence stands.
-        const outage = res.responded === 0 && !(gap && !candidates.length);
-        ack?.empty(outage ? "Couldn't reach the county server" : "No lot here");
-        if (outage) failUnavailable(`${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.`, latlng);
+        if (gap && candidates.length === 0) { ack?.empty("No lot here"); setErr(`${gap} You can still trace the lot from the Aerial underlay.`); return; }
+        ack?.empty(res.responded === 0 ? "Couldn't reach the county server" : "No lot here");
+        if (res.responded === 0) failUnavailable(`${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.`, latlng);
         else setErr(gap
           ? `${gap} You can still trace the lot from the Aerial underlay.`
           : "No parcel right there — zoom in and click directly on a lot.");
@@ -3576,10 +3578,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * `unavailable`, and only they keep the "start the plan here anyway" way out — per the NEW-4
      * rule the click path already follows: an OUTAGE carries the fallback, a coverage fact does not
      * (the aerial trace, offered in the copy, is the way forward for this one). */
-    if (!candidates.length && !nearSources.length) {
+    if (!candidates.length) {
       const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label });
-      return;
+      if (!nearSources.length) { if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label }); return; }
     }
     let res;
     try {
@@ -3609,7 +3610,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       }
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
-      if (!candidates.length) {
+      if (candidates.length === 0) {
         // NEW-1 — only a neighbour was asked (the routed county has no source) and it had nothing: the county's own gap stands.
         const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
         if (gap) { setParcelInfo({ status: "no-source", label, note: gap }); return; }
