@@ -26,6 +26,7 @@ export const ALLOWED_HOSTS = new Set([
   "maps.memphistn.gov", // City of Memphis GIS — hosts the Shelby County Assessor parcel basemap
   "gis.shelbycountytn.gov", // Shelby County TN government GIS (Assessor_Parcel)
   "scgis.shelbycountytn.gov", // Shelby County TN GIS server — the Assessor of Property's CERTParcel service (NEW-1, Memphis radius ×2)
+  "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
 ]);
