@@ -1011,6 +1011,102 @@
    "state": "MS",
    "lat": 33.3,
    "lng": -88.30749
+  },
+  {
+   "name": "Walker/Jefferson line \u2014 Walker side",
+   "county": "Walker County",
+   "lat": 33.5317,
+   "lng": -87.249
+  },
+  {
+   "name": "Walker/Jefferson line \u2014 Jefferson side",
+   "county": "Jefferson County",
+   "lat": 33.5293,
+   "lng": -87.249
+  },
+  {
+   "name": "Tallapoosa/Lee line \u2014 Tallapoosa side",
+   "county": "Tallapoosa County",
+   "lat": 32.601,
+   "lng": -85.69689
+  },
+  {
+   "name": "Tallapoosa/Lee line \u2014 Lee side",
+   "county": "Lee County",
+   "lat": 32.601,
+   "lng": -85.69449
+  },
+  {
+   "name": "Chilton/Autauga line \u2014 Chilton side",
+   "county": "Chilton County",
+   "lat": 32.66618,
+   "lng": -86.785
+  },
+  {
+   "name": "Chilton/Autauga line \u2014 Autauga side",
+   "county": "Autauga County",
+   "lat": 32.66378,
+   "lng": -86.785
+  },
+  {
+   "name": "Clay/Talladega line \u2014 Clay side",
+   "county": "Clay County",
+   "lat": 33.2033,
+   "lng": -86.165
+  },
+  {
+   "name": "Clay/Talladega line \u2014 Talladega side",
+   "county": "Talladega County",
+   "lat": 33.2057,
+   "lng": -86.165
+  },
+  {
+   "name": "Cullman/Marshall line \u2014 Cullman side",
+   "county": "Cullman County",
+   "lat": 34.27164,
+   "lng": -86.451
+  },
+  {
+   "name": "Cullman/Marshall line \u2014 Marshall side",
+   "county": "Marshall County",
+   "lat": 34.27404,
+   "lng": -86.451
+  },
+  {
+   "name": "Pickens/Tuscaloosa line \u2014 Pickens side",
+   "county": "Pickens County",
+   "lat": 33.167,
+   "lng": -87.83813
+  },
+  {
+   "name": "Pickens/Tuscaloosa line \u2014 Tuscaloosa side",
+   "county": "Tuscaloosa County",
+   "lat": 33.167,
+   "lng": -87.83573
+  },
+  {
+   "name": "Washington/Mobile line \u2014 Washington side",
+   "county": "Washington County",
+   "lat": 31.17201,
+   "lng": -87.995
+  },
+  {
+   "name": "Washington/Mobile line \u2014 Mobile side",
+   "county": "Mobile County",
+   "lat": 31.16961,
+   "lng": -87.995
+  },
+  {
+   "name": "Escambia/Baldwin line \u2014 Escambia side",
+   "county": "Escambia County",
+   "lat": 31.00807,
+   "lng": -87.615
+  },
+  {
+   "name": "Escambia/Baldwin line \u2014 Baldwin side",
+   "county": "Baldwin County",
+   "lat": 31.00567,
+   "lng": -87.615
   }
  ],
  "gaps": []
