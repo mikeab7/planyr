@@ -492,7 +492,8 @@
       "place_id"
     ],
     "food_dishes": [
-      "name"
+      "name",
+      "rated_on"
     ],
     "org_model_sheets": [
       "name"
