@@ -31,10 +31,13 @@ const DISH = "ZZ Brisket Taco";
 let taps = 0;
 const tap = async (page, loc, what) => { taps++; await loc.tap(); await sleep(500); return what; };
 const setSlider = async (page, loc, frac) => {
+  await loc.scrollIntoViewIfNeeded(); await sleep(400); // let the keyboard model / sheet settle BEFORE measuring where to tap
   const b = await loc.boundingBox();
   taps++; await page.touchscreen.tap(b.x + b.width * frac, b.y + b.height / 2); await sleep(350);
 };
 const rows = (page) => page.evaluate(async () => (await window.pfSupabase.from("food_dishes").select("id,name,score,note,rated_on,visit_id,created_at").order("created_at")).data || []);
+// Poll until `fn` is truthy (the live database + two reloads are seconds, not milliseconds); returns the last value.
+const until = async (fn, ms = 12000) => { const t0 = Date.now(); let v; while (Date.now() - t0 < ms) { v = await fn(); if (v) return v; await sleep(400); } return v; };
 const dishRowsOnScreen = (page, name) => page.locator('[data-testid="dish-row"]').filter({ hasText: name }).count();
 const noSideways = (page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth);
 
@@ -64,8 +67,9 @@ try {
   await setSlider(page, page.locator('[data-testid="dish-edit-row"] input[type=range]').first(), 0.5);
   await shot(page, "1-add-dish");
   await tap(page, page.locator('[data-testid="dish-save-close-btn"]'), "Done");
-  await sleep(1500);
-  check(`3b the dish appears on the restaurant page with its score, in ${taps} taps from "Add a dish" to saved`, (await dishRowsOnScreen(page, DISH)) === 1 && taps <= 4, `taps=${taps}`);
+  const tapsForAdd = taps;
+  await until(async () => (await rows(page)).length >= 1); await sleep(1200);
+  check(`3b the dish appears on the restaurant page with its score, in ${tapsForAdd} taps from "Add a dish" to saved`, (await dishRowsOnScreen(page, DISH)) === 1 && tapsForAdd <= 4, `taps=${tapsForAdd} onScreen=${await dishRowsOnScreen(page, DISH)}`);
   check("3c nothing pans sideways", await noSideways(page));
   let db = await rows(page);
   check("3d it is in the database, dated today (rated_on), attached to the visit", db.length === 1 && db[0].name === DISH && !!db[0].rated_on, JSON.stringify(db));
@@ -78,7 +82,7 @@ try {
   await setSlider(page, page.locator('[data-testid="dish-edit-row"] input[type=range]').first(), 0.92);
   await page.locator('[data-testid="dish-note-input"]').fill("ask for extra sauce");
   await tap(page, page.locator('[data-testid="dish-save-btn"]'), "Save");
-  await sleep(1500);
+  await until(async () => (await rows(page)).length >= 2); await sleep(1200);
   check("3g still ONE dish row (no duplicate)", (await dishRowsOnScreen(page, DISH)) === 1);
   await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
   const hist = await page.locator('[data-testid="dish-history-entry"]').count();
@@ -100,9 +104,11 @@ try {
   check("3j a misspelled name suggests the dish already saved here", sug.some((t) => t.includes(DISH)), JSON.stringify(sug));
   await tap(page, page.locator('[data-testid="dish-suggestion"]').first(), "suggestion");
   check("3k picking it fills the exact saved name, says it adds a rating, and carries the note forward", (await page.locator('[data-testid="dish-name-input"]').inputValue()) === DISH && (await page.locator('[data-testid="dish-rerate-hint"]').count()) === 1 && (await page.locator('[data-testid="dish-note-input"]').inputValue()) === "ask for extra sauce");
+  await shot(page, "3k-before-slider");
   await setSlider(page, page.locator('[data-testid="dish-edit-row"] input[type=range]').first(), 0.7);
-  await tap(page, page.locator('[data-testid="dish-save-close-btn"]'), "Done"); await sleep(1500);
-  check("3l …and it is STILL one dish (3 ratings in the database)", (await dishRowsOnScreen(page, DISH)) === 1 && (await rows(page)).length === 3);
+  await shot(page, "3k-after-slider");
+  await tap(page, page.locator('[data-testid="dish-save-close-btn"]'), "Done"); await until(async () => (await rows(page)).length >= 3); await sleep(1200);
+  check("3l …and it is STILL one dish (3 ratings in the database)", await until(async () => (await rows(page)).length === 3) && (await dishRowsOnScreen(page, DISH)) === 1, JSON.stringify((await rows(page)).map((d) => [d.score, d.rated_on, d.note, d.visit_id.slice(0, 4), d.created_at.slice(11, 23)])));
 
   // edit the note, then clear it
   const edit = async (note) => {

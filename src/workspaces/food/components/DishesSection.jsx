@@ -256,16 +256,19 @@ function DishEditRow({ initial, mode = initial ? "edit" : "new", rows = [], open
 
   const reset = () => { setName(""); setCourse(""); setScore(null); setOrderAgain(null); setPrice(""); setNote(""); };
 
+  const committing = useRef(false); // a second tap while the first save is still in flight must never write a second rating
   const commit = async (andReopen) => {
-    if (!name.trim()) return;
-    const ok = await onSave({ ...(isRerate ? { _rerate: true } : {}),
+    if (!name.trim() || committing.current) return;
+    committing.current = true;
+    let ok = false;
+    try { ok = await onSave({ ...(isRerate ? { _rerate: true } : {}),
       name: name.trim(),
       course: course || null,
       score,
       order_again: orderAgain,
       price_cents: price === "" ? null : Math.round(Number(price) * 100),
       note: note || null,
-    });
+    }); } finally { committing.current = false; }
     if (ok && andReopen) reset(); // stay open, ready for the next dish — "save-and-add-another"
     else if (ok) onCancel();
   };

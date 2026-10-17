@@ -29,7 +29,8 @@ const section = async (name, fn) => { try { await fn(); } catch (e) { check(`${n
 const sheetState = (page) => page.evaluate((SHEET) => {
   const s = document.querySelector(SHEET); if (!s) return null;
   const c = s.children[1], r = s.getBoundingClientRect(), hb = s.children[0].getBoundingClientRect();
-  return { h: Math.round(r.height), top: Math.round(r.top), snap: s.dataset.sheetSnap, scrollTop: c.scrollTop, handleY: hb.top + hb.height / 2, x: r.left + r.width / 2 };
+  const rootB = s.parentElement.getBoundingClientRect().bottom; // B2243588 x2: mid-drag the box is taller than what shows (it is slid by a transform)
+  return { h: Math.round(rootB - r.top), top: Math.round(r.top), snap: s.dataset.sheetSnap, scrollTop: c.scrollTop, handleY: hb.top + hb.height / 2, x: r.left + r.width / 2 };
 }, SHEET);
 
 async function openForm(cr, { w, h }) {

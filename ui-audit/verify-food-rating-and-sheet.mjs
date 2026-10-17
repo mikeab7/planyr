@@ -67,7 +67,8 @@ async function ratingChecks(page, tag, shotName, { expectLabels, formSel }) {
 const sheetState = (page) => page.evaluate((SHEET) => {
   const s = document.querySelector(SHEET); if (!s) return null;
   const c = s.children[1], r = s.getBoundingClientRect(), hb = s.children[0].getBoundingClientRect();
-  return { h: Math.round(r.height), top: Math.round(r.top), snap: s.dataset.sheetSnap, scrollTop: Math.round(c.scrollTop), handleY: hb.top + hb.height / 2, x: r.left + r.width / 2, left: r.left };
+  const rootB = s.parentElement.getBoundingClientRect().bottom; // B2243588 x2: mid-drag the box is taller than what shows (it is slid by a transform)
+  return { h: Math.round(rootB - r.top), top: Math.round(r.top), snap: s.dataset.sheetSnap, scrollTop: Math.round(c.scrollTop), handleY: hb.top + hb.height / 2, x: r.left + r.width / 2, left: r.left };
 }, SHEET);
 const near = (a, b, tol = 3) => Math.abs(a - b) <= tol;
 
@@ -136,7 +137,7 @@ async function sheetSection(engine, phone) {
     await ts.drag(s.x, s.handleY, s.handleY - 400, { ms: 500 }); await sleep(650); s = await sheetState(page);
     await ts.down(s.x, s.handleY); await ts.to(s.handleY - 150, { ms: 400 }); await sleep(100);
     const over = await sheetState(page);
-    check(`${tagp} 3b dragging past full never opens empty space above the content`, over.h <= stops.full + 4, `h=${over.h} full=${stops.full}`);
+    check(`${tagp} 3b dragging past full only rubber-bands (never more than the 56 px overshoot cap; it springs back on release)`, over.h <= stops.full + 60, `h=${over.h} full=${stops.full}`);
     await ts.up(); await sleep(650);
     s = await sheetState(page);
     check(`${tagp} 3b …and after letting go the full stop is the same height as before (it does not creep taller)`, near(s.h, stops.full), `h=${s.h} full=${stops.full}`);

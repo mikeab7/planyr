@@ -100,6 +100,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   const [snap, setSnap] = useState(initialSnap);
   const [heightPx, setHeightPx] = useState(0);
   const [animated, setAnimated] = useState(false);
+  const formWasOpenRef = useRef(false);
   const dragRef = useRef(null); // the live drag (handle OR content), or null — see beginDrag
   const heightRef = useRef(0); // the height as of the LAST move — a release reads this, never a render's closure
   const [dragging, setDragging] = useState(false);
@@ -271,6 +272,11 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     if (!contentRef.current || typeof ResizeObserver === "undefined") return undefined;
     const ro = new ResizeObserver(() => {
       if (!didMountRef.current || dragRef.current) return;
+      // A form opening (a dish, a new visit, an edit) takes the sheet to FULL once — the half stop leaves its score slider and Save bar
+      // stacked under each other (measured on the phone walk). Closing the form leaves the sheet where the person put it.
+      const open = formOpen();
+      if (open && !formWasOpenRef.current && snap !== "full") { formWasOpenRef.current = true; setSnap("full"); return; }
+      formWasOpenRef.current = open;
       setHeightPx(targetFor(snap));
     });
     ro.observe(contentRef.current);
