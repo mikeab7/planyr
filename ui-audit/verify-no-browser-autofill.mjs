@@ -47,6 +47,14 @@ const results = [];
 const check = (id, ok, detail = "") => { results.push({ id, ok: !!ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${id}${detail ? "  — " + detail : ""}`); };
 
 const FIELD = "input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=button]):not([type=submit]), textarea";
+// Fields that ARE contact / location data and so must keep browser suggestions (B2308848 amended 2026-10-17), with the
+// exact standard token each must carry. Matched on the field's label (testid / aria-label / placeholder).
+const CONTACT = [
+  { re: /^set-location-search$/, token: "street-address" },
+  { re: /^Name \*$|^Full name \*$/, token: "name" },
+  { re: /^Email$|^Email \(optional\)$/, token: "email" },
+];
+const contactTokenFor = (label) => CONTACT.find((c) => c.re.test(label))?.token;
 // A real contact / credential token on purpose (sign-in, profile). Anything else must read "off".
 const REAL = /^(name|given-name|family-name|additional-name|nickname|username|new-password|current-password|one-time-code|organization|organization-title|street-address|address-line[1-3]|address-level[1-4]|country|country-name|postal-code|cc-[a-z-]+|tel[a-z-]*|email|url)$/;
 
@@ -55,6 +63,7 @@ async function sweep(frame, scope) {
   const handles = await frame.evaluate(([FIELD, scope]) => {
     const roots = scope ? [...document.querySelectorAll(scope)] : [document];
     const out = [], seen = new Set();
+    for (const old of document.querySelectorAll("[data-nba]")) old.removeAttribute("data-nba"); // a stale tag from an earlier sweep would make querySelector read the WRONG field
     for (const root of roots) for (const el of root.querySelectorAll(FIELD)) {
       if (seen.has(el) || el.disabled) continue; seen.add(el);
       el.setAttribute("data-nba", String(out.length));
@@ -76,8 +85,9 @@ async function sweep(frame, scope) {
 }
 function score(surface, rows, { min = 1 } = {}) {
   check(`${surface} — fields found`, rows.length >= min, `${rows.length} field(s)`);
-  const bad = rows.filter((r) => r.ac !== "off" && !REAL.test(r.ac));
-  check(`${surface} — every field is autocomplete=off (or a deliberate contact token)`, bad.length === 0, bad.slice(0, 6).map((r) => `${r.label}[${r.type}] ac="${r.ac}"`).join("; ") + (bad.length > 6 ? ` …+${bad.length - 6}` : ""));
+  // The OFF set stays off (strictly "off" — a real token on a non-contact field is a failure); the CONTACT set carries its token.
+  const bad = rows.filter((r) => { const want = contactTokenFor(r.label); return want ? r.ac !== want : r.ac !== "off"; });
+  check(`${surface} — every field is autocomplete=off, except contact/address fields which carry their real token`, bad.length === 0, bad.slice(0, 6).map((r) => `${r.label}[${r.type}] ac="${r.ac}"`).join("; ") + (bad.length > 6 ? ` …+${bad.length - 6}` : ""));
   const pooled = rows.filter((r) => r.name === "planyr-field");
   check(`${surface} — no shared history bucket (name="planyr-field")`, pooled.length === 0, `${pooled.length} field(s)`);
 }
@@ -107,6 +117,9 @@ const arm = await sweep(page, "#nba-arm");
 const by = (id) => arm.find((r) => r.label === "text" || true) && null;
 const armRows = await page.evaluate(() => Object.fromEntries(["nba-bare", "nba-email", "nba-x"].map((id) => [id, document.getElementById(id).getAttribute("autocomplete")])));
 const voidRun = armRows["nba-bare"] !== "off" || armRows["nba-email"] !== "email" || armRows["nba-x"] !== "off";
+// the off set must reject a real token on a non-contact label, and the contact set must reject "off" (the new assertions can go red)
+check("known-answer arm: scorer flags a real token on a non-contact field", ![{ label: "Building depth", type: "text", ac: "name", name: "" }].every((r) => (contactTokenFor(r.label) ? r.ac === contactTokenFor(r.label) : r.ac === "off")));
+check("known-answer arm: scorer flags 'off' on the address field", ![{ label: "set-location-search", type: "text", ac: "off", name: "" }].every((r) => (contactTokenFor(r.label) ? r.ac === contactTokenFor(r.label) : r.ac === "off")));
 check("known-answer arms: bare→off, email stays email, x-planyr→off", !voidRun, JSON.stringify(armRows));
 await page.evaluate(() => document.getElementById("nba-arm").remove());
 
@@ -119,7 +132,20 @@ await tapParcel();
 for (const panel of ["Land", "Analysis", "Drainage", "Yield", "Overlays", "Standards"]) {
   await click(new RegExp(`^${panel}\\b`)); await unfold();
   let rows = await sweep(page);
-  if (panel === "Land") { // open the parcel's own page: "Your name for it" lives there (the owner's repro)
+  if (panel === "Land") {
+// Address entry keeps Chrome's address suggestions; Planyr's own live-suggestion search + the filter boxes stay off
+  {
+    const cta = page.locator('[data-testid="set-location-cta"]').first();
+    if (await cta.count()) {
+      await cta.click().catch(() => {}); await page.waitForTimeout(900);
+      const ac = await page.locator('[data-testid="set-location-search"]').first().evaluate((el) => { el.focus(); return el.getAttribute("autocomplete"); }).catch((e) => "NOT FOUND: " + String(e.message).slice(0, 60));
+      check("site — Set location: address box carries autocomplete=street-address", ac === "street-address", `autocomplete=${ac}`);
+      score("site — Set location dialog", await sweep(page, '[data-testid="set-location-dialog"]'), { min: 1 });
+      await page.mouse.click(5, 5); await page.waitForTimeout(400);
+      check("site — Set location dialog closed again", (await page.locator('[data-testid="set-location-dialog"]').count()) === 0);
+    } else check("site — Set location CTA present", false, "plan has an origin or the CTA moved");
+  }
+   // open the parcel's own page: "Your name for it" lives there (the owner's repro)
     await page.getByText(/^Parcel 1$/).first().click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(500); await unfold();
     rows = rows.concat(await sweep(page));
     const nm = page.getByText(/your name for it/i).first();
@@ -178,6 +204,17 @@ if (frame) {
   }
   score(`schedule — grid cell editors (${nRows} rows × every column)`, rows, { min: 3 });
   score("schedule — every field on the page", await sweep(frame), { min: 0 });
+  // Contacts: a person's name + email are contact data, so they keep browser suggestions with the right standard tokens
+  // (the toolbar lives in the host app and posts this message to the grid — exactly what its Contacts button does)
+  await page2.evaluate(() => document.querySelector("iframe").contentWindow.postMessage({ source: "planar-shell", type: "planar:contacts" }, location.origin));
+  await page2.waitForTimeout(500);
+  await frame.getByText(/Add contact/i).first().click({ timeout: 3000 }).catch(() => {});
+  await page2.waitForTimeout(400);
+  const crows = await sweep(frame);
+  const cn = crows.find((r) => r.label === "Full name *"), ce = crows.find((r) => r.label === "Email (optional)");
+  check("schedule — Contacts: 'Full name' carries autocomplete=name", cn?.ac === "name", `ac=${cn?.ac}`);
+  check("schedule — Contacts: 'Email' carries autocomplete=email", ce?.ac === "email", `ac=${ce?.ac}`);
+  score("schedule — Contacts panel", crows, { min: 2 });
 }
 
 await browser.close();

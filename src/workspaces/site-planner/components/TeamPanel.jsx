@@ -4,6 +4,7 @@
  * through lib/teams.js (RLS-scoped). Theme tokens only — no raw hex (owner theming rule).
  * Signed-in only (the Account panel only mounts this when there's a user). */
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { contactField } from "../../../shared/ui/noAutofill.js";
 import {
   listMyTeams, listMembers, listInvites, createTeam, inviteByEmail,
   setRole, removeMember, cancelInvite, leaveTeam, renameTeam, deleteTeam, resendInvite,
@@ -242,7 +243,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
   const inviteForm = (
     <div>
       <div style={{ display: "flex", gap: 6 }}>
-        <input type="email" autoComplete="off" aria-label="Email address" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doInvite(); }} />
+        <input type="email" {...contactField("email")} aria-label="Email address" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doInvite(); }} />
         <select aria-label="Role" value={role} onChange={(e) => setRoleSel(e.target.value)} style={{ ...field, width: 96, flex: "none" }}>
           <option value="member">Member</option>
           <option value="admin">Admin</option>
