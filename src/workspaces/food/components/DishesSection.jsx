@@ -27,9 +27,10 @@ import CloseX from "./CloseX.jsx";
 import { formatVisitDate } from "../lib/dateFormat.js";
 import {
   dishRowsForTable, theOrderEntries, theOrderTotalCents, theOrderAsText, formatCents,
-  formatScore, dishScoreTier,
+  formatScore, dishScoreTier, dishDate,
 } from "../lib/dishAggregates.js";
 import { noAutofill } from "../lib/noAutofill.js";
+import { suggestDishes, sameDishName } from "../lib/dishSuggest.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
@@ -123,35 +124,86 @@ export function OrderAgainControl({ value, onChange, isMobile }) {
   );
 }
 
+/* Today as the local calendar day (YYYY-MM-DD) — a rating given from the place page is dated the day it was given, never the
+ * day of the (possibly months-old) visit it hangs off. */
+export function todayLocal(now = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
+
+/* The dish name box with its own suggestions (B2268434): type "pad thia" and "Pad Thai · last 8.5" is offered right under the
+ * field, so a re-rate lands on the dish already saved here instead of minting a twin. Our own list, not a native <datalist> (iOS
+ * shows those as a tiny keyboard-bar strip and never tolerates a misspelling). `rows` are dishRowsForTable rows. */
+export function DishNameField({ value, onChange, rows, onPick, inputStyle, autoFocus, testId = "dish-name-input", ariaLabel = "Dish", placeholder = "Dish" }) {
+  const hits = suggestDishes(value, rows);
+  const exact = rows.find((r) => sameDishName(r.name, value));
+  const showList = hits.length > 0 && !(hits.length === 1 && exact);
+  return (
+    <div style={{ minWidth: 0, flex: 1 }}>
+      <input
+        type="text" autoFocus={autoFocus} value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder} aria-label={ariaLabel} data-testid={testId}
+        enterKeyHint="next" autoCapitalize="words" {...noAutofill("dish-pick")} style={inputStyle}
+      />
+      {showList && (
+        <div data-testid="dish-suggestions" role="listbox" aria-label="Dishes already saved here" style={{ display: "flex", flexDirection: "column", marginTop: 4, border: "1px solid var(--border-default)", borderRadius: RADIUS.md, overflow: "clip", background: "var(--surface-raised)" }}>
+          {hits.map((r) => (
+            <button key={r.key} type="button" role="option" data-testid="dish-suggestion" onClick={() => onPick(r)} style={{
+              display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", textAlign: "left", minHeight: 44, padding: "6px 10px",
+              border: "none", borderBottom: "1px solid var(--border-default)", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 14,
+            }}>
+              <span style={{ fontWeight: 700, overflowWrap: "anywhere" }}>{r.name}</span>
+              <span style={{ flex: "none", fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{r.latestScore != null ? `last ${formatScore(r.latestScore)}` : "saved"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {exact && (
+        <div data-testid="dish-rerate-hint" style={{ marginTop: 4, fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>
+          Already saved here{exact.latestScore != null ? ` (last ${formatScore(exact.latestScore)})` : ""} — this adds a new rating to it.
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* One dish's history — every score over time as a small bar chart, every note with its date and
  * price, and what else was had at the same visit. Inline expansion, never a separate page/modal.
  * Reached from the row's kebab menu (NEW-1) rather than a row click, which now opens the editor. */
-function DishHistoryPanel({ row, dishesAtSamePlace }) {
+function DishHistoryPanel({ row, dishesAtSamePlace, onRateAgain, onEdit }) {
   const entries = [row, ...row.history];
   const maxScore = Math.max(1, ...entries.map((e) => Number(e.score) || 0));
   return (
     <div data-testid="dish-history-panel" style={{ padding: "8px 12px 12px", background: "var(--surface-page)", borderRadius: 8, margin: "0 4px 8px" }}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 48, marginBottom: 8 }}>
-        {[...entries].reverse().map((e) => (
-          <div key={e.id} title={`${e.visited_on ? formatVisitDate(e.visited_on) : "undated"} · ${e.score ?? "—"}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "0 0 auto", width: 18 }}>
-            <div style={{
-              width: 12, borderRadius: 2, // design-exempt: sparkline bar corner (data-viz ink, not a chrome control)
-              height: e.score != null ? `${(Number(e.score) / maxScore) * 40}px` : "2px",
-              background: e.score != null ? "var(--accent-food)" : "var(--border-default)",
-            }} />
-          </div>
-        ))}
-      </div>
+      {row.note && (
+        <div data-testid="dish-full-note" style={{ marginBottom: 8, fontSize: FONT_SIZE.emphasis, color: "var(--text-primary)", overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+          <span style={{ fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", display: "block" }}>Note</span>
+          {row.note}
+        </div>
+      )}
+      {entries.length > 1 && (
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 48, marginBottom: 8 }}>
+          {[...entries].reverse().map((e) => (
+            <div key={e.id} title={`${dishDate(e) ? formatVisitDate(dishDate(e)) : "undated"} · ${e.score ?? "—"}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "0 0 auto", width: 18 }}>
+              <div style={{
+                width: 12, borderRadius: 2, // design-exempt: sparkline bar corner (data-viz ink, not a chrome control)
+                height: e.score != null ? `${(Number(e.score) / maxScore) * 40}px` : "2px",
+                background: e.score != null ? "var(--accent-food)" : "var(--border-default)",
+              }} />
+            </div>
+          ))}
+        </div>
+      )}
       {entries.map((e) => {
         const sameVisitOthers = dishesAtSamePlace.filter((d) => d.visit_id === e.visit_id && d.id !== e.id);
         return (
-          <div key={e.id} style={{ padding: "6px 0", borderTop: "1px solid var(--border-default)", fontSize: FONT_SIZE.control }}>
+          <div key={e.id} data-testid="dish-history-entry" style={{ padding: "6px 0", borderTop: "1px solid var(--border-default)", fontSize: FONT_SIZE.control }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
               <span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{e.score != null ? `${formatScore(e.score)} / 10` : "Not scored"}</span>
-              <span style={{ color: "var(--text-tertiary)" }}>{e.visited_on ? formatVisitDate(e.visited_on) : "Date unknown"}</span>
+              <span style={{ color: "var(--text-tertiary)" }}>{dishDate(e) ? formatVisitDate(dishDate(e)) : "Date unknown"}</span>
             </div>
             {e.price_cents != null && <div style={{ color: "var(--text-secondary)" }}>{formatCents(e.price_cents)}</div>}
-            {e.note && <div style={{ color: "var(--text-secondary)" }}>{e.note}</div>}
+            {e.note && e !== row && <div style={{ color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{e.note}</div>}
             {sameVisitOthers.length > 0 && (
               <div style={{ color: "var(--text-tertiary)", marginTop: 2 }}>
                 Also had: {sameVisitOthers.map((o) => o.name).join(", ")}
@@ -160,6 +212,16 @@ function DishHistoryPanel({ row, dishesAtSamePlace }) {
           </div>
         );
       })}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        {onRateAgain && (
+          <button type="button" onClick={onRateAgain} data-testid="dish-rate-again-btn" style={{
+            flex: 1, border: "none", borderRadius: RADIUS.md, minHeight: 44, background: "var(--accent-food)", color: "var(--on-accent-food)", cursor: "pointer", font: "inherit", fontSize: 14, fontWeight: 700,
+          }}>Rate again</button>
+        )}
+        <button type="button" onClick={onEdit} data-testid="dish-detail-edit-btn" style={{
+          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, minHeight: 44, padding: "0 16px", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 600,
+        }}>Edit</button>
+      </div>
     </div>
   );
 }
@@ -168,25 +230,35 @@ function DishHistoryPanel({ row, dishesAtSamePlace }) {
  * redesign's FIELD HIERARCHY): a "NEW DISH"/"EDIT DISH" label + close X, the dish name as the
  * page's one hero field, Course + Price sharing a row, the Score block, the Order-again block,
  * Note last. Enter commits (and, only when adding a NEW dish, reopens a blank row); Esc cancels. */
-function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCancel: onCancelRaw, pending, isMobile, scope = "place" }) {
+function DishEditRow({ initial, mode = initial ? "edit" : "new", rows = [], openWishlistNames, onSave, onCancel: onCancelRaw, pending, isMobile, scope = "place" }) {
+  const isEdit = mode === "edit", isRerate = mode === "rerate";
   // Kept across the card remounting (rotate the phone — lib/draftStore.js); an explicit close/cancel/save-and-close clears it.
   const drafts = useDraftStore();
-  const draftKey = `dish:${scope}:${initial?.id || "new"}`;
+  const draftKey = `dish:${scope}:${mode}:${initial?.id || "new"}`;
   const onCancel = () => { drafts?.clear(draftKey); onCancelRaw(); };
   const [name, setName] = useDraftField(draftKey, "name", () => initial?.name || "");
   const [course, setCourse] = useDraftField(draftKey, "course", () => initial?.course || "");
-  const [score, setScore] = useDraftField(draftKey, "score", () => (initial?.score != null ? Number(initial.score) : null));
+  const [score, setScore] = useDraftField(draftKey, "score", () => (!isRerate && initial?.score != null ? Number(initial.score) : null)); // a re-rate starts UNSET: the new score is the point
   const [orderAgain, setOrderAgain] = useDraftField(draftKey, "orderAgain", () => initial?.order_again || null);
   const [price, setPrice] = useDraftField(draftKey, "price", () => (initial?.price_cents != null ? (initial.price_cents / 100).toFixed(2) : ""));
   const [note, setNote] = useDraftField(draftKey, "note", () => initial?.note || "");
-  const listId = `dish-name-suggestions-${initial?.id || "new"}`;
-  const suggestions = [...new Set([...existingNames, ...openWishlistNames])];
+  // Names he wants to try but has not had yet are offered too (struck done on save by FoodApp), after the dishes already saved.
+  const pickRows = [...rows, ...openWishlistNames.filter((n) => !rows.some((r) => sameDishName(r.name, n))).map((n) => ({ key: `wish:${n}`, name: n, latestScore: null }))];
+  const pickRow = (r) => {
+    setName(r.name);
+    if (r.course != null || r.price_cents != null || r.note != null || r.order_again != null) { // an already-saved dish: carry its facts forward
+      if (!course) setCourse(r.course || "");
+      if (price === "") setPrice(r.price_cents != null ? (r.price_cents / 100).toFixed(2) : "");
+      if (!note) setNote(r.note || "");
+      if (!orderAgain) setOrderAgain(r.order_again || null);
+    }
+  };
 
   const reset = () => { setName(""); setCourse(""); setScore(null); setOrderAgain(null); setPrice(""); setNote(""); };
 
   const commit = async (andReopen) => {
     if (!name.trim()) return;
-    const ok = await onSave({
+    const ok = await onSave({ ...(isRerate ? { _rerate: true } : {}),
       name: name.trim(),
       course: course || null,
       score,
@@ -203,33 +275,31 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
       data-testid="dish-edit-row" data-edit-card="" data-sheet-form=""
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
-        if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); commit(!initial); }
+        if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); commit(!isEdit && !isRerate); }
       }}
       style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 12px", background: "var(--surface-raised)", border: "1px solid var(--accent-food)", borderRadius: RADIUS.lg, margin: "4px" }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }} data-testid="dish-edit-heading">
-          {initial ? "Edit dish" : "New dish"}
+          {isRerate ? "Rate again" : isEdit ? "Edit dish" : "New dish"}
         </span>
         <CloseX onClick={onCancel} label="Close" testId="dish-edit-close" size={44} />
       </div>
 
-      {/* Dish name — the editor's hero field: large, transparent, no box, a 2px accent underline
-          only. It shipped as a plain grey box identical to Note — the most important field looked
-          exactly as important as the least. */}
-      <input
-        type="text" autoFocus value={name} onChange={(e) => setName(e.target.value)}
-        placeholder="Dish" aria-label="Dish" list={listId}
-        data-testid="dish-name-input" {...noAutofill("dish-pick")} enterKeyHint="next" autoCapitalize="words"
-        style={{
-          width: "100%", boxSizing: "border-box", background: "transparent", border: "none",
-          borderBottom: "2px solid var(--accent-food)", padding: "4px 2px",
-          font: "inherit", fontSize: isMobile ? 20 : 19, fontWeight: 600, color: "var(--text-primary)",
-        }}
-      />
-      <datalist id={listId}>
-        {suggestions.map((n) => <option key={n} value={n} />)}
-      </datalist>
+      {/* Dish name — the editor's hero field: large, transparent, no box, a 2px accent underline only. A re-rate shows the name as
+          the title (it is the same dish); a new dish / an edit gets the field, name first, with saved-dish suggestions under it. */}
+      {isRerate ? (
+        <div data-testid="dish-rerate-name" style={{ fontSize: isMobile ? 20 : 19, fontWeight: 600, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{name}</div>
+      ) : (
+        <DishNameField
+          value={name} onChange={setName} rows={isEdit ? [] : pickRows} onPick={pickRow} autoFocus
+          inputStyle={{
+            width: "100%", boxSizing: "border-box", background: "transparent", border: "none",
+            borderBottom: "2px solid var(--accent-food)", padding: "4px 2px",
+            font: "inherit", fontSize: isMobile ? 20 : 19, fontWeight: 600, color: "var(--text-primary)",
+          }}
+        />
+      )}
 
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -260,40 +330,40 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
         // Phone: pinned to the bottom of the editor, a narrow secondary action on the left and
         // the primary solid action wide on the right — no hint line, no room for it.
         <div data-testid="dish-edit-buttons" data-sheet-sticky="bottom" style={{ position: "sticky", bottom: 0, background: "var(--surface-raised)", paddingTop: 4, display: "flex", gap: 8 }}>
-          <button type="button" onClick={initial ? onCancel : () => commit(false)} data-testid={initial ? "dish-cancel-btn" : "dish-save-close-btn"} style={{
+          <button type="button" onClick={isEdit || isRerate ? onCancel : () => commit(false)} data-testid={isEdit || isRerate ? "dish-cancel-btn" : "dish-save-close-btn"} style={{
             flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "0 16px", minHeight: 44,
             background: "transparent", color: "var(--text-secondary)", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 600,
           }}>
-            {initial ? "Cancel" : "Done"}
+            {isEdit || isRerate ? "Cancel" : "Done"}
           </button>
           <button
-            type="button" onClick={() => commit(!initial)} disabled={pending || !name.trim()} data-testid="dish-save-btn"
+            type="button" onClick={() => commit(!isEdit && !isRerate)} disabled={pending || !name.trim()} data-testid="dish-save-btn"
             style={{
               flex: 1, border: "none", borderRadius: RADIUS.md, padding: "0 12px", minHeight: 44, cursor: pending ? "default" : "pointer",
               background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: 14, fontWeight: 700,
               opacity: pending || !name.trim() ? 0.6 : 1,
             }}
           >
-            {initial ? "Save" : "Save & add another"}
+            {isEdit || isRerate ? "Save" : "Save & add another"}
           </button>
         </div>
       ) : (
         <div data-testid="dish-edit-buttons">
           <button
-            type="button" onClick={() => commit(!initial)} disabled={pending || !name.trim()} data-testid="dish-save-btn"
+            type="button" onClick={() => commit(!isEdit && !isRerate)} disabled={pending || !name.trim()} data-testid="dish-save-btn"
             style={{
               width: "100%", border: "none", borderRadius: RADIUS.md, padding: "10px 0", minHeight: 44, cursor: pending ? "default" : "pointer",
               background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: FONT_SIZE.display, fontWeight: 700,
               opacity: pending || !name.trim() ? 0.6 : 1,
             }}
           >
-            {initial ? "Save" : "Save & add another"}
+            {isEdit || isRerate ? "Save" : "Save & add another"}
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
             <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "1 1 auto" }}>
-              Enter saves{!initial ? " · starts another" : ""} · Esc cancels
+              Enter saves{!isEdit && !isRerate ? " · starts another" : ""} · Esc cancels
             </span>
-            {!initial && (
+            {!isEdit && !isRerate && (
               <button type="button" onClick={() => commit(false)} data-testid="dish-save-close-btn" style={{
                 flex: "none", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "6px 12px", minHeight: 32,
                 background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 600,
@@ -345,7 +415,7 @@ function ScoreChip({ score }) {
   );
 }
 
-function DishKebabMenu({ row, hasHistory, onEdit, onToggleHistory, onDelete }) {
+function DishKebabMenu({ row, onEdit, onRateAgain, onDelete }) {
   const [open, setOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const anchorRef = useRef(null);
@@ -381,9 +451,7 @@ function DishKebabMenu({ row, hasHistory, onEdit, onToggleHistory, onDelete }) {
         ) : (
           <>
             <MenuItem data-testid="dish-row-edit" onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
-            {hasHistory && (
-              <MenuItem data-testid="dish-row-history" onClick={() => { onToggleHistory(); close(); }}>History</MenuItem>
-            )}
+            <MenuItem data-testid="dish-row-rate-again" onClick={() => { onRateAgain(); close(); }}>Rate again</MenuItem>
             <MenuItem data-testid="dish-row-delete" onClick={() => setConfirmingDelete(true)} style={{ color: "var(--danger-text)" }}>
               Delete
             </MenuItem>
@@ -399,19 +467,17 @@ function DishKebabMenu({ row, hasHistory, onEdit, onToggleHistory, onDelete }) {
  * kebab menu at the right edge. The row itself opens the editor on click — the standalone pencil
  * button and the bare delete ✕ are both GONE (delete now lives only in the kebab menu, alongside
  * Edit and, when the dish has been had more than once, History). */
-function DishDisplayRow({ row, open, onToggle, onOpenEdit, onDeleteDish, dishesAtSamePlace }) {
+function DishDisplayRow({ row, open, onToggle, onOpenEdit, onRateAgain, onDeleteDish, dishesAtSamePlace }) {
   const unscored = row.latestScore == null;
   const orderBadge = ORDER_AGAIN_OPTIONS.find((o) => o.value === row.order_again);
-  const infoLine = unscored
-    ? null
-    : [COURSE_LABEL[row.course] || null, formatCents(row.price_cents), row.timesHad > 1 ? `had ${row.timesHad}×` : (row.note || null)]
-        .filter(Boolean).join(" · ");
+  const infoLine = [COURSE_LABEL[row.course] || null, formatCents(row.price_cents), row.timesHad > 1 ? `had ${row.timesHad}×` : null]
+    .filter(Boolean).join(" · ");
 
   return (
     <>
       <div
-        data-testid="dish-row" data-dish-scored={unscored ? "false" : "true"} onClick={onOpenEdit} role="button" tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter") onOpenEdit(); }}
+        data-testid="dish-row" data-dish-scored={unscored ? "false" : "true"} aria-expanded={open} onClick={onToggle} role="button" tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter") onToggle(); }}
         style={{
           display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", cursor: "pointer", minHeight: 46,
           borderBottom: unscored ? DASHED_BORDER : "1px solid var(--border-default)",
@@ -420,10 +486,11 @@ function DishDisplayRow({ row, open, onToggle, onOpenEdit, onDeleteDish, dishesA
         <ScoreChip score={row.latestScore} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{row.name}</div>
-          {unscored ? (
-            <div style={{ fontSize: FONT_SIZE.label, color: "var(--accent-food-text)" }} data-testid="dish-unscored-caption">Not scored yet</div>
-          ) : (
-            infoLine && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>{infoLine}</div>
+          {unscored && <div style={{ fontSize: FONT_SIZE.label, color: "var(--accent-food-text)" }} data-testid="dish-unscored-caption">Not scored yet</div>}
+          {!unscored && infoLine && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>{infoLine}</div>}
+          {row.note && (
+            // One truncated line; the full text is in the panel a tap on the row opens.
+            <div data-testid="dish-row-note" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.note}</div>
           )}
         </div>
         {orderBadge && (
@@ -450,13 +517,10 @@ function DishDisplayRow({ row, open, onToggle, onOpenEdit, onDeleteDish, dishesA
           </button>
         )}
         <span onClick={(e) => e.stopPropagation()}>
-          <DishKebabMenu
-            row={row} hasHistory={row.history.length > 0} onEdit={onOpenEdit}
-            onToggleHistory={onToggle} onDelete={onDeleteDish}
-          />
+          <DishKebabMenu row={row} onEdit={onOpenEdit} onRateAgain={onRateAgain} onDelete={onDeleteDish} />
         </span>
       </div>
-      {open && <DishHistoryPanel row={row} dishesAtSamePlace={dishesAtSamePlace} />}
+      {open && <DishHistoryPanel row={row} dishesAtSamePlace={dishesAtSamePlace} onRateAgain={onRateAgain} onEdit={onOpenEdit} />}
     </>
   );
 }
@@ -473,6 +537,7 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
   // Which add/edit row is open survives the card remounting (lib/draftStore.js); `scope` keeps the place-wide section and the one inside an editing visit apart.
   const [addingNew, setAddingNew] = useDraftField(`dishes-ui:${scope}`, "addingNew", false);
   const [editingKey, setEditingKey] = useDraftField(`dishes-ui:${scope}`, "editingKey", null);
+  const [rerateKey, setRerateKey] = useDraftField(`dishes-ui:${scope}`, "rerateKey", null);
   const [openHistoryKey, setOpenHistoryKey] = useState(null);
   const isMobile = useIsMobile();
 
@@ -480,10 +545,11 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
   const sorted = useMemo(() => [...rows].sort(SORTS[sortKey] || SORTS.score), [rows, sortKey]);
   const orderEntries = useMemo(() => theOrderEntries(rows), [rows]);
   const orderTotal = theOrderTotalCents(orderEntries);
-  const existingNames = useMemo(() => [...new Set(dishesWithDate.map((d) => d.name))], [dishesWithDate]);
 
   if (!visits || !visits.length) return null; // a place with zero visits has nothing to have had dishes at
   const targetVisitId = visits[0].id; // most recent visit — see file header for why
+  // A rating given from the PLACE page is dated today (`rated_on`); one made inside an editing visit belongs to that visit's own day.
+  const saveNew = (fields) => { const { _rerate, ...rest } = fields; return onSaveDish({ ...rest, visit_id: targetVisitId, ...(scope === "place" ? { rated_on: todayLocal() } : {}) }); };
 
   const copyOrder = () => {
     const text = theOrderAsText(orderEntries);
@@ -531,12 +597,12 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
         // pinned to THIS box (it scrolled away with the form) instead of the bottom of the sheet (NEW-2).
         overflow: "clip" }}>
         {sorted.map((row) =>
-          editingKey === row.key ? (
+          editingKey === row.key || rerateKey === row.key ? (
             <div key={row.key}>
               <DishEditRow
-                initial={row} existingNames={existingNames} openWishlistNames={openWishlistNames}
-                pending={pending} onCancel={() => setEditingKey(null)} isMobile={isMobile} scope={scope}
-                onSave={(fields) => onSaveDish({ ...fields, id: row.id })}
+                initial={row} mode={rerateKey === row.key ? "rerate" : "edit"} openWishlistNames={openWishlistNames}
+                pending={pending} onCancel={() => { setEditingKey(null); setRerateKey(null); }} isMobile={isMobile} scope={scope}
+                onSave={(fields) => (rerateKey === row.key ? saveNew(fields) : onSaveDish({ ...fields, id: row.id }))}
               />
             </div>
           ) : (
@@ -544,20 +610,21 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
               key={row.key} row={row} dishesAtSamePlace={dishesWithDate}
               open={openHistoryKey === row.key}
               onToggle={() => setOpenHistoryKey((k) => (k === row.key ? null : row.key))}
-              onOpenEdit={() => setEditingKey(row.key)}
+              onOpenEdit={() => { setAddingNew(false); setRerateKey(null); setEditingKey(row.key); }}
+              onRateAgain={() => { setAddingNew(false); setEditingKey(null); setOpenHistoryKey(null); setRerateKey(row.key); }}
               onDeleteDish={onDeleteDish}
             />
           )
         )}
         {addingNew ? (
           <DishEditRow
-            existingNames={existingNames} openWishlistNames={openWishlistNames} pending={pending} isMobile={isMobile}
+            rows={rows} openWishlistNames={openWishlistNames} pending={pending} isMobile={isMobile}
             onCancel={() => setAddingNew(false)} scope={scope}
-            onSave={(fields) => onSaveDish({ ...fields, visit_id: targetVisitId })}
+            onSave={saveNew}
           />
         ) : (
           <button
-            type="button" onClick={() => setAddingNew(true)} data-testid="food-add-dish-btn"
+            type="button" onClick={() => { setEditingKey(null); setRerateKey(null); setAddingNew(true); }} data-testid="food-add-dish-btn"
             style={{
               display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", background: "transparent",
               border: "none", borderTop: DASHED_BORDER, padding: "11px 12px", minHeight: 44, cursor: "pointer",

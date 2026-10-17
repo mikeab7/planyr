@@ -137,6 +137,24 @@ export function reportSheetSideways(detail, now = Date.now()) {
   } catch (_) { return Promise.resolve(false); }
 }
 
+let _lastStuckReport = 0;
+/** NEW-1 (B2243588 ×2): a drag the person clearly made on the visit sheet that the sheet did not follow. Same client/table/throttle as
+ *  reportSheetSideways — a recurrence on his phone leaves a row (source `food:sheet-stuck`) instead of an unreproducible report. */
+export function reportSheetStuck(detail, now = Date.now()) {
+  try {
+    if (now - _lastStuckReport < 60000) return Promise.resolve(false);
+    _lastStuckReport = now;
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:sheet-stuck", message: `visit sheet did not follow a drag: ${JSON.stringify(detail || {})}`.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
+}
+
 export async function searchPlacesByName(query, center, signal) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };
   const args = {
@@ -403,6 +421,15 @@ export async function insertDish(dish) {
     .insert({ ...rest, user_id: uid })
     .select()
     .single();
+  return { data, error };
+}
+
+/** One edit applied to every rating row of a dish (a rename must reach the dish's whole history, or the old rows would split off as
+ *  a second dish). `ids` are the rows of ONE dish at ONE place; same stripping as updateDish. */
+export async function updateDishes(ids, patch) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { place_id: _p, visit_id: _v, ...rest } = patch;
+  const { data, error } = await supabase.from("food_dishes").update(rest).in("id", ids).select();
   return { data, error };
 }
 
