@@ -107,7 +107,7 @@ import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import BottomSheet, { FORM_OPEN_CSS } from "./BottomSheet.jsx";
 import SideDock from "./SideDock.jsx";
 import { useLandscapePhone } from "../lib/phoneLayout.js";
-import DishesSection from "./DishesSection.jsx";
+import DishesSection, { DishNameField } from "./DishesSection.jsx";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 import { computeVisitAggregates, orderAgainEntries } from "../lib/visitAggregates.js";
 import { meanDishScoreForVisit, dishRowsForTable, bestDishRow } from "../lib/dishAggregates.js";
@@ -136,7 +136,15 @@ const SELECTED_ACCENT = "var(--accent-food)";
 const MOBILE_BREAKPOINT = "(max-width: 760px)";
 // NEW-1 (2026-08-27 owner block) — long enough to register as a real confirmation, short enough
 // to never feel like something that needs dismissing (it never does — no button, no modal).
-const SAVE_CONFIRMATION_MS = 2500;
+const SAVE_CONFIRMATION_MS = 7000; // long enough to reach the Edit button; still never needs dismissing (no modal)
+
+/** Scroll whichever ancestor is this panel's scroller (the sheet's list on a phone, the rail on desktop) back to its top. */
+function scrollPanelToTop(el) {
+  for (let n = el && el.parentElement; n; n = n.parentElement) {
+    const o = getComputedStyle(n).overflowY;
+    if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight) { n.scrollTop = 0; return; }
+  }
+}
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(() => {
@@ -175,8 +183,10 @@ function fieldStyle() {
  * this block replaces the old free-text "What I had" box. Rows are drafts until Save; FoodApp's
  * submitVisit writes the visit and then each dish (a dish needs its visit's id). Each row's rating
  * is the same ScoreMeter the place-detail dish editor uses. */
-function DraftDishes({ rows, setRows, isMobile }) {
+function DraftDishes({ rows, setRows, isMobile, knownRows = [] }) {
   const update = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  // Picking a dish already saved here fills the exact saved name (so the rating lands on it, never on a twin) and carries its note + eat-again forward.
+  const pick = (key, k) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, name: k.name, note: r.note || k.note || "", order_again: r.order_again ?? k.order_again ?? null } : r)));
   return (
     <div data-testid="visit-dishes" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
@@ -186,12 +196,10 @@ function DraftDishes({ rows, setRows, isMobile }) {
           border: "1px solid var(--border-default)", background: "var(--surface-page)",
         }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="text" value={r.name} onChange={(e) => update(r.key, { name: e.target.value })}
-              placeholder="Dish" aria-label={`Dish ${i + 1}`} data-testid="visit-dish-name"
-              enterKeyHint="next" autoCapitalize="words"
-              {...noAutofill("dish-pick")}
-              style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }}
+            <DishNameField
+              value={r.name} onChange={(name) => update(r.key, { name })} rows={knownRows} onPick={(k) => pick(r.key, k)}
+              ariaLabel={`Dish ${i + 1}`} testId="visit-dish-name"
+              inputStyle={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }}
             />
             {rows.length > 1 && (
               <CloseX onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} label={`Remove dish ${i + 1}`} testId="visit-dish-remove" />
@@ -199,6 +207,12 @@ function DraftDishes({ rows, setRows, isMobile }) {
           </div>
           <ScoreMeter value={r.score} onChange={(score) => update(r.key, { score })} label="Dish score" isMobile={isMobile} />
           <OrderAgainControl value={r.order_again ?? null} onChange={(order_again) => update(r.key, { order_again })} isMobile={isMobile} />
+          <input
+            type="text" value={r.note || ""} onChange={(e) => update(r.key, { note: e.target.value })}
+            placeholder="Note (optional) — e.g. ask for extra sauce" aria-label={`Note for dish ${i + 1}`} data-testid="visit-dish-note"
+            enterKeyHint="done" {...noAutofill("dish-remarks")}
+            style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }}
+          />
         </div>
       ))}
       <button type="button" onClick={() => setRows((rs) => [...rs, newDraftDish()])} data-testid="visit-dish-add"
@@ -212,7 +226,7 @@ function DraftDishes({ rows, setRows, isMobile }) {
   );
 }
 
-function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel = "Log this visit" }) {
+function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, submitLabel = "Log this visit" }) {
   // `initial` (the visit being edited) is a lazy-initializer READ ONCE at mount — VisitCard
   // unmounts/remounts this form every time editing toggles off then on again, so re-opening edit
   // always starts from the CURRENT saved row, never a stale in-progress edit from before a Cancel.
@@ -268,14 +282,14 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
       // NEW-1 (2026-08-27 owner block) — the SAME confirmed-save gate B668194 already uses for
       // clearing the form; the "✓ Visit saved" banner (VisitPanel, above) must never fire on a
       // failed save (the error banner already covers that case).
-      onSaved?.();
+      onSaved?.(saved);
     }
   };
 
   const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)", minWidth: 0 };
   return (
     <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
-      {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} />}
+      {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} knownRows={knownRows} />}
       {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: 12, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
       {initial?.what_i_had && (
         <div data-testid="visit-legacy-had" style={{ fontSize: FONT_SIZE.emphasis, color: "var(--text-secondary)" }}>
@@ -739,7 +753,7 @@ export default function VisitPanel({
   place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, onEditVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
   wishlisted, onToggleWishlist, onSheetHeightChange, onSideWidthChange,
-  dishesWithDate, onSaveDish, onDeleteDish, dishPending, openDishWishlistNames, listsControl,
+  dishesWithDate, onSaveDish, onDeleteDish, dishPending, openDishWishlistNames, listsControl, savedNotice,
 }) {
   const narrowPhone = useIsMobile();
   // B2046224 ×4 — a phone held sideways docks the card to the right edge instead of a bottom sheet.
@@ -765,7 +779,8 @@ export default function VisitPanel({
   const everVisited = visits.length > 0;
   const aggregates = useMemo(() => computeVisitAggregates(visits), [visits]);
   const orderAgain = useMemo(() => orderAgainEntries(visits), [visits]);
-  const bestDish = useMemo(() => bestDishRow(dishRowsForTable(dishesWithDate || [])), [dishesWithDate]);
+  const knownDishRows = useMemo(() => dishRowsForTable(dishesWithDate || []), [dishesWithDate]);
+  const bestDish = useMemo(() => bestDishRow(knownDishRows), [knownDishRows]);
   const wishlistDisabled = manualNameEditable && !(manualName || "").trim();
 
   // NEW-1 (2026-08-27 owner block) — "when I click log this visit, it should not make it seem
@@ -776,15 +791,23 @@ export default function VisitPanel({
   // every confirmed save (VisitForm calls `onSaved` only when `onSubmit` resolved true, mirroring
   // the B668194 field-clear contract exactly), and the banner auto-dismisses — never a modal, never
   // something to dismiss by hand.
-  const [savedNonce, setSavedNonce] = useState(0);
+  // NEW-2 (B2268433): after a confirmed save the form CLOSES and the place's own page shows what was just logged — never a cleared form
+  // inviting "another visit" seconds after one. FoodApp owns the notice (a new restaurant's panel remounts once it exists as a place, which
+  // would drop panel-local state); it only shows for a visit this place actually holds, and for a few seconds.
   const [showSaved, setShowSaved] = useState(false);
+  const noticeAt = savedNotice?.at;
+  const noticeHere = !!savedNotice && visits.some((v) => v.id === savedNotice.visitId);
   useEffect(() => {
-    if (savedNonce === 0) return undefined; // never shown on mount, only on a REAL save
+    if (!savedNotice || !noticeHere) return undefined;
+    const left = SAVE_CONFIRMATION_MS - (Date.now() - savedNotice.at);
+    if (left <= 0) return undefined;
     setShowSaved(true);
-    const t = setTimeout(() => setShowSaved(false), SAVE_CONFIRMATION_MS);
-    return () => clearTimeout(t);
-  }, [savedNonce]);
-  const handleSaved = useCallback(() => setSavedNonce((n) => n + 1), []);
+    const id = requestAnimationFrame(() => { if (savedNotice.kind === "new") scrollPanelToTop(peekRef.current); });
+    const t = setTimeout(() => setShowSaved(false), left);
+    return () => { cancelAnimationFrame(id); clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noticeAt, noticeHere]);
+  const handleSaved = useCallback(() => { drafts.clear("new"); setAdding(false); }, [drafts]);
 
   // Escape clears the selection exactly like the close button.
   useEffect(() => {
@@ -830,18 +853,19 @@ export default function VisitPanel({
             onClose={onClose}
           />
         </div>
-        {showSaved && (
-          // NEW-1 — deliberately INSIDE peekRef's own measured div, not an absolute overlay: it
-          // never covers the close button or the title, and BottomSheet's own "peek" height
-          // effect (see the header comment above) already re-measures on every render with no
-          // deps, so the sheet smoothly grows to reveal this and settles back when it clears —
-          // reusing the existing smooth-resettle machinery instead of fighting it with a new one.
+        {showSaved && savedNotice && (
+          // Inside peekRef's own measured div (not an overlay): never covers the close button or the title, and the sheet re-measures to it.
           <div role="status" data-testid="food-save-confirmation" style={{
             margin: "0 16px 8px", padding: "7px 10px", borderRadius: 8,
             background: "var(--success-bg)", color: "var(--success-text)", border: "1px solid var(--success-border)",
             fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6,
           }}>
-            ✓ Visit saved
+            <span style={{ flex: 1, minWidth: 0 }}>{savedNotice.kind === "edit" ? "✓ Changes saved" : `✓ Visit saved${savedNotice.dishes ? ` · ${savedNotice.dishes} ${savedNotice.dishes === 1 ? "dish" : "dishes"}` : ""}`}</span>
+            {savedNotice.kind !== "edit" && (
+              <button type="button" data-testid="food-saved-edit-btn" onClick={() => { setShowSaved(false); handleOpenEdit(savedNotice.visitId); }} style={{
+                flex: "none", minHeight: 44, padding: "0 12px", border: "none", background: "none", color: "inherit", cursor: "pointer", font: "inherit", fontWeight: 700, textDecoration: "underline",
+              }}>Edit visit</button>
+            )}
           </div>
         )}
         {everVisited && <ScoreStrip aggregates={aggregates} bestDish={bestDish} />}
@@ -867,7 +891,7 @@ export default function VisitPanel({
       )}
 
       {onSubmitVisit && adding && (
-        <VisitForm pending={pending} onCancel={() => setAdding(false)} onSubmit={onSubmitVisit} onSaved={handleSaved} />
+        <VisitForm pending={pending} onCancel={() => setAdding(false)} onSubmit={onSubmitVisit} onSaved={handleSaved} knownRows={knownDishRows} />
       )}
       {!landscape && actionsRow}
 

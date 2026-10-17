@@ -1577,7 +1577,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     expect(submitVisitFn).toMatch(/setError\("Give this place a name first\."\);\s*\n\s*return false;/);
     expect(submitVisitFn).toMatch(/if \(err\) \{/);
     expect(submitVisitFn).toMatch(/setError\(err\.message \|\| "Couldn't save that visit\."\);\s*\n\s*return false;/);
-    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,320}return true;/);
+    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,900}return savedVisit\.id;/); // B2268433: the saved visit's id (truthy) is the confirmation
   });
 
   it("NEW-1 (2026-08-27) — the visit is added OPTIMISTICALLY before the write resolves, and rolled back (never left as a phantom) if it fails", () => {
@@ -2898,29 +2898,26 @@ describe("NEW-1 (2026-08-27 owner block) — saving a visit gives an unmistakabl
 
   it("the confirmation banner exists, is a role=\"status\" (not an alert/modal), and reads a plain success message", () => {
     expect(panel).toMatch(/data-testid="food-save-confirmation"/);
-    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 300, panel.indexOf('data-testid="food-save-confirmation"') + 400);
+    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 300, panel.indexOf('data-testid="food-save-confirmation"') + 900);
     expect(bannerBlock).toMatch(/role="status"/);
     expect(bannerBlock).toMatch(/Visit saved/);
     expect(bannerBlock).toMatch(/var\(--success-bg\)/);
     expect(bannerBlock).toMatch(/var\(--success-text\)/);
   });
 
-  it("shown ONLY on savedNonce > 0 (never on mount) and auto-dismisses — no dismiss button, nothing for the owner to click away", () => {
-    expect(panel).toMatch(/const \[savedNonce, setSavedNonce\] = useState\(0\);/);
-    const effectBlock = panel.slice(panel.indexOf("if (savedNonce === 0) return undefined"), panel.indexOf("}, [savedNonce]);") + 20);
-    expect(effectBlock).toMatch(/setTimeout\(\(\) => setShowSaved\(false\), SAVE_CONFIRMATION_MS\)/);
+  it("shown ONLY for a notice FoodApp recorded after a confirmed save (never on mount) and auto-dismisses — the only control is Edit visit, no dismiss", () => {
+    expect(panel).toMatch(/const \[showSaved, setShowSaved\] = useState\(false\);/);
+    const effectBlock = panel.slice(panel.indexOf("if (!savedNotice || !noticeHere) return undefined"), panel.indexOf("}, [noticeAt, noticeHere]);") + 30);
+    expect(effectBlock).toMatch(/setTimeout\(\(\) => setShowSaved\(false\), left\)/);
     expect(effectBlock).toMatch(/clearTimeout\(t\)/);
-    // No dismiss affordance anywhere near the banner — it is not a toast the owner has to close.
-    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 50, panel.indexOf('data-testid="food-save-confirmation"') + 400);
-    expect(bannerBlock).not.toMatch(/onClick/);
   });
 
   it("fires ONLY on a confirmed save (the SAME B668194 gate VisitForm already uses to clear its fields) — never on a failed save, which the error banner already covers", () => {
-    expect(panel).toMatch(/onSaved\?\.\(\);/);
+    expect(panel).toMatch(/onSaved\?\.\(saved\);/);
     const submitFn = panel.slice(panel.indexOf("const submit = async (e) => {"), panel.indexOf("return (", panel.indexOf("const submit = async (e) => {")));
     const savedBlock = submitFn.slice(submitFn.indexOf("if (saved) {"), submitFn.indexOf("};", submitFn.indexOf("if (saved) {")));
-    expect(savedBlock).toMatch(/setWouldReturn\(null\);\s*\n\s*\/\/[\s\S]{0,300}onSaved\?\.\(\);/); // field-clear AND onSaved share the same `if (saved)` gate
-    expect(panel).toMatch(/<VisitForm pending=\{pending\} onCancel=\{\(\) => setAdding\(false\)\} onSubmit=\{onSubmitVisit\} onSaved=\{handleSaved\} \/>/);
+    expect(savedBlock).toMatch(/setWouldReturn\(null\);\s*\n\s*\/\/[\s\S]{0,300}onSaved\?\.\(saved\);/); // field-clear AND onSaved share the same `if (saved)` gate
+    expect(panel).toMatch(/<VisitForm pending=\{pending\} onCancel=\{\(\) => setAdding\(false\)\} onSubmit=\{onSubmitVisit\} onSaved=\{handleSaved\} knownRows=\{knownDishRows\} \/>/);
   });
 
   it("lives INSIDE peekRef's own measured block, not an absolute overlay over the header/close button — so it never covers the title or the close button, and the sheet's own existing peek-height re-measure (no deps, re-measures every render) picks it up for free", () => {
@@ -3263,22 +3260,24 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
   it("Enter commits (and, only when adding a NEW dish, reopens a blank row); Escape cancels — unchanged by the redesign", () => {
     const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
     expect(editRow).toMatch(/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); onCancel\(\); \}/);
-    expect(editRow).toMatch(/if \(e\.key === "Enter" && e\.target\.tagName !== "TEXTAREA"\) \{ e\.preventDefault\(\); commit\(!initial\); \}/);
+    expect(editRow).toMatch(/if \(e\.key === "Enter" && e\.target\.tagName !== "TEXTAREA"\) \{ e\.preventDefault\(\); commit\(!isEdit && !isRerate\); \}/);
     expect(editRow).toMatch(/if \(ok && andReopen\) reset\(\);/);
   });
 
   it("the dish name is the editor's HERO field — transparent background, no box, a 2px accent underline — never the same filled-grey box as every other field (the shipped defect)", () => {
     const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
-    const nameInput = editRow.slice(editRow.indexOf('data-testid="dish-name-input"') - 400, editRow.indexOf('data-testid="dish-name-input"') + 400);
+    const nameInput = editRow.slice(editRow.indexOf("<DishNameField"), editRow.indexOf("<DishNameField") + 900); // B2268434: the field now lives in DishNameField, styled by the editor
     expect(nameInput).toMatch(/background: "transparent"/);
     expect(nameInput).toMatch(/borderBottom: "2px solid var\(--accent-food\)"/);
     expect(nameInput).toMatch(/fontWeight: 600/);
   });
 
-  it("the dish name field autocompletes against existing dish names at this place AND open (not-done) wishlist names, via a native <datalist> (no custom dropdown widget)", () => {
+  it("the dish name field suggests dishes already saved at this place AND open (not-done) wishlist names — our own list (misspelling-tolerant via dishSuggest), not a native <datalist> (B2268434)", () => {
     const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
-    expect(editRow).toMatch(/const suggestions = \[\.\.\.new Set\(\[\.\.\.existingNames, \.\.\.openWishlistNames\]\)\];/);
-    expect(editRow).toMatch(/<datalist id=\{listId\}>/);
+    expect(editRow).toMatch(/openWishlistNames\.filter/);
+    expect(editRow).toMatch(/<DishNameField/);
+    expect(editRow).not.toMatch(/<datalist/);
+    expect(section).toMatch(/suggestDishes\(value, rows\)/);
   });
 
   it("Course and Price share a row — Course flexes, Price is a fixed narrow field", () => {
@@ -3309,8 +3308,8 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
 
   it("the buttons row: ADD mode gets 'Save & add another' (primary) + 'Save & close' + Cancel; EDIT mode gets only 'Save' (primary) + Cancel — an owner decision, not a guess", () => {
     const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
-    expect(editRow).toMatch(/\{initial \? "Save" : "Save & add another"\}/);
-    expect(editRow).toMatch(/!initial && \(/); // "Save & close" only renders when adding
+    expect(editRow).toMatch(/\{isEdit \|\| isRerate \? "Save" : "Save & add another"\}/);
+    expect(editRow).toMatch(/!isEdit && !isRerate && \(/); // "Save & close" only renders when adding
     expect(editRow).toMatch(/data-testid="dish-save-close-btn"/);
     expect(editRow).toMatch(/data-testid="dish-cancel-btn"/);
   });
@@ -3374,16 +3373,17 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
       expect(kebab).toMatch(/confirmingDelete \?/);
     });
 
-    it("clicking the row opens the editor (row onClick={onOpenEdit}) — this is what makes the pencil redundant", () => {
+    it("tapping the row opens the dish's history + full note (B2268434); Edit and Rate again are in the panel and the kebab", () => {
       const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
-      expect(displayRow).toMatch(/data-testid="dish-row" data-dish-scored=\{[^}]*\} onClick=\{onOpenEdit\}/);
+      expect(displayRow).toMatch(/data-testid="dish-row" data-dish-scored=\{[^}]*\} aria-expanded=\{open\} onClick=\{onToggle\}/);
     });
 
-    it("History is wired to render ONLY when the dish has more than one rating (row.history.length > 0) — owner decision: kept, not dropped, moved off the row click into the kebab", () => {
+    it("history is the row's own tap now (B2268434): the panel shows every rating when there is more than one, and the kebab offers Rate again", () => {
       const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
-      expect(displayRow).toMatch(/hasHistory=\{row\.history\.length > 0\}/);
+      expect(displayRow).toMatch(/<DishHistoryPanel/);
       const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
-      expect(kebab).toMatch(/\{hasHistory && \([\s\S]{0,120}?data-testid="dish-row-history"/);
+      expect(kebab).toMatch(/data-testid="dish-row-rate-again"/);
+      expect(section).toMatch(/entries\.length > 1 &&/);
     });
   });
 
@@ -3442,7 +3442,7 @@ describe("VisitPanel — Dishes section wired into place detail (only when everV
   });
 
   it("'Best dish here' surfaces in the score strip's facts line, derived from dishRowsForTable/bestDishRow — never a second aggregate engine", () => {
-    expect(panel).toMatch(/const bestDish = useMemo\(\(\) => bestDishRow\(dishRowsForTable\(dishesWithDate \|\| \[\]\)\), \[dishesWithDate\]\);/);
+    expect(panel).toMatch(/const bestDish = useMemo\(\(\) => bestDishRow\(knownDishRows\), \[knownDishRows\]\);/);
   });
 });
 

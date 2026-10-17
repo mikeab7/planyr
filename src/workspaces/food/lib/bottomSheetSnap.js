@@ -89,6 +89,15 @@ export function releaseVelocity(samples, windowMs = 100) {
 export function dragBounds({ stops, canDismiss }) {
   return { min: canDismiss ? 0 : stops.peek, max: Math.max(stops.peek, stops.half, stops.full) };
 }
+/** Rubber band (Apple/Vaul): past an end stop the sheet still follows the finger, but at a third of the pull and never more than
+ *  RUBBER_CAP. Below a bottom of 0 (a closable sheet) there is no band — it just goes down to closed. */
+export const RUBBER_CAP = 56;
+const RUBBER = 0.35;
+export function dragVisibleHeight(raw, { min, max }) {
+  if (raw > max) return max + Math.min(RUBBER_CAP, (raw - max) * RUBBER);
+  if (raw < min) return min > 0 ? min - Math.min(RUBBER_CAP, (min - raw) * RUBBER) : 0;
+  return raw;
+}
 export const clampDragHeight = (h, { min, max }) => Math.min(max, Math.max(min, h));
 
 /** Where a released drag settles: "peek" | "half" | "full" | "dismiss".

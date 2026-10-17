@@ -21,10 +21,17 @@ export function withVisitDate(dishes, visitsById) {
   return dishes.map((d) => ({ ...d, visited_on: visitsById.get(d.visit_id)?.visited_on ?? null }));
 }
 
+/** The day a rating applies to: `rated_on` when it was given apart from its visit (a re-rate from the place page), else the
+ *  visit's own day, else null (undated visit). The ONE place that answers "when was this score given". */
+export function dishDate(d) {
+  return d.rated_on || d.visited_on || null;
+}
+
 function dishSortKey(d) {
-  // Prefer the visit's own date (when a dish was actually eaten); fall back to the dish row's
-  // own updated/created timestamp so an undated visit still orders sensibly against others.
-  return d.visited_on || d.updated_at || d.created_at || "";
+  // The rating's day first (an undated one falls back to when the row was written), then the row's own creation time, so two
+  // ratings of one dish on the same day (a re-rate from the place page) still order oldest -> newest.
+  const day = dishDate(d) || (d.created_at || "").slice(0, 10);
+  return `${day}|${d.created_at || ""}`;
 }
 
 /** Every dish row belonging to any of `visitIds` — the one filter both a snapshot place (whose

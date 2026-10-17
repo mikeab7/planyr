@@ -1012,3 +1012,10 @@ create policy "Users delete own food_list_items" on public.food_list_items
 -- Verify (read-only; safe to run any time) -----------------------------------
 --   select relname, relrowsecurity from pg_class where oid in ('public.food_lists'::regclass, 'public.food_list_items'::regclass); -- both true
 --   select polrelid::regclass, polname from pg_policy where polrelid in ('public.food_lists'::regclass, 'public.food_list_items'::regclass); -- 4 + 4 owner-only, no anon
+
+
+-- ── B2268434 (2026-10-17): a rating given from the PLACE page is dated the day it was given ────────────────
+-- food_dishes.rated_on: null = the rating belongs to its visit's own day (visited_on, the one source); set only for a
+-- re-rate / add made from the place page, where the visit it hangs off may be months old. Applied to production 2026-10-17.
+-- RLS: the four own-row policies are whole-row (user_id = auth.uid()), so they already cover the new column.
+alter table public.food_dishes add column if not exists rated_on date;
