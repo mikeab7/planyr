@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { NO_AUTOFILL, autofillToken, isIosLike } from "../src/shared/ui/noAutofill.js";
+import { NO_AUTOFILL, autofillToken, isIosLike, contactField, CONTACT_TOKENS } from "../src/shared/ui/noAutofill.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SEQ = resolve(here, "../public/sequence/index.html");
@@ -89,7 +89,7 @@ describe("Sequence iframe editor completeness", () => {
       .filter(({ line }) => /<input\s/.test(line))
       .filter(({ line }) => !line.trim().startsWith("//"))   // skip code comments
       .filter(({ line }) => !IMMUNE.test(line))
-      .filter(({ line }) => !line.includes("NO_AUTOFILL"));
+      .filter(({ line }) => !line.includes("NO_AUTOFILL") && !line.includes("contactField("));
     expect(
       offenders.map((o) => `L${o.n}: ${o.line.trim().slice(0, 90)}`),
       "these iframe editors are missing the {...NO_AUTOFILL} spread",
@@ -104,5 +104,38 @@ describe("auth forms stay excluded (real autofill must keep working)", () => {
     expect(auth).toContain('autoComplete="email"');
     expect(auth).toContain('autoComplete="new-password"');
     expect(auth).toContain("current-password"); // present in the sign-in password field's ternary
+  });
+});
+
+describe("B2308848 amended — contact / address fields keep browser suggestions, everything else stays off", () => {
+  const read = (rel) => readFileSync(resolve(here, "..", rel), "utf8");
+  it("contactField stamps the standard token and the app-wide opt-in marker; an unknown kind throws (default stays off)", () => {
+    expect(contactField("email")).toEqual({ autoComplete: "email", "data-contact-field": "" });
+    expect(contactField("street").autoComplete).toBe("street-address");
+    expect(contactField("name").autoComplete).toBe("name");
+    expect(() => contactField("dimension")).toThrow();
+  });
+  it("only real WHATWG contact tokens are in the table (nothing 'off' / non-standard)", () => {
+    for (const t of Object.values(CONTACT_TOKENS)) expect(t).toMatch(/^(name|email|tel|organization|street-address|address-level[12]|postal-code)$/);
+  });
+  it("the iframe's inline contactField copy matches the shared table", () => {
+    const m = seq.match(/const CONTACT_TOKENS = \{([^}]*)\};/);
+    expect(m, "iframe must define CONTACT_TOKENS").toBeTruthy();
+    for (const [k, v] of Object.entries(CONTACT_TOKENS).filter(([k]) => ["name", "email", "phone", "company"].includes(k))) {
+      expect(m[1]).toContain(`${k}: "${v}"`);
+    }
+    expect(seq).toContain('const contactField = (kind) => ({ autoComplete: CONTACT_TOKENS[kind], "data-contact-field": "" });');
+  });
+  it("the contacts editor and the address / invite fields opt in; filters and Planyr's own search stay off", () => {
+    expect(seq).toMatch(/contactField\("name"\)\} autoFocus value=\{newName\}/);
+    expect(seq).toMatch(/contactField\("email"\)\} value=\{newEmail\}/);
+    expect(seq).toMatch(/contactField\("name"\)\} autoFocus value=\{editName\}|contactField\("name"\)\} value=\{editName\}/);
+    expect(read("src/workspaces/site-planner/components/SetLocationDialog.jsx")).toContain('{...contactField("street")}');
+    expect(read("src/workspaces/site-planner/components/TeamPanel.jsx")).toContain('{...contactField("email")}');
+    expect(read("src/workspaces/site-planner/MapFinder.jsx")).toMatch(/<input \{\.\.\.NO_AUTOFILL\} value=\{nameFilter\}/);
+    expect(read("src/workspaces/site-planner/components/ParcelsPanel.jsx")).toMatch(/\{\.\.\.NO_AUTOFILL\} value=\{filter\}/);
+    // Planyr's own live-suggestion boxes keep "off": a second (Chrome) dropdown would collide with theirs
+    expect(read("src/workspaces/site-planner/components/PlaceSearchField.jsx")).toContain('autoComplete="off"');
+    expect(read("src/shared/comps/components/PartyNameField.jsx")).toContain('autoComplete="off"');
   });
 });

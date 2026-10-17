@@ -20,6 +20,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
+import { contactField } from "../../../shared/ui/noAutofill.js";
 import L from "leaflet";
 import { BASEMAPS } from "../lib/basemaps.js";
 import { parseLatLon, normalizeOrigin } from "../lib/sitePlacement.js";
@@ -117,7 +118,7 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
             onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); find(); } }}
             placeholder="Address, or a latitude and longitude"
             aria-label="Address, or a latitude and longitude"
-            data-testid="set-location-search"
+            data-testid="set-location-search" {...contactField("street")}
             style={{ flex: 1, minWidth: 0, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, outline: "none", color: PAL.ink, background: "var(--surface-base)" }} />
           <button onClick={find} disabled={busy || !q.trim()} style={btn(true, !busy && !!q.trim())} data-testid="set-location-find">{busy ? "…" : "Find"}</button>
         </div>

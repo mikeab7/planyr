@@ -30,6 +30,7 @@ import { CONTROL_H, FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 // "Imagery & layers" corner chip is NOT rehomed onto `MenuTrigger` — measured, its own
 // MAP_CORNER_CHIP_STYLE is already byte-for-byte SIZE.md; see that constant's own note.)
 import { Button } from "../../shared/ui/controls.jsx";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 /* LAZY (B1064 tranche c). Converted in the same commit as SitePlanner.jsx's copy — see that
  * file's header comment. On THIS host the card defaults OPEN on desktop (`layersPanelOpen`'s
@@ -5024,7 +5025,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 labels needed shortening too. Shrink stays enabled on the select as a defensive
                 backstop for a narrower case than this fixed panel ever actually presents. */}
             <div style={{ display: "flex", gap: 6, padding: "0 8px 8px" }}>
-              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
+              <input {...NO_AUTOFILL} value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
                 style={{ flex: "1 1 auto", minWidth: FILTER_MIN_PX, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
               {/* NEW-1 (signature-budget convergence, B1038016) — padding "5px 6px" → "5px 8px",
                   matching the filter input beside it exactly (was the flagged sibling mismatch

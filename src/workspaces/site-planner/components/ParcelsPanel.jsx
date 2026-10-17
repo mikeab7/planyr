@@ -17,6 +17,7 @@ import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js"
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { LockGlyph as SharedLockGlyph } from "../../../shared/ui/LockToggle.jsx";
 import { isDiagArmed } from "../lib/diagArm.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { measureListOverflow } from "../lib/parcelListOverflow.js";
 
 export const LINE = "1px solid var(--border-default)";
@@ -316,7 +317,7 @@ export default function ParcelsPanel({
       )}
 
       {showFilter && (
-        <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or account" aria-label="Filter parcels by name or account" data-testid="parcels-filter"
+        <input type="search" {...NO_AUTOFILL} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or account" aria-label="Filter parcels by name or account" data-testid="parcels-filter"
           onKeyDown={(e) => e.stopPropagation()}
           style={{ height: CONTROL_H.lg, marginBottom: SPACE.md, padding: `0 ${SPACE.lg}px`, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", fontSize: FONT_SIZE.control }} />
       )}

@@ -50,4 +50,23 @@ export const NO_AUTOFILL = Object.freeze({
   "data-form-type": "other",
 });
 
+// ⛔ B2308848 AMENDED (owner, 2026-10-17): browser suggestions STAY on fields that hold real-world contact / location
+// info — an address, an email, a phone, a person's name, a company — where they genuinely help and other top apps offer
+// them. Everything else (dimensions, depths, counts, labels, street label names, parcel / plan / site names, notes,
+// filters) stays OFF, because those values are unique and suggesting them is pointless. DEFAULT IS OFF: nothing is a
+// contact field unless it opts in HERE, explicitly, with the right standard token so Chrome offers the right thing.
+// A field with a real token is left alone by the app-wide stamp (phoneTyping.js REAL_TOKEN), so this is the only edit
+// a contact field needs. Planyr's own live-suggestion boxes (PlaceSearchField, PartyNameField) are NOT contact fields:
+// their own dropdown would collide with Chrome's, so they stay "off".
+export const CONTACT_TOKENS = Object.freeze({
+  name: "name", email: "email", phone: "tel", company: "organization",
+  street: "street-address", city: "address-level2", state: "address-level1", zip: "postal-code",
+});
+/** Attributes for a contact / location field. `kind` is a key of CONTACT_TOKENS. Spread it INSTEAD of NO_AUTOFILL. */
+export function contactField(kind) {
+  const autoComplete = CONTACT_TOKENS[kind];
+  if (!autoComplete) throw new Error(`contactField: unknown kind "${kind}"`);
+  return { autoComplete, "data-contact-field": "" };
+}
+
 export default NO_AUTOFILL;
