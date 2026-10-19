@@ -16610,6 +16610,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { if (window.__plannerIdentifyResult === hook) window.__plannerIdentifyResult = null; };
   }, []);
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
+  const [outlinePhase, setOutlinePhase] = useState("none"); // NEW-1 (select-parcel first paint): what the lit-up outlines are doing — loading | drawn | empty | zoom | none (lib/parcelOutlineSet.js status())
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const identifyTok = useRef(0);
@@ -16924,7 +16925,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // selects them) instead of going dark, exactly like the Map view already does.
   useEffect(() => {
     if (!origin) return;
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); return; }
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); setOutlinePhase("none"); return; }
     ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
     /* B2024624 — ONE source per AREA, following the VIEW (lib/parcelOutlineSet.js). This used
      * to mount every county source in the country (36+ full-viewport images) and the statewide
@@ -16940,15 +16941,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
       isStatewideUrl: isStatewideLayerUrl,
       scopeFor: statewideBackupScope, // a failed county's statewide backup draws only that county, not the whole view
+      onChange: () => setOutlinePhase(set.status().phase),
     });
     outlineLayersRef.current = set;
+    setOutlinePhase("loading"); // the tool is armed: outlines are on their way until the set says otherwise
     let map = null, poll = null, tries = 0;
     const onMoved = () => set.sync();
     // The aerial may only be mounting now (basemap was off) — wait for the map, then follow its view.
     const attach = () => {
       poll = null;
       const m = geoMapRef.current;
-      if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); return; }
+      if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); else setOutlinePhase("none"); return; }
       map = m; m.on("moveend", onMoved); set.sync();
     };
     attach();
@@ -16965,7 +16968,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* B2024624 — read-only diagnostic: which outline sources the click-a-lot mode has mounted. Gated at CALL
    * time (diagArm.js), writes nothing; the acceptance for "no nationwide fan-out" reads this. */
   useEffect(() => {
-    const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted() } : null);
+    const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted(), ...outlineLayersRef.current.status() } : null);
     window.__plannerParcelOutlines = hook;
     return () => { if (window.__plannerParcelOutlines === hook) window.__plannerParcelOutlines = null; };
   }, []);
@@ -22622,8 +22625,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
                       {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
                     </button>
-                    {origin && ppfToZoom(view.ppf, origin.lat) < Math.max(PARCEL_MINZOOM, displayFloorForPoint(origin.lat, origin.lon)) && ( // NEW-2 — a dense statewide source (California) declares a higher floor
-                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 5 }}>Zoom in to see the county parcel lines light up (a click still adds the lot).</div>
+                    {/* NEW-1 (select-parcel first paint) — one short status line, from the outline set's own state; it replaces the old zoom-only hint. */}
+                    {(outlinePhase === "loading" || outlinePhase === "empty" || outlinePhase === "zoom") && (
+                      <div data-testid="parcel-outline-status" data-phase={outlinePhase} role="status" style={{ fontSize: 10.5, color: outlinePhase === "zoom" ? "var(--warn-text)" : PAL.muted, lineHeight: 1.4, marginTop: 5 }}>
+                        {outlinePhase === "loading" ? "Loading parcels…" : outlinePhase === "empty" ? "No parcels here" : "Zoom in to see the county lot lines (a click still adds the lot)."}
+                      </div>
                     )}
                   </>
                 )}

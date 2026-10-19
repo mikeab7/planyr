@@ -44,6 +44,8 @@ export function createOutlineSet({
   clearTimer = clearTimeout,
   onDown = () => {},
   scopeFor = null,   // (statewideKey, baseSources, downKeys) => county names | null — what a statewide BACKUP draws
+  onChange = () => {}, // () => void — the set's status() may have changed (a layer started/finished loading, the view moved)
+  now = Date.now,
 }) {
   const urls = {};            // key -> resolved url (null = none)
   const asking = new Set();   // keys whose url resolve is in flight
@@ -51,6 +53,8 @@ export function createOutlineSet({
   const byUrl = new Map();    // url -> { layer, keys:Set, timer }
   const keyUrl = {};          // key -> url it is mounted under
   let disposed = false;
+  let settleAt = 0;           // when the last layer finished loading — "empty" is only believed after the ingest queue has had a beat
+  let settleTimer = null;
 
   const unmountUrl = (url) => {
     const e = byUrl.get(url);
@@ -91,8 +95,8 @@ export function createOutlineSet({
     const ok = () => { if (e.timer) { clearTimer(e.timer); e.timer = null; } };
     const hook = (target, kind) => {
       if (!target || typeof target.on !== "function") return;
-      target.on(kind === "image" ? "loading" : "requeststart", arm);
-      target.on("load", ok);
+      target.on(kind === "image" ? "loading" : "requeststart", () => { e.busy = true; arm(); notify(); });
+      target.on("load", () => { ok(); e.busy = false; settleAt = now(); notify(); });
       target.on(kind === "image" ? "error" : "requesterror", () => markDown(url));
     };
     hook(layer, "vector"); // NEW-1 (2026-10-04): a queryable CAD is one plain vector layer; the image-only source never reaches wire()
@@ -104,7 +108,7 @@ export function createOutlineSet({
     const twin = byUrl.get(url);
     if (twin) { twin.keys.add(key); keyUrl[key] = url; return; }
     const layer = makeLayer(url);
-    const e = { layer, keys: new Set([key]), timer: null };
+    const e = { layer, keys: new Set([key]), timer: null, busy: !isStatewideUrl(url) }; // a queryable layer is busy from the moment it is added (its first request is on its way); the statewide image is not wired, so it is never tracked
     byUrl.set(url, e);
     keyUrl[key] = url;
     if (!isStatewideUrl(url)) wire(url, layer, e); // listeners BEFORE addTo — onAdd fires the first request
@@ -127,6 +131,39 @@ export function createOutlineSet({
     });
   };
 
+  const SETTLE_MS = 400;
+  function notify() { if (!disposed) { try { onChange(); } catch (_) { /* a listener must never break the set */ } } }
+  /* What the owner is looking at, in one word — the Parcels panel reads this (and nothing else) for its status line.
+   *   "loading" — a layer's first request is out, or a source's url is still resolving
+   *   "drawn"   — at least one lot is on the map
+   *   "empty"   — every in-range layer answered and holds no lots
+   *   "zoom"    — layers are mounted but the view is below every one's draw floor (they ask for nothing there)
+   *   "none"    — nothing mounted for this view
+   * `floor` is the lowest zoom at which the in-view layers draw (null when unknown). */
+  function status() {
+    const map = getMap();
+    if (!map || disposed) return { phase: "none", lots: 0, floor: null };
+    const z = typeof map.getZoom === "function" ? map.getZoom() : NaN;
+    let inRange = 0, below = 0, lots = 0, busy = false, floor = null;
+    byUrl.forEach((e) => {
+      const l = e.layer;
+      const f = Number(l && l.options && l.options.minZoom);
+      if (Number.isFinite(f)) floor = floor == null ? f : Math.min(floor, f);
+      if (Number.isFinite(z) && Number.isFinite(f) && z < f) { below++; return; }
+      inRange++;
+      if (e.busy) busy = true;
+      if (l && l._layers) lots += Object.keys(l._layers).length;
+      else if (!e.busy) lots += 1; // an image-only source cannot be counted — a loaded one counts as drawn
+    });
+    let phase;
+    if (lots > 0) phase = "drawn";
+    else if (asking.size || busy) phase = "loading";
+    else if (inRange > 0) phase = now() - settleAt >= SETTLE_MS ? "empty" : "loading";
+    else phase = below > 0 ? "zoom" : "none";
+    if (phase === "loading" && !busy && !asking.size && inRange > 0 && !settleTimer) settleTimer = setTimer(() => { settleTimer = null; notify(); }, SETTLE_MS + 20);
+    return { phase, lots, floor, zoom: Number.isFinite(z) ? z : null };
+  }
+
   function sync() {
     if (disposed) return false;
     const map = getMap();
@@ -142,11 +179,13 @@ export function createOutlineSet({
         .catch(() => { asking.delete(k); urls[k] = null; if (!disposed) { down.add(k); onDown(k); sync(); } });
     });
     applyScope(map);
+    notify();
     return true;
   }
 
   return {
     sync,
+    status,
     markDown: (key) => { const u = keyUrl[key]; if (u != null) markDown(u); },
     mounted: () => Object.keys(keyUrl),
     /* NEW-1 (2026-10-04) — ask every mounted layer to re-lay out its lot numbers. The Site planner calls
@@ -154,6 +193,7 @@ export function createOutlineSet({
     relayoutLabels: () => { byUrl.forEach((e) => { const ln = e.layer && e.layer._lotNumbers; if (ln && typeof ln.relayout === "function") ln.relayout(); }); },
     dispose() {
       disposed = true;
+      if (settleTimer) { clearTimer(settleTimer); settleTimer = null; }
       [...byUrl.keys()].forEach(unmountUrl);
     },
   };
