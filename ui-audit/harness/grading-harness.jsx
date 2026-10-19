@@ -103,7 +103,7 @@ function Harness({ data }) {
   const f2p = (p) => ({ x: p.x * ppf + 1000, y: p.y * ppf + 1450 });
   return (
     <>
-      <div id="panel">
+      <div id="panel" style={{ fontSize: 18, width: 300 }}>
         <React.Suspense fallback={null}><GradingController input={input} onModel={setModel} /></React.Suspense>
         {/* the SitePlanner dock: the panel chrome's header slot (the gear + info portal there), then the panel body */}
         <div id="panel-header" data-testid="panel-chrome-grading"><span>GRADING</span><span ref={setHeadEl} id="panel-header-actions" /></div>
