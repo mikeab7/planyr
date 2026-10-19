@@ -24,7 +24,7 @@ export const ALLOWED_HOSTS = new Set([
   "www.laurenscountygis.org", // Laurens County
   "gis.sumter-sc.com", // City/County of Sumter
   "www.horrycounty.org", "maps.spartanburgcounty.org", "arcserver2.oconeesc.com", "propertyviewer.andersoncountysc.org", // PROBE-TEMP
-  "gisccapps.charlestoncounty.org", "gis.charlestoncounty.org", "gis.richlandcountysc.gov", "rcgis.richlandcountysc.gov", "gis.aikencountysc.gov", "gis.pickenscountysc.gov", // PROBE-TEMP
+  "gis.state.sc.us", // PROBE-TEMP
   "www.sgrcmaps.com", // Southern Georgia Regional Commission — Tift + 10 sibling GA counties
   "mgrcmaps.org", // Middle Georgia Regional Commission
   "maps.crc.ga.gov", // Coastal Regional Commission (not yet wired to a county)
