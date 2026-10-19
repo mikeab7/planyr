@@ -61,7 +61,7 @@
 | Georgia (GA) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
 | Hawaii (HI) | county (4 counties only; state has had zero role in valuation since a 1981 constitutional amendment) | blocked-in-sandbox | [Hawaii Statewide TMKs (State Office of Planning & Sustainable Development, ParcelsZoning MapServer layer 25)](https://geodata.hawaii.gov/arcgis/rest/services/ParcelsZoning/MapServer/25) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — geodata.hawaii.gov) |
 | Iowa (IA) | county assessor generally; 8 larger cities (Cedar Rapids, Iowa City, Des Moines, etc.) run an independent City Assessor | no-free-source | none found | — | — | — | — | — | — | — | — |
-| Idaho (ID) | county | measured-reachable | [Public Idaho Parcels — layer 7 "Parcels Public" (Idaho OITS)](https://services1.arcgis.com/CNPdEkvnGl65jCX8/arcgis/rest/services/Public_Idaho_Parcels_/FeatureServer/7) | gov | yes (200) | 381,144 | esriGeometryPolygon | parcelId=`PARCEL_ID`, owner=`OWNER1`, situsAddress=`SITE_ADD`, landArea=`ASR_ACRES`, appraisedValue=`VAL_TOTAL` | lat 66% · lon 104% of state | 1682ms, 2000 feat. | ✅ (13 of 44 counties — see County-level section) |
+| Idaho (ID) | county | measured-reachable | [Public Idaho Parcels — layer 7 "Parcels Public" (Idaho OITS)](https://services1.arcgis.com/CNPdEkvnGl65jCX8/arcgis/rest/services/Public_Idaho_Parcels_/FeatureServer/7) | gov | yes (200) | 381,144 | esriGeometryPolygon | parcelId=`PARCEL_ID`, owner=`OWNER1`, situsAddress=`SITE_ADD`, landArea=`ASR_ACRES`, appraisedValue=`VAL_TOTAL` | lat 66% · lon 104% of state | 1682ms, 2000 feat. | ✅ (13 of 44 counties on this layer; 34 of 44 with the county-sourced rows — see "Idaho counties (2026-10-19)") |
 | Illinois (IL) | township assessors within most counties do the initial valuation (Cook County is the exception, assessing directly); county Supervisor of Assessments reviews/equalizes | no-free-source | none found | — | — | — | — | — | — | — | — |
 | Indiana (IN) | county assessor by default since a 2008 reform; a handful of larger townships above a population threshold retain their own elected township assessor | blocked-in-sandbox | [Parcel Boundaries of Indiana (Indiana Geographic Information Office, Data Harvest)](https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — gisdata.in.gov) |
 | Kansas (KS) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
@@ -292,6 +292,49 @@ Idaho Falls/Bonneville, Twin Falls) — confirmed live: the dispatch's own point
 d'Alene, Sandpoint, Idaho Falls and Twin Falls all returned ZERO (3.8–5.1s), the same wrong-scope
 signature the county-level `County` distinct-values query independently confirms. A pin in any of
 these must report no source, never a silent zero drawn as if the layer covered them.
+
+## Idaho counties (2026-10-19)
+
+B2317920, owner request "start wiring all the remaining states into Planner". **34 of 44 counties wired** (13 on the OITS layer above + 21 on their own county/assessor services, module `lib/idParcels.js`); **10 are named gaps** with a recorded reason. Re-measured from this session: the State's own tracker (`TIM_Parcels_Progress`, State of Idaho ArcGIS org) still lists exactly the 13 OITS participants (status S / UPP) and every other county as "AS"; OITS layer 7's `County` field still holds exactly the same 13 names. The 2026-09-09 statewide probe's Idaho verdict is superseded.
+
+**How it was searched.** The sandbox reaches only `*.arcgis.com`, so: (1) ArcGIS Online item search, bbox-filtered to Idaho, ~3,650 Feature/Map services, every polygon layer's extent probed (county-sized + parcel-ish fields); (2) per-county AGOL searches; (3) the Idaho State Tax Commission's "County Parcel Maps" links page (item `6b5a5290…`) and every county web map/app it links, read for their real layer URLs; (4) county portals' own `sharing/rest/search` and REST directories, read through the `/gis-proxy` relay on the PR preview deploy (non-AGOL hosts are unreachable from the sandbox); (5) web search for each gap county. Each wired row: 8 parcels sampled evenly across the layer each resolved (by centroid) to the right county and each re-found by a point query returning its parcel id; plus point queries at 6 spread interior and up to 3 county-line points.
+
+| County | Key | Source | Owner | Notes |
+|---|---|---|---|---|
+| Adams | `id_adams` | AGOL Parcels (Adams County Assessor) | no | id + acres + situs only |
+| Bannock | `id_bannock` | AGOL Parcels_GDB (county org) | yes | edited day of check |
+| Bingham | `id_bingham` | web.binghamid.gov Public/Instrument_Numbers (relay) | yes | 39,883 |
+| Blaine | `id_blaine` | maps.blainecountyid.gov Parcel_Information_Service_V2/5 (relay) | yes | 24,310 |
+| Bonner | `id_bonner` | AGOL TaxParcels2020 (Bonner County GIS org) | yes | 45,352; edited 2026-09-22 |
+| Bonneville | `id_bonneville` | AGOL Parcel_Viewer (county org) | yes | 65,357 |
+| Boundary | `id_boundary` | AGOL Boundary_Parcels_Public (State org, Panhandle Health) | mailing name | ProVal `ps_mail_nm` |
+| Butte | `id_butte` | AGOL Butte_County_Parcels_-_View | yes | no situs |
+| Canyon | `id_canyon` | maps.canyonco.org arcgisserver Public_Tax_Parcels (relay) | **no** | 103,060; county layer has no owner. A 2018 AlertSense copy has OwnerName but is 8 years stale — not used |
+| Clearwater | `id_clearwater` | AGOL Parcels_view (county org) | yes | edited 2026-10-04 |
+| Elmore | `id_elmore` | AGOL PARCEL_DATA (**City of Mountain Home** org) | yes | publisher is the city; edited 2025-11 |
+| Franklin | `id_franklin` | AGOL fr_parcels_090226 | yes | edited 2026-09-17 |
+| Fremont | `id_fremont` | AGOL Parcels/6 (Fremont assessor org) | no | PIDN only |
+| Idaho | `id_idaho` | AGOL Parcels (county org) | yes | id = `PS_PAR_15` (`Parcel_ID` is empty) |
+| Jefferson | `id_jefferson` | gisportal.co.jefferson.id.us archost Assessor/Historic_Parcels/0 "2025" (relay) | yes | county's roll-year snapshot; live fabric has parcel # only |
+| Kootenai | `id_kootenai` | map.kcgov.us ASSR_Dynamic_Layers_gisapp2022/9 (relay) | yes | 94,863; gis.kcgov.us host is down ("could not access any server machines") |
+| Latah | `id_latah` | gis.latah.id.us arcgis Parcels3 (relay) | mailing name | `PM_MAIL_NM` |
+| Lewis | `id_lewis` | AGOL POL_Parcels/4 (third-party admin org) | no | edited 2023-09 — stale, flagged |
+| Madison | `id_madison` | madison.rexburg.org mrgis Data/Parcels (relay) | yes | 17,769 |
+| Owyhee | `id_owyhee` | AGOL D3_Parcels/6 (ITD District 3 compile) | yes | edited 2023-05 — stale, flagged; nothing fresher found |
+| Shoshone | `id_shoshone` | AGOL Shoshone_Parcels (flo_publisher) | yes | edited 2020-12 — stale, flagged |
+
+**The 10 gaps, and what was searched (not "no source" — each has a specific blocker):**
+
+| County | What exists | Why it is not wired |
+|---|---|---|
+| Benewah, Caribou, Cassia, Gem, Lemhi, Payette, Power, Twin Falls | A county parcel map on the Idaho State Tax Commission's ArcGIS org (Experience Builder apps). Their parcel layers are `utility.arcgis.com/usrsvcs/servers/<id>/…` services | Every one answers HTTP 403 `GWM_0003` ("You do not have permissions") to an anonymous query, with or without an experience.arcgis.com Referer/Origin — the layers are token-gated behind the ISTC proxy. Not a format we could read; a key we do not have |
+| Lemhi (also) | `gisu.rdc.isu.edu/server/rest/services/Lemhi_County_Land_Ownership/MapServer` (ISU GIS center) | 502 from the relay on 2026-10-19; re-try when the host is up |
+| Clark, Custer | `maps.terragis.net/<county>/` (GWmap MapServer) | Behind a "must accept terms of use" gate with a shapefile download; `robots.txt` disallows the map server paths; no open REST. Not worked around |
+| All 8 ISTC counties + Gem, Owyhee, Payette, Washington, Lemhi, Bear Lake | `maps.idahoparcels.us` (ISTC GeoMoose over MapServer) | `robots.txt` is `Disallow: /`, and every other path returns Cloudflare 520 through the relay. Not used |
+| Statewide | IDWR `Reference/Parcels` (gis.idwr.idaho.gov) compiles every county | Its own description: "This dataset cannot be shared outside IDWR". **Rejected on licence grounds**; the host is not on the relay allow-list |
+| Statewide | Regrid vector tiles on ITD (gisp.itd.idaho.gov), Equator Studios, ReportAll, Land Records | Commercial / licensed aggregators, not used |
+
+**Open items for the owner:** Elmore (city-published), Lewis, Owyhee and Shoshone are wired on stale or non-county publishers because nothing fresher is public; Canyon, Adams, Fremont, Lewis return no owner. The 8 token-gated counties would open if the Tax Commission or the county will share a public (or keyed) endpoint — that is a request to make, not a build.
 
 ### 19 measured county endpoints across 12 states (B1455634)
 

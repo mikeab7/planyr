@@ -29,6 +29,26 @@ export const ALLOWED_HOSTS = new Set([
   "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
+  /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
+   * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
+   * county is wired to it. */
+  "maps.idahoparcels.us", // Idaho State Tax Commission's GeoMoose/MapServer parcel host (Bear Lake, Gem, Gooding, Lemhi, Owyhee, Payette, Washington viewers)
+  "maps.terragis.net", // Terra GIS public viewers (Clark, Custer, Fremont)
+  "gis.latah.id.us", // Latah County
+  "cloudgisapps.bonnercountyid.gov", // Bonner County
+  "gis.kcgov.us", // Kootenai County
+  "maps.canyonco.org", // Canyon County
+  "gisportal.co.jefferson.id.us", // Jefferson County
+  "madison.rexburg.org", // Madison County / City of Rexburg
+  "web.binghamid.gov", // Bingham County
+  "server.boundarycountyid.org", // Boundary County
+  "maps.blainecountyid.gov", "maps.co.blaine.id.us", // Blaine County
+  "maps.bannockcounty.us", // Bannock County
+  "gis.co.nezperce.id.us", // Nez Perce County
+  "insideidaho.org", // INSIDE Idaho (University of Idaho / Idaho Geospatial Office)
+  "gis.idaho.gov", // State of Idaho GIS portal
+  "giscenter.rdc.isu.edu", "gisu.rdc.isu.edu", // Idaho State University GIS Training & Research Center
+  "portal.kcgov.us", "map.kcgov.us", // Kootenai County ArcGIS portal + map server (KC_Parcel_Polygon)
   /* NEW-1 (Alabama, 2026-10-16) — county/vendor hosts the Alabama candidates sit on. The sandbox cannot reach any of
    * them, so each is relayed (CORS unread) and MEASURED through this relay before a county is wired to it. */
   "web1.kcsgis.com", "web2.kcsgis.com", "web3.kcsgis.com", "web4.kcsgis.com", "web5.kcsgis.com", "web6.kcsgis.com", // KCS GIS — Revenue Commissioner viewers (Etowah, Talladega, Cullman, Colbert, Baldwin…)

@@ -273,6 +273,8 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
+/* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
@@ -303,7 +305,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
   // column resolves exactly as before, so no existing source can change its answer.
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
-    if (!OWNER_FALLBACK_RE.test(leafKey(key))) continue;
+    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key))) continue;
     if (isPlaceholderValue(attrs[key])) continue;
     return key;
   }
