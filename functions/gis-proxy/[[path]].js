@@ -100,7 +100,6 @@ export const ALLOWED_HOSTS = new Set([
   "gis.lanecounty.org", "maps.lanecounty.org", "gis.ecso911.com", "hubcitygis.cityofalbany.net", "gis.corvallisoregon.gov",
 ]);
 
-
 const UPSTREAM_TIMEOUT_MS = 20000;
 const USER_AGENT = "planyr-gis-proxy";
 
