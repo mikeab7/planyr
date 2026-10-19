@@ -9,7 +9,9 @@
  * forms. `features` = [{ rings: [[ [lng,lat]… ]…], …anything }] — every other key rides through. */
 import { siteWindow, clipRingToWindow } from "./jurisdictionShare.js";
 
-export const WINDOW_PAD_M = 300;
+// 50 m: the window only has to hold the site (nothing measured reaches past it); measured on the Chehaw answer, 300 m → 50 m
+// took the measurement from ~54 ms to ~20 ms in Node with every field identical (test/siteChecksWindow).
+export const WINDOW_PAD_M = 50;
 
 /* `padM` Infinity (or a non-finite value) = no cut — the pre-fix whole-polygon reading, kept for the tests' replay. */
 export function windowFeatures(siteRings, features, padM = WINDOW_PAD_M) {

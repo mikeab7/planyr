@@ -53,7 +53,7 @@ describe("the work is bounded by the window, not the county", () => {
     expect(out.length).toBe(1);
     expect(out[0].rings[0].length).toBeLessThanOrEqual(6);
   });
-  it("the window is 300 m", () => expect(WINDOW_PAD_M).toBe(300));
+  it("the window is 50 m", () => expect(WINDOW_PAD_M).toBe(50));
 });
 
 describe("the measurement never runs in the response's own continuation", () => {

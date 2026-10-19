@@ -11,7 +11,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { siteWindow, clipRingToWindow } from "../src/workspaces/site-planner/lib/jurisdictionShare.js";
 
 /* The full answer is ~16 MB (one 702,524-vertex Zone X polygon), too big to commit. The fixture keeps every polygon cut to
- * a 1,500 m box around the parcel — real geometry, five times the 300 m window siteChecks measures inside — plus the full
+ * a 1,500 m box around the parcel — real geometry, thirty times the 50 m window siteChecks measures inside — plus the full
  * answer's per-feature vertex counts and the measurement taken on the FULL answer, so the test can prove the cut changes
  * nothing. */
 const TRIM_PAD_M = 1500;
