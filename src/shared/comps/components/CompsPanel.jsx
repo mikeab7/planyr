@@ -44,6 +44,7 @@ import CompsSearchPanel from "./CompsSearchPanel.jsx";
 import { countFiltered, countyOptions, activeFilterCount } from "../lib/compsQuery.js";
 import { loadCompsView, saveCompsView, emptyView } from "../lib/compsViewPrefs.js";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
+import { prepareCompForSave } from "../lib/compSavePrep.js";
 import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
 import { compLocationFor } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
@@ -1018,30 +1019,13 @@ export default function CompsPanel({
     // comp's own title/location (NEW-2). The owner should never have to create a site before
     // recording a deal. `comp.anchor` always carries lat/lon (validateComp already refused a
     // missing anchor above), regardless of anchor kind (pin/parcel/site_plan).
+    // NEW-2 — county + tracked-site resolution is ONE shared step (compSavePrep.js) every save path
+    // runs, so the import path can never again be the one that skips it.
     let matched = null;
-    if (!comp.projectId && comp.anchor) {
-      try {
-        // Dynamic import — keeps storage.js's full site-model/geometry-healing engine
-        // (loadSitesList, saveSite, cloudSync, …) off this panel's own chunk; it's only ever
-        // needed on this one path.
-        const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
-        const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
-        if (resolved.groupId) {
-          comp.projectId = resolved.groupId;
-          if (resolved.matched) matched = { name: resolved.matchedName, by: resolved.matchedBy };
-        } else if (resolved.error) {
-          // NEW-3 (adversarial review of PR 1431) — resolveOrCreateTrackedSiteForComp now REFUSES
-          // to hand back a site id it can't guarantee exists in the cloud (a NOT DEFERRABLE FK
-          // would otherwise fail the insert with a raw Postgres error). Surfaced in plain words,
-          // same slot the "attached to X" notice uses, rather than left silent.
-          matched = { failed: true, message: resolved.error };
-        }
-      } catch (_) {
-        // A hiccup here must never block the comp save itself — that would be a worse failure
-        // than the pre-this-feature baseline (an unattached comp, still fixable via the Site
-        // dropdown). It's still a real gap, so it's not silent — just not fatal.
-      }
-    }
+    const prep = await prepareCompForSave(comp);
+    Object.assign(comp, prep.comp);
+    if (prep.site?.failed) matched = { failed: true, message: prep.site.message };
+    else if (prep.site?.matched) matched = { name: prep.site.matchedName, by: prep.site.matchedBy };
     const result = draft.id ? await updateComp(draft.id, comp) : await insertComp(comp);
     setSaving(false);
     if (result.error) { setErrors([result.error.message || "Save failed"]); return; }
@@ -1137,18 +1121,10 @@ export default function CompsPanel({
     // rather than handing insertComps() a project_id the FK will reject and take the WHOLE batch
     // down over; counted so a real (if rare) run of failures is still visible, not silent.
     for (const r of toSave) {
-      const comp = draftToComp(r.draft);
-      if (!comp.projectId && comp.anchor) {
-        try {
-          const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
-          const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
-          if (resolved.groupId) comp.projectId = resolved.groupId;
-          else if (resolved.error) unattached += 1;
-        } catch (_) {
-          // Same non-fatal shape as the single-comp save() path — an unattached comp is still
-          // fixable via the Site dropdown, never a blocked save.
-        }
-      }
+      // NEW-2 — the same shared county + site step as the single-comp save and the KML promote.
+      const prep = await prepareCompForSave(draftToComp(r.draft));
+      const comp = prep.comp;
+      if (prep.site?.failed) unattached += 1;
       comps.push(comp);
     }
     const result = await insertComps(comps);
@@ -1198,7 +1174,10 @@ export default function CompsPanel({
 
   const promoteOneDraft = async (draftId, comp) => {
     setDraftBusyId(draftId);
-    const result = await promoteDraft(draftId, comp);
+    // NEW-2 — an imported comp gets its county and its tracked site exactly as a hand-entered one
+    // does (it used to land with county null and no site). Same shared step, before the insert.
+    const prep = await prepareCompForSave(comp);
+    const result = await promoteDraft(draftId, prep.comp);
     setDraftBusyId(null);
     if (result.error) { await reloadDrafts(); return; } // promote_error is now on the row itself
     setDraftAnchors((m) => { const next = { ...m }; delete next[draftId]; return next; });

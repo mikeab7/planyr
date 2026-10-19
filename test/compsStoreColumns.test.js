@@ -77,10 +77,12 @@ describe("sheet + paste wiring for power / dock doors (NEW-2)", () => {
   });
   it("a pasted Power / Dock doors header lands in the draft", async () => {
     const { parsePaste } = await import("../src/shared/comps/lib/compParse.js");
-    const text = "Type\tDate\tTenant\tSF\tRate\tPeriod\tPower\tDock doors\nlease\t2026-09-01\tAcme\t100000\t6\tyr\t2000\t24";
+    const text = "Type\tDate\tTenant\tSF\tRate\tPeriod\tPower\tVolts\tPhase\tDock doors\nlease\t2026-09-01\tAcme\t100000\t6\tyr\t2000\t480\t3\t24";
     const out = parsePaste(text);
     expect(out.mode).toBe("spreadsheet");
     expect(out.rows[0].draft.powerAmps).toBe("2000");
     expect(out.rows[0].draft.dockDoors).toBe("24");
+    expect(out.rows[0].draft.powerVolts).toBe("480");
+    expect(out.rows[0].draft.powerPhase).toBe("3");
   });
 });
