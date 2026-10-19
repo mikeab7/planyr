@@ -91,6 +91,11 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Michigan, 2026-10-19) — county hosts the Michigan sweep found (the GDIT "Parcels - MI -" index on ArcGIS Online, each county's own viewer config,
+   * regional bodies). The sandbox reaches none of them, so each is relayed and MEASURED through here before a county is wired to it. */
+  "gis.emmetcounty.org", "gis.miottawa.org", "arcgisweb.countyofnewaygo.com", "gis.mijackson.org", "gis.kentcountymi.gov", "gis.macombgov.org",
+  "gis.grandtraverse.org", "gis.gtcountymi.gov", "gis.allegancounty.org", "gis.kalcounty.com", "gis.stclaircounty.org", "a2maps.a2gov.org",
+  "python.it.mtu.edu:6080", "portal1-geo.sabu.mtu.edu:6443", "maps.deltami.gov", "gis.deltami.gov", "arcgis1.midland-mi.org", "baycitymiportal.org",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
