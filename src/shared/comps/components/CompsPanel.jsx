@@ -237,7 +237,7 @@ export function CompRow({ comp, onOpen, overlaysById, compsRatePeriod, enabled =
   const locationText = useCompLocationText(comp.anchor, overlaysById, enabled);
   const primary = comp.title || locationText;
   return (
-    <button onClick={() => onOpen(comp)} style={{
+    <button data-testid="comp-row" onClick={() => onOpen(comp)} style={{
       display: "block", width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
       borderBottom: "1px solid var(--border-default)", background: "transparent", cursor: "pointer", fontFamily: "inherit",
     }}>
