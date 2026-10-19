@@ -49,6 +49,7 @@ export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
 import { alRaw, alMap } from "./alabamaParcels.js"; // NEW-1 (B2302784) — the Alabama county rows
 import { idRaw, idMap } from "./idParcels.js"; // NEW-1 (B2317920) — the Idaho county rows beyond the 13 OITS counties
+import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
 
@@ -982,6 +983,7 @@ const COUNTIES_RAW = {
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
+  ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -1828,13 +1830,13 @@ const COUNTIES_RAW = {
     help: "Clay County (Fort Gaines) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_cook: {
-    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
-    // policy blocks this host): 5,103 parcel polygons, last edited 2023-11.
-    // ⚠ measured extent (about -83.49..-83.37) is narrower than the whole county — possibly city-of-Adel-only coverage. Wired anyway; the live-verify pass on this item must click a lot well outside Adel to confirm county-wide coverage, and a miss there is filed as a recurrence, not silently accepted.
-    state: "GA", label: "Cook County (Adel), GA",
-    layerUrl: "https://services1.arcgis.com/TSNNo8H51qYl31gq/arcgis/rest/services/Map__Adel_Overview_WFL1/FeatureServer/2",
+    // B2316720 (2026-10-19) — REPLACED the Adel-only Esri layer (Map__Adel_Overview_WFL1, 5,103 parcels): re-measured 2026-10-19, 0 of 5 spread
+    // interior points of the county returned a lot (it covers the city of Adel only). Now the Southern Georgia Regional Commission's countywide
+    // layer through /gis-proxy: 10,432 parcels, extent -83.58..-83.28 / 31.03..31.35, 4/5 interior and 4/4 near-county-line points hit.
+    state: "GA", label: "Cook County, GA",
+    layerUrl: "/gis-proxy/www.sgrcmaps.com/alma/rest/services/Cook/Cook_Parcels/MapServer/0",
     idField: "Parcel_No", pinIdField: true,
-    help: "Cook County (Adel) parcels (Esri-hosted). Search by parcel number.",
+    help: "Cook County parcels (Southern Georgia Regional Commission). Search by parcel number.",
   },
   ga_crawford: {
     // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
@@ -3028,6 +3030,7 @@ const COUNTIES_MAP_RAW = {
   ...msMarisMap(),
   ...alMap(),
   ...idMap(), // NEW-1 (B2317920)
+  ...gaMap(), // NEW-1 (B2316720)
   ...laMap(),
   ...moMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },

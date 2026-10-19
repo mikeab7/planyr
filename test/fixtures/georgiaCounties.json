@@ -1,0 +1,2412 @@
+{
+ "source": "Esri USA_Counties_Generalized_Boundaries (Census TIGER-derived), Georgia, queried 2026-10-19; points are the interior grid point nearest the area centroid; lines are points just inside a county's own line (a ring vertex pulled 12% toward its centre). `gaps` = the counties with no usable public parcel service wired (B2316720); docs/STATEWIDE-PARCELS.md 'Georgia counties (2026-10-19)' holds what was searched for each.",
+ "counties": [
+  {
+   "state": "GA",
+   "name": "Appling County",
+   "fips": "13001",
+   "lat": 31.719,
+   "lng": -82.299,
+   "bbox": [
+    31.478,
+    -82.548,
+    31.96,
+    -82.05
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Atkinson County",
+   "fips": "13003",
+   "lat": 31.299,
+   "lng": -82.8815,
+   "bbox": [
+    31.182,
+    -83.139,
+    31.416,
+    -82.624
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Bacon County",
+   "fips": "13005",
+   "lat": 31.561,
+   "lng": -82.4235,
+   "bbox": [
+    31.418,
+    -82.626,
+    31.704,
+    -82.221
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Baker County",
+   "fips": "13007",
+   "lat": 31.2675,
+   "lng": -84.387,
+   "bbox": [
+    31.081,
+    -84.632,
+    31.454,
+    -84.142
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Baldwin County",
+   "fips": "13009",
+   "lat": 33.0525,
+   "lng": -83.235,
+   "bbox": [
+    32.918,
+    -83.428,
+    33.187,
+    -83.042
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Banks County",
+   "fips": "13011",
+   "lat": 34.3465,
+   "lng": -83.4995,
+   "bbox": [
+    34.205,
+    -83.669,
+    34.488,
+    -83.33
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Barrow County",
+   "fips": "13013",
+   "lat": 34.0115,
+   "lng": -83.697,
+   "bbox": [
+    33.893,
+    -83.865,
+    34.13,
+    -83.529
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Bartow County",
+   "fips": "13015",
+   "lat": 34.2485,
+   "lng": -84.8415,
+   "bbox": [
+    34.086,
+    -85.041,
+    34.411,
+    -84.642
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Ben Hill County",
+   "fips": "13017",
+   "lat": 31.7525,
+   "lng": -83.236,
+   "bbox": [
+    31.656,
+    -83.475,
+    31.849,
+    -82.997
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Berrien County",
+   "fips": "13019",
+   "lat": 31.2535,
+   "lng": -83.231,
+   "bbox": [
+    31.029,
+    -83.43,
+    31.478,
+    -83.032
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Bibb County",
+   "fips": "13021",
+   "lat": 32.804,
+   "lng": -83.685,
+   "bbox": [
+    32.658,
+    -83.889,
+    32.95,
+    -83.481
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Bleckley County",
+   "fips": "13023",
+   "lat": 32.425,
+   "lng": -83.3165,
+   "bbox": [
+    32.271,
+    -83.493,
+    32.579,
+    -83.14
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Brantley County",
+   "fips": "13025",
+   "lat": 31.192,
+   "lng": -81.9995,
+   "bbox": [
+    31.016,
+    -82.279,
+    31.368,
+    -81.72
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Brooks County",
+   "fips": "13027",
+   "lat": 30.853,
+   "lng": -83.5245,
+   "bbox": [
+    30.634,
+    -83.738,
+    31.072,
+    -83.311
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Bryan County",
+   "fips": "13029",
+   "lat": 31.9845,
+   "lng": -81.4585,
+   "bbox": [
+    31.736,
+    -81.776,
+    32.233,
+    -81.141
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Bulloch County",
+   "fips": "13031",
+   "lat": 32.399,
+   "lng": -81.7335,
+   "bbox": [
+    32.153,
+    -82.033,
+    32.645,
+    -81.434
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Burke County",
+   "fips": "13033",
+   "lat": 33.051,
+   "lng": -81.9355,
+   "bbox": [
+    32.799,
+    -82.323,
+    33.303,
+    -81.548
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Butts County",
+   "fips": "13035",
+   "lat": 33.317,
+   "lng": -83.9705,
+   "bbox": [
+    33.185,
+    -84.124,
+    33.449,
+    -83.817
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Calhoun County",
+   "fips": "13037",
+   "lat": 31.537,
+   "lng": -84.6185,
+   "bbox": [
+    31.428,
+    -84.825,
+    31.646,
+    -84.412
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Camden County",
+   "fips": "13039",
+   "lat": 30.937,
+   "lng": -81.665,
+   "bbox": [
+    30.707,
+    -81.927,
+    31.167,
+    -81.403
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Candler County",
+   "fips": "13043",
+   "lat": 32.41,
+   "lng": -82.0795,
+   "bbox": [
+    32.27,
+    -82.25,
+    32.55,
+    -81.909
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Carroll County",
+   "fips": "13045",
+   "lat": 33.621,
+   "lng": -85.0745,
+   "bbox": [
+    33.425,
+    -85.335,
+    33.817,
+    -84.814
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Catoosa County",
+   "fips": "13047",
+   "lat": 34.876,
+   "lng": -85.118,
+   "bbox": [
+    34.759,
+    -85.268,
+    34.993,
+    -84.968
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Charlton County",
+   "fips": "13049",
+   "lat": 30.7155,
+   "lng": -82.1495,
+   "bbox": [
+    30.361,
+    -82.414,
+    31.07,
+    -81.885
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Chatham County",
+   "fips": "13051",
+   "lat": 31.9825,
+   "lng": -81.14,
+   "bbox": [
+    31.727,
+    -81.385,
+    32.238,
+    -80.895
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Chattahoochee County",
+   "fips": "13053",
+   "lat": 32.3795,
+   "lng": -84.8195,
+   "bbox": [
+    32.227,
+    -85.005,
+    32.532,
+    -84.634
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Chattooga County",
+   "fips": "13055",
+   "lat": 34.438,
+   "lng": -85.313,
+   "bbox": [
+    34.29,
+    -85.526,
+    34.586,
+    -85.1
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Cherokee County",
+   "fips": "13057",
+   "lat": 34.2475,
+   "lng": -84.4595,
+   "bbox": [
+    34.084,
+    -84.66,
+    34.411,
+    -84.259
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Clarke County",
+   "fips": "13059",
+   "lat": 33.952,
+   "lng": -83.3845,
+   "bbox": [
+    33.85,
+    -83.529,
+    34.054,
+    -83.24
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Clay County",
+   "fips": "13061",
+   "lat": 31.635,
+   "lng": -84.962,
+   "bbox": [
+    31.491,
+    -85.13,
+    31.779,
+    -84.794
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Clayton County",
+   "fips": "13063",
+   "lat": 33.5025,
+   "lng": -84.3465,
+   "bbox": [
+    33.355,
+    -84.456,
+    33.65,
+    -84.237
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Clinch County",
+   "fips": "13065",
+   "lat": 30.882,
+   "lng": -82.6925,
+   "bbox": [
+    30.577,
+    -82.973,
+    31.187,
+    -82.412
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Cobb County",
+   "fips": "13067",
+   "lat": 33.9305,
+   "lng": -84.556,
+   "bbox": [
+    33.749,
+    -84.736,
+    34.112,
+    -84.376
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Coffee County",
+   "fips": "13069",
+   "lat": 31.5875,
+   "lng": -82.8745,
+   "bbox": [
+    31.367,
+    -83.155,
+    31.808,
+    -82.594
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Colquitt County",
+   "fips": "13071",
+   "lat": 31.1815,
+   "lng": -83.7535,
+   "bbox": [
+    31.025,
+    -84.002,
+    31.338,
+    -83.505
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Columbia County",
+   "fips": "13073",
+   "lat": 33.532,
+   "lng": -82.242,
+   "bbox": [
+    33.365,
+    -82.445,
+    33.699,
+    -82.039
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Cook County",
+   "fips": "13075",
+   "lat": 31.188,
+   "lng": -83.4265,
+   "bbox": [
+    31.025,
+    -83.571,
+    31.351,
+    -83.282
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Coweta County",
+   "fips": "13077",
+   "lat": 33.3485,
+   "lng": -84.7485,
+   "bbox": [
+    33.183,
+    -85.01,
+    33.514,
+    -84.487
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Crawford County",
+   "fips": "13079",
+   "lat": 32.6875,
+   "lng": -83.966,
+   "bbox": [
+    32.52,
+    -84.197,
+    32.855,
+    -83.735
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Crisp County",
+   "fips": "13081",
+   "lat": 31.911,
+   "lng": -83.782,
+   "bbox": [
+    31.794,
+    -83.957,
+    32.028,
+    -83.607
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Dade County",
+   "fips": "13083",
+   "lat": 34.806,
+   "lng": -85.4845,
+   "bbox": [
+    34.622,
+    -85.609,
+    34.99,
+    -85.36
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Dawson County",
+   "fips": "13085",
+   "lat": 34.4755,
+   "lng": -84.1525,
+   "bbox": [
+    34.333,
+    -84.341,
+    34.618,
+    -83.964
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Decatur County",
+   "fips": "13087",
+   "lat": 30.888,
+   "lng": -84.6155,
+   "bbox": [
+    30.694,
+    -84.863,
+    31.082,
+    -84.368
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "DeKalb County",
+   "fips": "13089",
+   "lat": 33.795,
+   "lng": -84.186,
+   "bbox": [
+    33.623,
+    -84.339,
+    33.967,
+    -84.033
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Dodge County",
+   "fips": "13091",
+   "lat": 32.172,
+   "lng": -83.118,
+   "bbox": [
+    31.903,
+    -83.375,
+    32.441,
+    -82.861
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Dooly County",
+   "fips": "13093",
+   "lat": 32.158,
+   "lng": -83.8195,
+   "bbox": [
+    32.025,
+    -84.042,
+    32.291,
+    -83.597
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Dougherty County",
+   "fips": "13095",
+   "lat": 31.549,
+   "lng": -84.2125,
+   "bbox": [
+    31.435,
+    -84.448,
+    31.663,
+    -83.977
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Douglas County",
+   "fips": "13097",
+   "lat": 33.6895,
+   "lng": -84.7375,
+   "bbox": [
+    33.571,
+    -84.899,
+    33.808,
+    -84.576
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Early County",
+   "fips": "13099",
+   "lat": 31.3,
+   "lng": -84.866,
+   "bbox": [
+    31.076,
+    -85.103,
+    31.524,
+    -84.629
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Echols County",
+   "fips": "13101",
+   "lat": 30.728,
+   "lng": -82.857,
+   "bbox": [
+    30.589,
+    -83.137,
+    30.867,
+    -82.577
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Effingham County",
+   "fips": "13103",
+   "lat": 32.348,
+   "lng": -81.3355,
+   "bbox": [
+    32.1,
+    -81.547,
+    32.596,
+    -81.124
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Elbert County",
+   "fips": "13105",
+   "lat": 34.125,
+   "lng": -82.8385,
+   "bbox": [
+    33.959,
+    -83.103,
+    34.291,
+    -82.574
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Emanuel County",
+   "fips": "13107",
+   "lat": 32.5615,
+   "lng": -82.3235,
+   "bbox": [
+    32.287,
+    -82.647,
+    32.836,
+    -82
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Evans County",
+   "fips": "13109",
+   "lat": 32.16,
+   "lng": -81.866,
+   "bbox": [
+    32.046,
+    -82.023,
+    32.274,
+    -81.709
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Fannin County",
+   "fips": "13111",
+   "lat": 34.82,
+   "lng": -84.3401,
+   "bbox": [
+    34.599,
+    -84.619,
+    34.989,
+    -84.096
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Fayette County",
+   "fips": "13113",
+   "lat": 33.409,
+   "lng": -84.497,
+   "bbox": [
+    33.264,
+    -84.618,
+    33.554,
+    -84.376
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Floyd County",
+   "fips": "13115",
+   "lat": 34.3365,
+   "lng": -85.2325,
+   "bbox": [
+    34.086,
+    -85.46,
+    34.587,
+    -85.005
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Forsyth County",
+   "fips": "13117",
+   "lat": 34.1925,
+   "lng": -84.092,
+   "bbox": [
+    34.051,
+    -84.259,
+    34.334,
+    -83.925
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Franklin County",
+   "fips": "13119",
+   "lat": 34.3875,
+   "lng": -83.225,
+   "bbox": [
+    34.24,
+    -83.395,
+    34.535,
+    -83.055
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Fulton County",
+   "fips": "13121",
+   "lat": 33.749,
+   "lng": -84.388,
+   "bbox": [
+    33.5,
+    -84.839,
+    34.191,
+    -84.116
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Gilmer County",
+   "fips": "13123",
+   "lat": 34.7,
+   "lng": -84.4245,
+   "bbox": [
+    34.546,
+    -84.651,
+    34.854,
+    -84.198
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Glascock County",
+   "fips": "13125",
+   "lat": 33.2265,
+   "lng": -82.5905,
+   "bbox": [
+    33.122,
+    -82.752,
+    33.331,
+    -82.429
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Glynn County",
+   "fips": "13127",
+   "lat": 31.2495,
+   "lng": -81.5355,
+   "bbox": [
+    31.044,
+    -81.77,
+    31.455,
+    -81.301
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Gordon County",
+   "fips": "13129",
+   "lat": 34.5065,
+   "lng": -84.8735,
+   "bbox": [
+    34.385,
+    -85.106,
+    34.628,
+    -84.641
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Grady County",
+   "fips": "13131",
+   "lat": 30.879,
+   "lng": -84.222,
+   "bbox": [
+    30.679,
+    -84.374,
+    31.079,
+    -84.07
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Greene County",
+   "fips": "13133",
+   "lat": 33.5575,
+   "lng": -83.179,
+   "bbox": [
+    33.354,
+    -83.403,
+    33.761,
+    -82.955
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Gwinnett County",
+   "fips": "13135",
+   "lat": 33.9615,
+   "lng": -84.0335,
+   "bbox": [
+    33.747,
+    -84.267,
+    34.176,
+    -83.8
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Habersham County",
+   "fips": "13137",
+   "lat": 34.6275,
+   "lng": -83.5095,
+   "bbox": [
+    34.436,
+    -83.679,
+    34.819,
+    -83.34
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Hall County",
+   "fips": "13139",
+   "lat": 34.303,
+   "lng": -83.841,
+   "bbox": [
+    34.101,
+    -84.062,
+    34.505,
+    -83.62
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Hancock County",
+   "fips": "13141",
+   "lat": 33.276,
+   "lng": -83.0155,
+   "bbox": [
+    33.083,
+    -83.279,
+    33.469,
+    -82.752
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Haralson County",
+   "fips": "13143",
+   "lat": 33.78,
+   "lng": -85.2075,
+   "bbox": [
+    33.655,
+    -85.384,
+    33.905,
+    -85.031
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Harris County",
+   "fips": "13145",
+   "lat": 32.727,
+   "lng": -84.927,
+   "bbox": [
+    32.582,
+    -85.181,
+    32.872,
+    -84.673
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Hart County",
+   "fips": "13147",
+   "lat": 34.354,
+   "lng": -82.95,
+   "bbox": [
+    34.218,
+    -83.117,
+    34.49,
+    -82.783
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Heard County",
+   "fips": "13149",
+   "lat": 33.2775,
+   "lng": -85.1095,
+   "bbox": [
+    33.129,
+    -85.294,
+    33.426,
+    -84.925
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Henry County",
+   "fips": "13151",
+   "lat": 33.476,
+   "lng": -84.138,
+   "bbox": [
+    33.302,
+    -84.348,
+    33.65,
+    -83.928
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Houston County",
+   "fips": "13153",
+   "lat": 32.486,
+   "lng": -83.668,
+   "bbox": [
+    32.29,
+    -83.849,
+    32.682,
+    -83.487
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Irwin County",
+   "fips": "13155",
+   "lat": 31.617,
+   "lng": -83.2505,
+   "bbox": [
+    31.472,
+    -83.5,
+    31.762,
+    -83.001
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Jackson County",
+   "fips": "13157",
+   "lat": 34.134,
+   "lng": -83.585,
+   "bbox": [
+    33.968,
+    -83.816,
+    34.3,
+    -83.354
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Jasper County",
+   "fips": "13159",
+   "lat": 33.3325,
+   "lng": -83.6925,
+   "bbox": [
+    33.137,
+    -83.86,
+    33.528,
+    -83.525
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Jeff Davis County",
+   "fips": "13161",
+   "lat": 31.8195,
+   "lng": -82.6315,
+   "bbox": [
+    31.67,
+    -82.835,
+    31.969,
+    -82.428
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Jefferson County",
+   "fips": "13163",
+   "lat": 33.0375,
+   "lng": -82.443,
+   "bbox": [
+    32.754,
+    -82.655,
+    33.321,
+    -82.231
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Jenkins County",
+   "fips": "13165",
+   "lat": 32.7785,
+   "lng": -81.956,
+   "bbox": [
+    32.609,
+    -82.147,
+    32.948,
+    -81.765
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Johnson County",
+   "fips": "13167",
+   "lat": 32.6675,
+   "lng": -82.7005,
+   "bbox": [
+    32.513,
+    -82.962,
+    32.822,
+    -82.439
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Jones County",
+   "fips": "13169",
+   "lat": 33.011,
+   "lng": -83.5795,
+   "bbox": [
+    32.84,
+    -83.801,
+    33.182,
+    -83.358
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Lamar County",
+   "fips": "13171",
+   "lat": 33.0645,
+   "lng": -84.148,
+   "bbox": [
+    32.923,
+    -84.268,
+    33.206,
+    -84.028
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Lanier County",
+   "fips": "13173",
+   "lat": 31.022,
+   "lng": -83.082,
+   "bbox": [
+    30.852,
+    -83.198,
+    31.192,
+    -82.966
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Laurens County",
+   "fips": "13175",
+   "lat": 32.431,
+   "lng": -82.932,
+   "bbox": [
+    32.148,
+    -83.226,
+    32.714,
+    -82.638
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Lee County",
+   "fips": "13177",
+   "lat": 31.77,
+   "lng": -84.131,
+   "bbox": [
+    31.625,
+    -84.332,
+    31.915,
+    -83.93
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Liberty County",
+   "fips": "13179",
+   "lat": 31.846,
+   "lng": -81.4785,
+   "bbox": [
+    31.6,
+    -81.822,
+    32.092,
+    -81.135
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Lincoln County",
+   "fips": "13181",
+   "lat": 33.8145,
+   "lng": -82.438,
+   "bbox": [
+    33.647,
+    -82.641,
+    33.982,
+    -82.235
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Long County",
+   "fips": "13183",
+   "lat": 31.7735,
+   "lng": -81.7335,
+   "bbox": [
+    31.538,
+    -81.978,
+    32.009,
+    -81.489
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Lowndes County",
+   "fips": "13185",
+   "lat": 30.825,
+   "lng": -83.246,
+   "bbox": [
+    30.621,
+    -83.477,
+    31.029,
+    -83.015
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Lumpkin County",
+   "fips": "13187",
+   "lat": 34.5685,
+   "lng": -84.0095,
+   "bbox": [
+    34.413,
+    -84.193,
+    34.724,
+    -83.826
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Macon County",
+   "fips": "13193",
+   "lat": 32.347,
+   "lng": -84.039,
+   "bbox": [
+    32.178,
+    -84.25,
+    32.516,
+    -83.828
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Madison County",
+   "fips": "13195",
+   "lat": 34.1315,
+   "lng": -83.193,
+   "bbox": [
+    33.992,
+    -83.4,
+    34.271,
+    -82.986
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Marion County",
+   "fips": "13197",
+   "lat": 32.347,
+   "lng": -84.521,
+   "bbox": [
+    32.135,
+    -84.656,
+    32.559,
+    -84.386
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "McDuffie County",
+   "fips": "13189",
+   "lat": 33.487,
+   "lng": -82.4705,
+   "bbox": [
+    33.316,
+    -82.648,
+    33.658,
+    -82.293
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "McIntosh County",
+   "fips": "13191",
+   "lat": 31.5065,
+   "lng": -81.429,
+   "bbox": [
+    31.311,
+    -81.663,
+    31.702,
+    -81.195
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Meriwether County",
+   "fips": "13199",
+   "lat": 33.0275,
+   "lng": -84.673,
+   "bbox": [
+    32.833,
+    -84.857,
+    33.222,
+    -84.489
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Miller County",
+   "fips": "13201",
+   "lat": 31.163,
+   "lng": -84.7185,
+   "bbox": [
+    31.069,
+    -84.917,
+    31.257,
+    -84.52
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Mitchell County",
+   "fips": "13205",
+   "lat": 31.2595,
+   "lng": -84.249,
+   "bbox": [
+    31.079,
+    -84.501,
+    31.44,
+    -83.997
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Monroe County",
+   "fips": "13207",
+   "lat": 33.023,
+   "lng": -83.916,
+   "bbox": [
+    32.84,
+    -84.123,
+    33.206,
+    -83.709
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Montgomery County",
+   "fips": "13209",
+   "lat": 32.1495,
+   "lng": -82.53,
+   "bbox": [
+    31.948,
+    -82.652,
+    32.351,
+    -82.408
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Morgan County",
+   "fips": "13211",
+   "lat": 33.6245,
+   "lng": -83.4765,
+   "bbox": [
+    33.435,
+    -83.687,
+    33.814,
+    -83.266
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Murray County",
+   "fips": "13213",
+   "lat": 34.7865,
+   "lng": -84.763,
+   "bbox": [
+    34.58,
+    -84.938,
+    34.993,
+    -84.588
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Muscogee County",
+   "fips": "13215",
+   "lat": 32.487,
+   "lng": -84.874,
+   "bbox": [
+    32.371,
+    -85.084,
+    32.603,
+    -84.664
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Newton County",
+   "fips": "13217",
+   "lat": 33.558,
+   "lng": -83.8605,
+   "bbox": [
+    33.371,
+    -84.047,
+    33.745,
+    -83.674
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Oconee County",
+   "fips": "13219",
+   "lat": 33.8315,
+   "lng": -83.4625,
+   "bbox": [
+    33.695,
+    -83.647,
+    33.968,
+    -83.278
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Oglethorpe County",
+   "fips": "13221",
+   "lat": 33.873,
+   "lng": -83.0415,
+   "bbox": [
+    33.694,
+    -83.299,
+    34.052,
+    -82.784
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Paulding County",
+   "fips": "13223",
+   "lat": 33.934,
+   "lng": -84.8785,
+   "bbox": [
+    33.775,
+    -85.045,
+    34.093,
+    -84.712
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Peach County",
+   "fips": "13225",
+   "lat": 32.563,
+   "lng": -83.857,
+   "bbox": [
+    32.437,
+    -84.006,
+    32.689,
+    -83.708
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Pickens County",
+   "fips": "13227",
+   "lat": 34.471,
+   "lng": -84.457,
+   "bbox": [
+    34.381,
+    -84.653,
+    34.561,
+    -84.261
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Pierce County",
+   "fips": "13229",
+   "lat": 31.3685,
+   "lng": -82.1955,
+   "bbox": [
+    31.205,
+    -82.418,
+    31.532,
+    -81.973
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Pike County",
+   "fips": "13231",
+   "lat": 33.086,
+   "lng": -84.387,
+   "bbox": [
+    32.966,
+    -84.53,
+    33.206,
+    -84.244
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Polk County",
+   "fips": "13233",
+   "lat": 34.006,
+   "lng": -85.1695,
+   "bbox": [
+    33.904,
+    -85.417,
+    34.108,
+    -84.922
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Pulaski County",
+   "fips": "13235",
+   "lat": 32.2495,
+   "lng": -83.456,
+   "bbox": [
+    32.1,
+    -83.622,
+    32.399,
+    -83.29
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Putnam County",
+   "fips": "13237",
+   "lat": 33.324,
+   "lng": -83.341,
+   "bbox": [
+    33.167,
+    -83.54,
+    33.481,
+    -83.142
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Quitman County",
+   "fips": "13239",
+   "lat": 31.8795,
+   "lng": -85.0215,
+   "bbox": [
+    31.778,
+    -85.136,
+    31.981,
+    -84.907
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Rabun County",
+   "fips": "13241",
+   "lat": 34.855,
+   "lng": -83.3815,
+   "bbox": [
+    34.71,
+    -83.663,
+    35,
+    -83.1
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Randolph County",
+   "fips": "13243",
+   "lat": 31.7735,
+   "lng": -84.7455,
+   "bbox": [
+    31.616,
+    -84.958,
+    31.931,
+    -84.533
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Richmond County",
+   "fips": "13245",
+   "lat": 33.3895,
+   "lng": -82.0885,
+   "bbox": [
+    33.231,
+    -82.35,
+    33.548,
+    -81.827
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Rockdale County",
+   "fips": "13247",
+   "lat": 33.657,
+   "lng": -84.0435,
+   "bbox": [
+    33.526,
+    -84.174,
+    33.788,
+    -83.913
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Schley County",
+   "fips": "13249",
+   "lat": 32.285,
+   "lng": -84.2995,
+   "bbox": [
+    32.154,
+    -84.424,
+    32.416,
+    -84.175
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Screven County",
+   "fips": "13251",
+   "lat": 32.766,
+   "lng": -81.626,
+   "bbox": [
+    32.488,
+    -81.867,
+    33.044,
+    -81.385
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Seminole County",
+   "fips": "13253",
+   "lat": 30.8975,
+   "lng": -84.871,
+   "bbox": [
+    30.715,
+    -85.017,
+    31.08,
+    -84.725
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Spalding County",
+   "fips": "13255",
+   "lat": 33.2665,
+   "lng": -84.2945,
+   "bbox": [
+    33.178,
+    -84.502,
+    33.355,
+    -84.087
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Stephens County",
+   "fips": "13257",
+   "lat": 34.5665,
+   "lng": -83.285,
+   "bbox": [
+    34.455,
+    -83.462,
+    34.678,
+    -83.108
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Stewart County",
+   "fips": "13259",
+   "lat": 32.0755,
+   "lng": -84.852,
+   "bbox": [
+    31.922,
+    -85.07,
+    32.229,
+    -84.634
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Sumter County",
+   "fips": "13261",
+   "lat": 32.0495,
+   "lng": -84.1835,
+   "bbox": [
+    31.875,
+    -84.437,
+    32.224,
+    -83.93
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Talbot County",
+   "fips": "13263",
+   "lat": 32.701,
+   "lng": -84.4855,
+   "bbox": [
+    32.525,
+    -84.694,
+    32.877,
+    -84.277
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Taliaferro County",
+   "fips": "13265",
+   "lat": 33.5885,
+   "lng": -82.849,
+   "bbox": [
+    33.445,
+    -83.012,
+    33.732,
+    -82.686
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Tattnall County",
+   "fips": "13267",
+   "lat": 32.047,
+   "lng": -81.9985,
+   "bbox": [
+    31.785,
+    -82.23,
+    32.309,
+    -81.767
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Taylor County",
+   "fips": "13269",
+   "lat": 32.552,
+   "lng": -84.23,
+   "bbox": [
+    32.368,
+    -84.46,
+    32.736,
+    -84
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Telfair County",
+   "fips": "13271",
+   "lat": 31.9565,
+   "lng": -82.9325,
+   "bbox": [
+    31.776,
+    -83.208,
+    32.137,
+    -82.657
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Terrell County",
+   "fips": "13273",
+   "lat": 31.787,
+   "lng": -84.425,
+   "bbox": [
+    31.617,
+    -84.597,
+    31.957,
+    -84.253
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Thomas County",
+   "fips": "13275",
+   "lat": 30.8695,
+   "lng": -83.924,
+   "bbox": [
+    30.66,
+    -84.112,
+    31.079,
+    -83.736
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Tift County",
+   "fips": "13277",
+   "lat": 31.462,
+   "lng": -83.4975,
+   "bbox": [
+    31.327,
+    -83.663,
+    31.597,
+    -83.332
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Toombs County",
+   "fips": "13279",
+   "lat": 32.131,
+   "lng": -82.331,
+   "bbox": [
+    31.911,
+    -82.481,
+    32.351,
+    -82.181
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Towns County",
+   "fips": "13281",
+   "lat": 34.8855,
+   "lng": -83.7445,
+   "bbox": [
+    34.781,
+    -83.94,
+    34.99,
+    -83.549
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Treutlen County",
+   "fips": "13283",
+   "lat": 32.401,
+   "lng": -82.5625,
+   "bbox": [
+    32.289,
+    -82.741,
+    32.513,
+    -82.384
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Troup County",
+   "fips": "13285",
+   "lat": 33.0435,
+   "lng": -85.0435,
+   "bbox": [
+    32.865,
+    -85.234,
+    33.222,
+    -84.853
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Turner County",
+   "fips": "13287",
+   "lat": 31.709,
+   "lng": -83.6245,
+   "bbox": [
+    31.567,
+    -83.797,
+    31.851,
+    -83.452
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Twiggs County",
+   "fips": "13289",
+   "lat": 32.6695,
+   "lng": -83.414,
+   "bbox": [
+    32.45,
+    -83.602,
+    32.889,
+    -83.226
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Union County",
+   "fips": "13291",
+   "lat": 34.813,
+   "lng": -83.9775,
+   "bbox": [
+    34.637,
+    -84.179,
+    34.989,
+    -83.776
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Upson County",
+   "fips": "13293",
+   "lat": 32.847,
+   "lng": -84.322,
+   "bbox": [
+    32.691,
+    -84.527,
+    33.003,
+    -84.117
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Walker County",
+   "fips": "13295",
+   "lat": 34.7875,
+   "lng": -85.291,
+   "bbox": [
+    34.585,
+    -85.535,
+    34.99,
+    -85.047
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Walton County",
+   "fips": "13297",
+   "lat": 33.763,
+   "lng": -83.7465,
+   "bbox": [
+    33.597,
+    -83.979,
+    33.929,
+    -83.514
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Ware County",
+   "fips": "13299",
+   "lat": 31.0175,
+   "lng": -82.4135,
+   "bbox": [
+    30.566,
+    -82.696,
+    31.469,
+    -82.131
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Warren County",
+   "fips": "13301",
+   "lat": 33.433,
+   "lng": -82.626,
+   "bbox": [
+    33.254,
+    -82.864,
+    33.612,
+    -82.388
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Washington County",
+   "fips": "13303",
+   "lat": 32.9935,
+   "lng": -82.7925,
+   "bbox": [
+    32.749,
+    -83.074,
+    33.238,
+    -82.511
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Wayne County",
+   "fips": "13305",
+   "lat": 31.576,
+   "lng": -81.8775,
+   "bbox": [
+    31.326,
+    -82.142,
+    31.826,
+    -81.613
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Webster County",
+   "fips": "13307",
+   "lat": 32.075,
+   "lng": -84.5395,
+   "bbox": [
+    31.922,
+    -84.652,
+    32.228,
+    -84.427
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Wheeler County",
+   "fips": "13309",
+   "lat": 32.1115,
+   "lng": -82.7465,
+   "bbox": [
+    31.918,
+    -82.95,
+    32.305,
+    -82.543
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "White County",
+   "fips": "13311",
+   "lat": 34.648,
+   "lng": -83.747,
+   "bbox": [
+    34.502,
+    -83.871,
+    34.794,
+    -83.623
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Whitfield County",
+   "fips": "13313",
+   "lat": 34.802,
+   "lng": -84.982,
+   "bbox": [
+    34.611,
+    -85.164,
+    34.993,
+    -84.8
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Wilcox County",
+   "fips": "13315",
+   "lat": 31.989,
+   "lng": -83.393,
+   "bbox": [
+    31.849,
+    -83.607,
+    32.129,
+    -83.179
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Wilkes County",
+   "fips": "13317",
+   "lat": 33.7925,
+   "lng": -82.7385,
+   "bbox": [
+    33.598,
+    -82.991,
+    33.987,
+    -82.486
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Wilkinson County",
+   "fips": "13319",
+   "lat": 32.7935,
+   "lng": -83.179,
+   "bbox": [
+    32.579,
+    -83.406,
+    33.008,
+    -82.952
+   ]
+  },
+  {
+   "state": "GA",
+   "name": "Worth County",
+   "fips": "13321",
+   "lat": 31.5855,
+   "lng": -83.8385,
+   "bbox": [
+    31.319,
+    -84.032,
+    31.852,
+    -83.645
+   ]
+  }
+ ],
+ "gaps": [
+  "Bacon",
+  "Baker",
+  "Banks",
+  "Berrien",
+  "Burke",
+  "Calhoun",
+  "Carroll",
+  "Catoosa",
+  "Clinch",
+  "Colquitt",
+  "Early",
+  "Fannin",
+  "Gilmer",
+  "Habersham",
+  "Hancock",
+  "Haralson",
+  "Heard",
+  "Jenkins",
+  "Jones",
+  "Lamar",
+  "Lincoln",
+  "Long",
+  "Macon",
+  "Madison",
+  "Marion",
+  "McDuffie",
+  "Miller",
+  "Mitchell",
+  "Murray",
+  "Oglethorpe",
+  "Pickens",
+  "Pike",
+  "Polk",
+  "Pulaski",
+  "Quitman",
+  "Rabun",
+  "Randolph",
+  "Schley",
+  "Seminole",
+  "Stephens",
+  "Taliaferro",
+  "Terrell",
+  "Towns",
+  "Upson",
+  "Walton",
+  "Washington",
+  "Webster",
+  "Wilkes"
+ ],
+ "lines": [
+  {
+   "name": "Appling — just inside its own line",
+   "county": "Appling County",
+   "lat": 31.8228,
+   "lng": -82.4134
+  },
+  {
+   "name": "Ben Hill — just inside its own line",
+   "county": "Ben Hill County",
+   "lat": 31.6887,
+   "lng": -83.2615
+  },
+  {
+   "name": "Bleckley — just inside its own line",
+   "county": "Bleckley County",
+   "lat": 32.5605,
+   "lng": -83.2369
+  },
+  {
+   "name": "Brooks — just inside its own line",
+   "county": "Brooks County",
+   "lat": 30.9348,
+   "lng": -83.4387
+  },
+  {
+   "name": "Candler — just inside its own line",
+   "county": "Candler County",
+   "lat": 32.4179,
+   "lng": -82.1785
+  },
+  {
+   "name": "Chattahoochee — just inside its own line",
+   "county": "Chattahoochee County",
+   "lat": 32.3359,
+   "lng": -84.9827
+  },
+  {
+   "name": "Chattooga — just inside its own line",
+   "county": "Chattooga County",
+   "lat": 34.3738,
+   "lng": -85.3403
+  },
+  {
+   "name": "Coffee — just inside its own line",
+   "county": "Coffee County",
+   "lat": 31.7657,
+   "lng": -82.9594
+  },
+  {
+   "name": "Dawson — just inside its own line",
+   "county": "Dawson County",
+   "lat": 34.5543,
+   "lng": -84.2392
+  },
+  {
+   "name": "Decatur — just inside its own line",
+   "county": "Decatur County",
+   "lat": 30.8836,
+   "lng": -84.7479
+  },
+  {
+   "name": "Dodge — just inside its own line",
+   "county": "Dodge County",
+   "lat": 32.3894,
+   "lng": -83.1374
+  },
+  {
+   "name": "Douglas — just inside its own line",
+   "county": "Douglas County",
+   "lat": 33.5852,
+   "lng": -84.8048
+  },
+  {
+   "name": "Elbert — just inside its own line",
+   "county": "Elbert County",
+   "lat": 34.2156,
+   "lng": -83.051
+  },
+  {
+   "name": "Franklin — just inside its own line",
+   "county": "Franklin County",
+   "lat": 34.4654,
+   "lng": -83.1819
+  },
+  {
+   "name": "Glascock — just inside its own line",
+   "county": "Glascock County",
+   "lat": 33.1345,
+   "lng": -82.6473
+  },
+  {
+   "name": "Gordon — just inside its own line",
+   "county": "Gordon County",
+   "lat": 34.411,
+   "lng": -84.9716
+  },
+  {
+   "name": "Grady — just inside its own line",
+   "county": "Grady County",
+   "lat": 31.055,
+   "lng": -84.3505
+  },
+  {
+   "name": "Harris — just inside its own line",
+   "county": "Harris County",
+   "lat": 32.8432,
+   "lng": -84.7739
+  },
+  {
+   "name": "Hart — just inside its own line",
+   "county": "Hart County",
+   "lat": 34.4737,
+   "lng": -83.0424
+  },
+  {
+   "name": "Houston — just inside its own line",
+   "county": "Houston County",
+   "lat": 32.4429,
+   "lng": -83.7886
+  },
+  {
+   "name": "Irwin — just inside its own line",
+   "county": "Irwin County",
+   "lat": 31.6883,
+   "lng": -83.4384
+  },
+  {
+   "name": "Jasper — just inside its own line",
+   "county": "Jasper County",
+   "lat": 33.2625,
+   "lng": -83.8029
+  },
+  {
+   "name": "Jeff Davis — just inside its own line",
+   "county": "Jeff Davis County",
+   "lat": 31.9387,
+   "lng": -82.5545
+  },
+  {
+   "name": "Jefferson — just inside its own line",
+   "county": "Jefferson County",
+   "lat": 33.1145,
+   "lng": -82.5627
+  },
+  {
+   "name": "Johnson — just inside its own line",
+   "county": "Johnson County",
+   "lat": 32.7392,
+   "lng": -82.9245
+  },
+  {
+   "name": "Laurens — just inside its own line",
+   "county": "Laurens County",
+   "lat": 32.5612,
+   "lng": -83.1907
+  },
+  {
+   "name": "Lee — just inside its own line",
+   "county": "Lee County",
+   "lat": 31.7894,
+   "lng": -84.2648
+  },
+  {
+   "name": "Lumpkin — just inside its own line",
+   "county": "Lumpkin County",
+   "lat": 34.5953,
+   "lng": -84.171
+  },
+  {
+   "name": "McIntosh — just inside its own line",
+   "county": "McIntosh County",
+   "lat": 31.6785,
+   "lng": -81.4818
+  },
+  {
+   "name": "Montgomery — just inside its own line",
+   "county": "Montgomery County",
+   "lat": 32.1253,
+   "lng": -82.6127
+  },
+  {
+   "name": "Pierce — just inside its own line",
+   "county": "Pierce County",
+   "lat": 31.4341,
+   "lng": -82.3051
+  },
+  {
+   "name": "Putnam — just inside its own line",
+   "county": "Putnam County",
+   "lat": 33.3935,
+   "lng": -83.2328
+  },
+  {
+   "name": "Stewart — just inside its own line",
+   "county": "Stewart County",
+   "lat": 32.2106,
+   "lng": -84.9083
+  },
+  {
+   "name": "Talbot — just inside its own line",
+   "county": "Talbot County",
+   "lat": 32.6869,
+   "lng": -84.669
+  },
+  {
+   "name": "Tattnall — just inside its own line",
+   "county": "Tattnall County",
+   "lat": 32.0743,
+   "lng": -81.9805
+  },
+  {
+   "name": "Taylor — just inside its own line",
+   "county": "Taylor County",
+   "lat": 32.6602,
+   "lng": -84.3409
+  },
+  {
+   "name": "Telfair — just inside its own line",
+   "county": "Telfair County",
+   "lat": 31.8619,
+   "lng": -83.1494
+  },
+  {
+   "name": "Thomas — just inside its own line",
+   "county": "Thomas County",
+   "lat": 31.0539,
+   "lng": -84.0894
+  },
+  {
+   "name": "Toombs — just inside its own line",
+   "county": "Toombs County",
+   "lat": 31.9673,
+   "lng": -82.3908
+  },
+  {
+   "name": "Treutlen — just inside its own line",
+   "county": "Treutlen County",
+   "lat": 32.364,
+   "lng": -82.6967
+  },
+  {
+   "name": "Walker — just inside its own line",
+   "county": "Walker County",
+   "lat": 34.8038,
+   "lng": -85.4318
+  },
+  {
+   "name": "Warren — just inside its own line",
+   "county": "Warren County",
+   "lat": 33.4242,
+   "lng": -82.7994
+  },
+  {
+   "name": "Wayne — just inside its own line",
+   "county": "Wayne County",
+   "lat": 31.796,
+   "lng": -82.0293
+  },
+  {
+   "name": "Wheeler — just inside its own line",
+   "county": "Wheeler County",
+   "lat": 32.1339,
+   "lng": -82.9256
+  },
+  {
+   "name": "White — just inside its own line",
+   "county": "White County",
+   "lat": 34.7571,
+   "lng": -83.8121
+  },
+  {
+   "name": "Wilcox — just inside its own line",
+   "county": "Wilcox County",
+   "lat": 32.1122,
+   "lng": -83.4097
+  },
+  {
+   "name": "Wilkinson — just inside its own line",
+   "county": "Wilkinson County",
+   "lat": 32.9418,
+   "lng": -83.1702
+  },
+  {
+   "name": "Worth — just inside its own line",
+   "county": "Worth County",
+   "lat": 31.6185,
+   "lng": -83.9894
+  }
+ ]
+}
