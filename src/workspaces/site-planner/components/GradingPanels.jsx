@@ -291,11 +291,34 @@ export function GradingHeaderActions({ model, dockDropFt, onCfg, onDockDrop }) {
 /* The left-dock Grading panel (NEW-1, amends B2315856): the per-building cards, then the three Ground rows + the
  * show-on-map button. It only READS `model` (published by the controller SitePlanner mounts whether or not this
  * panel is open); opening it starts no build. `headerSlot` is the panel chrome's action element (the ⓘ + gear portal there). */
-export function GradingPanel({ model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false }) {
+export const OFF_LINE = "Turn this on to suggest finish elevations and show cut and fill for this plan.";
+export function GradingPanel({ planOn = true, showOnMap = false, onPlanOn = null, onShowOnMap = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false }) {
   const view = gradingPanelView(model);
+  const toggles = (
+    <div data-grading-switches="1" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 0 10px" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 650 }}>
+        <input type="checkbox" role="switch" data-testid="grading-plan-switch" checked={!!planOn} onChange={(e) => onPlanOn && onPlanOn(e.target.checked)} /> Grade this plan
+      </label>
+      {planOn && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" data-testid="grading-show-on-map" checked={!!showOnMap} onChange={(e) => onShowOnMap && onShowOnMap(e.target.checked)} /> Show cut and fill on the map
+        </label>
+      )}
+    </div>
+  );
+  if (!planOn) {
+    return (
+      <div data-testid="grading-panel" data-grading-panel="off"
+        style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", display: "flex", flexDirection: "column" }}>
+        {toggles}
+        <div data-grading-empty="off" style={muted}>{OFF_LINE}</div>
+      </div>
+    );
+  }
   return (
     <div data-testid="grading-panel" data-grading-panel={view.state}
       style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", display: "flex", flexDirection: "column" }}>
+      {toggles}
       {model && headerSlot && createPortal(<GradingHeaderActions model={model} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />, headerSlot)}
       <div data-section="grading" style={{ padding: "0 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
         {view.state === "cards"

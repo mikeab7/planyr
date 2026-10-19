@@ -34,7 +34,7 @@ describe("the Grading dock item (NEW-1, amends B2315856)", () => {
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
     expect(sp).toMatch(/grading: "Grading"/);
     expect(sp).toMatch(/\n  grading: <>/);
-    expect(sp).toMatch(/panelIdAllowed\("grading", grOn\)/);
+    expect(sp).toMatch(/panelIdAllowed\("grading", gradingOn\)/);
   });
 });
 

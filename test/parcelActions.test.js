@@ -258,7 +258,7 @@ describe("the two-sided 'Parcel' collision is resolved", () => {
 
   it("the panel name doesn't collide with another left tab", () => {
     // The element inspector is "Properties" — "Property" would have swapped one collision for another.
-    const tabs = (src.match(/const leftTabs = (?:withGradingTab\()?\[[\s\S]*?\],? ?(?:grOn\))?;/) || [""])[0];
+    const tabs = (src.match(/const leftTabs = (?:withGradingTab\()?\[[\s\S]*?\],? ?(?:gradingOn\))?;/) || [""])[0];
     const labels = [...tabs.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
     for (const l of labels) expect(l).not.toBe(PARCEL_SURFACES.panel.name);
     expect(tabs).toMatch(/PARCEL_SURFACES\.panel\.name/); // the Land tab reads its name from the model

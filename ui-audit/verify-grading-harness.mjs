@@ -126,6 +126,19 @@ try {
   await page.waitForSelector('[data-layer="cutfill"] image', { timeout: 30000 });
   check("Cut & Fill is on by default and painted (image + daylight line)", (await page.locator('[data-layer="cutfill"] image').count()) === 1 && (await page.locator('[data-layer="cutfill"] path').count()) === 2);
   check("Level-pad limit is OFF by default: no tint, no line", (await page.locator('[data-layer="buildable"]').count()) === 0);
+  // ---- per-plan switch + "Show cut and fill on the map" (NEW-1/NEW-2): one source of truth, clean when off
+  await page.click('[data-testid="grading-show-on-map"]');
+  await page.waitForFunction(() => !document.querySelector('[data-layer="cutfill"]') && !document.querySelector("[data-grade-pill]"), null, { timeout: 15000 });
+  check("checkbox off: panel keeps its numbers, map has no bands, no pills", (await page.locator('[data-grading-panel="cards"]').count()) === 1 && (await page.locator("[data-pad-corner],[data-flag-dot]").count()) === 0);
+  await page.click('[data-testid="grading-show-on-map"]');
+  await page.waitForSelector('[data-layer="cutfill"] image', { timeout: 30000 });
+  check("checkbox on: the bands return", (await page.locator('[data-layer="cutfill"] image').count()) === 1);
+  await page.click('[data-testid="grading-plan-switch"]');
+  await page.waitForFunction(() => window.__harness.model == null && !document.querySelector('[data-layer="cutfill"]'), null, { timeout: 15000 });
+  check("switch off: no bands, no pills, no cards, model gone — only the switch and one line", (await page.locator("[data-grade-pill],[data-pad-corner],[data-flag-dot],[data-layer]").count()) === 0 && (await page.locator('[data-grading-panel="off"]').count()) === 1 && /Turn this on to suggest finish elevations and show cut and fill for this plan\./.test(await page.textContent('[data-grading-empty="off"]')) && (await page.locator('[data-testid="grading-show-on-map"]').count()) === 0);
+  await page.click('[data-testid="grading-plan-switch"]');
+  await page.waitForSelector('[data-layer="cutfill"] image', { timeout: 60000 });
+  check("switch on again: the round-2 picture returns", (await page.locator('[data-grading-panel="cards"]').count()) === 1);
   const ink = await page.evaluate(async () => {
     const m = window.__harness.model;
     const L = m.cutfill;
