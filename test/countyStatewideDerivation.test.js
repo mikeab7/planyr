@@ -174,7 +174,9 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // to 199 — again purely real counties being wired one at a time, not a blind expansion.
     // ⛔ Bumped 240 → 400 (2026-10-16, NEW-1): all 82 Mississippi counties wired from ONE measured MARIS table
     // (57 new rows on top of 24) — real counties, one source, not a blind expansion.
-    expect(keys.length).toBeLessThan(400);
+    // ⛔ Bumped 400 → 600 (2026-10-19, NEW-1, B2317680): Missouri's 71 county rows (one table, measured per county) took it from ~360 to 431 —
+    // real counties wired from per-county measurements, not a blind expansion. 16 sibling state sessions are adding rows the same day.
+    expect(keys.length).toBeLessThan(600);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
