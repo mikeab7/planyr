@@ -188,6 +188,16 @@ export const ALLOWED_HOSTS = new Set([
   "webstergis.integritygis.com",
   "worthgis.integritygis.com",
   "wrightgis.integritygis.com",
+  "gis.mo.gov",
+  "www.franklinmo.net",
+  "gis.dnr.mo.gov",
+  "gisdev.dnr.mo.gov",
+  "maps.franklinmo.net",
+  "gis.taneycounty.org",
+  "gis.cityofbranson.org",
+  "mapping.modot.org",
+  "gis.cassmo.org",
+  "maps.casscountymo.gov",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
