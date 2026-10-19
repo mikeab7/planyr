@@ -13,9 +13,11 @@
  * promoted endpoint has a date, not a provenance excuse.
  */
 import { ALABAMA_VERIFICATION } from "./alabamaProvenance.js"; // NEW-1 (B2302784)
+import { IDAHO_VERIFICATION } from "./idProvenance.js"; // NEW-1 (B2317920)
 
 export const COUNTY_VERIFICATION = {
   ...ALABAMA_VERIFICATION,
+  ...IDAHO_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
