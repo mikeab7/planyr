@@ -124,9 +124,8 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
  * comment for why both hosts have to move together. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 const GradingController = lazy(() => import("./components/GradingController.jsx"));
-const GradingTabs = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingTabs })));
 const GroundSection = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GroundSection })));
-const BuildingGradeTab = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.BuildingTab })));
+const GradingGroup = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingGroup })));
 const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
 import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX } from "./lib/mapChromeStack.js";
@@ -14186,6 +14185,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Owner-only grading layer: the gate, then the small always-loaded glue (settings, the setback polygon, a
   // ground sampler that does not need a drainage check to have run). All inert for every other account.
   const gradingOn = useGradingEnabled();
+  // The model GradingController publishes (declared here, ahead of the surface inputs, because its SUGGESTED finish
+  // elevations feed them — see `padElevFt` below).
+  const [grModel, setGrModel] = useState(null);
   const grBase = useGradingBase({ enabled: gradingOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback });
   const grOn = grBase.on;
   const grHosts = grOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
@@ -14204,7 +14206,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       dockStack: hr && hr.length >= 3 ? centroid(hr) : null,
       accessible: !!g.accessible,
       slopeOverridePct: Number.isFinite(g.slopePct) ? g.slopePct : null,
-      padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt : null,
+      // Owner-only: a building with no TYPED finish elevation takes the SUGGESTED one (balanced dirt, adjusted for pond
+      // spoil / rock / the flood floor — GradingController), kept in the model and never written to the plan.
+      padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt
+        : (grOn && e.type === "building" && grModel && grModel.autoFfe && grModel.autoFfe.has(e.id) ? grModel.autoFfe.get(e.id) : null),
       ...(grOn && e.type !== "building" ? { hostId: grHosts.get(e.id) ?? null } : {}),
     };
   }).filter(Boolean);
@@ -14269,20 +14274,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
    * path exists. Inert (null) for any account the gate refuses. */
-  const [grModel, setGrModel] = useState(null);
-  const [grTab, setGrTab] = useState("analysis");
   const grBuildingsAll = grOn ? els.filter((e) => e.type === "building") : null;
   const grSelIds = grOn ? (multi.length ? multi : sel ? [sel] : []).filter((r) => r.kind === "el" && grBuildingsAll.some((b) => b.id === r.id)).map((r) => r.id) : [];
   const grSelBuildingId = grSelIds[0] || null;
-  const grPrevSelB = useRef(null);
-  useEffect(() => {
-    // The Inspector rule: selecting a building switches the Site Analysis panel to its Building tab; deselecting returns to Analysis.
-    if (grSelBuildingId && !grPrevSelB.current) setGrTab("building");
-    if (!grSelBuildingId) setGrTab("analysis");
-    grPrevSelB.current = grSelBuildingId;
-  }, [grSelBuildingId]);
   const grSetCfg = (patch) => { pushHistory(); setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } })); };
   const grSetLayer = (id, on) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), layers: { ...((sx.grading || {}).layers || {}), [id]: !!on } } }));
+  // "Show buildable area on map": turns the Level-pad limit on and frames the map on it (once the mask arrives);
+  // pressing it again turns the line off.
+  const grFitPending = useRef(false);
+  const grToggleBuildable = () => {
+    const on = !!(grBase.cfg && grBase.cfg.layers.buildable);
+    if (on) { grFitPending.current = false; grSetLayer("buildable", false); return; }
+    grFitPending.current = true;
+    grSetLayer("buildable", true);
+  };
+  const grFitBox = grModel && grModel.buildable ? grModel.buildable.fitBoxFt : null;
+  useEffect(() => {
+    if (!grFitPending.current || !grFitBox) return;
+    grFitPending.current = false;
+    setView(framedViewFor(size, [{ x: grFitBox.x0, y: grFitBox.y0 }, { x: grFitBox.x1, y: grFitBox.y1 }]));
+  }, [grFitBox]); // eslint-disable-line react-hooks/exhaustive-deps
   const grPatchBuilding = (id, patch, opt) => {
     if (opt && opt.history) pushHistory();
     setEls((a) => a.map((e) => {
@@ -14292,27 +14303,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return n;
     }));
   };
-  const grMoveAssembly = (id, dx, dy) => {
+  const grMoveAssembly = (id, dx, dy, freezeFfe = null) => {
     pushHistory();
     const ids = new Set(assemblyOf(id).map((x) => x.id));
-    // The fix was proven at THIS finish elevation, so applying it freezes an active chip to "typed": a live chip would
-    // re-solve for the new spot and could walk the slope back across the line.
+    // The fix was proven at THIS finish elevation, so applying it freezes a suggested (auto) finish to a typed one: a live
+    // suggestion would re-solve for the new spot and could walk the slope back across the line.
     setEls((a) => a.map((e) => {
       if (!ids.has(e.id)) return e;
       const m = elTranslate(e, dx, dy);
-      return e.id === id && e.ffeBasis && e.ffeBasis !== "typed" && Number.isFinite(e.padElevFt) ? { ...m, ffeBasis: "typed" } : m;
+      return e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freezeFfe) ? { ...m, padElevFt: freezeFfe, ffeBasis: "typed" } : m;
     }));
   };
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
-  const grInput = grOn ? {
-    base: grBase, origin, gsInputs, gsSig, gradeSurface, selBuildingId: grSelBuildingId, multiBuildings: grSelIds.length,
-    rawBuilding: grSelBuildingId ? grBuildingsAll.find((b) => b.id === grSelBuildingId) || null : null,
-    rawBuildings: new Map(grBuildingsAll.map((b) => [b.id, b])),
-    buildingName: grSelBuildingId ? grBldgName(grSelBuildingId) : null,
-    dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
-    accent: PAL.accent, isDragging: () => !!drag.current,
-    actions: { patchBuilding: grPatchBuilding },
-  } : null;
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -14596,6 +14598,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // one ledger — reading usable/credited off this pass would resurrect the double-count.
   const pondLedgerGeom = accumulatePondLedger(pondLedgerEntries);
   const { pondFullyInundated, unanchoredInTrigger, anchoredNoWseInTrigger, autoAnchored: pondAutoAnchored, excavationCf: pondExcavationCf } = pondLedgerGeom;
+  // Owner-only grading layer: everything GradingController needs. Built HERE, after the pond ledger, because the pond's
+  // cut is available fill ("pond spoil counts as fill"). A finish elevation is never asked for: it is suggested.
+  const grBuildingNums = grOn ? buildingNumbers(els) : null;
+  const grInput = grOn ? {
+    base: grBase, origin, gsInputs, gsSig, gradeSurface, selBuildingId: grSelBuildingId, multiBuildings: grSelIds.length,
+    rawBuildings: new Map(grBuildingsAll.map((b) => [b.id, b])),
+    buildingNames: new Map(grBuildingsAll.map((b) => [b.id, grBldgName(b.id)])),
+    buildingOrder: [...grBuildingsAll].sort((a, b) => (grBuildingNums.get(a.id) ?? 1e9) - (grBuildingNums.get(b.id) ?? 1e9)).map((b) => b.id),
+    pondCutCy: Number.isFinite(pondExcavationCf) && pondExcavationCf > 0 ? pondExcavationCf / 27 : 0,
+    siteFloorFt: Number.isFinite(fmEffectivePadFt) ? fmEffectivePadFt : null,
+    dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
+    accent: PAL.accent, isDragging: () => !!drag.current,
+    actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly },
+  } : null;
 
   // ---- B707/B712: the floodplain-mitigation ledger — a SEPARATE ledger from
   // detention; nothing here nets the two (the same acre-foot can't count twice).
@@ -22422,35 +22438,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }}
                     groundSlot={grOn && grModel ? (
                       <Suspense fallback={null}>
-                        <GroundSection model={grModel} onShowBuildable={() => { grSetLayer("buildable", true); setLayersOpen(true); }} />
+                        <GroundSection model={grModel} buildableOn={!!(grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable} />
+                        <GradingGroup model={grModel} dockDropFt={gsDockDrop} onCfg={grSetCfg}
+                          onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
+                          onSelectBuilding={(id) => { setMulti([]); setSel({ kind: "el", id }); }}
+                          onApplyFfeFix={(id, fx) => grPatchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" }, { history: true })}
+                          onApplyMoveFix={(id, mv) => grModel.actions.applyMoveFix(id, mv)} />
                       </Suspense>
                     ) : null} />
                 );
-                // Owner-only: a selected building adds a second, "Building" tab to this panel (grading controls only —
-                // everything else reads from the real building element). Every other account renders exactly SiteAnalysis.
-                const gb = grOn && grModel && grModel.building ? grBuildingsAll.find((x) => x.id === grModel.building.id) : null;
+                // Owner-only grading rides INSIDE this one Analysis view (a Ground row + a Grading group under "Who governs");
+                // there is no second tab. Every other account renders exactly SiteAnalysis.
                 return (
                   <>
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
-                      {gb ? (
-                        <Suspense fallback={null}>
-                          <GradingTabs tab={grTab} onTab={setGrTab} showBuilding>
-                            {grTab === "building" ? (
-                              <BuildingGradeTab model={grModel} dockDropFt={gsDockDrop}
-                                renderNumber={(
-                                  <BuildingNumberField id={gb.id} value={buildingNumbers(els).get(gb.id)} className="bldg-num-box"
-                                    style={{ width: 40, height: CONTROL_H.sm, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, borderRadius: RADIUS.sm, color: "var(--text-primary)", flex: "none" }}
-                                    resetToken={bldgNumResetSeq} onAttempt={(n) => attemptBuildingNumber(gb.id, n)} onCancelConflict={() => setBldgNumConflict(null)} />
-                                )}
-                                wallRows={wallRowPlan(gb).map((r) => ({ key: r.key, badge: r.badge, role: r.role, layers: wallLayersOn(gb, r.sides[0]).map((l) => ({ label: KIND_LABEL[l.kind] || l.kind, depth: l.depth })) }))}
-                                onCfg={grSetCfg}
-                                onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
-                                onApplyFfeFix={(fx) => grPatchBuilding(gb.id, { padElevFt: fx.ffe, ffeBasis: "typed" }, { history: true })}
-                                onApplyMoveFix={(mv) => grMoveAssembly(gb.id, mv.dx, mv.dy)} />
-                            ) : analysisNode}
-                          </GradingTabs>
-                        </Suspense>
-                      ) : analysisNode}
+                      {analysisNode}
                     </LazyPanel>
                   </>
                 );
@@ -25204,7 +25206,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ))}
                 </g>
               )}
-              {/* Owner-only grading layers ("Buildable at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
+              {/* Owner-only grading layers ("Level-pad limit at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
               {grOn && grModel && (grModel.buildable || grModel.cutfill) && (

@@ -78,7 +78,12 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
     expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill\)/);
     expect(sp).toMatch(/gradingRows=\{grOn && grModel \?/);
     expect(sp).toMatch(/groundSlot=\{grOn && grModel \?/);
-    expect(sp).toMatch(/const gb = grOn && grModel/);
+    expect(sp).toMatch(/<GradingGroup model=\{grModel\}/);
+  });
+  it("grading lives inside the Analysis view — there is no second tab, no Building tab, no chips", () => {
+    expect(sp).not.toMatch(/GradingTabs|BuildingGradeTab|grTab|setGrTab/);
+    const panels = read("../src/workspaces/site-planner/components/GradingPanels.jsx");
+    expect(code(panels)).not.toMatch(/export function (GradingTabs|BuildingTab)|data-ffe-basis|aria-pressed=\{b\.basis/);
   });
   it("the proposed-surface inputs only change under the gate (every other account keeps its exact engine inputs)", () => {
     expect(sp).toMatch(/\.\.\.\(grOn && grBase\.pack \? \{ grading: grBase\.pack \} : \{\}\)/);

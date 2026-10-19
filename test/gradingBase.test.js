@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { gradingCfg, gradingSetback, gradingPack, parcelsSig, hostIdMap, GRADING_DEFAULTS } from "../src/workspaces/site-planner/lib/gradingBase.js";
-import { GroundSection, BuildingTab, GradingTabs } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { GroundSection, GradingGroup } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
 import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../src/workspaces/site-planner/lib/mapLock.js";
 
@@ -14,7 +14,7 @@ describe("gradingCfg", () => {
   it("defaults: 1.5% pavement, 12 ft depth, 2:1", () => {
     const c = gradingCfg(undefined);
     expect([c.pavementSlopePct, c.maxCutFillFt, c.slopeRatio]).toEqual([1.5, 12, 2]);
-    expect(c.layers).toEqual({ buildable: false, cutfill: false });
+    expect(c.layers).toEqual({ buildable: false, cutfill: true });      // round 2: Cut & Fill defaults ON, the level-pad line OFF
   });
   it("pavement slope is never below 0.5%; ratio is 2/3/4 only; depth must be positive", () => {
     expect(gradingCfg({ pavementSlopePct: 0.1 }).pavementSlopePct).toBe(0.5);
@@ -22,7 +22,7 @@ describe("gradingCfg", () => {
     expect(gradingCfg({ slopeRatio: 3 }).slopeRatio).toBe(3);
     expect(gradingCfg({ slopeRatio: 5 }).slopeRatio).toBe(2);
     expect(gradingCfg({ maxCutFillFt: -4 }).maxCutFillFt).toBe(12);
-    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false });
+    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: true });
     expect(GRADING_DEFAULTS.shoulderFt).toBe(5);
   });
 });
@@ -64,14 +64,24 @@ describe("gradingSetback — the existing setback feature, else the property lin
   });
 });
 
+describe("gradingCfg layer defaults", () => {
+  it("Level-pad limit is OFF until asked for; Cut & Fill is ON until switched off", () => {
+    expect(gradingCfg({}).layers).toEqual({ buildable: false, cutfill: true });
+    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: true });
+    expect(gradingCfg({ layers: { cutfill: false } }).layers).toEqual({ buildable: false, cutfill: false });
+  });
+});
+
 describe("panels render (static markup)", () => {
+  const noop = () => {};
+  const actions = { typeFfe: noop, resetFfe: noop };
   const model = (over = {}) => ({
     cfg: gradingCfg({}), setback: { usingPropertyLine: false }, demStatus: "ready",
     ground: { status: "ready", retry() {}, summary: { best: { E: 795, areaAc: 37.46 }, parcelAc: 73.98, severity: { id: "workable", label: "Workable", tone: "green" }, relief: { reliefFt: 95, lowFt: 719.3, highFt: 814.3, steepShare: 0.04 } } },
-    bestFinish: 795, actions: { typeFfe() {}, pickBasis() {} }, building: null, ...over,
+    bestFinish: 795, actions, cards: [], rock: { status: "ready", count: 0, retry: noop }, ...over,
   });
   it("Ground: the three rows, the severity pill, the show-on-map button", () => {
-    const html = renderToStaticMarkup(React.createElement(GroundSection, { model: model(), onShowBuildable() {} }));
+    const html = renderToStaticMarkup(React.createElement(GroundSection, { model: model(), onToggleBuildable() {} }));
     expect(html).toContain("Level ground at 2:1, no walls");
     expect(html).toContain("37.5 of 74.0 AC");
     expect(html).toContain("best single pad, finish 795 ft · no more than 12 ft of cut or fill");
@@ -82,38 +92,77 @@ describe("panels render (static markup)", () => {
     expect(html).toContain(">4%<");
     expect(html).toContain("Show buildable area on map");
   });
+  it("Ground: with the line on the same button reads Hide", () => {
+    const html = renderToStaticMarkup(React.createElement(GroundSection, { model: model(), onToggleBuildable() {}, buildableOn: true }));
+    expect(html).toContain(">Hide<"); expect(html).not.toContain("Show buildable area on map");
+  });
   it("Ground: computing and failed states are named, never blank", () => {
-    expect(renderToStaticMarkup(React.createElement(GroundSection, { model: model({ ground: { status: "computing", summary: null, retry() {} } }), onShowBuildable() {} }))).toContain("Reading the ground");
-    const f = renderToStaticMarkup(React.createElement(GroundSection, { model: model({ ground: { status: "failed", summary: null, retry() {} }, demStatus: "failed" }), onShowBuildable() {} }));
+    expect(renderToStaticMarkup(React.createElement(GroundSection, { model: model({ ground: { status: "computing", summary: null, retry() {} } }), onToggleBuildable() {} }))).toContain("Reading the ground");
+    const f = renderToStaticMarkup(React.createElement(GroundSection, { model: model({ ground: { status: "failed", summary: null, retry() {} }, demStatus: "failed" }), onToggleBuildable() {} }));
     expect(f).toContain("Couldn&#x27;t read the ground"); expect(f).toContain("Retry");
   });
-  const bModel = (flag) => model({ building: {
-    id: "b", ffe: 793.5, basis: "balanced", solving: null, extra: 0, noSurface: false, court: null, courtDrop: "789.5 → 787.5 ft", spots: [],
-    earthwork: { cutCy: 38000, fillCy: 37000, netCy: -1000, balanced: false, dirtCy: 75000 },
-    flag, fixes: { status: "done", ffe: { ffe: 791, delta: -2.5 }, move: { distFt: 35, direction: "north", dx: 0, dy: -35 } },
-  } });
-  it("Building tab: chips, FFE, court readout, tiles, no-walls pill", () => {
-    const html = renderToStaticMarkup(React.createElement(BuildingTab, { model: bModel(null), dockDropFt: 4, renderNumber: "1", wallRows: [{ key: "dock", badge: "S", role: "dock", layers: [{ label: "Court", depth: 130 }] }], onCfg() {}, onDockDrop() {}, onApplyFfeFix() {}, onApplyMoveFix() {} }));
-    for (const t of ["Balanced dirt", "Least dirt", "Most room", "789.5 → 787.5 ft", "38,000", "37,000", "CY cut", "CY fill", "CY export", "no walls · 5 ft shoulder", "Bank volumes, no stripping or shrink", "Slopes daylight inside the setback.", "Court 130′"]) expect(html).toContain(t);
-    expect(html).toContain('aria-pressed="true"');
+
+  const card = (over = {}) => ({
+    id: "b1", name: "Building 1", sf: 217500, ffe: 799.8, isAuto: true, solving: false, failed: false, focus: true,
+    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 615, balanced: false, dirtCy: 107881 },
+    flag: null, basis: "Balances the dirt: 54k CY cut on the north, 54k CY fill on the south; 600 CY import. Docks sit on the low side, so the courts drain away from the building.",
+    fixes: { id: "b1", status: "idle", ffe: null, move: null },
+    alt: { id: "b1", E: 795, areaAc: 37.6, cutCy: 4000, fillCy: 75000, netCy: 71000 },
+    ...over,
   });
-  it("Building tab: the flag card with both fixes and the disabled wall option", () => {
+  const group = (cards, extra = {}) => renderToStaticMarkup(React.createElement(GradingGroup, { model: model({ cards, ...extra }), dockDropFt: 4, onCfg: noop, onDockDrop: noop, onSelectBuilding: noop, onApplyFfeFix: noop, onApplyMoveFix: noop }));
+  it("Grading group: exists only when there is a building", () => {
+    expect(group([])).toBe("");
+    expect(group([card()])).toContain("Ground › Grading");
+  });
+  it("one card: title, FFE already filled in (grey = auto), the basis, ONE alternative link, the earthwork line — and NO tab, NO chips, NO 'pick' prompt", () => {
+    const html = group([card()]);
+    expect(html).toContain("Building 1 · 217,500 SF");
+    expect(html).toContain("FFE 799.8 ft");
+    expect(html).toContain('data-ffe-source="auto"');
+    expect(html).toContain("Balances the dirt: 54k CY cut on the north");
+    expect(html).toContain("Or sit it on the most level ground: FFE 795 (38 AC stays level, 71k CY import)");
+    expect(html).toContain("Cut 53,600 · Fill 54,200 · 600 CY import");
+    expect(html).toContain("Slopes daylight inside the setback.");
+    for (const gone of ["Balanced dirt", "Least dirt", "Most room", "Pick a chip", "Pick a finish elevation", "role=\"tab\"", "Walls", "data-ffe-basis"]) expect(html).not.toContain(gone);
+  });
+  it("the settings are NOT in the card: the pavement slope, dock drop, depth and ratio live behind the gear", () => {
+    const html = group([card()]);
+    for (const hidden of ["Pavement slope", "Dock drop", "Max cut or fill under a pad", "Grading slopes", "5 ft shoulder"]) expect(html).not.toContain(hidden);
+    expect(html).toContain('data-grading-gear="1"');
+  });
+  it("a typed FFE is black with the small auto chip that resets", () => {
+    const html = group([card({ isAuto: false, ffe: 801, basis: "Your number. Reset to auto for the balanced finish." })]);
+    expect(html).toContain('data-ffe-source="typed"'); expect(html).toContain('data-ffe-reset="1"');
+    expect(html).toContain('value="801"');
+  });
+  it("solving shows an ellipsis (never an empty field); a failed price says so", () => {
+    expect(group([card({ ffe: null, solving: true, earthwork: null, basis: undefined, alt: null })])).toContain("FFE … ft");
+    expect(group([card({ ffe: null, failed: true, earthwork: null, basis: undefined, alt: null })])).toContain("FFE — ft");
+    expect(group([card({ ffe: null, solving: true, earthwork: null, alt: null })], { demStatus: "failed" })).toContain("no suggestion yet");
+  });
+  it("a balanced pad reads Balanced; an export reads CY export", () => {
+    expect(group([card({ earthwork: { cutCy: 50000, fillCy: 50100, netCy: 100 } })])).toContain("Balanced");
+    expect(group([card({ earthwork: { cutCy: 60000, fillCy: 50000, netCy: -10000 } })])).toContain("10,000 CY export");
+  });
+  it("the selected card is expanded; the rest are one line each and name their FFE", () => {
+    const html = group([card(), card({ id: "b2", name: "Building 2", sf: 140000, ffe: 801.2, focus: false, flag: { text: { title: "Slope crosses the setback · East", body: "x" } } })]);
+    expect(html).toContain('data-card-state="open"'); expect(html).toContain('data-card-state="collapsed"');
+    expect(html).toContain("Building 2 · 140,000 SF"); expect(html).toContain("FFE 801.2 ft");
+  });
+  it("the flag card is exactly as shipped: side, element, overshoot, the two fixes, the disabled wall line", () => {
     const flag = { text: { title: "Slope crosses the setback · South", body: "The fill slope off the truck court runs 18 ft past the line at 2:1. Pick a fix:" } };
-    const html = renderToStaticMarkup(React.createElement(BuildingTab, { model: bModel(flag), dockDropFt: 4, renderNumber: "1", wallRows: [], onCfg() {}, onDockDrop() {}, onApplyFfeFix() {}, onApplyMoveFix() {} }));
+    const html = group([card({ flag, fixes: { id: "b1", status: "done", ffe: { ffe: 791, delta: -2.5 }, move: { distFt: 35, direction: "north", dx: 0, dy: -35 } } })]);
     expect(html).toContain("Slope crosses the setback · South");
     expect(html).toContain("Lower FFE to 791.0 ft");
     expect(html).toContain("Move building 35 ft north");
     expect(html).toMatch(/<button disabled[^>]*data-fix="wall"/);
+    expect(html).not.toContain("Slopes daylight inside the setback.");
   });
-  it("Building tab: with no clearing fix, the buttons are disabled and say so", () => {
-    const m = bModel({ text: { title: "t", body: "b" } }); m.building.fixes = { status: "done", ffe: null, move: null };
-    const html = renderToStaticMarkup(React.createElement(BuildingTab, { model: m, dockDropFt: 4, renderNumber: "1", wallRows: [], onCfg() {}, onDockDrop() {}, onApplyFfeFix() {}, onApplyMoveFix() {} }));
+  it("with no clearing fix, the buttons are disabled and say so", () => {
+    const html = group([card({ flag: { text: { title: "t", body: "b" } }, fixes: { id: "b1", status: "done", ffe: null, move: null } })]);
     expect(html).toContain("No finish elevation clears it");
     expect(html).toMatch(/<button disabled[^>]*data-fix="ffe"/);
-  });
-  it("Tabs: the strip only exists while a building is selected", () => {
-    expect(renderToStaticMarkup(React.createElement(GradingTabs, { tab: "analysis", onTab() {}, showBuilding: false }, "x"))).not.toContain("Building");
-    expect(renderToStaticMarkup(React.createElement(GradingTabs, { tab: "building", onTab() {}, showBuilding: true }, "x"))).toContain("Building");
   });
 });
 

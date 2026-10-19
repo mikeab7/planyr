@@ -1,8 +1,8 @@
-/* Building-grade helpers (NEW-3, owner-only grading layer) — everything the Site Analysis "Building" tab
- * and the grading layers need that is NOT the surface itself: which elements belong to a building, its
- * earthwork tiles (read from the SAME lattice the earthwork rows use), the setback flag in plain words,
- * the three FFE basis solvers, the two fix solvers, and the spot-elevation geometry drawn on the court
- * and the lots.
+/* Building-grade helpers (owner-only grading layer) — everything the Site Analysis Grading group and the grading
+ * layers need that is NOT the surface itself: which elements belong to a building, its earthwork (read from the
+ * SAME lattice the earthwork rows use), the setback flag in plain words, the balanced-dirt solver (the FFE
+ * suggestion in lib/ffeSuggest.js builds on it), the two fix solvers, and the spot-elevation geometry drawn on
+ * the court and the lots.
  *
  * Pure, no DOM, Node-tested. Feet and cubic yards; elevations ft NAVD88. Bank volumes — no stripping,
  * no shrink or swell (owner rule). The solvers are GENERATORS that `yield` before every surface build so
@@ -180,27 +180,6 @@ export function* solveBalanced(evalNet, range) {
   return { ffe: best.ffe, netCy: best.netCy, achieved: Math.abs(best.netCy) < BALANCE_TOL_CY };
 }
 
-/* LEAST DIRT — the FFE minimising cut + fill. cut + fill is convex in the pad elevation, so an integer
- * ternary search over 0.5-ft steps finds it in ~log steps. `evalDirt(ffe)` → cut + fill CY or null. */
-export function* solveLeastDirt(evalDirt, range) {
-  let lo = Math.round(range.lo / FFE_STEP_FT), hi = Math.round(range.hi / FFE_STEP_FT);
-  const memo = new Map();
-  const f = function* (k) { if (!memo.has(k)) { yield; memo.set(k, evalDirt(k * FFE_STEP_FT)); } return memo.get(k); };
-  while (hi - lo > 2) {
-    const m1 = lo + Math.floor((hi - lo) / 3), m2 = hi - Math.floor((hi - lo) / 3);
-    const a = yield* f(m1), b = yield* f(m2);
-    if (a == null || b == null) return null;
-    if (a <= b) hi = m2; else lo = m1;
-  }
-  let best = null;
-  for (let k = lo; k <= hi; k++) {
-    const v = yield* f(k);
-    if (v == null) return null;
-    if (!best || v < best.dirtCy) best = { ffe: k * FFE_STEP_FT, dirtCy: v };
-  }
-  return best;
-}
-
 /* ---- the two fix solvers ---- */
 
 /* Nearest FFE within ±16 ft (0.5 steps) at which the slopes daylight inside the setback. `clears(ffe)` →
@@ -287,18 +266,47 @@ export function courtDropReadout(spot) {
   return `${f1(spot.face.z)} → ${f1(mid.far.z)} ft`;
 }
 
-/* ---- FFE basis copy ---- */
-export const BASES = Object.freeze([
-  { id: "balanced", label: "Balanced dirt" },
-  { id: "least", label: "Least dirt" },
-  { id: "room", label: "Most room" },
-]);
-export function basisNote(basis, { netCy = null, dirtCy = null, bestFinish = null } = {}) {
-  const cy = (v) => Math.round(Math.abs(v)).toLocaleString("en-US");
-  switch (basis) {
-    case "balanced": return netCy != null ? `Balanced: cut and fill within ${cy(netCy)} CY of each other.` : "Balanced: cut and fill as close to equal as the ground allows.";
-    case "least": return dirtCy != null ? `Least dirt: ${cy(dirtCy)} CY of cut plus fill, the minimum.` : "Least dirt: the finish that moves the fewest yards.";
-    case "room": return bestFinish != null ? `Most room: the finish with the biggest single level pad (${f1(bestFinish)} ft).` : "Most room: the finish with the biggest single level pad.";
-    default: return "Typed. Pick a chip to let the ground choose.";
+/* ---- the four corner spots on the pad ---- */
+
+/* The pad's four corners (the ring itself when it is a quadrilateral, else the corners of its oriented bounding box,
+ * oriented along the ring's longest edge). Returns [{x, y}] or null. */
+export function padCorners(ring) {
+  if (!ring || ring.length < 3) return null;
+  if (ring.length === 4) return ring.map((p) => ({ x: p.x, y: p.y }));
+  let best = 0, ux = 1, uy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L > best) { best = L; ux = (b.x - a.x) / L; uy = (b.y - a.y) / L; }
   }
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (const p of ring) {
+    const u = p.x * ux + p.y * uy, v = -p.x * uy + p.y * ux;
+    if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v;
+  }
+  const at = (u, v) => ({ x: u * ux - v * uy, y: u * uy + v * ux });
+  return [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
+}
+
+/* "cut 9.1" / "fill 6.8" at each pad corner: existing ground against the finished floor. `existAt(pt)` → ft | null.
+ * A corner over a DEM void has no spot (never a guessed number). Returns [{ pt, existFt, kind, depthFt, text }]. */
+export function padCornerSpots(ring, ffe, existAt) {
+  const cs = padCorners(ring);
+  if (!cs || !Number.isFinite(ffe) || typeof existAt !== "function") return [];
+  const out = [];
+  for (const pt of cs) {
+    const g = existAt(pt);
+    if (g == null || !Number.isFinite(g)) continue;
+    const d = ffe - g;
+    if (Math.abs(d) < 0.05) out.push({ pt, existFt: g, kind: "grade", depthFt: 0, text: "grade" });
+    else out.push({ pt, existFt: g, kind: d < 0 ? "cut" : "fill", depthFt: Math.abs(d), text: `${d < 0 ? "cut" : "fill"} ${f1(Math.abs(d))}` });
+  }
+  return out;
+}
+
+/* A ring's area in square feet (shoelace). */
+export function ringSf(ring) {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; a += p.x * q.y - q.x * p.y; }
+  return Math.abs(a) / 2;
 }

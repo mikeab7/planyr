@@ -1,7 +1,7 @@
 /* verify-grading-hidden-live (V1742993) — the owner-only grading layer is INVISIBLE to every other account.
  * Signs in as the throwaway test account (authenticated only, not in admin_users), opens the Site Planner
  * and the fixture plan, and asserts: the is_admin() answer is false; Site Analysis has no Ground group;
- * Layers has no "Buildable at"/"Cut & Fill" rows; no GradingController/GradingPanels chunk was requested.
+ * Layers has no "Level-pad limit"/"Cut & Fill" rows; no GradingController/GradingPanels chunk was requested.
  *   E2E_LOGIN_KEY=… node ui-audit/verify-grading-hidden-live.mjs [https://planyr.io] */
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -30,7 +30,7 @@ try {
   ok("no Ground group in Site Analysis", (await page.locator('[data-section="ground"]').count()) === 0);
   const layers = page.getByRole("button", { name: /Layers/ }).filter({ visible: true }).first();
   if (await layers.count()) { await layers.click().catch(() => {}); await page.waitForTimeout(1500); }
-  ok("no Buildable / Cut & Fill rows in Layers", (await page.locator('[data-testid^="layer-row-grading-"]').count()) === 0 && (await page.getByText(/Buildable at|Cut & Fill/).count()) === 0);
+  ok("no Level-pad limit / Cut & Fill rows in Layers", (await page.locator('[data-testid^="layer-row-grading-"]').count()) === 0 && (await page.getByText(/Level-pad limit|Buildable at|Cut & Fill/).count()) === 0);
   ok("no Building grading tab", (await page.locator('[data-grading-tab]').count()) === 0);
   ok("no GradingController / GradingPanels chunk requested", chunks.length === 0, chunks.join(","));
   console.log(`planner reached: ${(await page.locator("svg").count()) > 0}`);

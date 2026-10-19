@@ -24,7 +24,8 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /* The owner's grading settings, normalised. Stored sparsely on `settings.grading` (additive keys beside the
  * existing B826 ones): pavement slope %, max cut-or-fill under a pad (ft), grading slope ratio (H:V), and
- * which of the two Topography layers are switched on. Pavement slope is never below 0.5%. */
+ * which of the two Topography layers are switched on (Level-pad limit default OFF, Cut & Fill default ON). Pavement
+ * slope is never below 0.5%. */
 export function gradingCfg(g) {
   const src = g || {};
   const p = num(src.pavementSlopePct);
@@ -34,7 +35,8 @@ export function gradingCfg(g) {
     pavementSlopePct: p == null ? GRADING_DEFAULTS.pavementSlopePct : Math.max(GRADING_DEFAULTS.minPavementSlopePct, p),
     maxCutFillFt: d == null || d <= 0 ? GRADING_DEFAULTS.maxCutFillFt : d,
     slopeRatio: SLOPE_RATIOS.includes(r) ? r : GRADING_DEFAULTS.slopeRatio,
-    layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !!(src.layers && src.layers.cutfill) },
+    // Level-pad limit: OFF until asked for. Cut & Fill: ON until switched off — it is the whole point of having a building.
+    layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !(src.layers && src.layers.cutfill === false) },
   };
 }
 
