@@ -708,6 +708,7 @@ Owner-only (constraint #25). Code: `proposedSurface.js` (`grading` argument), `b
 - Slopes start 5 ft past the pavement edge (a shoulder), then run at the grading slope (2:1 default; 3:1, 4:1 selectable) until they daylight on existing ground.
 - Access and drive grading are OUT of scope (no drive, no drive grade, no road tie-in). Volumes are bank volumes — no shrink or swell.
 - Setbacks: the parcel's setback polygon when the plan has one, else the property line (and the panel says so).
+- A bump-out (a building element with `dogEar`, or attached to another building) is a pad member of its host, never a graded building of its own: one card, one FFE, one assembly per host, pad area and pills at the host (`lib/gradingMembership.js` `isPadMember`; B2315856/B2315857 amended). Guard: `test/gradingBumpOut.test.js`.
 - **Round 2 (owner rules 2026-10-18, after using PR #2360 on Chehaw Rd › Concept A), amended 2026-10-19 (B2315856 → its own panel):**
   - Grading has its own left-dock panel (owner-only, same gate) between Drainage and Yield: one card per building, then the Ground rows, with the settings gear and ⓘ in the panel header.
   - Site Analysis carries no grading or ground rows (the owner: grading mixed into it "just doesn't work").

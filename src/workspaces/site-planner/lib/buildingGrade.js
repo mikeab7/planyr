@@ -38,7 +38,8 @@ export function shiftAssembly(els, ids, dx, dy) {
     return n;
   });
 }
-export const withFfe = (els, buildingId, ffe) => els.map((e) => (e.id === buildingId ? { ...e, padElevFt: ffe } : e));
+// A bump-out is part of the host's pad, so it takes the same finish (`hostId` is stamped on it by the planner).
+export const withFfe = (els, buildingId, ffe) => els.map((e) => (e.id === buildingId || (e.type === "building" && e.hostId === buildingId) ? { ...e, padElevFt: ffe } : e));
 
 /* ---- compass ---- */
 const POINTS8 = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];

@@ -111,7 +111,7 @@ export default function GradingController({ input, onModel }) {
   const namesKey = input.buildingNames ? [...input.buildingNames].map(([k, v]) => `${k}=${v}`).join("|") : "";
   const buildings = useMemo(() => {
     const order = inRef.current.buildingOrder || EMPTY;
-    const byId = new Map(els.filter((e) => e.type === "building").map((e) => [e.id, e]));
+    const byId = new Map(els.filter((e) => e.type === "building" && !e.hostId).map((e) => [e.id, e]));
     const ids = order.filter((id) => byId.has(id));
     for (const id of byId.keys()) if (!ids.includes(id)) ids.push(id);
     return ids.map((id) => byId.get(id));
@@ -150,7 +150,7 @@ export default function GradingController({ input, onModel }) {
     }
     return m;
   }, [buildings, assemblies, gsSig]); // eslint-disable-line react-hooks/exhaustive-deps
-  const padArea = useMemo(() => new Map(buildings.map((b) => [b.id, ringSf(b.ring)])), [buildings]);
+  const padArea = useMemo(() => new Map(buildings.map((b) => [b.id, ringSf(b.ring) + els.reduce((s, x) => s + (x.type === "building" && x.hostId === b.id ? ringSf(x.ring) : 0), 0)])), [buildings, gsSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const pondTotal = Math.max(0, Math.round((input.pondCutCy || 0) / 100) * 100);
   const totalPad = [...padArea.values()].reduce((a, v) => a + v, 0) || 1;
   const pondShareOf = (id) => Math.round((pondTotal * (padArea.get(id) || 0) / totalPad) / 100) * 100;
