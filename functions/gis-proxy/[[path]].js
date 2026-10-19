@@ -91,6 +91,17 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
+   * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
+  "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
+  "gis.minnehahacounty.gov", "gis2.siouxfalls.org", // Minnehaha County / Sioux Falls
+  "arcgis.sd.gov", "sdgis.sd.gov", // State of South Dakota GIS (BIT)
+  "gis.districtiii.org", "www.districtiii.org", "districtiii.org", // Planning & Development District III — Faulk, Day … county viewers
+  "1stdistrict.org", "www.1stdistrict.org", "mapnet.1stdistrict.org", "gis.1stdistrict.org", // First District Association of Local Governments — MapNet county viewers
+  "gis.rcgov.org", // Rapid City
+  "davisonreports.com", "www.davisonreports.com", // Davison County parcel viewer
+  "sidbox.sidwellco.com", // Sidwell — Dakotas county parcel viewers
+  "brookingscountysd.gov", "www.brookingscountysd.gov", "codington.sdcounty.gov", "brown.sd.us", // county sites whose GIS pages name the viewer
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
