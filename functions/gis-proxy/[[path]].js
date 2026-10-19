@@ -198,6 +198,16 @@ export const ALLOWED_HOSTS = new Set([
   "mapping.modot.org",
   "gis.cassmo.org",
   "maps.casscountymo.gov",
+  "mapps.camavision.com",
+  "maps.sccmo.org",
+  "www.showmeboone.com",
+  "showmeboone.com",
+  "gisweb.showmeboone.com",
+  "maps.showmeboone.com",
+  "gis.camavision.com",
+  "gis.pettiscomo.com",
+  "maps.jacksongov.org",
+  "gis.cityofkirksville.com",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
