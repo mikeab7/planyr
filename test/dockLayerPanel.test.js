@@ -85,7 +85,7 @@ describe("length + steps", () => {
 
 describe("source guard — the redesigned panel stays redesigned", () => {
   const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
-  const branch = src.slice(src.indexOf(") : isDockZone(selEl) ? (() => {"), src.indexOf(') : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? ('));
+  const branch = src.slice(src.indexOf(") : isDockLayerEl(selEl) ? (() => {"), src.indexOf(') : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? ('));
   const panel = src.slice(src.indexOf("function DockLayerPanel("), src.indexOf("// PercentField — compact"));
   it("the dock branch hands everything to DockLayerPanel", () => { expect(branch).toContain("<DockLayerPanel"); });
   it("none of the removed copy survives in the panel or its branch", () => {
@@ -97,7 +97,7 @@ describe("source guard — the redesigned panel stays redesigned", () => {
     expect(branch).not.toMatch(/window\.confirm|\bconfirm\(/);
   });
   it("the generic Delete / Pin / Properties / Footprint / Pad / Grading blocks skip a dock layer", () => {
-    expect((src.match(/!isDockZone\(selEl\)/g) || []).length).toBeGreaterThanOrEqual(6);
+    expect((src.match(/!isDockLayerEl\(selEl\)/g) || []).length).toBeGreaterThanOrEqual(6);
   });
   it("length is an editable stepper again (it was read-only text)", () => { expect(panel).toContain('testid="dock-length"'); });
   it("no px / hex in the panel", () => { expect(panel).not.toMatch(/#[0-9a-fA-F]{6}\b/); expect(panel).not.toMatch(/>\s*px\s*</); });
