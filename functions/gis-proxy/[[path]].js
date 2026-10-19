@@ -176,19 +176,13 @@ export const ALLOWED_HOSTS = new Set([
    * relayed and MEASURED through this relay before a county is wired to it. */
   "kygisserver.ky.gov", // Kentucky DGI — county PVA parcel MapServers
   "kygeonet.ky.gov", // Kentucky DGI — county PVA viewers (read to find a county's real service)
+  /* NEW-1 (Kentucky, 2026-10-19) — county hosts the Kentucky parcel sources sit on. The sandbox cannot reach any of them, so each is
+   * relayed and was MEASURED through this relay before a county was wired to it (docs/STATEWIDE-PARCELS.md "Kentucky counties"). */
   "gis.lojic.org", // LOJIC — Jefferson County (Louisville) PVA parcels
-  "arcgis.boonecountygis.com", // Boone County KY GIS
-  "webgis.bgky.org", // City of Bowling Green / Warren County KY (CCPC parcels)
-  "gis.bgky.org", // City of Bowling Green / Warren County KY CCPC reference services
-  "secure.boonecountygis.com", // Boone County KY GIS (PVA parcel layers)
-  "maps2.bgadd.org", // Bluegrass Area Development District — Boyle County parcels
   "maps.linkgis.org", // LINK-GIS — Campbell / Kenton / Pendleton parcels
-  "gis.ccgisonline.com", "gis.ccgisonline.com:6443", // Clark County KY GIS
   "arcserver.madisoncountyky.us", // Madison County KY GIS
   "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
-  "gis.daviesskypva.org", // Daviess County PVA
-  "gis.elizabethtownky.org", // City of Elizabethtown (Hardin) property boundaries
-  "gis.equatorstudios.com", // Equator Studios — vendor-hosted county PVA viewers (read to find a county's real service)
+  "webgis.bgky.org", // Warren County City-County Planning Commission (CCPC parcels)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
