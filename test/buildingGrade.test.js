@@ -1,11 +1,11 @@
-// NEW-3 — the Building tab's pure half: assembly membership, the earthwork tiles (read from the lattice the
+// the Grading group's pure half: assembly membership, the earthwork tiles (read from the lattice the
 // rows use), the flag in plain words, the three FFE bases, the two fix solvers, and the spot-elevation
 // geometry. Synthetic grounds with closed-form answers, then the REAL Chehaw lattice.
 import { describe, it, expect } from "vitest";
 import {
   hostBuildingIdOf, assemblyIds, assemblyEarthwork, netLabel, describeFlag, shiftAssembly, withFfe,
-  solveBalanced, solveLeastDirt, findFfeFix, findMoveFix, runSync, runChunked, compass8, compassAbbr,
-  spotElevationsFor, courtDropReadout, basisNote, snapFfe, BALANCE_TOL_CY,
+  solveBalanced, findFfeFix, findMoveFix, runSync, runChunked, compass8, compassAbbr,
+  spotElevationsFor, courtDropReadout, snapFfe, BALANCE_TOL_CY, padCorners, padCornerSpots, ringSf,
 } from "../src/workspaces/site-planner/lib/buildingGrade.js";
 import { buildProposedSurface } from "../src/workspaces/site-planner/lib/proposedSurface.js";
 
@@ -112,29 +112,42 @@ describe("FFE bases", () => {
     for (let f = 80; f <= 100; f += 0.1) { const n = Math.abs(net(f)); if (!bf || n < bf.n) bf = { f, n }; }
     expect(Math.abs(r.ffe - bf.f)).toBeLessThanOrEqual(0.3);
   });
-  it("Least dirt is the minimum of cut + fill over the 0.5-ft steps", () => {
-    const r = runSync(solveLeastDirt(dirt, { lo: 70, hi: 110 }));
-    let bf = null;
-    for (let f = 70; f <= 110; f += 0.5) { const d = dirt(f); if (!bf || d < bf.d) bf = { f, d }; }
-    expect(Math.abs(r.ffe - bf.f)).toBeLessThanOrEqual(0.5);
-    expect(r.dirtCy).toBeLessThanOrEqual(bf.d * 1.0001 + 1);
-  });
-  it("the three bases give three different answers on sloping ground", () => {
-    const bal = runSync(solveBalanced(net, { lo: 70, hi: 120 })).ffe;
-    const least = runSync(solveLeastDirt(dirt, { lo: 70, hi: 110 })).ffe;
-    const room = 99; // the sweep's best finish is supplied by the caller (NEW-1)
-    expect(new Set([bal, least, room]).size).toBeGreaterThan(1);
-  });
   it("ids reach the tiles: balanced FFE reads 'CY net, balanced' on the tile", () => {
     const f = runSync(solveBalanced(net, { lo: 70, hi: 120 })).ffe;
     const t = assemblyEarthwork(at(f).grid, ids);
     expect(netLabel(t.netCy)).toBe("CY net, balanced");
   });
-  it("typed/ chip copy", () => {
-    expect(basisNote("typed")).toBe("Typed. Pick a chip to let the ground choose.");
-    expect(basisNote("balanced", { netCy: 120 })).toMatch(/120 CY/);
+  it("snapFfe rounds to the half-foot convention", () => {
     expect(snapFfe(793.74)).toBe(793.5); expect(snapFfe(793.76)).toBe(794);
   });
+});
+
+describe("the four pad-corner spots", () => {
+  it("a quadrilateral pad uses its own corners; any other ring uses its oriented box", () => {
+    const sq = rect(0, 0, 100, 60);
+    expect(padCorners(sq)).toHaveLength(4);
+    const L = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 30 }, { x: 40, y: 30 }, { x: 40, y: 60 }, { x: 0, y: 60 }];
+    const cs = padCorners(L);
+    expect(cs).toHaveLength(4);
+    const xs = cs.map((c) => Math.round(c.x)), ys = cs.map((c) => Math.round(c.y));
+    expect(Math.min(...xs)).toBe(0); expect(Math.max(...xs)).toBe(100); expect(Math.min(...ys)).toBe(0); expect(Math.max(...ys)).toBe(60);
+  });
+  it("cut where the ground is above the floor, fill where it is below, to a tenth", () => {
+    const ring = rect(0, 0, 100, 100);
+    const ground = (p) => 100 + (p.x > 50 ? 9.14 : -6.83);      // east corners 9.14 above a 100 ft floor... west 6.83 below
+    const spots = padCornerSpots(ring, 100, ground);
+    expect(spots).toHaveLength(4);
+    const texts = spots.map((s) => s.text).sort();
+    expect(texts).toEqual(["cut 9.1", "cut 9.1", "fill 6.8", "fill 6.8"]);
+    expect(spots.find((s) => s.kind === "cut").depthFt).toBeCloseTo(9.14, 6);
+  });
+  it("a corner over a DEM void has no spot, and a corner on grade says so", () => {
+    const ring = rect(0, 0, 100, 100);
+    expect(padCornerSpots(ring, 100, (p) => (p.x > 50 ? null : 100))).toHaveLength(2);
+    expect(padCornerSpots(ring, 100, () => 100).every((s) => s.text === "grade")).toBe(true);
+    expect(padCornerSpots(ring, NaN, () => 100)).toEqual([]);
+  });
+  it("ringSf is the shoelace area", () => { expect(ringSf(rect(5, 5, 20, 30))).toBe(600); });
 });
 
 describe("the fix solvers", () => {

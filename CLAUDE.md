@@ -708,6 +708,11 @@ Owner-only (constraint #25). Code: `proposedSurface.js` (`grading` argument), `b
 - Slopes start 5 ft past the pavement edge (a shoulder), then run at the grading slope (2:1 default; 3:1, 4:1 selectable) until they daylight on existing ground.
 - Access and drive grading are OUT of scope (no drive, no drive grade, no road tie-in). Volumes are bank volumes — no shrink or swell.
 - Setbacks: the parcel's setback polygon when the plan has one, else the property line (and the panel says so).
+- **Round 2 (owner rules 2026-10-18, after using PR #2360 on Chehaw Rd › Concept A):** grading lives in the Site Analysis ANALYSIS view as a Ground › Grading group (Ground row, then one card per building) — never a tab; no Building tab, no walls strip there.
+- The FFE is always SUGGESTED, never asked: balanced dirt, adjusted for pond spoil (counts as fill), rock (cuts stay 2 ft clear), docks kept on the low side (said, not changed), the max cut/fill as a soft warning, and any flood floor as a hard minimum — each explained in a plain-words basis line (`lib/ffeSuggest.js`). Typing one is allowed (black, with an auto chip that resets); no chips, no empty state.
+- The Cut & Fill layer (default ON) paints ONLY the slopes outside the pavement edge, the daylight line, the spot elevations and four pad-corner "cut n.n / fill n.n" pills — never the pad, courts, trailer rows, lots or walks; labels draw only at working zoom.
+- The Level-pad limit at 2:1 is a dashed LINE with a faint inside-edge hatch and one label, never a fill, OFF by default; the Ground row's button shows it and frames the map on it, and reads Hide while it is on.
+- Settings (pavement slope, dock drop, max cut/fill, grading slope, the 5 ft shoulder) live behind the group's gear; Cut & Fill and the level-pad line stay owner-only through the one gate.
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by

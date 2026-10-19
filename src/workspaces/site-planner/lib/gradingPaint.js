@@ -3,9 +3,14 @@
  * "the painted mask equals the engine mask cell for cell" is a test on arrays, not a screenshot. The browser
  * glue (`pixelsToDataUrl`) is the only DOM touch and returns null with no DOM.
  *
- *   • Buildable at <s>     — the NEW-1 pad mask tinted in the accent at ~30% with a 1 px outline.
- *   • Cut & Fill           — the B826 surface's cells: RUST cut, BLUE fill, alpha by depth; any graded cell
- *                            outside the setback is solid RED; DEM-void cells a quiet grey.
+ *   • Level-pad limit at <s> — the sweep's pad mask as a LINE, never a fill: a dashed accent outline plus a faint
+ *                            diagonal hatch on the INSIDE edge only (a 40 ft band), and one label at the mask's
+ *                            visual centre. (Round 2: a flat tint over half the parcel read as "a default orange
+ *                            section" with no purpose.)
+ *   • Cut & Fill           — ONLY the slopes outside the pavement edge (shoulder + the grading run): RUST cut, BLUE
+ *                            fill, alpha by depth; any slope cell outside the setback is solid RED; DEM-void slope
+ *                            cells a quiet grey. The pad, courts, trailer rows, lots and walks are never painted —
+ *                            the building draws exactly as it does without the layer.
  * Colours are fixed hex by design: these draw over aerial imagery, which does not theme. */
 import { releaseCanvas } from "./releaseCanvas.js";
 
@@ -13,7 +18,9 @@ export const CUT_RGB = [181, 84, 28];     // rust
 export const FILL_RGB = [43, 108, 176];   // blue
 export const OUT_RGB = [211, 47, 47];     // setback breach — red is a genuine alert here
 export const VOID_RGB = [107, 114, 128];
-export const MASK_ALPHA = 0.3;
+export const HATCH_ALPHA = 0.12;           // the inside-edge hatch, as a share of the accent
+export const HATCH_BAND_FT = 40;           // how far in from the edge the hatch runs
+export const HATCH_SS = 4;                 // the hatch texture is supersampled this many pixels per lattice cell
 export const EDGE_EPS_FT = 0.05;          // |dz| below this paints nothing ("on grade")
 
 export function hexToRgb(hex) {
@@ -71,18 +78,79 @@ export function traceEdges(has, nx, ny, x0, y0, dx, dy) {
   return parts.join("");
 }
 
-/* ---- Buildable mask ---- */
-export function maskPixels({ mask, nx, ny }, rgb, alpha = MASK_ALPHA) {
-  const px = new Uint8ClampedArray(nx * ny * 4);
-  const a = Math.round(alpha * 255);
-  for (let k = 0; k < mask.length; k++) {
-    if (!mask[k]) continue;
-    px[k * 4] = rgb[0]; px[k * 4 + 1] = rgb[1]; px[k * 4 + 2] = rgb[2]; px[k * 4 + 3] = a;
-  }
-  return px;
-}
+/* ---- Level-pad limit (the pad mask as a line) ---- */
 export const maskOutlinePath = ({ mask, nx, ny, x0, y0, cell }) =>
   traceEdges((i, j) => !!mask[j * nx + i], nx, ny, x0, y0, cell, cell);
+
+/* Chamfer (3-4) distance, in CELLS, from each in-mask cell to the nearest out-of-mask cell (the lattice edge counts
+ * as outside). Out-of-mask cells are 0. Two passes; exact enough for a 40 ft band and a visual centre. */
+export function maskDistance({ mask, nx, ny }) {
+  const INF = 1e9, d = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) d[j * nx + i] = mask[j * nx + i] ? INF : 0;
+  const at = (i, j) => (i < 0 || j < 0 || i >= nx || j >= ny ? 0 : d[j * nx + i]);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i;
+    if (!d[k]) continue;
+    d[k] = Math.min(d[k], at(i - 1, j) + 3, at(i, j - 1) + 3, at(i - 1, j - 1) + 4, at(i + 1, j - 1) + 4);
+  }
+  for (let j = ny - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) {
+    const k = j * nx + i;
+    if (!d[k]) continue;
+    d[k] = Math.min(d[k], at(i + 1, j) + 3, at(i, j + 1) + 3, at(i + 1, j + 1) + 4, at(i - 1, j + 1) + 4);
+  }
+  for (let k = 0; k < d.length; k++) d[k] = d[k] / 3;     // chamfer unit 3 = one cell
+  return d;
+}
+
+/* The mask's visual centre: the in-mask cell farthest from any edge (ties → nearest the mask's centroid), as a
+ * feet point; null for an empty mask. */
+export function maskVisualCentre(info) {
+  const { mask, nx, ny, x0, y0, cell } = info;
+  const d = maskDistance(info);
+  let best = -1, cx = 0, cy = 0, n = 0;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (mask[j * nx + i]) { cx += i; cy += j; n++; }
+  if (!n) return null;
+  cx /= n; cy /= n;
+  let bi = -1, bj = -1, bd = Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const v = d[j * nx + i];
+    if (!mask[j * nx + i]) continue;
+    const dc = Math.hypot(i - cx, j - cy);
+    if (v > best + 1e-6 || (Math.abs(v - best) <= 1e-6 && dc < bd)) { best = v; bi = i; bj = j; bd = dc; }
+  }
+  return { x: x0 + (bi + 0.5) * cell, y: y0 + (bj + 0.5) * cell };
+}
+
+/* The tight bbox of the in-mask cells, in feet — what "fit the map to the pad" frames. */
+export function maskTightBox({ mask, nx, ny, x0, y0, cell }) {
+  let i0 = Infinity, j0 = Infinity, i1 = -1, j1 = -1;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (mask[j * nx + i]) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; }
+  if (i1 < 0) return null;
+  return { x0: x0 + i0 * cell, y0: y0 + j0 * cell, x1: x0 + (i1 + 1) * cell, y1: y0 + (j1 + 1) * cell };
+}
+
+/* The inside-edge hatch: diagonal stripes at ~12% of the accent, on in-mask cells within 40 ft of the edge, on a
+ * texture HATCH_SS pixels per cell (the <image> is stretched over the same box, so the stripes stay fine). Nothing
+ * outside the mask and nothing deeper than the band is touched. */
+export function maskHatchPixels(info, rgb, { bandFt = HATCH_BAND_FT, alpha = HATCH_ALPHA, ss = HATCH_SS } = {}) {
+  const { mask, nx, ny, cell } = info;
+  const d = maskDistance(info);
+  const bandCells = bandFt / cell;
+  const w = nx * ss, h = ny * ss;
+  const px = new Uint8ClampedArray(w * h * 4);
+  const a = Math.round(alpha * 255), period = ss * 2;
+  for (let sy = 0; sy < h; sy++) {
+    const j = (sy / ss) | 0;
+    for (let sx = 0; sx < w; sx++) {
+      const i = (sx / ss) | 0, k = j * nx + i;
+      if (!mask[k] || d[k] > bandCells) continue;
+      if (((sx + sy) % period) >= ss) continue;            // the stripe: half of each diagonal period
+      const o = (sy * w + sx) * 4;
+      px[o] = rgb[0]; px[o + 1] = rgb[1]; px[o + 2] = rgb[2]; px[o + 3] = a;
+    }
+  }
+  return { pixels: px, w, h };
+}
 
 /* ---- Cut & Fill cells ---- */
 /* How one surface cell paints → { rgb, a } or null (on grade). Pure. */
@@ -91,7 +159,7 @@ export function cellPaint(c) {
   if (c.dzFt == null) return { rgb: VOID_RGB, a: 0.25, kind: "void" };
   const d = Math.abs(c.dzFt);
   if (d < EDGE_EPS_FT) return null;
-  const a = 0.25 + 0.6 * Math.min(1, d / 12);
+  const a = 0.35 + 0.5 * Math.min(1, d / 10);
   return c.dzFt > 0 ? { rgb: FILL_RGB, a, kind: "fill" } : { rgb: CUT_RGB, a, kind: "cut" };
 }
 
@@ -108,7 +176,9 @@ export function cellsLattice(cells) {
   const nx = Math.round((maxX - minX) / dx) + 1, ny = Math.round((maxY - minY) / dy) + 1;
   return { x0, y0, dx, dy, nx, ny, at: (c) => ({ i: Math.round((c.x - minX) / dx), j: Math.round((c.y - minY) / dy) }) };
 }
-export function cellsPixels(cells) {
+/* `paintOnly(c)` (optional) limits which cells get INK; every cell still marks `present`, so the daylight line is
+ * the outer edge of the whole graded set while only the cells the caller names are tinted. */
+export function cellsPixels(cells, paintOnly = null) {
   const L = cellsLattice(cells);
   if (!L) return null;
   const px = new Uint8ClampedArray(L.nx * L.ny * 4);
@@ -117,6 +187,7 @@ export function cellsPixels(cells) {
     const { i, j } = L.at(c);
     const k = j * L.nx + i;
     present[k] = 1;
+    if (paintOnly && !paintOnly(c)) continue;
     const p = cellPaint(c);
     if (!p) continue;
     px[k * 4] = p.rgb[0]; px[k * 4 + 1] = p.rgb[1]; px[k * 4 + 2] = p.rgb[2]; px[k * 4 + 3] = Math.round(p.a * 255);
@@ -127,6 +198,9 @@ export function cellsPixels(cells) {
 export const cellsOutlinePath = (cp) => traceEdges((i, j) => !!cp.present[j * cp.nx + i], cp.nx, cp.ny, cp.x0, cp.y0, cp.dx, cp.dy);
 
 /* ---- browser glue ---- */
+/* `slopeOnly` — the Cut & Fill layer's rule: only the slope bands (wedge cells) are ever painted. */
+export const slopeOnly = (c) => !!c.wedge;
+
 export function pixelsToDataUrl(pixels, nx, ny) {
   if (typeof document === "undefined" || !nx || !ny) return null;
   const canvas = document.createElement("canvas");
