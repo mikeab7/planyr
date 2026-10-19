@@ -177,12 +177,14 @@ export function saveState({ rows, readyCount, saving }) {
 
 /* ---- More details ------------------------------------------------------------------------ */
 
-const MORE_KEYS = ["clearHeightFt", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate",
+const MORE_KEYS = ["clearHeightFt", "powerAmps", "powerVolts", "powerPhase", "dockDoors", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate",
   "leaseFreeRentMonths", "leaseTi", "bldgNoi", "bldgCapRate", "compDate", "notes"];
 
 /** Suffix/prefix shown INSIDE the box for a More-details field (only once it has a value/focus). */
 export const MORE_AFFIX = {
   clearHeightFt: { suffix: "ft" },
+  powerAmps: { suffix: "A" },
+  powerVolts: { suffix: "V" },
   leaseOpex: { prefix: "$", suffix: "/SF/yr" },
   leaseEscalationPct: { suffix: "%/yr" },
   leaseFreeRentMonths: { suffix: "mo" },

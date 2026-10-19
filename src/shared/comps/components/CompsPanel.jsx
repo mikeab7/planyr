@@ -17,7 +17,7 @@
  *
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Field, MenuItem } from "../../ui/controls.jsx";
 import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
 import {
@@ -38,6 +38,9 @@ import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteList
 import { loadCompsRatePeriod } from "../lib/compsRatePeriodPrefs.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
+import CompsQueryBar from "./CompsQueryBar.jsx";
+import { defaultFilters, hasActiveQuery, queryComps, countFiltered } from "../lib/compsQuery.js";
+import { loadQueryPrefs, saveQueryPrefs, clearQueryPrefs } from "../lib/compsQueryPrefs.js";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
 import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
@@ -84,6 +87,11 @@ function countyEntry(key) {
 // session, seeded from the persisted disk copy so a returning visit starts warm.
 const _pinAddrCache = new Map(Object.entries(readPinAddrStorage()));
 const _pinAddrInflight = new Map();
+// The Records search reads this cache (and ONLY reads it — a search never geocodes). A row's own
+// lookup landing later should make a search that was waiting on that address match, so the panel
+// subscribes to "an address resolved" here.
+const _pinAddrListeners = new Set();
+function notifyPinAddr() { _pinAddrListeners.forEach((fn) => fn()); }
 // Test-only: clear the in-memory cache/in-flight map so one test's resolved pins can't leak
 // into the next (mirrors colorRecents.js's own `_resetRecentsCache` convention).
 export function _resetPinAddrCache() { _pinAddrCache.clear(); _pinAddrInflight.clear(); }
@@ -113,7 +121,7 @@ function useCompLocationText(anchor, overlaysById, enabled = true) {
         if (label) persistPinAddr(key, label);
       })
       .catch(() => { _pinAddrCache.set(key, null); })
-      .finally(() => { _pinAddrInflight.delete(key); bump((n) => n + 1); });
+      .finally(() => { _pinAddrInflight.delete(key); bump((n) => n + 1); notifyPinAddr(); });
     _pinAddrInflight.set(key, p);
   }, [anchor, enabled]);
   if (!anchor) return null;
@@ -213,12 +221,12 @@ function TypeChip({ type }) {
 // NEW-1: the rail lists comps, it is not a summary surface — LEASE deliberately contributes no
 // line here (see `compsSummaryBits` in lib/comps.js for why; the lease aggregation itself is
 // untouched and still fully unit-tested there).
-function SummaryStrip({ comps }) {
+function SummaryStrip({ comps, scopeLabel }) {
   const bits = compsSummaryBits(comps);
   if (!bits.length) return null;
   return (
     <div style={{ fontSize: 11, color: "var(--text-secondary)", padding: "0 14px 8px", lineHeight: 1.5 }}>
-      {bits.join(" · ")}
+      {scopeLabel ? `${scopeLabel}: ` : ""}{bits.join(" · ")}
     </div>
   );
 }
@@ -574,6 +582,19 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
         </>
       )}
 
+      {(draft.compType === "building_sale" || draft.compType === "lease") && (
+        <>
+          <Field label="Power (amps)" stacked><NumField value={draft.powerAmps} onChange={setVal("powerAmps")} placeholder="optional, e.g. 2000" style={inputStyle} /></Field>
+          <Field label="Power (volts)" stacked><NumField value={draft.powerVolts} onChange={setVal("powerVolts")} placeholder="optional, e.g. 480" style={inputStyle} /></Field>
+          <Field label="Power phase" stacked>
+            <select value={draft.powerPhase} onChange={set("powerPhase")} style={inputStyle}>
+              <option value="">—</option><option value="1">1-phase</option><option value="3">3-phase</option>
+            </select>
+          </Field>
+          <Field label="Dock doors" stacked><NumField value={draft.dockDoors} onChange={setVal("dockDoors")} placeholder="optional" style={inputStyle} /></Field>
+        </>
+      )}
+
       <Field label="Notes" stacked><textarea value={draft.notes} onChange={set("notes")} rows={3} style={{ ...inputStyle, resize: "vertical" }} /></Field>
 
       {teams?.length > 0 && (
@@ -667,6 +688,9 @@ export default function CompsPanel({
   // "Pin this on the plan" click — see doRepin below. `startUploadRef` triggers the upload flow
   // for the "+ Site plan" button (no comp open yet).
   onDetailCompChange, repinCompAnchorRef, startUploadRef,
+  // NEW-1 — a Set of the comp ids the Records filter currently shows, or null when nothing narrows the list.
+  // View-only: `onCompsChange` still carries every comp to every other reader.
+  onVisibleCompsChange,
 }) {
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -731,6 +755,48 @@ export default function CompsPanel({
   const [trashError, setTrashError] = useState(null);
   const notifiedRef = useRef(onCompsChange);
   notifiedRef.current = onCompsChange;
+
+  // NEW-1 — Records search / filters / sort. State lives HERE (above the list/detail views) so opening a
+  // record and pressing "← All comps" returns to the same filtered, sorted, scrolled list; the list the
+  // user sees is derived from `comps` at render time, never copied into state that can go stale.
+  const [query, setQuery] = useState(() => loadQueryPrefs()); // stale-ok: a per-device VIEW preference (filters/sort), not shared data - nothing else can change it
+  const filters = query.filters, sort = query.sort;
+  const setFilters = (f) => setQuery((q) => ({ ...q, filters: f }));
+  const setSort = (s) => setQuery((q) => ({ ...q, sort: s }));
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [, bumpAddrVersion] = useState(0);
+  const addrVersion = useRef(0);
+  useEffect(() => {
+    const fn = () => { addrVersion.current += 1; bumpAddrVersion((n) => n + 1); };
+    _pinAddrListeners.add(fn);
+    return () => { _pinAddrListeners.delete(fn); };
+  }, []);
+  const queryActive = hasActiveQuery(filters);
+  useEffect(() => {
+    if (!queryActive && sort === "newest") clearQueryPrefs(); else saveQueryPrefs(filters, sort);
+  }, [filters, sort, queryActive]);
+  // Search may only READ the address cache — it never starts a lookup.
+  const cachedLocation = (c) => {
+    const key = pinCacheKey(c.anchor);
+    return key && _pinAddrCache.has(key) ? _pinAddrCache.get(key) : null;
+  };
+  const shownComps = useMemo(
+    () => queryComps(comps, filters, sort, { cachedLocation }),
+    [comps, filters, sort, addrVersion.current], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const queryCounts = useMemo(
+    () => countFiltered(comps, filters, { cachedLocation }),
+    [comps, filters, addrVersion.current], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const clearQuery = () => { setFilters(defaultFilters()); };
+  const visibleSig = queryActive ? shownComps.map((c) => c.id).join(",") : null;
+  useEffect(() => {
+    if (!onVisibleCompsChange) return;
+    onVisibleCompsChange(visibleSig === null ? null : new Set(visibleSig ? visibleSig.split(",") : []));
+  }, [visibleSig, onVisibleCompsChange]);
+  // Back from a record: the list remounts, so put the scroll back where it was.
+  const scrollRef = useRef(null);
+  const listScrollTop = useRef(0);
 
   useEffect(() => {
     if (!open) return;
@@ -910,6 +976,10 @@ export default function CompsPanel({
     if (c) { setActiveComp(c); setView("detail"); setAssignNotice(null); }
     onFocusHandled?.();
   }, [focusCompId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useLayoutEffect(() => {
+    if (view === "list" && !loading && scrollRef.current) scrollRef.current.scrollTop = listScrollTop.current;
+  }, [view, loading]);
 
   if (!open) return null;
 
@@ -1146,7 +1216,7 @@ export default function CompsPanel({
 
   return (
     <div style={{ display: active ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div ref={scrollRef} onScroll={(e) => { if (view === "list" && !loading) listScrollTop.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto" }}>
         {loading && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>Loading…</div>}
         {loadError && <div style={{ padding: 14, fontSize: 12, color: "var(--danger-text)" }}>{loadError}</div>}
 
@@ -1206,9 +1276,17 @@ export default function CompsPanel({
               </button>
             )}
             {kmlImportError && <div style={{ padding: "6px 14px 0", fontSize: 10.5, color: "var(--danger-text)" }}>{kmlImportError}</div>}
-            <SummaryStrip comps={comps} />
+            {comps.length > 0 && (
+              <CompsQueryBar
+                filters={filters} setFilters={setFilters} sort={sort} setSort={setSort}
+                panelOpen={filterPanelOpen} setPanelOpen={setFilterPanelOpen}
+                comps={comps} counts={queryCounts} onClearAll={clearQuery}
+              />
+            )}
+            <div style={{ height: 8 }} />
+            <SummaryStrip comps={shownComps} scopeLabel={queryActive ? `Avg of ${shownComps.length} shown` : null} />
             {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ Paste comps” above, or point at the map and choose “Log a comp”.</div>}
-            {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} compsRatePeriod={compsRatePeriod} enabled={active} />)}
+            {shownComps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} compsRatePeriod={compsRatePeriod} enabled={active} />)}
 
             {/* B1066368 — "Recently deleted", mirroring SitePlansSection.jsx's own trash disclosure
                 exactly (collapsed by default, fetched lazily on first open). */}

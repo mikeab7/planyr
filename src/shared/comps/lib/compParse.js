@@ -752,7 +752,7 @@ function emptyGeneric() {
     compType: null, compDate: null, title: null, partyProvider: null, partyAcquirer: null,
     price: null, sizeValue: null, sizeUnit: null, rate: null, ratePeriod: null, rateBasis: null,
     ti: null, term: null, notes: null, freeRentMonths: null, escalationPct: null,
-    capRate: null, noi: null, opex: null, hadRecognizedNote: false,
+    capRate: null, noi: null, opex: null, powerAmps: null, dockDoors: null, hadRecognizedNote: false,
     commencementDate: null, commencementEstimated: false, commencementSourceLine: null,
   };
 }
@@ -765,7 +765,7 @@ function emptyGeneric() {
 function genericHasAnything(g) {
   return !!(g.compDate || g.title || g.partyProvider || g.partyAcquirer || g.price != null ||
     g.rate != null || g.sizeValue != null || g.term || g.ti != null || g.freeRentMonths != null ||
-    g.escalationPct != null || g.capRate != null || g.noi != null || g.opex != null ||
+    g.escalationPct != null || g.capRate != null || g.noi != null || g.opex != null || g.powerAmps != null || g.dockDoors != null ||
     g.commencementDate || g.hadRecognizedNote);
 }
 
@@ -1206,6 +1206,8 @@ function genericToDraft(generic) {
     // exact convention `compSheetColumns.js`'s bldgCapRate column get/set pair already uses, so
     // the two conversions can never disagree.
     if (generic.capRate != null) d.bldgCapRate = String(generic.capRate / 100);
+    if (generic.powerAmps != null) d.powerAmps = String(generic.powerAmps);
+    if (generic.dockDoors != null) d.dockDoors = String(generic.dockDoors);
   } else if (d.compType === "lease") {
     if (generic.rate != null) d.leaseRate = String(generic.rate);
     if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
@@ -1220,6 +1222,8 @@ function genericToDraft(generic) {
     if (generic.freeRentMonths != null) d.leaseFreeRentMonths = String(generic.freeRentMonths);
     if (generic.escalationPct != null) d.leaseEscalationPct = String(generic.escalationPct);
     if (generic.opex != null) d.leaseOpex = String(generic.opex);
+    if (generic.powerAmps != null) d.powerAmps = String(generic.powerAmps);
+    if (generic.dockDoors != null) d.dockDoors = String(generic.dockDoors);
   } else {
     // ⛔ B1149584 — a row whose TYPE could not be resolved at all (no wording signal anywhere in
     // the record, and `inferTypeFromCapturedFields` also came up empty) previously dropped every
@@ -1235,6 +1239,8 @@ function genericToDraft(generic) {
     if (generic.rate != null) bits.push(`Rate: $${generic.rate}/SF`);
     if (generic.ti != null) bits.push(`TI: $${generic.ti}`);
     if (generic.opex != null) bits.push(`OpEx: $${generic.opex}`);
+    if (generic.powerAmps != null) bits.push(`Power: ${generic.powerAmps} A`);
+    if (generic.dockDoors != null) bits.push(`Dock doors: ${generic.dockDoors}`);
     if (generic.noi != null) bits.push(`NOI: $${generic.noi.toLocaleString()}`);
     if (generic.capRate != null) bits.push(`Cap: ${generic.capRate}%`);
     if (generic.escalationPct != null) bits.push(`Escalation: ${generic.escalationPct}%`);
@@ -1486,6 +1492,8 @@ const HEADER_ALIASES = {
   noi: ["noi"],
   capRate: ["cap", "cap rate"],
   notes: ["notes", "comments"],
+  powerAmps: ["power", "amps", "amperage", "power (a)", "power (amps)", "electrical"],
+  dockDoors: ["dock", "docks", "dock doors", "dock-high doors", "dock high doors"],
 };
 
 function matchHeader(cell) {
@@ -1545,6 +1553,8 @@ function assignGenericCell(generic, flags, key, val) {
     case "noi": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.noi = n.value; break; }
     case "capRate": { const n = Number(String(val).replace(/%$/, "")); if (Number.isFinite(n)) generic.capRate = n; break; }
     case "notes": generic.notes = val; break;
+    case "powerAmps": { const n = parseMagnitudeNumber(val.replace(/\s*a(mps?)?$/i, "")); if (n) generic.powerAmps = n.value; break; }
+    case "dockDoors": { const n = parseMagnitudeNumber(val); if (n) generic.dockDoors = n.value; break; }
     default: break;
   }
 }

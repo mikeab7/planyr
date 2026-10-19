@@ -772,6 +772,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   — never blended into one score. A save that auto-attached to a MATCHED existing site (never a
   brand-new one) surfaces which site and how (`assignNotice` in `CompDetail`) so a wrong guess is
   reassignable via the existing Site dropdown rather than a silent duplicate.
+  **Records search + filters (B2347488):** `lib/compsQuery.js` is the PURE engine (search tokens, filters, sort, chips, counts — no React, no network; search reads the address cache only and never geocodes), `lib/compsQueryPrefs.js` the per-device persistence, `components/CompsQueryBar.jsx` the presentational bar + inline filter panel. The filter state lives in `CompsPanel` above the list/detail views; the visible set rides `onVisibleCompsChange` to MapFinder's markers only (every other reader keeps ALL comps). Power / dock doors: `db/comps_power_docks.sql` (B2347489). ⛔ `compsStore.SELECT_COLS` must cover every column `compToRow` writes (B2347490 — `lease_opex` was missing and an edit wiped it); the repo-root `test/` suite **compsPowerDocks** fails otherwise.
 - **`reports/` (B842866) — the problem-report submission model behind the global help/report
   control (the app shell's own help-control component, mounted on every route).**
   `reportsStore.js` is the whole thing: `buildReportContext` (the same privacy-allowlist
