@@ -48,6 +48,12 @@ export const ALLOWED_HOSTS = new Set([
   "al20portal.kcsgis.com", // KCS GIS — Colbert County (named in the county viewer's own public config.js: al20server/…/Internal/Colbert_Public_ISV, B2312352)
   /* NEW-1 (B2302785) — Flagship GIS's Autodesk MapGuide servers behind the www.alabamagis.com county viewers. Exact hostnames, one per
    * server number the viewers name (cloudURL in each county's page); read-only anonymous queries only — never a key the viewer injects. */
+  /* NEW-1 (Georgia, 2026-10-19) — county / regional hosts named by the Georgia parcel sweep; each is MEASURED through this relay before any county is wired to it. */
+  "maps.douglascountyga.gov", // Douglas County GA
+  "arcgis5.roktech.net", // ROK Technologies — Habersham, Paulding (wired by other route) and other GA county viewers
+  "www.thomascountymaps.org", // Thomas County GA
+  "www.mgrcmaps.org", // Middle Georgia Regional Commission (www form)
+  "www.valorgis.com", // VALOR — Lowndes and sibling South Georgia counties
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
   /* NEW-1 (Missouri, 2026-10-19) — PROBE HOSTS, temporary: candidate county hosts the sandbox cannot reach; measured through this relay
