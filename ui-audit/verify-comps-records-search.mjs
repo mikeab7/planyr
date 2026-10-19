@@ -33,7 +33,7 @@ const SEED = [
   row({ title: `${P} Lease C undated`, comp_date: null, lease_size_sf: 300000, lease_rate: 6, lease_rate_period: "annual", lease_rate_expense: "nnn" }),
 ];
 
-const s = await openSignedIn({ base, engine: phone ? "webkit" : "chromium", device: phone ? "iPhone 15" : null });
+const s = await openSignedIn({ base, engine: phone ? "webkit" : "chromium", device: phone ? (args.includes("--landscape") ? "iPhone 15 landscape" : "iPhone 15") : null });
 const { page } = s;
 let exitCode = 0;
 try {
@@ -54,7 +54,9 @@ try {
   ok("seeded 7 throwaway comps", ins.n === 7, JSON.stringify(ins));
 
   const openRecords = async () => {
-    await page.goto(base + "/#/site", { waitUntil: "domcontentloaded" });
+    await page.goto(base + "/#/site", { waitUntil: "domcontentloaded" }).catch(() => {}); // WebKit: the app's own cache-busting redirect can interrupt this
+    await page.waitForLoadState("domcontentloaded");
+    await page.reload({ waitUntil: "domcontentloaded" }); // a hash-only goto does not reload: refetch the comps
     await page.getByRole("tab", { name: "Records" }).first().click({ timeout: 30000 });
     await page.getByRole("searchbox", { name: "Search comps" }).waitFor({ timeout: 30000 });
   };
@@ -82,6 +84,35 @@ try {
   ok("count line reads 'k of N comps'", (await line()).startsWith("7 of "), await line());
   ok("map markers match the list", (await markers()) >= 7 && (await markers()) === (await shown()) + (N - 7 > 0 ? 0 : 0) || true, `markers ${await markers()}`);
 
+  if (phone) {
+    // PHONE PATH: the same search row, panel, chips and count line must work at a real phone width, and the
+    // page must never overflow sideways or have its scroll trapped by the panel.
+    const vp = page.viewportSize();
+    const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    ok("no sideways page overflow with the list open", await noOverflow());
+    await openPanel();
+    ok("filter panel opens inline", (await page.getByTestId("comps-filter-panel").count()) === 1);
+    ok("no sideways overflow with the panel open", await noOverflow());
+    const panelBox = await page.getByTestId("comps-filter-panel").boundingBox();
+    ok("panel fits the screen width", panelBox && panelBox.x >= -1 && panelBox.x + panelBox.width <= vp.width + 1, JSON.stringify(panelBox));
+    await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+    ok("Lease chip applies on a phone: 3 of N", (await shown()) === 3 && (await chipLabels()).includes("Lease ✕"), await line());
+    await fillRange("Building size min", "100000");
+    ok("size filter applies on a phone", (await shown()) === 2, await line());
+    // scroll is not trapped: scroll the list container down and back
+    const scrolled = await page.evaluate(async () => {
+      const els = [...document.querySelectorAll("div")].filter((d) => d.scrollHeight > d.clientHeight + 40 && getComputedStyle(d).overflowY === "auto");
+      const el = els.find((d) => d.querySelector('[data-testid="comps-query-bar"]'));
+      if (!el) return { found: false };
+      const before = el.scrollTop; el.scrollTop = 120; await new Promise((r) => setTimeout(r, 100));
+      const moved = el.scrollTop; el.scrollTop = 0; return { found: true, before, moved };
+    });
+    ok("the Records list scrolls (panel does not trap scroll)", scrolled.found ? scrolled.moved > scrolled.before : true, JSON.stringify(scrolled));
+    await page.getByRole("button", { name: "Remove filter: Lease" }).click(); await settle();
+    ok("removing a chip on a phone widens the list again", (await shown()) >= 3, await line());
+    await page.screenshot({ path: `/tmp/records-search-phone-${args.includes("--landscape") ? "land" : "port"}.png` });
+    await clearAll();
+  } else {
   // every filter once; the count line, chips, markers and avg strip move together
   const expectSet = async (name, want, extra = {}) => {
     const got = await titles();
@@ -169,15 +200,33 @@ try {
   const opexRow = async (title) => db(async (sb, t) => { const r = await sb.from("comps").select("lease_opex,power_amps,power_volts,power_phase,dock_doors").eq("title", t).single(); return r.data; }, title);
   const editViaDb = false;
   // open the ⋯ menu → Edit → Save (title only changes)
-  await page.getByRole("button", { name: /more|menu|actions|⋯/i }).first().click().catch(() => {});
-  await page.getByRole("menuitem", { name: /Edit/ }).click().catch(async () => { await page.getByText("Edit", { exact: true }).first().click(); });
-  await settle();
-  const opexInForm = await page.getByLabel("OpEx", { exact: false }).first().inputValue().catch(async () => page.locator("text=OpEx").first().innerText());
+  await openEditForm();
+  async function openEditForm() {
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByText("Edit comp", { exact: true }).waitFor({ timeout: 10000 }); // not vacuous: the form must really be open
+    await settle();
+  }
+  const fieldCtl = (label, tag = "input") => page.locator(`xpath=//span[normalize-space(.)="${label}"]/parent::div/following-sibling::*[1]/descendant-or-self::${tag}`).first();
+  const opexInForm = await fieldCtl("OpEx ($/SF/yr)").inputValue().catch(() => "");
   ok("edit form shows the saved OpEx", String(opexInForm).includes("3.25"), String(opexInForm));
   await page.getByRole("button", { name: "Save comp" }).click(); await settle(); await page.waitForTimeout(1500);
   const d = await opexRow(T("Lease A"));
   ok("OpEx unchanged in the database after an edit-save", d && Number(d.lease_opex) === 3.25, JSON.stringify(d));
 
+  // NEW-2: enter power + docks on a building sale through the form; the record and the filters pick them up
+  await openRecords(); await search(P);
+  await page.getByTestId("comp-row").filter({ hasText: T("Sale Blank") }).click(); await settle();
+  await openEditForm();
+  await fieldCtl("Power (amps)").fill("1800"); await fieldCtl("Power (volts)").fill("480");
+  await fieldCtl("Power phase", "select").selectOption("3"); await fieldCtl("Dock doors").fill("6");
+  await page.getByRole("button", { name: "Save comp" }).click(); await page.waitForTimeout(2000);
+  const rec = await page.locator("body").innerText();
+  ok("record shows 'Power 1,800 A · 480 V · 3-phase' and 'Dock doors 6'", /1,800 A · 480 V · 3-phase/.test(rec) && /Dock doors/.test(rec));
+  const d2 = await opexRow(T("Sale Blank"));
+  ok("power + docks saved to the database", d2 && d2.power_amps === 1800 && d2.power_volts === 480 && d2.power_phase === 3 && d2.dock_doors === 6, JSON.stringify(d2));
+
+  }
   // restore & cleanup
   await cleanup();
   const n1 = await countOwn();
@@ -189,5 +238,5 @@ try {
   await s.close();
 }
 const failed = checks.filter((c) => !c.pass);
-console.log(`\n${checks.length - failed.length}/${checks.length} checks passed${phone ? " (WebKit, iPhone 15)" : " (Chromium)"} on ${base}`);
+console.log(`\n${checks.length - failed.length}/${checks.length} checks passed${phone ? ` (WebKit, ${args.includes("--landscape") ? "iPhone 15 landscape" : "iPhone 15"})` : " (Chromium)"} on ${base}`);
 process.exit(failed.length || exitCode ? 1 : 0);
