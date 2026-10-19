@@ -2081,22 +2081,18 @@
   "Clinch",
   "Colquitt",
   "Early",
-  "Elbert",
   "Fannin",
   "Gilmer",
-  "Gordon",
   "Habersham",
   "Hancock",
   "Haralson",
   "Heard",
-  "Jasper",
   "Jenkins",
   "Jones",
   "Lamar",
   "Lee",
   "Lincoln",
   "Long",
-  "Lumpkin",
   "Macon",
   "Madison",
   "Marion",
@@ -2121,7 +2117,6 @@
   "Towns",
   "Upson",
   "Walton",
-  "Warren",
   "Washington",
   "Webster",
   "Wilkes",
@@ -2201,6 +2196,12 @@
    "lng": -84.8048
   },
   {
+   "name": "Elbert — just inside its own line",
+   "county": "Elbert County",
+   "lat": 34.2156,
+   "lng": -83.051
+  },
+  {
    "name": "Franklin — just inside its own line",
    "county": "Franklin County",
    "lat": 34.4654,
@@ -2211,6 +2212,12 @@
    "county": "Glascock County",
    "lat": 33.1345,
    "lng": -82.6473
+  },
+  {
+   "name": "Gordon — just inside its own line",
+   "county": "Gordon County",
+   "lat": 34.411,
+   "lng": -84.9716
   },
   {
    "name": "Grady — just inside its own line",
@@ -2243,6 +2250,12 @@
    "lng": -83.4384
   },
   {
+   "name": "Jasper — just inside its own line",
+   "county": "Jasper County",
+   "lat": 33.2625,
+   "lng": -83.8029
+  },
+  {
    "name": "Jeff Davis — just inside its own line",
    "county": "Jeff Davis County",
    "lat": 31.9387,
@@ -2265,6 +2278,12 @@
    "county": "Laurens County",
    "lat": 32.5612,
    "lng": -83.1907
+  },
+  {
+   "name": "Lumpkin — just inside its own line",
+   "county": "Lumpkin County",
+   "lat": 34.5953,
+   "lng": -84.171
   },
   {
    "name": "McIntosh — just inside its own line",
@@ -2337,6 +2356,12 @@
    "county": "Walker County",
    "lat": 34.8038,
    "lng": -85.4318
+  },
+  {
+   "name": "Warren — just inside its own line",
+   "county": "Warren County",
+   "lat": 33.4242,
+   "lng": -82.7994
   },
   {
    "name": "Wayne — just inside its own line",
