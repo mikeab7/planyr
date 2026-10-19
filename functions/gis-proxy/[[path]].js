@@ -96,7 +96,8 @@ export const ALLOWED_HOSTS = new Set([
   "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services
   "asps0305.tulsacounty.org", // Tulsa County Assessor
   "okmaps.onenet.net", // OneNet-hosted state GIS server
-  "mapview-online.com", // MapView Online — assessor viewers for several Oklahoma counties
+  "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
+  "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

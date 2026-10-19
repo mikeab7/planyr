@@ -17,6 +17,7 @@ import { IDAHO_VERIFICATION } from "./idProvenance.js"; // NEW-1 (B2317920)
 import { GEORGIA_VERIFICATION } from "./gaProvenance.js"; // NEW-1 (B2316720)
 import { LOUISIANA_VERIFICATION } from "./laProvenance.js"; // NEW-1 (Louisiana 2026-10-19)
 import { MISSOURI_VERIFICATION } from "./moProvenance.js"; // NEW-1 (B2317680)
+import { OKLAHOMA_VERIFICATION } from "./okProvenance.js"; // NEW-1 (Oklahoma)
 
 export const COUNTY_VERIFICATION = {
   ...ALABAMA_VERIFICATION,
@@ -24,6 +25,7 @@ export const COUNTY_VERIFICATION = {
   ...GEORGIA_VERIFICATION,
   ...LOUISIANA_VERIFICATION,
   ...MISSOURI_VERIFICATION,
+  ...OKLAHOMA_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
