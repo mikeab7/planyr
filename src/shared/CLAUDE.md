@@ -761,6 +761,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   the review/promote surface, reachable ONLY from the KML import button — hand entry never creates
   a row here. `db/test/comp_import_drafts_rls.test.sql` — the same self-rolling-back proof shape,
   9/9 passed live against production.
+  **B2345504/B2345505 (2026-10-19):** `compParse.js` reads spreadsheet headers by RULE (`matchHeaderCell`, broker wording, unit hints, x/y → pin, unclaimed columns → Notes; fixtures in repo-root `test/fixtures/brokerLeaseComps/`), and `lib/compSavePrep.js` `prepareCompForSave` is the ONE county + tracked-site step every save path runs (single save, grid save, KML promote) — never call the site resolver from a save path directly.
   **⛔ B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — every comp gets an owning
   site automatically, never a duplicate.** `CompsPanel.jsx`'s `save()` calls the site-planner
   workspace's storage module's `resolveOrCreateTrackedSiteForComp` whenever `draft.projectId` is
