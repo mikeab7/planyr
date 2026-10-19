@@ -34,10 +34,12 @@ export const GA_ROWS = [
   ["jefferson","Jefferson","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Jefferson_Web_Map_2024_WFL1/FeatureServer/3","PARCEL_NO",null,null,1,33.0375,-82.443,[32.734,-82.675,33.341,-82.211]],
   ["johnson","Johnson","https://services1.arcgis.com/ue5fMdTkPeHLCobS/arcgis/rest/services/Johnson_GA_Parcels_gdb/FeatureServer/0","parcel_id","situs_address",null,1,32.6675,-82.7005,[32.493,-82.982,32.842,-82.419]],
   ["laurens","Laurens","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Laurens_Web_Map_WFL1/FeatureServer/5","Parcel_No",null,null,1,32.431,-82.932,[32.128,-83.246,32.734,-82.618]],
+  ["lee","Lee","https://services7.arcgis.com/xWHrkwYCAX9v0Owj/arcgis/rest/services/TylerTechnologyMap07222022_WFL1/FeatureServer/8","PARCEL_ID",null,null,1,31.77,-84.131,[31.605,-84.352,31.935,-83.91]],
   ["lumpkin","Lumpkin","https://services6.arcgis.com/BAJNi3EgCdtQ1BCG/arcgis/rest/services/Lumpkin_2025Parcels/FeatureServer/0","PARCEL_NO",null,null,1,34.5685,-84.0095,[34.393,-84.213,34.744,-83.806]],
   ["mcintosh","McIntosh","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/McIntosh_Web_Map_2025_WFL1/FeatureServer/5","PIN",null,null,1,31.5065,-81.429,[31.291,-81.683,31.722,-81.175]],
   ["montgomery","Montgomery","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/MontgomeryToombsBoundary/FeatureServer/15","Parcel_No",null,null,1,32.1495,-82.53,[31.928,-82.672,32.371,-82.388]],
   ["pierce","Pierce","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Pierce/ParcelInformation/MapServer/0","PARCEL_NO",null,null,1,31.3685,-82.1955,[31.185,-82.438,31.552,-81.953]],
+  ["putnam","Putnam","https://services9.arcgis.com/Ze58Pg6CJLrZhbzA/arcgis/rest/services/Putnam_Parcels/FeatureServer/0","NEW_PIN",null,null,0,33.324,-83.341,[33.147,-83.56,33.501,-83.122]],
   ["stewart","Stewart","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels2022/FeatureServer/0","Parcel_No",null,null,1,32.0755,-84.852,[31.902,-85.09,32.249,-84.614]],
   ["talbot","Talbot","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels2025/FeatureServer/2","Parcel_No",null,null,1,32.701,-84.4855,[32.505,-84.714,32.897,-84.257]],
   ["tattnall","Tattnall","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Tattnall_CountyWide_GeoData_View/FeatureServer/13","Parcel_PIN",null,null,0,32.047,-81.9985,[31.765,-82.25,32.329,-81.747]],
@@ -54,6 +56,7 @@ export const GA_ROWS = [
   ["white","White","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Cleveland_Sewer_2023_WFL1/FeatureServer/8","PIN",null,null,0,34.648,-83.747,[34.482,-83.891,34.814,-83.603]],
   ["wilcox","Wilcox","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Wilcox_County_Wide_View/FeatureServer/12","PIN",null,null,0,31.989,-83.393,[31.829,-83.627,32.149,-83.159]],
   ["wilkinson","Wilkinson","https://services1.arcgis.com/ue5fMdTkPeHLCobS/arcgis/rest/services/Wilkinson_GA_gdb/FeatureServer/0","ParcelID","PropertyAddress",null,1,32.7935,-83.179,[32.559,-83.426,33.028,-82.932]],
+  ["worth","Worth","https://services2.arcgis.com/PYn6bWCjT6bhw1z3/arcgis/rest/services/Worth_Heirs_Concentration_Census_Block_WFL1/FeatureServer/4","Parcel_No",null,null,1,31.5855,-83.8385,[31.299,-84.052,31.872,-83.625]],
 ];
 export const gaRaw = () => Object.fromEntries(GA_ROWS.map(([k, n, url, id, addr, scope]) => ["ga_" + k, {
   state: "GA", label: n + " County, GA", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}), ...(scope ? { scopeWhere: scope } : {}),

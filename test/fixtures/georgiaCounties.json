@@ -2090,7 +2090,6 @@
   "Jenkins",
   "Jones",
   "Lamar",
-  "Lee",
   "Lincoln",
   "Long",
   "Macon",
@@ -2105,7 +2104,6 @@
   "Pike",
   "Polk",
   "Pulaski",
-  "Putnam",
   "Quitman",
   "Rabun",
   "Randolph",
@@ -2119,8 +2117,7 @@
   "Walton",
   "Washington",
   "Webster",
-  "Wilkes",
-  "Worth"
+  "Wilkes"
  ],
  "lines": [
   {
@@ -2280,6 +2277,12 @@
    "lng": -83.1907
   },
   {
+   "name": "Lee — just inside its own line",
+   "county": "Lee County",
+   "lat": 31.7894,
+   "lng": -84.2648
+  },
+  {
    "name": "Lumpkin — just inside its own line",
    "county": "Lumpkin County",
    "lat": 34.5953,
@@ -2302,6 +2305,12 @@
    "county": "Pierce County",
    "lat": 31.4341,
    "lng": -82.3051
+  },
+  {
+   "name": "Putnam — just inside its own line",
+   "county": "Putnam County",
+   "lat": 33.3935,
+   "lng": -83.2328
   },
   {
    "name": "Stewart — just inside its own line",
@@ -2392,6 +2401,12 @@
    "county": "Wilkinson County",
    "lat": 32.9418,
    "lng": -83.1702
+  },
+  {
+   "name": "Worth — just inside its own line",
+   "county": "Worth County",
+   "lat": 31.6185,
+   "lng": -83.9894
   }
  ]
 }
