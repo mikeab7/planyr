@@ -18,6 +18,11 @@
 // Exact hostnames only — never a pattern. Extend here as a new CORS-blocked regional/county host
 // is wired (see docs/STATEWIDE-PARCELS.md's "GIS pass-through" section).
 export const ALLOWED_HOSTS = new Set([
+  /* NEW-1 (South Carolina, 2026-10-19) — the SCDOT GIS server that publishes a parcel layer for each of the 46 counties, plus county hosts a county is wired to; each MEASURED through this relay on the PR preview before use. */
+  "smpesri.scdot.org", // SCDOT ArcGIS Server — GISMapping/SC_Parcels MapServer, one layer per county
+  "gis1.georgetowncountysc.org", // Georgetown County
+  "www.laurenscountygis.org", // Laurens County
+  "gis.sumter-sc.com", // City/County of Sumter
   "www.sgrcmaps.com", // Southern Georgia Regional Commission — Tift + 10 sibling GA counties
   "mgrcmaps.org", // Middle Georgia Regional Commission
   "maps.crc.ga.gov", // Coastal Regional Commission (not yet wired to a county)
