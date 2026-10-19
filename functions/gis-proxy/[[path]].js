@@ -91,7 +91,15 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Oregon, 2026-10-19, B2347696) — county / regional hosts named by the state's "Publicly Accessible Oregon County Parcel Data" page and
+   * each county viewer's own web-map config. The build sandbox reaches none of them, so each is relayed and MEASURED through here before a county is wired. */
+  "gis.co.benton.or.us", "gis.co.josephine.or.us", "maps.co.polk.or.us", "gis.co.linn.or.us", "geo.co.crook.or.us", "public.co.wasco.or.us",
+  "gispub.co.washington.or.us", "wcgis1.co.washington.or.us", "maps.co.lincoln.or.us", "lcmaps.lanecounty.org", "open.maps.rlid.org",
+  "geocortex.co.douglas.or.us", "gis.columbiacountymaps.com", "webmap.hoodrivercounty.gov", "pdo.jacksoncountyor.gov", "maps.medfordmaps.org",
+  "gis.medfordmaps.org", "delta.co.clatsop.or.us", "gis.co.marion.or.us", "gis.odf.oregon.gov", "navigator.state.or.us", "maps.clackamas.us",
+  "gis.lanecounty.org", "maps.lanecounty.org", "gis.ecso911.com", "hubcitygis.cityofalbany.net", "gis.corvallisoregon.gov",
 ]);
+
 
 const UPSTREAM_TIMEOUT_MS = 20000;
 const USER_AGENT = "planyr-gis-proxy";
