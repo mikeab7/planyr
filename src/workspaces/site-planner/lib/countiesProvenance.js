@@ -14,12 +14,14 @@
  */
 import { ALABAMA_VERIFICATION } from "./alabamaProvenance.js"; // NEW-1 (B2302784)
 import { IDAHO_VERIFICATION } from "./idProvenance.js"; // NEW-1 (B2317920)
+import { GEORGIA_VERIFICATION } from "./gaProvenance.js"; // NEW-1 (B2316720)
 import { LOUISIANA_VERIFICATION } from "./laProvenance.js"; // NEW-1 (Louisiana 2026-10-19)
 import { MISSOURI_VERIFICATION } from "./moProvenance.js"; // NEW-1 (B2317680)
 
 export const COUNTY_VERIFICATION = {
   ...ALABAMA_VERIFICATION,
   ...IDAHO_VERIFICATION,
+  ...GEORGIA_VERIFICATION,
   ...LOUISIANA_VERIFICATION,
   ...MISSOURI_VERIFICATION,
   harris: {
@@ -532,9 +534,9 @@ export const COUNTY_VERIFICATION = {
   },
   ga_cook: {
     publisher: "third-party",
-    publisherName: "Miami University researcher account (keverett_miamioh; Adel overview)",
-    verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,103 parcel polygons, last edited 2023-11. ⚠ measured extent is narrower than the whole county (about -83.49..-83.37) — possibly city-of-Adel-only coverage. Wired anyway per this item's own instruction; the live-verify pass must click a lot outside Adel to confirm county-wide coverage. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
+    publisherName: "Southern Georgia Regional Commission (www.sgrcmaps.com, relayed)",
+    verifiedOn: "2026-10-19",
+    verifiedNote: "MEASURED through planyr.io/gis-proxy (the sandbox itself cannot reach www.sgrcmaps.com) 2026-10-19: countywide polygon layer, 10,432 parcels, extent inside Cook County, 4/5 spread interior points and 4/4 near-county-line points returned a parcel with a real Parcel_No; no owner column with a value on this layer. REPLACES the earlier Adel-only Esri layer, which returned no lot at 0 of 5 spread interior points (B2316720).",
   },
   ga_crawford: {
     publisher: "own",

@@ -1,3 +1,4 @@
+import { GA_ROWS } from "../src/workspaces/site-planner/lib/gaParcels.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
@@ -563,7 +564,7 @@ describe("NEW-1 (2026-09-23) — 11 more Georgia counties are registered and sha
       expect(COUNTIES_MAP[k], k).toBeTruthy();
       expect(COUNTIES[k].state, k).toBe("GA");
       expect(COUNTIES_MAP[k].state, k).toBe("GA");
-      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^(https:\/\/|\/gis-proxy\/)/); // B2316720 — ga_cook now rides the relay like ga_tift
       expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
     }
   });
@@ -717,7 +718,7 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
       expect(COUNTIES_MAP[k], k).toBeTruthy();
       expect(COUNTIES[k].state, k).toBe("GA");
       expect(COUNTIES_MAP[k].state, k).toBe("GA");
-      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^(https:\/\/|\/gis-proxy\/)/); // B2316720 — ga_cook now rides the relay like ga_tift
       expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
     }
   });
@@ -740,8 +741,9 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
   it("Georgia now has 60 county keys in both registries (25 pre-existing (first + second pass) + ga_tift (B1874880) + 34 third pass, this batch)", () => {
     const gaInCounties = Object.entries(COUNTIES).filter(([, c]) => c.state === "GA").map(([k]) => k);
     const gaInMap = Object.entries(COUNTIES_MAP).filter(([, c]) => c.state === "GA").map(([k]) => k);
-    expect(gaInCounties).toHaveLength(60);
-    expect(gaInMap).toHaveLength(60);
+    // B2316720 — gaParcels.js adds its own rows on top of these 60 hand-written ones (test/georgiaCounties.test.js owns that table).
+    expect(gaInCounties).toHaveLength(60 + GA_ROWS.length);
+    expect(gaInMap).toHaveLength(60 + GA_ROWS.length);
   });
 
   it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {
@@ -834,7 +836,7 @@ describe("NEW-1 (2026-09-24, third pass) — 34 more Georgia counties are regist
       expect(COUNTIES_MAP[k], k).toBeTruthy();
       expect(COUNTIES[k].state, k).toBe("GA");
       expect(COUNTIES_MAP[k].state, k).toBe("GA");
-      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^(https:\/\/|\/gis-proxy\/)/); // B2316720 — ga_cook now rides the relay like ga_tift
       expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
     }
   });

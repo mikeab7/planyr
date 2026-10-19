@@ -111,7 +111,7 @@ describe("a county name outside the configured states resolves to nothing, never
     ["Montgomery County", "PA"],
     ["Liberty County", "FL"],
     ["Colbert County", "TN"], // B2312352 — every Alabama county is wired now, so the same-named-key trap is asserted with the WRONG state instead
-    ["Harris County", "GA"],
+    ["Harris County", "FL"], // B2316720 — ga_harris is wired now, so the same-named-key trap is asserted with a state that has no per-county keys
   ])("%s, %s → null", (name, state) => {
     expect(countyKeyForName(name, state)).toBeNull();
   });

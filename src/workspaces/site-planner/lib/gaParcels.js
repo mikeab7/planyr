@@ -1,0 +1,59 @@
+/* NEW-1 (B2316720, 2026-10-19) — GEORGIA county parcel sources added after the three 2026-09 passes (those 60 rows stay hand-written in counties.js).
+ * Georgia has no free statewide parcel service; its assessors mostly sit behind qPublic (no public API), so each county here is wired to
+ * the layer a regional commission, an appraisal contractor or the county itself publishes. A county absent from counties.js AND this table has
+ * no usable public service found and says so by name ("<County> — no parcel data wired here yet"): docs/STATEWIDE-PARCELS.md
+ * "Georgia counties (2026-10-19)" has the per-county table and what was searched for every gap.
+ * Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy), idField, addrField, scopeWhere, owner column?, centre lat, lng,
+ * padded bbox]. Provenance prose lives in gaProvenance.js (build-time only, never shipped to the browser). */
+export const GA_ROWS = [
+  ["appling","Appling","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Appling_County_Wide_View/FeatureServer/19","PIN",null,null,0,31.719,-82.299,[31.458,-82.568,31.98,-82.03]],
+  ["atkinson","Atkinson","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Atkinson/PropertyInformation/MapServer/1","PARCEL_NO",null,null,1,31.299,-82.8815,[31.162,-83.159,31.436,-82.604]],
+  ["benhill","Ben Hill","/gis-proxy/www.sgrcmaps.com/alma/rest/services/BenHill/Property/MapServer/2","PARCEL_NO",null,null,1,31.7525,-83.236,[31.636,-83.495,31.869,-82.977]],
+  ["bleckley","Bleckley","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Bleckley_County_Wide_View/FeatureServer/39","Parcel_No",null,null,0,32.425,-83.3165,[32.251,-83.513,32.599,-83.12]],
+  ["brooks","Brooks","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Brooks/Boundaries/MapServer/0","PARCEL_NO",null,null,1,30.853,-83.5245,[30.614,-83.758,31.092,-83.291]],
+  ["candler","Candler","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Candler_County_Wide_View/FeatureServer/18","NAME",null,null,0,32.41,-82.0795,[32.25,-82.27,32.57,-81.889]],
+  ["chattahoochee","Chattahoochee","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/ParcelsChattCo/FeatureServer/0","Parcel_num",null,null,1,32.3795,-84.8195,[32.207,-85.025,32.552,-84.614]],
+  ["chattooga","Chattooga","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Chattooga_Webmap_2025_WFL1/FeatureServer/3","MAP_PAR",null,null,1,34.438,-85.313,[34.27,-85.546,34.606,-85.08]],
+  ["coffee","Coffee","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Coffee/CoffeeBackgroundLayers/MapServer/2","Parcel_No",null,null,0,31.5875,-82.8745,[31.347,-83.175,31.828,-82.574]],
+  ["dawson","Dawson","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Dawson_Webmap_WFL1/FeatureServer/1","Parcel_No",null,null,1,34.4755,-84.1525,[34.313,-84.361,34.638,-83.944]],
+  ["decatur","Decatur","https://services1.arcgis.com/uCLHikoEKcQwv9tD/arcgis/rest/services/Tax_Parcels/FeatureServer/7","PARCEL_ID","SITUS",null,1,30.888,-84.6155,[30.674,-84.883,31.102,-84.348]],
+  ["dodge","Dodge","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Dodge_County_Wide_View/FeatureServer/38","PIN",null,null,0,32.172,-83.118,[31.883,-83.395,32.461,-82.841]],
+  ["douglas","Douglas","/gis-proxy/maps.douglascountyga.gov/arcgis/rest/services/CountyLayers/Parcels/MapServer/15","ParcelNo","PropertyAddress",null,1,33.6895,-84.7375,[33.551,-84.919,33.828,-84.556]],
+  ["floyd","Floyd","https://services2.arcgis.com/nV67H1IJR8GS6SAA/ArcGIS/rest/services/Current_Parcels/FeatureServer/5","PARCEL","PROP_ADDR",null,1,34.3365,-85.2325,[34.066,-85.48,34.607,-84.985]],
+  ["franklin","Franklin","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Rose_Hill_Updated_Web_Map_05152023_WFL1/FeatureServer/8","JJGPin",null,null,0,34.3875,-83.225,[34.22,-83.415,34.555,-83.035]],
+  ["glascock","Glascock","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Glascock_Web_Map_2026_WFL1/FeatureServer/1","PIN",null,null,1,33.2265,-82.5905,[33.102,-82.772,33.351,-82.409]],
+  ["grady","Grady","https://services7.arcgis.com/Pf7RRv4QttHB3VbR/arcgis/rest/services/WebParcels/FeatureServer/0","PARCELNO",null,null,0,30.879,-84.222,[30.659,-84.394,31.099,-84.05]],
+  ["harris","Harris","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels4_2026_HUB/FeatureServer/0","PARCEL_NO","PhisicalAddress",null,1,32.727,-84.927,[32.562,-85.201,32.892,-84.653]],
+  ["hart","Hart","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/LavoniaSewerWebMap04282023_WFL1/FeatureServer/15","Parcel_No",null,null,0,34.354,-82.95,[34.198,-83.137,34.51,-82.763]],
+  ["houston","Houston","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/HoustonCoParcels_withOwner/FeatureServer/0","PARCEL_NO",null,null,1,32.486,-83.668,[32.27,-83.869,32.702,-83.467]],
+  ["irwin","Irwin","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Irwin/ParcelInformation/MapServer/5","PARCEL_NO",null,null,1,31.617,-83.2505,[31.452,-83.52,31.782,-82.981]],
+  ["jeffdavis","Jeff Davis","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Jeff_Davis_Web_Map_2026_WFL1/FeatureServer/8","PIN",null,null,1,31.8195,-82.6315,[31.65,-82.855,31.989,-82.408]],
+  ["jefferson","Jefferson","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Jefferson_Web_Map_2024_WFL1/FeatureServer/3","PARCEL_NO",null,null,1,33.0375,-82.443,[32.734,-82.675,33.341,-82.211]],
+  ["johnson","Johnson","https://services1.arcgis.com/ue5fMdTkPeHLCobS/arcgis/rest/services/Johnson_GA_Parcels_gdb/FeatureServer/0","parcel_id","situs_address",null,1,32.6675,-82.7005,[32.493,-82.982,32.842,-82.419]],
+  ["laurens","Laurens","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Laurens_Web_Map_WFL1/FeatureServer/5","Parcel_No",null,null,1,32.431,-82.932,[32.128,-83.246,32.734,-82.618]],
+  ["mcintosh","McIntosh","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/McIntosh_Web_Map_2025_WFL1/FeatureServer/5","PIN",null,null,1,31.5065,-81.429,[31.291,-81.683,31.722,-81.175]],
+  ["montgomery","Montgomery","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/MontgomeryToombsBoundary/FeatureServer/15","Parcel_No",null,null,1,32.1495,-82.53,[31.928,-82.672,32.371,-82.388]],
+  ["pierce","Pierce","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Pierce/ParcelInformation/MapServer/0","PARCEL_NO",null,null,1,31.3685,-82.1955,[31.185,-82.438,31.552,-81.953]],
+  ["stewart","Stewart","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels2022/FeatureServer/0","Parcel_No",null,null,1,32.0755,-84.852,[31.902,-85.09,32.249,-84.614]],
+  ["talbot","Talbot","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels2025/FeatureServer/2","Parcel_No",null,null,1,32.701,-84.4855,[32.505,-84.714,32.897,-84.257]],
+  ["tattnall","Tattnall","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Tattnall_CountyWide_GeoData_View/FeatureServer/13","Parcel_PIN",null,null,0,32.047,-81.9985,[31.765,-82.25,32.329,-81.747]],
+  ["taylor","Taylor","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Taylor_Web_Map_2025_WFL1/FeatureServer/0","PARCEL_NO",null,null,1,32.552,-84.23,[32.348,-84.48,32.756,-83.98]],
+  ["telfair","Telfair","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Telfair_2025_WFL1/FeatureServer/0","PIN",null,null,1,31.9565,-82.9325,[31.756,-83.228,32.157,-82.637]],
+  ["thomas","Thomas","/gis-proxy/www.thomascountymaps.org/arcgis/rest/services/parcels_addresses/MapServer/4","PARCEL_NO",null,null,1,30.8695,-83.924,[30.64,-84.132,31.099,-83.716]],
+  ["toombs","Toombs","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/MontgomeryToombsBoundary/FeatureServer/16","Parcel_No",null,null,1,32.131,-82.331,[31.891,-82.501,32.371,-82.161]],
+  ["treutlen","Treutlen","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Treutlen_CountyWide_View/FeatureServer/15","Parcel_no",null,null,0,32.401,-82.5625,[32.269,-82.761,32.533,-82.364]],
+  ["union","Union","https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Union_Web_Map_2026_WFL1/FeatureServer/24","PIN",null,null,1,34.813,-83.9775,[34.617,-84.199,35.009,-83.756]],
+  ["walker","Walker","https://services7.arcgis.com/tzrZqCyu9DgupjuD/arcgis/rest/services/Parcels/FeatureServer/2","Parcel_No",null,null,1,34.7875,-85.291,[34.565,-85.555,35.01,-85.027]],
+  ["wayne","Wayne","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Wayne_2026_test/FeatureServer/7","PARCEL_NO",null,null,0,31.576,-81.8775,[31.306,-82.162,31.846,-81.593]],
+  ["wheeler","Wheeler","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Wheeler_County_View/FeatureServer/15","Parcel_No",null,null,0,32.1115,-82.7465,[31.898,-82.97,32.325,-82.523]],
+  ["white","White","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Cleveland_Sewer_2023_WFL1/FeatureServer/8","PIN",null,null,0,34.648,-83.747,[34.482,-83.891,34.814,-83.603]],
+  ["wilcox","Wilcox","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Wilcox_County_Wide_View/FeatureServer/12","PIN",null,null,0,31.989,-83.393,[31.829,-83.627,32.149,-83.159]],
+  ["wilkinson","Wilkinson","https://services1.arcgis.com/ue5fMdTkPeHLCobS/arcgis/rest/services/Wilkinson_GA_gdb/FeatureServer/0","ParcelID","PropertyAddress",null,1,32.7935,-83.179,[32.559,-83.426,33.028,-82.932]],
+];
+export const gaRaw = () => Object.fromEntries(GA_ROWS.map(([k, n, url, id, addr, scope]) => ["ga_" + k, {
+  state: "GA", label: n + " County, GA", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}), ...(scope ? { scopeWhere: scope } : {}),
+  help: n + " County parcels. Search by parcel number" + (addr ? " or a site address." : "."),
+}]));
+export const gaMap = () => Object.fromEntries(GA_ROWS.map(([k, n, url, id, addr, scope, ow, la, ln, bb]) => ["ga_" + k, {
+  state: "GA", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url, ...(scope ? { scopeWhere: scope } : {}),
+}]));
