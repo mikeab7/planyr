@@ -1842,7 +1842,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         return;
       }
       // NEW-1 — ring at the cursor the moment the click lands; handleClick clears it on every exit.
-      if (selectModeRef.current) { handleClick(e.latlng, e.originalEvent ? startClickAck(e.originalEvent.clientX, e.originalEvent.clientY) : null); return; }
+      if (selectModeRef.current) {
+        // B2335056 — the ring rides the tapped LAT/LNG, re-projected on every map move/zoom, not the screen pixel.
+        const track = {
+          project: () => { const r = containerEl.getBoundingClientRect(); const pt = map.latLngToContainerPoint(e.latlng); return [r.left + pt.x, r.top + pt.y]; },
+          subscribe: (cb) => { map.on("move zoom viewreset", cb); return () => map.off("move zoom viewreset", cb); },
+        };
+        handleClick(e.latlng, e.originalEvent ? startClickAck(e.originalEvent.clientX, e.originalEvent.clientY, track) : null);
+        return;
+      }
       // A background click (nothing else claimed it) deselects a site plan armed for editing —
       // its own image click already stops propagation before this ever runs (B848496 NEW-2).
       // B2163346 — …but not the click a handle drag's own release produces (it would disarm the plan mid-edit).
