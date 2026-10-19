@@ -91,7 +91,10 @@ try {
   ok("(a) exactly one Remove control", (await page.getByRole("button", { name: /^Remove truck court$/ }).count()) === 1);
   const area = await T("dock-area").evaluate((el) => { const c = getComputedStyle(el); return { w: c.fontWeight, fs: parseFloat(c.fontSize), txt: el.textContent }; });
   ok("(a) Area is plain body weight, not a display number", Number(area.w) <= 500 && area.fs <= 14 && /^[\d,]+ SF$/.test(area.txt), JSON.stringify(area));
-  ok("(a) the numeric inputs suppress autofill", await T("dock-depth").evaluate((el) => el.getAttribute("autocomplete") === "off"));
+  // the app-wide stamp (shared/ui/phoneTyping.js) lands on a field as it is focused/touched — by design — so focus each field first, THEN read
+  const acRows = [];
+  for (const id of ["dock-depth", "dock-length", "dock-slope", "dock-weight", "dock-outline-opacity"]) { await T(id).focus(); acRows.push(await T(id).evaluate((el) => el.getAttribute("autocomplete"))); }
+  ok("(a) every numeric input suppresses browser autofill once focused", acRows.every((v) => v === "off"), JSON.stringify(acRows));
   if (SHOTS) await T("property-panel").screenshot({ path: `${SHOTS}/dock-panel.png` }).catch(() => {});
 
   // (b) length + depth independence
