@@ -49,6 +49,7 @@ export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
 import { alRaw, alMap } from "./alabamaParcels.js"; // NEW-1 (B2302784) — the Alabama county rows
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
+import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -978,6 +979,7 @@ const COUNTIES_RAW = {
   ...msMarisRaw(),
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -3024,6 +3026,7 @@ const COUNTIES_MAP_RAW = {
   ...msMarisMap(),
   ...alMap(),
   ...laMap(),
+  ...moMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
@@ -4068,11 +4071,17 @@ const CONSOLIDATED_GOV_ALIAS = {
   GA: { augustarichmond: "richmond", athensclarke: "clarke" },
 };
 
+/* NEW-1 (B2317680, 2026-10-19) — Missouri's St. Louis city is an INDEPENDENT city, not part of St. Louis County, and both slug to "stlouis" once the designation words are
+ * stripped. Before Missouri was wired that collision was harmless (neither was configured); now St. Louis County has a real parcel source whose layer EXCLUDES the city, so
+ * the city must key apart or every city click would ask the county's layer and come back empty. Keyed on the full lower-cased letters of the asset's own name. */
+const INDEPENDENT_CITY_KEYS = { MO: { stlouiscity: "stlouiscity" } };
+
 export function countyKeyForName(name, state = null) {
   if (!name) return null;
   const slug = String(name).toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
   const st = state ? String(state).toUpperCase() : null;
-  const generalSlug = (st && CONSOLIDATED_GOV_ALIAS[st] && CONSOLIDATED_GOV_ALIAS[st][slug]) || slug;
+  const independent = st && INDEPENDENT_CITY_KEYS[st] && INDEPENDENT_CITY_KEYS[st][String(name).toLowerCase().replace(/[^a-z]/g, "")];
+  const generalSlug = independent || (st && CONSOLIDATED_GOV_ALIAS[st] && CONSOLIDATED_GOV_ALIAS[st][slug]) || slug;
   /* B209503 — the one Texas county whose key is not its slug. Austin COUNTY (Bellville / Sealy)
    * keeps the key `austintx` so the far more common string "Austin" — the city, its ETJ, a TxDOT
    * district — can never resolve to it by accident. The alias is applied here, in the one place

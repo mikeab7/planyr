@@ -60,7 +60,9 @@ describe("parcel coverage join (NEW-1)", () => {
     expect(cityKeysOn("MO", "Clay County")).toEqual(["mo_kansascity"]);
     expect(cityKeysOn("MO", "Platte County")).toEqual(["mo_kansascity"]);
     // a county with no source of its own but a city one is painted as city-level only — not "wired"
-    for (const [st, nm] of [["MI", "Wayne County"], ["MO", "Jackson County"]]) {
+    // (Jackson MO stopped being one on 2026-10-19: Missouri's countywide parcel layer was found — B2317680 — and the two city scopes still win inside their limits.)
+    expect(rowFor(cov, "MO", "Jackson County")).toMatchObject({ wired: true, cityOnly: false, kind: "own" });
+    for (const [st, nm] of [["MI", "Wayne County"]]) {
       expect(rowFor(cov, st, nm)).toMatchObject({ wired: false, cityOnly: true, kind: null });
       expect(rowFor(cov, st, nm).cityKind).toBeTruthy();
     }
@@ -72,8 +74,8 @@ describe("parcel coverage join (NEW-1)", () => {
     const t = cov.totals;
     expect(Object.values(t.byKind).reduce((a, b) => a + b, 0)).toBe(t.counties);
     expect(t.cityOnly).toBe(cov.rows.filter((r) => r.cityOnly).length);
-    expect(t.cityOnly).toBe(2); // Wayne MI, Jackson MO
-    expect(totalLine(t)).toContain("Plus 2 with city-level parcels only");
+    expect(t.cityOnly).toBe(1); // Wayne MI (Jackson MO has a countywide source since B2317680)
+    expect(totalLine(t)).toContain("Plus 1 with city-level parcels only");
     // wiring counts are what they were before the city sources were placed
     expect(t.counties).toBe(cov.rows.filter((r) => r.wired).length);
   });

@@ -528,13 +528,19 @@ describe("B1574257 — the county-designation strip introduces no new key collis
     expect(collisionsUnder(WIDE)).toEqual(collisionsUnder(NARROW));
   });
 
-  it("the pre-existing collisions are exactly the six independent-city/county pairs, and none is configured", () => {
+  it("the pre-existing collisions are exactly the six independent-city/county pairs, and none is configured under the shared key", () => {
     const pre = collisionsUnder(NARROW);
     expect(pre).toHaveLength(6);
     expect(pre.join(" | ")).toMatch(/MD_baltimore.*MO_stlouis.*VA_fairfax.*VA_franklin.*VA_richmond.*VA_roanoke/);
-    for (const key of ["md_baltimore", "mo_stlouis", "va_fairfax", "va_franklin", "va_richmond", "va_roanoke"]) {
+    // NEW-1 (B2317680): Missouri was wired, so mo_stlouis is now St. Louis COUNTY's real row — and St. Louis city keys apart (INDEPENDENT_CITY_KEYS), so the
+    // shared key can never answer for the city. The other five pairs are still unconfigured.
+    for (const key of ["md_baltimore", "va_fairfax", "va_franklin", "va_richmond", "va_roanoke"]) {
       expect(COUNTIES_MAP[key], key).toBeUndefined();
     }
+    expect(COUNTIES.mo_stlouis.label).toBe("St. Louis County, MO");
+    expect(COUNTIES_MAP.mo_stlouiscity).toBeTruthy();
+    expect(countyKeyForName("St. Louis city", "MO")).toBe("mo_stlouiscity");
+    expect(countyKeyForName("St. Louis County", "MO")).toBe("mo_stlouis");
   });
 
   it("no designation strips a name to nothing — an empty slug would key every such row alike", () => {
