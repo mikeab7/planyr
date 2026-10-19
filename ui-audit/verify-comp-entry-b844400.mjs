@@ -163,7 +163,7 @@ async function clickThenType(page, colIdx, key) {
   await openEntrySheet(page);
   await pasteViaTextarea(page, "West Hardy tract, 3.2 AC, $850,000, closed 3/14/2026");
   const typeAfter = await clickThenType(page, 0, "b"); // Land -> Bldg sale
-  check("Type: click then type 'b' jumps to 'Bldg sale', not swallowed", /Bldg sale/.test(typeAfter), typeAfter);
+  check("Type: click then type 'b' jumps to Bldg Sale, not swallowed", /Bldg Sale/.test(typeAfter), typeAfter);
   await ctx.close();
 }
 {
@@ -216,7 +216,7 @@ async function sweepRestingRow(page) {
   // The real-click check the earlier round skipped: every one of the four caret-bearing cells
   // must resolve to an actual, focused <select> with the RIGHT option set for this row's type —
   // Unit's own set is SF-only here, the one value a lease's `lease_size_sf` column accepts.
-  const EXPECTED = { Type: ["", "Land", "Bldg sale", "Lease"], Unit: ["", "SF"], Per: ["", "MO", "YR"], Basis: ["", "NNN", "GROSS"] };
+  const EXPECTED = { Type: ["", "Land", "Bldg Sale", "Lease"], Unit: ["", "SF"], Per: ["", "MO", "YR"], Basis: ["", "NNN", "GROSS"] };
   const COLIDX = { Type: 0, Unit: 4, Per: 12, Basis: 13 };
   for (const [name, expected] of Object.entries(EXPECTED)) {
     const cell = page.locator(`td[data-cell="0-${COLIDX[name]}"]`);
