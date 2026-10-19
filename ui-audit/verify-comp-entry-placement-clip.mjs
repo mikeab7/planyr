@@ -173,7 +173,7 @@ console.log("\n=== NEW-10 — Type/Unit/Per/Basis never clip their own longest o
 
   check("Type never clips at its baseline value", notClipped(await cellClipInfo(page, 0)), JSON.stringify(await cellClipInfo(page, 0)));
   await setSelectCell(page, 0, "building_sale");
-  check("Type never clips its LONGEST option ('Bldg sale')", notClipped(await cellClipInfo(page, 0)), JSON.stringify(await cellClipInfo(page, 0)));
+  check("Type never clips its LONGEST option ('Bldg Sale')", notClipped(await cellClipInfo(page, 0)), JSON.stringify(await cellClipInfo(page, 0)));
   await setSelectCell(page, 0, "lease");
   await pacedWait(page, 200);
 
@@ -203,7 +203,7 @@ console.log("\n=== NEW-10 — Type/Unit/Per/Basis never clip their own longest o
   const titleW = await page.locator('td[data-cell="0-2"]').evaluate((td) => td.clientWidth);
   check("on a wide viewport, Title/Address grows well past its squeezed floor (~58px)", titleW > 150, `titleW=${titleW}`);
   await setSelectCell(page, 0, "building_sale");
-  check("Type still never clips on a wide viewport ('Bldg sale')", notClipped(await cellClipInfo(page, 0)), JSON.stringify(await cellClipInfo(page, 0)));
+  check("Type still never clips on a wide viewport ('Bldg Sale')", notClipped(await cellClipInfo(page, 0)), JSON.stringify(await cellClipInfo(page, 0)));
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new10-wide-1900.png` });
   await ctx.close();
 }

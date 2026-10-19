@@ -6,7 +6,7 @@ import { costRollup, roadQuantities } from "../src/workspaces/site-planner/lib/c
 const SRC = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
 const roadBranch = (() => {
   const a = SRC.indexOf('selEl.type === "road" ? (() => {');
-  const b = SRC.indexOf("})() : isDockZone(selEl) ? (() => {", a);
+  const b = SRC.indexOf("})() : isDockLayerEl(selEl) ? (() => {", a);
   expect(a).toBeGreaterThan(0); expect(b).toBeGreaterThan(a);
   return SRC.slice(a, b);
 })();

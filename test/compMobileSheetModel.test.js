@@ -78,39 +78,41 @@ describe("NEW-2 — footer read-back", () => {
     expect(footerReadback(d("land", { landSizeValue: "42.5", landSizeUnit: "ac", landPrice: "9250000" }))).toBe("42.5 AC · $9,250,000 · $5.00/SF");
     expect(footerReadback(d("building_sale", { bldgSizeSf: "120000", bldgPrice: "9250000" }))).toBe("120,000 SF · $9,250,000 · $77.08/SF");
   });
-  it("empty", () => {
-    expect(footerReadback(d("lease"))).toBe("Nothing entered yet");
-    expect(footerReadback(d("land"))).toBe("Nothing entered yet");
+  it("empty is the empty string — the sheet hides the line (NEW-7)", () => {
+    expect(footerReadback(d("lease"))).toBe("");
+    expect(footerReadback(d("land"))).toBe("");
+    expect(footerReadback(d("building_sale"))).toBe("");
   });
 });
 
-describe("NEW-2 — Save copy, three blocker states", () => {
+describe("NEW-9 — Save copy: never a blocker, never disabled for a missing field", () => {
   const row = (o) => ({ _id: "r", draft: d("land", o), cellFlags: {} });
   it("no rows", () => expect(saveState({ rows: [], readyCount: 0 })).toEqual({ label: "Nothing to save yet", disabled: true }));
-  it("only the location missing", () => expect(saveState({ rows: [row({})], readyCount: 0 })).toEqual({ label: "Place it on the map to save", disabled: true }));
-  it("ready", () => {
-    expect(saveState({ rows: [row({ anchor: PIN })], readyCount: 1 })).toEqual({ label: "Save 1 comp", disabled: false });
+  it("one comp reads Save comp, ready or not", () => {
+    expect(saveState({ rows: [row({})], readyCount: 0 })).toEqual({ label: "Save comp", disabled: false });
+    expect(saveState({ rows: [row({ anchor: PIN })], readyCount: 1 })).toEqual({ label: "Save comp", disabled: false });
+  });
+  it("a batch reads Save N comps (the ready ones, else the batch size)", () => {
     expect(saveState({ rows: [row({ anchor: PIN }), row({ anchor: PIN })], readyCount: 2 }).label).toBe("Save 2 comps");
+    expect(saveState({ rows: [row({ anchor: PIN }), row({})], readyCount: 1 }).label).toBe("Save 1 comp");
+    expect(saveState({ rows: [row({}), row({})], readyCount: 0 }).label).toBe("Save 2 comps");
   });
-  it("placed lease with no period is blocked on the period, not the map", () => {
-    const r = { _id: "r", draft: d("lease", { anchor: PIN }), cellFlags: {} };
-    expect(saveState({ rows: [r], readyCount: 0 }).label).toBe("Pick monthly or yearly to save");
-  });
+  it("saving is the only other disabled state", () => expect(saveState({ rows: [row({})], readyCount: 0, saving: true })).toEqual({ label: "Saving…", disabled: true }));
 });
 
 describe("NEW-2 — More details + labels", () => {
   it("lease carries lease fields, land carries none of the building ones", () => {
     const keys = (t) => moreDetailFields(t).map((m) => m.col.key);
-    expect(keys("lease")).toEqual(["clearHeightFt", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate", "leaseFreeRentMonths", "leaseTi", "compDate", "notes"]);
-    expect(keys("building_sale")).toEqual(["clearHeightFt", "yearBuilt", "bldgNoi", "bldgCapRate", "compDate", "notes"]);
+    expect(keys("lease")).toEqual(["clearHeightFt", "powerAmps", "powerVolts", "powerPhase", "dockDoors", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate", "leaseFreeRentMonths", "leaseTi", "compDate", "notes"]);
+    expect(keys("building_sale")).toEqual(["clearHeightFt", "powerAmps", "powerVolts", "powerPhase", "dockDoors", "yearBuilt", "bldgNoi", "bldgCapRate", "compDate", "notes"]);
     expect(keys("land")).toEqual(["compDate", "notes"]);
   });
   it("labels read per type", () => {
-    expect(moreDetailFields("lease").find((m) => m.col.key === "compDate").label).toBe("Lease signed");
-    expect(moreDetailFields("land").find((m) => m.col.key === "compDate").label).toBe("Closed");
+    expect(moreDetailFields("lease").find((m) => m.col.key === "compDate").label).toBe("Date signed");
+    expect(moreDetailFields("land").find((m) => m.col.key === "compDate").label).toBe("Closing date");
     expect(moreDetailFields("lease").find((m) => m.col.key === "clearHeightFt").label).toBe("Clear height");
     expect(mobilePartyLabels("lease")).toEqual({ provider: "Landlord", acquirer: "Tenant" });
     expect(mobilePartyLabels("land")).toEqual({ provider: "Seller", acquirer: "Buyer" });
-    expect(compDateLabel("building_sale")).toBe("Closed");
+    expect(compDateLabel("building_sale")).toBe("Closing date");
   });
 });

@@ -63,6 +63,17 @@ export const ALLOWED_HOSTS = new Set([
   "gis.idaho.gov", // State of Idaho GIS portal
   "giscenter.rdc.isu.edu", "gisu.rdc.isu.edu", // Idaho State University GIS Training & Research Center
   "portal.kcgov.us", "map.kcgov.us", // Kootenai County ArcGIS portal + map server (KC_Parcel_Polygon)
+  /* NEW-1 (New Mexico, 2026-10-19) — the state / county hosts the New Mexico candidates sit on (named by the state's "Parcels - NM - <County>" ArcGIS
+   * Online catalog and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
+   * county is wired to it. */
+  "gis.ose.state.nm.us", "gis.ose.nm.gov", // NM Office of the State Engineer — County_Parcels_2021 (one layer per county) and MRGCD parcels
+  "rgis.unm.edu", "gstore.unm.edu", // UNM Earth Data Analysis Center — RGIS (NM's state GIS clearinghouse)
+  "maps.currycounty.org", // Curry County
+  "arcgisce2.co.valencia.nm.us", // Valencia County
+  "sfcomaps.santafecountynm.gov", // Santa Fe County
+  "gis.donaanacounty.org", // Doña Ana County
+  "webmaps.sjcounty.net", // San Juan County
+  "gis.losalamosnm.us", // Los Alamos County
   /* NEW-1 (Alabama, 2026-10-16) — county/vendor hosts the Alabama candidates sit on. The sandbox cannot reach any of
    * them, so each is relayed (CORS unread) and MEASURED through this relay before a county is wired to it. */
   "web1.kcsgis.com", "web2.kcsgis.com", "web3.kcsgis.com", "web4.kcsgis.com", "web5.kcsgis.com", "web6.kcsgis.com", // KCS GIS — Revenue Commissioner viewers (Etowah, Talladega, Cullman, Colbert, Baldwin…)
@@ -96,6 +107,17 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
+   * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
+  "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
+  "gis.minnehahacounty.gov", "gis2.siouxfalls.org", // Minnehaha County / Sioux Falls
+  "arcgis.sd.gov", "sdgis.sd.gov", // State of South Dakota GIS (BIT)
+  "gis.districtiii.org", "www.districtiii.org", "districtiii.org", // Planning & Development District III — Faulk, Day … county viewers
+  "1stdistrict.org", "www.1stdistrict.org", "mapnet.1stdistrict.org", "gis.1stdistrict.org", // First District Association of Local Governments — MapNet county viewers
+  "gis.rcgov.org", // Rapid City
+  "davisonreports.com", "www.davisonreports.com", // Davison County parcel viewer
+  "sidbox.sidwellco.com", // Sidwell — Dakotas county parcel viewers
+  "brookingscountysd.gov", "www.brookingscountysd.gov", "codington.sdcounty.gov", "brown.sd.us", // county sites whose GIS pages name the viewer
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

@@ -27,8 +27,13 @@
  */
 import { parseSingleRecord } from "./compParse.js";
 
-function decodeEntities(s) {
+// NEW-1 — also numeric references (&#38; / &#x26;), and applied to placemark NAMES too: a name
+// "Dircks Moving &amp; Logistics" used to be saved as the comp title verbatim.
+export function decodeEntities(s) {
   return String(s || "")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 }
@@ -130,7 +135,7 @@ export function parseKmlPlacemarks(kmlText) {
   const text = String(kmlText || "");
   const blocks = text.match(/<Placemark[^>]*>[\s\S]*?<\/Placemark>/gi) || [];
   return blocks.map((block) => ({
-    name: extractTag(block, "name")?.trim() || null,
+    name: decodeEntities(extractTag(block, "name") || "").trim() || null,
     description: kmlDescriptionToText(extractTag(block, "description")),
     geometry: extractGeometry(block),
   }));

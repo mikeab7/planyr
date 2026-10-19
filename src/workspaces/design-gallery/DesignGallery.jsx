@@ -14,7 +14,7 @@
  */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ToggleChip, SegmentedControl, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
+import { Button, ToggleChip, SegmentedControl, RangeFields, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 
@@ -134,6 +134,15 @@ function GalleryBody() {
       <Row title="ToggleChip — active × rest">
         <Specimen label="rest" tokens="CONTROL_RADIUS.pill"><ToggleChip>Off</ToggleChip></Specimen>
         <Specimen label="active" tokens="accent fill"><ToggleChip active>On</ToggleChip></Specimen>
+      </Row>
+
+      <Row title="RangeFields — a Min–Max pair (either end may be blank)">
+        <Specimen label="range" tokens="CONTROL_RADIUS.control · SIZE.sm height · FONT.md">
+          <div style={{ width: 220 }}><RangeFields label="Size" min="100000" max="250000" unit="SF" onChange={() => {}} /></div>
+        </Specimen>
+        <Specimen label="at least (single)" tokens="min box + unit">
+          <div style={{ width: 220 }}><RangeFields label="Power" single min="2000" unit="A" onChange={() => {}} /></div>
+        </Specimen>
       </Row>
 
       <Row title="Switch — applies the moment it flips">
