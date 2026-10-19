@@ -48,6 +48,7 @@ import { cityScopeAnswer, CITY_SCOPE_COUNTIES } from "./cityScopes.js";
 export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
 import { alRaw, alMap } from "./alabamaParcels.js"; // NEW-1 (B2302784) — the Alabama county rows
+import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -975,6 +976,7 @@ const COUNTIES_RAW = {
     help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Benton County. Search by parcel number or a site address.",
   },
   ...msMarisRaw(),
+  ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
@@ -3021,6 +3023,7 @@ const COUNTIES_MAP_RAW = {
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
   ...msMarisMap(),
   ...alMap(),
+  ...laMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
