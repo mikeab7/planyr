@@ -403,6 +403,7 @@ import { hasCrop, cropClipShapeScreen, cropEditBlock, normalizeCropShape, recrop
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
+import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
 import { wallRowPlan, chipLabel, bumpSummary, addOptions, KIND_NAME, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, wallTotalDepth, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields, resolveLayerExtent, layerExtentPatch } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
@@ -482,7 +483,7 @@ import {
   bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE,
 } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
-import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
@@ -5226,6 +5227,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histRef = useRef(null);
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [histTick, bumpHist] = useState(0);
+  const [dockRemoved, setDockRemoved] = useState(null); // NEW-1 — { hostId, text, tick }: the "Removed. W wall has no dock layers." note + Undo; valid only at the history tick the removal produced
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   /* NEW-2 (B712225) — the operation-envelope tracker (operationEnvelope.js). ONE instance per tab,
    * kept across renders like histRef beside it — `beginOperation` at the `pushHistory()` seam is
@@ -11639,6 +11641,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Is this element a member of a dock-zone stack, and which zone (0 court / 1 trailer / 2 buffer)?
   const isDockZone = (el) => !!el && !el.points && !!(el.truckCourt || el.forCourt || el.forTrailer);
   const zoneIndexOf = (el) => (el.truckCourt ? 0 : el.forCourt ? 1 : 2);
+  // NEW-1 — the dock-layer Properties panel also covers a BUFFER added from the Building panel's "Docks & walls" strip
+  // (`makeChainZone`: bonded by `prevZone` + `stackSide`, no `forTrailer`), which `isDockZone` deliberately does not claim.
+  const isDockLayerEl = (el) => isDockZone(el) || (!!el && !el.points && !!el.buffer && !!el.noFit && !!el.stackSide && !!el.attachedTo);
   // The min / max stack depth across a building's dock sides (the "+"/"−" operate on
   // the whole set as a unit, so the min level advances together and the max peels off).
   // The dock side a stack zone belongs to (court carries it; trailer/buffer inherit via their chain).
@@ -11647,6 +11652,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (z.truckCourt) return z.truckCourt.side;
     if (z.forCourt) { const c = arr.find((x) => x.id === z.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
     if (z.forTrailer) { const t = arr.find((x) => x.id === z.forTrailer); const c = t && arr.find((x) => x.id === t.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
+    if (z.stackSide) return z.stackSide;   // an appended chain layer carries its wall
     return null;
   };
   // NEW-2 (B1818257) — a compass-suffixed display label for a dock-zone stack member, so a
@@ -11658,7 +11664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // own rotation (dockSideCompassLabel), so an angled cross-dock building reads NE/SW rather than
   // a hardcoded N/S.
   const dockZoneDisplayLabel = (z) => {
-    if (!isDockZone(z)) return null;
+    if (!isDockLayerEl(z)) return null;
     const b = els.find((x) => x.id === z.attachedTo);
     const side = b && zoneSideOf(els, z);
     if (!b || !side) return null;
@@ -11914,45 +11920,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     setSel({ kind: "el", id: b.id });
   };
-  // NEW-2 (B1818257) — the single-side sibling of setZoneDepthAll: a cross-dock building's two
-  // truck courts (one per dock side) are independent site elements bonded via `truckCourt.side`
-  // (they always have been — `findCourtIn` is already keyed on `side`), but every edit path used
-  // to force the SAME depth onto both. This is what the dock-zone element's OWN properties panel
-  // now calls, so editing the truck court you actually clicked never touches the other side's.
-  const setZoneDepthOnSide = (b, side, i, newDepth) => {
+  // NEW-2 (B1818257) — a cross-dock building's two truck courts are independent site elements bonded via `truckCourt.side`;
+  // the dock-layer panel's writers below edit ONLY the layer you selected, never the other side's.
+  // NEW-1 — the dock-layer panel's writers act on the SELECTED layer's own element (by id), so a buffer bonded by `prevZone`
+  // alone (no forTrailer) edits exactly like the default sequence's. Same history frame + relayout as the *OnSide pair above.
+  const setDockLayerDepth = (z, b, side, newDepth) => {
     const nd = Math.max(1, Math.round(newDepth));
     pushHistory();
-    setEls((a) => {
-      const z = findZoneIn(a, b, side, i);
-      let next = z ? a.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)) : a;
-      next = relayoutSide(next, b, side);
-      return next;
-    });
+    setEls((a) => relayoutSide(a.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)), b, side));
+  };
+  const setDockLayerLength = (z, b, side, newLen) => {
+    const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
+    pushHistory();
+    setEls((a) => relayoutSide(a.map((x) => (x.id !== z.id ? x : nl == null ? (() => { const { alongLen: _l, alongAnchor: _a, alongOff: _o, ...rest } = x; return rest; })() : { ...x, alongLen: nl })), b, side));
   };
   // The depth shown for zone index `i` (first dock side that has it).
   const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
-  /* Inline LENGTH edit for an OUTWARD zone (trailer parking, buffer, an appended layer) — the same
-   * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
-   * on that zone's `alongLen`; relayoutSide clamps it to the wall but never resets it, so the
-   * trailer can be shorter OR longer than the court and stays where it was put. `null` clears the
-   * override and the zone goes back to tracking the court.
-   * NEW-1 — a TYPED length KEEPS the current anchor (it does not silently re-centre), so a zone the
-   * owner already pulled in from its north end keeps that end put when he then types a number.
-   * Clearing the override clears the anchor with it: intent withdrawn is intent gone.
-   * NEW-2 (B1818257) — this now edits ONE side's zone only (findZoneIn(a, b, side, i), not a
-   * dockSides.forEach loop): a cross-dock building's two truck courts are independent site
-   * elements, and a typed length on one side's trailer/buffer must not pin the other side's to
-   * match. The truck court's OWN length (i===0) stays read-only regardless — B1749154, unaffected. */
-  const setZoneLengthOnSide = (b, side, i, newLen) => {
-    const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
-    pushHistory();
-    setEls((a) => {
-      const z = findZoneIn(a, b, side, i);
-      let next = z ? a.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x)) : a;
-      next = relayoutSide(next, b, side);
-      return next;
-    });
-  };
+  /* NEW-1 — the length rules (kept from the old inline edit, now `setDockLayerLength` above): a typed length keeps the current
+   * anchor (never silently re-centres), relayoutSide clamps it to the wall but never resets it, and `null` clears the override AND
+   * its anchor (intent withdrawn is intent gone). The truck court's own length is editable now (it was read-only, B1749154); its
+   * clamp window stays the CLEAR bump-out face (courtBumpOpts), so a typed length can never re-overlap a corner bump-out. */
   // Per-side "+" used by the on-canvas add nodes — adds that side's next zone, stack-compatible.
   const addZoneOnSide = (b, side) => {
     pushHistory();
@@ -21486,6 +21473,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
+  const dockPanelOn = !multiStyleable && !!selEl && isDockLayerEl(selEl);
   // NEW-1/NEW-7/NEW-8 — a real (rectangular or reshaped) building gets the redesigned inspector: the
   // header carries its number, lock and ⋯ menu, and Footprint / Loading / Structure / Appearance are Collapse sections.
   const bldgPanel = !multiStyleable && !!selEl && isBuilding(selEl) && (!selEl.points || !!selEl.footEdit);
@@ -21508,6 +21496,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </span>}
     />
   ) : null;
+  // NEW-1 — the trailer row's own stall spec + label switch, hoisted so a dock-zone trailer parking layer shows it INSIDE
+  // its Size section (DockLayerPanel `size.extra`) and a free-standing trailer court still shows it where it always did.
+  const trailerStallsNode = selEl && selEl.type === "trailer" ? (() => {
+                const tc = cfgOf(selEl);
+                const own = selEl.cfg || {};
+                const specField = (key, label, extra = {}) => (
+                  <Field label={label}>
+                    <span style={ROW4}>
+                      <NumInput style={{ ...numInput, width: 52 }} value={tc[key]} min={TRAILER_FIELD_MIN[key]} ariaLabel={`Trailer ${label}`} onCommit={(n) => setTrailerSpec(selEl.id, key, n)} />
+                      {own[key] != null && !extra.noReset
+                        ? <button title="Back to the plan Standards value" onClick={() => { pushHistory(); const { [key]: _drop, ...rest } = own; setSelEl({ cfg: Object.keys(rest).length ? rest : null }); }} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>std ↺</button>
+                        : <span style={{ fontSize: 10, color: PAL.muted }}>std</span>}
+                    </span>
+                  </Field>
+                );
+                return (
+                  <div style={{ marginTop: 6 }} data-testid="trailer-stall-spec">
+                    <div style={subHead}>Stalls</div>
+                    {!selEl.noFit && specField("trailerL", "Stall depth (ft)")}
+                    {specField("trailerW", "Stall width (ft)")}
+                    {!tc.single && specField("trailerAisle", "Drive lane (ft)")}
+                    <Field label="Label">
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FONT_SIZE.control, color: PAL.ink, cursor: "pointer" }}>
+                        <input type="checkbox" data-testid="trailer-label-toggle" checked={!selEl.labelHidden} onChange={() => toggleElLabel(selEl.id)} style={{ accentColor: PAL.accent, width: 14, height: 14 }} />
+                        <span>{selEl.labelHidden ? "Hidden" : "Shown on the plan"}</span>
+                      </label>
+                    </Field>
+                  </div>
+                );
+              })() : null;
   // B740 — the styleable members of a multi-selection (els resolved to their style host), and the
   // COMMON editable style across them (each property uniform-value-or-"mixed"). Non-styleable refs
   // (measures) are simply ignored so the user can still restyle the buildings/strips in the set.
@@ -27104,6 +27122,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           )}
+          {dockPanelOn && !propsCollapsed && (() => {
+            // NEW-1 — the dock layer's one sub-line: the host building (a link that selects it, which is how you grow /
+            // shrink every dock side at once) and the layer's place in the default sequence. Nothing else.
+            const hb = els.find((x) => x.id === selEl.attachedTo);
+            const hbNo = hb ? buildingNumbers(els).get(hb.id) : null;
+            return (
+              <div data-testid="dock-subline" style={{ display: "flex", alignItems: "baseline", gap: SPACE.md, fontSize: FONT_SIZE.label, color: "var(--text-secondary)", padding: "0 0 4px" }}>
+                {hb && <button type="button" data-testid="dock-host-link" onClick={() => setSel({ kind: "el", id: hb.id })} title="Select the building — grow or shrink every dock side at once"
+                  style={{ padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, color: "var(--accent-site-text)", textDecoration: "underline", textUnderlineOffset: 2 }}>{`Building${hbNo != null ? ` ${hbNo}` : ""} ›`}</button>}
+                <span>{dockLayerPosition(zoneIndexOf(selEl))}</span>
+              </div>
+            );
+          })()}
+          {dockRemoved && histTick === dockRemoved.tick && selEl && selEl.id === dockRemoved.hostId && (
+            <div data-testid="dock-removed-note" role="status" style={{ display: "flex", alignItems: "baseline", gap: SPACE.md, fontSize: FONT_SIZE.label, color: "var(--text-primary)", padding: "2px 0 8px" }}>
+              <span>{dockRemoved.text}</span>
+              <button type="button" data-testid="dock-removed-undo" onClick={() => { undo(); setDockRemoved(null); }}
+                style={{ padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, color: "var(--accent-site-text)", textDecoration: "underline", textUnderlineOffset: 2 }}>Undo</button>
+            </div>
+          )}
           {(bldgPanel || roadPanel || !propsCollapsed) && (<>
           {/* B740 — SHARED properties for a multi-selection: only the style props common to every
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
@@ -28084,79 +28122,77 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       )}
                     </>
                     );
-                  })() : isDockZone(selEl) ? (() => {
-                    // A dock-zone stack member (court / trailer / buffer). Edit its DEPTH inline,
-                    // and — the button Michael relies on — a "＋" to add the NEXT outward zone on
-                    // THIS side (court → trailer parking → buffer), plus a direct remove. This is the
-                    // per-zone add restored (B239): selecting the truck court gives you "＋ Add trailer
-                    // parking" again, independent of the other dock side.
+                  })() : isDockLayerEl(selEl) ? (() => {
+                    // NEW-1 (owner-approved mockup 2026-10-19) — ONE layer-properties panel for the truck court,
+                    // trailer parking and buffer (DockLayerPanel; lib/dockLayerPanel.js owns the words and rules).
+                    // Every write goes through the same history + relayout path as before (setDockLayerDepth /
+                    // setDockLayerLength / setSelEl / removeFeature), so the live redraw and the one-frame undo
+                    // are unchanged. Reads THIS layer's own element, never the other dock side's (B1818257).
                     const b = els.find((x) => x.id === selEl.attachedTo);
                     const side = b && zoneSideOf(els, selEl);
                     const i = zoneIndexOf(selEl);
-                    const n = b && side ? stackCountIn(els, b, side) : 0; // zones present on this side (1..3)
-                    const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label : null; // the next one out
+                    const along = side === "top" || side === "bottom";
+                    const curLen = Math.round(along ? selEl.w : selEl.h);
+                    const faceLen = b && side ? Math.round(courtBumpOpts(els, b, side).faceAlong) : curLen;
+                    const wallLen = b && side ? Math.round(along ? b.w : b.h) : curLen;
+                    const courtLen = (() => { const c = b && side ? findCourtIn(els, b, side) : null; return c ? Math.round(along ? c.w : c.h) : faceLen; })();
+                    const wordLower = dockLayerTitleWord(i).toLowerCase();
+                    const chain = (b && side ? dockChainOnSide(els, b, side) : []);
+                    const chainOrSelf = chain.some((z) => z.id === selEl.id) ? chain : [selEl];
+                    const removal = dockRemovalPlan({
+                      chain: chainOrSelf, idx: chainOrSelf.findIndex((z) => z.id === selEl.id),
+                      wallLabel: b && side ? dockSideCompassLabel(side, b.rot || 0) : "",
+                      nameOf: (z) => dockLayerName(z, TYPE[z.type]?.label),
+                    });
+                    const fmS = settings.floodMitigation || {};
+                    const hasGrade = FM_FILL_TYPES.has(selEl.type) && selEl.type !== "building";
+                    const g = selEl.grading || {};
+                    const clsId = hasGrade ? classifyGradeElement({ type: selEl.type, dockStack: {}, accessible: false }) : null;
+                    const rule = clsId ? GRADING_RULES[clsId] : null;
+                    const band = clsId ? slopeBand(clsId, rule) : null;
+                    const padAutoEl = hasGrade ? effectivePadElev({ ...selEl, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4 }) : null;
+                    const stroke1 = (v) => { pushHistory(); setSelEl(v); };
                     return (
-                      <>
-                        {/* NEW-2 (B1749153) — plain "Depth (ft)" / "Length (ft)", matching the
-                            sidewalk fields just below: the panel's own selection is already scoped to
-                            this one zone, so re-stating its name ("Truck court depth (ft)") in every
-                            row only pushed the one differentiating word ("depth" vs "length") off the
-                            narrow 64px label gutter — both rows clamped to an identical "Truck
-                            court…" with nothing left to tell them apart. */}
-                        <Field label="Depth (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            {/* NEW-2 (B1818257) — reads/writes THIS zone's own element, on THIS side
-                                only (zoneDepthOf(selEl, ...) / setZoneDepthOnSide), not the
-                                both-sides-mirrored zoneDepthShown/setZoneDepthAll pair below (still
-                                used by the building-level "set both at once" quick-edit). A cross-dock
-                                building's two truck courts are independent site elements — editing one
-                                no longer overwrites the other's depth. */}
-                            <NumInput style={numInput} value={b && side ? Math.round(zoneDepthOf(selEl, b, side, i)) : zoneDepthShown(selEl, i)} min={1} onCommit={(n2) => (b && side ? setZoneDepthOnSide(b, side, i, n2) : null)} />
-                            <button title="Plan standard depths for new dock zones — edit in Standards" onClick={() => jumpToStandards("dockzones")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
-                          </span>
-                        </Field>
-                        {/* NEW-3 (B1749154) — the truck court's own length is read-only: it's the
-                            clear dock-face span between the corner bump-outs, not an independent
-                            input (an outward zone's length still edits here — it can legitimately run
-                            shorter/longer than the court). Reads THIS court's own geometry (not
-                            courtLengthShown's "first dock side that has one", which on a cross-dock
-                            building would show the wrong side's length here — NEW-2/B1818257). */}
-                        {b && side && i === 0 && (
-                          <Field label="Length (ft)">
-                            <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Set by the dock wall's clear face between its corner bump-outs">
-                              {Math.round(side === "top" || side === "bottom" ? selEl.w : selEl.h)}′
-                            </span>
-                          </Field>
-                        )}
-                        {b && side && i > 0 && (
-                          <Field label="Length (ft)">
-                            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                              {/* NEW-2 (B1818257) — THIS zone's own laid-out extent + pin state, and
-                                  setZoneLengthOnSide so a typed length no longer pins the other side. */}
-                              <NumInput style={numInput} value={Math.round(side === "top" || side === "bottom" ? selEl.w : selEl.h)} min={1}
-                                onCommit={(n2) => setZoneLengthOnSide(b, side, i, n2)} />
-                              {Number.isFinite(selEl.alongLen) && selEl.alongLen > 0
-                                ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthOnSide(b, side, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
-                                : <span style={{ fontSize: 10, color: PAL.muted }} title="Matches the truck court until you set a length">auto</span>}
-                            </span>
-                          </Field>
-                        )}
-                        {b && side && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2, marginBottom: 4 }}>
-                            {nextLabel && (
-                              <button style={{ ...chip, textAlign: "left", color: PAL.info }}
-                                title={`Add ${Math.round(zoneDepthDefaults(settings)[n])}′ ${nextLabel.toLowerCase()} flush beyond this, on this dock side`}
-                                onClick={() => addZoneOnSide(b, side)}>＋ Add {nextLabel.toLowerCase()}</button>
-                            )}
-                            <button style={{ ...chip, textAlign: "left", color: PAL.danger }}
-                              title={`Remove this ${DOCK_ZONES[i].label.toLowerCase()}${n > i + 1 ? " and the zones beyond it" : ""}`}
-                              onClick={() => removeFeature(selEl.id)}>－ Remove {DOCK_ZONES[i].label.toLowerCase()}{n > i + 1 ? " (+ outer)" : ""}</button>
-                          </div>
-                        )}
-                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
-                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){b && side && dockSidesOf(b).dockSides.length > 1 ? ` · ${dockSideCompassLabel(side, b.rot || 0)} dock face, set independently of the other side` : ""}. Or select the building to grow / shrink every dock side at once.
-                        </div>
-                      </>
+                      <DockLayerPanel
+                        key={selEl.id}
+                        kind={["court", "trailer", "buffer"][i] || "layer"}
+                        removeNoun={wordLower}
+                        size={{
+                          depth: b && side ? Math.round(zoneDepthOf(selEl, b, side, i)) : zoneDepthShown(selEl, i),
+                          onDepth: (n2) => (b && side ? setDockLayerDepth(selEl, b, side, n2) : null),
+                          length: curLen, maxLength: i === 0 ? faceLen : wallLen,
+                          isFull: lengthIsFull(curLen, faceLen),
+                          onLength: (n2) => (b && side ? setDockLayerLength(selEl, b, side, n2) : null),
+                          onFullWall: () => { if (b && side) setDockLayerLength(selEl, b, side, i === 0 || Math.abs(courtLen - faceLen) < 0.5 ? null : faceLen); },
+                          area: selEl.w * selEl.h,
+                          extra: trailerStallsNode,
+                        }}
+                        grade={hasGrade ? {
+                          elevation: autoField(selEl.padElevFt, padAutoEl),
+                          onElevation: (v) => { pushHistory(); setSelEl({ padElevFt: v }); },
+                          slope: autoField(g.slopePct, band ? band.min : null),
+                          onSlope: (v) => { pushHistory(); setSelEl({ grading: { ...g, slopePct: v } }); },
+                          notice: slopeBandNotice({ slopePct: g.slopePct, band, label: `${wordLower}` }),
+                        } : null}
+                        style={{
+                          strokeColor: <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />,
+                          fillColor: <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />,
+                          weight: curStyle.strokeWidth, onWeight: (n2) => stroke1({ strokeWidth: Math.max(1, Math.min(10, n2)) }),
+                          strokeOpacity: curStyle.strokeOpacity, onStrokeOpacity: (v) => stroke1({ strokeOpacity: v }),
+                          fillOpacity: curStyle.fillOpacity, onFillOpacity: (v) => stroke1({ fillOpacity: v }),
+                        }}
+                        pinned={!!selEl.locked}
+                        onPin={() => toggleLock(selEl.id)}
+                        removal={removal}
+                        onRemove={() => {
+                          // ONE way to remove: the cascade (this layer + everything outward) in a single undo frame,
+                          // then the selection moves to the host building, which carries the "Removed" note + Undo.
+                          const hostId = b ? b.id : null;
+                          removeFeature(selEl.id);
+                          if (hostId) { setSel({ kind: "el", id: hostId }); setDockRemoved({ hostId, text: removal.note, tick: histTick + 1 }); }
+                          else setSel(null);
+                        }}
+                      />
                     );
                   })() : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? (
                     <>
@@ -28375,7 +28411,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
                       the spec sheet's GEOMETRY section above; excluded here so it isn't rendered twice
                       (was rendering as an orphaned second "Rotation (°)" row below Pin/Delete). */}
-                  {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && selEl.type !== "parking" && (
+                  {!isDockLayerEl(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && selEl.type !== "parking" && (
                   <Field label="Rotation (°)">
                     <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
                       onCommit={(deg) => rotateSelTo(deg)}
@@ -28459,37 +28495,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   overrides in `cfg` (they beat Standards, which stays the default for new rows); a dock-zone
                   member (`noFit`) takes its depth from the stack's own Depth control, so only its label switch
                   and width show. Hiding the label changes the picture only — never the count or the yield. */}
-              {selEl.type === "trailer" && (() => {
-                const tc = cfgOf(selEl);
-                const own = selEl.cfg || {};
-                const specField = (key, label, extra = {}) => (
-                  <Field label={label}>
-                    <span style={ROW4}>
-                      <NumInput style={{ ...numInput, width: 52 }} value={tc[key]} min={TRAILER_FIELD_MIN[key]} ariaLabel={`Trailer ${label}`} onCommit={(n) => setTrailerSpec(selEl.id, key, n)} />
-                      {own[key] != null && !extra.noReset
-                        ? <button title="Back to the plan Standards value" onClick={() => { pushHistory(); const { [key]: _drop, ...rest } = own; setSelEl({ cfg: Object.keys(rest).length ? rest : null }); }} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>std ↺</button>
-                        : <span style={{ fontSize: 10, color: PAL.muted }}>std</span>}
-                    </span>
-                  </Field>
-                );
-                return (
-                  <div style={{ marginTop: 6 }} data-testid="trailer-stall-spec">
-                    <div style={subHead}>Stalls</div>
-                    {!selEl.noFit && specField("trailerL", "Stall depth (ft)")}
-                    {specField("trailerW", "Stall width (ft)")}
-                    {!tc.single && specField("trailerAisle", "Drive lane (ft)")}
-                    <Field label="Label">
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FONT_SIZE.control, color: PAL.ink, cursor: "pointer" }}>
-                        <input type="checkbox" data-testid="trailer-label-toggle" checked={!selEl.labelHidden} onChange={() => toggleElLabel(selEl.id)} style={{ accentColor: PAL.accent, width: 14, height: 14 }} />
-                        <span>{selEl.labelHidden ? "Hidden" : "Shown on the plan"}</span>
-                      </label>
-                    </Field>
-                  </div>
-                );
-              })()}
+              {selEl.type === "trailer" && !isDockLayerEl(selEl) && trailerStallsNode}
               {/* Car parking's own Footprint/Stalls readout is now the spec-sheet's stat strip
                   (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {selEl.type !== "pond" && !bldgPanel && !roadPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
+              {selEl.type !== "pond" && !bldgPanel && !roadPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const poly = !!selEl.points;
                 const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
@@ -28529,7 +28538,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   dock drop; everything else at slab FF). Inline editor + Auto chip.
                   Car parking renders its own copy inside the Grading and elevation spec-sheet
                   section above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {FM_FILL_TYPES.has(selEl.type) && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
+              {FM_FILL_TYPES.has(selEl.type) && !bldgPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const fmS = settings.floodMitigation || {};
                 const drop = Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4;
                 const auto = effectivePadElev({ ...selEl, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: drop });
@@ -28555,7 +28564,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   Buildings are pinned flat at FFE — no slope control there. Car parking renders
                   its own copy (incl. the ADA checkbox) inside the Grading and elevation spec-sheet
                   section above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {FM_FILL_TYPES.has(selEl.type) && selEl.type !== "building" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
+              {FM_FILL_TYPES.has(selEl.type) && selEl.type !== "building" && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const g = selEl.grading || {};
                 const clsId = classifyGradeElement({ type: selEl.type, dockStack: (selEl.truckCourt || selEl.forCourt) ? {} : null, accessible: !!g.accessible });
                 const rule = clsId ? GRADING_RULES[clsId] : null;
@@ -28589,7 +28598,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   chords — see arrangeSel/arrangePeers and /CLAUDE.md's owner-constraints entry 10. */}
               {/* Car parking carries its own Pin/Delete footer at the bottom of the spec sheet
                   above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {selEl.type !== "pond" && !bldgPanel && !roadPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
+              {selEl.type !== "pond" && !bldgPanel && !roadPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
@@ -30113,7 +30122,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               so the standalone Properties section is suppressed for them. Car parking renders its
               own "Display" group inside the spec sheet above (B1790016 NEW-1), so it is suppressed
               here too — same reasoning as the pond exception right above. */}
-          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
+          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !bldgPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
             <Section title="Properties">
               <PairedFieldHead left="Outline" right="Fill" />
               <PairedField label="Colour"
@@ -32398,6 +32407,110 @@ function PairedFieldHead({ left, right }) {
     </div>
   );
 }
+// DockLayerPanel — NEW-1 (owner-approved mockup 2026-10-19): the ONE Properties body for a dock layer (truck court ·
+// trailer parking · buffer), parameterised by `kind`, never three copies. Presentational: every rule (Auto vs typed,
+// the band notice, what a removal takes) is in lib/dockLayerPanel.js; every write is a callback into the planner's
+// planner's writers (setDockLayerDepth / setDockLayerLength / setSelEl / removeFeature) so history, redraw and
+// tombstones behave exactly as before. Module scope (MODULE-SCOPE-COMPONENTS); `confirm` is local state keyed on
+// the selected layer by the call site. The Grade section exists only when `grade` is passed (a buffer has none today).
+const DOCK_GUTTER_W = 84;
+function DockHead({ children }) {
+  return (
+    <div style={{ fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", padding: "9px 2px 5px", marginBottom: SPACE.md, borderBottom: "1px solid var(--border-default)" }}>{children}</div>
+  );
+}
+function AutoPill({ on, onClick, label }) {
+  return (
+    <button type="button" data-testid={`dock-auto-${label}`} aria-pressed={on} onClick={onClick} onMouseDown={(e) => e.preventDefault()}
+      title={on ? "Using the computed value — type or step to set your own" : "Back to the computed value"}
+      style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 4, height: CONTROL_H.md, padding: "0 8px", borderRadius: RADIUS.pill, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600,
+        border: `1px solid ${on ? "var(--accent-site)" : "var(--border-strong)"}`, background: on ? "var(--accent-site)" : "transparent", color: on ? "var(--on-accent-site)" : "var(--text-secondary)" }}>
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 5.2 4 7.6 8.5 2.6" /></svg>Auto
+    </button>
+  );
+}
+function DockLayerPanel({ kind, size, grade, style, pinned, onPin, removal, onRemove, removeNoun }) {
+  const [confirm, setConfirm] = useState(false);
+  const muted = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
+  const autoRow = (label, tid, f, { min, max, step, onCommit, onAuto, noun }) => (
+    <Field gutter={DOCK_GUTTER_W} oneLine label={label}>
+      <span style={ROW6}>
+        <NumInput boxed boxWidth={84} testid={tid} ariaLabel={label} value={f.shown == null ? "" : f.shown} placeholder="—" min={min} max={max} step={step} coarse={step * 5}
+          muted={f.isAuto} forceCommit={f.isAuto} syncExternal onCommit={onCommit} />
+        <AutoPill on={f.isAuto} label={noun} onClick={() => { if (!f.isAuto) onAuto(); }} />
+      </span>
+    </Field>
+  );
+  const colHead = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
+  const grid = { display: "grid", gridTemplateColumns: `${DOCK_GUTTER_W}px 1fr 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md };
+  return (
+    <div data-testid="dock-layer-panel" data-dock-kind={kind}>
+      <DockHead>Size</DockHead>
+      <Field gutter={DOCK_GUTTER_W} oneLine label="Depth (ft)">
+        <NumInput boxed boxWidth={84} testid="dock-depth" ariaLabel="Depth" value={size.depth} min={1} max={MAX_DIM} step={DOCK_STEPS.depth} onCommit={size.onDepth} />
+      </Field>
+      <Field gutter={DOCK_GUTTER_W} oneLine label="Length (ft)">
+        <span style={ROW6}>
+          <NumInput boxed boxWidth={84} testid="dock-length" ariaLabel="Length" value={size.length} min={1} max={size.maxLength} step={DOCK_STEPS.length} onCommit={size.onLength} />
+          {size.isFull
+            ? <span data-testid="dock-full-wall" style={muted}>Full wall</span>
+            : <button type="button" data-testid="dock-full-wall-link" style={{ ...muted, padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", color: "var(--accent-text, var(--accent))", textDecoration: "underline", textUnderlineOffset: 2 }} onClick={size.onFullWall}>Full wall</button>}
+        </span>
+      </Field>
+      <Field gutter={DOCK_GUTTER_W} oneLine label="Area"><span data-testid="dock-area" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", fontVariantNumeric: TABULAR_NUMS }}>{f0(size.area)} SF</span></Field>
+      {size.extra}
+
+      {grade && (
+        <Collapse sectionId="dock-grade" title="Grade" defaultOpen>
+          {autoRow("Elevation (ft)", "dock-elevation", grade.elevation, { min: -1000, max: 20000, step: DOCK_STEPS.elevation, noun: "elevation",
+            onCommit: (n) => grade.onElevation(Number.isFinite(n) ? n : null), onAuto: () => grade.onElevation(null) })}
+          {autoRow("Slope (%)", "dock-slope", grade.slope, { min: 0, max: 100, step: DOCK_STEPS.slope, noun: "slope",
+            onCommit: (n) => grade.onSlope(Number.isFinite(n) ? n : null), onAuto: () => grade.onSlope(null) })}
+          {grade.notice && (
+            <div data-testid="dock-band-notice" role="status" style={{ display: "flex", alignItems: "flex-start", gap: SPACE.sm, margin: `-${SPACE.xs}px 0 ${SPACE.md}px`, fontSize: FONT_SIZE.label, color: "var(--warn-text)", lineHeight: 1.4 }}>
+              <span aria-hidden="true" style={{ flex: "none" }}>⚠</span><span>{grade.notice}</span>
+            </div>
+          )}
+        </Collapse>
+      )}
+
+      <Collapse sectionId="dock-style" title="Style" defaultOpen>
+        <div style={{ ...grid, marginBottom: SPACE.sm }}><span /><span style={colHead}>Outline</span><span style={colHead}>Fill</span></div>
+        <div style={grid}><PropLabel oneLine>Colour</PropLabel><span style={ROW6}>{style.strokeColor}</span><span style={ROW6}>{style.fillColor}</span></div>
+        <div style={grid}><PropLabel oneLine>Weight</PropLabel>
+          <span style={{ display: "flex" }}><NumInput boxed boxWidth={72} testid="dock-weight" ariaLabel="Outline weight" value={style.weight} min={1} max={10} step={DOCK_STEPS.weight} onCommit={style.onWeight} /></span><span /></div>
+        <div style={grid}><PropLabel oneLine>Opacity (%)</PropLabel>
+          <span style={{ display: "flex" }}><NumInput boxed boxWidth={72} testid="dock-outline-opacity" ariaLabel="Outline opacity" value={Math.round((style.strokeOpacity ?? 1) * 100)} min={0} max={100} step={DOCK_STEPS.opacity} onCommit={(n) => style.onStrokeOpacity(Math.max(0, Math.min(100, Math.round(n))) / 100)} /></span>
+          <span style={{ display: "flex" }}><NumInput boxed boxWidth={72} testid="dock-fill-opacity" ariaLabel="Fill opacity" value={Math.round((style.fillOpacity ?? 1) * 100)} min={0} max={100} step={DOCK_STEPS.opacity} onCommit={(n) => style.onFillOpacity(Math.max(0, Math.min(100, Math.round(n))) / 100)} /></span></div>
+      </Collapse>
+
+      <div style={{ display: "flex", gap: SPACE.md, marginTop: SPACE.xl }}>
+        <button type="button" data-testid="dock-pin" aria-pressed={pinned} onClick={onPin}
+          style={{ height: CONTROL_H.md, padding: "0 12px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600,
+            border: `1px solid ${pinned ? "var(--accent-site)" : "var(--border-strong)"}`, background: pinned ? "var(--accent-site)" : "transparent", color: pinned ? "var(--on-accent-site)" : "var(--text-primary)" }}
+          title="Pin in place: prevents accidental moves/edits">{pinned ? "Pinned" : "📌 Pin"}</button>
+        <button type="button" data-testid="dock-remove" aria-expanded={confirm} onClick={() => setConfirm((c) => !c)}
+          style={{ height: CONTROL_H.md, padding: "0 12px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, border: "1px solid var(--danger-text)", background: "transparent", color: "var(--danger-text)" }}>Remove {removeNoun}</button>
+      </div>
+      {confirm && (
+        <div data-testid="dock-remove-confirm" role="alertdialog" aria-label={`Remove ${removeNoun}`}
+          style={{ marginTop: SPACE.md, padding: SPACE.xl, border: "1px solid var(--border-strong)", borderRadius: RADIUS.md, background: "var(--surface-raised)" }}>
+          {removal.copy && <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", lineHeight: 1.45, marginBottom: SPACE.md }}>{removal.copy}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: SPACE.lg, rowGap: SPACE.xs, fontSize: FONT_SIZE.label, marginBottom: SPACE.xl }}>
+            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Now</span><span data-testid="dock-confirm-now" style={{ color: "var(--text-primary)" }}>{removal.now}</span>
+            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>After</span><span data-testid="dock-confirm-after" style={{ color: "var(--text-primary)" }}>{removal.after}</span>
+          </div>
+          <div style={{ display: "flex", gap: SPACE.md }}>
+            <button type="button" data-testid="dock-confirm-remove" onClick={() => { setConfirm(false); onRemove(); }}
+              style={{ height: CONTROL_H.md, padding: "0 12px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, border: "1px solid var(--danger-text)", background: "var(--danger-text)", color: "var(--on-accent)" }}>{removal.confirmLabel}</button>
+            <button type="button" data-testid="dock-confirm-cancel" onClick={() => setConfirm(false)}
+              style={{ height: CONTROL_H.md, padding: "0 12px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, border: "1px solid var(--border-strong)", background: "transparent", color: "var(--text-primary)" }}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 // PercentField — compact 0–100% entry for a 0–1 opacity value. A paired value column has no room
 // for a full-width slider (the mockup's deliberate call), so both OUTLINE and FILL opacity read as
 // a short number instead. Commits once (blur/Enter), like every other NumInput in these panels —
@@ -32943,7 +33056,7 @@ function LineSample({ weight }) {
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
 /* `boxed` (Building panel v3, NEW-2) draws the field as the shared NumberBox: ONE bordered box holding the value,
  * `unit` and a stacked ▲▼ (when `step` is set). Same commit/clamp/"Using N" logic — only the chrome changes. */
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid, seed }) {
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid, seed, muted = false, syncExternal = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
    * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
@@ -32963,7 +33076,10 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
    * equality-suppression, matching `BandWidthInput`'s identical fix in RoadCrossSectionDialog.jsx. */
   const dirtyRef = useRef(false);
   const fmtNum = (n) => String(Math.round(n * 1000) / 1000);
-  useEffect(() => { if (!editing.current) { setDraft(value == null ? "" : String(value)); dirtyRef.current = false; } }, [value]);
+  /* `syncExternal` (dock-layer Auto fields): after an Enter the box stays focused (`editing` stays true), so a value that then
+   * changes from OUTSIDE — the Auto pill handing back the computed number — would never reach the box. A change we did not
+   * just commit ourselves (`committedRef` is set only by our own commit) is authoritative and replaces the draft. */
+  useEffect(() => { if (!editing.current || (syncExternal && committedRef.current == null)) { setDraft(value == null ? "" : String(value)); dirtyRef.current = false; } }, [value]);
   // Clamp a candidate value the same way for a typed commit AND a stepper nudge: floor at min,
   // ceil at max (default 1e7 bounds the absurd). Reject NaN AND ±Infinity here — parseFloat("1e999")
   // is NOT NaN and Math.max(min, Infinity) stays Infinity, so a min-clamp alone can't catch it; a
@@ -33072,7 +33188,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
    * also have been rounded. */
   const note = invalidReason || altered;
   const input = (
-    <input style={boxed ? NUMBOX_INPUT_STYLE : style} data-numbox-input={boxed ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
+    <input style={boxed ? (muted ? { ...NUMBOX_INPUT_STYLE, color: "var(--text-secondary)" } : NUMBOX_INPUT_STYLE) : style} data-numbox-input={boxed ? "1" : undefined} data-muted={muted ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       aria-invalid={invalidReason ? "true" : undefined}
       /* ⛔ `aria-describedby`, not `aria-errormessage`: it is universally supported, and it also
        * carries the non-error "Using 614" note, which is not an error message at all. */
