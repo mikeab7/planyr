@@ -14,10 +14,12 @@
  */
 import { ALABAMA_VERIFICATION } from "./alabamaProvenance.js"; // NEW-1 (B2302784)
 import { KENTUCKY_VERIFICATION } from "./kyProvenance.js"; // NEW-1 (Kentucky)
+import { LOUISIANA_VERIFICATION } from "./laProvenance.js"; // NEW-1 (Louisiana 2026-10-19)
 
 export const COUNTY_VERIFICATION = {
   ...ALABAMA_VERIFICATION,
   ...KENTUCKY_VERIFICATION,
+  ...LOUISIANA_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
