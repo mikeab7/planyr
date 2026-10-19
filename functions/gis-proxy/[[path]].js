@@ -91,6 +91,10 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Pennsylvania, 2026-10-19) — PASDA (the state's data clearinghouse) hosts ONE MapServer per county for many PA counties, plus the DEP
+   * "PA_Parcels" partial statewide layer, and a number of counties run their own server. Each host is MEASURED through this relay before a county is wired to it. */
+  "mapservices.pasda.psu.edu", "maps.pasda.psu.edu", "services.pasda.psu.edu", "imagery.pasda.psu.edu", "gis.dep.pa.gov",
+  "mapping.adamscountypa.gov", "ccgis2.crawfordcountypa.net", "gis.mckeancountypa.gov", "gisportal.franklincountypa.gov",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
