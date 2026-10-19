@@ -48,6 +48,9 @@ export const ALLOWED_HOSTS = new Set([
   "insideidaho.org", // INSIDE Idaho (University of Idaho / Idaho Geospatial Office)
   "gis.idaho.gov", // State of Idaho GIS portal
   "giscenter.rdc.isu.edu", "gisu.rdc.isu.edu", // Idaho State University GIS Training & Research Center
+  "gis.idwr.idaho.gov", // Idaho Dept. of Water Resources — hosts the compiled county-assessor "Reference/Parcels" service (usage terms read before any use)
+  "gis.equatorstudios.com", // Equator Studios — vendor viewers for Twin Falls, Kootenai and others
+  "portal.kcgov.us", // Kootenai County ArcGIS portal
   /* NEW-1 (Alabama, 2026-10-16) — county/vendor hosts the Alabama candidates sit on. The sandbox cannot reach any of
    * them, so each is relayed (CORS unread) and MEASURED through this relay before a county is wired to it. */
   "web1.kcsgis.com", "web2.kcsgis.com", "web3.kcsgis.com", "web4.kcsgis.com", "web5.kcsgis.com", "web6.kcsgis.com", // KCS GIS — Revenue Commissioner viewers (Etowah, Talladega, Cullman, Colbert, Baldwin…)
