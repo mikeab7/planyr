@@ -1897,6 +1897,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Helvetica (not embedded), `Tz`-squeezed to the browser's measured widths — read the B2127664 deviations list before
   promising more. Guards: repo-root `test/` suite **pdfAnnotations** (incl. a second-library round-trip) + ui-audit
   **verify-pdf-markup-annotations** (real compose flow, poppler render parity, known-good arm).
+  **NEW-1/NEW-2 (2026-10-19, B2264688 ×2 / B2326896) — WHAT STAYS IN THE PAGE.** `annotationExtract.js` pins an object into the page only if it is
+  BEHIND the plan (`behindEls`) or later page content overlaps it in plan space (top-down pass); a promoted reference or lifted GIS layer never
+  pins a markup, an empty `data-gis-front-band` is not content. Buildings (`isBuilding`, with their `data-label-for` nodes) lift too, as
+  `family: "building"` Polygons — held to the stricter flattened-picture bar (references/GIS DO pin a building), and a parcel acreage chip over
+  a lifted building travels inside its appearance. Guards: repo-root `test/` suite **annotationExtract** (a fake SVG DOM, since vitest has no jsdom)
+  + ui-audit **verify-pdf-annotation-pins** (local preview or signed-in live).
   **B2143584 — the `/AP` stream is only what shows UNTIL a viewer REGENERATES the annotation (Bluebeam/Acrobat on any edit), so every key a regenerating viewer reads must agree with it:** FreeText `/C` is the box FILL (border in `/DA` `RG`, never `/IC`), a translucent fill's opacity is `/CA`, a cloud's `/BE /I` comes from the scallop pitch, a two-point measurement's number is its `/Cap` caption. Guards: **pdfAnnotations** (regeneration block) + ui-audit **verify-pdf-annotation-regeneration** (MuPDF `update()` drift).
   **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
   canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
