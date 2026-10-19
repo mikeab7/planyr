@@ -95,6 +95,7 @@ export const ALLOWED_HOSTS = new Set([
    * "PA_Parcels" partial statewide layer, and a number of counties run their own server. Each host is MEASURED through this relay before a county is wired to it. */
   "mapservices.pasda.psu.edu", "maps.pasda.psu.edu", "services.pasda.psu.edu", "imagery.pasda.psu.edu", "gis.dep.pa.gov",
   "mapping.adamscountypa.gov", "ccgis2.crawfordcountypa.net", "gis.mckeancountypa.gov", "gisportal.franklincountypa.gov",
+  "apps.pasda.psu.edu", "gis.delcopa.gov", "gis.beavercountypa.gov", "gis.carboncounty.com",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
