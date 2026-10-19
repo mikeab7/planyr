@@ -73,7 +73,7 @@ export const SITUS_LADDER = [
   /situs/i,
   // 2 — the land's own address under another name. `prop_?street(?!_)` matches CCAD's Prop_Street
   //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
-  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$)/i,
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$|^property_?l(oc(ation)?)?$)/i, // Kentucky (NEW-1): Simpson's `Property_L` is the situs line beside a mailing `Address_Li`
   // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
   //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
   //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
@@ -144,6 +144,8 @@ export function situsKey(attrs, { skip = null } = {}) {
         if (wantComposed === false && COMPOSED_ADDR_RE.test(lk)) continue; // already tried above
         const v = attrs[key];
         if (isPlaceholderValue(v) || looksLikeJsonBlob(v)) continue;
+        // Kentucky (NEW-1): Henderson's `LOCATION` is the jurisdiction flag ("COUNTY" / "CITY"), not an address.
+        if (/^\s*(county|city)\s*$/i.test(String(v))) continue;
         // NEW-1 (Louisiana) — below the bare-`situs` rung, a value that is a bare house NUMBER
         // ("1653", "240") is one half of a split address (Address_Nu + Street_Nam on Lafourche, St. Mary,
         // St. John, St. Bernard, Iberville, Webster), never a situs: as a card title it names nothing.
@@ -265,12 +267,14 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 // B2191xxx — `owner_?name_?\d+` is HCAD's own spelling (`owner_name_1` / `owner_name_2`); without it the
 // Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
+/* Kentucky (NEW-1, 2026-10-19): `PRCLOWNR1` is Boone County's planning-commission owner column. Fayette's PVA layer (LFUCG) has a bare `NAME`, but it is the
+ * STREET NAME of the situs (siblings NUM1 / DIR / TYPE → `ownerKey` skips it): a street shown as the owner would be a false owner. */
 /* Alabama (B2302784): `OWNER_ALL` (the Central Alabama commission's merged roll — Autauga, Montgomery), `PropertyOwner` (Madison), `FULLNAME` (Greene) and
  * `Name1` (Mobile's Revenue Commission, Shelby's DOR roll, St. Clair's `NAME_1`) are the owner column of those sources; `name_?1` is as weak as bare `name`.
  * Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
  * L15Parce_2, GIS-measured acres L15Parce_4 (GPDATA__DA / __CA are the deed / assessor acres, one of which is 0 on every row) —
  * matched by their EXACT names here (and in the situs / Account / Acreage patterns below); no other source uses them. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1)$/i;
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|prclownr1)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
 
@@ -284,6 +288,8 @@ const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]
 export function ownerKey(attrs, { skip = null } = {}) {
   if (!attrs) return null;
   let best = null, bestSeq = Infinity;
+  const ks = Object.keys(attrs).map((k) => leafKey(k).toLowerCase());
+  const streetParts = ks.includes("num1") && ks.includes("type"); // Fayette KY: NAME is the street name of the situs
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
     const lk = leafKey(key);
@@ -291,6 +297,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
     if (isPlaceholderValue(attrs[key])) continue;
     // A TABLE-PREFIXED `name` is a joined layer's own label (TaxParcels.Name = the lot number), never an owner.
     if (lk !== key && /^name$/i.test(lk)) continue;
+    if (/^name$/i.test(lk) && streetParts) continue;
     // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
     // NUMBER), so any real owner column outranks it whatever order the service lists them in.
     const seq = ownerSeq(lk) + (/^name(_?1)?$/i.test(lk) ? 1000 : 0);
