@@ -96,6 +96,8 @@ export const ALLOWED_HOSTS = new Set([
   "mapservices.pasda.psu.edu", "maps.pasda.psu.edu", "services.pasda.psu.edu", "imagery.pasda.psu.edu", "gis.dep.pa.gov",
   "mapping.adamscountypa.gov", "ccgis2.crawfordcountypa.net", "gis.mckeancountypa.gov", "gisportal.franklincountypa.gov",
   "apps.pasda.psu.edu", "gis.delcopa.gov", "gis.beavercountypa.gov", "gis.carboncounty.com",
+  /* NEW-1 (Pennsylvania) — the county-run servers the ArcGIS Online county-parcel registries (PA_AgMaps_Admin / GDITAdmin) point at; each MEASURED before wiring. */
+  "arcgis.lancastercountypa.gov", "arcgis.mobile311.com", "arcweb1.ycpc.org", "bcmaps.bradfordco.org", "ccgis.crawfordcountypa.net", "clearfieldco.org", "dcgis.co.delaware.pa.us", "gis.blairco.org", "gis.co.berks.pa.us", "gis.co.butler.pa.us", "gis.co.clarion.pa.us", "gis.co.lancaster.pa.us", "gis.dauphincounty.org", "gis.franklincountypa.gov", "gis.leoc.net:6443", "gis.lyco.org", "gis.mbakerintl.com", "gis.norrycopa.net", "gis.pikepa.org", "gismaps.mckeancountypa.org", "gisprodops.chesco.org", "gissites4.centrecountypa.gov", "mapping.adamscounty.us", "mapping.huntingdoncounty.net", "maps.clintoncountypa.gov", "maps.pottercountypa.net", "parcelviewer.geodecisions.com", "tiogagis.tiogacountypa.us", "wcsvrgis.washcopa.org", "www.monroegis.org", "www.unionco.org", "www.wcgis.us",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
