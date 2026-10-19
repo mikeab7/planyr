@@ -18,7 +18,7 @@ export const ID_ROWS = [
   ["canyon","Canyon","/gis-proxy/maps.canyonco.org/arcgisserver/rest/services/General/Canyon_County_Public_Tax_Parcels/MapServer/0","PIN","SiteAddress",null,0,43.578,-116.75,[43.262, -117.057, 43.894, -116.444]],
   ["clearwater","Clearwater","https://services2.arcgis.com/bkAz0G7Qq4dmkYCg/arcgis/rest/services/Parcels_view/FeatureServer/0","PARCEL_ID","SitusAddress",null,1,46.594,-115.537,[46.244, -116.483, 46.945, -114.591]],
   ["elmore","Elmore","https://services.arcgis.com/zuVYcGbo1L9xuj72/arcgis/rest/services/PARCEL_DATA/FeatureServer/0","PARCEL_ID","PM_PROP_AD",null,1,43.425,-115.609,[42.743, -116.274, 44.107, -114.945]],
-  ["franklin","Franklin","https://services9.arcgis.com/pf67TISFO3iTjgFX/arcgis/rest/services/fr_parcels_090226/FeatureServer/0","PIN_1","LglAddr",null,1,42.213,-111.805,[41.98, -112.136, 42.447, -111.475]],
+  ["franklin","Franklin","https://services9.arcgis.com/pf67TISFO3iTjgFX/arcgis/rest/services/fr_parcels_090226/FeatureServer/0","PIN_1","LglAddr",null,1,42.213,-111.805,[42.01, -112.136, 42.447, -111.475]],
   ["fremont","Fremont","https://services6.arcgis.com/tNgqqEFlzKrVeDPz/arcgis/rest/services/Parcels/FeatureServer/6","PIDN",null,null,0,44.313,-111.598,[43.861, -112.165, 44.765, -111.031]],
   ["idaho","Idaho","https://services7.arcgis.com/gqcDdwE7LMrYrEMJ/arcgis/rest/services/Parcels/FeatureServer/0","PS_PAR_15","PS_PROP_AD",null,1,45.882,-115.558,[45.082, -116.811, 46.681, -114.305]],
   ["jefferson","Jefferson","/gis-proxy/gisportal.co.jefferson.id.us/archost/rest/services/Assessor/Historic_Parcels/MapServer/0","PIN","PROPAD",null,1,43.834,-112.15,[43.593, -112.703, 44.074, -111.597]],
@@ -26,7 +26,7 @@ export const ID_ROWS = [
   ["latah","Latah","/gis-proxy/gis.latah.id.us/arcgis/rest/services/Parcels3/MapServer/0","PARCEL_ID","GISParcels_dbo_pcparc00_PM_PROP_AD",null,1,46.827,-116.685,[46.513, -117.062, 47.14, -116.309]],
   ["lewis","Lewis","https://services6.arcgis.com/MzNRwfxJp71yxjQd/arcgis/rest/services/POL_Parcels/FeatureServer/4","PARCEL_ID",null,null,0,46.226,-116.361,[45.965, -116.735, 46.486, -115.987]],
   ["madison","Madison","/gis-proxy/madison.rexburg.org/mrgis/rest/services/Data/Parcels/MapServer/0","PARCEL_ID","SITE_ADD",null,1,43.77,-111.678,[43.597, -111.989, 43.944, -111.368]],
-  ["owyhee","Owyhee","https://services1.arcgis.com/Qqv4dYPC8Vv8e3c3/arcgis/rest/services/D3_Parcels/FeatureServer/6","RP_NUMBER","Situs",null,1,42.837,-116.026,[41.974, -117.046, 43.699, -115.005]],
+  ["owyhee","Owyhee","https://services1.arcgis.com/Qqv4dYPC8Vv8e3c3/arcgis/rest/services/D3_Parcels/FeatureServer/6","RP_NUMBER","Situs",null,1,42.837,-116.026,[42.01, -117.046, 43.699, -115.005]],
   ["shoshone","Shoshone","https://services1.arcgis.com/DjfAyvUwdiY6gnFC/arcgis/rest/services/Shoshone_Parcels/FeatureServer/0","ID",null,null,1,47.489,-115.647,[46.901, -116.349, 48.076, -114.945]],
 ];
 export const idRaw = () => Object.fromEntries(ID_ROWS.map(([k, n, url, id, addr, scope]) => ["id_" + k, {
