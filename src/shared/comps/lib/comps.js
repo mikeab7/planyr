@@ -625,7 +625,10 @@ export function validateComp(draft) {
   // alone (period is never defaulted/guessed, on purpose) and then threw the raw
   // `comps_lease_rate_period_check`/`comps_lease_rate_requires_period` Postgres text at the user.
   // Blocked here, before any insert, the same way a missing comp type already is.
-  if (draft?.compType === "lease" && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
+  // NEW-1 (round 3, 2026-10-19) — only when a RATE is present: no rate, nothing to pick a period for
+  // (`comps_lease_rate_requires_period` is `lease_rate is null or period is not null`).
+  const hasRate = draft?.leaseRate !== "" && draft?.leaseRate != null && Number.isFinite(Number(draft.leaseRate));
+  if (draft?.compType === "lease" && hasRate && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
   // db/comps_power_docks.sql: integer columns, and phase is 1 or 3 — refused here in plain words
   // instead of surfacing the raw Postgres text.
   const blank = (v) => v === "" || v == null;
