@@ -112,6 +112,9 @@ export const ALLOWED_HOSTS = new Set([
   "gis.co.walla-walla.wa.us", // Walla Walla County
   "maps.lewiscountywa.gov", // Lewis County
   "gis.kingcounty.gov", "gisdata.kingcounty.gov", // King County
+  /* Washington gap counties (Adams, Columbia, Ferry, Garfield, Okanogan, Pacific) — vendor viewer hosts probed for a public REST layer behind them. */
+  "ferrywa-mapsifter.publicaccessnow.com", "adamswa-mapsifter.publicaccessnow.com", "columbiawa-mapsifter.publicaccessnow.com",
+  "garfieldwa-mapsifter.publicaccessnow.com", "pacificwa-mapsifter.publicaccessnow.com", "okanoganwa.mapgeo.io", "okanoganwa-mapsifter.publicaccessnow.com",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
