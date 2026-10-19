@@ -420,7 +420,7 @@ function fmtRate(n) {
 // use a DIFFERENT existing convention ("Jun 1, 2027") — this app already has two date display
 // conventions, not one; this function now follows the owner's explicit instruction for comps
 // specifically (mm/dd/yy) rather than the longer form those other modules use.
-function fmtCompDate(iso) {
+function fmtCompDateShort(iso) {
   return formatDateDisplay(iso) || null;
 }
 
@@ -461,8 +461,11 @@ export function partyLabels(compType) {
  * `displayPeriod` ("annual" | "monthly", optional) is a lease Rate row's chosen display period —
  * see `leaseRateDisplayFor`'s header. Omit it to keep showing a lease's own entered rate/period
  * untouched, exactly as before a period toggle existed anywhere. */
-export function compFieldRows(comp, displayPeriod) {
+export function compFieldRows(comp, displayPeriod, opts) {
   const rows = [];
+  // NEW-1 (site-record panel V1) — the record view prints dates ISO (YYYY-MM-DD), matching the
+  // document date beside it; every other reader (KMZ balloon, list) keeps the mm/dd/yy form.
+  const fmtCompDate = opts && opts.isoDates ? (iso) => (iso ? String(iso).slice(0, 10) : null) : fmtCompDateShort;
   const push = (key, label, value) => {
     if (value != null && value !== "") rows.push({ key, label, value });
   };
@@ -562,6 +565,53 @@ export function compFieldRows(comp, displayPeriod) {
   if (comp?.createdAt) push("dateEntered", "Date entered", fmtCompDate(String(comp.createdAt).slice(0, 10)));
   push("notes", "Notes", comp?.notes || null);
   return rows;
+}
+
+/** NEW-1 (site-record panel V1, owner-approved 2026-10-19) — the badge word for a comp's deal type. */
+export function compBadgeLabel(compType) {
+  if (compType === "land") return "LAND";
+  if (compType === "building_sale") return "SALE";
+  return "LEASE";
+}
+
+// Which section each `compFieldRows` key belongs to, in the order the record shows them. A key the
+// model grows later and this table does not name lands in DEAL (the owner's fallback), so a new
+// field can never be silently dropped from the record.
+const RECORD_DEAL_ORDER = {
+  lease: ["rate", "term", "escalation", "freeRent", "ti", "opex", "commencement", "date", "netEffective", "opexNormalized", "dateEntered"],
+  building_sale: ["price", "psf", "capRate", "noi", "date", "dateEntered"],
+  land: ["price", "psf", "size", "date", "dateEntered"],
+};
+const RECORD_BUILDING_KEYS = ["size", "clearHeight", "yearBuilt", "parcelApn"];
+const RECORD_PARTY_KEYS = ["partyProvider", "partyAcquirer", "source"];
+
+/** NEW-1 (site-record panel V1) — the single-record view's rows, grouped Deal / Building / Parties.
+ * Reads `compFieldRows` (never a second derivation, so the list, the KMZ balloon and this view
+ * cannot disagree on a formula or a label) and only SORTS them into sections. A field with no value
+ * is not in `compFieldRows`, and a section with no rows is not returned. `opts.source` is the
+ * provenance line ("flyer.pdf · 2026-01-02") when the comp is pinned on a stored plan.
+ * Land's acreage is a DEAL fact (what was sold), a lease's / building's size is a BUILDING fact.
+ * "Date entered" (when the record was added) is the Deal section's last dated row, never a Parties
+ * row — it exists on every comp, so a Parties section holding only it would make a sparse comp look
+ * fuller than it is. */
+export function compRecordSections(comp, displayPeriod, opts) {
+  const type = isCompType(comp?.compType) ? comp.compType : "lease";
+  const all = compFieldRows(comp, displayPeriod, { isoDates: true });
+  if (opts && opts.source) all.push({ key: "source", label: "Source", value: opts.source });
+  const dealOrder = RECORD_DEAL_ORDER[type];
+  const isBuildingKey = (k) => RECORD_BUILDING_KEYS.includes(k) && !(type === "land" && k === "size");
+  const relabel = (r) => (r.key === "date" && type !== "lease" ? { ...r, label: "Close date" } : r);
+  const building = all.filter((r) => isBuildingKey(r.key));
+  const parties = RECORD_PARTY_KEYS.map((k) => all.find((r) => r.key === k)).filter(Boolean);
+  const placed = new Set([...building, ...parties].map((r) => r.key));
+  const rest = all.filter((r) => !placed.has(r.key));
+  const ranked = (r) => { const i = dealOrder.indexOf(r.key); return i < 0 ? (r.key === "notes" ? 1e6 : 1e5) : i; };
+  const deal = rest.map(relabel).map((r, i) => ({ r, i })).sort((a, b) => ranked(a.r) - ranked(b.r) || a.i - b.i).map((x) => x.r);
+  return [
+    { id: "deal", title: "Deal", rows: deal },
+    { id: "building", title: "Building", rows: building },
+    { id: "parties", title: "Parties", rows: parties },
+  ].filter((sec) => sec.rows.length > 0);
 }
 
 /** Compact one-line label for a map marker / list row. `displayPeriod` ("annual" | "monthly",
