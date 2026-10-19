@@ -59,12 +59,13 @@ function Harness({ data }) {
       { id: "c2", type: "paving", truckCourt: true, attachedTo: "b2", ring: rect(x2, by + 200, 300, 110), dockStack: { x: x2 + 150, y: by + 100 } },
     ]);
   });
-  const [settings, setSettings] = useState({ grading: { layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: true } } });
+  const [settings, setSettings] = useState({ grading: { enabled: new URLSearchParams(location.search).get("off") !== "1", layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: new URLSearchParams(location.search).get("cutfill") !== "0" } } });
   const [model, setModel] = useState(null);
   const [headEl, setHeadEl] = useState(null);
   const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") === "1" ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
+  const planOn = cfg.enabled;
   const setback = useMemo(() => gradingSetback(parcels, 25), [parcels]);
   const existAt = useMemo(() => demSampler(dem, origin), [dem, origin]);
   const hosts = hostIdMap(els);
@@ -104,10 +105,13 @@ function Harness({ data }) {
   return (
     <>
       <div id="panel" style={{ fontSize: 18, width: 300 }}>
-        <React.Suspense fallback={null}><GradingController input={input} onModel={setModel} /></React.Suspense>
+        {planOn && <React.Suspense fallback={null}><GradingController input={input} onModel={setModel} /></React.Suspense>}
         {/* the SitePlanner dock: the panel chrome's header slot (the gear + info portal there), then the panel body */}
         <div id="panel-header" data-testid="panel-chrome-grading"><span>GRADING</span><span ref={setHeadEl} id="panel-header-actions" /></div>
-        <GradingPanel model={model} headerSlot={headEl} dockDropFt={4} buildableOn={!!(model && model.cfg.layers.buildable)}
+        <GradingPanel planOn={planOn} showOnMap={!!settings.grading.layers.cutfill}
+          onPlanOn={(v) => setSettings((s) => ({ grading: { ...s.grading, enabled: v } }))}
+          onShowOnMap={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, cutfill: v } } }))}
+          model={planOn ? model : null} headerSlot={headEl} dockDropFt={4} buildableOn={!!(model && model.cfg.layers.buildable)}
           onToggleBuildable={() => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, buildable: !s.grading.layers.buildable } } }))}
           onCfg={(p) => setSettings((s) => ({ grading: { ...s.grading, ...p } }))} onDockDrop={() => {}}
           onSelectBuilding={(id) => setSel(id)}
@@ -115,7 +119,7 @@ function Harness({ data }) {
           onApplyMoveFix={(id, mv) => model.actions.applyMoveFix(id, mv)} />
       </div>
       <svg id="canvas" width="1400" height="1000" style={{ background: "#e8efe6" }}>
-        {model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}
+        {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
         <polygon points={ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#0a0" strokeWidth="1.5" />
       </svg>

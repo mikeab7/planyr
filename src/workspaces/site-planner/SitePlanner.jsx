@@ -14191,7 +14191,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The model GradingController publishes (declared here, ahead of the surface inputs, because its SUGGESTED finish
   // elevations feed them — see `padElevFt` below).
   const [grModel, setGrModel] = useState(null);
-  const grBase = useGradingBase({ enabled: gradingOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback });
+  // Per-plan switch (NEW-1, amends B2315856): `gradingOn` is the owner gate; grading WORKS on this plan only when the owner has
+  // also switched it on in the Grading panel. While off, `grOn` is false and everything below is the non-owner planner.
+  const grPlanOn = gradingOn && (settings.grading || {}).enabled === true;
+  const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback });
   const grOn = grBase.on;
   const grHosts = grOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
   const gsExistAt = fmGradeAt || (grOn && grBase.existAt) || (gsMedianGrade != null ? () => gsMedianGrade : null);
@@ -14285,10 +14288,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The Grading dock item exists only while the gate says so: a refused/lost answer (sign-out, account switch) closes the
   // panel whether it was docked or floating, so nothing grading-shaped stays on screen for an account that cannot have it.
   useEffect(() => {
-    if (panelIdAllowed("grading", grOn)) return;
+    if (panelIdAllowed("grading", gradingOn)) return;
     if (leftPanel === "grading") setLeftPanel(null);
     if (isFloating("grading")) closeFloating("grading");
-  }, [grOn, leftPanel, isFloating, closeFloating]);
+  }, [gradingOn, leftPanel, isFloating, closeFloating]);
   const grSetLayer = (id, on) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), layers: { ...((sx.grading || {}).layers || {}), [id]: !!on } } }));
   // "Show buildable area on map": turns the Level-pad limit on and frames the map on it (once the mask arrives);
   // pressing it again turns the line off.
@@ -19441,7 +19444,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // panel state and every `setLeftPanel("references")` call site, and renaming it would orphan
     // them for no user gain (same shape as the `parcel`/"Land" split above).
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
-  ], grOn); // owner-only Grading item sits between Drainage and Yield; the SAME array comes back for every other account
+  ], gradingOn); // owner-only Grading item sits between Drainage and Yield; the SAME array comes back for every other account
   // NEW-1 (single-occupancy left dock, amends B656/B733): on DESKTOP the inspector only ever renders
   // as the docked "properties" panel — `openInspector` takes over the dock, it never stacks above
   // another open panel. NARROW keeps the B556 model: a tap only selects; the companion overlay is
@@ -22965,9 +22968,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* Grading (owner-only; NEW-1, amends B2315856) — the per-building cards + the Ground rows. It only READS grModel:
               the controller is mounted from this component (below) whether or not the panel is open, so the Cut & Fill layer and
               the suggested FFE paint with the panel closed and opening it never starts a build. */}
-          {_pid === "grading" && grOn && (<div data-testid="grading-metrics" style={{ display: "contents" }}>
+          {_pid === "grading" && gradingOn && (<div data-testid="grading-metrics" style={{ display: "contents" }}>
             <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted }}>Loading grading…</div>}>
-              <GradingPanel model={grModel || null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
+              <GradingPanel planOn={grOn} showOnMap={!!(settings.grading || {}).layers?.cutfill} onPlanOn={(v) => grSetCfg({ enabled: v ? true : null })}
+                onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
                 onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}

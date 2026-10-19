@@ -24,7 +24,7 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /* The owner's grading settings, normalised. Stored sparsely on `settings.grading` (additive keys beside the
  * existing B826 ones): pavement slope %, max cut-or-fill under a pad (ft), grading slope ratio (H:V), and
- * which of the two Topography layers are switched on (Level-pad limit default OFF, Cut & Fill default ON). Pavement
+ * whether grading is on for the plan (default OFF) and which of the two map layers are shown (both default OFF). Pavement
  * slope is never below 0.5%. */
 export function gradingCfg(g) {
   const src = g || {};
@@ -35,8 +35,10 @@ export function gradingCfg(g) {
     pavementSlopePct: p == null ? GRADING_DEFAULTS.pavementSlopePct : Math.max(GRADING_DEFAULTS.minPavementSlopePct, p),
     maxCutFillFt: d == null || d <= 0 ? GRADING_DEFAULTS.maxCutFillFt : d,
     slopeRatio: SLOPE_RATIOS.includes(r) ? r : GRADING_DEFAULTS.slopeRatio,
-    // Level-pad limit: OFF until asked for. Cut & Fill: ON until switched off — it is the whole point of having a building.
-    layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !(src.layers && src.layers.cutfill === false) },
+    // Per-plan switch (NEW-1, amends B2315856): grading is OFF for a plan until the owner turns it on in the Grading panel.
+    enabled: src.enabled === true,
+    // Level-pad limit and Cut & Fill (the "Show cut and fill on the map" checkbox, NEW-2): both OFF until asked for.
+    layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !!(src.layers && src.layers.cutfill) },
   };
 }
 
@@ -141,7 +143,7 @@ export function parcelsSig(parcels, baseSetback) {
 
 export function useGradingBase({ enabled, origin, parcels, gradingSettings, baseSetback }) {
   const g = gradingSettings || null;
-  const cfgKey = JSON.stringify([g && g.pavementSlopePct, g && g.maxCutFillFt, g && g.slopeRatio, g && g.layers && g.layers.buildable, g && g.layers && g.layers.cutfill]);
+  const cfgKey = JSON.stringify([g && g.enabled, g && g.pavementSlopePct, g && g.maxCutFillFt, g && g.slopeRatio, g && g.layers && g.layers.buildable, g && g.layers && g.layers.cutfill]);
   const cfg = useMemo(() => gradingCfg(g), [cfgKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const psig = enabled ? parcelsSig(parcels, baseSetback) : "";
   const parcelsRef = useRef(parcels); parcelsRef.current = parcels;
