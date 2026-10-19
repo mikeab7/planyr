@@ -107,7 +107,7 @@ function monthsFromTermText(text) {
 
 export const TYPE_OPTIONS = [
   { value: "land", label: "Land" },
-  { value: "building_sale", label: "Bldg sale" },
+  { value: "building_sale", label: "Bldg Sale" },
   { value: "lease", label: "Lease" },
 ];
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];

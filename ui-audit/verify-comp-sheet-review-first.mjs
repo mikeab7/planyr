@@ -1,12 +1,16 @@
 #!/usr/bin/env node
-/* verify-comp-sheet-review-first — NEW-1 + NEW-2 (2026-10-05).
+/* verify-comp-sheet-review-first — NEW-1 + NEW-2 (2026-10-05), round 3 (2026-10-19, NEW-1..NEW-11).
  *   NEW-1: the page-containment guard must not undo Safari's keyboard lift (focused field → scroll
  *          stays; blurred → still snaps back, drag protection intact).
  *   NEW-2: the review-first phone comp sheet, for lease / land / building sale, iPhone 13 descriptor.
  *
  *   node ui-audit/verify-comp-sheet-review-first.mjs --live https://planyr.io [--shots DIR]   (signed in as the test account)
  *   node ui-audit/verify-comp-sheet-review-first.mjs --url http://localhost:4319/              (signed out, fixture plan)
- * Nothing is saved: rows live only in the open sheet, which is cancelled at the end. */
+ * Nothing is saved: rows live only in the open sheet, which is cancelled at the end. Round 3 drives the
+ * Save path, so every non-GET Supabase REST call is STUBBED for the whole run (installed once, never
+ * removed — a tracked-site sync journalled by a save must not flush to the real cloud after the stub
+ * comes off); a POST to /comps is counted, never persisted. The save-reaches-the-call checks are live-only
+ * (a signed-out local run has no Supabase client to call). */
 import { chromium, devices } from "playwright";
 import { readFixture } from "./lib/fixtureSeeding.mjs";
 import { fixtureSeed } from "./lib/planFixture.mjs";
@@ -20,12 +24,19 @@ const BASE = LIVE || arg("--url", "http://localhost:4319/");
 const SHOTS = arg("--shots", null);
 const root = BASE.replace(/\/$/, "");
 const results = [];
+const compPosts = []; // every stubbed POST to /comps (live only)
 const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`  ${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`); };
 
 async function newPhone() {
   if (LIVE) {
     const s = await openSignedIn({ base: root, viewport: devices["iPhone 13"].viewport, contextOptions: { ...devices["iPhone 13"] } });
     console.log(`signed in as ${s.proof.email} · build ${JSON.stringify(s.build)}`);
+    await s.page.context().route((u) => /\/rest\/v1\//.test(u.href), (route) => {
+      const req = route.request();
+      if (req.method() === "GET" || req.method() === "HEAD") return route.continue();
+      if (req.method() === "POST" && /\/rest\/v1\/comps(\?|$)/.test(req.url())) compPosts.push(req.postData() || "");
+      return route.fulfill({ status: 201, contentType: "application/json", body: "[]" });
+    });
     return { page: s.page, close: s.close, build: s.build };
   }
   const exe = process.env.PW_CHROME || "/opt/pw-browsers/chromium";
@@ -60,13 +71,47 @@ const footer = (page) => page.locator('[data-footer-readback="1"]').innerText();
 const mobile = (page) => page.locator('[data-comp-entry-mobile="1"]').count();
 
 const CASES = [
-  { type: "land", line: "West Hardy tract, 42.5 AC, $9,250,000, closed 3/14/2026", footer: /42\.5 AC.*\$9,250,000.*\$5\.00\/SF/, unit: true },
-  { type: "lease", line: "120,000 SF industrial lease, $6.25/SF/yr NNN, 64 month term", footer: /\$6\.25\/SF\/yr NNN.*120,000 SF.*64 mo/, unit: false },
-  { type: "building_sale", line: "Katy building sale, $9,250,000, 120,000 SF", footer: /120,000 SF.*\$9,250,000.*\$77\.08\/SF/, unit: false },
+  { type: "land", line: "West Hardy tract, 42.5 AC, $9,250,000, closed 3/14/2026", footer: /42\.5 AC.*\$9,250,000.*\$5\.00\/SF/, unit: true, a: "Buyer", b: "Seller", date: "Closing date" },
+  { type: "lease", line: "120,000 SF industrial lease, $6.25/SF/yr NNN, 64 month term", footer: /\$6\.25\/SF\/yr NNN.*120,000 SF.*64 mo/, unit: false, a: "Tenant", b: "Landlord", date: "Date signed" },
+  { type: "building_sale", line: "Katy building sale, $9,250,000, 120,000 SF", footer: /120,000 SF.*\$9,250,000.*\$77\.08\/SF/, unit: false, a: "Buyer", b: "Seller", date: "Closing date" },
 ];
 
 const { page, close } = await newPhone();
 await page.addInitScript(() => {}); // (placeholder so the context is touched before navigation)
+
+const seg = (g, v) => page.locator(`[aria-label="${g}"] [data-seg-value="${v}"]`);
+const pill = (k) => page.locator(`[data-pill="${k}"]`);
+const pillInfo = (k) => pill(k).evaluate((el) => ({ text: el.textContent, tone: el.getAttribute("data-pill-tone"), border: getComputedStyle(el).borderTopStyle })).catch(() => null);
+const hint = (k) => page.locator(`[data-hint="${k}"]`);
+const saveBtn = () => page.locator('[data-save-button="1"]');
+// is the element fully inside the visible scroll area (above the sticky footer, below the top bar)?
+const inView = (sel) => page.evaluate((q) => {
+  const el = document.querySelector(`[data-comp-entry-mobile="1"] ${q}`);
+  const foot = document.querySelector('[data-save-button="1"]').getBoundingClientRect().top;
+  const bar = document.querySelector('[data-comp-entry-mobile="1"] button').getBoundingClientRect().bottom;
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.top >= bar - 1 && r.bottom <= foot + 1;
+}, sel);
+const scrollSheetToEnd = () => page.evaluate(() => { const sc = document.querySelector('[data-save-button="1"]').parentElement.previousElementSibling; sc.scrollTop = sc.scrollHeight; return sc.scrollHeight - sc.clientHeight; });
+const placeOnMap = async (viaWarn = false) => {
+  await (viaWarn ? hint("location-warn") : page.locator('[data-field-key="location"]')).click();
+  await pacedWait(page, 400);
+  const mb = await page.locator(".leaflet-container").first().boundingBox();
+  if (mb) { await page.touchscreen.tap(mb.x + mb.width / 2, mb.y + mb.height / 3); await pacedWait(page, 4200); }
+};
+const leave = async () => {
+  await page.getByRole("button", { name: "Cancel", exact: true }).first().click().catch(() => {});
+  await pacedWait(page, 300);
+  const dd = page.getByRole("button", { name: /discard/i }).first();
+  if (await dd.count()) await dd.click();
+  await pacedWait(page, 300);
+};
+const setRate = async (v) => {
+  const rate = page.locator('[data-field-key="leaseRate"] input');
+  await rate.tap(); await rate.fill(v); await rate.evaluate((el) => el.blur());
+  await pacedWait(page, 450);
+};
 
 for (const c of CASES) {
   console.log(`\n=== ${c.type} ===`);
@@ -75,134 +120,163 @@ for (const c of CASES) {
   check(`${c.type}: phone sheet rendered, paste panel closed after the paste`, (await mobile(page)) === 1 && (await page.locator('[data-paste-panel="1"]').count()) === 0);
   const body = await page.locator('[data-comp-entry-mobile="1"]').innerText();
   check(`${c.type}: no "Needed to save" anywhere`, !/needed to save|before you save/i.test(body));
+  check(`${c.type}: no Parties section`, !/^parties$/im.test(body));
+  check(`${c.type}: no "Nothing entered yet" text`, !/nothing entered yet/i.test(body));
+  check(`${c.type}: type control reads "Bldg Sale" (capital S)`, (await seg("Comp type", "building_sale").innerText()) === "Bldg Sale");
   check(`${c.type}: no separate Unit row`, (await page.locator('[data-field-key="landSizeUnit"]').count()) === 0);
   const toggle = await page.locator('[aria-label="Size unit"]').count();
   check(`${c.type}: AC|SF toggle ${c.unit ? "present" : "absent"}`, c.unit ? toggle === 1 : toggle === 0);
+  // Deal group order: Location, Tenant/Buyer, Landlord/Seller, Size
+  const ys = await page.evaluate(([a, b]) => ["location", "partyAcquirer", "partyProvider", "size"].map((k) => document.querySelector(`[data-field-key="${k}"]`)?.getBoundingClientRect().top ?? -1), [c.a, c.b]);
+  const labels = await page.evaluate(() => ["partyAcquirer", "partyProvider"].map((k) => document.querySelector(`[data-field-key="${k}"] span`)?.textContent));
+  check(`${c.type}: Deal order is Location → ${c.a} → ${c.b} → Size`, ys.every((y) => y >= 0) && ys[0] < ys[1] && ys[1] < ys[2] && ys[2] < ys[3] && labels[0] === c.a && labels[1] === c.b, `${labels} ${ys.map(Math.round)}`);
   if (c.type === "lease") {
-    check("lease: Monthly|Yearly, NNN|Gross and months|years toggles present",
-      (await page.locator('[aria-label="Rate period"]').count()) === 1 && (await page.locator('[aria-label="Rate basis"]').count()) === 1 && (await page.locator('[aria-label="Term unit"]').count()) === 1);
+    check("lease: no separate Monthly|Yearly / NNN|Gross toggle row or months|years toggle", (await page.locator('[role="group"][aria-label="Rate period"]').count()) === 0 && (await page.locator('[role="group"][aria-label="Rate basis"]').count()) === 0 && (await page.locator('[role="group"][aria-label="Term unit"]').count()) === 0);
+    const pp = await pillInfo("period"), bp = await pillInfo("basis"), tp = await pillInfo("term-unit");
+    check("lease: pasted explicit period shows a SOLID `/yr` pill (not a guess)", pp?.text === "/yr" && pp.tone === "solid" && pp.border === "solid", JSON.stringify(pp));
+    check("lease: basis pill reads NNN, term pill reads mo", bp?.text === "NNN" && tp?.text === "mo", `${bp?.text}/${tp?.text}`);
+    check("lease: no guess hint when the period was stated", (await hint("period-guess").count()) === 0 && (await hint("period-warn").count()) === 0);
   }
   check(`${c.type}: "Place on map" before arming`, /Place on map/.test(await page.locator('[data-field-key="location"]').innerText()));
   const fb = await footer(page);
   check(`${c.type}: footer read-back matches pasted values`, c.footer.test(fb), fb);
-  const saveTxt = await page.locator('[data-save-button="1"]').innerText();
-  check(`${c.type}: Save copy while unplaced`, /Place it on the map to save|Pick monthly or yearly to save/.test(saveTxt), saveTxt);
-
-  // (e) an empty "Clear height" chip mounts a focused input (building_sale + lease only)
+  const sv = await saveBtn();
+  check(`${c.type}: Save is never disabled and reads "Save comp" with no pin`, !(await sv.isDisabled()) && (await sv.innerText()) === "Save comp", await sv.innerText());
+  // (e) an empty chip mounts a focused input; the date chip carries the new label
+  const dateLabel = (await page.locator('[data-add-chip="compDate"]').count()) ? await page.locator('[data-add-chip="compDate"]').innerText() : await page.locator('[data-field-key="compDate"] span').first().innerText();
+  check(`${c.type}: date field (chip or row) reads "${c.date}"`, dateLabel.includes(c.date) && !/Lease signed|Closed\b/.test(dateLabel), dateLabel);
   if (c.type !== "land") {
     const chip = page.locator('[data-add-chip="clearHeightFt"]');
-    check(`${c.type}: Clear height chip present`, (await chip.count()) === 1);
-    if (await chip.count()) {
-      await chip.click();
-      await pacedWait(page, 250);
-      const focusedLabel = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
-      check(`${c.type}: tapping the chip mounts a FOCUSED input`, focusedLabel === "Clear height", String(focusedLabel));
-      await page.keyboard.press("Escape");
-    }
+    check(`${c.type}: Clear height chip present under "Add more"`, (await chip.count()) === 1 && /add more/i.test(await page.locator('[data-comp-entry-mobile="1"]').innerText()));
+    // "Details" is shown only when at least one extra holds a value (a pasted lease carries a note, so it has one)
+    const extraRows = await page.evaluate(() => ["clearHeightFt", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate", "leaseFreeRentMonths", "leaseTi", "bldgNoi", "bldgCapRate", "compDate", "notes"].filter((k) => document.querySelector(`[data-comp-entry-mobile="1"] label[data-field-key="${k}"]`)).length);
+    check(`${c.type}: "Details" caption is shown only when an extra has a value (${extraRows} extra row(s))`, /^details$/im.test(await page.locator('[data-comp-entry-mobile="1"]').innerText()) === (extraRows > 0));
+    await chip.click();
+    await pacedWait(page, 250);
+    const focusedLabel = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+    check(`${c.type}: tapping the chip mounts a FOCUSED input`, focusedLabel === "Clear height", String(focusedLabel));
+    check(`${c.type}: the field moved up under a "Details" caption`, /^details$/im.test(await page.locator('[data-comp-entry-mobile="1"]').innerText()) && (await page.locator('[data-add-chip="clearHeightFt"]').count()) === 0);
+    await page.keyboard.press("Escape");
   }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${c.type}-rest.png` });
 
-  // (c) pick on the map → "Place on map" ABSENT afterwards
-  await page.locator('[data-field-key="location"]').click();
-  await pacedWait(page, 400);
-  check(`${c.type}: arming minimises the sheet to the banner`, (await mobile(page)) === 0);
-  const mapBox = await page.locator(".leaflet-container").first().boundingBox();
-  if (mapBox) {
-    await page.touchscreen.tap(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 3);
-    await pacedWait(page, 4200);
-  }
-  check(`${c.type}: sheet restored after the pick`, (await mobile(page)) === 1);
+  // NEW-9: tap Save with no pin → no save; Location scrolled into view, flagged, inline line
+  const range = await scrollSheetToEnd();
+  await pacedWait(page, 200);
+  const outBefore = range > 0 ? !(await inView('[data-field-key="location"]')) : null;
+  const before = compPosts.length;
+  await saveBtn().click();
+  await pacedWait(page, 1000);
+  if (outBefore === true) check(`${c.type}: Location row was OUT of view before the Save tap (precondition)`, true);
+  else console.log(`   (note: ${c.type} sheet fits without scrolling — scroll-into-view is not separately observable here)`);
+  check(`${c.type}: Save tap with no pin scrolls Location into view`, await inView('[data-field-key="location"]'));
+  check(`${c.type}: inline "Place it on the map to save." under Location`, (await hint("location-warn").count()) === 1 && /Place it on the map to save\./.test(await hint("location-warn").innerText()));
+  check(`${c.type}: that tap saved nothing`, compPosts.length === before);
+
+  // (c) tapping the inline line arms the map pick like the row does
+  await placeOnMap(true);
+  check(`${c.type}: tapping the inline line armed the pick (sheet restored after)`, (await mobile(page)) === 1);
   if ((await mobile(page)) === 1) {
     const loc = await page.locator('[data-field-key="location"]').innerText();
     check(`${c.type}: "Place on map" ABSENT after the pick`, !/Place on map/.test(loc), loc.replace(/\n/g, " | "));
-    const s2 = await page.locator('[data-save-button="1"]').innerText();
-    if (c.type !== "lease") check(`${c.type}: Save enabled after placement`, /^Save \d+ comp/.test(s2), s2);
+    check(`${c.type}: inline warn line gone once placed`, (await hint("location-warn").count()) === 0);
+    const s2 = await saveBtn().innerText();
+    check(`${c.type}: Save still reads "Save comp"`, s2 === "Save comp", s2);
   }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${c.type}-placed.png` });
-  // leave: Cancel (discard prompt may appear — keep it test-artifact clean)
-  await page.getByRole("button", { name: "Cancel", exact: true }).first().click().catch(() => {});
-  await pacedWait(page, 300);
-  const discard = page.getByRole("button", { name: /discard/i }).first();
-  if (await discard.count()) await discard.click();
-  await pacedWait(page, 300);
+  await leave();
 }
 
-/* ---- B2138081 follow-ups (2026-10-08): header name, segmented type, spacing, Save copy, land Price ---- */
-console.log("\n=== follow-ups: header name · type control · lease spacing · land Save copy + Price ===");
-const seg = (g, v) => page.locator(`[aria-label="${g}"] [data-seg-value="${v}"]`);
-const box = (loc) => loc.first().boundingBox();
-const placeOnMap = async () => {
-  await page.locator('[data-field-key="location"]').click();
-  await pacedWait(page, 400);
-  const mb = await page.locator(".leaflet-container").first().boundingBox();
-  if (mb) { await page.touchscreen.tap(mb.x + mb.width / 2, mb.y + mb.height / 3); await pacedWait(page, 4200); }
-};
+/* ---- round 3: lease rate pills, the period guess, term, deal name, Save routing ---- */
+console.log("\n=== round 3 — lease: rate pills, guess, term, deal name ===");
 await openSheet(page);
-await paste(page, "120,000 SF industrial lease, $6.25/SF NNN, 64 month term"); // no period → a blocking lease flag, on purpose
-// (a) the header name is a text input; tapping it focuses it and opens no picker
-check("(a) header has NO <select> anywhere in the sheet", (await page.locator('[data-comp-entry-mobile="1"] select').count()) === 0);
-const nb = await box(page.locator('[data-deal-name="1"]'));
-await page.touchscreen.tap(nb.x + 20, nb.y + nb.height / 2);
-await pacedWait(page, 300);
-const focusedName = await page.evaluate(() => { const a = document.activeElement; return a && a.tagName === "INPUT" && a.getAttribute("data-deal-name") === "1"; });
-check("(a) tapping the header name focuses a text input", focusedName);
-await page.keyboard.type("Cypress test deal");
-await page.keyboard.press("Enter");
-await pacedWait(page, 300);
-check("(a) the typed name stays in the header input", (await page.locator('[data-deal-name="1"]').inputValue()) === "Cypress test deal");
-check("(a) no `Name` row in the Deal group", (await page.locator('[data-field-key="title"][data-field-editor]').count()) === 0 && !(await page.locator('[data-comp-entry-mobile="1"] label span', { hasText: /^Name$/ }).count()));
-check("(a) the header input sits above the Deal group's Location row", (await box(page.locator('[data-deal-name="1"]'))).y < (await box(page.locator('[data-field-key="location"]'))).y);
-// (c) lease spacing (set a rate first)
-const rate = page.locator('[data-field-key="leaseRate"] input');
-await rate.tap(); await rate.fill("0.62"); await page.keyboard.press("Escape"); await rate.fill("0.62"); await rate.blur();
-await pacedWait(page, 300);
-const g = await page.evaluate(() => {
-  const row = document.querySelector('[data-field-key="leaseRate"]');
-  const spans = [...row.querySelectorAll("span")];
-  const label = spans[0].getBoundingClientRect();
-  const dollar = spans.find((e) => e.textContent === "$")?.getBoundingClientRect();
-  const sf = spans.find((e) => e.textContent === "/SF")?.getBoundingClientRect();
-  const input = row.querySelector("input").getBoundingClientRect();
-  const per = document.querySelector('[aria-label="Rate period"]').getBoundingClientRect();
-  const bas = document.querySelector('[aria-label="Rate basis"]').getBoundingClientRect();
-  return { label: label.left, dollarRight: dollar?.right, inputLeft: input.left, sfRight: sf?.right, perLeft: per.left, perW: per.width, basRight: bas.right, basW: bas.width, gap: bas.left - per.right };
-});
-console.log("   lease geometry:", JSON.stringify(g));
-check("(c) `$` hugs the rate number (right edge within 6px of the number's left edge)", g.dollarRight != null && Math.abs(g.inputLeft - g.dollarRight) <= 6, `gap ${(g.inputLeft - g.dollarRight).toFixed(1)}px`);
-check("(c) Monthly|Yearly left edge lines up with the Rate label", Math.abs(g.perLeft - g.label) <= 1.5, `${g.perLeft} vs ${g.label}`);
-check("(c) Yearly/Gross group right edge lines up with the value's right edge", Math.abs(g.basRight - g.sfRight) <= 2, `${g.basRight} vs ${g.sfRight}`);
-check("(c) the two toggle groups are equal width with a 16px gap", Math.abs(g.perW - g.basW) <= 1.5 && Math.abs(g.gap - 16) <= 1.5, `${g.perW}/${g.basW} gap ${g.gap}`);
-const hts = await page.evaluate(() => ["Comp type", "Rate period", "Rate basis", "Term unit"].map((n) => Math.round(document.querySelector(`[aria-label="${n}"]`).getBoundingClientRect().height)));
-check("(c) Term's toggle has the same height as the rate toggles", new Set(hts).size === 1, hts.join("/"));
-if (SHOTS) await page.screenshot({ path: `${SHOTS}/followup-lease-rest.png` });
-// (b) the segmented type control switches lease → land → bldg sale and the fields change
-await seg("Comp type", "land").tap(); await pacedWait(page, 300);
-check("(b) → Land: AC|SF toggle appears, Rate row gone", (await page.locator('[aria-label="Size unit"]').count()) === 1 && (await page.locator('[data-field-key="leaseRate"]').count()) === 0);
-check("(b) the Land → AC default fired", (await page.locator('[aria-label="Size unit"] [aria-pressed="true"]').getAttribute("data-seg-value")) === "ac");
-await seg("Comp type", "building_sale").tap(); await pacedWait(page, 300);
-check("(b) → Bldg sale: Price + NOI rows, no AC|SF toggle", (await page.locator('[data-field-key="price"]').count()) === 1 && (await page.locator('[data-field-key="bldgNoi"]').count() + await page.locator('[data-add-chip="bldgNoi"]').count()) === 1 && (await page.locator('[aria-label="Size unit"]').count()) === 0);
-await seg("Comp type", "lease").tap(); await pacedWait(page, 300);
-check("(b) → Lease: Rate period toggle is back", (await page.locator('[aria-label="Rate period"]').count()) === 1);
-check("(b) the name survived the type switches", (await page.locator('[data-deal-name="1"]').inputValue()) === "Cypress test deal");
-// (d)+(e) land with location placed and size/price empty (the lease's stale period flag must not leak)
-await seg("Comp type", "land").tap(); await pacedWait(page, 300);
-const unplaced = await page.locator('[data-save-button="1"]').innerText();
-check("(d) land, unplaced: Save copy names the map, not mo/yr", /Place it on the map to save/.test(unplaced), unplaced);
+await paste(page, "120,000 SF industrial lease"); // no rate, no term, no period
+check("blank-rate lease: no pills until a rate is typed", (await pill("period").count()) === 0 && (await pill("basis").count()) === 0 && (await pill("term-unit").count()) === 0);
+check("blank-rate lease: no period hint while there is no rate", (await hint("period-warn").count()) === 0 && (await hint("period-guess").count()) === 0);
+// header: deal name reads as a field
+const nameInfo = await page.locator('[data-deal-name="1"]').evaluate((el) => ({ ph: el.placeholder, border: getComputedStyle(el).borderBottomWidth, bstyle: getComputedStyle(el).borderBottomStyle }));
+check("deal name: placeholder `Add a deal name` with a thin underline", nameInfo.ph === "Add a deal name" && nameInfo.border === "1px" && nameInfo.bstyle === "solid", JSON.stringify(nameInfo));
+check("deal name: no fallback hint with no tenant", (await hint("name-fallback").count()) === 0);
+const ten = page.locator('[data-field-key="partyAcquirer"] input');
+await ten.tap(); await ten.fill("Acme Logistics"); await ten.evaluate((el) => el.blur()); await pacedWait(page, 300);
+check('deal name: blank + Tenant → `Will save as "Acme Logistics"`', /Will save as .Acme Logistics./.test(await hint("name-fallback").innerText().catch(() => "")));
+check("deal name: the name field itself stays empty (fallback is applied at save, not typed in)", (await page.locator('[data-deal-name="1"]').inputValue()) === "");
+const nm = page.locator('[data-deal-name="1"]');
+await nm.tap(); await page.keyboard.type("Typed name"); await page.keyboard.press("Enter"); await pacedWait(page, 300);
+check("deal name: typed name wins and the hint is gone", (await hint("name-fallback").count()) === 0 && (await nm.inputValue()) === "Typed name");
+// 0.62 → guessed /mo, dashed
+await setRate("0.62");
+let pi = await pillInfo("period");
+check("rate 0.62: dashed amber `/mo` guess pill", pi?.text === "/mo" && pi.tone === "guess" && pi.border === "dashed", JSON.stringify(pi));
+check("rate 0.62: quiet hint `Guessed monthly from the rate. Tap /mo to change.`", /Guessed monthly from the rate\. Tap \/mo to change\./.test(await hint("period-guess").innerText().catch(() => "")));
+const rowLine = await page.evaluate(() => { const r = document.querySelector('[data-field-key="leaseRate"]').textContent; return r; });
+check("rate row: label Rate, `$0.62`, `/SF`, period + basis pills on ONE row", /Rate.*\$.*0\.62.*\/SF.*\/mo.*NNN/.test(rowLine.replace(/\s+/g, "")) || (/Rate/.test(rowLine) && /\/SF/.test(rowLine) && /\/mo/.test(rowLine) && /NNN/.test(rowLine)), rowLine);
+const g = await page.evaluate(() => { const row = document.querySelector('[data-field-key="leaseRate"]'); const sp = [...row.querySelectorAll("span")]; const d = sp.find((e) => e.textContent === "$")?.getBoundingClientRect(); const i = row.querySelector("input").getBoundingClientRect(); return { gap: i.left - d.right }; });
+check("rate row: `$` hugs the number", Math.abs(g.gap) <= 6, `${g.gap.toFixed(1)}px`);
+if (SHOTS) await page.screenshot({ path: `${SHOTS}/lease-guess-rest.png` });
+await pill("period").tap(); await pacedWait(page, 400);
+pi = await pillInfo("period");
+check("tap: `/mo` flips to `/yr`, SOLID, hint gone", pi?.text === "/yr" && pi.tone === "solid" && pi.border === "solid" && (await hint("period-guess").count()) === 0, JSON.stringify(pi));
+await setRate("0.5");
+check("locked: a further rate edit never re-guesses (still `/yr`)", (await pillInfo("period"))?.text === "/yr");
+await pill("basis").tap(); await pacedWait(page, 300);
+check("NNN pill flips to Gross (and back)", (await pillInfo("basis"))?.text === "Gross");
+await pill("basis").tap(); await pacedWait(page, 300);
+check("Gross flips back to NNN", (await pillInfo("basis"))?.text === "NNN");
+await setRate("");
+check("rate cleared: the pills disappear", (await pill("period").count()) === 0 && (await pill("basis").count()) === 0);
+// Term pill
+const term = page.locator('[data-field-key="leaseTerm"] input');
+await term.tap(); await term.fill("5"); await term.evaluate((el) => el.blur()); await pacedWait(page, 400);
+check("term: pill reads `mo` once a term is typed", (await pillInfo("term-unit"))?.text === "mo");
+await pill("term-unit").tap(); await pacedWait(page, 300);
+check("term: tapping flips `mo` → `yr`", (await pillInfo("term-unit"))?.text === "yr");
+await pill("term-unit").tap(); await pacedWait(page, 300);
+check("term: flips back to `mo`", (await pillInfo("term-unit"))?.text === "mo");
+await leave();
+
+console.log("\n=== round 3 — lease: 6.25 guesses /yr; 2.5 stays unpicked ===");
+await openSheet(page);
+await paste(page, "120,000 SF industrial lease");
+await setRate("6.25");
+pi = await pillInfo("period");
+check("rate 6.25: dashed `/yr` guess pill", pi?.text === "/yr" && pi.tone === "guess" && pi.border === "dashed", JSON.stringify(pi));
+check("rate 6.25: hint says yearly", /Guessed yearly from the rate\. Tap \/yr to change\./.test(await hint("period-guess").innerText().catch(() => "")));
+await setRate("");
+check("rate cleared while still a guess: the guess clears too (no pills, no hint)", (await pill("period").count()) === 0 && (await hint("period-guess").count()) === 0);
+await setRate("2.5");
+pi = await pillInfo("period");
+check("rate 2.5: unpicked — warn pill `/mo or /yr?`", pi?.text === "/mo or /yr?" && pi.tone === "warn", JSON.stringify(pi));
+check("rate 2.5: warn hint `Monthly or yearly? They differ by 12x.`", /Monthly or yearly\? They differ by 12x\./.test(await hint("period-warn").innerText().catch(() => "")));
 await placeOnMap();
-if ((await mobile(page)) === 1) {
-  const landSave = await page.locator('[data-save-button="1"]').innerText();
-  check("(d) land, placed, size/price empty: Save copy never says mo/yr (it is saveable)", !/mo or yr|monthly or yearly/i.test(landSave) && /^Save 1 comp/.test(landSave), landSave);
-  const price = page.locator('[data-field-key="price"]');
-  const pin = price.locator("input");
-  check("(e) land Price is a mounted input with the `Add` placeholder", (await pin.count()) === 1 && (await pin.getAttribute("placeholder")) === "Add" && (await price.getAttribute("data-field-editor")) === "text" && !/—/.test(await price.innerText()));
-  const sizeG = await page.evaluate(() => { const r = document.querySelector('[data-field-key="size"]'); return { h: r.querySelector('[aria-label="Size unit"]').getBoundingClientRect().height, term: 0 }; });
-  check("(e) land AC|SF toggle is the same height as the other toggles", sizeG.h === hts[0], `${sizeG.h} vs ${hts[0]}`);
-  if (SHOTS) await page.screenshot({ path: `${SHOTS}/followup-land-rest.png` });
-} else check("(d) sheet restored after the pick", false);
-await page.getByRole("button", { name: "Cancel", exact: true }).first().click().catch(() => {});
-await pacedWait(page, 300);
-{ const dd = page.getByRole("button", { name: /discard/i }).first(); if (await dd.count()) await dd.click(); }
-await pacedWait(page, 300);
+check("rate 2.5, placed: Save still reads Save comp and is enabled", (await mobile(page)) === 1 && (await saveBtn().innerText()) === "Save comp" && !(await saveBtn().isDisabled()));
+{
+  const before = compPosts.length;
+  const range = await scrollSheetToEnd(); await pacedWait(page, 200);
+  const out = range > 0 ? !(await inView('[data-field-key="leaseRate"]')) : null;
+  await saveBtn().click(); await pacedWait(page, 1000);
+  console.log(`   (Rate row out of view before the tap: ${out})`);
+  check("rate without a period, no guess: Save tap scrolls the Rate row into view", await inView('[data-field-key="leaseRate"]'));
+  check("…and shows its warn hint, and saves nothing", (await hint("period-warn").count()) === 1 && compPosts.length === before);
+}
+await leave();
+
+if (LIVE) {
+  console.log("\n=== round 3 — blank lease WITH a pin reaches the save call (stubbed, nothing persisted) ===");
+  await openSheet(page);
+  await paste(page, "120,000 SF industrial lease");
+  await placeOnMap();
+  check("blank lease, placed: Save reads `Save comp`, enabled", (await mobile(page)) === 1 && (await saveBtn().innerText()) === "Save comp" && !(await saveBtn().isDisabled()));
+  const before = compPosts.length;
+  await saveBtn().click(); await pacedWait(page, 2500);
+  check("blank lease with a pin: the tap reaches the save call (stubbed POST /comps)", compPosts.length === before + 1, `${compPosts.length - before} POST(s)`);
+  if (compPosts.length > before) {
+    let body = []; try { body = JSON.parse(compPosts[compPosts.length - 1]); } catch (_) {}
+    const r0 = Array.isArray(body) ? body[0] : body;
+    check("…with a null rate and a null period (nothing invented)", r0 && r0.lease_rate == null && r0.lease_rate_period == null, JSON.stringify({ r: r0?.lease_rate, p: r0?.lease_rate_period }));
+  }
+  await leave();
+} else console.log("\n(note: the save-reaches-the-call checks need --live — a signed-out local run has no Supabase client)");
 
 console.log("\n=== NEW-1: keyboard lift is not undone by the page-containment guard ===");
 await openSheet(page);
