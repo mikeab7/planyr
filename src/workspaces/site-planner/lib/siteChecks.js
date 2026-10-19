@@ -20,7 +20,7 @@ import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { classifyWell } from "./wellStatus.js";
 import { toGrid, screenProximity } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
-import { siteWindow, clipRingToWindow } from "./jurisdictionShare.js";
+import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
 
 const FT_PER_MI = 5280;
 const EDGE = 1e-6; // a feature EXACTLY at the radius is inside it (≤, not <): float dust must not flip that
@@ -225,32 +225,10 @@ export function compassFrom(dx, dy, inside = false) {
 }
 
 /* ── measurements ────────────────────────────────────────────────────────────────────────────── */
-/* ⛔ WINDOW FIRST (problem report 6cea9895, 2026-10-19). FEMA publishes the all-clear as polygons, and in much of Georgia
- * the "AREA OF MINIMAL FLOOD HAZARD" Zone X is ONE county-scale polygon: on the Chehaw Rd parcel it was 702,524 vertices.
- * clipper's cost is superlinear in vertex count, so measuring it whole held the owner's main thread for 6 s (34 s in Node,
- * 26 s in the sandbox's headless Chromium) inside the FEMA response's continuation. Every feature ring is therefore cut
- * to a window around the site BEFORE any projection or clipping (Sutherland–Hodgman in lon/lat — the same cut the
- * jurisdiction share pass uses, B2208416). Nothing on the site is removed: the site lies inside the window by
- * WINDOW_PAD_M on every side, every number here is an area or a side INTERSECTED WITH THE SITE, and the artificial edges
- * the cut creates lie on the window border. Rings are cut independently (outer and holes), which is exact for the
- * even-odd region `featurePaths` forms. Measured on the real answer: identical results (test/siteChecksWindow). */
-export const WINDOW_PAD_M = 300;
-export function windowFeatures(siteRings, features, padM = WINDOW_PAD_M) {
-  const w = Number.isFinite(padM) ? siteWindow(siteRings, padM) : null;
-  if (!w) return features || [];
-  const inside = (r) => { for (const p of r) if (p[0] < w.minx || p[0] > w.maxx || p[1] < w.miny || p[1] > w.maxy) return false; return true; };
-  const out = [];
-  for (const f of features || []) {
-    const rings = [];
-    for (const r of f.rings || []) {
-      if (!r || r.length < 3) continue;
-      const c = inside(r) ? r : clipRingToWindow(r, w);
-      if (c) rings.push(c);
-    }
-    if (rings.length) out.push({ ...f, rings });
-  }
-  return out;
-}
+/* ⛔ WINDOW FIRST (problem report 6cea9895): every polygon is cut to a window around the site before it is measured —
+ * one county-scale FEMA polygon measured whole held the owner's main thread for 6 s. The rule and its proof live in
+ * featureWindow.js; re-exported here for the measurement's callers. */
+export { windowFeatures, WINDOW_PAD_M };
 
 /* FLOOD. `features` = [{ rings (lng/lat), zone, subtype }]. Three disjoint classes are formed BEFORE any
  * area is read: SFHA (the 1% / 100-yr, floodway included), shaded X (the 0.2% / 500-yr) MINUS the SFHA

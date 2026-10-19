@@ -65,3 +65,38 @@ describe("the measurement never runs in the response's own continuation", () => 
     }
   });
 });
+
+describe("the worker transport's answer-level cut (featureWindow.windowArcgisAnswer)", async () => {
+  const { windowArcgisAnswer } = await import("../src/workspaces/site-planner/lib/featureWindow.js");
+  const { windowedFetchImpl, workerAvailable } = await import("../src/workspaces/site-planner/lib/siteChecksTransport.js");
+  const answer = { objectIdFieldName: "OBJECTID", exceededTransferLimit: false,
+    features: fx.flood.map((f) => ({ attributes: f.attrs, geometry: { rings: f.rings, spatialReference: { wkid: 4326 } } })) };
+  it("cuts the geometry and keeps everything else (attributes, paging fields, spatial reference)", () => {
+    const w = windowArcgisAnswer(answer, rings);
+    expect(w.objectIdFieldName).toBe("OBJECTID");
+    expect(w.exceededTransferLimit).toBe(false);
+    expect(w.features.map((f) => f.attributes)).toEqual(answer.features.map((f) => f.attributes));
+    expect(w.features[1].geometry.spatialReference).toEqual({ wkid: 4326 });
+    expect(verts(w.features.map((f) => ({ rings: f.geometry.rings })))).toBeLessThan(12000);
+  });
+  it("measuring the windowed answer gives the same numbers as the full one", () => {
+    const w = windowArcgisAnswer(answer, rings);
+    expect(measureFlood(rings, [], w.features.map((f) => ({ rings: f.geometry.rings, zone: f.attributes.FLD_ZONE, subtype: f.attributes.ZONE_SUBTY })))).toEqual(fx.fullMeasure.flood);
+  });
+  it("a feature the cut would empty keeps its real geometry (never a geometry-less feature)", () => {
+    const [lng, lat] = fx.ringLngLat[0];
+    const far = { attributes: { FLD_ZONE: "X" }, geometry: { rings: [[[lng + 1, lat + 1], [lng + 1.01, lat + 1], [lng + 1.01, lat + 1.01], [lng + 1, lat + 1]]] } };
+    expect(windowArcgisAnswer({ features: [far] }, rings).features[0].geometry.rings).toEqual(far.geometry.rings);
+  });
+  it("with no Worker (Node) the transport falls back to a main-thread fetch that still windows", async () => {
+    expect(workerAvailable()).toBe(false);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => answer });
+    try {
+      const res = await windowedFetchImpl(rings)("https://example.test/q", { method: "GET" });
+      const j = await res.json();
+      expect(res.ok).toBe(true);
+      expect(verts(j.features.map((f) => ({ rings: f.geometry.rings })))).toBeLessThan(12000);
+    } finally { globalThis.fetch = realFetch; }
+  });
+});
