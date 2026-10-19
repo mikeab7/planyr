@@ -6,7 +6,7 @@
 import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import GradingController from "../../src/workspaces/site-planner/components/GradingController.jsx";
-import { GroundSection, GradingGroup, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { GradingPanel, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
 import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
@@ -44,6 +44,7 @@ function Harness({ data }) {
         ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
       }));
     }
+    if (new URLSearchParams(location.search).get("none") === "1") return [];     // no building on the plan: the panel's empty state
     const one = [
       { id: "b1", type: "building", ring: rect(bx, by, 520, 300) },
       { id: "c1", type: "paving", truckCourt: true, attachedTo: "b1", ring: rect(bx, by + 300, 520, 130), dockStack: { x: bx + 260, y: by + 150 } },
@@ -60,6 +61,7 @@ function Harness({ data }) {
   });
   const [settings, setSettings] = useState({ grading: { layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: true } } });
   const [model, setModel] = useState(null);
+  const [headEl, setHeadEl] = useState(null);
   const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") === "1" ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
@@ -103,14 +105,14 @@ function Harness({ data }) {
     <>
       <div id="panel">
         <React.Suspense fallback={null}><GradingController input={input} onModel={setModel} /></React.Suspense>
-        {model && <GroundSection model={model} buildableOn={!!model.cfg.layers.buildable} onToggleBuildable={() => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, buildable: !s.grading.layers.buildable } } }))} />}
-        {model && model.cards.length > 0 && (
-          <GradingGroup model={model} dockDropFt={4}
-            onCfg={(p) => setSettings((s) => ({ grading: { ...s.grading, ...p } }))} onDockDrop={() => {}}
-            onSelectBuilding={(id) => setSel(id)}
-            onApplyFfeFix={(id, fx) => patchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" })}
-            onApplyMoveFix={(id, mv) => model.actions.applyMoveFix(id, mv)} />
-        )}
+        {/* the SitePlanner dock: the panel chrome's header slot (the gear + info portal there), then the panel body */}
+        <div id="panel-header" data-testid="panel-chrome-grading"><span>GRADING</span><span ref={setHeadEl} id="panel-header-actions" /></div>
+        <GradingPanel model={model} headerSlot={headEl} dockDropFt={4} buildableOn={!!(model && model.cfg.layers.buildable)}
+          onToggleBuildable={() => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, buildable: !s.grading.layers.buildable } } }))}
+          onCfg={(p) => setSettings((s) => ({ grading: { ...s.grading, ...p } }))} onDockDrop={() => {}}
+          onSelectBuilding={(id) => setSel(id)}
+          onApplyFfeFix={(id, fx) => patchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" })}
+          onApplyMoveFix={(id, mv) => model.actions.applyMoveFix(id, mv)} />
       </div>
       <svg id="canvas" width="1400" height="1000" style={{ background: "#e8efe6" }}>
         {model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}

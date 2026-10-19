@@ -124,8 +124,7 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
  * comment for why both hosts have to move together. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 const GradingController = lazy(() => import("./components/GradingController.jsx"));
-const GroundSection = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GroundSection })));
-const GradingGroup = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingGroup })));
+const GradingPanel = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingPanel })));
 const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
 import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX } from "./lib/mapChromeStack.js";
@@ -489,6 +488,7 @@ import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
+import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
 import { useGradeSurface } from "./lib/useGradeSurface.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
@@ -756,6 +756,8 @@ const RAIL_ICONS = {
   analysis: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.2 15.2 4.8 4.8" /></>,
   // Drainage
   drainage: <path d="M3 7.5c3-6 6 6 9 0s6 6 9 0M3 16.5c3-6 6 6 9 0s6 6 9 0" />,
+  // Grading (owner-only) — a hill drawn as nested contour lines on a ground line
+  grading: <><path d="M3 20h18" /><path d="M6 20c0-6 3-10 6-10s6 4 6 10" /><path d="M9.5 20c0-3 1.2-5 2.5-5s2.5 2 2.5 5" /></>,
   // Yield
   yield: <path d="M19 4H5l7 8-7 8h14" />,
   // Properties
@@ -14280,6 +14282,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const grSelIds = grOn ? (multi.length ? multi : sel ? [sel] : []).filter((r) => r.kind === "el" && grBuildingsAll.some((b) => b.id === r.id)).map((r) => r.id) : [];
   const grSelBuildingId = grSelIds[0] || null;
   const grSetCfg = (patch) => { pushHistory(); setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } })); };
+  // The Grading dock item exists only while the gate says so: a refused/lost answer (sign-out, account switch) closes the
+  // panel whether it was docked or floating, so nothing grading-shaped stays on screen for an account that cannot have it.
+  useEffect(() => {
+    if (panelIdAllowed("grading", grOn)) return;
+    if (leftPanel === "grading") setLeftPanel(null);
+    if (isFloating("grading")) closeFloating("grading");
+  }, [grOn, leftPanel, isFloating, closeFloating]);
   const grSetLayer = (id, on) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), layers: { ...((sx.grading || {}).layers || {}), [id]: !!on } } }));
   // "Show buildable area on map": turns the Level-pad limit on and frames the map on it (once the mask arrives);
   // pressing it again turns the line off.
@@ -19414,7 +19423,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ATTRIBUTES & SETTINGS (what a parcel HAS — its acreage, county record, taxes, setbacks,
   // active/locked state). The panel id stays `parcel` — it keys persisted panel state and the
   // `setLeftPanel("parcel")` call sites, and renaming it would orphan them for no user gain.
-  const leftTabs = [
+  const leftTabs = withGradingTab([
     { id: "parcel", label: PARCEL_SURFACES.panel.name },
     { id: "analysis", label: "Analysis" },
     // NEW-1 (2026-09-05, owner directive) — Drainage is its own left-rail module, split out of
@@ -19429,7 +19438,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // panel state and every `setLeftPanel("references")` call site, and renaming it would orphan
     // them for no user gain (same shape as the `parcel`/"Land" split above).
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
-  ];
+  ], grOn); // owner-only Grading item sits between Drainage and Yield; the SAME array comes back for every other account
   // NEW-1 (single-occupancy left dock, amends B656/B733): on DESKTOP the inspector only ever renders
   // as the docked "properties" panel — `openInspector` takes over the dock, it never stacks above
   // another open panel. NARROW keeps the B556 model: a tap only selects; the companion overlay is
@@ -22253,6 +22262,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const panelTitle = {
     yield: "Yield",
     drainage: "Drainage", // the rail tab had no entry, so its header strip rendered EMPTY (× alone)
+    grading: "Grading", // owner-only (NEW-1, amends B2315856): its own dock panel, not a group inside Site Analysis
     parcel: "Parcels", // Parcels rework: the header is just the name + ✕; the count rides the list's own summary line
     analysis: "Site Analysis",
     properties: "Properties", // B733 (dock-only; the companion supplies its body)
@@ -22265,6 +22275,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (docked column / floating card), read through state so the portal mounts once the slot exists.
   const [dockActionsEl, setDockActionsEl] = useState(null);
   const [floatActionsEl, setFloatActionsEl] = useState(null);
+  // The owner-only Grading panel keeps its OWN header slots (docked / floating), so a docked Drainage and a floating
+  // Grading (or the reverse) can never portal their header actions into each other's chrome.
+  const [gradDockActionsEl, setGradDockActionsEl] = useState(null);
+  const [gradFloatActionsEl, setGradFloatActionsEl] = useState(null);
   const panelHeaderSubtitle = [siteLabel, planLabel].filter(Boolean).join(" · ");
   // Render one left-rail panel's body for a given id, hosted in EITHER the docked column or a
   // floating card. A called render FUNCTION (never a mounted <Component/>) so the same JSX inlines
@@ -22437,20 +22451,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
                     callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
                     onOpenDrainage={() => setLeftPanel("drainage")}
-                    onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }}
-                    groundSlot={grOn && grModel ? (
-                      <Suspense fallback={null}>
-                        <GroundSection model={grModel} buildableOn={!!(grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable} />
-                        <GradingGroup model={grModel} dockDropFt={gsDockDrop} onCfg={grSetCfg}
-                          onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
-                          onSelectBuilding={(id) => { setMulti([]); setSel({ kind: "el", id }); }}
-                          onApplyFfeFix={(id, fx) => grPatchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" }, { history: true })}
-                          onApplyMoveFix={(id, mv) => grModel.actions.applyMoveFix(id, mv)} />
-                      </Suspense>
-                    ) : null} />
+                    onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
                 );
-                // Owner-only grading rides INSIDE this one Analysis view (a Ground row + a Grading group under "Who governs");
-                // there is no second tab. Every other account renders exactly SiteAnalysis.
+                // Site Analysis carries NO grading or ground rows (NEW-1, amends B2315856): the owner-only Grading panel is its own
+                // left-dock item beside Drainage and Yield.
                 return (
                   <>
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
@@ -22950,6 +22954,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onMitOpenChange={setFmMitOpen}
             siteId={siteId} siteState={siteStateId} // B877440/B877441 — the "Request criteria" action on a no-data detention row
           />
+          </div>)}
+
+          {/* Grading (owner-only; NEW-1, amends B2315856) — the per-building cards + the Ground rows. It only READS grModel:
+              the controller is mounted from this component (below) whether or not the panel is open, so the Cut & Fill layer and
+              the suggested FFE paint with the panel closed and opening it never starts a build. */}
+          {_pid === "grading" && grOn && (<div data-testid="grading-metrics" style={{ display: "contents" }}>
+            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted }}>Loading grading…</div>}>
+              <GradingPanel model={grModel || null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
+                buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
+                dockDropFt={gsDockDrop} onCfg={grSetCfg}
+                onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
+                onSelectBuilding={(id) => { setMulti([]); setSel({ kind: "el", id }); }}
+                onApplyFfeFix={(id, fx) => grPatchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" }, { history: true })}
+                onApplyMoveFix={(id, mv) => grModel.actions.applyMoveFix(id, mv)} />
+            </Suspense>
           </div>)}
 
           {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
@@ -30109,7 +30128,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel && !propsTab && (<>
           <PanelChrome
             title={panelTitle[leftPanel]} icon={<RailIcon id={leftPanel} size={18} />} subtitle={leftPanel === "parcel" ? null : panelHeaderSubtitle}
-            actionsRef={leftPanel === "drainage" ? setDockActionsEl : undefined}
+            actionsRef={leftPanel === "drainage" ? setDockActionsEl : leftPanel === "grading" ? setGradDockActionsEl : undefined}
             floating={false} canFloat={!narrow && leftPanel !== "parcel" && leftPanel !== "references"} // Parcels rework: no detach icon on the Parcels header — double-clicking the header still floats/docks it
             onDetach={() => detachPanel(leftPanel)}
             onClose={() => setLeftPanel(null)}
@@ -30135,7 +30154,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           duplicated JSX. Gated to !narrow — below the breakpoint the app is docked-only. */}
       {!narrow && Object.keys(floating).map((id) => (
         <FloatingPanel key={id} title={panelTitle[id]} icon={<RailIcon id={id} size={18} />} subtitle={id === "parcel" ? null : panelHeaderSubtitle}
-          actionsRef={id === "drainage" ? setFloatActionsEl : undefined} pos={floating[id]}
+          actionsRef={id === "drainage" ? setFloatActionsEl : id === "grading" ? setGradFloatActionsEl : undefined} pos={floating[id]}
           onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
           boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}
           footer={id === "standards" ? standardsFooter : null}>
