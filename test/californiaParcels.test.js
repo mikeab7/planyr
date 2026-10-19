@@ -41,7 +41,8 @@ describe("a California view queries ONLY the California source", () => {
     });
   }
   it("a whole-state California view stays California + the genuinely neighbouring Nevada source — never a country-wide list", () => {
-    const got = displaySourcesForView(view(32.5, -124.5, 42.0, -114.1));
+    // North edge 41.95, not 42.0: at exactly 42.0 the view sits ON the Oregon/Idaho line, and a county source there (Owyhee ID, B2317920) is a genuine neighbour by the line band, not a leak.
+    const got = displaySourcesForView(view(32.5, -124.5, 41.95, -114.1));
     expect(got).toContain("ca_statewide");
     expect(got.every((k) => ["CA", "NV"].includes(stateOf(k)))).toBe(true);
     expect(got.length).toBeLessThanOrEqual(3);
