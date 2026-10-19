@@ -29,6 +29,15 @@ export const ALLOWED_HOSTS = new Set([
   "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
+  /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
+   * Integrity GIS runs five Geocortex pools; a county's public site lives on exactly one of them. */
+  "adairgis.integritygis.com", "audraingis.integritygis.com", "barrygis.integritygis.com", "bartongis.integritygis.com", "bentongis.integritygis.com",
+  "maps.semogis.com", // SEMO Regional Planning Commission — Cape Girardeau, Iron, Madison, Perry, Scott, St. Francois, Washington
+  "www.midmogis.org", // Mid-Missouri RPC — Cole County
+  "greenecountyassessor.org", // Greene County Assessor
+  "maps.stlouisco.com", // St. Louis County GIS Service Center
+  "maps6.stlouis-mo.gov", // City of St. Louis
+  "gis.boonemo.gov", // Boone County GIS
   /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
    * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
    * county is wired to it. */

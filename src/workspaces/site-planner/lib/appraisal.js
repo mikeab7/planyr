@@ -270,7 +270,10 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
  * L15Parce_2, GIS-measured acres L15Parce_4 (GPDATA__DA / __CA are the deed / assessor acres, one of which is 0 on every row) —
  * matched by their EXACT names here (and in the situs / Account / Acreage patterns below); no other source uses them. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1)$/i;
+/* Missouri (NEW-1, 2026-10-19): the Integrity GIS counties publish the owner as `DEEDHOLDER` / `DEED_HOLDER` / `DEEDNAME` (Atchison's joined layer as
+ * `REALDATA_DEEDHOLDER`), Greene as `OWN1`, Holt as `owner1_name`, St. Clair as `Owner_1`, Cape Girardeau as `Main_Name`. `pcloNAME` is Tuscaloosa AL's owner — it only looked resolved
+ * because the bare `Name` beside it (the parcel number) used to win; a digits-only `Name` no longer counts as an owner. */
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?holder|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
 /* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
@@ -293,6 +296,8 @@ export function ownerKey(attrs, { skip = null } = {}) {
     if (isPlaceholderValue(attrs[key])) continue;
     // A TABLE-PREFIXED `name` is a joined layer's own label (TaxParcels.Name = the lot number), never an owner.
     if (lk !== key && /^name$/i.test(lk)) continue;
+    // …and a bare `name` holding only digits / dots / dashes is a parcel NUMBER (Buchanan MO's `Name` = "11-4.0-17-000-000-005.002"), never an owner.
+    if (/^name$/i.test(lk) && /^[0-9][0-9.\-\s/]*$/.test(String(attrs[key]).trim())) continue;
     // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
     // NUMBER), so any real owner column outranks it whatever order the service lists them in.
     const seq = ownerSeq(lk) + (/^name(_?1)?$/i.test(lk) ? 1000 : 0);
@@ -584,7 +589,9 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
   for (const k of Object.keys(attrs || {})) if (/^(tax_?yea?r|taxyr|tax_yr|appraisal_?year|apprYear)$/i.test(k)) { const v = String(attrs[k] ?? "").trim(); if (/^\d{4}$/.test(v)) { taxYear = v; break; } }
   return {
     owner: ownerName(attrs) || null,
-    account: clean(row("Account / ID")) || declared(idField) || clean(acct),
+    /* …and where the generic resolver caught only a FRAGMENT of the county's declared parcel number (Missouri's Henry County publishes `PARCEL_NUM` "11"
+     * beside `PID` "18-2.0-04-001-004-011.000"; Cole's `PARCELNUM` is "55"), the declared column — which contains it and says more — is the account. */
+    account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); return gen && dec && dec.length > gen.length && dec.includes(gen) ? dec : (gen || dec || clean(acct)); })(),
     address: clean(situsAddress(attrs)) || streetFromParts(attrs) || declared(addrField) || clean(addr),
     deedAcres: deed,
     taxYear,
