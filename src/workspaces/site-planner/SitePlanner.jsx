@@ -5997,6 +5997,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.__plannerLayers = hook;
     return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
   }, [overlays]);
+  /* B2335056 — click-ack rings riding the LIVE view (see beginIdentifyPress). Layout effect: re-projected
+     in the same frame as the view change, never a frame behind it. */
+  const ackMoversRef = useRef(new Set());
+  useLayoutEffect(() => { ackMoversRef.current.forEach((cb) => cb()); }, [view]);
   const p2f = useCallback((cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
     return screenToWorld({ scale: view.ppf, tx: view.offX, ty: view.offY }, { x: cx - r.left, y: cy - r.top });
@@ -7706,7 +7710,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-1 — acknowledge the press AT THE CURSOR before anything else runs (plain DOM, so it paints
     // on the next frame instead of waiting on this component's render). Cleared by onUp: a drag
     // becomes a pan (cancel), a click hands it to quickAddAt, which holds it until the lot lands.
-    const ack = startClickAck(e.clientX, e.clientY);
+    // B2335056 — anchored to the tapped GROUND point (feet), re-projected on every live-view change, so a
+    // pan/zoom while the county answers carries the ring with the land instead of leaving it on the glass.
+    const ackFp = p2f(e.clientX, e.clientY);
+    const ack = startClickAck(e.clientX, e.clientY, {
+      project: () => {
+        const r = svgRef.current && svgRef.current.getBoundingClientRect(); const v = viewRef.current;
+        if (!r || !v) return null;
+        const s = worldToScreen({ scale: v.ppf, tx: v.offX, ty: v.offY }, ackFp);
+        return [r.left + s.x, r.top + s.y];
+      },
+      subscribe: (cb) => { ackMoversRef.current.add(cb); return () => ackMoversRef.current.delete(cb); },
+    });
     setPanning(true);
     drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapIdentify: p2f(e.clientX, e.clientY), downX: e.clientX, downY: e.clientY, ack };
     capturePidRef.current = e.pointerId;

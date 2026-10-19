@@ -12,6 +12,13 @@
  * ring for a short "no lot here" tag at the same point, then removes itself · `cancel()` clears with no
  * message (a drag became a pan, or a newer click superseded this one) · a watchdog turns an answer that
  * never comes into the same tag, so a wedged county host can never leave a ring spinning forever.
+ *
+ * ANCHORED TO THE GROUND, NOT THE GLASS (B2335056). The ring is `position: fixed`, so on its own it keeps
+ * the SCREEN pixel it was born at — a pan while the county answers left it hovering over the wrong
+ * ground. A caller that knows the tapped point in map/world terms passes `track`
+ * (`{ project(): [clientX, clientY] | null, subscribe(reposition): unsubscribe }`); the ring then
+ * re-projects through `project()` every time the caller's view changes (pan, zoom, rotate — whatever
+ * `subscribe` fires on). No `track` = the old fixed-at-the-pixel behaviour.
  * Styling lives in index.css (`.click-ack`) so no colour/size literal is needed here. */
 
 const CLS_BUSY = "click-ack-busy";
@@ -24,7 +31,7 @@ function syncBusy() {
   document.documentElement.classList.toggle(CLS_BUSY, live.size > 0);
 }
 
-export function startClickAck(clientX, clientY) {
+export function startClickAck(clientX, clientY, track = null) {
   if (typeof document === "undefined" || !document.body) return { done() {}, empty() {}, cancel() {} };
   const el = document.createElement("div");
   el.className = "click-ack";
@@ -42,7 +49,15 @@ export function startClickAck(clientX, clientY) {
   let tagTimer = null;
   let watchdog = null;
   const handle = {};
+  let unsub = null;
+  const reposition = () => {
+    if (closed) return;
+    let p = null;
+    try { p = track.project(); } catch (_) { p = null; }
+    if (p && Number.isFinite(p[0]) && Number.isFinite(p[1])) { el.style.left = `${p[0]}px`; el.style.top = `${p[1]}px`; }
+  };
   const remove = () => {
+    if (unsub) { try { unsub(); } catch (_) {} unsub = null; }
     if (tagTimer) clearTimeout(tagTimer);
     if (watchdog) clearTimeout(watchdog);
     tagTimer = watchdog = null;
@@ -65,6 +80,7 @@ export function startClickAck(clientX, clientY) {
     el.appendChild(tag);
     tagTimer = setTimeout(remove, TAG_MS);
   };
+  if (track && typeof track.subscribe === "function" && typeof track.project === "function") unsub = track.subscribe(reposition);
   live.add(handle);
   syncBusy();
   watchdog = setTimeout(() => handle.empty("No answer yet — the county server is slow"), WATCHDOG_MS);
