@@ -95,6 +95,9 @@ export const ALLOWED_HOSTS = new Set([
    * regional bodies). The sandbox reaches none of them, so each is relayed and MEASURED through here before a county is wired to it. */
   "gis.emmetcounty.org", "gis.miottawa.org", "arcgisweb.countyofnewaygo.com", "gis.mijackson.org", "gis.kentcountymi.gov", "gis.macombgov.org",
   "gis.grandtraverse.org", "gis.gtcountymi.gov", "gis.allegancounty.org", "gis.kalcounty.com", "gis.stclaircounty.org", "a2maps.a2gov.org",
+  /* TEMPORARY discovery-only hosts (documentation pages + vendor probes) — removed again before this PR leaves draft. */
+  "www.michigan.gov", "www.emcog.org", "wuppdr.org", "www.discovernortheastmichigan.org", "shiawassee.net", "legacy.stclaircounty.org", "stclaircounty.org",
+  "www.baycountymi.gov", "app.fetchgis.com", "fetchgis.com", "api.fetchgis.com", "maps.fetchgis.com", "maps.stclaircounty.org", "www.co.marquette.mi.us", "stjosephcountymi.gov",
   "python.it.mtu.edu:6080", "portal1-geo.sabu.mtu.edu:6443", "maps.deltami.gov", "gis.deltami.gov", "arcgis1.midland-mi.org", "baycitymiportal.org",
 ]);
 
