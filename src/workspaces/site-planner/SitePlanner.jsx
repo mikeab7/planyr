@@ -11932,7 +11932,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setDockLayerLength = (z, b, side, newLen) => {
     const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
     pushHistory();
-    setEls((a) => relayoutSide(a.map((x) => (x.id !== z.id ? x : nl == null ? (() => { const { alongLen: _l, alongAnchor: _a, alongOff: _o, ...rest } = x; return rest; })() : { ...x, alongLen: nl })), b, side));
+    setEls((a) => relayoutSide(a.map((x) => (x.id !== z.id ? x : nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl })), b, side));
   };
   // The depth shown for zone index `i` (first dock side that has it).
   const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
