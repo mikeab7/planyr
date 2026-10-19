@@ -103,8 +103,8 @@ describe("NEW-9 — Save copy: never a blocker, never disabled for a missing fie
 describe("NEW-2 — More details + labels", () => {
   it("lease carries lease fields, land carries none of the building ones", () => {
     const keys = (t) => moreDetailFields(t).map((m) => m.col.key);
-    expect(keys("lease")).toEqual(["clearHeightFt", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate", "leaseFreeRentMonths", "leaseTi", "compDate", "notes"]);
-    expect(keys("building_sale")).toEqual(["clearHeightFt", "yearBuilt", "bldgNoi", "bldgCapRate", "compDate", "notes"]);
+    expect(keys("lease")).toEqual(["clearHeightFt", "powerAmps", "powerVolts", "powerPhase", "dockDoors", "yearBuilt", "leaseOpex", "leaseEscalationPct", "leaseCommencementDate", "leaseFreeRentMonths", "leaseTi", "compDate", "notes"]);
+    expect(keys("building_sale")).toEqual(["clearHeightFt", "powerAmps", "powerVolts", "powerPhase", "dockDoors", "yearBuilt", "bldgNoi", "bldgCapRate", "compDate", "notes"]);
     expect(keys("land")).toEqual(["compDate", "notes"]);
   });
   it("labels read per type", () => {

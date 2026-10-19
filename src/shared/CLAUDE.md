@@ -763,6 +763,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   the review/promote surface, reachable ONLY from the KML import button — hand entry never creates
   a row here. `db/test/comp_import_drafts_rls.test.sql` — the same self-rolling-back proof shape,
   9/9 passed live against production.
+  **B2345504/B2345505 (2026-10-19):** `compParse.js` reads spreadsheet headers by RULE (`matchHeaderCell`, broker wording, unit hints, x/y → pin, unclaimed columns → Notes; fixtures in repo-root `test/fixtures/brokerLeaseComps/`), and `lib/compSavePrep.js` `prepareCompForSave` is the ONE county + tracked-site step every save path runs (single save, grid save, KML promote) — never call the site resolver from a save path directly.
   **⛔ B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — every comp gets an owning
   site automatically, never a duplicate.** `CompsPanel.jsx`'s `save()` calls the site-planner
   workspace's storage module's `resolveOrCreateTrackedSiteForComp` whenever `draft.projectId` is
@@ -774,6 +775,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   — never blended into one score. A save that auto-attached to a MATCHED existing site (never a
   brand-new one) surfaces which site and how (`assignNotice` in `CompDetail`) so a wrong guess is
   reassignable via the existing Site dropdown rather than a silent duplicate.
+  **Records search + filters (B2347488):** `lib/compsQuery.js` is the PURE engine (search tokens, filters, sort, chips, counts — no React, no network; search reads the address cache only and never geocodes), `lib/compsQueryPrefs.js` the per-device persistence, `components/CompsQueryBar.jsx` the presentational bar + inline filter panel. The filter state lives in `CompsPanel` above the list/detail views; the visible set rides `onVisibleCompsChange` to MapFinder's markers only (every other reader keeps ALL comps). Power / dock doors: `db/comps_power_docks.sql` (B2347489). ⛔ `compsStore.SELECT_COLS` must cover every column `compToRow` writes (B2347490 — `lease_opex` was missing and an edit wiped it); the repo-root `test/` suite **compsPowerDocks** fails otherwise.
 - **`reports/` (B842866) — the problem-report submission model behind the global help/report
   control (the app shell's own help-control component, mounted on every route).**
   `reportsStore.js` is the whole thing: `buildReportContext` (the same privacy-allowlist
