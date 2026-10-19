@@ -83,6 +83,12 @@ export const ALLOWED_HOSTS = new Set([
   "www.thomascountymaps.org", // Thomas County GA
   "www.mgrcmaps.org", // Middle Georgia Regional Commission (www form)
   "www.valorgis.com", // VALOR — Lowndes and sibling South Georgia counties
+  /* NEW-1 (Georgia re-measure, 2026-10-19) — the county hosts the 2026-09 Georgia passes wired from Michael's browser only. Added so they can be
+   * re-measured from a sandbox through this relay (B2316720); the app still reads them directly (they send CORS headers). */
+  "www.bartowgis.org", "bryangis.bryan-county.org", "gis.cherokeecountyga.gov", "weba.co.clayton.ga.us:5443", "gis.cobbcounty.gov",
+  "coweta-gis-web.coweta.ga.us", "geo.forsythco.com", "gis-web.glynncounty-ga.gov", "hallgis.hallcounty.org", "arcgis.co.henry.ga.us",
+  "gismap.augustaga.gov", "gis.whitfieldcountyga.com",
+  "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
 ]);
