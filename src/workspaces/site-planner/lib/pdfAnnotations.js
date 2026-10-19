@@ -506,7 +506,7 @@ const aligned = (it, tol = 0.5) => {
 /**
  * Build one annotation spec per descriptor.
  *
- * descriptor = { family: "markup"|"callout"|"measure", id, kind, tree, hints?, meta? }
+ * descriptor = { family: "markup"|"callout"|"measure"|"building", id, kind, tree, hints?, meta? }
  * opts       = { M0: user→PDF matrix, frame: [x0,y0,x1,y1] PDF rect the sheet's plan window occupies,
  *                patterns: id→tree, now: ISO string, author: string }
  * Returns { annots: [...], skipped: [{id, why}], degraded: [...] }.
@@ -616,6 +616,21 @@ export function buildAnnotations(descriptors, opts) {
         rotated: !!(d.meta && d.meta.rot && d.meta.rot % 90 !== 0) || (d.meta && d.meta.rot % 90 === 0 && d.meta.rot !== 0),
       });
       if (runs.length > 1) degraded.push(`callout ${d.id}: ${runs.length - 1} extra leader(s) are drawn in the appearance only (a PDF callout carries one native leader)`);
+    } else if (d.family === "building") {
+      /* NEW-2 (2026-10-19) — a building footprint as a native Polygon. The vertices are the model's footprint ring
+         (hints.verts, clone units → PDF through M0, the same path a cloud's real vertices take); the appearance
+         is the whole building group exactly as the flattened sheet paints it (fill, outline, dock doors,
+         dimension, label). Regeneration inputs come from the footprint's own fill and outline, not from the first
+         ink item, which in a dock-door group is a door. */
+      const verts = d.hints && d.hints.verts ? d.hints.verts.map((p) => apply(M0, p.x, p.y)) : null;
+      const outline = ink.find((i) => i.stroke && i.sw > 0 && !i.fill) || ink.find((i) => i.stroke && i.sw > 0) || null;
+      const body = ink.find((i) => i.fill && i.fillA > 0.02) || null;
+      base.subj = base.subj || "Building";
+      base.color = outline ? rgbOf(outline.stroke) : null; base.bw = outline ? outline.sw : 0; base.dash = outline ? outline.dash || [] : [];
+      base.ic = body ? rgbOf(body.fill) : null;
+      base.ca = body ? body.fillA : outline ? outline.strokeA : 1;
+      if (verts && verts.length >= 3) annots.push({ ...base, subtype: "Polygon", vertices: verts.flat() });
+      else { annots.push({ ...base, subtype: "Stamp", subj: base.subj + " (unmapped)" }); degraded.push(`building ${d.id}: no footprint ring — written as a Stamp`); }
     } else {
       const mode = d.kind;
       const chip = items.filter((i) => i.t === "text" && /chip|tally/.test(i.src || "") || (i.t === "text" && d.meta && d.meta.chipTexts && d.meta.chipTexts.includes(i.str)));

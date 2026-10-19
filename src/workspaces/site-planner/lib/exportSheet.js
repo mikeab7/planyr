@@ -1137,7 +1137,7 @@ export function createExportSheet(ctx) {
       const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
       const mctx = document.createElement("canvas").getContext("2d");
       const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
-      const { descriptors, patterns, flattened } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, f2p, measureText });
+      const { descriptors, patterns, flattened } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, els, f2p, measureText });
       annotationsKeptInPage = flattened.length;
       // clone user units → PDF points: the nested <svg> is fitted "meet" into the plan box, then the page
       // unit (page.w units across wIn inches) converts to points; PDF y runs up, so it flips.
@@ -1211,7 +1211,7 @@ export function createExportSheet(ctx) {
         // NEW-1 — LOUD-FAILURE: a markup stacked behind the plan can't be a PDF markup (those always paint over
         // the page), so it was printed into the picture in its true place. Say so instead of leaving it looking editable.
         if (annotationsKeptInPage > 0) {
-          flashWarn(`⚠ ${annotationsKeptInPage} markup${annotationsKeptInPage === 1 ? " sits" : "s sit"} behind the plan, so ${annotationsKeptInPage === 1 ? "it was" : "they were"} printed into the page to keep the stacking order (not editable in Bluebeam).`, 9000);
+          flashWarn(`⚠ ${annotationsKeptInPage} item${annotationsKeptInPage === 1 ? " sits" : "s sit"} behind the plan or under other drawing, so ${annotationsKeptInPage === 1 ? "it was" : "they were"} printed into the page to keep the stacking order (not editable in Bluebeam).`, 9000);
         }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));

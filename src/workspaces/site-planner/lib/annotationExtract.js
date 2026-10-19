@@ -14,6 +14,9 @@
  * pure and unit-testable in plain node.
  */
 import { ANNOTATION_KINDS } from "./siteModel.js";
+import { isBuilding } from "../../../shared/projects/projectModel.js";
+import { elCorners } from "./siteGeometry.js";
+import { flattenTree, itemBBox, unionBox } from "./pdfAnnotations.js";
 import { calloutStyle } from "./calloutStyle.js";
 
 /** Parse `style="a: b; c: d"` into a plain object (property names kebab-cased). */
@@ -79,46 +82,142 @@ export function domToTree(el, { measureText = null, patterns = {}, root = el } =
   return node;
 }
 
+const IDENT = [1, 0, 0, 1, 0, 0];
+const ALL = [-Infinity, -Infinity, Infinity, Infinity];
+/* Two flush neighbours (a truck court against its building, a bump-out on its wall) share an edge, and the half-unit
+   fringe itemBBox adds to a box would read that as an overlap. Real covering is deeper than a hairline. */
+const OVERLAP_TOL = 1.5;
+const overlaps = (a, b) => Math.min(a[2], b[2]) - Math.max(a[0], b[0]) > OVERLAP_TOL && Math.min(a[3], b[3]) - Math.max(a[1], b[1]) > OVERLAP_TOL;
+
+/** `<image>` has no ink in flattenTree (its draw is the raster); for a bounding box it is just its rect. */
+function imagesAsRects(t) {
+  if (!t) return t;
+  if (t.tag === "image") return { ...t, tag: "rect", a: { ...t.a, fill: "black", stroke: "none" }, kids: [] };
+  return { ...t, kids: (t.kids || []).map(imagesAsRects) };
+}
+
+/** Plan-space (clone user units) box of everything `node` paints; null when it paints nothing; ALL when it can't be told. */
+function paintBox(node, root) {
+  try {
+    const tree = imagesAsRects(domToTree(node, { root }));
+    const { items } = flattenTree(tree, IDENT, {});
+    return unionBox(items.map((it) => (it.t === "path" ? itemBBox({ ...it, stroke: null, sw: 0 }) : itemBBox(it)))); // the fill geometry, not its stroke fringe
+  } catch (_) { return ALL; } // unknown extent = assume it overlaps (keeps the safe, flattened answer)
+}
+
 /**
  * Lift the annotation-class features out of `clone` (mutates it) and describe them.
  *
- *   ctx = { markups, callouts, measures, f2p, measureText }
+ *   ctx = { markups, callouts, measures, els, f2p, measureText }
  *
- * Returns { descriptors, patterns } — descriptors are in DOM order, which IS paint order.
+ * Returns { descriptors, patterns, flattened } — descriptors are in DOM order, which IS paint order.
+ *
+ * WHICH OBJECTS STAY IN THE PAGE (NEW-1 of 2026-10-19, replacing "everything that precedes the last content node"):
+ * a PDF annotation always paints above the page, so an object may be lifted only if nothing that stays in
+ * the page is meant to paint over it. Walking the stack top-down:
+ *   · an annotation the user sent BEHIND THE PLAN (the `behindEls` band, ladder rungs 2–4) is pinned, always;
+ *   · any other annotation is pinned only when page content that paints AFTER it genuinely overlaps it in
+ *     plan space — a later element, a later easement/encumbrance line, or an annotation already pinned.
+ *     A promoted reference drawing or a lifted GIS layer does NOT pin an annotation (decision: those are
+ *     thin overlays the user put over the plan on purpose; "anything under a transparent overlay is burned
+ *     in" was never the intent of the behind-the-plan rule), and an empty `data-gis-front-band` is not content;
+ *   · a BUILDING (NEW-2) is held to the stricter bar of the flattened picture: any later content that
+ *     overlaps it — including a reference drawing or GIS layer — keeps it in the page, so the editable
+ *     export looks identical to the flattened one.
+ * Parcel outlines/chips and element LABELS are thin linework laid over the plan and never pin (stated deviation).
  */
 export function extractMarkupAnnotations(clone, ctx) {
-  const { markups = [], callouts = [], measures = [], f2p = null, measureText = null } = ctx || {};
+  const { markups = [], callouts = [], measures = [], els = [], f2p = null, measureText = null } = ctx || {};
   const patterns = {};
   const descriptors = [];
-  const nodes = Array.from(clone.querySelectorAll("[data-feature]"));
-  /* NEW-1 (print ignores send-to-back) — A PDF ANNOTATION ALWAYS PAINTS ABOVE THE PAGE. A markup the user
-     sent behind the plan (or any annotation that sits under a building, court, parcel, placed drawing…)
-     lifted out of the page would therefore jump on top of everything it was behind. Only annotations that
-     paint AFTER the last piece of page content form the top of the stack and may be lifted; every other one
-     stays in the clone and is printed into the page, exactly where the canvas shows it. This also keeps
-     relative order intact: a flattened annotation is always beneath every lifted one, as it was on screen. */
-  const lastContent = Array.from(clone.querySelectorAll("[data-feature],[data-overlay-id],[data-gis-front-band]")).filter((n) => {
-    const key = n.getAttribute("data-feature");
-    if (key == null) return true; // a placed drawing / the lifted GIS band is page content
-    const colon = key.indexOf(":");
-    const fam = key.slice(0, colon), fid = key.slice(colon + 1);
-    if (fam === "callout" || fam === "measure") return false;
-    // DELIBERATE DEVIATION (stated, not accidental): parcel outline / chip nodes paint after on-top markups on the
-    // canvas, so counting them would pin EVERY markup into the page and end editable markups altogether. They are
-    // thin linework, and this export has always put a lifted annotation over them; solid site content is what counts.
-    if (fam === "parcel") return false;
-    if (fam === "markup") { const m = markups.find((x) => x && String(x.id) === fid); return !(m && ANNOTATION_KINDS.includes(m.kind)); }
-    return true;
-  }).pop() || null;
   const flattened = [];
-  for (const node of nodes) {
-    if (lastContent && node !== lastContent && !(node.compareDocumentPosition(lastContent) & 2 /* PRECEDING */) && isAnnotationKey(node, markups)) { flattened.push(node.getAttribute("data-feature")); continue; }
-    const key = node.getAttribute("data-feature") || "";
-    const colon = key.indexOf(":");
-    const family = key.slice(0, colon), id = key.slice(colon + 1);
-    if (family === "markup") {
+
+  const keyOf = (n) => { const k = n.getAttribute("data-feature") || ""; const i = k.indexOf(":"); return { fam: k.slice(0, i), id: k.slice(i + 1), key: k }; };
+  const inFeature = (n) => { for (let p = n.parentNode; p && p.getAttribute; p = p.parentNode) if (p.getAttribute("data-feature") != null) return true; return false; };
+  const buildingOf = (id) => { const e = els.find((x) => x && String(x.id) === id); return e && isBuilding(e) ? e : null; };
+
+  /* 1 — the stack in paint order, each node classed as a lift candidate or page content. */
+  const all = Array.from(clone.querySelectorAll("[data-feature],[data-overlay-id],[data-gis-front-band],[data-label-for]"));
+  const labelsByEl = new Map();
+  for (const n of all) { const lf = n.getAttribute("data-label-for"); if (lf != null) (labelsByEl.get(lf) || labelsByEl.set(lf, []).get(lf)).push(n); }
+  const stack = [];
+  const chips = []; // parcel acreage chips: laid over the plan, so a lifted building would otherwise cover them
+  const seenBuilding = new Set();
+  for (const node of all) {
+    if (node.getAttribute("data-label-for") != null) continue; // owned by its element (lifted or kept with it)
+    if (node.getAttribute("data-gis-front-band") != null) { stack.push({ node, content: "gis" }); continue; }
+    if (node.getAttribute("data-feature") == null) { if (!inFeature(node)) stack.push({ node, content: "reference" }); continue; }
+    const { fam, id } = keyOf(node);
+    if (fam === "parcel") { if (node.getAttribute("data-print-chip") != null) chips.push(node); continue; }
+    if (fam === "reference") { stack.push({ node, content: "reference" }); continue; }
+    if (fam === "markup") {
       const m = markups.find((x) => x && String(x.id) === id);
-      if (!m || !ANNOTATION_KINDS.includes(m.kind)) continue; // easement / encumbrance / utility routes stay on the page
+      if (m && ANNOTATION_KINDS.includes(m.kind)) stack.push({ node, fam, id, model: m, annot: true, behind: m.behindEls === true });
+      else stack.push({ node, content: "plan" });
+    } else if (fam === "callout") {
+      const c = callouts.find((x) => x && String(x.id) === id);
+      if (c) stack.push({ node, fam, id, model: c, annot: true, behind: c.behindEls === true && c.frontForce !== true });
+    } else if (fam === "measure") {
+      const idx = parseInt(id, 10);
+      const m = Number.isFinite(idx) ? measures[idx] : null;
+      stack.push({ node, fam, id, model: m, annot: true, behind: !!(m && m.behindEls === true) });
+    } else if (fam === "el" && buildingOf(id) && !seenBuilding.has(id)) {
+      seenBuilding.add(id);
+      stack.push({ node, fam, id, model: buildingOf(id), building: true, behind: false });
+    } else stack.push({ node, content: "plan" });
+  }
+
+  /* 2 — top-down: decide which candidates stay in the page. */
+  const boxCache = new Map();
+  const boxOf = (e) => {
+    if (!boxCache.has(e)) {
+      const nodes = e.building ? [e.node, ...(labelsByEl.get(e.id) || [])] : [e.node];
+      const boxes = nodes.map((n) => paintBox(n, clone));
+      boxCache.set(e, boxes.includes(ALL) ? ALL : unionBox(boxes));
+    }
+    return boxCache.get(e);
+  };
+  const covering = []; // everything stacked above the current position that STAYS in the page
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const e = stack[i];
+    if (e.content) { covering.push(e); continue; }
+    let pin = e.annot && e.behind;
+    if (!pin && covering.length) {
+      const mine = boxOf(e);
+      if (mine) pin = covering.some((c) => {
+        const counts = c.content === "plan" || c.pinned || (e.building && (c.content === "reference" || c.content === "gis"));
+        if (!counts) return false;
+        const theirs = boxOf(c);
+        return !!theirs && overlaps(mine, theirs);
+      });
+    }
+    if (pin) { e.pinned = true; covering.push(e); flattened.push(e.node.getAttribute("data-feature")); }
+  }
+
+  /* A parcel's acreage chip paints above the buildings on screen, but a lifted building paints above the whole
+     page. So a chip that overlaps a lifted building travels INSIDE that building's appearance (the topmost one it
+     overlaps) and leaves the page — the default export then looks exactly like the flattened one. (Move the
+     building and its chip moves with it; that is the one cosmetic cost, stated in the PR.) */
+  const chipsOf = new Map();
+  for (const chip of chips) {
+    let owner = null;
+    const cb = paintBox(chip, clone);
+    if (!cb) continue;
+    for (const e of stack) {
+      if (!e.building || e.pinned) continue;
+      if (all.indexOf(chip) < all.indexOf(e.node)) continue; // only a chip that paints after the building
+      const b = boxOf(e);
+      if (b && overlaps(cb, b)) owner = e;
+    }
+    if (owner) (chipsOf.get(owner) || chipsOf.set(owner, []).get(owner)).push(chip);
+  }
+
+  /* 3 — lift the rest, in DOM order. */
+  for (const e of stack) {
+    if (e.content || e.pinned) continue;
+    const { node, fam, id, model } = e;
+    if (fam === "markup") {
+      const m = model;
       const hints = {};
       if (m.kind === "cloud" && Array.isArray(m.pts) && f2p) { hints.verts = m.pts.map((p) => f2p(p)); hints.arcFt = m.arcFt; }
       const tree = domToTree(node, { measureText, patterns, root: clone });
@@ -127,9 +226,8 @@ export function extractMarkupAnnotations(clone, ctx) {
         family: "markup", id, kind: m.kind, tree, hints,
         meta: { subject: m.subject || null, comment: m.comment || (m.inlineLabel || m.label || ""), author: m.author || null, createdAt: m.createdAt || null, modifiedAt: m.modifiedAt || null },
       });
-    } else if (family === "callout") {
-      const c = callouts.find((x) => x && String(x.id) === id);
-      if (!c) continue;
+    } else if (fam === "callout") {
+      const c = model;
       const tree = domToTree(node, { measureText, patterns, root: clone });
       const lines = Array.from(node.querySelectorAll("text")).map((t) => t.textContent || "");
       node.parentNode.removeChild(node);
@@ -138,29 +236,31 @@ export function extractMarkupAnnotations(clone, ctx) {
         family: "callout", id, kind: parseInt(node.getAttribute("data-callout-leaders"), 10) > 0 ? "callout" : "textbox", tree,
         meta: { lines, align: st.align, rot: c.rot || 0, subject: c.subject || null, author: c.author || null, createdAt: c.createdAt || null, modifiedAt: c.modifiedAt || null },
       });
-    } else if (family === "measure") {
-      const idx = parseInt(id, 10);
-      const m = Number.isFinite(idx) ? measures[idx] : null;
+    } else if (fam === "measure") {
+      const m = model;
       const mode = node.getAttribute("data-measure-mode") || (m && m.mode) || "line";
       const chipTexts = Array.from(node.querySelectorAll("[data-chip-text]")).map((t) => (t.textContent || "").trim()).filter(Boolean);
       const tree = domToTree(node, { measureText, patterns, root: clone });
       node.parentNode.removeChild(node);
       descriptors.push({
-        family: "measure", id: (m && m.id) || String(idx), kind: mode, tree,
+        family: "measure", id: (m && m.id) || String(id), kind: mode, tree,
         meta: { chipTexts, subject: null, comment: (m && m.note) || "", author: (m && m.author) || null, createdAt: (m && m.createdAt) || null, modifiedAt: (m && m.modifiedAt) || null },
+      });
+    } else if (e.building) {
+      const el = model;
+      const ring = el.points && el.points.length >= 3 ? el.points : elCorners(el);
+      const hints = f2p ? { verts: ring.map((p) => f2p(p)) } : {};
+      const labelNodes = labelsByEl.get(id) || [];
+      const carried = chipsOf.get(e) || [];
+      const kids = [node, ...labelNodes, ...carried].map((n) => domToTree(n, { measureText, patterns, root: clone })).filter(Boolean);
+      const lines = labelNodes.flatMap((n) => Array.from(n.querySelectorAll("text")).map((t) => (t.textContent || "").trim()).filter(Boolean));
+      [node, ...labelNodes, ...carried].forEach((n) => n.parentNode && n.parentNode.removeChild(n));
+      descriptors.push({
+        family: "building", id, kind: "building", hints, tree: { tag: "g", a: {}, kids },
+        meta: { lines, subject: "Building", comment: lines[0] || "", author: el.author || null, createdAt: el.createdAt || null, modifiedAt: el.modifiedAt || null },
       });
     }
   }
   return { descriptors, patterns, flattened };
 }
 
-/* Is this feature node an annotation-class object (the kind that would otherwise be lifted)? */
-function isAnnotationKey(node, markups) {
-  const key = node.getAttribute("data-feature") || "";
-  const colon = key.indexOf(":");
-  const fam = key.slice(0, colon), id = key.slice(colon + 1);
-  if (fam === "callout" || fam === "measure") return true;
-  if (fam !== "markup") return false;
-  const m = (markups || []).find((x) => x && String(x.id) === id);
-  return !!(m && ANNOTATION_KINDS.includes(m.kind));
-}
