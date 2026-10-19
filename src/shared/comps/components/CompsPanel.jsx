@@ -17,9 +17,10 @@
  *
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Field, MenuItem } from "../../ui/controls.jsx";
 import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
+import { NO_AUTOFILL } from "../../ui/noAutofill.js";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
@@ -39,6 +40,9 @@ import { loadCompsRatePeriod } from "../lib/compsRatePeriodPrefs.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
+import CompsSearchPanel from "./CompsSearchPanel.jsx";
+import { countFiltered, countyOptions, activeFilterCount } from "../lib/compsQuery.js";
+import { loadCompsView, saveCompsView, emptyView } from "../lib/compsViewPrefs.js";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
 import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
 import { compLocationFor } from "../lib/compLocationText.js";
@@ -87,6 +91,18 @@ const _pinAddrInflight = new Map();
 // Test-only: clear the in-memory cache/in-flight map so one test's resolved pins can't leak
 // into the next (mirrors colorRecents.js's own `_resetRecentsCache` convention).
 export function _resetPinAddrCache() { _pinAddrCache.clear(); _pinAddrInflight.clear(); }
+/** The Location text SEARCH may match on: only what is ALREADY cached (a resolved street address for a
+ * pin / parcel, a site plan's title). It never starts a reverse-geocode — search must not spend
+ * network (the B1497889 gating on `useCompLocationText` stays the only thing that fetches). */
+function cachedLocationText(comp, overlaysById) {
+  const a = comp?.anchor;
+  if (!a) return null;
+  if (a.kind === "pin" || a.kind === "parcel") {
+    const key = pinCacheKey(a);
+    return key ? (_pinAddrCache.get(key) || null) : null;
+  }
+  return compLocationFor(a, { overlaysById, countyEntry, resolvedAddress: null });
+}
 /** A saved comp's Location text — a real place, resolved the SAME way regardless of anchor kind
  * (a pin's or a parcel's reverse-geocoded street address once resolved, else the synchronous
  * county/coordinate fallback; a site plan's own title). ⛔ NEW-1 (owner-adversarial review,
@@ -179,6 +195,7 @@ function NumField({ value, onChange, placeholder, style }) {
   const [focused, setFocused] = useState(false);
   return (
     <input
+      {...NO_AUTOFILL}
       type="text" inputMode="decimal"
       value={focused ? (value ?? "") : formatNumberDisplay(value)}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
@@ -213,12 +230,13 @@ function TypeChip({ type }) {
 // NEW-1: the rail lists comps, it is not a summary surface — LEASE deliberately contributes no
 // line here (see `compsSummaryBits` in lib/comps.js for why; the lease aggregation itself is
 // untouched and still fully unit-tested there).
-function SummaryStrip({ comps }) {
+function SummaryStrip({ comps, filtered = false }) {
   const bits = compsSummaryBits(comps);
   if (!bits.length) return null;
   return (
     <div style={{ fontSize: 11, color: "var(--text-secondary)", padding: "0 14px 8px", lineHeight: 1.5 }}>
-      {bits.join(" · ")}
+      {/* The averages follow the filtered set, so say so — a number must say what it is. */}
+      {filtered ? `Avg of ${comps.length} shown · ` : ""}{bits.join(" · ")}
     </div>
   );
 }
@@ -229,7 +247,7 @@ export function CompRow({ comp, onOpen, overlaysById, compsRatePeriod, enabled =
   const locationText = useCompLocationText(comp.anchor, overlaysById, enabled);
   const primary = comp.title || locationText;
   return (
-    <button onClick={() => onOpen(comp)} style={{
+    <button data-testid="comp-row" data-comp-id={comp.id} onClick={() => onOpen(comp)} style={{
       display: "block", width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
       borderBottom: "1px solid var(--border-default)", background: "transparent", cursor: "pointer", fontFamily: "inherit",
     }}>
@@ -574,6 +592,21 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
         </>
       )}
 
+      {(draft.compType === "building_sale" || draft.compType === "lease") && (
+        <>
+          {/* NEW-2 (comps records search) — electrical service + dock-high doors, building facts the
+              Records filters read. All optional; a blank stays blank (never 0). */}
+          <Field label="Power (amps)" stacked><NumField value={draft.powerAmps} onChange={setVal("powerAmps")} placeholder="optional, e.g. 2000" style={inputStyle} /></Field>
+          <Field label="Volts" stacked><NumField value={draft.powerVolts} onChange={setVal("powerVolts")} placeholder="optional, e.g. 480" style={inputStyle} /></Field>
+          <Field label="Phase" stacked>
+            <select value={draft.powerPhase} onChange={set("powerPhase")} style={inputStyle}>
+              <option value="">—</option><option value="1">1-phase</option><option value="3">3-phase</option>
+            </select>
+          </Field>
+          <Field label="Dock doors" stacked><NumField value={draft.dockDoors} onChange={setVal("dockDoors")} placeholder="optional" style={inputStyle} /></Field>
+        </>
+      )}
+
       <Field label="Notes" stacked><textarea value={draft.notes} onChange={set("notes")} rows={3} style={{ ...inputStyle, resize: "vertical" }} /></Field>
 
       {teams?.length > 0 && (
@@ -657,6 +690,7 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
  * otherwise held by SitePlannerApp today.
  */
 export default function CompsPanel({
+  onVisibleCompsChange,
   open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
   projects, onCompsChange, overlaysById, onOpenBrochure, reloadToken, onFocusAnchor,
   onArmMapPin, onDisarmMapPin,
@@ -669,6 +703,10 @@ export default function CompsPanel({
   onDetailCompChange, repinCompAnchorRef, startUploadRef,
 }) {
   const [comps, setComps] = useState([]);
+  // Search / filters / sort live HERE (not in the list view or a child that unmounts) so opening a
+  // record and pressing "← All comps" returns to the same filtered, sorted list; persisted per
+  // device (compsViewPrefs) so a refresh does not reset the view.
+  const [q, setQ] = useState(loadCompsView); // stale-ok: this device's OWN search/filter/sort view — a per-device preference, not shared entity data; nothing else reads or writes it
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState("list"); // list | detail | form | grid | drafts
@@ -911,6 +949,39 @@ export default function CompsPanel({
     onFocusHandled?.();
   }, [focusCompId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => { saveCompsView(q); }, [q]);
+  const clearAllFilters = () => setQ((s) => ({ ...emptyView(), sort: s.sort, panelOpen: s.panelOpen }));
+  // The view is DERIVED from the loaded array on every change — nothing is copied into state. The
+  // cached-address count is a dep so a search that matches a street address re-runs once that
+  // address has resolved (never the other way round: search does not trigger the lookup).
+  const addrCount = _pinAddrCache.size;
+  const overlaysRef = useRef(overlaysById);
+  overlaysRef.current = overlaysById;
+  const view_ = useMemo(
+    () => countFiltered(comps, q.filters, { search: q.search, sort: q.sort, today: new Date(), locationText: (c) => cachedLocationText(c, overlaysRef.current) }),
+    [comps, q.filters, q.search, q.sort, addrCount], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const counties = useMemo(() => countyOptions(comps), [comps]);
+  const viewFiltered = activeFilterCount(q.filters) > 0 || q.search.trim() !== "";
+  // The map draws only what is shown. null = no filter active = every comp (the Dashboard, the KMZ
+  // export, Recently deleted and every other reader keep seeing ALL comps — the filter is view-only).
+  const visibleSig = viewFiltered ? view_.shown.map((c) => c.id).join(",") : null;
+  const visibleCbRef = useRef(onVisibleCompsChange);
+  visibleCbRef.current = onVisibleCompsChange;
+  useEffect(() => {
+    visibleCbRef.current?.(visibleSig == null ? null : new Set(visibleSig ? visibleSig.split(",") : []));
+  }, [visibleSig]);
+  // Back from a record lands on the same scroll position of the same list.
+  const scrollRef = useRef(null);
+  const listScrollRef = useRef(0);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const prevViewRef = useRef(view);
+  useLayoutEffect(() => {
+    if (view === "list" && prevViewRef.current !== "list" && scrollRef.current) scrollRef.current.scrollTop = listScrollRef.current;
+    prevViewRef.current = view;
+  }, [view]);
+
   if (!open) return null;
 
   // NEW-2/NEW-3 correction (owner review) — every live "tracked" site (market intel only),
@@ -1146,7 +1217,7 @@ export default function CompsPanel({
 
   return (
     <div style={{ display: active ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div ref={scrollRef} onScroll={(e) => { if (viewRef.current === "list") listScrollRef.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto" }}>
         {loading && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>Loading…</div>}
         {loadError && <div style={{ padding: 14, fontSize: 12, color: "var(--danger-text)" }}>{loadError}</div>}
 
@@ -1206,9 +1277,13 @@ export default function CompsPanel({
               </button>
             )}
             {kmlImportError && <div style={{ padding: "6px 14px 0", fontSize: 10.5, color: "var(--danger-text)" }}>{kmlImportError}</div>}
-            <SummaryStrip comps={comps} />
+            <CompsSearchPanel
+              q={q} setQ={setQ} counties={counties} total={comps.length} shownCount={view_.shownCount}
+              undatedHidden={view_.undatedHidden} onClearAll={clearAllFilters}
+            />
+            <SummaryStrip comps={view_.shown} filtered={viewFiltered} />
             {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ Paste comps” above, or point at the map and choose “Log a comp”.</div>}
-            {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} compsRatePeriod={compsRatePeriod} enabled={active} />)}
+            {view_.shown.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} compsRatePeriod={compsRatePeriod} enabled={active} />)}
 
             {/* B1066368 — "Recently deleted", mirroring SitePlansSection.jsx's own trash disclosure
                 exactly (collapsed by default, fetched lazily on first open). */}

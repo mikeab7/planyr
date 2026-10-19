@@ -54,3 +54,8 @@ alter table public.comps add constraint comps_cap_rate_range check (
 --   select conname from pg_constraint where conrelid = 'public.comps'::regclass and contype = 'c'
 --     and conname in ('comps_lease_rate_requires_period', 'comps_amounts_non_negative', 'comps_cap_rate_range');
 --   -- expect 3 rows
+
+-- NEW-2 (comps records search) — power_amps / power_volts / dock_doors non-negative and
+-- power_phase in (1, 3) live in comps_power_docks.sql, under their OWN constraint names so the
+-- drop-and-re-add of comps_amounts_non_negative above (and in comps_building_specs.sql) can never
+-- silently remove them. Applied to production 2026-10-19; verify with the query in that file.

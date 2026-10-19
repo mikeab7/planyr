@@ -894,6 +894,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // item 1), so the open comps panel/map markers refetch immediately instead of waiting for its
   // own tab-focus refetch to notice the DB changed underneath it.
   const [compsReloadToken, setCompsReloadToken] = useState(0);
+  // Records search: the ids currently shown by the Records filter (null = no filter = every comp). View-only.
+  const [visibleCompIds, setVisibleCompIds] = useState(null);
   const [activeOverlayId, setActiveOverlayId] = useState(null); // armed for move/scale/rotate editing
   useEffect(() => { activeOverlayIdRef.current = activeOverlayId; }, [activeOverlayId]);
   const commitPlacementRef = useRef(null); // set by SitePlansSection; called once per finished drag
@@ -2601,6 +2603,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // B831778 (NEW-3) — gated ONLY on the "Comps" checkbox, never on `mode` or the rail tab —
       // the same decoupling rule as the sites layer above.
       (showCompsLayer ? comps : []).forEach((c) => {
+        if (visibleCompIds && !visibleCompIds.has(c.id)) return;
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
         const { size, anchor } = compMarkerSize(false);
         const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
@@ -2626,7 +2629,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
+  }, [comps, visibleCompIds, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
@@ -5155,6 +5158,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   onFocusHandled={onCompFocusHandled}
                   projects={sites}
                   onCompsChange={onCompsChange}
+                  onVisibleCompsChange={setVisibleCompIds}
                   overlaysById={overlaysById}
                   onOpenBrochure={openOverlayBrochure}
                   reloadToken={compsReloadToken}

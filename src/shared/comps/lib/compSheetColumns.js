@@ -302,6 +302,10 @@ export const SHEET_COLUMNS = [
   // and year built are physical characteristics of the improvement, not the deal's location, and
   // grouping them with the street address read as if they were the same kind of fact.
   simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerAmps", label: "Power (A)", fullLabel: "Power (amps)", group: "BUILDING", width: 62, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerVolts", label: "Volts", fullLabel: "Volts", group: "BUILDING", width: 50, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerPhase", label: "Phase", fullLabel: "Phase (1 or 3)", group: "BUILDING", width: 50, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "dockDoors", label: "Docks", fullLabel: "Dock doors", group: "BUILDING", width: 52, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
   simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
 
   // DEAL — facts about the transaction: when, how long.

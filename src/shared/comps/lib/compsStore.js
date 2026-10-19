@@ -18,11 +18,11 @@ import { notifyCompsChanged } from "./compsChanged.js";
 export { supabase };
 
 const TABLE = "comps";
-const SELECT_COLS =
+export const SELECT_COLS =
   "id,user_id,team_id,project_id,comp_type,comp_date,lease_commencement_date,title,notes,anchor_kind,lat,lon,county," +
   "parcel_apn,parcel_geom,site_plan_overlay_id,site_plan_point,land_price,land_size_value," +
-  "land_size_unit,bldg_price,bldg_size_sf,clear_height_ft,year_built,bldg_noi,bldg_cap_rate," +
-  "lease_rate,lease_rate_period,lease_rate_expense,lease_ti,lease_term,lease_size_sf," +
+  "land_size_unit,bldg_price,bldg_size_sf,clear_height_ft,year_built,power_amps,power_volts,power_phase,dock_doors,bldg_noi,bldg_cap_rate," +
+  "lease_rate,lease_rate_period,lease_rate_expense,lease_ti,lease_opex,lease_term,lease_size_sf," +
   "lease_free_rent_months,lease_escalation_pct,comp_party_provider,comp_party_acquirer,created_at,updated_at";
 // Trash-view select — the same shape as SELECT_COLS plus `deleted_at`, so a "Recently deleted"
 // row can reuse every existing display helper (compHeadline, useCompLocationText) rather than a

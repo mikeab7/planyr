@@ -455,6 +455,15 @@ export function partyLabels(compType) {
   return { provider: "Owner/Developer", acquirer: "Tenant" }; // lease, and the honest default
 }
 
+/** "2,000 A · 480 V · 3-phase" — only the parts that are known; null when none are. */
+export function compPowerText(comp) {
+  const parts = [];
+  if (comp?.powerAmps != null) parts.push(`${Number(comp.powerAmps).toLocaleString("en-US")} A`);
+  if (comp?.powerVolts != null) parts.push(`${Number(comp.powerVolts).toLocaleString("en-US")} V`);
+  if (comp?.powerPhase != null) parts.push(`${comp.powerPhase}-phase`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /** Ordered {key,label,value} rows for a comp — a field with no value is simply not in the
  * array, never rendered as an empty row or an em-dash. The list panel, the map popup and the
  * detail form all read this instead of re-deriving which fields apply per type.
@@ -499,6 +508,8 @@ export function compFieldRows(comp, displayPeriod) {
     // they sit right beside Building size.
     if (comp?.clearHeightFt != null) push("clearHeight", "Clear height", `${Number(comp.clearHeightFt).toLocaleString()} ft`);
     if (comp?.yearBuilt != null) push("yearBuilt", "Year built", String(comp.yearBuilt));
+    push("power", "Power", compPowerText(comp));
+    if (comp?.dockDoors != null) push("dockDoors", "Dock doors", Number(comp.dockDoors).toLocaleString());
     // B986096-HARDENING-7 — Price/NOI/Cap are a triangle (any two determine the third; see
     // resolveCapTriangle), so by the time a comp is saved all three are populated whenever at
     // least two were ever known. Shown together, in the same order Michael specified them.
@@ -515,6 +526,8 @@ export function compFieldRows(comp, displayPeriod) {
     // NEW-COMPS-CARD — building-spec facts, property attributes rather than deal economics.
     if (comp?.clearHeightFt != null) push("clearHeight", "Clear height", `${Number(comp.clearHeightFt).toLocaleString()} ft`);
     if (comp?.yearBuilt != null) push("yearBuilt", "Year built", String(comp.yearBuilt));
+    push("power", "Power", compPowerText(comp));
+    if (comp?.dockDoors != null) push("dockDoors", "Dock doors", Number(comp.dockDoors).toLocaleString());
     // NEW-2 (owner chat, 2026-09-08) — "Total annual rent (face)" removed from this detail list:
     // Rate, Leased SF and Net effective already carry the deal, and a fourth money figure here
     // was redundant with what the create form's own live rate preview already shows. Read
@@ -671,6 +684,11 @@ export function rowToComp(r) {
     // has no building yet); nullable, never guessed. `db/comps_building_specs.sql`.
     clearHeightFt: r.clear_height_ft != null ? Number(r.clear_height_ft) : null,
     yearBuilt: r.year_built != null ? Number(r.year_built) : null,
+    // Electrical service + dock doors (`db/comps_power_docks.sql`) — building_sale / lease only, nullable.
+    powerAmps: r.power_amps != null ? Number(r.power_amps) : null,
+    powerVolts: r.power_volts != null ? Number(r.power_volts) : null,
+    powerPhase: r.power_phase != null ? Number(r.power_phase) : null,
+    dockDoors: r.dock_doors != null ? Number(r.dock_doors) : null,
     bldgNoi: r.bldg_noi != null ? Number(r.bldg_noi) : null,
     // Decimal fraction (0.0575), never a percentage number — see resolveCapTriangle's header.
     bldgCapRate: r.bldg_cap_rate != null ? Number(r.bldg_cap_rate) : null,
@@ -720,7 +738,7 @@ export function emptyDraft(anchor) {
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
-    clearHeightFt: "", yearBuilt: "",
+    clearHeightFt: "", yearBuilt: "", powerAmps: "", powerVolts: "", powerPhase: "", dockDoors: "",
     // HARDENING-11 (owner correction, 2026-09-02, amending HARDENING-10 NEW-4) — Per and Basis
     // are NOT the same kind of guess and don't get the same treatment. Per (monthly vs annual)
     // stays genuinely blank: both answers are common and a wrong guess is a silent 12x error, so
@@ -812,6 +830,7 @@ export function draftToComp(d) {
     bldgSizeSf: num(d.bldgSizeSf),
     clearHeightFt: num(d.clearHeightFt),
     yearBuilt: num(d.yearBuilt),
+    powerAmps: num(d.powerAmps), powerVolts: num(d.powerVolts), powerPhase: num(d.powerPhase), dockDoors: num(d.dockDoors),
     bldgNoi: tri ? tri.noi.value : num(d.bldgNoi),
     bldgCapRate: tri ? tri.capRate.value : num(d.bldgCapRate),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
@@ -846,6 +865,7 @@ export function compToDraft(c) {
     landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
     bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
     clearHeightFt: str(c.clearHeightFt), yearBuilt: str(c.yearBuilt),
+    powerAmps: str(c.powerAmps), powerVolts: str(c.powerVolts), powerPhase: str(c.powerPhase), dockDoors: str(c.dockDoors),
     bldgNoi: str(c.bldgNoi), bldgCapRate: str(c.bldgCapRate),
     // ⛔ NEW-1 (owner call, 2026-09-10) — was `|| "annual"`. A comp whose period is genuinely
     // unknown (a legacy row, or one saved before comps_value_constraints.sql required a period
@@ -888,6 +908,10 @@ export function compToRow(comp) {
     bldg_size_sf: comp.bldgSizeSf ?? null,
     clear_height_ft: comp.clearHeightFt ?? null,
     year_built: comp.yearBuilt ?? null,
+    power_amps: comp.powerAmps ?? null,
+    power_volts: comp.powerVolts ?? null,
+    power_phase: comp.powerPhase ?? null,
+    dock_doors: comp.dockDoors ?? null,
     bldg_noi: comp.bldgNoi ?? null,
     bldg_cap_rate: comp.bldgCapRate ?? null,
     lease_rate: comp.leaseRate ?? null,
