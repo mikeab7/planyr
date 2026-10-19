@@ -14,6 +14,7 @@
  * accent, --accent unless the host overrides").
  */
 import { forwardRef, useState } from "react";
+import { NO_AUTOFILL } from "./noAutofill.js";
 // The single source of the control scale. Radius 8 is the median of the pre-convergence
 // spread (6/7/8/9) and already the Site Planner chip/iconBtn value — the smallest net move.
 /* ⛔ B427411 — THESE THREE AGREE WITH `shared/ui/radius.js` BY VALUE, AND THEY STAY LITERAL.
@@ -266,6 +267,52 @@ export function Field({ label, children, stacked = false, required = false, tigh
       {labelNode}
       {tight ? <span style={{ flex: "1 1 auto", minWidth: 0 }}>{children}</span> : children}
     </div>
+  );
+}
+
+/* RangeFields — a labelled Min–Max pair of numeric inputs (NEW-1, Records filters, 2026-10-19): the one
+ * shape for "between A and B" so a filter panel never hand-builds two boxes and a dash. Either end may be
+ * blank (an open range). Values are STRINGS held by the caller; input is digits and one decimal point only,
+ * and a resting value is shown with thousands separators ("100,000") while a focused one is raw, so a
+ * typed digit never has its caret jumped by a live reformat. `single` renders just the Min box (a "at least"
+ * filter) with `unit` after it. Browser autofill is opted out on both boxes. Module scope. */
+function groupDigits(v) {
+  if (v === "" || v == null) return "";
+  const [i, f] = String(v).split(".");
+  return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${f != null ? `.${f}` : ""}`;
+}
+function RangeBox({ value, onChange, placeholder, label, unit, grouped = true }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <span style={{ flex: "1 1 0", minWidth: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input
+        {...NO_AUTOFILL} type="text" inputMode="decimal" aria-label={label} placeholder={placeholder}
+        value={focused || !grouped ? (value ?? "") : groupDigits(value)}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d*\.\d*)\./, "$1"))}
+        style={{
+          flex: "1 1 auto", minWidth: 0, boxSizing: "border-box", height: SIZE.sm.height, padding: "0 8px", fontSize: FONT.md,
+          border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.control, background: "var(--surface-raised)",
+          color: "var(--text-primary)", fontFamily: "inherit", textAlign: "right",
+        }}
+      />
+      {unit ? <span style={{ flex: "none", fontSize: FONT.sm, color: "var(--text-secondary)" }}>{unit}</span> : null}
+    </span>
+  );
+}
+export function RangeFields({ label, min, max, onChange, unit, single = false, grouped = true, minPlaceholder = "Min", maxPlaceholder = "Max" }) {
+  return (
+    <Field label={label} stacked>
+      <span role="group" aria-label={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <RangeBox value={min} onChange={(v) => onChange({ min: v, max })} placeholder={single ? "Min" : minPlaceholder} label={`${label} ${single ? "minimum" : "min"}`} unit={single ? unit : null} grouped={grouped} />
+        {single ? null : (
+          <>
+            <span aria-hidden="true" style={{ flex: "none", color: "var(--text-secondary)" }}>–</span>
+            <RangeBox value={max} onChange={(v) => onChange({ min, max: v })} placeholder={maxPlaceholder} label={`${label} max`} unit={unit} grouped={grouped} />
+          </>
+        )}
+      </span>
+    </Field>
   );
 }
 
