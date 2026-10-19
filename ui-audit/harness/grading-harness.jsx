@@ -7,12 +7,13 @@ import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import GradingController from "../../src/workspaces/site-planner/components/GradingController.jsx";
 import { GroundSection, GradingGroup, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
-import { buildProposedSurface } from "../../src/workspaces/site-planner/lib/proposedSurface.js";
+import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
 import { offsetPolygon } from "../../src/workspaces/site-planner/lib/parcelOffset.js";
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
+import { CHEHAW_CROSS_DOCK_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
 
 const F = "/test/fixtures/chehaw-218-02007";
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
@@ -33,6 +34,16 @@ function Harness({ data }) {
   const { dem, origin, ring, sb } = data;
   const [els, setEls] = useState(() => {
     const bx = +(new URLSearchParams(location.search).get("bx") ?? -560), by = +(new URLSearchParams(location.search).get("by") ?? -1326);
+    // ?owner=1 — the owner's real 636,916 SF cross-dock (problem report 6cea9895), moved from his plan's origin into this frame
+    if (new URLSearchParams(location.search).get("owner") === "1") {
+      const o = lngLatToFeet(OWNER_ORIGIN.lon, OWNER_ORIGIN.lat, data.origin.lon, data.origin.lat);
+      const host = CHEHAW_CROSS_DOCK_ROWS[0];
+      const hc = { x: host.cx + o.x, y: host.cy + o.y };
+      return CHEHAW_CROSS_DOCK_ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
+        id: e.id, type: e.type, attachedTo: e.attachedTo, truckCourt: !!e.truckCourt, ring: rowRing(e).map((p) => ({ x: p.x + o.x, y: p.y + o.y })),
+        ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
+      }));
+    }
     const one = [
       { id: "b1", type: "building", ring: rect(bx, by, 520, 300) },
       { id: "c1", type: "paving", truckCourt: true, attachedTo: "b1", ring: rect(bx, by + 300, 520, 130), dockStack: { x: bx + 260, y: by + 150 } },
@@ -49,7 +60,7 @@ function Harness({ data }) {
   });
   const [settings, setSettings] = useState({ grading: { layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: true } } });
   const [model, setModel] = useState(null);
-  const [sel, setSel] = useState("b1");
+  const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") === "1" ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
   const setback = useMemo(() => gradingSetback(parcels, 25), [parcels]);
@@ -62,7 +73,9 @@ function Harness({ data }) {
   const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: gradingPack(cfg, setback) };
   const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt;
   const anyFfe = gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
-  const gradeSurface = useMemo(() => (anyFfe ? buildProposedSurface(gsInputs) : null), [gsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  // SitePlanner's wiring: the grading layer builds the surface OFF the render path and holds it while a drag is in flight.
+  const dragRef = React.useRef(false);
+  const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
   const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
   const qs = new URLSearchParams(location.search);
@@ -77,10 +90,12 @@ function Harness({ data }) {
   }, [rockFt, ring, origin]);
   const input = { base, origin, gsInputs, gsSig, gradeSurface, selBuildingId: sel, multiBuildings: sel ? 1 : 0, rawBuilding: els.find((e) => e.id === sel) || null,
     rawBuildings: new Map(els.filter((e) => e.type === "building").map((e) => [e.id, e])), buildingNames: new Map(els.filter((e) => e.type === "building").map((e, i) => [e.id, `Building ${i + 1}`])), buildingOrder: els.filter((e) => e.type === "building").map((e) => e.id),
-    pondCutCy: pondCy, siteFloorFt: null, rockPolys, dockDropFt: 4, groundBasis: "grid", accent: "#0e7a52", isDragging: () => false,
+    pondCutCy: pondCy, siteFloorFt: null, rockPolys, dockDropFt: 4, groundBasis: "grid", accent: "#0e7a52", isDragging: () => dragRef.current,
     actions: { patchBuilding: (id, p) => patchBuilding(id, p),
       moveAssembly: (id, dx, dy, freeze) => setEls((a) => shiftAssembly(a, new Set(a.map((e) => e.id)), dx, dy).map((e) => (e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freeze) ? { ...e, padElevFt: freeze, ffeBasis: "typed" } : e))) } };
-  window.__harness = { els, model, setSel, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings };
+  window.__harness = { els, model, setSel, gradeSurface,
+    // a real gesture's shape: dragging=true, one assembly move per pointer step, then release (dragging=false + a final commit)
+    dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings };
   const PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
   const ppf = +(qs.get("ppf") || 0.9);
   const f2p = (p) => ({ x: p.x * ppf + 1000, y: p.y * ppf + 1450 });

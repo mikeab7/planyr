@@ -12,7 +12,8 @@
  * proposed surface (buildProposedSurface on the shared inputs with the building's FFE and/or the
  * assembly shifted). The solvers never build a surface of their own, so a verdict here can never differ
  * from what the tiles paint. */
-import { solveBalanceFfe } from "./ffeBalance.js";
+import { solveBalanceFfeSteps, evalSteps } from "./ffeBalance.js";
+export { evalSteps };
 import { hostBuildingIdOf, assemblyIds } from "./gradingMembership.js";
 
 export const CF_PER_CY = 27;
@@ -132,25 +133,9 @@ export function runSync(gen) {
   while (!r.done) r = gen.next();
   return r.value;
 }
-/* Drive a solver without hogging the main thread: pump until `sliceMs` is spent, then yield to the event
- * loop via a MessageChannel (never a clamped timer — a hidden tab must not stall it). `isStale()` abandons
- * the run (a newer request superseded it) and resolves `{ stale: true }`. */
-export function runChunked(gen, { sliceMs = 10, isStale = null, now = () => (typeof performance !== "undefined" ? performance.now() : Date.now()) } = {}) {
-  const tick = () => new Promise((res) => {
-    if (typeof MessageChannel === "undefined") { setTimeout(res, 0); return; }
-    const mc = new MessageChannel(); mc.port1.onmessage = () => { mc.port1.close(); res(); }; mc.port2.postMessage(0);
-  });
-  return (async () => {
-    let r = gen.next();
-    let t0 = now();
-    while (!r.done) {
-      if (isStale && isStale()) return { stale: true };
-      if (now() - t0 >= sliceMs) { await tick(); t0 = now(); if (isStale && isStale()) return { stale: true }; }
-      r = gen.next();
-    }
-    return r.value;
-  })();
-}
+/* runChunked lives in its own leaf (lib/runChunked.js) so the planner's off-render surface build can use it without
+ * pulling this module onto the boot path; re-exported here for every existing caller. */
+export { runChunked } from "./runChunked.js";
 
 /* ---- the three FFE bases ---- */
 
@@ -164,7 +149,9 @@ export const snapFfe = (v, step = FFE_STEP_FT) => Math.round(v / step) * step;
  * the FFE window to search. Returns { ffe, netCy, achieved } or null. */
 export function* solveBalanced(evalNet, range) {
   yield;
-  const sol = solveBalanceFfe({ netAtFfe: evalNet, regMinFfeFt: range.lo, maxRaiseFt: Math.max(1, range.hi - range.lo), tolCy: BALANCE_TOL_CY / 4 });
+  // The bisection YIELDS between (and, with a generator evaluator, inside) its surface builds: it used to run whole inside
+  // one step — every build of the search in a single task (a 637 ms task on the owner's cross-dock, problem report 6cea9895).
+  const sol = yield* solveBalanceFfeSteps({ netAtFfe: evalNet, regMinFfeFt: range.lo, maxRaiseFt: Math.max(1, range.hi - range.lo), tolCy: BALANCE_TOL_CY / 4 });
   if (!sol) return null;
   const round1 = (v) => Math.round(v * 10) / 10;
   const base = round1(sol.ffeFt);
@@ -172,7 +159,7 @@ export function* solveBalanced(evalNet, range) {
   for (const d of [-0.2, -0.1, 0, 0.1, 0.2]) {
     yield;
     const f = round1(base + d);
-    const n = evalNet(f);
+    const n = yield* evalSteps(evalNet, f);
     if (n == null) continue;
     if (!best || Math.abs(n) < Math.abs(best.netCy)) best = { ffe: f, netCy: n };
   }
@@ -190,9 +177,9 @@ export function* findFfeFix(clears, current, { prefer = null } = {}) {
   for (let k = 1; k <= steps; k++) {
     const up = current + k * FFE_STEP_FT, down = current - k * FFE_STEP_FT;
     yield;
-    const u = clears(up);
+    const u = yield* evalSteps(clears, up);
     yield;
-    const d = clears(down);
+    const d = yield* evalSteps(clears, down);
     if (u && d) {
       const pick = prefer ? prefer(up, down) : up;
       return { ffe: pick, delta: pick - current };
@@ -214,7 +201,7 @@ export function* findMoveFix(clearsAt, { buildingCentre, offendCentroid }) {
   for (let d = MOVE_STEP_FT; d <= MOVE_MAX_FT; d += MOVE_STEP_FT) {
     yield;
     const dx = ux * d, dy = uy * d;
-    if (clearsAt(dx, dy)) return { dx, dy, distFt: d, direction: compass8(ux, uy) };
+    if (yield* evalSteps(clearsAt, dx, dy)) return { dx, dy, distFt: d, direction: compass8(ux, uy) };
   }
   return null;
 }

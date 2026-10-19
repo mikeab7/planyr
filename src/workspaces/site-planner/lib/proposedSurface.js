@@ -42,6 +42,13 @@
  * Pure, Node-testable, no DOM. Feet everywhere; elevations ft NAVD88. Screening only —
  * confirm final grading with your civil engineer. */
 import { pointInRing } from "./pondGeom.js";
+
+/* Run a step generator to completion, synchronously. Its return value is the answer. */
+export function drainSteps(gen) {
+  let r = gen.next();
+  while (!r.done) r = gen.next();
+  return r.value;
+}
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
 
 export const TIE_DROP_FT = 0.15;   // threshold tie: paving meets the doors just below slab FF
@@ -268,7 +275,11 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
  * and NEVER priced as zero. cutCy/fillCy are null (honest UNKNOWN) when nothing
  * priced. Retained cells: { x, y, wFt, hFt, dzFt (+fill/−cut | null), elId, cls }.
  * Also accumulates the PL fill checks and the dock-approach break scan. Pure. */
-export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {} } = {}) {
+export function surfaceGrid(args) { return drainSteps(surfaceGridSteps(args)); }
+/* The same lattice as a GENERATOR (problem report 6cea9895): one `yield` per lattice column and per graded element's
+ * apron sampling, so a caller off the render path (runChunked, the owner-only grading layer) can hand the main thread
+ * back between columns. `surfaceGrid` drains it synchronously — the ONE implementation, byte-identical results. */
+export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {} } = {}) {
   const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   const maxCells = opts.maxCells || 3000;
   const minCellFt = opts.minCellFt || 2;
@@ -319,6 +330,7 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   };
   const sampleFt = G ? (Number.isFinite(G.apronSampleFt) ? G.apronSampleFt : GRADING_DEFAULTS.apronSampleFt) : 0;
   for (const g of graded) {
+    yield;
     let reach = 0;
     if (apronsOn) {
       const ring = g.el.ring;
@@ -374,6 +386,7 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   let wedgeFillCf = 0, wedgeCutCf = 0, wedgeSf = 0, wedgeEasementSf = 0;
   const perEl = {};
   for (let i = 0; i < nx; i++) {
+    yield;
     for (let j = 0; j < ny; j++) {
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
       let hit = null;
@@ -634,15 +647,23 @@ export function surfaceViolations({ planes, grid } = {}) {
  * identity key (memo/persist signatures — the B807 stale-memo discipline: the key must
  * change whenever any input that changes the surface changes). Returns null when no
  * element yields a plane (no FFE anywhere / nothing graded). Pure. */
-export function buildProposedSurface({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {}, grading = null } = {}) {
+export function buildProposedSurface(args) { return drainSteps(buildProposedSurfaceSteps(args)); }
+/* ⛔ NOT ON THE RENDER PATH FOR THE GRADING LAYER (problem report 6cea9895). One build of the owner's 636,916 SF
+ * cross-dock on the Chehaw lattice is ~100 ms in Node; the grading layer runs this generator through runChunked
+ * (lib/useGradeSurface.js, GradingController) so no step holds the main thread past a lattice column.
+ * `buildProposedSurface` drains it synchronously: one implementation, identical results. */
+export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {}, grading = null } = {}) {
   const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading });
   if (!planes.size) return null;
+  yield;
   // The grading model rides OPTS into the lattice (maxCells defaults up so a 520′ building keeps ~8′ cells).
   const gridOpts = grading ? { maxCells: GRADING_DEFAULTS.maxCells, ...opts, grading } : opts;
-  const grid = surfaceGrid({ planes, els, existAt, parcelRings, pondRings, easementRings, opts: gridOpts });
+  const grid = yield* surfaceGridSteps({ planes, els, existAt, parcelRings, pondRings, easementRings, opts: gridOpts });
   if (!grid) return null;
+  yield;
   const violations = surfaceViolations({ planes, grid });
   // B833(c) — the daylight boundary, per graded element (rendered as a subtle contour).
+  yield;
   const daylight = daylightRings({ planes, els, existAt, apronRatio: grid.apronRatio, shoulderFt: grid.shoulderFt || 0, zOf: grid.zOf || null });
   const surfaceKey = [
     "b826", ffeFt, dockDropFt, tieDropFt, clamp01(fieldT).toFixed(3),

@@ -220,6 +220,60 @@ try {
     }
   }
   await page.close();
+
+  // ================= 6. NO FRAME OVER 100 MS (problem report 6cea9895) — the owner's real cross-dock, his screen =================
+  // Viewport 1913×641 at deviceScaleFactor 2.68 (his capture). Long animation frames are recorded from the moment the
+  // harness is ready (the lattice decode before it is harness setup, not app work): the plan opening (sweep, FFE solve,
+  // surface, cards, Cut & Fill, labels), the panel settling, then a 20-step drag of the building and its release.
+  // KNOWN-GOOD ARM first: the same instrument must SEE a deliberately blocking frame, or the run is VOID.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1913, height: 641 }, deviceScaleFactor: 2.68 });
+    await ctx.addInitScript(() => {
+      window.__lf = [];
+      new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lf.push({ t: e.startTime, d: e.duration, s: (e.scripts || []).map((x) => `${x.invoker}${x.sourceFunctionName ? "/" + x.sourceFunctionName : ""} ${Math.round(x.duration)}ms`).join(" | ") }); }).observe({ type: "long-animation-frame", buffered: true });
+    });
+    const pg = await ctx.newPage();
+    pg.on("pageerror", (e) => errs.push(String(e)));
+    await pg.goto(`${BASE}/ui-audit/harness/grading-harness.html?owner=1&buildable=0`);
+    await assertMeasurable(pg, "verify-grading-harness (frames)");
+    await pg.waitForFunction(() => window.__ready, null, { timeout: 60000 });
+    const tReady = await pg.evaluate(() => performance.now());
+    // the known-good arm: one 250 ms block in a real page TASK (a CDP evaluate is not a task the frame timing sees)
+    await pg.evaluate(() => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 250) { /* block */ } }, 0); });
+    const seen = await pg.waitForFunction((t0) => window.__lf.some((e) => e.t + e.d >= t0 + 200 && e.d >= 240), tReady, { timeout: 3000 }).then(() => true, () => false);
+    if (!seen) { fails.push("✗ VOID — the frame instrument did not see a known 250 ms block, so its clean numbers would mean nothing"); }
+    else {
+      const t1 = await pg.evaluate(() => performance.now());
+      await waitFfe(pg, 120000); await waitEarthwork(pg);
+      await pg.waitForTimeout(4000);
+      const openFrames = await pg.evaluate((t) => window.__lf.filter((e) => e.t >= t), t1);
+      const openMax = Math.max(0, ...openFrames.map((e) => e.d));
+      const ownerFfe = await readFfe(pg);
+      check("the owner's cross-dock gets a suggested FFE (the same engine, off the render path)", ownerFfe != null && ownerFfe > 760 && ownerFfe < 840, `${ownerFfe} ft`);
+      check("longest frame while the plan opens and the grading settles < 50 ms at DSF 2.68 (the brief asks < 100; nothing may block > ~50)", openMax < 50,
+        `${Math.round(openMax)} ms${openMax >= 50 ? " — " + openFrames.filter((e) => e.d >= 50).map((e) => `${Math.round(e.d)}ms [${e.s}]`).join(" ; ") : ""}`);
+      const before = await pg.evaluate(() => window.__harness.gradeSurface && window.__harness.gradeSurface.surfaceKey);
+      const t2 = await pg.evaluate(() => performance.now());
+      await pg.evaluate(() => window.__harness.dragStart());
+      let heldThroughDrag = true;
+      for (let k = 0; k < 20; k++) {
+        await pg.evaluate(() => window.__harness.applyMove(3, 2));
+        await pg.waitForTimeout(16);
+        if (await pg.evaluate(() => window.__harness.gradeSurface && window.__harness.gradeSurface.surfaceKey) !== before) heldThroughDrag = false;
+      }
+      check("the surface is NOT rebuilt per pointer step: the last one stays painted for the whole drag", heldThroughDrag);
+      await pg.evaluate(() => window.__harness.dragEnd());
+      await pg.waitForFunction((b) => window.__harness.gradeSurface && window.__harness.gradeSurface.surfaceKey !== b, before, { timeout: 30000 }).catch(() => {});
+      const after = await pg.evaluate(() => window.__harness.gradeSurface && window.__harness.gradeSurface.surfaceKey);
+      check("released: the surface is rebuilt once for the new position", after && after !== before);
+      await pg.waitForTimeout(5000);
+      const dragFrames = await pg.evaluate((t) => window.__lf.filter((e) => e.t >= t), t2);
+      const dragMax = Math.max(0, ...dragFrames.map((e) => e.d));
+      check("longest frame during the 20-step drag, the release and the re-solve < 50 ms at DSF 2.68", dragMax < 50,
+        `${Math.round(dragMax)} ms${dragMax >= 50 ? " — " + dragFrames.filter((e) => e.d >= 50).map((e) => `${Math.round(e.d)}ms [${e.s}]`).join(" ; ") : ""}`);
+    }
+    await ctx.close();
+  }
   const real = errs.filter((e) => !/Failed to load resource|ERR_TUNNEL|ERR_CONNECTION/.test(e));     // the sandbox has no outside network
   check("no page errors", real.length === 0, real.slice(0, 3).join(" || "));
   await browser.close();

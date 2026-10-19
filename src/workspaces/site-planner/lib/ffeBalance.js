@@ -34,9 +34,29 @@
  *     clamped        — null | "imports-at-floor" (raising can't help — the site needs
  *                      import even at the floor) | "capped" (even the max raise still exports).
  * Pure. */
-export function solveBalanceFfe({ netAtFfe, regMinFfeFt, maxRaiseFt = 8, tolCy = 10, iters = 24 } = {}) {
+export function solveBalanceFfe(args) {
+  const gen = solveBalanceFfeSteps(args);
+  let r = gen.next();
+  while (!r.done) r = gen.next();
+  return r.value;
+}
+
+/* `evalSteps(fn, x)` — call an evaluator that is either an ordinary function or a GENERATOR function (one that yields
+ * between units of work, e.g. buildProposedSurfaceSteps); delegate to the generator, return a plain value as is. The
+ * ONE way a step-driven search (here, buildingGrade's fix searches, ffeSuggest) asks its evaluator, so a search can
+ * hand the main thread back INSIDE an evaluation and not only between them (problem report 6cea9895). */
+export function* evalSteps(fn, ...args) {
+  const r = fn(...args);
+  if (r && typeof r.next === "function" && typeof r[Symbol.iterator] === "function") return yield* r;
+  return r;
+}
+
+/* The same bisection as a generator: a `yield` before every evaluation, and an evaluator that is itself a generator is
+ * delegated to. `solveBalanceFfe` drains it — one implementation. */
+export function* solveBalanceFfeSteps({ netAtFfe, regMinFfeFt, maxRaiseFt = 8, tolCy = 10, iters = 24 } = {}) {
   if (typeof netAtFfe !== "function" || !Number.isFinite(regMinFfeFt)) return null;
-  const n0 = netAtFfe(regMinFfeFt);
+  yield;
+  const n0 = yield* evalSteps(netAtFfe, regMinFfeFt);
   if (n0 == null || !Number.isFinite(n0)) return null;
   const round1 = (v) => Math.round(v * 10) / 10;
   const round2 = (v) => Math.round(v * 100) / 100;
@@ -50,7 +70,8 @@ export function solveBalanceFfe({ netAtFfe, regMinFfeFt, maxRaiseFt = 8, tolCy =
     };
   }
   // Exporting at the floor: raise the pad to reuse the spoil. Check the cap first.
-  const nCap = netAtFfe(regMinFfeFt + maxRaiseFt);
+  yield;
+  const nCap = yield* evalSteps(netAtFfe, regMinFfeFt + maxRaiseFt);
   if (nCap == null || !Number.isFinite(nCap)) return null;
   if (nCap <= -tolCy) {
     // Even the max raise still exports — report the capped raise honestly (partial).
@@ -64,7 +85,8 @@ export function solveBalanceFfe({ netAtFfe, regMinFfeFt, maxRaiseFt = 8, tolCy =
   let lo = 0, hi = maxRaiseFt, rm = maxRaiseFt, nm = nCap;
   for (let k = 0; k < iters; k++) {
     rm = (lo + hi) / 2;
-    nm = netAtFfe(regMinFfeFt + rm);
+    yield;
+    nm = yield* evalSteps(netAtFfe, regMinFfeFt + rm);
     if (nm == null || !Number.isFinite(nm)) return null;
     if (Math.abs(nm) <= tolCy) break;
     if (nm > 0) hi = rm; else lo = rm;

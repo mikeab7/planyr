@@ -489,6 +489,7 @@ import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
+import { useGradeSurface } from "./lib/useGradeSurface.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
   pondFloodplainTier,
@@ -14253,11 +14254,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Owner-only: a building carrying its OWN finish elevation (the FFE chips) prices a surface even when the plan has
   // no site-wide FFE; for every other account this is exactly the old `fmEffectivePadFt == null` test.
   const grAnyFfe = grOn && gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
-  const gradeSurface = useMemo(() => {
-    if ((fmEffectivePadFt == null && !grAnyFfe) || !gsEls.length) return null;
-    return buildProposedSurface(gsInputs);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gsSig]);
+  // Owner-only grading layer: built OFF the render path (chunked, previous surface kept, held while a drag is in flight —
+  // problem report 6cea9895); every other account keeps the render-path memo byte for byte (lib/useGradeSurface.js).
+  const gradeSurface = useGradeSurface({
+    inputs: gsInputs, sig: gsSig, enabled: (fmEffectivePadFt != null || grAnyFfe) && gsEls.length > 0,
+    offRender: grOn, isDragging: () => !!drag.current,
+  });
   /* NEW-2(c/e) — the PROPOSED elevation under the cursor, read from the very surface the
    * earthwork rows price off (`gradeSurface.grid.owners`) rather than re-derived, so the
    * chip and the ledger cannot disagree. `null` reasons are honest, never a plane

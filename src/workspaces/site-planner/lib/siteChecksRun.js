@@ -16,8 +16,10 @@ import { fetchArcgisJson, classifyGisError, pLimit, GIS_MAX_GET_URL, clearCoales
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { normalizeAttrs, buildQueryUrl } from "./siteAnalysis.js";
+import { yieldToMain } from "./yieldToMain.js";
+import { windowedFetchImpl } from "./siteChecksTransport.js";
 import {
-  TRUSTED_CHECKS, CHECK_THRESHOLDS, siteRegions, isTrustedFor, measureFlood, measureWetlands, measureWells,
+  windowFeatures, TRUSTED_CHECKS, CHECK_THRESHOLDS, siteRegions, isTrustedFor, measureFlood, measureWetlands, measureWells,
   measurePipelines, rowFromMeasurement,
 } from "./siteChecks.js";
 
@@ -131,14 +133,22 @@ async function fetchNear(key, rings, radiusMi, fetchJson, cap = CHECK_THRESHOLDS
 /* group → the measurement for the whole group (flood100 + flood500 are ONE fetch). */
 const GROUPS = {
   flood: async (rings, holes, o) => {
-    const feats = await fetchPolygons("flood", rings, o.fetchJson);
+    const feats = await fetchPolygons("flood", rings, o.polyFetchJson || o.fetchJson);
     // Features with no zone attribute (schema drift / an alias) would all read as "mapped, not floodplain" — a false None.
     if (feats.length && !feats.every((f) => typeof f.attrs.FLD_ZONE === "string")) throw new Error("flood: the answer carried no flood-zone field.");
-    return measureFlood(rings, holes, feats.map((f) => ({ rings: f.rings, zone: f.attrs.FLD_ZONE, subtype: f.attrs.ZONE_SUBTY })), o.thresholds);
+    // Problem report 6cea9895: never measure in the response's own continuation, and cut the county-scale polygons to the
+    // site's window in a task of their own first (siteChecks.windowFeatures; measureFlood re-asks it, at no cost).
+    await yieldToMain();
+    const near = windowFeatures(rings, feats.map((f) => ({ rings: f.rings, zone: f.attrs.FLD_ZONE, subtype: f.attrs.ZONE_SUBTY })));
+    await yieldToMain();
+    return { ...measureFlood(rings, holes, near, o.thresholds), featureCount: feats.length };
   },
   wetlands: async (rings, holes, o) => {
-    const feats = await fetchPolygons("wetlands", rings, o.fetchJson);
-    return measureWetlands(rings, holes, feats.map((f) => ({ rings: f.rings, type: f.attrs.WETLAND_TYPE })), o.thresholds);
+    const feats = await fetchPolygons("wetlands", rings, o.polyFetchJson || o.fetchJson);
+    await yieldToMain();
+    const near = windowFeatures(rings, feats.map((f) => ({ rings: f.rings, type: f.attrs.WETLAND_TYPE })));
+    await yieldToMain();
+    return measureWetlands(rings, holes, near, o.thresholds);
   },
   pipelines: async (rings, holes, o) => {
     const { recs } = await fetchNear("pipelines", rings, o.thresholds.nearRadiusMi, o.fetchJson);
@@ -203,6 +213,11 @@ export async function runTrustedChecks(rings, opts = {}) {
   const limit = pLimit(opts.poolSize || 3);
   const baseFetch = opts.fetchJson || ((url, o) => fetchArcgisJson(url, o));
   const fetchJson = (url, o) => limit(() => baseFetch(url, o));
+  // Polygon queries (flood, wetlands) go through the worker transport: the network round trip, the (possibly 16 MB)
+  // parse and the cut to the site's window happen off the main thread (problem report 6cea9895). An injected fetchJson
+  // (tests, harnesses) is used as is.
+  const polyFetchJson = opts.fetchJson ? fetchJson
+    : ((fi) => (url, o) => limit(() => fetchArcgisJson(url, { ...o, fetchImpl: fi })))(windowedFetchImpl(rings));
   const only = Array.isArray(opts.only) ? new Set(opts.only) : null;
 
   const trusted = TRUSTED_CHECKS.filter((c) => isTrustedFor(c, reg.regions));
@@ -221,7 +236,7 @@ export async function runTrustedChecks(rings, opts = {}) {
     const key = `siteverdict:${VERDICT_CACHE_VERSION}:${group}:${thresholds.nearRadiusMi}:${hash}`;
     try {
       if (opts.force) cache.remove(key);
-      const { fresh } = cache.swr(key, () => GROUPS[group](rings, holes, { fetchJson, thresholds }), { ttl: TTL[group] || DAY });
+      const { fresh } = cache.swr(key, () => GROUPS[group](rings, holes, { fetchJson, polyFetchJson, thresholds }), { ttl: TTL[group] || DAY });
       const r = await fresh;
       // STRICT: any error — even with an older stored copy behind it — is a failure, never a stale verdict.
       if (r.error) throw r.error;

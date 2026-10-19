@@ -20,13 +20,13 @@
  * The surface itself is NOT built here: it is SitePlanner's `gradeSurface` (the B826 engine with the
  * grading model on), passed in. Cards, picture and earthwork rows therefore cannot disagree. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildProposedSurface } from "../lib/proposedSurface.js";
+import { buildProposedSurfaceSteps } from "../lib/proposedSurface.js";
 import {
   assemblyIds, assemblyEarthwork, describeFlag, withFfe, shiftAssembly, findFfeFix, findMoveFix, runChunked,
   spotElevationsFor, courtDropReadout, padCornerSpots, padCorners, ringSf,
 } from "../lib/buildingGrade.js";
 import {
-  suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolation,
+  suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps,
   balanceClause, dockClause, rockClause, depthClause, floorClause, composeBasis,
 } from "../lib/ffeSuggest.js";
 import { feetToLatLngPair } from "../lib/mapLock.js";
@@ -185,9 +185,10 @@ export default function GradingController({ input, onModel }) {
     const stale = () => my !== autoSeq.current;
     const range = groundRange(aIds);
     if (!range) return null;
-    const surf = (f) => buildProposedSurface({ ...gi, els: withFfe(gi.els, id, f) });
-    const evalNet = (f) => { const s = surf(f); const t = s && assemblyEarthwork(s.grid, aIds); return t ? t.netCy : null; };
-    const evalGrid = (f) => { const s = surf(f); return s ? s.grid : null; };
+    // Generator evaluators: every surface build of the search yields per lattice column (problem report 6cea9895).
+    const surf = (f) => buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, id, f) });
+    function* evalNet(f) { const s = yield* surf(f); const t = s && assemblyEarthwork(s.grid, aIds); return t ? t.netCy : null; }
+    function* evalGrid(f) { const s = yield* surf(f); return s ? s.grid : null; }
     return runChunked(suggestFfe({ evalNet, evalGrid, range, ids: aIds, pondCy: pondShareOf(id), floorFt, rockAt: rockRef.current }), { isStale: stale });
   };
   const bump = () => setAutoVer((n) => n + 1);
@@ -253,7 +254,7 @@ export default function GradingController({ input, onModel }) {
     const t = setTimeout(async () => {
       const gi = inRef.current.gsInputs;
       const aIds = assemblyIds(gi.els, focusId);
-      const r = await runChunked((function* () { yield; const s = buildProposedSurface({ ...gi, els: withFfe(gi.els, focusId, altE) }); return s ? assemblyEarthwork(s.grid, aIds) : null; })(), { isStale: () => my !== altSeq.current });
+      const r = await runChunked((function* () { yield; const s = yield* buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, focusId, altE) }); return s ? assemblyEarthwork(s.grid, aIds) : null; })(), { isStale: () => my !== altSeq.current });
       if (my !== altSeq.current || !r || r.stale) return;
       setAlt({ id: focusId, E: altE, areaAc: best.areaAc, cutCy: r.cutCy, fillCy: r.fillCy, netCy: r.netCy });
     }, 300);
@@ -274,18 +275,18 @@ export default function GradingController({ input, onModel }) {
     const gi = I.gsInputs;
     const aIds = assemblyIds(gi.els, focusId);
     const bPrepared = gi.els.find((e) => e.id === focusId);
-    const outAt = (e2) => { const s = buildProposedSurface({ ...gi, els: e2 }); return s ? sumOut(s, aIds) : null; };
+    function* outAt(e2) { const s = yield* buildProposedSurfaceSteps({ ...gi, els: e2 }); return s ? sumOut(s, aIds) : null; }
     const cur = Number.isFinite(bPrepared.padElevFt) ? bPrepared.padElevFt : gi.ffeFt;
     const stale = () => my !== fixSeq.current;
     const flag = focusFacts.flag;
     const start = setTimeout(async () => {
       try {
         const ffeFix = Number.isFinite(cur)
-          ? await runChunked(findFfeFix((f) => { const n = outAt(withFfe(gi.els, focusId, f)); return n == null ? null : n === 0; }, cur), { isStale: stale })
+          ? await runChunked(findFfeFix(function* (f) { const n = yield* outAt(withFfe(gi.els, focusId, f)); return n == null ? null : n === 0; }, cur), { isStale: stale })
           : null;
         if (stale() || (ffeFix && ffeFix.stale)) return;
         const moveFix = await runChunked(findMoveFix(
-          (dx, dy) => { const n = outAt(shiftAssembly(gi.els, aIds, dx, dy)); return n === 0; },
+          function* (dx, dy) { const n = yield* outAt(shiftAssembly(gi.els, aIds, dx, dy)); return n === 0; },
           { buildingCentre: centreOf(bPrepared.ring), offendCentroid: flag.centroid },
         ), { isStale: stale });
         if (stale() || (moveFix && moveFix.stale)) return;
@@ -296,6 +297,26 @@ export default function GradingController({ input, onModel }) {
     }, 60);
     return () => clearTimeout(start);
   }, [flagKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------------- the live rock check, off the render path ---------------- */
+  // rockViolation asks the soil polygons once per cut cell (tens of ms on the owner's cross-dock), so it never runs in a
+  // render: a chunked scan per building, superseded by token, keyed on the surface it read.
+  const [rockLive, setRockLive] = useState({ key: "", byId: new Map() });
+  const rockLiveSeq = useRef(0);
+  const rockLiveKey = rockAt && gradeSurface ? `${gradeSurface.surfaceKey}#${rockKey}` : "";
+  useEffect(() => {
+    if (!rockLiveKey) return undefined;
+    const my = ++rockLiveSeq.current;
+    const g = grid, at = rockAt, list = buildings.map((b) => [b.id, assemblies.get(b.id)]);
+    runChunked((function* () {
+      const byId = new Map();
+      for (const [id, aIds] of list) { yield; byId.set(id, yield* rockViolationSteps(g, aIds, at)); }
+      return byId;
+    })(), { isStale: () => my !== rockLiveSeq.current }).then((byId) => {
+      if (my === rockLiveSeq.current && byId && !byId.stale) setRockLive({ key: rockLiveKey, byId });
+    });
+    return () => { rockLiveSeq.current++; };
+  }, [rockLiveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- the basis, in plain words ---------------- */
   const basisFor = (b, ffe, isAuto) => {
@@ -320,8 +341,9 @@ export default function GradingController({ input, onModel }) {
       else clauses.push({ id: "balance", text: "Your number. Reset to auto for the balanced finish." });
     }
     // live checks on the surface the cards and the map both show
-    if (rockRef.current && !(isAuto && aliveInfo && aliveInfo.rock)) {
-      const v = rockViolation(grid, F.aIds, rockRef.current);
+    // The live rock scan runs off the render path (rockLive, below); a scan for an older surface is ignored.
+    const v = rockLive.key === rockLiveKey ? rockLive.byId.get(b.id) : null;
+    if (v && !(isAuto && aliveInfo && aliveInfo.rock)) {
       if (v.raiseFt > 0.04 && v.at) {
         const sd = fourWay(v.at.x - F.centre.x, v.at.y - F.centre.y, 30);
         clauses.push({ id: "rock", text: `Cut runs into rock${sd ? ` on the ${sd} end` : ""} (bedrock about ${Math.max(1, Math.round(v.depthFt))} ft down there); ${f1(Math.ceil(v.raiseFt * 10) / 10).replace(/\.0$/, "")} ft more FFE would clear it.` });
@@ -373,7 +395,7 @@ export default function GradingController({ input, onModel }) {
       })() : null;
     }
     return card;
-  }), [buildings, facts, focusId, autoVer, fixes, altForFocus, gradeSurface, grid, solvingId, namesKey, typedKey_(input)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [buildings, facts, focusId, autoVer, fixes, altForFocus, gradeSurface, grid, solvingId, namesKey, typedKey_(input), rockLive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- canvas labels: the court / lot spots and the four pad-corner pills ---------------- */
   const labels = useMemo(() => {
