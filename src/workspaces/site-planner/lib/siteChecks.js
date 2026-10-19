@@ -20,6 +20,7 @@ import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { classifyWell } from "./wellStatus.js";
 import { toGrid, screenProximity } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
+import { siteWindow, clipRingToWindow } from "./jurisdictionShare.js";
 
 const FT_PER_MI = 5280;
 const EDGE = 1e-6; // a feature EXACTLY at the radius is inside it (≤, not <): float dust must not flip that
@@ -224,18 +225,46 @@ export function compassFrom(dx, dy, inside = false) {
 }
 
 /* ── measurements ────────────────────────────────────────────────────────────────────────────── */
+/* ⛔ WINDOW FIRST (problem report 6cea9895, 2026-10-19). FEMA publishes the all-clear as polygons, and in much of Georgia
+ * the "AREA OF MINIMAL FLOOD HAZARD" Zone X is ONE county-scale polygon: on the Chehaw Rd parcel it was 702,524 vertices.
+ * clipper's cost is superlinear in vertex count, so measuring it whole held the owner's main thread for 6 s (34 s in Node,
+ * 26 s in the sandbox's headless Chromium) inside the FEMA response's continuation. Every feature ring is therefore cut
+ * to a window around the site BEFORE any projection or clipping (Sutherland–Hodgman in lon/lat — the same cut the
+ * jurisdiction share pass uses, B2208416). Nothing on the site is removed: the site lies inside the window by
+ * WINDOW_PAD_M on every side, every number here is an area or a side INTERSECTED WITH THE SITE, and the artificial edges
+ * the cut creates lie on the window border. Rings are cut independently (outer and holes), which is exact for the
+ * even-odd region `featurePaths` forms. Measured on the real answer: identical results (test/siteChecksWindow). */
+export const WINDOW_PAD_M = 300;
+export function windowFeatures(siteRings, features, padM = WINDOW_PAD_M) {
+  const w = Number.isFinite(padM) ? siteWindow(siteRings, padM) : null;
+  if (!w) return features || [];
+  const inside = (r) => { for (const p of r) if (p[0] < w.minx || p[0] > w.maxx || p[1] < w.miny || p[1] > w.maxy) return false; return true; };
+  const out = [];
+  for (const f of features || []) {
+    const rings = [];
+    for (const r of f.rings || []) {
+      if (!r || r.length < 3) continue;
+      const c = inside(r) ? r : clipRingToWindow(r, w);
+      if (c) rings.push(c);
+    }
+    if (rings.length) out.push({ ...f, rings });
+  }
+  return out;
+}
+
 /* FLOOD. `features` = [{ rings (lng/lat), zone, subtype }]. Three disjoint classes are formed BEFORE any
  * area is read: SFHA (the 1% / 100-yr, floodway included), shaded X (the 0.2% / 500-yr) MINUS the SFHA
  * — so an AE area that a shaded-X polygon also covers is counted once, in the 100-year only — and Zone D
  * (undetermined). `mappedFrac` is how much of the site ANY polygon covers: FEMA publishes the all-clear
  * as polygons, so uncovered ground is unmapped, and a row may not read "None" over it. */
-export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOLDS) {
+/* `opts.windowPadM` exists ONLY so a test can replay the pre-fix whole-polygon measurement (Infinity) against the window. */
+export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOLDS, { windowPadM = WINDOW_PAD_M } = {}) {
   const ringsFt = ringsToFt(rings);
   const frame = makeFrame(ringsFt);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
   if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
-  const feats = features || [];
+  const feats = windowFeatures(rings, features, windowPadM);
   const sfha = feats.filter((f) => isSfhaZone(f.zone));
   const shaded = feats.filter((f) => !isSfhaZone(f.zone) && String(f.zone || "").trim().toUpperCase() === "X" && isShadedXSubtype(f.subtype));
   const undetermined = feats.filter((f) => /^D$|NOT INCLUDED/i.test(String(f.zone || "").trim()));
@@ -258,13 +287,13 @@ export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOL
     sfhaZones: zonesOf(sfha), floodway: sfha.some((f) => /floodway/i.test(String(f.subtype || ""))),
     sfhaSide: clean(sfhaSqft) ? sideWord(sfhaOn, solid) : null,
     shadedSide: clean(shadedSqft) ? sideWord(shadedOn, solid) : null,
-    featureCount: feats.length,
+    featureCount: (features || []).length,
   };
 }
 
 /* WETLANDS. `features` = [{ rings, type }]. Acres is the area of the union ON the site; count is the
  * number of mapped wetlands that put real ground on it (a polygon merely touching the ring is not one). */
-export function measureWetlands(rings, holes, features, thresholds = CHECK_THRESHOLDS) {
+export function measureWetlands(rings, holes, features, thresholds = CHECK_THRESHOLDS, { windowPadM = WINDOW_PAD_M } = {}) {
   const ringsFt = ringsToFt(rings);
   const frame = makeFrame(ringsFt);
   const solid = siteSolid(rings, holes, frame);
@@ -273,7 +302,7 @@ export function measureWetlands(rings, holes, features, thresholds = CHECK_THRES
   let count = 0;
   const types = new Set();
   const kept = [];
-  for (const f of features || []) {
+  for (const f of windowFeatures(rings, features, windowPadM)) {
     const on = clipToSite(featurePaths(f.rings, frame), solid);
     if (pathsArea(on) >= thresholds.overlapDustSqft) { count++; kept.push(f); if (f.type) types.add(String(f.type)); }
   }

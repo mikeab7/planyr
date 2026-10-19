@@ -17,7 +17,7 @@
  * Pure, no DOM, Node-tested. Feet and cubic yards. The solvers are GENERATORS that `yield` before every surface
  * build so runChunked can keep the UI alive between builds; every surface build goes through ONE closure the
  * caller supplies, so a verdict here can never differ from what the tiles paint. */
-import { solveBalanced, compass8, cap, BALANCE_TOL_CY } from "./buildingGrade.js";
+import { solveBalanced, compass8, cap, BALANCE_TOL_CY, evalSteps } from "./buildingGrade.js";
 
 export const ROCK_CLEARANCE_FT = 2;      // cut may go no deeper than depth-to-rock minus this
 export const DOCK_UPHILL_MIN_FT = 1;     // a court is "uphill" when its ground is this much above the pad's mean ground
@@ -133,9 +133,20 @@ export function rockDepthLookup(polys, origin, toLatLng) {
  * pavement (slopes are not "under" anything), over = cutDepth − max(0, depthToRock − 2). Returns
  * { raiseFt (the largest overshoot, 0 when clear), at: {x,y}, depthFt (rock depth there) }. */
 export function rockViolation(grid, ids, rockAt) {
+  const gen = rockViolationSteps(grid, ids, rockAt);
+  let r = gen.next();
+  while (!r.done) r = gen.next();
+  return r.value;
+}
+/* The same scan as a generator — a `yield` every ROCK_SCAN_CHUNK cells, since each cell asks the soil polygons
+ * (33 ms per scan in Node on the owner's cross-dock with stand-in polygons; never one block on the main thread). */
+export const ROCK_SCAN_CHUNK = 400;
+export function* rockViolationSteps(grid, ids, rockAt) {
   const out = { raiseFt: 0, at: null, depthFt: null };
   if (!grid || !grid.cells || typeof rockAt !== "function") return out;
+  let k = 0;
   for (const c of grid.cells) {
+    if (++k % ROCK_SCAN_CHUNK === 0) yield;
     if (!ids.has(c.elId) || c.wedge || c.dzFt == null || c.dzFt >= 0) continue;
     const r = rockAt({ x: c.x, y: c.y });
     if (r == null) continue;
@@ -252,7 +263,7 @@ export function composeBasis(clauses, { max = 3 } = {}) {
  * Options: pondCy (spoil available as fill), floorFt (hard minimum), rockAt (see rockDepthLookup).
  * Resolves { ffe, solvedFfe, achieved, netCy, floored, rock } or null when the ground cannot be priced. */
 export function* suggestFfe({ evalNet, evalGrid, range, ids, pondCy = 0, floorFt = null, rockAt = null }) {
-  const netEff = (f) => { const n = evalNet(f); return n == null ? null : n - pondCy; };
+  function* netEff(f) { const n = yield* evalSteps(evalNet, f); return n == null ? null : n - pondCy; }
   const bal = yield* solveBalanced(netEff, range);
   if (!bal) return null;
   let ffe = bal.ffe;
@@ -263,8 +274,8 @@ export function* suggestFfe({ evalNet, evalGrid, range, ids, pondCy = 0, floorFt
   if (typeof rockAt === "function" && typeof evalGrid === "function") {
     for (let pass = 0; pass < MAX_ROCK_PASSES; pass++) {
       yield;
-      const g = evalGrid(ffe);
-      const v = rockViolation(g, ids, rockAt);
+      const g = yield* evalSteps(evalGrid, ffe);
+      const v = yield* rockViolationSteps(g, ids, rockAt);
       if (!(v.raiseFt > 0.04)) break;
       const raise = Math.ceil(v.raiseFt * 10) / 10;
       ffe = round1(ffe + raise);

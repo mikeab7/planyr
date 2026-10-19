@@ -713,6 +713,10 @@ Owner-only (constraint #25). Code: `proposedSurface.js` (`grading` argument), `b
 - The Cut & Fill layer (default ON) paints ONLY the slopes outside the pavement edge, the daylight line, the spot elevations and four pad-corner "cut n.n / fill n.n" pills — never the pad, courts, trailer rows, lots or walks; labels draw only at working zoom.
 - The Level-pad limit at 2:1 is a dashed LINE with a faint inside-edge hatch and one label, never a fill, OFF by default; the Ground row's button shows it and frames the map on it, and reads Hide while it is on.
 - Settings (pavement slope, dock drop, max cut/fill, grading slope, the 5 ft shoulder) live behind the group's gear; Cut & Fill and the level-pad line stay owner-only through the one gate.
+- **Main thread (problem report 6cea9895, 2026-10-19):** grading never does work in a React render — `gradeSurface` comes from `lib/useGradeSurface.js`, never a `useMemo` that builds.
+- Surface builds run chunked (`buildProposedSurfaceSteps` through `runChunked`, a stale token, the previous surface kept painted); every search (FFE balance, fixes, alternative, rock scan) yields INSIDE its builds and cell loops — no step over ~50 ms.
+- A drag/resize/rotate rebuilds on RELEASE only (`isDragging()`); the picture, labels and cards keep the last surface for the gesture.
+- Cut & Fill is ONE lattice image + one outline (not tiles) and the level-pad line one overlay, each rebuilt only when the surface or its layer changes. Guards: `test/gradeSurfaceOffRender`, ui-audit **verify-grading-harness** (frames < 50 ms at DSF 2.68).
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
