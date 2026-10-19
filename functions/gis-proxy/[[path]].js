@@ -97,7 +97,8 @@ export const ALLOWED_HOSTS = new Set([
   "gispub.co.washington.or.us", "wcgis1.co.washington.or.us", "maps.co.lincoln.or.us", "lcmaps.lanecounty.org", "open.maps.rlid.org",
   "geocortex.co.douglas.or.us", "gis.columbiacountymaps.com", "webmap.hoodrivercounty.gov", "pdo.jacksoncountyor.gov", "maps.medfordmaps.org",
   "gis.medfordmaps.org", "delta.co.clatsop.or.us", "gis.co.marion.or.us", "gis.odf.oregon.gov", "navigator.state.or.us", "maps.clackamas.us",
-  "gis.lanecounty.org", "maps.lanecounty.org", "gis.ecso911.com", "hubcitygis.cityofalbany.net", "gis.corvallisoregon.gov",
+  "gis.lanecounty.org", "maps.lanecounty.org", "gis.crookcountyor.gov", "jcportal.jacksoncountyor.gov", "spatial.jacksoncountyor.gov", "gis.co.douglas.or.us",
+  "gis.wrd.state.or.us", "maps.co.jefferson.or.us", "gis.ecso911.com", "hubcitygis.cityofalbany.net", "gis.corvallisoregon.gov",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
