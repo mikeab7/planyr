@@ -231,6 +231,19 @@ try {
   check("clicking the one-line card selects that building and opens it", (await page.locator('[data-card-state="open"]').count()) === 1 && /Building 2/.test(await page.textContent('[data-card-state="open"] [data-card-title]')));
   await page.close();
 
+  // ================= 4c. bump-outs: part of the host's pad — ONE card, one FFE, never a building of their own (NEW-1) =================
+  page = await open("?buildable=0&bump=1");
+  await waitFfe(page);
+  await waitEarthwork(page);
+  await page.waitForTimeout(1200);
+  const bumpCards = await page.evaluate(() => [...document.querySelectorAll("[data-grading-card]")].map((c) => c.textContent.replace(/\s+/g, " ").trim().slice(0, 60)));
+  check("a host with two bump-outs shows ONE card (known-good arm: it is still there)", bumpCards.length === 1 && /^Building 1 · 162,600 SF/.test(bumpCards[0]), JSON.stringify(bumpCards));
+  const bumpFfe = await page.evaluate(() => { const m = window.__harness.model; return { n: m.autoFfe.size, keys: [...m.autoFfe.keys()] }; });
+  check("only the host building carries a suggested FFE", bumpFfe.n === 1 && bumpFfe.keys[0] === "b1", JSON.stringify(bumpFfe));
+  const bumpPlanes = await page.evaluate(() => { const s = window.__harness.gradeSurface; const g = (id) => s && s.planes.get(id); const pads = ["b1", "d1", "d2"].map((id) => g(id) && g(id).baseElevFt); return pads; });
+  check("the bump-outs grade flat at the host's finish (no step inside one building; a typed value on a bump-out is ignored)", bumpPlanes.every((v) => v != null && Math.abs(v - bumpPlanes[0]) < 1e-6), JSON.stringify(bumpPlanes));
+  await page.close();
+
   // ================= 5. the flag: push the building toward the property line =================
   page = await open("?buildable=0");
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1200);

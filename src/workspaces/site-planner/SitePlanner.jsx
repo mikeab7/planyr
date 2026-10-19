@@ -14207,6 +14207,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const host = (e.truckCourt || e.forCourt) && e.attachedTo ? els.find((x) => x.id === e.attachedTo) : null;
     const hr = host ? ringOf(host) : null;
     const g = e.grading || {};
+    const fs = grOn && e.type === "building" && grHosts.get(e.id) ? (els.find((x) => x.id === grHosts.get(e.id)) || e) : e;
     return {
       id: e.id, type: e.type, ring: r,
       dockStack: hr && hr.length >= 3 ? centroid(hr) : null,
@@ -14214,9 +14215,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       slopeOverridePct: Number.isFinite(g.slopePct) ? g.slopePct : null,
       // Owner-only: a building with no TYPED finish elevation takes the SUGGESTED one (balanced dirt, adjusted for pond
       // spoil / rock / the flood floor — GradingController), kept in the model and never written to the plan.
-      padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt
-        : (grOn && e.type === "building" && grModel && grModel.autoFfe && grModel.autoFfe.has(e.id) ? grModel.autoFfe.get(e.id) : null),
+      // A bump-out (building attached to a building) grades flat at its HOST's finish; its own typed value is ignored, not deleted.
+      padElevFt: Number.isFinite(fs.padElevFt) ? fs.padElevFt
+        : (grOn && e.type === "building" && grModel && grModel.autoFfe && grModel.autoFfe.has(fs.id) ? grModel.autoFfe.get(fs.id) : null),
       ...(grOn && e.type !== "building" ? { hostId: grHosts.get(e.id) ?? null } : {}),
+      ...(grOn && e.type === "building" && grHosts.get(e.id) ? { hostId: grHosts.get(e.id) } : {}),
     };
   }).filter(Boolean);
   // Drainage target: the largest pond's centroid (the outfall/low side when no pond is
@@ -14281,8 +14284,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
    * path exists. Inert (null) for any account the gate refuses. */
-  const grBuildingsAll = grOn ? els.filter((e) => e.type === "building") : null;
-  const grSelIds = grOn ? (multi.length ? multi : sel ? [sel] : []).filter((r) => r.kind === "el" && grBuildingsAll.some((b) => b.id === r.id)).map((r) => r.id) : [];
+  // Bump-outs are pad members of their host, so only host buildings are graded buildings; selecting a bump-out selects its host.
+  const grBuildingsAll = grOn ? els.filter((e) => e.type === "building" && !grHosts.has(e.id)) : null;
+  const grSelIds = grOn ? [...new Set((multi.length ? multi : sel ? [sel] : []).filter((r) => r.kind === "el").map((r) => (grBuildingsAll.some((b) => b.id === r.id) ? r.id : (els.find((x) => x.id === r.id) || {}).type === "building" ? grHosts.get(r.id) ?? r.id : r.id)).filter((id) => grBuildingsAll.some((b) => b.id === id)))] : [];
   const grSelBuildingId = grSelIds[0] || null;
   const grSetCfg = (patch) => { pushHistory(); setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } })); };
   // The Grading dock item exists only while the gate says so: a refused/lost answer (sign-out, account switch) closes the

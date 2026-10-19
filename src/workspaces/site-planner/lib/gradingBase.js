@@ -86,7 +86,7 @@ export function gradingPack(cfg, setback) {
 export function hostIdMap(els) {
   const byId = new Map(els.map((e) => [e.id, e]));
   const out = new Map();
-  for (const e of els) { if (e.type === "building") continue; const h = hostBuildingIdOf(e, byId); if (h) out.set(e.id, h); }
+  for (const e of els) { const h = hostBuildingIdOf(e, byId); if (h && h !== e.id) out.set(e.id, h); }
   return out;
 }
 

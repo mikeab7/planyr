@@ -51,6 +51,12 @@ function Harness({ data }) {
       { id: "p1", type: "parking", attachedTo: "b1", ring: rect(bx, by - 62, 520, 62) },
       { id: "p2", type: "parking", attachedTo: "p1", ring: rect(bx, by - 124, 520, 62) },
     ];
+    // ?bump=1 — two corner bump-outs (dog-ears) on b1, exactly the shape makeDogEar stamps: a building element
+    // attached to its host, dogEar set. They must grade as part of b1's pad, never as buildings of their own.
+    if (new URLSearchParams(location.search).get("bump") === "1") {
+      one.push({ id: "d1", type: "building", attachedTo: "b1", noFit: true, noLabel: true, dock: "none", dogEar: { side: "s", sign: -1 }, padElevFt: 1, ring: rect(bx, by + 300, 55, 60) });
+      one.push({ id: "d2", type: "building", attachedTo: "b1", noFit: true, noLabel: true, dock: "none", dogEar: { side: "s", sign: 1 }, ring: rect(bx + 465, by + 300, 55, 60) });
+    }
     if (new URLSearchParams(location.search).get("two") !== "1") return one;
     // a second, smaller building well to the east, with its own court
     const x2 = bx + 900;
@@ -70,9 +76,14 @@ function Harness({ data }) {
   const existAt = useMemo(() => demSampler(dem, origin), [dem, origin]);
   const hosts = hostIdMap(els);
   // SitePlanner's wiring: a building with no TYPED finish elevation takes the SUGGESTED one the controller published
-  const gsEls = els.map((e) => ({ id: e.id, type: e.type, ring: ringOf(e), dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null,
-    padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt : (e.type === "building" && model && model.autoFfe && model.autoFfe.has(e.id) ? model.autoFfe.get(e.id) : null),
-    ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) }));
+  const gsEls = els.map((e) => {
+    const fs = e.type === "building" && hosts.get(e.id) ? (els.find((x) => x.id === hosts.get(e.id)) || e) : e;   // a bump-out takes its HOST's finish
+    return { id: e.id, type: e.type, ring: ringOf(e), dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null,
+      padElevFt: Number.isFinite(fs.padElevFt) ? fs.padElevFt : (e.type === "building" && model && model.autoFfe && model.autoFfe.has(fs.id) ? model.autoFfe.get(fs.id) : null),
+      ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}),
+      ...(e.type === "building" && hosts.get(e.id) ? { hostId: hosts.get(e.id) } : {}) };
+  });
+  const hostBuildings = els.filter((e) => e.type === "building" && !hosts.has(e.id));
   const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: gradingPack(cfg, setback) };
   const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt;
   const anyFfe = gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
@@ -92,7 +103,7 @@ function Harness({ data }) {
     return [{ depthCm: rockFt * 30.48, polygons: [[box]] }];
   }, [rockFt, ring, origin]);
   const input = { base, origin, gsInputs, gsSig, gradeSurface, selBuildingId: sel, multiBuildings: sel ? 1 : 0, rawBuilding: els.find((e) => e.id === sel) || null,
-    rawBuildings: new Map(els.filter((e) => e.type === "building").map((e) => [e.id, e])), buildingNames: new Map(els.filter((e) => e.type === "building").map((e, i) => [e.id, `Building ${i + 1}`])), buildingOrder: els.filter((e) => e.type === "building").map((e) => e.id),
+    rawBuildings: new Map(hostBuildings.map((e) => [e.id, e])), buildingNames: new Map(hostBuildings.map((e, i) => [e.id, `Building ${i + 1}`])), buildingOrder: hostBuildings.map((e) => e.id),
     pondCutCy: pondCy, siteFloorFt: null, rockPolys, dockDropFt: 4, groundBasis: "grid", accent: "#0e7a52", isDragging: () => dragRef.current,
     actions: { patchBuilding: (id, p) => patchBuilding(id, p),
       moveAssembly: (id, dx, dy, freeze) => setEls((a) => shiftAssembly(a, new Set(a.map((e) => e.id)), dx, dy).map((e) => (e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freeze) ? { ...e, padElevFt: freeze, ffeBasis: "typed" } : e))) } };

@@ -5,12 +5,22 @@
 /* The building an element is attached to, climbing `attachedTo` through intermediate layers (a trailer row
  * bonds to its court, a buffer to a strip…). Returns the building id or null. */
 export function hostBuildingIdOf(el, byId, maxHops = 5) {
-  let cur = el, hops = 0;
+  let cur = el, hops = 0, root = null;
   while (cur && hops++ < maxHops) {
-    if (cur.type === "building") return cur.id;
+    // A building attached to another building (a corner bump-out) is a pad member of it, so keep climbing to the
+    // outermost building; the climb stops at the first building with no attachment that resolves.
+    if (cur.type === "building") root = cur.id;
     cur = cur.attachedTo != null ? byId.get(cur.attachedTo) : null;
   }
-  return null;
+  return root;
+}
+
+/* A bump-out (`dogEar`, or any building element attached to another building) is a pad member of its host and
+ * never a graded building of its own. An orphan (host gone) stays a building so it cannot vanish from grading. */
+export function isPadMember(el, byId) {
+  if (!el || el.type !== "building") return false;
+  const h = hostBuildingIdOf(el, byId);
+  return h != null && h !== el.id;
 }
 
 /* The building's assembly: the building plus every prepared element hosted by it. */
