@@ -111,6 +111,13 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
+// NEW-1 — a RATE keeps its real precision: brokers quote industrial rent to the tenth of a cent
+// ($0.665, $0.535/SF/mo), and rounding to cents moved every one of those. This only strips float
+// noise (0.665 stays 0.665, 66.5 cents / 100 doesn't become 0.66500000001).
+function roundRate(n) {
+  return Math.round(n * 1e6) / 1e6;
+}
+
 function isoFrom(y, mo, d) {
   if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
   return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -338,9 +345,10 @@ function moneyVal(rawNum, rawSuffix) {
   if (!Number.isFinite(n)) return null;
   const suffix = rawSuffix?.toLowerCase();
   const mult = suffix ? NUM_SUFFIX[suffix] : 1;
-  // Round off float dust (4.15 * 1e6 is 4150000.0000000005 in IEEE 754) — every dollar figure
-  // here is currency, never needs sub-cent precision.
-  return { value: Math.round(n * mult * 100) / 100, soft: !!suffix };
+  // Round off float dust (4.15 * 1e6 is 4150000.0000000005 in IEEE 754) — and ONLY dust: NEW-1, a
+  // lease rate is quoted to the tenth of a cent ($0.665/SF/mo), so rounding to cents here moved
+  // every such rate ("$0.665" read as 0.67).
+  return { value: Math.round(n * mult * 1e6) / 1e6, soft: !!suffix };
 }
 
 /** Wraps a successful money-regex match with the shared negative-sign and ambiguous-grouping
@@ -628,7 +636,7 @@ function findRateToken(text) {
   let m = t.match(RATE_SF_RE);
   if (m) return wrapMoneyMatch(t, m);
   m = t.match(CENTS_RE);
-  if (m) return { value: round2(Number(m[1]) / 100), soft: false, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
+  if (m) return { value: roundRate(Number(m[1]) / 100), soft: false, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
   m = t.match(RATE_BARE_MONTHLY_RE);
   if (m) return wrapMoneyMatch(t, m);
   m = t.match(RATE_DOLLAR_PERIOD_RE);
@@ -637,7 +645,7 @@ function findRateToken(text) {
     m = t.match(RATE_BARE_CONTEXT_RE);
     if (m) {
       if (hasAmbiguousGrouping(m[1])) return { value: null, soft: false, invalid: true, working: blank(t, m), rawMatch: m[0] };
-      return { value: round2(Number(m[1].replace(/,/g, ""))), soft: false, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
+      return { value: roundRate(Number(m[1].replace(/,/g, ""))), soft: false, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
     }
   }
   m = t.match(RATE_MAGNITUDE_FALLBACK_RE);
@@ -645,7 +653,7 @@ function findRateToken(text) {
     const n = Number(m[1]);
     if (n >= 0.10 && n < 5) {
       return {
-        value: round2(n), soft: true, working: blank(t, m),
+        value: roundRate(n), soft: true, working: blank(t, m),
         negative: precededByDroppedMinus(t, m.index), rawMatch: m[0],
         reason: "Read as a bare number with no $ sign or unit — assumed a monthly $/SF rate by its size. Check it.",
       };
@@ -753,6 +761,7 @@ function emptyGeneric() {
     price: null, sizeValue: null, sizeUnit: null, rate: null, ratePeriod: null, rateBasis: null,
     ti: null, term: null, notes: null, freeRentMonths: null, escalationPct: null,
     capRate: null, noi: null, opex: null, hadRecognizedNote: false,
+    clearHeightFt: null, yearBuilt: null, anchor: null,
     commencementDate: null, commencementEstimated: false, commencementSourceLine: null,
   };
 }
@@ -766,7 +775,7 @@ function genericHasAnything(g) {
   return !!(g.compDate || g.title || g.partyProvider || g.partyAcquirer || g.price != null ||
     g.rate != null || g.sizeValue != null || g.term || g.ti != null || g.freeRentMonths != null ||
     g.escalationPct != null || g.capRate != null || g.noi != null || g.opex != null ||
-    g.commencementDate || g.hadRecognizedNote);
+    g.commencementDate || g.hadRecognizedNote || g.clearHeightFt != null || g.yearBuilt != null || !!g.anchor);
 }
 
 function addNote(g, text) {
@@ -777,6 +786,26 @@ function addNote(g, text) {
 function addRecognizedNote(g, text) {
   addNote(g, text);
   g.hadRecognizedNote = true;
+}
+
+/* ---- clear height + year built (NEW-1) ----------------------------------------------------- */
+const CLEAR_VALUE_THEN_LABEL_RE = /(?<![\d.$])(\d{2}(?:\.\d+)?)\s*(?:'|’|ft\.?|feet|foot)?\s*(?:-?\s*0\s*"?\s*)?(?:min(?:imum)?\s*)?clear(?:\s*(?:height|ht))?\b/i;
+const CLEAR_LABEL_THEN_VALUE_RE = /\bclear(?:\s*(?:height|ht))?\s*(?:min(?:imum)?)?\s*(?:of|:|-|is)?\s*(\d{2}(?:\.\d+)?)\s*(?:'|’|ft\.?|feet|foot)?/i;
+function findClearHeight(text) {
+  const t = String(text || "");
+  const m = t.match(CLEAR_VALUE_THEN_LABEL_RE) || t.match(CLEAR_LABEL_THEN_VALUE_RE);
+  if (!m) return null;
+  const v = Number(m[1]);
+  if (!(v >= 10 && v <= 80)) return null;
+  return { value: v, working: blank(t, m) };
+}
+const YEAR_BUILT_LABEL_THEN_VALUE_RE = /\b(?:year\s*built|yr\.?\s*built|built|constructed|delivered)\s*(?:in|:|-)?\s*((?:18|19|20)\d\d)\b/i;
+const YEAR_BUILT_VALUE_THEN_LABEL_RE = /\b((?:18|19|20)\d\d)\s*(?:built|construction|vintage|delivery)\b/i;
+function findYearBuilt(text) {
+  const t = String(text || "");
+  const m = t.match(YEAR_BUILT_LABEL_THEN_VALUE_RE) || t.match(YEAR_BUILT_VALUE_THEN_LABEL_RE);
+  if (!m) return null;
+  return { value: Number(m[1]), working: blank(t, m) };
 }
 
 /** SEVERITY-1 finding (live report, 2026-09-02): a dropped negative sign ("-5.00/SF/yr" ->
@@ -840,6 +869,17 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext, opts = {})
       working = " ".repeat(working.length);
       claimedAnything = true;
     }
+  }
+
+  // NEW-1 — clear height and year built are real comp fields; a line that states them ("32' clear",
+  // "Clear height 36 ft", "built 2019") now fills them instead of leaving the fact in Notes.
+  if (generic.clearHeightFt == null) {
+    const ch = findClearHeight(working);
+    if (ch) { generic.clearHeightFt = ch.value; working = ch.working; claimedAnything = true; }
+  }
+  if (generic.yearBuilt == null) {
+    const yb = findYearBuilt(working);
+    if (yb) { generic.yearBuilt = yb.value; working = yb.working; claimedAnything = true; }
   }
 
   if (generic.freeRentMonths == null) {
@@ -1182,8 +1222,10 @@ function genericToDraft(generic) {
     bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "", leaseOpex: "",
+    clearHeightFt: "", yearBuilt: "",
   };
   d.compType = generic.compType || d.compType;
+  if (generic.anchor) d.anchor = generic.anchor;
   if (generic.title) d.title = generic.title;
   if (generic.partyProvider) d.partyProvider = generic.partyProvider;
   if (generic.partyAcquirer) d.partyAcquirer = generic.partyAcquirer;
@@ -1206,7 +1248,11 @@ function genericToDraft(generic) {
     // exact convention `compSheetColumns.js`'s bldgCapRate column get/set pair already uses, so
     // the two conversions can never disagree.
     if (generic.capRate != null) d.bldgCapRate = String(generic.capRate / 100);
+    if (generic.clearHeightFt != null) d.clearHeightFt = String(generic.clearHeightFt);
+    if (generic.yearBuilt != null) d.yearBuilt = String(generic.yearBuilt);
   } else if (d.compType === "lease") {
+    if (generic.clearHeightFt != null) d.clearHeightFt = String(generic.clearHeightFt);
+    if (generic.yearBuilt != null) d.yearBuilt = String(generic.yearBuilt);
     if (generic.rate != null) d.leaseRate = String(generic.rate);
     if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
     // HARDENING-11 — `generic.rateBasis` already defaults to "nnn" by the time this runs
@@ -1240,6 +1286,8 @@ function genericToDraft(generic) {
     if (generic.escalationPct != null) bits.push(`Escalation: ${generic.escalationPct}%`);
     if (generic.freeRentMonths != null) bits.push(`Free rent: ${generic.freeRentMonths} mo`);
     if (generic.term) bits.push(`Term: ${generic.term}`);
+    if (generic.clearHeightFt != null) bits.push(`Clear height: ${generic.clearHeightFt} ft`);
+    if (generic.yearBuilt != null) bits.push(`Year built: ${generic.yearBuilt}`);
     if (bits.length) {
       const summary = `${bits.join(", ")} — pick a Type to file these.`;
       d.notes = d.notes ? `${d.notes}; ${summary}` : summary;
@@ -1347,12 +1395,19 @@ function detectFieldCollisions(lines) {
 // Label:value line prefixes, industrial-brokerage shorthand included (TT=Tenant, LL=Landlord,
 // TI=Tenant Improvement allowance) — a small domain lexicon, not generic pattern matching. The
 // separator between label and value is a colon OR a dash ("LL -"), not just a colon.
-const LABEL_PREFIX_RE = /^\s*(TT|LL|TI|OpEx|T|Landlord|Tenant|Owner|Developer|Seller|Buyer|Purchaser|Grantor|Grantee|Rate|Term|Type|Date|Notes)\s*(?::|-)\s*/i;
+const LABEL_PREFIX_RE = /^\s*(Clear\s*Height|Clear\s*Ht|Year\s*Built|Yr\.?\s*Built|TT|LL|TI|OpEx|T|Landlord|Tenant|Owner|Developer|Seller|Buyer|Purchaser|Grantor|Grantee|Rate|Term|Type|Date|Notes)\s*(?::|-)\s*/i;
 const LABEL_FIELD = {
   tt: "partyAcquirer", tenant: "partyAcquirer", buyer: "partyAcquirer", purchaser: "partyAcquirer", grantee: "partyAcquirer", t: "partyAcquirer",
   ll: "partyProvider", landlord: "partyProvider", owner: "partyProvider", developer: "partyProvider", seller: "partyProvider", grantor: "partyProvider",
   ti: "ti", opex: "opex", term: "term", rate: "rate", type: "compTypeLabel", date: "compDate", notes: "notes",
 };
+// Multi-word labels ("Clear Height", "Year Built") are looked up whitespace-collapsed.
+function labelFieldOf(label) {
+  const k = String(label || "").toLowerCase().replace(/[\s.]+/g, "");
+  if (k === "clearheight" || k === "clearht") return "clearHeightFt";
+  if (k === "yearbuilt" || k === "yrbuilt") return "yearBuilt";
+  return LABEL_FIELD[String(label || "").toLowerCase()];
+}
 const LEASE_LABELS = new Set(["tt", "ll"]);
 
 function hasKnownLabelPrefix(line) {
@@ -1386,7 +1441,7 @@ export function detectPasteShape(text) {
 }
 
 function applyLabeledLine(generic, flags, sawLeaseLabel, label, value) {
-  const key = LABEL_FIELD[label.toLowerCase()];
+  const key = labelFieldOf(label);
   const v = String(value || "").trim();
   if (!v) return;
   if (LEASE_LABELS.has(label.toLowerCase())) sawLeaseLabel.value = true;
@@ -1412,6 +1467,8 @@ function applyLabeledLine(generic, flags, sawLeaseLabel, label, value) {
     case "compTypeLabel": { const t = normalizeCompTypeToken(v); if (t) generic.compType = t; break; }
     case "compDate": { const d = findDateToken(v); if (d) { generic.compDate = d.iso; if (d.soft) mergeFlag(flags, "compDate", "soft", d.reason || "Day wasn't given — defaulted to the 1st."); } break; }
     case "notes": generic.notes = generic.notes ? `${generic.notes}; ${v}` : v; break;
+    case "clearHeightFt": { const n = extractLeadingNumber(v); if (n && n.value > 0) generic.clearHeightFt = n.value; break; }
+    case "yearBuilt": { const m = v.match(/\b((?:18|19|20)\d\d)\b/); if (m) generic.yearBuilt = Number(m[1]); break; }
     default: break; // an unrecognized label still gets its VALUE run through content detectors below
   }
 }
@@ -1467,39 +1524,185 @@ export function splitPasteLines(text) {
   return String(text || "").split(/\r?\n/).map((l) => l.replace(/\r$/, "")).filter((l) => l.trim() !== "");
 }
 
-// Column header aliases (case-insensitive, exact cell match) -> the generic field they fill.
-const HEADER_ALIASES = {
-  compType: ["type", "comp type", "kind"],
-  compDate: ["date", "comp date", "closed", "close date"],
-  title: ["title", "property", "deal", "address", "name"],
-  partyProvider: ["landlord", "seller", "owner", "developer", "provider"],
-  partyAcquirer: ["tenant", "buyer", "user", "acquirer"],
-  price: ["price", "sale price", "land price", "bldg price", "building price"],
-  sizeValue: ["size", "sf", "acres", "ac", "building sf", "leased sf", "land size"],
-  sizeUnit: ["unit", "size unit"],
-  rate: ["rate", "lease rate", "$/sf", "psf"],
-  ratePeriod: ["period", "mo/yr"],
-  rateBasis: ["basis", "nnn/gross", "expense"],
-  ti: ["ti", "ti $/sf", "ti allowance"],
-  opex: ["opex", "op ex", "operating expenses", "opex $/sf/yr", "nnn charges", "cam"],
-  term: ["term"],
-  noi: ["noi"],
-  capRate: ["cap", "cap rate"],
-  notes: ["notes", "comments"],
-};
+/* ---- spreadsheet HEADER reading (NEW-1, owner report 2026-10-16) -------------------------------
+ *
+ * ⛔ WHY THIS WAS REWRITTEN: the old reader matched a header cell only when it EXACTLY equalled
+ * one of a short alias list, so a real broker lease-comp sheet ("Lease Executed", "Lease Term
+ * (months)", "Rent per SF/Month", "Clear Height Min (ft)", x / y …) filled four columns out of
+ * twenty-two — and the grid's OWN header names ("Executed (ISO)", "Clear Ht (ft)", "Escal (%)",
+ * "Landlord/Seller") did not round-trip either. Matching is now by RULE over a normalised header
+ * (case- and punctuation-insensitive, the parenthetical read separately as a UNIT hint), in a fixed
+ * priority order, so "Base Rent Increases %" is an escalation before it can be a rent and "Tenant
+ * Improvement" is TI before it can be a tenant. A column no rule claims is never dropped: its
+ * values ride into Notes as "Header: value". Fixtures for this sheet and three other broker layouts
+ * live in the repo-root test/ suite **compBrokerSheets**.
+ *
+ * Header-implied facts apply to EVERY row of that column: a rate header that says "per SF/Month"
+ * (or "/Yr") sets the period, so no row is flagged "Rate has no period" for a sheet that stated it
+ * once; a term header that says "(months)"/"(years)" is the unit of a bare number. */
 
-function matchHeader(cell) {
-  const c = String(cell || "").trim().toLowerCase();
-  if (!c) return null;
-  for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
-    if (aliases.includes(c)) return key;
+function headerParts(raw) {
+  const s = String(raw || "").trim();
+  const lower = s.toLowerCase();
+  const paren = (lower.match(/\(([^)]*)\)/g) || []).join(" ");
+  const n = lower.replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+  return { raw: s, lower, paren, n };
+}
+
+function headerPeriod(lower) {
+  if (/month|\/\s*mo\b|\bmo\b|\bmos\b|monthly|\bpsf\s*\/?\s*mo/.test(lower)) return "monthly";
+  if (/year|annual|\/\s*yr\b|\byr\b|\bpa\b|per annum|yearly/.test(lower)) return "annual";
+  return null;
+}
+
+// Ordered: the FIRST rule whose test passes owns the column. Each test sees the header parts.
+const HEADER_RULES = [
+  ["latlon", ({ n }) => /^(lat\s*(long|lon|lng)|lat lon|latitude\s*longitude|coordinates?|coords|gps|location|lat lng|geo)$/.test(n)],
+  ["lon", ({ n }) => /^(x|lon|long|lng|longitude|x coord|x coordinate)$/.test(n)],
+  ["lat", ({ n }) => /^(y|lat|latitude|y coord|y coordinate)$/.test(n)],
+  ["compType", ({ n }) => /^(type|comp type|kind|comp kind|record type|deal kind)$/.test(n)],
+  ["notes", ({ n }) => /^(notes?|comments?|remarks?|comment s)$/.test(n)],
+  ["escalationPct", ({ n }) => /(escal|increase|bumps?|steps?|annual incr)/.test(n)],
+  ["freeRentMonths", ({ n }) => /(free|abat)/.test(n)],
+  ["ti", ({ n }) => /(^ti\b|\bti\b|\btia\b|tenant improvement|improvement allowance|ti allowance)/.test(n)],
+  ["rateBasis", ({ n }) => /^(basis|nnn gross|expense|expense type|expense basis|lease basis|rent basis|rent type|service type|services|rate basis|rate type)$/.test(n)],
+  ["opex", ({ n }) => /(opex|op ex|operating exp|nnn charges|^cam$|ticam|reimbursements?|nnn expenses?|^nnns?$)/.test(n)],
+  ["clearHeightFt", ({ n }) => /(clear|clearance|ceiling height|eave height)/.test(n)],
+  ["yearBuilt", ({ n }) => /(year built|yr built|^built$|^yob$|year blt|yr blt|construction year|^year$)/.test(n)],
+  ["commencementDate", ({ n }) => /(commenc|^lcd$|^rcd$|start date|lease start|occupancy|move in)/.test(n)],
+  ["expiration", ({ n }) => /(expir|end date|lease end|^lxd$)/.test(n)],
+  // "Lease Transaction Type", "Load Type", "Property Type" … — any OTHER "type" column is a fact
+  // with no comp field (the comp's own type is the exact-name rule above): Notes.
+  ["extra", ({ n }) => /\btype\b/.test(n)],
+  ["compDate", ({ n }) => /(execut|signed|sign date|^date$|comp date|^closed$|close date|closing date|sale date|deal date|transaction date|lease date|date signed)/.test(n)],
+  ["term", ({ n }) => /(^|\s)term(\s|$)|lease length|duration/.test(n)],
+  ["ratePeriod", ({ n }) => /^(per|period|rate period|rent period|mo yr|rate per)$/.test(n)],
+  ["price", ({ n }) => /^(price|sale price|sales price|land price|bldg price|building price|purchase price|consideration|sold price)$/.test(n)],
+  ["noi", ({ n }) => /^(noi|net operating income)$/.test(n)],
+  ["capRate", ({ n }) => /^(cap|cap rate|going in cap|going in cap rate)$/.test(n)],
+  // A total / effective rent is not the face rate — keep it, in Notes.
+  ["extra", ({ n }) => /(total|effective|\bner\b)/.test(n) && /(rent|rate)/.test(n)],
+  ["rate", ({ n, lower }) => /\b(rate|rent|asking|psf|rental)\b/.test(n) || /\$\s*\/\s*sf/.test(lower)],
+  ["buildingSf", ({ n }) => /(total building|building sf|bldg sf|^rba$|building size|bldg size|total sf|building area|total rsf|^gba$|building sq)/.test(n)],
+  ["sizeValue", ({ n }) => /(leased sf|sf leased|^rsf$|^sf$|^size$|square feet|sq ft|leased area|lease size|^acres?$|^ac$|land size|^area$|^nra$|leased rsf|^sqft$|deal size|space size)/.test(n)],
+  ["sizeUnit", ({ n }) => /^(unit|size unit|units)$/.test(n)],
+  ["partyProvider", ({ n }) => /(landlord|owner|seller|developer|lessor|provider|grantor)/.test(n)],
+  ["partyAcquirer", ({ n }) => /(tenant|buyer|user|acquirer|lessee|occupant|grantee|purchaser)/.test(n)],
+  ["title", ({ n }) => /^(title|title address|deal|deal name)$/.test(n)],
+  ["address", ({ n }) => /(address|street|^addr$)/.test(n)],
+  ["propertyName", ({ n }) => /^(property|property name|building|building name|bldg name|bldg|project|project name|park|park name|development|name|site|site name)$/.test(n)],
+];
+
+/** One header cell -> `{ key, label, period?, termUnit?, basis? }`, or null for a blank cell.
+ * Never null for a non-blank header: an unclaimed column is `key: "extra"` (into Notes). */
+export function matchHeaderCell(raw) {
+  const parts = headerParts(raw);
+  if (!parts.n) return null;
+  let key = "extra";
+  for (const [k, test] of HEADER_RULES) { if (test(parts)) { key = k; break; } }
+  const out = { key, label: parts.raw.replace(/\s+/g, " ") };
+  if (key === "rate") {
+    out.period = headerPeriod(parts.lower);
+    const b = detectBasis(parts.lower);
+    if (b) out.basis = b;
+  }
+  if (key === "term" || key === "freeRentMonths") {
+    out.termUnit = /year|\byrs?\b/.test(parts.paren || parts.lower) ? "years" : /month|\bmos?\b/.test(parts.paren || parts.lower) ? "months" : null;
+  }
+  return out;
+}
+
+const RECOGNIZED_FOR_HEADER = (m) => m && m.key !== "extra";
+
+/** Pick the header row: the first line (of the first few) on which at least two cells match a
+ * known column. Lines above it — a sheet title ("NORTH HOUSTON LEASE COMPS"), a blank banner —
+ * are skipped, never read as data. Returns `{ index, map }` or null (no header → positional). */
+function findHeaderRow(rows) {
+  const scan = Math.min(rows.length, 6);
+  for (let i = 0; i < scan; i++) {
+    // A header row holds NAMES: a line carrying a figure or a date is data, however many of its
+    // words happen to read like column names ("Acme Seller", "Acme Buyer").
+    if (rows[i].some((c) => /^\s*[$-]?[\d,.]+\s*(%|k|m|sf|ac)?\s*$/i.test(String(c || "")) || (String(c || "").trim() && findDateToken(String(c)) && /\d/.test(String(c))))) continue;
+    const map = rows[i].map(matchHeaderCell);
+    if (map.filter(RECOGNIZED_FOR_HEADER).length >= 2) return { index: i, map };
   }
   return null;
 }
 
-const DEFAULT_COLUMN_ORDER = [
-  "compType", "compDate", "partyProvider", "partyAcquirer", "price", "sizeValue", "rate", "ratePeriod", "rateBasis", "term", "notes",
-];
+// A size column that names the WHOLE building ("Total Building SF") is the comp's size only when
+// the sheet has no leased/deal size; otherwise it is context, kept in Notes.
+function resolveHeaderMap(map) {
+  const hasSize = map.some((m) => m && m.key === "sizeValue");
+  return map.map((m) => {
+    if (!m || m.key !== "buildingSf") return m;
+    return hasSize ? { ...m, key: "extra" } : { ...m, key: "sizeValue" };
+  });
+}
+
+/** Sheet-level type: a header row that only speaks lease (a rent rate, TI, free rent, escalation,
+ * commencement, a tenant/landlord pair) and carries no sale column (price, NOI, cap) is a LEASE
+ * sheet — every row is a lease, said once by the sheet itself, so no row is flagged "Type wasn't a
+ * column — guessed". Mixed or silent sheets fall back to the per-row reading. */
+function sheetTypeFromHeaders(map, preamble) {
+  const keys = new Set(map.filter(Boolean).map((m) => m.key));
+  if (keys.has("compType")) return null;
+  const saleish = keys.has("price") || keys.has("noi") || keys.has("capRate");
+  const leaseish = keys.has("rate") || keys.has("ti") || keys.has("freeRentMonths") || keys.has("escalationPct") ||
+    keys.has("commencementDate") || /\blease\b/i.test(map.filter(Boolean).map((m) => m.label).join(" ") + " " + (preamble || ""));
+  if (leaseish && !saleish) return "lease";
+  return null;
+}
+
+const NA_CELL_RE = /^(?:-+|–|—|n\/?a|none|tbd|\?|\.)$/i;
+
+function cellNumber(val) {
+  const m = String(val).replace(/,/g, "").match(/-?\d*\.?\d+/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Excel hands a date cell over as its serial number when the column wasn't formatted
+// (1 = 1900-01-01, with Excel's 1900 leap-year bug — serial 60 does not exist in reality).
+function excelSerialToIso(n) {
+  if (!Number.isInteger(n) || n < 20000 || n > 80000) return null;
+  const ms = Date.UTC(1899, 11, 30) + n * 86400000;
+  const d = new Date(ms);
+  return d.toISOString().slice(0, 10);
+}
+
+function readDateCell(val) {
+  const v = String(val).trim();
+  if (/^\d{5}$/.test(v)) { const iso = excelSerialToIso(Number(v)); if (iso) return { iso, soft: false }; }
+  // "Jun-26" / "Jun 2026" / "6/26" — a broker month-year cell is the month's FIRST, by the sheet's
+  // own convention; stated once by the column, not a per-row guess, so it carries no flag.
+  // A quarter / "mid-2027" stays flagged: that one IS approximate, whatever the column says.
+  const d = findDateToken(v);
+  if (!d) return null;
+  return d.reason ? { iso: d.iso, soft: true, reason: d.reason } : { iso: d.iso, soft: false };
+}
+
+/** A single "lat, lon" cell (the grid's own Location column, a "Lat/Long" column, a Google-maps
+ * copy) -> {lat, lon}. The pair is read in the order written; a pair written lon-first is caught
+ * by range (a latitude cannot exceed 90). */
+export function parseLatLonPair(text) {
+  const nums = String(text || "").match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length !== 2) return null;
+  let [a, b] = nums.map(Number);
+  if (Math.abs(a) > 90 && Math.abs(b) <= 90) [a, b] = [b, a];
+  return validLatLon(a, b) ? { lat: a, lon: b } : null;
+}
+
+function validLatLon(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0);
+}
+
+function sameName(a, b) {
+  const na = String(a || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const nb = String(b || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!na || !nb) return false;
+  return na === nb || na.startsWith(nb) || nb.startsWith(na);
+}
 
 function normalizeCompTypeToken(v) {
   const s = String(v).trim().toLowerCase();
@@ -1509,56 +1712,169 @@ function normalizeCompTypeToken(v) {
   return null;
 }
 
-function assignGenericCell(generic, flags, key, val) {
+// Positional fallback for a header-less tab block — unchanged from the original reader.
+const DEFAULT_COLUMN_ORDER = [
+  "compType", "compDate", "partyProvider", "partyAcquirer", "price", "sizeValue", "rate", "ratePeriod", "rateBasis", "term", "notes",
+].map((key) => ({ key, label: key }));
+
+function assignHeaderCell(generic, flags, ctx, col, val) {
+  const { key } = col;
   switch (key) {
     case "compType": generic.compType = normalizeCompTypeToken(val); break;
     case "compDate": {
-      const d = findDateToken(val);
-      if (d) { generic.compDate = d.iso; if (d.soft) mergeFlag(flags, "compDate", "soft", d.reason || "Day wasn't given — defaulted to the 1st."); }
+      const d = readDateCell(val);
+      if (d) { generic.compDate = d.iso; if (d.soft) mergeFlag(flags, "compDate", "soft", d.reason); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
-    case "title": generic.title = val; break;
+    case "commencementDate": {
+      const d = readDateCell(val);
+      if (d) { generic.commencementDate = d.iso; if (d.soft) mergeFlag(flags, "leaseCommencementDate", "soft", d.reason); } else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "expiration": ctx.extras.push(`Expires ${val}`); break;
+    case "title": ctx.title = val; break;
+    case "address": ctx.address = val; break;
+    case "propertyName": ctx.propertyName = val; break;
     case "partyProvider": generic.partyProvider = val; break;
     case "partyAcquirer": generic.partyAcquirer = val; break;
     case "price": {
-      const n = parseMagnitudeNumber(val.replace(/^\$/, ""));
+      const n = parseMagnitudeNumber(val.replace(/^\$/, "").replace(/\s/g, ""));
       if (n) { generic.price = n.value; if (n.soft) mergeFlag(flags, "price", "soft", "Had a k/m suffix — check the expanded value."); }
+      else { const x = cellNumber(val); if (x != null && x > 0) generic.price = x; }
       break;
     }
     case "sizeValue": {
-      const n = parseMagnitudeNumber(val);
+      const n = parseMagnitudeNumber(val.replace(/\s*(sf|rsf|ac|acres?|square\s*feet)\s*$/i, ""));
       if (n) { generic.sizeValue = n.value; if (n.soft) mergeFlag(flags, "sizeValue", "soft", "Had a k/m suffix — check the expanded value."); }
-      if (/ac/i.test(val) && !/sf|square/i.test(val)) generic.sizeUnit = "ac";
+      else { const x = cellNumber(val); if (x != null && x > 0) generic.sizeValue = x; }
+      if ((/\bac/i.test(val) || /\bac|acre/i.test(col.label)) && !/sf|square/i.test(val)) generic.sizeUnit = "ac";
       break;
     }
     case "sizeUnit": generic.sizeUnit = /ac/i.test(val) ? "ac" : "sf"; break;
     case "rate": {
-      const n = parseMagnitudeNumber(val.replace(/^\$/, "").replace(/\/\s*sf/i, ""));
-      if (n) { generic.rate = n.value; if (n.soft) mergeFlag(flags, "rate", "soft", "Had a k/m suffix — check the expanded value."); }
+      const x = cellNumber(val.replace(/^\$/, ""));
+      if (x == null) { ctx.extras.push(`${col.label}: ${val}`); break; }
+      generic.rate = x;
+      const p = detectPeriod(val) || col.period || null;
+      if (p) generic.ratePeriod = p;
+      const b = detectBasis(val) || col.basis || null;
+      if (b && !generic.rateBasis) generic.rateBasis = b;
       break;
     }
-    case "ratePeriod": generic.ratePeriod = /mo/i.test(val) ? "monthly" : /yr|year|annual/i.test(val) ? "annual" : null; break;
-    case "rateBasis": generic.rateBasis = /nnn|net/i.test(val) ? "nnn" : /gross|fs|full|\big\b|\bmg\b|base\s*year/i.test(val) ? "gross" : null; break;
-    case "ti": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.ti = n.value; break; }
-    case "opex": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.opex = n.value; break; }
-    case "term": { const termHit = findTermBare(val); generic.term = termHit ? termHit.text : val; break; }
-    case "noi": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.noi = n.value; break; }
-    case "capRate": { const n = Number(String(val).replace(/%$/, "")); if (Number.isFinite(n)) generic.capRate = n; break; }
-    case "notes": generic.notes = val; break;
-    default: break;
+    case "ratePeriod": {
+      const v = val.toLowerCase();
+      generic.ratePeriod = /mo|month/.test(v) ? "monthly" : /yr|year|annual|ann\b|pa\b/.test(v) ? "annual" : generic.ratePeriod;
+      break;
+    }
+    case "rateBasis": {
+      const b = detectBasis(val) || (/\bnet\b/i.test(val) ? "nnn" : null);
+      if (b) generic.rateBasis = b; else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "ti": {
+      const x = cellNumber(val.replace(/^\$/, ""));
+      if (x != null && x >= 0) { generic.ti = x; if (!/^\$?\s*[\d,]*\.?\d+\s*(\/\s*sf|psf)?$/i.test(val)) ctx.extras.push(`TI: ${val}`); }
+      else ctx.extras.push(`TI: ${val}`);
+      break;
+    }
+    case "opex": { const x = cellNumber(val.replace(/^\$/, "")); if (x != null && x >= 0) generic.opex = x; else ctx.extras.push(`${col.label}: ${val}`); break; }
+    case "term": {
+      const hit = findTermBare(val);
+      if (hit) generic.term = hit.text;
+      else {
+        const x = cellNumber(val);
+        if (x != null && x > 0) generic.term = col.termUnit === "years" ? `${Math.round(x * 12)} mo` : `${x} mo`;
+        else ctx.extras.push(`${col.label}: ${val}`);
+      }
+      break;
+    }
+    case "freeRentMonths": {
+      // "6", "6 mo", "6 mo $0.37 NNN", "9 (2 mo gross/ 7 mo net)": the LEADING number is the
+      // months; anything said beyond it is kept, whole, in Notes.
+      const m = val.match(/^\s*(\d+(?:\.\d+)?)/);
+      if (m) {
+        const months = Number(m[1]) * (col.termUnit === "years" ? 12 : 1);
+        generic.freeRentMonths = months;
+        const rest = val.slice(m[0].length).replace(/^\s*(mo|mos|months?)\.?\s*$/i, "").trim();
+        if (rest) ctx.extras.push(`Free rent: ${val}`);
+      } else ctx.extras.push(`Free rent: ${val}`);
+      break;
+    }
+    case "escalationPct": {
+      const x = cellNumber(val);
+      if (x == null) { ctx.extras.push(`${col.label}: ${val}`); break; }
+      // A cell formatted as a fraction (0.0375) is the same 3.75% — never a 0.04% bump.
+      generic.escalationPct = !/%/.test(val) && x > 0 && x < 0.2 ? Math.round(x * 1e6) / 1e4 : x;
+      break;
+    }
+    case "clearHeightFt": {
+      const x = cellNumber(val);
+      if (x != null && x > 0) { generic.clearHeightFt = x; if ((val.match(/\d+(?:\.\d+)?/g) || []).length > 1 && !/^\s*\d+\s*'\s*-?\s*0+\s*"?\s*$/.test(val)) ctx.extras.push(`${col.label}: ${val}`); }
+      else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "yearBuilt": {
+      const m = val.match(/\b(1[89]\d\d|20\d\d)\b/);
+      if (m) { generic.yearBuilt = Number(m[1]); if (val.trim() !== m[1]) ctx.extras.push(`${col.label}: ${val}`); }
+      else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "noi": { const n = parseMagnitudeNumber(val.replace(/^\$/, "").replace(/\s/g, "")); if (n) generic.noi = n.value; break; }
+    case "capRate": {
+      const x = cellNumber(val);
+      if (x != null) generic.capRate = !/%/.test(val) && x > 0 && x < 0.3 ? Math.round(x * 1e6) / 1e4 : x;
+      break;
+    }
+    case "lat": { const x = cellNumber(val); if (x != null) ctx.lat = x; break; }
+    case "lon": { const x = cellNumber(val); if (x != null) ctx.lon = x; break; }
+    case "latlon": {
+      const p = parseLatLonPair(val);
+      if (p) { ctx.lat = p.lat; ctx.lon = p.lon; } else if (!ctx.address) ctx.address = val;
+      break;
+    }
+    case "notes": ctx.notes.push(val); break;
+    default: ctx.extras.push(`${col.label}: ${val}`); break;
   }
 }
 
-function parseSpreadsheetRow(cells, headerMap) {
+function parseSpreadsheetRow(cells, headerMap, sheetType) {
   const generic = emptyGeneric();
   const flags = {};
-  const keys = headerMap || DEFAULT_COLUMN_ORDER;
+  const ctx = { extras: [], notes: [], title: null, address: null, propertyName: null, lat: null, lon: null };
+  const cols = headerMap || DEFAULT_COLUMN_ORDER;
   cells.forEach((raw, i) => {
-    const key = keys[i];
+    const col = cols[i];
     const val = String(raw || "").trim();
-    if (!key || !val) return;
-    assignGenericCell(generic, flags, key, val);
+    if (!col || !val || NA_CELL_RE.test(val)) return;
+    assignHeaderCell(generic, flags, ctx, col, val);
   });
+
+  // Title — "<Property Name> - <Tenant>", or "<Address> - <Tenant>" when the property name only
+  // repeats the address (or there isn't one). An explicit Title column always wins.
+  if (ctx.title) generic.title = ctx.title;
+  else {
+    const place = ctx.propertyName && !sameName(ctx.propertyName, ctx.address) ? ctx.propertyName : (ctx.address || ctx.propertyName);
+    if (place && generic.partyAcquirer && !sameName(place, generic.partyAcquirer)) generic.title = `${place} - ${generic.partyAcquirer}`;
+    else if (place) generic.title = place;
+  }
+  if (ctx.address && ctx.propertyName && !sameName(ctx.propertyName, ctx.address) && !ctx.title) ctx.extras.unshift(`Address: ${ctx.address}`);
+  if (ctx.title && ctx.address && !sameName(ctx.title, ctx.address)) ctx.extras.unshift(`Address: ${ctx.address}`);
+
+  const noteParts = [...ctx.notes, ...ctx.extras];
+  if (noteParts.length) generic.notes = noteParts.join("; ");
+
+  // Location — an explicit coordinate pair is the pin, at exactly that point. x is LONGITUDE and
+  // y LATITUDE; a sheet that swapped them is caught by range rather than dropped. County resolves
+  // after the paste the same way a hand-dropped pin's does (`countyPending`).
+  let anchor = null;
+  if (ctx.lat != null && ctx.lon != null) {
+    let lat = ctx.lat, lon = ctx.lon;
+    if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) [lat, lon] = [lon, lat];
+    if (validLatLon(lat, lon)) anchor = { kind: "pin", lat, lon, county: null, countyPending: true };
+  }
+  generic.anchor = anchor;
+
+  if (!generic.compType && sheetType) generic.compType = sheetType;
   if (!generic.compType) {
     const guess = detectCompType(cells.join(" "));
     if (guess.value) {
@@ -1569,22 +1885,31 @@ function parseSpreadsheetRow(cells, headerMap) {
       if (inferred) { generic.compType = inferred; flags.compType = { level: "soft", reason: "Type wasn't a column — guessed from which figures were given." }; }
     }
   }
-  return finalizeGenericRow(generic, flags, cells.join("\t"));
+  const row = finalizeGenericRow(generic, flags, cells.join("\t"));
+  // No coordinate but an address: the grid geocodes it (the map search's own forward lookup).
+  if (!anchor && (ctx.address || ctx.propertyName)) {
+    const cityBits = cols.map((c, i) => (c && /^(city|state|zip|zip code|postal code|st)$/i.test(headerParts(c.label).n) ? String(cells[i] || "").trim() : "")).filter((v) => v && !NA_CELL_RE.test(v));
+    row.geocodeQuery = [ctx.address || ctx.propertyName, ...cityBits].join(", ");
+  }
+  return row;
 }
 
-/** A tab-delimited pasted block -> one row per line. The first line is treated as a HEADER row
- * (and skipped as data) when at least two of its cells match a known column name; otherwise
- * every line is data, mapped positionally to `DEFAULT_COLUMN_ORDER`. Rows that end up with
- * nothing at all are dropped — never emitted empty. */
+/** A tab-delimited pasted block -> one row per line. The HEADER row is the first line (of the
+ * first few) on which at least two cells match a known column — title rows above it are skipped;
+ * with no header at all, every line is data, mapped positionally to `DEFAULT_COLUMN_ORDER`. Rows
+ * that end up with nothing at all are dropped — never emitted empty. */
 export function parsePasteBlock(text) {
   const lines = splitPasteLines(text);
   if (!lines.length) return [];
   const rows = lines.map((l) => l.split("\t"));
-  const firstRowMatches = rows[0].map(matchHeader);
-  const matchCount = firstRowMatches.filter(Boolean).length;
-  const headerMap = matchCount >= 2 ? firstRowMatches : null;
-  const dataRows = headerMap ? rows.slice(1) : rows;
-  return dataRows.map((cells) => parseSpreadsheetRow(cells, headerMap));
+  const header = findHeaderRow(rows);
+  const headerMap = header ? resolveHeaderMap(header.map) : null;
+  const preamble = header ? lines.slice(0, header.index).join(" ") : "";
+  const sheetType = headerMap ? sheetTypeFromHeaders(headerMap, preamble) : null;
+  const dataRows = header ? rows.slice(header.index + 1) : rows;
+  return dataRows
+    .filter((cells) => cells.some((c) => String(c || "").trim() && !NA_CELL_RE.test(String(c).trim())))
+    .map((cells) => parseSpreadsheetRow(cells, headerMap, sheetType));
 }
 
 /** Top-level dispatcher: detects paste SHAPE (not just spreadsheet-vs-not) and returns
