@@ -71,6 +71,16 @@ try {
   check("the suggestion is balanced to within a few hundred CY", Math.abs(nums[1] - nums[0]) <= 1000, ew);
   check("settings are not visible in the card (behind the gear)", !/Pavement slope|Dock drop|Max cut or fill|Grading slopes/.test(await page.textContent("[data-grading-card]")) && (await page.locator('[data-grading-gear]').count()) === 1);
   check("clear when it daylights inside the setback", (await page.locator('[data-grading-flag="clear"]').count()) === 1);
+  // ---- NEW-1 (amends B2315856): the left-dock Grading panel — cards first, Ground under them, the gear in the header
+  check("the panel: cards first, then the three Ground rows (moved out of Site Analysis, not copied)", await page.evaluate(() => {
+    const card = document.querySelector("[data-grading-card]"), g = document.querySelector('[data-section="ground"]');
+    return !!card && !!g && !!(card.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING) && g.querySelectorAll("[data-ground-row]").length === 3;
+  }));
+  check("the settings gear + info ride the panel HEADER, not the body", await page.evaluate(() => {
+    const head = document.querySelector("#panel-header-actions");
+    return !!head && !!head.querySelector("[data-grading-gear]") && !document.querySelector('[data-grading-panel] [data-grading-gear]');
+  }));
+  check("no 'Ground › Grading' group heading survives", !/Ground › Grading/.test(await page.textContent("#panel")));
 
   // ---- the level-ground alternative: one text link, sets the FFE (typed), basis says so, auto chip resets
   await page.waitForSelector("[data-alt-ffe]", { timeout: 60000 });
@@ -149,6 +159,15 @@ try {
   await page.click("[data-ground-show-buildable]");
   await page.waitForFunction(() => !document.querySelector('[data-layer="buildable"]'), null, { timeout: 15000 });
   check("pressing it again clears the line; the button reads Show again", (await page.textContent("[data-ground-show-buildable]")) === "Show buildable area on map");
+  await page.close();
+
+  // ================= 1b. no building on the plan: one line, and the Ground section still shows =================
+  page = await open("?buildable=0&none=1");
+  await page.waitForSelector('[data-grading-panel="empty"]', { timeout: 60000 });
+  check("empty state: 'Place a building to grade it.'", /Place a building to grade it\./.test(await page.textContent("[data-grading-empty]")));
+  await page.waitForSelector('[data-ground-state="ready"]', { timeout: 60000 });
+  check("empty state: the Ground rows are still there", (await page.locator("[data-ground-row]").count()) === 3);
+  check("empty state: no building card", (await page.locator("[data-grading-card]").count()) === 0);
   await page.close();
 
   // ================= 2. zoomed out: bands and the daylight line only =================

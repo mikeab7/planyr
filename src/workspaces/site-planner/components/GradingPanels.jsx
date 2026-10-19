@@ -2,15 +2,17 @@
  * every sentence comes from the model GradingController publishes (and lib/buildingGrade.js / lib/ffeSuggest.js),
  * and every action is a callback into SitePlanner's EXISTING edit paths — this file computes no grading itself.
  *
- *   GroundSection — "Level ground at 2:1, no walls" + relief + steepness, in Site Analysis under Who governs.
- *   GradingGroup  — GROUND › GRADING: one compact card per building (FFE suggested, never asked), in the same
- *                   Analysis view. There is no Building tab.
+ *   GradingPanel  — the left-dock Grading panel (beside Drainage and Yield): one compact card per building (FFE
+ *                   suggested, never asked), then GroundSection under it; the ⓘ + gear ride the panel header
+ *                   (GradingHeaderActions). Site Analysis carries NONE of this.
+ *   GroundSection — "Level ground at 2:1, no walls" + relief + steepness + the show-on-map button.
  *   GradingCanvas — the slope bands, daylight line, level-pad line, spot elevations, corner pills, the
  *                   setback-breach dot (SVG, inside the plan canvas).
  *
  * Module-scope components only (MODULE-SCOPE-COMPONENTS). Colours are theme tokens; the SVG half takes its
  * hex from the planner's PAL (SVG attributes cannot use var()). */
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, SegmentedControl, IconButton } from "../../../shared/ui/controls.jsx";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
@@ -20,6 +22,7 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
+import { gradingPanelView } from "../lib/gradingPanelModel.js";
 
 const sectionLabel = {
   fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)",
@@ -264,33 +267,43 @@ function BuildingCard({ c, model, onSelect, onApplyFfeFix, onApplyMoveFix }) {
   );
 }
 
-export function GradingGroup({ model, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix }) {
+/* The header's own actions: the ⓘ and the gear (settings popover). Rendered INTO the panel chrome's action slot, beside the
+ * ✕ — the cards below carry no settings. */
+export function GradingHeaderActions({ model, dockDropFt, onCfg, onDockDrop }) {
   const gearRef = useRef(null);
   const [open, setOpen] = useState(false);
-  const cards = model.cards || [];
-  if (!cards.length) return null;
   const noSetback = model.setback && model.setback.usingPropertyLine;
   return (
-    <div data-section="grading" style={{ borderBottom: "1px solid var(--planner-border)", padding: "10px 0", display: "flex", flexDirection: "column", gap: 7 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={sectionLabel}>Ground › Grading</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <RowInfo label="Grading" sections={[
-            { text: "The finished floor is suggested for you: the dirt balanced on site, with the pond's spoil counted as fill, held out of rock, and the docks kept on the low side where the ground allows. Type your own number any time; the small auto chip takes it back." },
-            { text: noSetback ? "No setback drawn, using the property line." : "Slopes are measured to your parcel setback lines." },
-          ]} />
-          <IconButton ref={gearRef} size={24} aria-label="Grading settings" aria-expanded={open} data-grading-gear="1" onClick={() => setOpen((o) => !o)}>⚙</IconButton>
-        </span>
-      </div>
+    <span data-grading-header-actions="1" onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "none" }}>
+      <RowInfo label="Grading" sections={[
+        { text: "The finished floor is suggested for you: the dirt balanced on site, with the pond's spoil counted as fill, held out of rock, and the docks kept on the low side where the ground allows. Type your own number any time; the small auto chip takes it back." },
+        { text: noSetback ? "No setback drawn, using the property line." : "Slopes are measured to your parcel setback lines." },
+      ]} />
+      <IconButton ref={gearRef} size={24} aria-label="Grading settings" aria-expanded={open} data-grading-gear="1" onClick={() => setOpen((o) => !o)}>⚙</IconButton>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={gearRef} placement="below-right" width={280} gap={6}
         panelStyle={{ ...menuPanelStyle, padding: "10px 12px" }}>
         <GradingSettings model={model} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />
       </AnchoredMenu>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {cards.map((c) => (
-          <BuildingCard key={c.id} c={c} model={model} onSelect={onSelectBuilding} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} />
-        ))}
+    </span>
+  );
+}
+
+/* The left-dock Grading panel (NEW-1, amends B2315856): the per-building cards, then the three Ground rows + the
+ * show-on-map button. It only READS `model` (published by the controller SitePlanner mounts whether or not this
+ * panel is open); opening it starts no build. `headerSlot` is the panel chrome's action element (the ⓘ + gear portal there). */
+export function GradingPanel({ model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false }) {
+  const view = gradingPanelView(model);
+  return (
+    <div data-testid="grading-panel" data-grading-panel={view.state} style={{ display: "flex", flexDirection: "column" }}>
+      {model && headerSlot && createPortal(<GradingHeaderActions model={model} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />, headerSlot)}
+      <div data-section="grading" style={{ padding: "0 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {view.state === "cards"
+          ? view.cards.map((c) => (
+              <BuildingCard key={c.id} c={c} model={model} onSelect={onSelectBuilding} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} />
+            ))
+          : <div data-grading-empty={view.state} style={muted}>{view.line}</div>}
       </div>
+      {model && <GroundSection model={model} buildableOn={buildableOn} onToggleBuildable={onToggleBuildable} />}
     </div>
   );
 }

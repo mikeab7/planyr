@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { gradingCfg, gradingSetback, gradingPack, parcelsSig, hostIdMap, GRADING_DEFAULTS } from "../src/workspaces/site-planner/lib/gradingBase.js";
-import { GroundSection, GradingGroup } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { GroundSection, GradingPanel, GradingHeaderActions } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
 import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../src/workspaces/site-planner/lib/mapLock.js";
 
@@ -110,10 +110,25 @@ describe("panels render (static markup)", () => {
     alt: { id: "b1", E: 795, areaAc: 37.6, cutCy: 4000, fillCy: 75000, netCy: 71000 },
     ...over,
   });
-  const group = (cards, extra = {}) => renderToStaticMarkup(React.createElement(GradingGroup, { model: model({ cards, ...extra }), dockDropFt: 4, onCfg: noop, onDockDrop: noop, onSelectBuilding: noop, onApplyFfeFix: noop, onApplyMoveFix: noop }));
-  it("Grading group: exists only when there is a building", () => {
-    expect(group([])).toBe("");
-    expect(group([card()])).toContain("Ground › Grading");
+  const group = (cards, extra = {}) => renderToStaticMarkup(React.createElement(GradingPanel, { model: model({ cards, ...extra }), dockDropFt: 4, onCfg: noop, onDockDrop: noop, onSelectBuilding: noop, onApplyFfeFix: noop, onApplyMoveFix: noop, onToggleBuildable: noop }));
+  it("Grading panel: with no building it says so in one line, and the Ground section still shows", () => {
+    const html = group([]);
+    expect(html).toContain("Place a building to grade it.");
+    expect(html).toContain('data-grading-panel="empty"');
+    expect(html).toContain('data-section="ground"');
+    expect(html).not.toContain("data-grading-card");
+  });
+  it("Grading panel: cards first, the Ground section under them", () => {
+    const html = group([card()]);
+    expect(html).toContain('data-grading-panel="cards"');
+    expect(html.indexOf("data-grading-card")).toBeGreaterThan(-1);
+    expect(html.indexOf('data-section="ground"')).toBeGreaterThan(html.indexOf("data-grading-card"));
+    expect(html).not.toContain("Ground › Grading");
+  });
+  it("Grading panel: no model yet reads as loading, never blank", () => {
+    const html = renderToStaticMarkup(React.createElement(GradingPanel, { model: null }));
+    expect(html).toContain("Reading the ground");
+    expect(html).toContain('data-grading-panel="loading"');
   });
   it("one card: title, FFE already filled in (grey = auto), the basis, ONE alternative link, the earthwork line — and NO tab, NO chips, NO 'pick' prompt", () => {
     const html = group([card()]);
@@ -129,7 +144,10 @@ describe("panels render (static markup)", () => {
   it("the settings are NOT in the card: the pavement slope, dock drop, depth and ratio live behind the gear", () => {
     const html = group([card()]);
     for (const hidden of ["Pavement slope", "Dock drop", "Max cut or fill under a pad", "Grading slopes", "5 ft shoulder"]) expect(html).not.toContain(hidden);
-    expect(html).toContain('data-grading-gear="1"');
+    expect(html).not.toContain('data-grading-gear="1"');   // the gear rides the panel HEADER (portal slot), not the body
+    const head = renderToStaticMarkup(React.createElement(GradingHeaderActions, { model: model({ cards: [card()] }), dockDropFt: 4, onCfg: noop, onDockDrop: noop }));
+    expect(head).toContain('data-grading-gear="1"');
+    expect(head).toContain('aria-label="Grading settings"');
   });
   it("a typed FFE is black with the small auto chip that resets", () => {
     const html = group([card({ isAuto: false, ffe: 801, basis: "Your number. Reset to auto for the balanced finish." })]);

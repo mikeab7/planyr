@@ -77,10 +77,18 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
     expect(sp).toMatch(/\{grOn && grInput && \(\s*<Suspense fallback=\{null\}><GradingController/);
     expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill\)/);
     expect(sp).toMatch(/gradingRows=\{grOn && grModel \?/);
-    expect(sp).toMatch(/groundSlot=\{grOn && grModel \?/);
-    expect(sp).toMatch(/<GradingGroup model=\{grModel\}/);
+    // NEW-1 (amends B2315856): grading is its own dock panel, rendered only behind the gate; Site Analysis carries none of it
+    expect(sp).toMatch(/_pid === "grading" && grOn && \(/);
+    expect(sp).toMatch(/<GradingPanel model=\{grModel \|\| null\}/);
+    expect(sp).not.toMatch(/groundSlot/);
+    expect(sp).not.toMatch(/<GradingGroup|<GroundSection/);
+    expect(read("../src/workspaces/site-planner/components/SiteAnalysis.jsx")).not.toMatch(/groundSlot|Grading|GroundSection/);
   });
-  it("grading lives inside the Analysis view — there is no second tab, no Building tab, no chips", () => {
+  it("the dock item is added by the gate's answer alone", () => {
+    expect(sp).toMatch(/import \{ withGradingTab, panelIdAllowed \} from "\.\/lib\/gradingDock\.js"/);
+    expect(sp).toMatch(/\], grOn\); \/\/ owner-only Grading item/);
+  });
+  it("grading has its own dock panel — no second tab inside Analysis, no Building tab, no chips", () => {
     expect(sp).not.toMatch(/GradingTabs|BuildingGradeTab|grTab|setGrTab/);
     const panels = read("../src/workspaces/site-planner/components/GradingPanels.jsx");
     expect(code(panels)).not.toMatch(/export function (GradingTabs|BuildingTab)|data-ffe-basis|aria-pressed=\{b\.basis/);
