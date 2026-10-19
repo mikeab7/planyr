@@ -58,6 +58,16 @@ export const ALLOWED_HOSTS = new Set([
   "gis.lojic.org", // LOJIC — Jefferson County (Louisville) PVA parcels
   "arcgis.boonecountygis.com", // Boone County KY GIS
   "webgis.bgky.org", // City of Bowling Green / Warren County KY (CCPC parcels)
+  "gis.bgky.org", // City of Bowling Green / Warren County KY CCPC reference services
+  "secure.boonecountygis.com", // Boone County KY GIS (PVA parcel layers)
+  "maps2.bgadd.org", // Bluegrass Area Development District — Boyle County parcels
+  "maps.linkgis.org", // LINK-GIS — Campbell / Kenton / Pendleton parcels
+  "gis.ccgisonline.com", "gis.ccgisonline.com:6443", // Clark County KY GIS
+  "arcserver.madisoncountyky.us", // Madison County KY GIS
+  "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
+  "gis.daviesskypva.org", // Daviess County PVA
+  "gis.elizabethtownky.org", // City of Elizabethtown (Hardin) property boundaries
+  "gis.equatorstudios.com", // Equator Studios — vendor-hosted county PVA viewers (read to find a county's real service)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
