@@ -80,6 +80,15 @@ try {
     const head = document.querySelector("#panel-header-actions");
     return !!head && !!head.querySelector("[data-grading-gear]") && !document.querySelector('[data-grading-panel] [data-grading-gear]');
   }));
+  // the Ground rows carry the ordinary row-label size at the panel's width (the dock body hands down a larger size; the panel must not inherit it)
+  const gm = await page.evaluate(() => {
+    const t = document.querySelector('[data-ground-row="level"] > div > span');
+    const cs = getComputedStyle(t), lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
+    const r = t.getBoundingClientRect();
+    return { font: parseFloat(cs.fontSize), lines: Math.round(r.height / lh), card: parseFloat(getComputedStyle(document.querySelector("[data-card-title]")).fontSize), relief: parseFloat(getComputedStyle(document.querySelector('[data-ground-row="relief"]')).fontSize), steep: parseFloat(getComputedStyle(document.querySelector('[data-ground-row="steep"]')).fontSize) };
+  });
+  check("Ground row title is at most two lines at the panel's width", gm.lines <= 2, JSON.stringify(gm));
+  check("Ground rows use the same label size as the cards (not the dock's heading size)", gm.font === gm.card && gm.relief === gm.card && gm.steep === gm.card, JSON.stringify(gm));
   check("no 'Ground › Grading' group heading survives", !/Ground › Grading/.test(await page.textContent("#panel")));
 
   // ---- the level-ground alternative: one text link, sets the FFE (typed), basis says so, auto chip resets

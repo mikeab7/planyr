@@ -294,7 +294,8 @@ export function GradingHeaderActions({ model, dockDropFt, onCfg, onDockDrop }) {
 export function GradingPanel({ model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false }) {
   const view = gradingPanelView(model);
   return (
-    <div data-testid="grading-panel" data-grading-panel={view.state} style={{ display: "flex", flexDirection: "column" }}>
+    <div data-testid="grading-panel" data-grading-panel={view.state}
+      style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", display: "flex", flexDirection: "column" }}>
       {model && headerSlot && createPortal(<GradingHeaderActions model={model} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />, headerSlot)}
       <div data-section="grading" style={{ padding: "0 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
         {view.state === "cards"
