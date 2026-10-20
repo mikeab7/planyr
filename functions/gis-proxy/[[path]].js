@@ -155,6 +155,12 @@ export const ALLOWED_HOSTS = new Set([
   "maps.boonecountyil.org", "www.colesco.illinois.gov", "maps.grundyco.org", "maps.co.kendall.il.us", "gis.knoxcountyil.gov", "gis.lasallecounty.org", "maps.lakecountyil.gov", "gisportal.co.madison.il.us",
   "www.mcgisweb.org", "sangis.co.sangamon.il.us", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell-il.gov", "rockgis.rockfordil.gov", // Winnebago County's ownership layer (City of Rockford GIS)
   "gis.wiu.edu", // Western Illinois University GIS Center — Henderson and McDonough counties
+  /* NEW-1 (Kansas, 2026-10-19, B2348000) — the non-arcgis.com hosts the wired Kansas counties sit on; each was MEASURED through this relay on the PR preview before its county was wired. */
+  "ww1.bucoks.com", // Butler County GIS
+  "geodataportal.net", // Eagleview's MultiPlatformParcels host — Ellis County appraiser
+  "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
+  "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
+  "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
