@@ -23,12 +23,16 @@ if (/^https:\/\/planyr\.io/.test(BASE) && process.env.E2E_LOGIN_KEY) {
   close = () => browser.close();
 }
 
+const location_is_design = (u) => /#\/design/.test(u);
 const results = [];
 const check = (name, got, want) => { const ok = got === want; results.push({ name, got, want, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}  → ${got} (want ${want})`); };
 
 try {
   await page.goto(BASE.replace(/\/?$/, "/") + "#/design", { waitUntil: "load" });
-  await page.waitForSelector('button', { timeout: 20000 });
+  // A deployed build can rewrite a cold #/design to the last route during boot — set the hash again once it has settled.
+  await page.waitForTimeout(2500);
+  if (!location_is_design(page.url())) await page.evaluate(() => { location.hash = "#/design"; });
+  await page.waitForFunction(() => document.querySelector('button[aria-label="Disabled specimen"]') && document.body.textContent.includes("Body content goes here."), null, { timeout: 30000 }); // the lazy gallery chunk, not just any button
   await page.evaluate(() => document.fonts?.ready);
   await assertMeasurable(page, "verify-cursors-shared");
 
