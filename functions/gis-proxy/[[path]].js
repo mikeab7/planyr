@@ -18,6 +18,11 @@
 // Exact hostnames only — never a pattern. Extend here as a new CORS-blocked regional/county host
 // is wired (see docs/STATEWIDE-PARCELS.md's "GIS pass-through" section).
 export const ALLOWED_HOSTS = new Set([
+  /* NEW-1 (South Carolina, 2026-10-19) — the three county hosts a South Carolina county is wired to (each MEASURED through this relay on the PR preview). The statewide base layer is on
+   * *.arcgis.com and needs no relay. */
+  "www.laurenscountygis.org", // Laurens County
+  "gis.sumter-sc.com", // City / County of Sumter
+  "maps.spartanburgcounty.org", // Spartanburg County
   "www.sgrcmaps.com", // Southern Georgia Regional Commission — Tift + 10 sibling GA counties
   "mgrcmaps.org", // Middle Georgia Regional Commission
   "maps.crc.ga.gov", // Coastal Regional Commission (not yet wired to a county)

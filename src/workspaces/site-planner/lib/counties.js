@@ -55,6 +55,7 @@ import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georg
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
 import { miRaw, miMap } from "./miParcels.js"; // NEW-1 (Michigan, 2026-10-20) — the Michigan county rows (mi_oakland / mi_macomb / mi_detroit stay hand-written)
+import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
 import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
 import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
 import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
@@ -999,6 +1000,7 @@ const COUNTIES_RAW = {
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
   ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
   ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
   ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
   ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
@@ -3063,6 +3065,7 @@ const COUNTIES_MAP_RAW = {
   ...miMap(),
   ...ksMap(), // NEW-1 (B2348000)
   ...moMap(),
+  ...scMap(),
   ...paMap(),
   ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)
