@@ -139,6 +139,7 @@ try {
       const L = `[webkit ${device}]`;
       let ctx, page;
       try {
+        if (LIVE && seeded) seeded = await seedPanel(BASE); // every device pass starts from the SAME seed — the full flow above mutates it (Yes → No, the price level)
         ({ ctx, page } = await openRaw(wk, device, "ios"));
         await assertMeasurable(page, `verify-food-restaurant-panel:${device}`);
         await page.evaluate(() => { window.__PLANYR_E2E = true; });
@@ -160,7 +161,7 @@ try {
         const skipRowsClosed = await page.locator('[data-testid="food-dishes-skip"] [data-testid="dish-row"]').count();
         check(`${L} S1 WHAT TO ORDER holds the "yes" dishes by score (Salmon 9.5 before Miso 7.0)`, order.join("|") === "ZZ Salmon Nigiri|ZZ Miso Soup", JSON.stringify(order));
         check(`${L} S2 MAYBE holds the "maybe" dish and the unanswered one`, maybe.join("|") === "ZZ Edamame|ZZ Tempura" || maybe.join("|") === "ZZ Tempura|ZZ Edamame", JSON.stringify(maybe));
-        check(`${L} S3 "Skip · 1 dish ▾" is collapsed by default (no skip rows drawn)`, /^Skip · 1 dish/.test(skipToggle) && skipRowsClosed === 0, `${skipToggle} rows=${skipRowsClosed}`);
+        check(`${L} S3 "Skip · 1 dish ▾" is collapsed by default (no skip rows drawn)`, /^Skip · 1 dish/i.test(skipToggle) && skipRowsClosed === 0, `${skipToggle} rows=${skipRowsClosed}`); // the heading is drawn uppercase (CSS), hence /i
         await page.locator('[data-testid="food-dishes-skip-toggle"]').tap(); await sleep(400);
         const skipRows = await texts(page, '[data-testid="food-dishes-skip"] [data-testid="dish-row"]');
         check(`${L} S4 one tap expands Skip: the "no" dish appears`, skipRows.length === 1 && /ZZ Udon/.test(skipRows[0]), JSON.stringify(skipRows));
@@ -191,12 +192,12 @@ try {
         const after = { order: (await texts(page, '[data-testid="food-dishes-order"] [data-testid="dish-row"]')).map(T), skipToggle: T(await page.locator('[data-testid="food-dishes-skip-toggle"]').innerText()), sheet: await page.locator('[data-testid="dish-sheet"]').count() };
         await page.locator('[data-testid="food-dishes-skip-toggle"]').tap(); await sleep(400);
         after.skip = (await texts(page, '[data-testid="food-dishes-skip"] [data-testid="dish-row"]')).map(T);
-        check(`${L} D3 changing Yes → No and tapping Done moves the dish out of WHAT TO ORDER into Skip (now "Skip · 2 dishes") immediately`, after.sheet === 0 && !after.order.some((t) => /Salmon/.test(t)) && /^Skip · 2 dishes/.test(after.skipToggle) && after.skip.some((t) => /Salmon/.test(t)), JSON.stringify(after));
+        check(`${L} D3 changing Yes → No and tapping Done moves the dish out of WHAT TO ORDER into Skip (now "Skip · 2 dishes") immediately`, after.sheet === 0 && !after.order.some((t) => /Salmon/.test(t)) && /^Skip · 2 dishes/i.test(after.skipToggle) && after.skip.some((t) => /Salmon/.test(t)), JSON.stringify(after));
 
         // ── price level: set $$, reload (cache-busted), still $$; tap $$ again clears it
         check(`${L} arm: the throwaway place starts with NO price level (all four $ grey)`, (await page.locator('[data-testid="food-price-level"]').getAttribute("data-level")) === "" && (await db(page, "food_place_prefs", "price_level")).length === 0);
         await page.locator('[data-testid="food-price-level-2"]').tap(); await sleep(300);
-        const lvl = await page.evaluate(() => ({ level: document.querySelector('[data-testid="food-price-level"]').dataset.level, filled: [...document.querySelectorAll('[data-testid^="food-price-level-"]')].map((b) => b.dataset.filled) }));
+        const lvl = await page.evaluate(() => ({ level: document.querySelector('[data-testid="food-price-level"]').dataset.level, filled: [...document.querySelectorAll('[data-testid^="food-price-level-"]')].map((b) => b.dataset.filled), alert: document.querySelector('[role="alert"]')?.innerText || null }));
         const saved = await until(async () => { const r = await db(page, "food_place_prefs", "price_level,place_id"); return r.length === 1 && r[0].price_level === 2 ? r : null; });
         check(`${L} $1 tapping the second $ sets $$ at once (two dark, two grey) and saves it on the restaurant record`, lvl.level === "2" && lvl.filled.join("") === "truetruefalsefalse" && !!saved && saved[0].place_id === LIVE_ABURI, JSON.stringify({ lvl, saved }));
         await page.goto(`${BASE}/?cb=${Date.now()}#/food`, { waitUntil: "domcontentloaded" });
