@@ -33,6 +33,57 @@ try {
   check("finder: header has Hide Layers and the ⋯ menu", (await finder.getByTestId("layers-hide-toggle").count()) === 1 && (await finder.getByTestId("layers-more").count()) === 1);
   await page.screenshot({ path: "/tmp/imagery-live-finder.png" });
 
+  // 8–10. Polish round: name alignment in every pane · no "sources that don't cover this site" line · Interval on an OFF Contour Lines row —
+  // phone and desktop widths, both themes, on the finder's card.
+  for (const [vw, vh, size] of [[1440, 900, "desktop"], [390, 800, "phone"]]) {
+    await page.setViewportSize({ width: vw, height: vh });
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
+      await page.waitForTimeout(400);
+      const fp = page.locator('[data-testid="layer-panel"][data-surface="finder"]');
+      const keys = await (async () => {
+        const tabs = fp.locator('[data-testid="layer-group-nav"] button[role="tab"]');
+        if (await tabs.count()) return tabs.evaluateAll((els) => els.map((e) => e.getAttribute("data-testid").replace("layer-group-", "")));
+        return fp.locator('[data-testid="layer-group-select"] option').evaluateAll((os) => os.map((o) => o.value));
+      })();
+      const xs = {};
+      let floodText = "";
+      for (const k of keys) {
+        const tab = fp.getByTestId(`layer-group-${k}`);
+        if (await tab.count()) await tab.click(); else await fp.locator('[data-testid="layer-group-select"]').selectOption(k);
+        await page.waitForTimeout(150);
+        const got = await fp.evaluate((root) => {
+          const pane = root.querySelector('[data-testid="layer-pane"]');
+          const left = pane.getBoundingClientRect().left;
+          return { x: [...pane.querySelectorAll('[data-testid^="layer-row-"]')].filter((r) => !r.getAttribute("data-testid").endsWith("-menu")).map((r) => Math.round(((r.querySelector("label > span:last-child") || r.querySelector("label span")).getBoundingClientRect().left - left) * 10) / 10), text: pane.innerText };
+        });
+        for (const x of got.x) xs[x] = (xs[x] || 0) + 1;
+        if (k === "flood") floodText = got.text;
+      }
+      check(`finder · ${size} · ${theme}: every row's name starts at the same x in every pane`, Object.keys(xs).length === 1 && Object.values(xs)[0] > 15, JSON.stringify(xs));
+      check(`finder · ${size} · ${theme}: Flood & Drainage has no "sources that don't cover this site" line`, floodText.length > 0 && !/cover this site/i.test(floodText));
+      const tpl = fp.getByTestId("layer-group-topo");
+      if (await tpl.count()) await tpl.click(); else await fp.locator('[data-testid="layer-group-select"]').selectOption("topo");
+      const row = fp.getByTestId("layer-row-contours");
+      const wasOn = await row.locator('input[type="checkbox"]').first().isChecked();
+      if (wasOn) await row.locator('input[type="checkbox"]').first().uncheck({ force: true });
+      const menu = fp.getByTestId("layer-row-contours-menu");
+      if (!(await menu.count())) await fp.getByTestId("layer-caret-contours").click();
+      const sel = menu.getByTestId("contour-interval");
+      check(`finder · ${size} · ${theme}: Contour Lines is off and its ▾ offers the Interval`, (await sel.count()) === 1);
+      if (await sel.count()) {
+        const prev = await sel.inputValue();
+        await sel.selectOption("5");
+        check(`finder · ${size} · ${theme}: choosing 5 on the off row shows 5′ on the row`, ((await row.getByTestId("layer-value-contours").textContent()) || "").trim() === "5′");
+        await sel.selectOption(prev); // put the device preference back
+      }
+      if (await menu.count()) await fp.getByTestId("layer-caret-contours").click();
+      if (wasOn) await row.locator('input[type="checkbox"]').first().check({ force: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+
   // 2. Planner on the fixture site.
   const fixName = await page.evaluate(async (id) => { const q = await window.pfSupabase.from("sites").select("data").eq("id", id).maybeSingle(); return q.data && q.data.data && (q.data.data.site || q.data.data.name); }, FIXTURE_SITE_ID);
   console.log("fixture plan:", fixName);
