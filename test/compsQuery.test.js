@@ -171,6 +171,12 @@ describe("sort — missing values at the end", () => {
     expect(ids(sortComps(set, "newest"))).toEqual(ids(sortCompsByRecency(set)));
     expect(ids(sortComps(set, "bogus"))).toEqual(ids(sortCompsByRecency(set)));
   });
+  it("newest puts undated last too; dated keep recency order, undated keep Date-entered order", () => {
+    const u1 = comp({ compType: "land", compDate: null, createdAt: "2026-10-01T00:00:00Z" });
+    const u2 = comp({ compType: "land", compDate: null, createdAt: "2026-10-18T00:00:00Z" });
+    const a = dated("2026-02-01"), b = dated("2026-08-01");
+    expect(ids(sortComps([u1, a, u2, b], "newest"))).toEqual(ids([b, a, u2, u1]));
+  });
   it("oldest puts undated last", () => {
     const u = comp({ compType: "land", compDate: null }), a = dated("2026-02-01"), b = dated("2026-08-01");
     expect(ids(sortComps([b, u, a], "oldest"))).toEqual(ids([a, b, u]));
