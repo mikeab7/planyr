@@ -116,6 +116,13 @@ export const ALLOWED_HOSTS = new Set([
   "gispub.co.washington.or.us", // Washington County
   "public.co.wasco.or.us", // Wasco County
   "gis.wrd.state.or.us", // Oregon Water Resources Department public tax-lot query (Curry, Jefferson, Lincoln)
+  /* NEW-1 (Oklahoma, 2026-10-19) — county / regional hosts named by the Oklahoma parcel sweep; each is MEASURED through this relay before any county is wired to it. */
+  "gis.okco14.org", "gis.clevelandcountyassessor.us", // Cleveland County assessor
+  "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services
+  "asps0305.tulsacounty.org", // Tulsa County Assessor
+  "okmaps.onenet.net", // OneNet-hosted state GIS server
+  "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
+  "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
   /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
    * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
   "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
