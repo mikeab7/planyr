@@ -187,10 +187,6 @@ export const ALLOWED_HOSTS = new Set([
    * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
    * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
   "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
-  /* PROBE-ONLY (remove before merge): the PVA / county sites that name an embedded map, read once to learn which queryable endpoint they call. */
-  "perrycountypva.com", "www.perrycountypva.com", "laurelpva.com", "www.laurelpva.com", "bellpva.com", "www.bellpva.com", "washingtonkypva.com", "www.washingtonkypva.com",
-  "carrollpva.com", "www.carrollpva.com", "ccpva.org", "www.ccpva.org", "triggpva.com", "www.triggpva.com", "mcpva.com", "www.mcpva.com", "pikekypva.com", "www.pikekypva.com",
-  "estillkypva.org", "www.estillkypva.org", "russellpva.com", "www.russellpva.com", "gis.marshallcounty.ky.gov", "maps2.bgadd.org", "gis.ccgisonline.com:6443",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
