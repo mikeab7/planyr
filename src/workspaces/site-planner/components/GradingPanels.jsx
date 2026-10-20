@@ -23,7 +23,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { LIMIT_MODES, LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
-import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels } from "../lib/gradingPaint.js";
+import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels, planContourDraw } from "../lib/gradingPaint.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
 import { gradingPanelView } from "../lib/gradingPanelModel.js";
@@ -172,6 +172,8 @@ function GradingSettings({ model, dockDropFt, onCfg, onDockDrop }) {
       <Row label="Shoulder past the pavement"><NumField value={cfg.shoulderFt} min={0} step={1} unit="ft" testid="grading-shoulder" ariaLabel="Shoulder past the pavement" onCommit={(v) => onCfg({ shoulderFt: v })} /></Row>
       <Row label="Limit corner radius"><NumField value={cfg.cornerRadiusFt} min={0} step={5} unit="ft" testid="grading-corner-radius" ariaLabel="Limit corner radius" onCommit={(v) => onCfg({ cornerRadiusFt: v })} /></Row>
       <Row label="Max pavement slope"><NumField value={cfg.maxPavementSlopePct} min={0.5} step={0.5} unit="%" testid="grading-max-pavement-slope" ariaLabel="Max pavement slope" onCommit={(v) => onCfg({ maxPavementSlopePct: v })} /></Row>
+      {/* ROUND 6 (NEW-3) — the open ground inside the limit falls away from the pavement it touches at this slope */}
+      <Row label="Open-ground slope"><NumField value={cfg.openGroundSlopePct} min={0} step={0.5} unit="%" testid="grading-open-ground-slope" ariaLabel="Open-ground slope" onCommit={(v) => onCfg({ openGroundSlopePct: v })} /></Row>
       <span style={muted}>No walls · the slope starts at the grading limit. Bank volumes.</span>
       {rockLine && <span data-rock-status={rock.status} style={muted}>{rockLine}</span>}
       {rock.status === "failed" && (
@@ -405,8 +407,10 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
  * stroke, so a pan never recomputes a thing (VIEW-INDEPENDENT-ONCE). */
 export function GradingCanvas({ model, f2p, rppf, PAL }) {
   const { buildable, cutfill, labels, cfg, contours, limit } = model;
-  const contourLabels = contours && contours.labels;
-  const placedLabels = useMemo(() => placeContourLabels(contourLabels || [], rppf), [contourLabels, rppf]);
+  // ROUND 6 (NEW-1): what is drawn at this zoom — index only with the parcel filling the map, every level with the building
+  // filling it, a band thinned to a coarser interval where its lines would touch — then the labels of the pieces drawn
+  const drawPlan = useMemo(() => planContourDraw(contours, rppf), [contours, rppf]);
+  const placedLabels = useMemo(() => placeContourLabels(drawPlan.labels, rppf), [drawPlan, rppf]);
   const o = f2p({ x: 0, y: 0 });
   const feetG = (d, stroke, w, dash, cap = "butt") => (
     <g transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
@@ -439,11 +443,11 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
       )}
       {/* ROUND 4 (B2349122) — the proposed contours: bold brown lines, index lines heavier and labelled, clipped to daylight */}
       {contours && contours.levels && contours.levels.length > 0 && (
-        <g data-layer="contours" data-contour-interval={contours.interval}>
-          {contours.levels.map((lv) => (
+        <g data-layer="contours" data-contour-interval={contours.interval} data-contour-index-only={drawPlan.indexOnly ? "1" : "0"} data-contour-levels-drawn={drawPlan.levels.length}>
+          {drawPlan.levels.map((lv) => (
             <g key={lv.level} data-contour-level={lv.level} data-contour-index={lv.isIndex ? "1" : "0"}
               transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
-              <path d={lv.d} fill="none" stroke={lv.isIndex ? CONTOUR_PROPOSED_INDEX_RGB : CONTOUR_PROPOSED_RGB} strokeWidth={lv.isIndex ? 1.8 : 1.1} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              <path d={lv.d} fill="none" stroke={lv.isIndex ? CONTOUR_PROPOSED_INDEX_RGB : CONTOUR_PROPOSED_RGB} strokeWidth={lv.weight} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
             </g>
           ))}
           {/* ROUND 5 — labels ride the line (rotated with it, upright), one per index piece, never stacked (placeContourLabels) */}

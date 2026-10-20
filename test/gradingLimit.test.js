@@ -8,8 +8,7 @@ import {
   autoGradingLimit, resolveGradingLimit, boundaryGradingLimit, maskRegions, unionRings, regionsAreaSf, pointInRegions, clearGradingLimitCache,
   LIMIT_MODES, LIMIT_DEFAULTS,
 } from "../src/workspaces/site-planner/lib/gradingLimit.js";
-import { buildProposedSurface, sampleProposedAt, buildSeams, buildPlanes } from "../src/workspaces/site-planner/lib/proposedSurface.js";
-import { prepareSweep, maskAt, buildLattice } from "../src/workspaces/site-planner/lib/buildableGround.js";
+import { buildProposedSurface, sampleProposedAt, buildSeams, buildPlanes, nearestOnRing } from "../src/workspaces/site-planner/lib/proposedSurface.js";
 import { describeFlag, cardEarthwork, scopeIds, assemblyIds } from "../src/workspaces/site-planner/lib/buildingGrade.js";
 import { pointInRing } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { readFileSync } from "node:fs";
@@ -257,36 +256,72 @@ describe("the flag moves to the limit", () => {
   });
 });
 
-describe("boundary mode — the plateau IS the Level-ground sweep's mask at the building's FFE", () => {
-  const tilt = (p) => 90 + 0.02 * p.x;
-  it("the open ground inside the limit is flat at the FFE exactly where the sweep says a level pad can sit, within one cell", () => {
-    const s = build(scene(), tilt, {}, { mode: "boundary" });
-    expect(s.grid.limit.mode).toBe("boundary");
-    expect(s.grid.limit.plateaus).toEqual([{ id: "b", ffe: 100, areaSf: expect.any(Number) }]);
-    const lat = buildLattice({ bbox: [-500, -500, 800, 700], cell: 10, sample: (x, y) => tilt({ x, y }) });
-    const m = maskAt(prepareSweep({ lattice: lat, rings: [SB], holes: [] }), 100, 2, 12);
-    let agree = 0, dis = 0;
-    for (const c of s.grid.cells) {
-      if (c.cls !== "infill" && !c.wedge) continue;
-      const i = Math.floor((c.x - lat.x0) / 10), j = Math.floor((c.y - lat.y0) / 10);
-      const inMask = !!m.mask[j * lat.nx + i];
-      const plateau = c.cls === "infill" && Math.abs(c.propFt - 100) < 1e-6;
-      if (inMask === plateau) agree++; else dis++;
+/* ROUND 6 (NEW-3, owner live check 2026-10-20 on Georgia Test Site › Concept A, "To the boundary"): the open ground inside the
+ * limit FOLLOWS THE PAVEMENT in both modes — it reads the graded edges it touches and continues their fall at the open-ground
+ * slope (2% default) toward the limit, never back up to the FFE. Boundary mode's flat plateau at the FFE (the Level-ground
+ * sweep's mask) is gone: the setback's inward slope is thrown from the limit at whatever elevation that surface reaches there. */
+describe("ROUND 6 — the open ground inside the limit follows the pavement, it does not step back up to the FFE", () => {
+  // a court falling 1.5% from the dock face to its far edge at E, then 100 ft of open ground to the setback (boundary mode)
+  const court = [
+    { id: "b", type: "building", ring: rect(0, 0, 200, 100), padElevFt: FFE },
+    { id: "c", type: "paving", ring: rect(0, 100, 200, 130), dockStack: { x: 100, y: 50 }, hostId: "b" },
+  ];
+  const SB2 = rect(-100, -100, 400, 430);                 // the court's far edge is y = 230; the setback 100 ft past it
+  const flatLow = () => FFE - 7;                           // flat ground near the court's far edge, so the setback band never bites
+  const s = buildProposedSurface({ els: court, ffeFt: FFE, dockDropFt: 4, existAt: flatLow, parcelRings: [SB2],
+    grading: { ...G({ setbackRings: [SB2] }, { mode: "boundary" }), openGroundSlopePct: 2 }, opts: { maxCells: 12000, minCellFt: 2, existKey: "r6" } });
+  const E = sampleProposedAt(s.grid, { x: 100, y: 229.5 }, flatLow).ft;        // the court's far-edge elevation
+  it("beyond the court's far edge the open ground is ≤ E and ≥ E − 2 ft at the limit (100 ft at 2%)", () => {
+    expect(E).toBeCloseTo(FFE - 4 - 0.015 * 129.5, 1);
+    const beyond = s.grid.cells.filter((c) => c.cls === "infill" && c.y > 232 && c.x > 20 && c.x < 180);
+    expect(beyond.length).toBeGreaterThan(200);
+    expect(beyond.every((c) => c.propFt <= E + 1e-6)).toBe(true);
+    expect(beyond.every((c) => c.propFt >= E - 2 - 1e-6)).toBe(true);
+    // and it FALLS away from the court at the open-ground slope: 2% of the distance past the far edge
+    for (const c of beyond.filter((c) => c.x > 60 && c.x < 140)) expect(c.propFt).toBeCloseTo(E - 0.02 * (c.y - 230), 1);
+    // the FFE never comes back: nothing beyond the court is above the court's edge, let alone at the pad's finish
+    expect(Math.max(...beyond.map((c) => c.propFt))).toBeLessThan(FFE - 4);
+  });
+  it("no open-ground cell inside the limit is higher than the nearest pavement edge it drains from", () => {
+    const infill = s.grid.cells.filter((c) => c.cls === "infill");
+    expect(infill.length).toBeGreaterThan(1000);
+    const over = infill.filter((c) => {
+      let best = null;
+      for (const g of s.grid.owners) { const q = nearestOnRing(c, g.el.ring); const d = Math.hypot(c.x - q.x, c.y - q.y); if (!best || d < best.d) best = { d, z: s.grid.zOf(g, q) }; }
+      return c.propFt > best.z + 1e-6;
+    });
+    expect(over.length).toBe(0);
+  });
+  it("the plateau is retired: `plateaus` is empty, the graded area IS the setback, and the probe agrees with the cells", () => {
+    expect(s.grid.limit.plateaus).toEqual([]);
+    expect(s.grid.limit.areaSf).toBeCloseTo(400 * 430, -2);
+    const c0 = s.grid.cells.find((c) => c.cls === "infill" && c.y > 260 && c.x > 90 && c.x < 110);
+    expect(sampleProposedAt(s.grid, c0, flatLow).ft).toBeCloseTo(c0.propFt, 6);
+  });
+  it("layout mode too: the open ground inside the limit leaves a pad at its finish and falls at 2%, never interpolated back up (the round-4 IDW)", () => {
+    const tilt = (p) => 90 + 0.02 * p.x;
+    const sl = build(scene(), tilt, { openGroundSlopePct: 2 });
+    const inside = sl.grid.cells.filter((c) => c.cls === "infill");
+    expect(inside.length).toBeGreaterThan(50);
+    for (const c of inside) {
+      let best = null;
+      for (const g of sl.grid.owners) { const q = nearestOnRing(c, g.el.ring); const d = Math.hypot(c.x - q.x, c.y - q.y); if (!best || d < best.d) best = { d, z: sl.grid.zOf(g, q) }; }
+      expect(c.propFt).toBeLessThanOrEqual(best.z + 1e-6);
     }
-    expect(agree).toBeGreaterThan(3000);
-    expect(dis / (agree + dis)).toBeLessThan(0.02);                           // one cell of edge quantisation at most
-    expect(s.grid.limit.areaSf).toBeCloseTo(m.areaSf, -3);
-    // the slopes run INWARD from the boundary down to the plateau: a slope cell sits between the setback line and the plateau
-    const slope = s.grid.cells.filter((c) => c.wedge);
-    expect(slope.length).toBeGreaterThan(50);
-    expect(slope.every((c) => pointInRing(c, SB) || true)).toBe(true);
-    expect(s.daylight.length).toBeGreaterThanOrEqual(1);
+  });
+  it("the gear's open-ground slope is honoured: 4% falls twice as fast as 2%", () => {
+    const s4 = buildProposedSurface({ els: court, ffeFt: FFE, dockDropFt: 4, existAt: flatLow, parcelRings: [SB2],
+      grading: { ...G({ setbackRings: [SB2] }, { mode: "boundary" }), openGroundSlopePct: 4 }, opts: { maxCells: 12000, minCellFt: 2, existKey: "r6b" } });
+    const z2 = sampleProposedAt(s.grid, { x: 100, y: 280 }, flatLow).ft, z4 = sampleProposedAt(s4.grid, { x: 100, y: 280 }, flatLow).ft;
+    expect(E - z2).toBeCloseTo(1.0, 1);
+    expect(E - z4).toBeCloseTo(2.0, 1);
   });
   it("the pond and a stream buffer are cut out of the boundary limit", () => {
-    const s = buildProposedSurface({ els: scene(), ffeFt: FFE, dockDropFt: 4, existAt: tilt, parcelRings: [], pondRings: [rect(400, 300, 100, 100)], easementRings: [rect(-300, 400, 900, 100)],
+    const tilt = (p) => 90 + 0.02 * p.x;
+    const sp = buildProposedSurface({ els: scene(), ffeFt: FFE, dockDropFt: 4, existAt: tilt, parcelRings: [], pondRings: [rect(400, 300, 100, 100)], easementRings: [rect(-300, 400, 900, 100)],
       grading: G({}, { mode: "boundary" }), opts: { maxCells: 9000, minCellFt: 2, existKey: "t2" } });
-    expect(s.grid.cells.some((c) => c.x > 400 && c.x < 500 && c.y > 300 && c.y < 400 && !c.wedge)).toBe(false);   // pond: nothing priced
-    expect(pointInRegions({ x: 100, y: 450 }, s.grid.limit.limitRegions)).toBe(false);                              // buffer: outside the limit
+    expect(sp.grid.cells.some((c) => c.x > 400 && c.x < 500 && c.y > 300 && c.y < 400 && !c.wedge)).toBe(false);   // pond: nothing priced
+    expect(pointInRegions({ x: 100, y: 450 }, sp.grid.limit.limitRegions)).toBe(false);                              // buffer: outside the limit
   });
 });
 
@@ -311,13 +346,15 @@ describe("boundary mode never grades outside the setback and never flags (B23762
     expect(slope.every(inSb)).toBe(true);
     expect(s.daylight.length).toBe(s.grid.limit.limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0));
     expect(s.daylight[0].ring).toEqual(s.grid.limit.limitRegions[0].outer);
-    // the band is CONTINUOUS from the limit: a slope cell a few feet inside the setback edge is a shallow one, and the depth
-    // grows toward the plateau (the slope daylights AT the setback, not past it)
+    // the band starts AT the limit: a slope cell a few feet inside the setback edge exists and is shallow — every band cell's
+    // depth is within the 2:1 slope thrown from the setback (|dz| ≤ distance to the setback / 2), so the slope daylights AT the
+    // setback, never past it (ROUND 6: the band meets the open ground's own fall, not a flat plateau)
     const nearEdge = slope.filter((c) => Math.abs(c.x - (-300)) < 6 && c.y > -100 && c.y < 100);
-    const deeper = slope.filter((c) => Math.abs(c.x - (-300)) > 20 && Math.abs(c.x - (-300)) < 40 && c.y > -100 && c.y < 100);
-    expect(nearEdge.length).toBeGreaterThan(0); expect(deeper.length).toBeGreaterThan(0);
-    const mean = (a) => a.reduce((t, c) => t + Math.abs(c.dzFt), 0) / a.length;
-    expect(mean(nearEdge)).toBeLessThan(mean(deeper));
+    expect(nearEdge.length).toBeGreaterThan(0);
+    const toSb = (c) => Math.min(c.x + 300, 600 - c.x, c.y + 300, 500 - c.y);
+    expect(slope.every((c) => Math.abs(c.dzFt) <= toSb(c) / 2 + 0.05 + c.wFt / 2)).toBe(true);
+    // the open ground inside falls away from the pavement: nothing in it sits above the FFE
+    expect(s.grid.cells.filter((c) => c.cls === "infill").every((c) => c.propFt <= FFE + 1e-6)).toBe(true);
     // the probe agrees with the lattice at a band cell and refuses a point outside the limit
     const c0 = slope[Math.floor(slope.length / 2)];
     expect(sampleProposedAt(s.grid, c0, tilt).ft).toBeCloseTo(c0.propFt, 6);
@@ -350,10 +387,11 @@ describe("boundary mode never grades outside the setback and never flags (B23762
     expect(s.grid.cells.filter((c) => c.wedge).length).toBeGreaterThan(100);
     expect(s.daylight.length).toBe(1);
     expect(s.daylight[0].ring).toEqual(s.grid.limit.limitRegions[0].outer);
-    // every open-ground cell inside the (clipped) plateau is flat at the FFE — none falls through to the inverse-distance infill
+    // ROUND 6: the open ground inside the setback follows the pavement — none of it is above the FFE, and it is not flat at it
     const infill = s.grid.cells.filter((c) => c.cls === "infill");
     expect(infill.length).toBeGreaterThan(500);
-    expect(infill.filter((c) => Math.abs(c.propFt - 795) > 1e-6).length).toBe(0);
+    expect(infill.filter((c) => c.propFt > 795 + 1e-6).length).toBe(0);
+    expect(infill.filter((c) => c.propFt < 795 - 0.5).length).toBeGreaterThan(300);
     expect(ms).toBeLessThan(1500);
   });
 });

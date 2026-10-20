@@ -65,8 +65,7 @@ export function drainSteps(gen) {
   return r.value;
 }
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
-import { resolveGradingLimit, unionRings, clipRegions, maskRegions, pointInRegions, regionsAreaSf, ringHash as limitRingHash } from "./gradingLimit.js";
-import { prepareSweep, cachedMaskAt, CELL_FT as SWEEP_CELL_FT, DEFAULT_MAX_DEPTH_FT } from "./buildableGround.js";
+import { resolveGradingLimit, pointInRegions, regionsAreaSf } from "./gradingLimit.js";
 
 export const TIE_DROP_FT = 0.15;   // threshold tie: paving meets the doors just below slab FF
 export const DOCK_BREAK_FT = 0.75; // adjoining-pavement step at a court edge a truck can't cross
@@ -539,7 +538,10 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
 const SEAM_SAMPLE_FT = 5;       // how often an element's edge is sampled for a neighbour
 const SEAM_TOUCH_FT = 1.0;      // two paved rings closer than this share an edge
 const SEAM_MIN_DROP_FT = 0.05;  // a seam flatter than this is the same plane (a dock chain's court + trailer row)
-const IDW_K = 4;
+/* ROUND 6 (NEW-3): the open-ground slope away from a pavement / pad edge (%; the gear's "Open-ground slope"), and how many
+ * touched edges a point of open ground reads at most. */
+export const OPEN_GROUND_SLOPE_PCT = 2;
+const OPEN_GROUND_K = 6;
 const LIMIT_SAMPLE_FT = 10;     // the limit ring is sampled this often for the slope reach + the daylight line
 const REACH_MAX_FT = 400;
 
@@ -623,35 +625,6 @@ export function buildSeams(graded, { maxPavementSlopePct = 5 } = {}) {
   return { seams, steps };
 }
 
-/* The sweep lattice + context for boundary mode, cached by the ground's own key (the FFE search rebuilds dozens of
- * surfaces over unchanged ground). */
-const sweepCache = new Map();
-const SWEEP_CACHE_MAX = 3;
-function* sweepContextSteps({ existAt, existKey, regions }) {
-  const [bx0, by0, bx1, by1] = bboxOfRings(regions.map((r) => r.outer));
-  const M = 200;
-  const bbox = [bx0 - M, by0 - M, bx1 + M, by1 + M];
-  const key = `${existKey || "?"}|${bbox.map((v) => Math.round(v)).join(",")}|${regions.map((r) => limitRingHash(r.outer)).join(",")}|${regions.map((r) => r.holes.map(limitRingHash).join("/")).join(",")}`;
-  const hit = sweepCache.get(key);
-  if (hit) return hit;
-  // the lattice, row by row (a 100-acre parcel is ~60k ground reads)
-  const cell = SWEEP_CELL_FT;
-  const x0 = Math.floor(bbox[0] / cell) * cell, y0 = Math.floor(bbox[1] / cell) * cell;
-  const nx = Math.max(1, Math.ceil((bbox[2] - x0) / cell)), ny = Math.max(1, Math.ceil((bbox[3] - y0) / cell));
-  const z = new Float32Array(nx * ny);
-  for (let j = 0; j < ny; j++) {
-    if (j % 12 === 0) yield;
-    const y = y0 + (j + 0.5) * cell;
-    for (let i = 0; i < nx; i++) { const v = existAt({ x: x0 + (i + 0.5) * cell, y }); z[j * nx + i] = v == null || !isFinite(v) ? NaN : v; }
-  }
-  const lattice = { x0, y0, nx, ny, cell, z };
-  yield;
-  const ctx = prepareSweep({ lattice, rings: regions.map((r) => r.outer), holes: regions.flatMap((r) => r.holes) });
-  sweepCache.set(key, ctx);
-  if (sweepCache.size > SWEEP_CACHE_MAX) sweepCache.delete(sweepCache.keys().next().value);
-  return ctx;
-}
-
 /* The lattice for the round-4 model. `graded` = [{ el, plane, bbox }] sorted by precedence (building → dock → rest). */
 function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRings, opts, G, apronRatio, maxCells, minCellFt, inAnyRing }) {
   const spec = G.limit;
@@ -684,71 +657,96 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     }
     return null;
   };
-  // boundary mode: the plateau per host building, off the Level-ground sweep at that building's finish
-  let plateaus = [];
-  let plateauAt = () => null;
-  let srcRegions = limit.regions;
-  let bs = null, bandDevMax = 0;                      // the sweep's boundary samples (boundary mode only)
-  if (limit.mode === "boundary" && limit.regions.length && typeof existAt === "function") {
-    const ctx = yield* sweepContextSteps({ existAt, existKey: opts.existKey, regions: limit.regions });
-    const D = Number.isFinite(spec.maxCutFillFt) && spec.maxCutFillFt > 0 ? spec.maxCutFillFt : DEFAULT_MAX_DEPTH_FT;
-    const hosts = graded.filter((g) => g.plane.classId === "buildingPad" && !(g.el.hostId != null && g.el.hostId !== g.el.id));
-    const masks = [];
-    const unionMask = new Uint8Array(ctx.lattice.nx * ctx.lattice.ny);
-    for (const h of hosts) {
-      yield;
-      const E = Math.round(h.plane.baseElevFt * 10) / 10;
-      const r = cachedMaskAt(ctx, E, apronRatio, D);
-      masks.push({ id: h.el.id, ffe: E, mask: r.mask, areaSf: r.areaSf });
-      for (let k = 0; k < unionMask.length; k++) if (r.mask[k]) unionMask[k] = 1;
+  // ROUND 6 (NEW-3) — THE OPEN GROUND INSIDE THE LIMIT FOLLOWS THE PAVEMENT; IT DOES NOT STEP BACK UP TO THE FFE. In BOTH
+  // modes a point of open ground reads the graded edges it TOUCHES — the nearest elements whose nearest point it can see
+  // without crossing another element (a court shadows the pad behind it, so ground past the court's far edge never hears
+  // of the FFE) — and continues their fall at the site's open-ground slope (`openGroundSlopePct`, default 2%). Each touched
+  // edge e offers   z_e(q_e) − s · d_e + (d_e − d_nearest) / (2 · ratio)   and the LOWEST offer wins: the nearest edge's
+  // offer is its own fall; a farther, lower edge wins where it is lower even after climbing back at the grading slope (the
+  // bank from a lower lot up to the ground beside it, 2:1 by default), and a farther, higher edge can never win (its offer
+  // is above its own fall). So beyond a court falling to E the ground is ≤ E and keeps falling 2% toward the limit (never
+  // interpolated back up toward the FFE — the round-4 inverse-distance infill did exactly that); between a pad and a lower
+  // lot the ground leaves the pad at the FFE and banks down to the lot where their falls meet ("where two falls meet, the
+  // lower wins"); and nothing ever sits above an adjacent pavement edge (every offer is ≤ its edge's elevation as d → 0).
+  // Boundary mode's flat plateau at the FFE (the Level-ground sweep's mask) is GONE: the setback's inward slope (`bandZ`,
+  // B2376240) is thrown from the limit at whatever elevation this surface reaches there. Earthwork, the balance and the
+  // suggested FFE all run on this surface. Every offer is continuous in p, so the surface is (a shadow edge can only drop a
+  // HIGHER offer — one that was not winning — so it does not step there).
+  const sOpen = (Number.isFinite(G.openGroundSlopePct) && G.openGroundSlopePct >= 0 ? G.openGroundSlopePct : OPEN_GROUND_SLOPE_PCT) / 100;
+  const segCrossesRing = (p, q, ring) => {
+    const n = ring.length;
+    const dx = q.x - p.x, dy = q.y - p.y;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const c = ring[j], d = ring[i];
+      const ex = d.x - c.x, ey = d.y - c.y;
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((c.x - p.x) * ey - (c.y - p.y) * ex) / den;
+      const u = ((c.x - p.x) * dy - (c.y - p.y) * dx) / den;
+      if (t > 1e-6 && t < 1 - 1e-6 && u >= 0 && u <= 1) return true;
     }
-    yield;
-    const { x0, y0, nx, ny, cell } = ctx.lattice;
-    const plateauRegions = maskRegions({ mask: unionMask, nx, ny, x0, y0, cell });
-    plateaus = masks.map((m) => ({ id: m.id, ffe: m.ffe, areaSf: m.areaSf }));
-    const ffeAtCell = (i, j) => {
-      if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
-      const k = j * nx + i;
-      for (const m of masks) if (m.mask[k]) return m.ffe;
-      return null;
-    };
-    plateauAt = (pt) => {
-      const fi = (pt.x - x0) / cell, fj = (pt.y - y0) / cell;
-      const i = Math.floor(fi), j = Math.floor(fj);
-      const z = ffeAtCell(i, j);
-      if (z != null) return z;
-      // the plateau polygon is traced along sweep-cell EDGES: a point on such an edge floors into the neighbour that is
-      // off the mask, so look at the cell on the other side of the nearest edge too (B2376240: one lattice cell did this)
-      const di = fi - i < 0.5 ? -1 : 1, dj = fj - j < 0.5 ? -1 : 1;
-      return ffeAtCell(i + di, j) ?? ffeAtCell(i, j + dj) ?? ffeAtCell(i + di, j + dj);
-    };
-    yield;
-    srcRegions = clipRegions(unionRings([...plateauRegions.map((r) => r.outer), ...graded.map((g) => g.el.ring)]),
-      limit.regions.map((r) => r.outer), limit.regions.flatMap((r) => r.holes));   // the traced mask runs on cell edges: never past the limit
-    bs = ctx.bs;
-    for (let q = 0; q < bs.z.length; q++) for (const m of masks) { const dv = Math.abs(bs.z[q] - m.ffe); if (dv > bandDevMax) bandDevMax = dv; }
-  }
+    return false;
+  };
+  // can the point see element `own`'s nearest point `q` without crossing another element? (bbox-culled)
+  const seesEdge = (p, q, own) => {
+    const sx0 = Math.min(p.x, q.x), sx1 = Math.max(p.x, q.x), sy0 = Math.min(p.y, q.y), sy1 = Math.max(p.y, q.y);
+    for (const g of graded) {
+      if (g === own) continue;
+      if (sx1 < g.bbox[0] || sx0 > g.bbox[2] || sy1 < g.bbox[1] || sy0 > g.bbox[3]) continue;
+      if (segCrossesRing(p, q, g.el.ring)) return false;
+    }
+    return true;
+  };
+  const openGroundZ = (pt) => {
+    const near = [];
+    for (const g of graded) { const q = nearestOnRing(pt, g.el.ring); if (!q) continue; near.push({ g, q, d: Math.hypot(pt.x - q.x, pt.y - q.y) }); }
+    if (!near.length) return null;
+    near.sort((a, b) => a.d - b.d);
+    const dNear = near[0].d;
+    let best = Infinity, n = 0;
+    for (const c of near) {
+      if (n >= OPEN_GROUND_K) break;
+      if (n > 0 && !seesEdge(pt, c.q, c.g)) continue;      // the nearest edge is always touched; a farther one must be in sight
+      n++;
+      const offer = zOf(c.g, c.q) - sOpen * c.d + (c.d - dNear) / (2 * apronRatio);
+      if (offer < best) best = offer;
+    }
+    return best;
+  };
+  const insideZ = (pt) => { const g = elementAt(pt); return g ? zOf(g, pt) : openGroundZ(pt); };
+  const srcRegions = limit.regions;             // ROUND 6: in both modes the graded area IS the limit (no traced plateau)
+  const plateaus = [];                          // retired with the plateau (kept so older readers see an empty list)
   if (!srcRegions.length) return null;
-  // B2376240 — boundary mode: the slope is thrown INWARD from the limit (the setback), never outward from the plateau.
-  // Every boundary sample b (the SAME samples the Level-ground sweep paints its blocking discs from) bounds the surface
-  // at a point p to [z(b) − d/ratio, z(b) + d/ratio]; the pad elevation ze clamped into every such band is the slope,
-  // and a point no sample constrains is the plateau — which is exactly the sweep's own disc rule, so the two agree by
-  // construction. Nothing outside the limit is ever graded, so the setback flag cannot fire in this mode.
   const boundary = limit.mode === "boundary";
-  const bandR2 = bs ? Math.pow(apronRatio * (bandDevMax + 10), 2) : 0;   // a sample further than this constrains nothing
-  // ROUND 5 (NEW-3): the ground at the NEAREST point on the limit bounds the surface too — the sweep's samples sit every
-  // 10 ft along the line, so between two of them the band alone let the surface sit up to 2.5 ft off the ground AT the
-  // setback; with the exact nearest point (d → 0 there) the surface meets existing ground on the line, so a proposed
-  // contour of level E ends exactly where the existing contour of level E crosses it.
+  // B2376240 — boundary mode: the slope is thrown INWARD from the limit (the setback), never outward from anything inside.
+  // Ground samples every LIMIT_SAMPLE_FT along the limit's rings (the setback, the pond and buffer holes) each bound the
+  // surface at a point p to [z(b) − d/ratio, z(b) + d/ratio]; the open-ground elevation clamped into every such band is the
+  // slope, and a point no sample constrains is the open ground itself. ROUND 5 (NEW-3): the EXACT nearest point on the limit
+  // bounds it too, so the surface meets existing ground ON the line (d → 0 there) and a proposed contour of level E ends
+  // exactly where the existing contour of level E crosses the setback. Nothing outside the limit is ever graded here.
+  let bs = null;
+  if (boundary && typeof existAt === "function") {
+    const xs = [], ys = [], zs = [];
+    let zMin = Infinity, zMax = -Infinity;
+    for (const r of limit.regions) for (const ring of [r.outer, ...r.holes]) for (const smp of sampleRing(ring, LIMIT_SAMPLE_FT)) {
+      const gz = existAt(smp);
+      if (gz == null || !isFinite(gz)) continue;
+      xs.push(smp.x); ys.push(smp.y); zs.push(gz);
+      if (gz < zMin) zMin = gz; if (gz > zMax) zMax = gz;
+    }
+    if (xs.length) bs = { x: Float64Array.from(xs), y: Float64Array.from(ys), z: Float64Array.from(zs), zMin, zMax };
+  }
   const bandZ = (pt, ze) => {
     if (!bs) return ze;
     let L = -Infinity, U = Infinity;
     const nl = nearestOnRegions(pt, limit.regions);
     if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
+    // a sample further than ratio × the largest possible |ze − z(b)| constrains nothing
+    const R = apronRatio * Math.max(Math.abs(ze - bs.zMin), Math.abs(ze - bs.zMax)) + 1, R2 = R * R;
     const bx = bs.x, by = bs.y, bz = bs.z;
     for (let q = 0; q < bx.length; q++) {
       const ddx = pt.x - bx[q], ddy = pt.y - by[q], d2 = ddx * ddx + ddy * ddy;
-      if (d2 > bandR2) continue;
+      if (d2 > R2) continue;
       const d = Math.sqrt(d2) / apronRatio;
       const lo = bz[q] - d, hi = bz[q] + d;
       if (lo > L) L = lo;
@@ -756,24 +754,6 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     }
     return Math.min(Math.max(ze, L), U);
   };
-  // the open ground inside the limit: the plateau in boundary mode, else inverse-distance between the planes it touches
-  const infillZ = (pt) => {
-    const pz = plateauAt(pt);
-    if (pz != null) return pz;
-    const near = [];
-    for (const g of graded) {
-      const q = nearestOnRing(pt, g.el.ring);
-      if (!q) continue;
-      const d = Math.hypot(pt.x - q.x, pt.y - q.y);
-      near.push({ d, z: zOf(g, q) });
-    }
-    if (!near.length) return null;
-    near.sort((a, b) => a.d - b.d);
-    let sw = 0, sz = 0;
-    for (const n of near.slice(0, IDW_K)) { const w = 1 / ((n.d + 1) * (n.d + 1)); sw += w; sz += w * n.z; }
-    return sz / sw;
-  };
-  const insideZ = (pt) => { const g = elementAt(pt); return g ? zOf(g, pt) : infillZ(pt); };
   // the edge elevation at a point ON the limit: read a hair inside
   const edgeZ = (q, from) => {
     const dx = q.x - from.x, dy = q.y - from.y, L = Math.hypot(dx, dy) || 1;
@@ -867,40 +847,38 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       if (boundary && regionIndexOf(pt, limit.regions) < 0) continue;   // B2376240: outside the limit is never graded
       const k = regionIndexOf(pt, srcRegions);
       if (k >= 0) {
-        // open ground inside the limit
-        const prop = infillZ(pt);
-        if (prop == null) continue;
-        gradedSf += A; regionStats[k].areaSf += A;
+        // open ground inside the limit: the pavement's fall (ROUND 6), bent to the setback's inward slope in boundary mode
+        const zo = openGroundZ(pt);
+        if (zo == null) continue;
+        const prop = boundary ? bandZ(pt, zo) : zo;
+        const band = boundary && Math.abs(prop - zo) > 1e-6;
         const dz = gOk ? prop - g0 : null;
-        const id = `infill:${k}`;
-        const cell = { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, elId: id, cls: "infill", regionId: k };
+        const id = band ? `limit:${k}` : `infill:${k}`;
+        const cell = band
+          ? { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: k }
+          : { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, elId: id, cls: "infill", regionId: k };
+        if (band) { wedgeSf += A; regionStats[k].slopeSf += A; } else { gradedSf += A; regionStats[k].areaSf += A; }
         noteOut(pt, A, dz, id, cell);
         cells.push(cell);
         if (dz == null) { voidCells++; continue; }
-        price(id, dz, false);
+        price(id, dz, band);
         regionStats[k][dz > 0 ? "fillCf" : "cutCf"] += A * Math.abs(dz);
         if (dz > PL_FILL_EPS_FT && parcelRings.length) {
           if (!inAnyRing(pt, parcelRings)) plFillSf += A;
           else if (distToRingEdges(pt, parcelRings) < tieRatio * dz) tieShortSf += A;
         }
+        if (band && dz > PL_FILL_EPS_FT && easementRings.length && inAnyRing(pt, easementRings)) wedgeEasementSf += A;
         continue;
       }
-      if (!apronsOn) continue;
-      if (!boundary && !(reach > 0)) continue;
-      // outside the plateau: the daylight slope — thrown FROM the limit outward (layout), or INWARD from it (boundary)
+      if (boundary || !apronsOn || !(reach > 0)) continue;
+      // outside the limit (layout mode): the daylight slope, thrown FROM the limit outward at the elevation the surface reaches there
       const nr = nearestOnRegions(pt, srcRegions);
-      if (!nr || (!boundary && nr.d > reach)) continue;
+      if (!nr || nr.d > reach) continue;
       const id = `limit:${nr.k}`;
       if (!gOk) { voidCells++; cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: null, elId: id, cls: "transition", wedge: true, regionId: nr.k }); continue; }
       const ze = edgeZ(nr.q, pt);
       if (ze == null) continue;
-      let dz;
-      if (boundary) {
-        const zb = bandZ(pt, ze);
-        // a cell no boundary sample constrains but the sweep still left out (too deep, or off the main plateau) keeps the
-        // plateau-edge taper down to the ground it sits on; every other band cell is the inward slope from the limit
-        dz = Math.abs(zb - ze) < 1e-9 ? wedgeDz(ze, g0, nr.d, apronRatio, 0) : zb - g0;
-      } else dz = wedgeDz(ze, g0, nr.d, apronRatio, 0);
+      const dz = wedgeDz(ze, g0, nr.d, apronRatio, 0);
       if (Math.abs(dz) < PL_FILL_EPS_FT) continue;                   // at/past the daylight line
       wedgeSf += A; regionStats[nr.k].slopeSf += A;
       const cell = { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: g0 + dz, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: nr.k };
@@ -940,21 +918,23 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     if (inAnyRing(pt, pondRings)) return { status: "none", reason: "pond" };
     const g = elementAt(pt);
     if (g) return { status: "value", ft: zOf(g, pt), elId: g.el.id, cls: g.plane.classId, wedge: false };
-    if (boundary && regionIndexOf(pt, limit.regions) < 0) return { status: "none", reason: "outside" };
     const k = regionIndexOf(pt, srcRegions);
-    if (k >= 0) { const z = infillZ(pt); return z == null ? { status: "none", reason: "outside" } : { status: "value", ft: z, elId: `infill:${k}`, cls: "infill", wedge: false }; }
-    if (!apronsOn) return { status: "none", reason: "outside" };
+    if (k >= 0) {
+      const zo = openGroundZ(pt);
+      if (zo == null) return { status: "none", reason: "outside" };
+      if (!boundary) return { status: "value", ft: zo, elId: `infill:${k}`, cls: "infill", wedge: false };
+      const zb = bandZ(pt, zo);
+      return Math.abs(zb - zo) > 1e-6
+        ? { status: "value", ft: zb, elId: `limit:${k}`, cls: "transition", wedge: true }
+        : { status: "value", ft: zo, elId: `infill:${k}`, cls: "infill", wedge: false };
+    }
+    if (boundary || !apronsOn) return { status: "none", reason: "outside" };
     const nr = nearestOnRegions(pt, srcRegions);
-    if (!nr || (!boundary && nr.d > reach)) return { status: "none", reason: "outside" };
+    if (!nr || nr.d > reach) return { status: "none", reason: "outside" };
     const g0 = existAt(pt);
     if (g0 == null || !isFinite(g0)) return { status: "none", reason: "void" };
     const ze = edgeZ(nr.q, pt);
     if (ze == null) return { status: "none", reason: "outside" };
-    if (boundary) {
-      const zb = bandZ(pt, ze);
-      const ft = Math.abs(zb - ze) < 1e-9 ? g0 + wedgeDz(ze, g0, nr.d, apronRatio, 0) : zb;
-      return { status: "value", ft, elId: `limit:${nr.k}`, cls: "transition", wedge: true };
-    }
     return { status: "value", ft: g0 + wedgeDz(ze, g0, nr.d, apronRatio, 0), elId: `limit:${nr.k}`, cls: "transition", wedge: true };
   };
   return {
@@ -1024,7 +1004,7 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
       if (r && r.status === "value" && Number.isFinite(r.ft)) {
         z = r.ft;
         if (z < lo) lo = z; if (z > hi) hi = z;
-        if (!r.wedge) inside[k] = 1;
+        if (!r.wedge || boundary) inside[k] = 1;   // ROUND 6: boundary mode's inward slope is graded ground inside the setback — the limit ring is its edge
         else {
           const g = typeof existAt === "function" ? existAt(pt) : null;
           // unclamped above: |dz| falls linearly across the band, so the interpolated zero crossing is the true daylight
@@ -1219,7 +1199,7 @@ export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt 
     easementRings.length ? `es:${easementRings.map((r) => ringHash(r)).join(",")}` : "",
     // GRADING MODEL inputs join the identity (the B807 stale-memo discipline) — and only then, so an
     // account without the model gets the key it always had.
-    grading ? `gr:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
+    grading ? `gr:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${grading.openGroundSlopePct ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
     // ROUND 4 — the limit's inputs join the identity (the surface itself is cached by them inside gradingLimit.js)
     grading && grading.limit ? `lm:${grading.limit.mode || "layout"}:${grading.limit.shoulderFt ?? ""}:${grading.limit.cornerRadiusFt ?? ""}:${grading.limit.aisleFt ?? ""}:${grading.limit.maxPavementSlopePct ?? ""}:${grading.limit.maxCutFillFt ?? ""}:${grading.limit.edited ? ringHash(grading.limit.edited) : "-"}:${(grading.limit.extraRings || []).map((r) => ringHash(r)).join(",")}:${(grading.limit.setbackHoles || []).map((r) => ringHash(r)).join(",")}:${pondRings.map((r) => ringHash(r)).join(",")}` : "",
     els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}`).join("|"),

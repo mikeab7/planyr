@@ -95,12 +95,12 @@ function Harness({ data }) {
   });
   const hostBuildings = els.filter((e) => e.type === "building" && !hosts.has(e.id));
   const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: gradingPack(cfg, setback) };
-  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + JSON.stringify(cfg.limitRing || null);
+  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + cfg.openGroundSlopePct + JSON.stringify(cfg.limitRing || null);
   const anyFfe = gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   // SitePlanner's wiring: the grading layer builds the surface OFF the render path and holds it while a drag is in flight.
   const dragRef = React.useRef(false);
   const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
-  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
   const qs = new URLSearchParams(location.search);
   const rockFt = qs.get("rock") ? +qs.get("rock") : null, pondCy = +(qs.get("pond") || 0);
