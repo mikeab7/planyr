@@ -149,23 +149,12 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",
-  /* NEW-1 (Illinois, 2026-10-20) — the Illinois statewide / county / vendor hosts named by the ISGS statewide parcel service and the "Parcels - IL - <County>" ArcGIS Online
-   * index. The build sandbox reaches none of them; each is MEASURED through this relay (5+ interior points + points beside the county lines) before a county is wired to it. */
-  "maps.isgs.illinois.edu", "gis.prairie.illinois.edu", // Illinois State Geological Survey / Prairie Research Institute — statewide parcel database
-  "ags.bhamaps.com", // Bhamaps — hosts the PAT tax-map services of a dozen Illinois county assessors (Christian, Edgar, Ford, Iroquois, Jackson, Macoupin, Shelby, Vermilion, Williamson …)
-  "www.centralilmaps.com", "gis.wiu.edu", "k3gis.com", // Central Illinois maps (Logan, Woodford) / Western Illinois University (Hancock, McDonough) / Kankakee K3
-  "maps.boonecountyil.org", "www.co.coles.il.us", "maps.co.kendall.il.us", "gis.lasallecounty.org", "gis.leecountyil.com", "gis.leecountyil.gov", "www.mchenrycountygis.org",
-  "www.mcgisweb.org", "gis.peoriacounty.gov", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell.com", "maps.grundyco.org", "maps.lakecountyil.gov", "adamscountyarcserver.com",
-  "rockgis.rockfordil.gov", // City of Rockford (Winnebago County layer)
-  "gis.cookcountyil.gov", "gis12.cookcountyil.gov", "gis.dupageco.org", "gis.willcountyillinois.com", // the three counties wired by hand since 2026-09 (re-measured here)
-  /* NEW-1 (Illinois round 2, 2026-10-20) — hosts named by the counties' own AGOL registrations / web maps (Madison, Tazewell, Sangamon, Macon, Rock Island, Kankakee K3, McHenry's bare host, SAGIS)
-   * and the Bhamaps services2 host; each is MEASURED through this relay before a county is wired to it. */
-  "gis.madisoncountyil.gov", "gisportal.co.madison.il.us", "gis.tazewell-il.gov", "gis.co.sangamon.il.us", "sangis.co.sangamon.il.us", "pub.sagis.org", "k3gis.net",
-  "mchenrycountygis.org", "gis.rockislandcountyil.gov", "macongis.co.macon.il.us", "services2.bhamaps.com", "gis.stclaircounty.org", "gis.cityofdanville.org",
-  "gis.ci.pekin.il.us", "portal.greenvilleillinois.com", "maps.decaturil.gov", "redqueen.ci.galesburg.il.us",
-  /* NEW-1 (Illinois round 3, 2026-10-20) — Coles' new county domain, Knox's own server (named by its parcel viewer's web map), the Illinois Department of Revenue's tax-district server,
-   * the GIS Consortium, Adams County's ArcGIS server and St. Clair's second public host; MEASURED through this relay before any county is wired to one. */
-  "www.colesco.illinois.gov", "gis.knoxcountyil.gov", "gis.co.knox.il.us", "aglomaps.revenue.illinois.gov", "ags.gisconsortium.org", "www.adamscountyarcserver.com", "stclairpublicmap.co.st-clair.il.us",
+  /* NEW-1 (Illinois, 2026-10-20, B2372624) — exactly the county / university hosts the 62 wired Illinois rows use (ilParcels.js), each MEASURED through this relay before its row existed.
+   * The probe hosts that could not be used were pruned: the ISGS statewide service answers Token Required; the Bhamaps hosts (ags/services2.bhamaps.com) and Lee/Tazewell's older hosts answer
+   * Cloudflare 526/522 from a Worker (B2379936 re-measures them from a browser). */
+  "maps.boonecountyil.org", "www.colesco.illinois.gov", "maps.grundyco.org", "maps.co.kendall.il.us", "gis.knoxcountyil.gov", "gis.lasallecounty.org", "maps.lakecountyil.gov", "gisportal.co.madison.il.us",
+  "www.mcgisweb.org", "sangis.co.sangamon.il.us", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell-il.gov", "rockgis.rockfordil.gov", // Winnebago County's ownership layer (City of Rockford GIS)
+  "gis.wiu.edu", // Western Illinois University GIS Center — Henderson and McDonough counties
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
