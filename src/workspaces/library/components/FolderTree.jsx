@@ -17,6 +17,7 @@ import {
   listFolders, ensureSeeded, addFolder, renameFolder, moveFolder,
   trashSubtree, syncFoldersToDrive, planFolderDelete,
 } from "../lib/folders.js";
+import { applyFolderRead, templatePreviewAllowed, FOLDER_READ_FAILED_PREFIX } from "../lib/folderLoadDecision.js";
 
 // The template's total folder count, for the "Create the standard N-folder structure" button —
 // computed once from the same pure template the seed itself uses, never a hand-typed number.
@@ -85,6 +86,7 @@ export default function FolderTree({
   const [rows, setRowsRaw] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false); // NEW-4 — a failed read never renders the seed template
   const [expanded, setExpanded] = useState(() => new Set());
   const [editing, setEditing] = useState(null); // { id, value }
   const [moving, setMoving] = useState(null); // id being re-parented
@@ -102,14 +104,29 @@ export default function FolderTree({
   const expandedLoadedFor = useRef(null);
 
   // Every rows update also publishes upward (the unified view places files by these rows).
-  const setRows = useCallback((list) => { setRowsRaw(list); onRowsChange?.(list); },
+  // `rowsRef` mirrors what is shown so `reload` (NEW-4) can keep it on a failed read without
+  // re-creating the callback on every change.
+  const rowsRef = useRef([]);
+  const setRows = useCallback((list) => { rowsRef.current = list; setRowsRaw(list); onRowsChange?.(list); },
     [onRowsChange]);
 
+  // NEW-4 — a failed re-read KEEPS the rows on screen and says so (folderLoadDecision.js; the same
+  // NEW-F5 rule FileBrowser applies to the file list). Returns the rows shown, or null on failure
+  // so a caller that depends on a fresh read (a seed, a delete) can stop rather than mirror a tree
+  // it never read.
   const reload = useCallback(async () => {
-    if (!signedIn || !projectId) return;
-    const list = await listFolders(projectId);
-    setRows(list);
-    return list;
+    if (!signedIn || !projectId) return null;
+    const r = await listFolders(projectId);
+    const d = applyFolderRead(rowsRef.current, r);
+    setLoadFailed(d.failed);
+    if (d.failed) {
+      setError(d.error);
+      import("../../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("cloud-read-failed", "folder tree re-read failed", { projectId, error: r && r.error })).catch(() => {});
+      return null;
+    }
+    setRows(d.rows);
+    setError((e) => (e && e.startsWith(FOLDER_READ_FAILED_PREFIX) ? "" : e)); // a read that recovered retires its own notice, nothing else's
+    return d.rows;
   }, [signedIn, projectId, setRows]);
 
   // Load → restore this project's remembered expansion (default: everything collapsed) → kick a
@@ -124,11 +141,22 @@ export default function FolderTree({
     let live = true;
     expandedLoadedFor.current = null;
     setDrive({ state: "idle", msg: "", at: 0 }); // a project switch must not inherit the last project's status
-    if (!signedIn || !projectId) { setRows([]); return; }
+    if (!signedIn || !projectId) { setRows([]); setLoadFailed(false); return; }
     (async () => {
       setLoading(true); setError("");
-      const list = await listFolders(projectId);
+      const r = await listFolders(projectId);
       if (!live) return;
+      // NEW-4 — `fresh`: this is a project switch / first load, so a failed read shows NOTHING
+      // (never the previous project's rows) and is marked failed, which keeps the "Create the
+      // standard structure" template off the screen until a real read says the tree is empty.
+      const d = applyFolderRead([], r, { fresh: true });
+      setLoadFailed(d.failed);
+      if (d.failed) {
+        setRows([]); setError(d.error); setLoading(false);
+        import("../../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("cloud-read-failed", "folder tree load failed", { projectId, error: r && r.error })).catch(() => {});
+        return;
+      }
+      const list = d.rows;
       setRows(list);
       // Restore what the user last had open, pruning ids of since-deleted folders. A first
       // visit restores the empty set = all collapsed (the tree no longer flings itself open).
@@ -187,9 +215,9 @@ export default function FolderTree({
     setCreating(true); setError("");
     const seed = await ensureSeeded(projectId);
     if (seed && seed.ok === false) setError(seed.error || "Couldn't set up folders.");
-    await reload();
+    const list = await reload();
     setCreating(false);
-    scheduleSync(0); // seed → sync now so Drive materializes promptly
+    if (list) scheduleSync(0); // seed → sync now so Drive materializes promptly (NEW-4: never mirror a tree we failed to read)
   }, [projectId, creating, reload, scheduleSync]);
 
   // Right-click context menu closes on Escape (the backdrop handles click-away).
@@ -277,8 +305,8 @@ export default function FolderTree({
     setPendingDelete(null);
     const r = await trashSubtree(projectId, id);
     if (!r.ok) { setError(r.error || "Delete failed."); return; }
-    await reload();
-    scheduleSync(0); // trash the Drive folders promptly
+    const list = await reload();
+    if (list) scheduleSync(0); // trash the Drive folders promptly (NEW-4: a failed re-read keeps the old tree and skips the mirror)
   };
 
   // ── render ─────────────────────────────────────────────────────────────────────────────
@@ -467,7 +495,12 @@ export default function FolderTree({
           </div>
         )}
         {loading ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>Loading folders…</div>
-          : tree.length === 0 ? (
+          : loadFailed && tree.length === 0 ? (
+            // NEW-4 — a failed first read: nothing to show, and NOT an invitation to seed.
+            <div data-testid="folder-tree-load-failed" style={{ color: T.sub, padding: 16, fontSize: 12.5, lineHeight: 1.5 }}>
+              Couldn’t load this project’s folders. <button onClick={() => reload()} style={{ border: "none", background: "none", color: T.accent, cursor: "pointer", fontWeight: 700, padding: 0, font: "inherit" }}>Try again</button>
+            </div>
+          ) : templatePreviewAllowed({ loading, failed: loadFailed, treeLength: tree.length }) ? (
             <div>
               <div style={{ padding: "8px 8px 2px" }}>
                 <button

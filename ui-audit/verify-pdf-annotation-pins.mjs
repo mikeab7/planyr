@@ -9,8 +9,9 @@
  * a building and its bump-outs are ONE annotation), a reference drawing promoted ABOVE the plan, a default rectangle,
  * a rectangle sent BEHIND the plan (under the first building) and a length measurement, on a geolocated plan (so the
  * lifted-GIS front band exists, empty). Exported with "Flatten markups" OFF then ON through the real compose screen:
- *   · OFF → exactly four annotations: the default Square, the measurement's Line, one Polygon per building (/Subj Building);
- *           the behind-the-plan rectangle is NOT one of them (it is printed into the page);
+ *   · OFF → six annotations: both rectangles (the behind-the-plan one written BEFORE the building over it — NEW-1 of
+ *           2026-10-20: /Annots order carries the stacking, so it is no longer printed into the page), the measurement's
+ *           Line, one Polygon per building (/Subj Building) and the parcel's acreage label (its own Stamp);
  *   · ON  → zero annotations;
  *   · render parity (poppler) between the two within the markups' own ink weight;
  *   · KNOWN-GOOD ARM: the flattened page differs from a plan-with-nothing-on-it export (the comparison isn't vacuous);
@@ -175,15 +176,17 @@ const dicts = edit.match(/\/Type \/Annot [^\n]*/g) || [];
 check(!/\/Annots/.test(flat), "toggle ON: zero annotations");
 const sub = dicts.map((a) => /\/Subtype \/(\w+)/.exec(a)[1]).sort();
 console.log("   toggle OFF subtypes:", JSON.stringify(sub));
-check(dicts.length === 4 && sub.join() === "Line,Polygon,Polygon,Square", "toggle OFF: exactly four annotations — Square (default rectangle), Line (measurement), one Polygon per building (the bump-outs are NOT annotations of their own)");
-check(/\(DEFAULT\)/.test(edit) && !/\(BEHIND\)/.test(edit), "the default rectangle is an annotation; the rectangle sent behind the plan is NOT");
+check(dicts.length === 6 && sub.join() === "Line,Polygon,Polygon,Square,Square,Stamp", "toggle OFF: six annotations — two Squares (default + behind-the-plan rectangle), Line (measurement), one Polygon per building (the bump-outs are NOT annotations of their own), the parcel's acreage label (Stamp)");
+const at = (re) => dicts.findIndex((a) => re.test(a));
+check(at(/\(BEHIND\)/) >= 0 && at(/\(BEHIND\)/) < at(/\/Subj \(Building\)/) && at(/\(DEFAULT\)/) >= 0, "NEW-1 (2026-10-20): the behind-the-plan rectangle is an annotation too, written BEFORE the building it sits under (/Annots order = paint order)");
+check(/\/Subj \(Parcel label\)/.test(edit) && dicts.filter((a) => /\/Subj \(Building\)/.test(a)).every((a) => !/AC\)/.test(a)), "the parcel's acreage label is its own annotation, not part of a building");
 check(/\/Subj \(Building\)/.test(edit), "the Polygon is the building (/Subj Building)");
 check(dicts.every((a) => /\/F 4 /.test(a) && /\/AP << \/N \d+ 0 R >>/.test(a)), "every annotation is unlocked (/F 4) and has an /AP /N stream");
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const an = await (await (await pdfjs.getDocument({ data: new Uint8Array(out.edit), verbosity: 0 }).promise).getPage(1)).getAnnotations();
 const polys = an.filter((a) => a.annotationType === 7);
 const vertsOf = (a) => { const v = a.vertices || []; return typeof v[0] === "number" ? Array.from({ length: v.length / 2 }, (_, i) => ({ x: v[2 * i], y: v[2 * i + 1] })) : v.map((p) => ({ x: p.x, y: p.y })); };
-check(an.length === 4 && an.every((a) => (a.annotationFlags & 192) === 0 && a.hasAppearance), `pdf.js reads ${an.length} annotations back, unlocked, each with an appearance`);
+check(an.length === 6 && an.every((a) => (a.annotationFlags & 192) === 0 && a.hasAppearance), `pdf.js reads ${an.length} annotations back, unlocked, each with an appearance`);
 const plain = polys.find((a) => vertsOf(a).length === 4), bumped = polys.find((a) => vertsOf(a).length === 8);
 check(polys.length === 2 && !!plain && !!bumped, `pdf.js: two Building Polygons — one with 4 vertices, one with 8 (${polys.map((a) => vertsOf(a).length).join(", ")})`);
 let bumpRegions = null;

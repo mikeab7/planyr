@@ -1,4 +1,4 @@
-/* annotationExtract — the DOM half of the "editable markups" PDF export (NEW-1, 2026-10-05).
+/* annotationExtract — the DOM half of the "editable markups" PDF export (NEW-1, 2026-10-05; site elements 2026-10-20).
  *
  * Takes the CLONED plan <svg> that buildExportSvg produced (so every print retarget — stroke
  * weights, label sizes, hidden groups — has already been applied), lifts each ANNOTATION markup /
@@ -6,16 +6,19 @@
  * `pdfAnnotations.buildAnnotations`. What it removes is exactly what the flattened export would have
  * painted, so the picture and the annotations can never describe two different drawings.
  *
- * Only the neutral drawing markups (line · polyline · rect · ellipse · polygon · cloud), callouts /
- * text boxes and measurements move. Easements, encumbrances and utility routes are SITE DATA that
- * happen to live in the `markups` array — they stay as page content, like parcels and buildings.
+ * EVERY DRAWN OBJECT MOVES (NEW-1, 2026-10-20, owner: "buildings weren't touchable, detention wasn't touchable, roads
+ * aren't editable"): markups of every kind (easements and utility routes included), callouts / text boxes,
+ * measurements, AND every site element — buildings (with their bump-outs), roads (one per dissolved network),
+ * detention ponds, paving / truck courts, parking, trailer parking, sidewalks, landscape. What stays page content is the
+ * ground the plan is drawn on: the aerial, parcels, GIS layers, reference drawings, title block and furniture.
  *
  * `domToTree` is the one place that touches the DOM, so the converter in pdfAnnotations.js stays
  * pure and unit-testable in plain node.
  */
 import { ANNOTATION_KINDS } from "./siteModel.js";
 import { isBuilding } from "../../../shared/projects/projectModel.js";
-import { flattenTree, itemBBox, unionBox } from "./pdfAnnotations.js";
+import ClipperLib from "clipper-lib";
+import { flattenTree, unionBox } from "./pdfAnnotations.js";
 import { bumpOutsOf, buildingOutlineRing } from "./buildingOutline.js";
 import { calloutStyle } from "./calloutStyle.js";
 
@@ -103,191 +106,303 @@ export function domToTree(el, { measureText = null, patterns = {}, root = el } =
 
 const IDENT = [1, 0, 0, 1, 0, 0];
 const ALL = [-Infinity, -Infinity, Infinity, Infinity];
-/* Two flush neighbours (a truck court against its building, a bump-out on its wall) share an edge, and the half-unit
-   fringe itemBBox adds to a box would read that as an overlap. Real covering is deeper than a hairline. */
+/* Two flush neighbours (a truck court against its building, a bump-out on its wall) share an edge; real covering is
+   deeper than a hairline. Applied to the INTERSECTION OF THE REAL SHAPES (below), never to bounding boxes. */
 const OVERLAP_TOL = 1.5;
-const overlaps = (a, b) => Math.min(a[2], b[2]) - Math.max(a[0], b[0]) > OVERLAP_TOL && Math.min(a[3], b[3]) - Math.max(a[1], b[1]) > OVERLAP_TOL;
+const boxesTouch = (a, b) => Math.min(a[2], b[2]) - Math.max(a[0], b[0]) > OVERLAP_TOL && Math.min(a[3], b[3]) - Math.max(a[1], b[1]) > OVERLAP_TOL;
 
-/** `<image>` has no ink in flattenTree (its draw is the raster); for a bounding box it is just its rect. */
+/** `<image>` has no ink in flattenTree (its draw is the raster); for its footprint it is just its (transformed) rect. */
 function imagesAsRects(t) {
   if (!t) return t;
   if (t.tag === "image") return { ...t, tag: "rect", a: { ...t.a, fill: "black", stroke: "none" }, kids: [] };
   return { ...t, kids: (t.kids || []).map(imagesAsRects) };
 }
 
-/** Plan-space (clone user units) box of everything `node` paints; null when it paints nothing; ALL when it can't be told. */
-function paintBox(node, root) {
-  try {
-    const tree = imagesAsRects(domToTree(node, { root }));
-    const { items } = flattenTree(tree, IDENT, {});
-    return unionBox(items.map((it) => (it.t === "path" ? itemBBox({ ...it, stroke: null, sw: 0 }) : itemBBox(it)))); // the fill geometry, not its stroke fringe
-  } catch (_) { return ALL; } // unknown extent = assume it overlaps (keeps the safe, flattened answer)
+/* Subpaths of a flattened path item as vertex lists (control points dropped — the hull a Bézier lies inside is close
+   enough for an overlap test), each with whether it was closed. */
+function subpaths(it, onCurve = false) {
+  const out = [];
+  let cur = null;
+  for (const s of it.segs) {
+    if (s[0] === "M") { cur = { v: [[s[1], s[2]]], closed: false }; out.push(cur); }
+    else if (s[0] === "L" && cur) cur.v.push([s[1], s[2]]);
+    else if (s[0] === "C" && cur) { if (!onCurve) cur.v.push([s[1], s[2]], [s[3], s[4]]); cur.v.push([s[5], s[6]]); }
+    else if (s[0] === "Z" && cur) cur.closed = true;
+  }
+  return out.filter((p) => p.v.length >= 2);
 }
+const ringArea = (v) => { let a = 0; for (let i = 0, j = v.length - 1; i < v.length; j = i++) a += (v[j][0] + v[i][0]) * (v[j][1] - v[i][1]); return Math.abs(a / 2); };
 
 /**
- * Lift the annotation-class features out of `clone` (mutates it) and describe them.
+ * The REAL painted footprint of `node` (clone user units): one polygon per filled / closed subpath, a thin quad per
+ * segment of an open stroke, a rotated box per text run. NEW-1 (2026-10-20): the pin test used to compare axis-aligned
+ * BOUNDING BOXES, and on a real plan every building and its truck court are ROTATED — a tilted truck court's box
+ * swallows its building's box although the two only touch along the dock wall, so all five buildings on the owner's
+ * Bain plan stayed burned into the page while a square throwaway plan passed. Returns null when nothing is painted.
+ */
+function paintShapes(node, root) {
+  let items;
+  try { items = flattenTree(imagesAsRects(domToTree(node, { root })), IDENT, {}).items; } catch (_) { return null; }
+  const polys = [];
+  for (const it of items) {
+    if (it.t === "text") {
+      const c = Math.cos(it.ang), s = Math.sin(it.ang), up = it.size * 0.95, dn = it.size * 0.3;
+      polys.push([[0, -dn], [it.w, -dn], [it.w, up], [0, up]].map(([u, v]) => [it.x + u * c - v * s, it.y + u * s + v * c]));
+      continue;
+    }
+    for (const sp of subpaths(it)) {
+      if ((sp.closed || it.fill || it.pat) && sp.v.length >= 3) { polys.push(sp.v); continue; }
+      const hw = Math.max(it.sw || 0, 1) / 2;
+      for (let i = 1; i < sp.v.length; i++) {
+        const [x0, y0] = sp.v[i - 1], [x1, y1] = sp.v[i];
+        const L = Math.hypot(x1 - x0, y1 - y0); if (!(L > 0)) continue;
+        const nx = (-(y1 - y0) / L) * hw, ny = ((x1 - x0) / L) * hw;
+        polys.push([[x0 + nx, y0 + ny], [x1 + nx, y1 + ny], [x1 - nx, y1 - ny], [x0 - nx, y0 - ny]]);
+      }
+    }
+  }
+  if (!polys.length) return null;
+  const box = unionBox(polys.map((p) => unionBox(p.map(([x, y]) => [x, y, x, y]))));
+  return { polys, box };
+}
+const CLIP = 100;
+const toClip = (v) => v.map(([x, y]) => ({ X: Math.round(x * CLIP), Y: Math.round(y * CLIP) }));
+/** Do two painted footprints genuinely overlap — an intersection thicker than a hairline, not a shared edge? */
+function shapesOverlap(a, b) {
+  if (!a || !b) return false;
+  if (a === ALL || b === ALL) return true;
+  if (!boxesTouch(a.box, b.box)) return false;
+  for (const pa of a.polys) {
+    const ba = unionBox(pa.map(([x, y]) => [x, y, x, y]));
+    for (const pb of b.polys) {
+      const bb = unionBox(pb.map(([x, y]) => [x, y, x, y]));
+      if (!boxesTouch(ba, bb)) continue;
+      const c = new ClipperLib.Clipper();
+      c.AddPath(toClip(pa), ClipperLib.PolyType.ptSubject, true);
+      c.AddPath(toClip(pb), ClipperLib.PolyType.ptClip, true);
+      const sol = new ClipperLib.Paths();
+      c.Execute(ClipperLib.ClipType.ctIntersection, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+      for (const q of sol) {
+        const area = Math.abs(ClipperLib.Clipper.Area(q)) / (CLIP * CLIP);
+        const qb = unionBox(q.map((pt) => [pt.X / CLIP, pt.Y / CLIP, pt.X / CLIP, pt.Y / CLIP]));
+        const span = Math.max(qb[2] - qb[0], qb[3] - qb[1], 1e-9);
+        if (area / span > OVERLAP_TOL) return true; // thicker than a hairline on average
+      }
+    }
+  }
+  return false;
+}
+
+/** The outer outline the element DRAWS (clone units): the largest closed subpath of the largest filled/closed item. */
+function drawnOutline(node, root) {
+  let items;
+  try { items = flattenTree(domToTree(node, { root }), IDENT, {}).items; } catch (_) { return null; }
+  let best = null, bestA = 0;
+  for (const it of items) {
+    if (it.t !== "path" || !(it.fill || it.pat || it.stroke)) continue;
+    for (const sp of subpaths(it, true)) { // on-curve vertices only: a Bézier's control points are not corners
+      if (!(sp.closed || it.fill || it.pat) || sp.v.length < 3) continue;
+      const a = ringArea(sp.v);
+      if (a > bestA) { bestA = a; best = sp.v; }
+    }
+  }
+  if (best && best.length > 3 && Math.hypot(best[0][0] - best[best.length - 1][0], best[0][1] - best[best.length - 1][1]) < 1e-6) best = best.slice(0, -1);
+  return best ? best.map(([x, y]) => ({ x, y })) : null;
+}
+
+/** The words a recipient sees for an element in Bluebeam's Subject column. */
+export function elementSubject(el) {
+  if (!el) return "Site element";
+  if (el.type === "building") return "Building";
+  if (el.type === "paving") return el.truckCourt ? "Truck court" : "Paving";
+  const W = { pond: "Detention pond", road: "Road", parking: "Car parking", trailer: "Trailer parking", sidewalk: "Sidewalk", landscape: "Landscape" };
+  return W[el.type] || String(el.type || "Site element").replace(/^./, (c) => c.toUpperCase());
+}
+/** Plain words for a site-data markup kind (easements, utility routes — they live in `markups` but are drawn site data). */
+export const MARKUP_SITE_SUBJECT = { easement: "Easement", encumbrance: "Encumbrance", utilRoute: "Utility route", traced: "Traced line", infwater: "Water main (inferred)" };
+
+/**
+ * Lift every drawn object out of `clone` (mutates it) and describe each as a native annotation.
  *
  *   ctx = { markups, callouts, measures, els, f2p, measureText }
  *
- * Returns { descriptors, patterns, flattened } — descriptors are in paint order (each object at its last member's
- * position in the page), which is the order the annotations are written in.
+ * Returns { descriptors, patterns, flattened, pinned, notes }. Descriptors are in PAINT ORDER — a PDF viewer paints
+ * annotations in /Annots order, so the z-order of the drawing is carried entirely by that order (NEW-1, 2026-10-20).
  *
- * WHICH OBJECTS STAY IN THE PAGE (NEW-1 of 2026-10-19, replacing "everything that precedes the last content node"):
- * a PDF annotation always paints above the page, so an object may be lifted only if nothing that stays in
- * the page is meant to paint over it. Walking the stack top-down:
- *   · an annotation the user sent BEHIND THE PLAN (the `behindEls` band, ladder rungs 2–4) is pinned, always;
- *   · any other annotation is pinned only when page content that paints AFTER it genuinely overlaps it in
- *     plan space — a later element, a later easement/encumbrance line, or an annotation already pinned.
- *     A promoted reference drawing or a lifted GIS layer does NOT pin an annotation (decision: those are
- *     thin overlays the user put over the plan on purpose; "anything under a transparent overlay is burned
- *     in" was never the intent of the behind-the-plan rule), and an empty `data-gis-front-band` is not content;
- *   · a BUILDING (NEW-2) is held to the stricter bar of the flattened picture: any later content that
- *     overlaps it — including a reference drawing or GIS layer — keeps it in the page, so the editable
- *     export looks identical to the flattened one.
- * Parcel outlines/chips and element LABELS are thin linework laid over the plan and never pin (stated deviation).
+ * ONE ANNOTATION PER OBJECT, and what an object IS:
+ *   · a building and its corner bump-outs (B2352496 — `bumpOutsOf`, one outline through all of them);
+ *   · a dissolved ROAD NETWORK: every road whose pavement the planner unions into one surface (`data-road-cluster`) is
+ *     one annotation — the surface belongs to none of them alone (NO-ONE-OWNS-A-COMPOSITE), so splitting it would
+ *     leave the joint behind when one road is dragged;
+ *   · every other element, markup, callout and measurement on its own.
+ *   An element's LABEL (`data-label-for`) and its dimension text travel inside its own annotation. A parcel's acreage
+ *   chip is the PARCEL's — it never rides on a building (that is what B2326896's "moving a building moves its Parcel 1
+ *   24.79 AC label" was); a chip a lifted element would cover becomes its own small "Parcel label" annotation.
  *
- * A BUILDING AND ITS CORNER BUMP-OUTS ARE ONE ANNOTATION (NEW-1 of 2026-10-19, amending NEW-2). A bump-out is its
- * own element on the canvas (`dogEar`, `attachedTo` the host — lib/dogEar.js) and so its own `el:` node in the
- * clone; left as page content it stayed behind when a recipient dragged the building in Bluebeam. It is therefore a
- * MEMBER of its host's entry here (the grading layer's pad-member rule, `bumpOutsOf`): the entry sits at the first
- * member's paint position, its box is the union of every member (so later content over a bump-out pins the whole
- * building, and a chip over a bump-out travels with it), every member node leaves the page together, and the
- * Polygon's vertices are the one outline `buildingOutlineRing` draws through host and bump-outs alike.
+ * WHAT STILL STAYS IN THE PAGE (the only pin left): an ELEMENT that a REFERENCE DRAWING promoted above the plan really
+ * covers (real shapes, not boxes) — the reference is page content, so lifting the element would paint it over the
+ * drawing the user put on top. Anything such a pinned element in turn covers is pinned with it. Each pin is returned
+ * in `pinned` with its reason, for the export's warning list. Markups are never pinned by a reference (the 2026-10-19
+ * decision), and a lifted GIS layer pins nothing — it is a frame-wide translucent raster, so pinning under it would
+ * make the whole plan uneditable again; that deviation is returned in `notes` instead.
  */
 export function extractMarkupAnnotations(clone, ctx) {
   const { markups = [], callouts = [], measures = [], els = [], f2p = null, measureText = null } = ctx || {};
   const patterns = {};
   const descriptors = [];
   const flattened = [];
+  const pinned = [];
+  const notes = [];
 
   const keyOf = (n) => { const k = n.getAttribute("data-feature") || ""; const i = k.indexOf(":"); return { fam: k.slice(0, i), id: k.slice(i + 1), key: k }; };
   const inFeature = (n) => { for (let p = n.parentNode; p && p.getAttribute; p = p.parentNode) if (p.getAttribute("data-feature") != null) return true; return false; };
-  const buildingOf = (id) => { const e = els.find((x) => x && String(x.id) === id); return e && isBuilding(e) ? e : null; };
-  // bump-out id → its host building (only for a host that is itself a liftable building in `els`)
-  const bumpHostOf = new Map();
-  for (const e of els) if (isBuilding(e)) for (const b of bumpOutsOf(els, e)) bumpHostOf.set(String(b.id), e);
+  const elById = new Map(els.filter(Boolean).map((e) => [String(e.id), e]));
+  // bump-out id → host building (only for a host that is itself a building in `els`)
+  const groupOfEl = new Map(); // element id → group key
+  for (const e of els) if (isBuilding(e)) { const bumps = bumpOutsOf(els, e); if (bumps.length) { groupOfEl.set(String(e.id), `b:${e.id}`); for (const b of bumps) groupOfEl.set(String(b.id), `b:${e.id}`); } }
 
-  /* 1 — the stack in paint order, each node classed as a lift candidate or page content. */
-  const all = Array.from(clone.querySelectorAll("[data-feature],[data-overlay-id],[data-gis-front-band],[data-label-for]"));
+  const all = Array.from(clone.querySelectorAll("[data-feature],[data-overlay-id],[data-gis-front-band],[data-label-for],[data-road-cluster]"));
+  // a road network: every road id in one `data-road-cluster` shares a group
+  for (const n of all) {
+    const rc = n.getAttribute("data-road-cluster");
+    if (rc == null) continue;
+    const ids = rc.split(",").filter(Boolean);
+    for (const id of ids) groupOfEl.set(id, `r:${ids[0]}`);
+  }
+  const groupKey = (id) => groupOfEl.get(id) || `e:${id}`;
   const labelsByEl = new Map();
   for (const n of all) { const lf = n.getAttribute("data-label-for"); if (lf != null) (labelsByEl.get(lf) || labelsByEl.set(lf, []).get(lf)).push(n); }
+
   const stack = [];
-  const chips = []; // parcel acreage chips: laid over the plan, so a lifted building would otherwise cover them
-  const seenBuilding = new Set();
-  /* A building's MEMBERS: its own node plus every bump-out node bonded to it. One pass over the stack groups them
-     by host (a bump-out whose host is not a liftable building here is ordinary page content below). */
-  const hostNodeOf = new Map(), bumpNodesOf = new Map();
-  for (const n of all) {
-    if (n.getAttribute("data-label-for") != null || n.getAttribute("data-feature") == null) continue;
-    const { fam, id } = keyOf(n);
-    if (fam !== "el") continue;
-    const bumpHost = bumpHostOf.get(id);
-    if (bumpHost) (bumpNodesOf.get(String(bumpHost.id)) || bumpNodesOf.set(String(bumpHost.id), []).get(String(bumpHost.id))).push(n);
-    else if (buildingOf(id) && !hostNodeOf.has(id)) hostNodeOf.set(id, n);
-  }
-  // Push the host's ONE entry the first time any member is met, so it sits at the first member's paint position.
-  const pushBuilding = (hostId) => {
-    const host = buildingOf(hostId), node = hostNodeOf.get(hostId);
-    if (!host || !node || seenBuilding.has(hostId)) return;
-    seenBuilding.add(hostId);
-    const bumpNodes = bumpNodesOf.get(hostId) || [];
-    stack.push({ node, fam: "el", id: hostId, model: host, building: true, behind: false, bumpNodes, members: [node, ...bumpNodes].sort((a, b) => all.indexOf(a) - all.indexOf(b)) });
+  const chips = [];
+  const groups = new Map(); // group key → stack entry
+  const elEntry = (gk, id) => {
+    let e = groups.get(gk);
+    if (!e) {
+      const kind = gk[0];
+      const hostId = gk.slice(2);
+      const model = kind === "r" ? elById.get(hostId) || elById.get(id) : elById.get(hostId);
+      e = { fam: "el", gk, id: hostId, model, element: true, building: kind === "b" || isBuilding(model), road: kind === "r", members: [], ids: new Set() };
+      groups.set(gk, e);
+      stack.push(e);
+    }
+    return e;
   };
   for (const node of all) {
     if (node.getAttribute("data-label-for") != null) continue; // owned by its element (lifted or kept with it)
     if (node.getAttribute("data-gis-front-band") != null) { stack.push({ node, content: "gis" }); continue; }
+    const rc = node.getAttribute("data-road-cluster");
+    if (rc != null) { const ids = rc.split(",").filter(Boolean); if (ids.length && elById.has(ids[0])) { const e = elEntry(groupKey(ids[0]), ids[0]); e.members.push(node); ids.forEach((x) => e.ids.add(x)); } continue; }
     if (node.getAttribute("data-feature") == null) { if (!inFeature(node)) stack.push({ node, content: "reference" }); continue; }
+    if (inFeature(node)) continue; // a nested feature key inside another feature's group (chrome) travels with its owner
     const { fam, id } = keyOf(node);
     if (fam === "parcel") { if (node.getAttribute("data-print-chip") != null) chips.push(node); continue; }
     if (fam === "reference") { stack.push({ node, content: "reference" }); continue; }
     if (fam === "markup") {
       const m = markups.find((x) => x && String(x.id) === id);
-      if (m && ANNOTATION_KINDS.includes(m.kind)) stack.push({ node, fam, id, model: m, annot: true, behind: m.behindEls === true });
+      if (m) stack.push({ node, fam, id, model: m, annot: true, members: [node] });
       else stack.push({ node, content: "plan" });
     } else if (fam === "callout") {
       const c = callouts.find((x) => x && String(x.id) === id);
-      if (c) stack.push({ node, fam, id, model: c, annot: true, behind: c.behindEls === true && c.frontForce !== true });
+      if (c) stack.push({ node, fam, id, model: c, annot: true, members: [node] });
+      else stack.push({ node, content: "plan" });
     } else if (fam === "measure") {
       const idx = parseInt(id, 10);
       const m = Number.isFinite(idx) ? measures[idx] : null;
-      stack.push({ node, fam, id, model: m, annot: true, behind: !!(m && m.behindEls === true) });
-    } else if (fam === "el" && bumpHostOf.has(id)) {
-      const hostId = String(bumpHostOf.get(id).id);
-      if (hostNodeOf.has(hostId)) pushBuilding(hostId); // a member: the host's entry starts at the first member's position
-      else stack.push({ node, content: "plan" });       // host not drawn: the bump-out is ordinary page content
-    } else if (fam === "el" && buildingOf(id)) {
-      pushBuilding(id);
+      stack.push({ node, fam, id, model: m, annot: true, members: [node] });
+    } else if (fam === "el") {
+      if (!elById.has(id)) { stack.push({ node, content: "plan" }); continue; }
+      const gk = groupKey(id);
+      const e = elEntry(gk, id);
+      if (!e.model) { e.model = elById.get(id); e.building = isBuilding(e.model); }
+      e.members.push(node); e.ids.add(id);
     } else stack.push({ node, content: "plan" });
   }
-
-  /* 2 — decide which candidates stay in the page. Every candidate is a set of (box, paint position) pairs — a
-     building's are its host, its bump-outs and its labels, each at ITS OWN position; judging a building by one
-     bounding box would let a truck court, which sits exactly in the notch between two bump-outs, "cover" it, and
-     judging it at one position would let a markup painted between a bump-out and its host pin or free the whole
-     building wrongly. A candidate is pinned when some box of something that stays in the page paints AFTER one of
-     its boxes and overlaps it. Pins only ever accumulate, so this runs to a fixpoint (a building whose members
-     straddle another candidate is seen whichever order the stack puts them in). */
-  const posOf = (n) => all.indexOf(n);
-  const boxCache = new Map();
-  const boxesOf = (e) => {
-    if (!boxCache.has(e)) {
-      const nodes = e.building ? [...e.members, ...(labelsByEl.get(e.id) || [])] : [e.node];
-      boxCache.set(e, nodes.map((n) => ({ box: paintBox(n, clone), pos: posOf(n) })).filter((b) => b.box));
+  // A building group whose host never drew (only its bump-outs did) is ordinary: its first member stands in.
+  for (const e of stack) {
+    if (!e.element) continue;
+    e.node = e.members[0];
+    // a building group whose HOST never drew (only a bump-out did) is an ordinary element: what drew is what moves
+    if (e.building && !e.members.some((n) => n.getAttribute("data-feature") === `el:${e.id}`)) {
+      const first = keyOf(e.node).id;
+      e.building = false; e.id = first; e.model = elById.get(first); e.ids = new Set(e.members.map((n) => keyOf(n).id).filter(Boolean));
     }
-    return boxCache.get(e);
+  }
+
+  /* 2 — which candidates stay in the page. Every candidate is a set of (real footprint, paint position) pairs, one per
+     member node at ITS OWN position (a building's bump-outs, a road network's strips and surface). Labels are left out
+     of this judgement: they paint above every element on screen and ride inside their own element's appearance. */
+  const posOf = (n) => all.indexOf(n);
+  const shapeCache = new Map();
+  const shapesOf = (e) => {
+    if (!shapeCache.has(e)) {
+      const nodes = e.members || [e.node];
+      shapeCache.set(e, nodes.map((n) => ({ shape: paintShapes(n, clone), pos: posOf(n) })).filter((b) => b.shape));
+    }
+    return shapeCache.get(e);
   };
   const coveredBy = (e, c) => {
-    const counts = c.content === "plan" || c.pinned || (e.building && (c.content === "reference" || c.content === "gis"));
+    const counts = c.content === "plan" || c.pinned || (e.element && c.content === "reference");
     if (!counts) return false;
-    const mine = boxesOf(e), theirs = boxesOf(c);
-    return mine.some((m) => theirs.some((t) => t.pos > m.pos && overlaps(m.box, t.box)));
+    return shapesOf(e).some((m) => shapesOf(c).some((t) => t.pos > m.pos && shapesOverlap(m.shape, t.shape)));
   };
-  // X must paint UNDER Y when some box of Y paints after an overlapping box of X (the page's own order).
-  const under = (x, y) => boxesOf(x).some((m) => boxesOf(y).some((t) => t.pos > m.pos && overlaps(m.box, t.box)));
-  const pinIt = (e) => { e.pinned = true; flattened.push(e.node.getAttribute("data-feature")); };
+  const under = (x, y) => shapesOf(x).some((m) => shapesOf(y).some((t) => t.pos > m.pos && shapesOverlap(m.shape, t.shape)));
+  const nameOf = (e) => (e.element ? `${elementSubject(e.model)} ${e.id}` : (e.node && e.node.getAttribute("data-feature")) || e.content);
+  const pinIt = (e, why, by) => { e.pinned = true; const key = e.element ? `el:${e.id}` : e.node.getAttribute("data-feature"); flattened.push(key); pinned.push({ key, why, by: by ? nameOf(by) : null, name: nameOf(e) }); };
   for (let again = true; again;) {
     for (let changed = true; changed;) {
       changed = false;
       for (let i = stack.length - 1; i >= 0; i--) {
         const e = stack[i];
         if (e.content || e.pinned) continue;
-        if ((e.annot && e.behind) || stack.some((c) => c !== e && (c.content || c.pinned) && coveredBy(e, c))) { pinIt(e); changed = true; }
+        const cov = stack.find((c) => c !== e && (c.content || c.pinned) && coveredBy(e, c));
+        if (cov) { pinIt(e, cov.content === "reference" ? "under-reference" : cov.pinned ? "under-pinned" : "under-page", cov); changed = true; }
       }
     }
-    /* Two lifted objects whose members straddle each other (building A's bump-out painted over building B's host,
-       B's host over A's host) have NO annotation order that reproduces the page: both stay in it. Pinning them can
-       pin others, so the pass above runs again. Only buildings can straddle (every other candidate paints in its
-       own band), so this is a building-against-building question in practice. */
+    // Two lifted objects whose members straddle each other have NO annotation order that reproduces the page: both stay.
+    // Only a multi-member object (a building with bump-outs, a road network) can straddle, so one of each pair is one.
     again = false;
     const lifted = stack.filter((e) => !e.content && !e.pinned);
+    const multi = (e) => (e.members || []).length > 1;
     for (let a = 0; a < lifted.length; a++) for (let b = a + 1; b < lifted.length; b++) {
       const x = lifted[a], y = lifted[b];
-      if (!x.pinned && !y.pinned && under(x, y) && under(y, x)) { pinIt(x); pinIt(y); again = true; }
+      if ((multi(x) || multi(y)) && !x.pinned && !y.pinned && under(x, y) && under(y, x)) { pinIt(x, "straddle", y); pinIt(y, "straddle", x); again = true; }
     }
   }
-  // Annotations paint in array order, so a lifted object is ordered by its LAST member's paint position: a
-  // building whose bump-out paints over a neighbour's host then lands above that neighbour, as on the page.
-  const lastPos = (e) => Math.max(...boxesOf(e).map((b) => b.pos), posOf(e.node));
+  // Annotations paint in array order: a lifted object is ordered by its LAST member's paint position.
+  const lastPos = (e) => Math.max(...(e.members || [e.node]).map(posOf));
   const liftOrder = stack.filter((e) => !e.content && !e.pinned).sort((a, b) => lastPos(a) - lastPos(b));
+  const liftedEls = liftOrder.filter((e) => e.element);
 
-  /* A parcel's acreage chip paints above the buildings on screen, but a lifted building paints above the whole
-     page. So a chip that overlaps a lifted building travels INSIDE that building's appearance (the topmost one it
-     overlaps) and leaves the page — the default export then looks exactly like the flattened one. (Move the
-     building and its chip moves with it; that is the one cosmetic cost, stated in the PR.) */
-  const chipsOf = new Map();
+  // A lifted GIS front band is printed into the page under the editable elements it overlaps — say so, once.
+  const gis = stack.find((c) => c.content === "gis" && paintShapes(c.node, clone));
+  if (gis && liftedEls.length) notes.push("a map layer shown above the plan is printed into the page, so the editable site elements paint over it (turn on “Flatten markups” for the exact stacking)");
+
+  /* Parcel acreage chips: the PARCEL's label, never a building's. One that a lifted element would cover becomes its
+     own annotation at its own paint position (above the elements, as on screen); the rest stay in the page. */
+  const chipEntries = [];
   for (const chip of chips) {
-    let owner = null;
-    const cb = paintBox(chip, clone), cp = posOf(chip);
-    if (!cb) continue;
-    for (const e of stack) {
-      if (!e.building || e.pinned) continue;
-      if (boxesOf(e).some((m) => m.pos < cp && overlaps(cb, m.box))) owner = e; // only a chip that paints after the member it covers
-    }
-    if (owner) (chipsOf.get(owner) || chipsOf.set(owner, []).get(owner)).push(chip);
+    const sh = paintShapes(chip, clone);
+    if (!sh) continue;
+    const cp = posOf(chip);
+    if (liftOrder.some((e) => lastPos(e) < cp && shapesOf(e).some((m) => shapesOverlap(sh, m.shape)))) chipEntries.push({ node: chip, chip: true, pos: cp });
   }
 
-  /* 3 — lift the rest, in paint order. */
-  for (const e of liftOrder) {
+  /* 3 — lift the rest, in paint order (chips slot in by their own position). */
+  const ordered = [...liftOrder.map((e) => ({ e, pos: lastPos(e) })), ...chipEntries.map((c) => ({ e: c, pos: c.pos }))].sort((a, b) => a.pos - b.pos).map((x) => x.e);
+  const linesOf = (labelNodes) => labelNodes.flatMap((n) => Array.from(n.querySelectorAll("text")).flatMap((t) => {
+    const ts = Array.from(t.childNodes || []).filter((c) => c.nodeType === 1 && String(c.tagName).toLowerCase() === "tspan");
+    return (ts.length > 1 ? ts : [t]).map((x) => (x.textContent || "").trim());
+  }).filter(Boolean));
+  for (const e of ordered) {
+    if (e.chip) {
+      const tree = domToTree(e.node, { measureText, patterns, root: clone });
+      const text = Array.from(e.node.querySelectorAll("text")).map((t) => (t.textContent || "").trim()).filter(Boolean).join(" ");
+      const pid = e.node.getAttribute("data-chip-parcel") || keyOf(e.node).id;
+      e.node.parentNode.removeChild(e.node);
+      descriptors.push({ family: "parcel-label", id: pid, kind: "parcel-label", tree, meta: { subject: "Parcel label", comment: text } });
+      continue;
+    }
     const { node, fam, id, model } = e;
     if (fam === "markup") {
       const m = model;
@@ -297,7 +412,7 @@ export function extractMarkupAnnotations(clone, ctx) {
       node.parentNode.removeChild(node);
       descriptors.push({
         family: "markup", id, kind: m.kind, tree, hints,
-        meta: { subject: m.subject || null, comment: m.comment || (m.inlineLabel || m.label || ""), author: m.author || null, createdAt: m.createdAt || null, modifiedAt: m.modifiedAt || null },
+        meta: { subject: m.subject || MARKUP_SITE_SUBJECT[m.kind] || null, comment: m.comment || (m.inlineLabel || m.label || m.name || ""), author: m.author || null, createdAt: m.createdAt || null, modifiedAt: m.modifiedAt || null },
       });
     } else if (fam === "callout") {
       const c = model;
@@ -319,28 +434,34 @@ export function extractMarkupAnnotations(clone, ctx) {
         family: "measure", id: (m && m.id) || String(id), kind: mode, tree,
         meta: { chipTexts, subject: null, comment: (m && m.note) || "", author: (m && m.author) || null, createdAt: (m && m.createdAt) || null, modifiedAt: (m && m.modifiedAt) || null },
       });
-    } else if (e.building) {
+    } else if (e.element) {
       const el = model;
-      const bumps = bumpOutsOf(els, el);
-      const outline = buildingOutlineRing(el, bumps);
-      const hints = f2p ? { verts: outline.ring.map((p) => f2p(p)) } : {};
-      if (outline.detached.length) hints.detachedBumpOuts = outline.detached.slice(); // LOUD: named, never silently outside the ring
-      const labelNodes = labelsByEl.get(id) || [];
-      const carried = chipsOf.get(e) || [];
-      const lifted = [...e.members, ...labelNodes, ...carried];
+      const labelNodes = [...e.ids].flatMap((x) => labelsByEl.get(x) || []);
+      const membersSorted = e.members.slice().sort((a, b) => posOf(a) - posOf(b));
+      const lifted = [...membersSorted, ...labelNodes];
+      const hints = {};
+      const meta = { subject: elementSubject(el), author: el.author || null, createdAt: el.createdAt || null, modifiedAt: el.modifiedAt || null };
+      if (e.building) {
+        const bumps = bumpOutsOf(els, el);
+        const outline = buildingOutlineRing(el, bumps);
+        if (f2p) hints.verts = outline.ring.map((p) => f2p(p));
+        if (outline.detached.length) hints.detachedBumpOuts = outline.detached.slice(); // LOUD: named, never silently outside the ring
+        meta.bumpOuts = [...e.ids].filter((x) => x !== String(el.id));
+      } else {
+        // the outline the element DRAWS (a road network: its dissolved surface), so vertices and picture agree
+        const surface = e.road ? membersSorted.find((n) => n.getAttribute("data-road-cluster") != null) : null;
+        const src = surface || membersSorted.find((n) => drawnOutline(n, clone)) || membersSorted[0];
+        const v = src ? drawnOutline(src, clone) : null;
+        if (v && v.length >= 3) hints.verts = v;
+        if (e.road) meta.roads = [...e.ids];
+      }
       const kids = lifted.map((n) => domToTree(n, { measureText, patterns, root: clone })).filter(Boolean);
-      const lines = labelNodes.flatMap((n) => Array.from(n.querySelectorAll("text")).flatMap((t) => {
-        const ts = Array.from(t.childNodes || []).filter((c) => c.nodeType === 1 && String(c.tagName).toLowerCase() === "tspan");
-        return (ts.length > 1 ? ts : [t]).map((x) => (x.textContent || "").trim());
-      }).filter(Boolean));
+      const lines = linesOf(labelNodes);
       lifted.forEach((n) => n.parentNode && n.parentNode.removeChild(n));
-      void node;
-      descriptors.push({
-        family: "building", id, kind: "building", hints, tree: { tag: "g", a: {}, kids },
-        meta: { lines, subject: "Building", comment: lines[0] || "", bumpOuts: e.bumpNodes.map((n) => keyOf(n).id), author: el.author || null, createdAt: el.createdAt || null, modifiedAt: el.modifiedAt || null },
-      });
+      meta.lines = lines;
+      meta.comment = lines[0] || meta.subject; // Contents = its label (the name line), the rest rides the appearance
+      descriptors.push({ family: e.building ? "building" : "element", id: e.id, kind: e.building ? "building" : (el && el.type) || "element", tree: { tag: "g", a: {}, kids }, hints, meta });
     }
   }
-  return { descriptors, patterns, flattened };
+  return { descriptors, patterns, flattened, pinned, notes };
 }
-

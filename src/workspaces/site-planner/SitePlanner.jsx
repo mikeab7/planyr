@@ -75,6 +75,8 @@ import { buildingFloodExposure, exposureHeadline, FLOOD_CLASS_LABEL } from "./li
 import {
   CANVAS_Z, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL,
   PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
+  // NEW-1 — Parcels in front: while the Parcels tool is up the parcel geometry is the TOP of the drawing (mapStack.js).
+  PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ,
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
@@ -2794,6 +2796,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * a Leaflet pane inside it must not be translated twice). */
   const geoFrontWrapRef = useRef(null);
   const geoFrontPaneRef = useRef(null);
+  /* NEW-1 — the PARCELS-IN-FRONT HOST: the county lots on offer ("Pick county lots") live in a Leaflet pane hosted
+   * INSIDE the plan SVG (a foreignObject under the moved parcel group), exactly the front band's shape and for the
+   * same reason — a pane inside the backdrop map can never clear the SVG. Same two mirrored transforms. */
+  const geoPickWrapRef = useRef(null);
+  const geoPickPaneRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
@@ -2913,12 +2920,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!geoTopPaneRef.current) console.error("[planyr] the map-top GIS band host is not mounted — line layers would draw under the plan instead");
     mountBand(geoFrontPaneRef.current, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, 380);
     mountBand(geoTopPaneRef.current, PANE_LINE, PANE_LINE_LABEL, 400);
+    if (!geoPickPaneRef.current) console.error("[planyr] the Parcels-in-front host (data-parcel-pick-band) is not mounted — the county lots on offer would draw under the plan instead");
+    mountBand(geoPickPaneRef.current, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, 380);
     if (paneHosts.length) {
       const mirrorPane = () => {
         const mp = map._mapPane;
         if (!mp) return;
         const t = mp.style.transform || "";
-        for (const el of [geoFrontPaneRef.current, geoTopPaneRef.current]) if (el) el.style.transform = t;
+        for (const el of [geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]) if (el) el.style.transform = t;
       };
       map.on("move zoom viewreset moveend zoomend resize load", mirrorPane);
       mirrorPane();
@@ -3207,7 +3216,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — BOTH external hosts, never just the top one: the lifted-area band tracks the
       // imagery on exactly the same terms as the line band, so a lifted floodplain edge stays
       // welded to the aerial through a flick-drag instead of sliding a frame behind it.
-      const mirrors = [geoTopWrapRef.current, geoFrontWrapRef.current];
+      const mirrors = [geoTopWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current];
       if (origin != null) { wrap.style.transformOrigin = origin; for (const m of mirrors) if (m) m.style.transformOrigin = origin; }
       wrap.style.transform = value;
       for (const m of mirrors) if (m) m.style.transform = value;
@@ -5261,7 +5270,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const DRAG_OP_KIND = {
     move: "move", groupMove: "move", mkMove: "move", moveSheetOverlay: "move", callout: "move", measureMove: "move",
     resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize",
-    vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize",
+    vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize", grLimitVertex: "resize",
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
@@ -6717,6 +6726,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * Returns true iff it handled the gesture, so a caller can fall through when it did not. */
   const featureDoubleAction = (t, e) => {
     if (!t) return false;
+    // NEW-1 — picking county lots: every press went to the LOT (handleIdentifyCapture), so a double-click opens nothing drawn over it; a lot's own line still opens its page.
+    if (identifyMode && t.kind !== "parcel") return true;
     if (t.kind === "el") {
       const el = els.find((x) => x.id === t.id);
       if (!el) return false;
@@ -7917,6 +7928,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDrillId(null);
     setSel(picked.target);
     flashWarn(picked.len > 1 ? `${picked.idx + 1} of ${picked.len} here — Alt+click again to go deeper` : "Only one thing here.", 1800);
+    return true;
+  };
+  /* NEW-1 — PICKING COUNTY LOTS: a press belongs to the LOT, whatever is drawn over it.
+   * "Pick county lots" is a mode whose only job is to add the lot under the cursor, and the lots are now the top of the
+   * drawing (mapStack.parcelsOnTop) — so the press must follow the draw order and reach them, not stop at the first building,
+   * markup, callout, measurement or overlay painted over the spot (each of those used to select ITSELF, and the lot under it
+   * could not be picked at all). Runs in the CAPTURE phase, ahead of every feature's own bubble-phase pointerdown, and hands
+   * the press to `onBgDown` — the very function a press on bare ground reaches — so the ack ring, the click-vs-drag pan, the
+   * Space-pan and the attach / align flows all behave exactly as they do on empty canvas. Left alone on purpose: the handle
+   * layer (a grip you are holding keeps its press), text fields, and Alt+press (the stack picker, tried first, is the owner's
+   * deliberate "click what is behind"). Returns true when it took the press. */
+  const handleIdentifyCapture = (e) => {
+    if (!identifyMode || e.button !== 0) return false;
+    const t = e.target;
+    if (t && t.closest && t.closest('[data-handle-layer], input, textarea, select, [contenteditable="true"]')) return false;
+    onBgDown(e);
+    e.stopPropagation();
     return true;
   };
   /* NEW-1 (2026-09-12) — Alt+RIGHT-CLICK's twin: same cycle, same target, opened as a MENU instead
@@ -9683,6 +9711,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const sp = snapPt(fp);
       scheduleFrameJob("geom", () => setParcels((a) => a.map((pc) => pc.id === d.id
         ? { ...pc, points: pc.points.map((p, i) => (i === d.index ? sp : p)) } : pc)));
+      return;
+    }
+    if (d.mode === "grLimitVertex") { // ROUND 4 (B2349120) — a vertex of the edited grading limit (stored on the plan)
+      const sp = snapPt(fp);
+      scheduleFrameJob("geom", () => setSettings((sx) => {
+        const g = sx.grading || {}, ring = Array.isArray(g.limitRing) ? g.limitRing : null;
+        if (!ring || !ring[d.index]) return sx;
+        return { ...sx, grading: { ...g, limitRing: ring.map((p, i) => (i === d.index ? { x: sp.x, y: sp.y } : p)) } };
+      }));
       return;
     }
     if (d.mode === "elVertex") {
@@ -14200,9 +14237,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Per-plan switch (NEW-1, amends B2315856): `gradingOn` is the owner gate; grading WORKS on this plan only when the owner has
   // also switched it on in the Grading panel. While off, `grOn` is false and everything below is the non-owner planner.
   const grPlanOn = gradingOn && (settings.grading || {}).enabled === true;
-  const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback });
+  // ROUND 4 (B2349120) — the rings that join the GRADING LIMIT without being graded planes: drive aisles / roads inside
+  // the site and the walks / landscape strips hosted by a building. The graded planes themselves (FM_FILL_TYPES) join
+  // through gsEls. Fresh array per render; useGradingBase memoises it on its value signature.
+  const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
+    if (e.type === "road") {
+      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), undefined) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
+    }
+    if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
+    return [];
+  }) : null;
+  const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback, extraRings: grLimitExtraRings, aisleFt: Number.isFinite(settings.aisle) && settings.aisle > 0 ? settings.aisle : 24 });
   const grOn = grBase.on;
-  const grHosts = grOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const grHosts = grOn ? grHostsPre : null;
+  // ROUND 4 — "Edit outline": the edited grading limit is dragged by vertex handles like a parcel outline; `highlight` is
+  // the offending span the flag's "pull the limit in" fix opened it on. Session state only; the ring itself is on the plan.
+  const [grLimitEdit, setGrLimitEdit] = useState(null);
+  useEffect(() => { if (!grOn && grLimitEdit) setGrLimitEdit(null); }, [grOn, grLimitEdit]);
   const gsExistAt = fmGradeAt || (grOn && grBase.existAt) || (gsMedianGrade != null ? () => gsMedianGrade : null);
   const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : (grOn && grBase.existAt) ? grBase.existKey : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
   const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type)).map((e) => {
@@ -14339,6 +14391,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }));
   };
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
+  // ROUND 4 — the grading limit's edit actions (every one an ordinary settings edit: undoable, one write path)
+  const grLimitRingNow = () => { const g = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const regs = g && g.limitRegions ? g.limitRegions : []; let best = null; for (const r of regs) if (!best || polyArea(r.outer) > polyArea(best.outer)) best = r; return best ? best.outer.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })) : null; };
+  const grEditLimit = (span) => {
+    const g = settings.grading || {};
+    if (!Array.isArray(g.limitRing) || g.limitRing.length < 3) {
+      const ring = grLimitRingNow();
+      if (!ring) { flashWarn("The grading limit isn't computed yet — try again in a moment.", 3000); return; }
+      grSetCfg({ limitRing: ring, limitMode: "layout" });
+    } else if (g.limitMode === "boundary") grSetCfg({ limitMode: "layout" });
+    setGrLimitEdit({ highlight: span || null });
+  };
+  const grDoneEditLimit = () => setGrLimitEdit(null);
+  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null }); };
+  const grSetLimitMode = (m) => { if (m !== "layout") setGrLimitEdit(null); grSetCfg({ limitMode: m }); };
+  const grStartLimitVertex = (e, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    drag.current = { mode: "grLimitVertex", index, ...startGate(e, { rebase: false }) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -14634,7 +14706,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     siteFloorFt: Number.isFinite(fmEffectivePadFt) ? fmEffectivePadFt : null,
     dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
     accent: PAL.accent, isDragging: () => !!drag.current,
-    actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly },
+    limitEditing: !!grLimitEdit, limitHighlight: grLimitEdit ? grLimitEdit.highlight : null,
+    actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly, setLimitMode: grSetLimitMode, editLimit: grEditLimit, doneEditLimit: grDoneEditLimit, resetLimit: grResetLimit },
   } : null;
 
   // ---- B707/B712: the floodplain-mitigation ledger — a SEPARATE ledger from
@@ -16611,6 +16684,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // many) — the same "boundaries light up, click to add" feel as the map's Select-parcels
   // tool. A re-click on a just-added lot toggles it back off.
   const [identifyMode, setIdentifyMode] = useState(false);
+  /* NEW-1 — PARCELS IN FRONT. While the Parcels tool is the thing being worked (the Land panel open — docked or floating —
+   * Pick county lots, Draw / Split / Combine / Edit corners) the parcel geometry is the TOP of the drawing. One boolean, one
+   * pure answer (mapStack.parcelsOnTop); it moves RENDER ORDER only — nothing is stored, no layer's order or lift changes. */
+  const parcelsFront = parcelsOnTop({ leftPanel, floating, identifyMode, tool, mergePick, boundaryEdit });
   const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
   /* NEW-1 (Memphis radius ×2) — READ-ONLY: the identify-and-add path's last answer, for the live audit (owner / parcel id / rings
    * as the app received them). Answers only under automation, checked at CALL time; writes nothing. */
@@ -16948,7 +17025,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       boundsOf: (m) => { const b = m.getBounds(); return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }; },
       resolveUrl: (key) => resolveOneCountyLayer(key),
       // NEW-1 (2026-10-04) — Planyr draws the county lot numbers; they must clear this plan's own parcel chips.
-      makeLayer: (url) => makeParcelDisplayLayer(url, { getObstacles: () => lotNoObstaclesRef.current(), getInset: () => lotNoInsetRef.current }),
+      /* NEW-1 — the county lots on offer mount in the Parcels-in-front panes (a host INSIDE the plan SVG, under the plan's own
+       * parcels), so a building / overlay / markup / GIS layer can never cover a lot you are picking. LOUD-FAILURE: if the host
+       * is not there the lots would silently draw UNDER the plan again, so say so and fall back to the old pane. */
+      makeLayer: (url) => {
+        const m = geoMapRef.current;
+        const hosted = !!(m && m.getPane(PANE_PARCEL_PICK) && m.getPane(PANE_PARCEL_PICK_LABEL));
+        if (!hosted) console.error("[planyr] the Parcels-in-front panes are missing — county lots would draw under the plan");
+        return makeParcelDisplayLayer(url, {
+          getObstacles: () => lotNoObstaclesRef.current(), getInset: () => lotNoInsetRef.current,
+          ...(hosted ? { pane: PANE_PARCEL_PICK, labelPane: PANE_PARCEL_PICK_LABEL } : null),
+        });
+      },
       sourcesForView: displaySourcesForView,
       statewideKeysForState,
       stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
@@ -19000,6 +19088,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!pc || pc.locked) return null;
     const on = (i) => isSelVtx("parcel", pc.id, i);
     return <g>{decimatedHandles(pc.points, on).map((h) => vtxRect(`pv${h.i}`, { x: h.x, y: h.y }, on(h.i), "move", (e) => startVertex(e, pc.id, h.i)))}</g>;
+  })();
+
+  // ROUND 4 (B2349120) — the EDITED grading limit while "Edit outline" is on: the ring itself (dashed, blue) and a
+  // draggable square per vertex, exactly the parcel-outline affordance. Session-only chrome in the handle layer.
+  const grLimitHandles = (() => {
+    if (!grOn || !grLimitEdit || tool !== "select") return null;
+    const ring = (settings.grading || {}).limitRing;
+    if (!Array.isArray(ring) || ring.length < 3) return null;
+    const pts = ring.map(f2p);
+    return (
+      <g data-grading-limit-edit="1">
+        <polygon data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+        {decimatedHandles(ring, () => false).map((h) => vtxRect(`glv${h.i}`, { x: h.x, y: h.y }, false, "move", (e) => grStartLimitVertex(e, h.i)))}
+      </g>
+    );
   })();
 
   // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
@@ -23065,6 +23168,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted }}>Loading grading…</div>}>
               <GradingPanel planOn={grOn} showOnMap={!!(settings.grading || {}).layers?.cutfill} onPlanOn={(v) => grSetCfg({ enabled: v ? true : null })}
                 onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
+                showContours={!!(settings.grading || {}).layers?.contours} onShowContours={(v) => grSetLayer("contours", v)}
+                onPullLimit={(id, span) => grEditLimit(span)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
                 onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
@@ -23839,10 +23944,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         sheetSvg: c.sheetSvg,
         liftedIds: (c.annotationSet?.annots || []).length,
         keptInPage: c.annotationsKeptInPage || 0,
+        pins: c.annotationPins || [],
+        annots: (c.annotationSet?.annots || []).map((a) => ({ subtype: a.subtype, nm: a.nm, subj: a.subj, contents: a.contents, family: a.family, kind: a.kind })),
+        degraded: c.annotationSet?.degraded || [],
       };
     };
     window.__plannerExportComposed = composedHook;
-    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; }; // NEW-3 — see the note on __plannerView
+    /* NEW-1 (2026-10-20) — the feet → clone-unit map the export used, as an affine (origin, +x foot, +y foot), so a test
+       fixture captured from __plannerExportSvg can be replayed through the extractor in node. Read-only; same gate. */
+    const f2pHook = () => { const c = exportCtx(); return [c.f2p({ x: 0, y: 0 }), c.f2p({ x: 1, y: 0 }), c.f2p({ x: 0, y: 1 })]; };
+    window.__plannerExportF2p = f2pHook;
+    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; if (window.__plannerExportF2p === f2pHook) window.__plannerExportF2p = null; }; // NEW-3 — see the note on __plannerView
   });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
@@ -24340,6 +24452,134 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the furniture still clears a real device's home indicator with the FAB reserve gone. Desktop
   // is untouched (`narrowSafeBottom` is always 0 there — the effect never arms).
   const FURNITURE_ROW = narrow ? 8 + narrowSafeBottom : 40;
+  /* NEW-1 — the plan's own setback rings + parcels (boundary, casing, fill, hit-strokes, boundary sections), as one
+   * node tree so it can render in either place: the normal slot, or the Parcels-in-front slot. The JSX is unchanged. */
+  const parcelTierNodes = (<>
+              {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
+                  parcel draws none (B213: inherits active state, like the yield math).
+                  The visible dashed line stays pointer-inert; a companion fat hit-stroke (B420) makes
+                  the setback line a SECOND grab target for that lot — owner wants "boundary OR setback" —
+                  wired to the same startMoveParcel/right-click for that pc.id. The interior between the
+                  boundary and the setback line stays free for building work. The inboard value pills
+                  render later (on top) and keep their own stopPropagation, so editing them is unchanged. */}
+              {settings.showSetback && !isHidden(hiddenGroups, "parcels") && parcels.filter((pc) => pc.active !== false).map((pc) => {
+                const sb = parcelSetbacks(pc);
+                const posSb = sb.filter((v) => v > 0);
+                if (!posSb.length) return null;
+                // B880 — when the smallest setback's on-screen inset drops below ~3 px the dashed ring
+                // collapses onto the parcel boundary → the garbled double-line the owner saw on zoom-out.
+                // Suppress it there (it reappears on zoom-in), the same way a sub-pixel 6" curb drops (B719).
+                // NEW-1 (V481(f)): on the LABEL frame, so an export sheet keeps the setback ring
+                // whatever the live zoom — this sub-pixel gate silently dropped it from a wide-zoom PDF.
+                if (!insetRingVisible(Math.min(...posSb), labelPpf)) return null;
+                const o = offsetPolygon(pc.points, sb);
+                if (!o) return null;
+                // NEW-1 — LOUD FAILURE: setbacks wider than the lot leave nothing to build on; say so on the plan.
+                const gone = setbackEnvelope(pc.points, sb).collapsed;
+                const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
+                // creation like the boundary's and overridable per parcel. An untouched parcel
+                // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
+                // NEW-2: colour / weight / dash resolve parcel override → workspace default → built-in; the weight is
+                // SCREEN PIXELS, constant across zoom (no strokeZoom factor).
+                const lkP = lookOf(pc), lkS = lkP.setback;
+                const sbs = { stroke: lkS.color, weight: lkS.weightPx, dash: setbackDashArray(lkS.dash, lkS.weightPx), opacity: pc.sbOpacity ?? 1 };
+                // B966627 — a DEFAULTED ring (nothing stored on this parcel; drawn only because
+                // `parcelSetbacks` fell back to the project default) must not paint identically to
+                // one someone actually set. A sparser dash + a lighter stroke is the same idiom this
+                // repo already uses for "not yet confirmed" (the uncalibrated-measurement amber), and
+                // it costs no panel copy (PANEL-BREVITY: this is the canvas, not a panel sentence).
+                const explicit = parcelSetbacksExplicit(pc);
+                const dash = explicit || lkP.from.setback.dashed !== "builtin" ? sbs.dash : "2 5"; // a dash someone CHOSE (parcel or workspace default) is honoured on a defaulted ring too; the 0.65 opacity still marks it defaulted
+                // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
+                const sbCase = sbs.weight + PARCEL_CASING_W;
+                const goneAt = gone ? polylabel(pc.points) : null;
+                return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
+                  {goneAt && (() => { const c = f2p(goneAt); return (
+                    <text data-testid="setback-collapsed-badge" x={c.x} y={c.y} textAnchor="middle" dominantBaseline="central" pointerEvents="none"
+                      style={{ fontSize: 12, fontWeight: 700, fill: "var(--danger-text)", paintOrder: "stroke", stroke: "var(--surface-raised)", strokeWidth: 3, strokeLinejoin: "round" }}>Setbacks exceed parcel — no buildable area</text>); })()}
+                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dash} strokeLinejoin="round" pointerEvents="none" />
+                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={sbs.weight} strokeDasharray={dash} strokeOpacity={sbs.opacity} pointerEvents="none" />
+                  {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
+                      selection-chrome layer with the chips, so it isn't buried under a building
+                      that sits hard against the setback line. Every other parcel keeps it here. */}
+                  {pc.id !== selParcel?.id && (
+                    <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
+                      style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : "crosshair" }}
+                      onPointerDown={(e) => startMoveParcel(e, pc.id)}
+                      onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                  )}
+                </g>;
+              })}
+              {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
+                  when a translucent fill is toggled on); a companion transparent fat hit-stroke on the
+                  SAME ring is the only grab target, so a lot is selectable by its boundary edge, never
+                  by its empty interior. Interior presses fall through to whatever element is painted on
+                  top, else the background pan — exactly as on empty canvas. Reuses the B146 fat invisible
+                  hit-stroke; ~12 screen px (f2p already projects feet→pixels, so the grab is zoom-independent). B420. */}
+              {drawParcels.map((pc) => {
+                // B651 — a superseded (split) parent isn't drawn: its active children occupy the
+                // exact same ground, so a dimmed parent outline under them is redundant clutter.
+                // It stays selectable from the Parcel panel (nested, greyed).
+                if (supersededParcelIds.has(pc.id)) return null;
+                const isSel = sel?.kind === "parcel" && sel.id === pc.id;
+                const picked = combineSel.includes(pc.id);
+                const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
+                const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
+                const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                const lkB = lookOf(pc).boundary; // NEW-2: parcel override → workspace default → built-in
+                const baseW = lkB.weightPx; // screen pixels, constant across zoom (owner-locked)
+                // B619: no accent recolor on select — the property line keeps its own color; the square
+                // vertex handles carry the selection. B617: the boundary weight holds constant relative
+                // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
+                // NEW-2 — CASING: a dark under-stroke a touch wider than the line itself. The
+                // default boundary colour is a very saturated green and many of these sites are
+                // farmland, so without it a green property line can vanish into green ground; it
+                // does the same work on dark asphalt and on the topo basemap. Skipped while the
+                // line is already carrying a state colour of its own (remove-hover / multi-pick),
+                // where the colour IS the message, and on an inactive parcel, which is deliberately
+                // faint context.
+                const cased = !removeHover && !picked && !inactive;
+                const pcFillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0); // Fill is an option with its own opacity; 0 = no fill
+                // Parcels rework — while this parcel's page is open, its boundary SECTIONS answer a press (selecting
+                // the section for editing) and the selected one is drawn heavier. Off in Edit parcels, where the
+                // corners and edges own the press; a press still selects the parcel and a drag still pans.
+                const secOv = pageSections && pageSections.parcelId === pc.id && !editingCorners && tool === "select" ? pageSections.list : null;
+                return <g key={pc.id} data-feature={`parcel:${pc.id}`}>
+                  {cased && (
+                    <polygon data-testid="parcel-casing" points={ring} fill="none" stroke={PAL.lineCasing}
+                      strokeWidth={((isSel) ? Math.max(3, baseW) : baseW) + PARCEL_CASING_W}
+                      strokeDasharray={dashArray(lkB.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
+                  )}
+                  <polygon data-testid="parcel-outline" points={ring}
+                    fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
+                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : lkB.color} strokeWidth={(removeHover || picked || isSel) ? Math.max(3, baseW) : baseW}
+                    strokeDasharray={inactive ? "8 6" : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
+                    pointerEvents="none" />
+                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
+                    style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer"
+                      // NEW-1 (B1264944) — the SECOND of the mode's two legitimate cursor variations:
+                      // over the edge where Shift-click/right-click would insert a corner (the same
+                      // spot `insHint`'s dot already marks), the cursor says "add a point" rather than
+                      // the plain corner-editing crosshair. Scoped to the parcel actually being edited
+                      // so a stray insHint from some OTHER selected editable path can't paint this cursor.
+                      : (editingCorners && insHint && sel?.kind === "parcel" && sel.id === pc.id) ? "copy" : "crosshair" }}
+                    onPointerDown={(e) => startMoveParcel(e, pc.id)}
+                    onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                  {secOv && secOv.map((sec, si) => {
+                    const sd = sectionPath(pc.points, sec).map((q) => { const c = f2p(q); return `${c.x},${c.y}`; }).join(" ");
+                    const on = sec.key === selSectionKey;
+                    return (
+                      <g key={sec.key} data-export="skip" data-testid={`map-section-${sec.key}`}>
+                        {on && <polyline points={sd} fill="none" stroke={sectionColor(si)} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
+                        <polyline points={sd} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" style={{ cursor: "pointer" }}
+                          onPointerDown={(e) => { setSelSectionKey(sec.key); startMoveParcel(e, pc.id); }} />
+                      </g>
+                    );
+                  })}
+                </g>;
+              })}
+  </>);
   // Would the calibration badge (anchored at left:56, bottom:FURNITURE_ROW) run into the
   // right-anchored scale bar on the same row? Pure decision in sheetFurniture.js: when they'd
   // meet the badge is lifted to its own row above the bar (and its width capped). `calibBadgeW`
@@ -24530,7 +24770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the backdrop exactly (same clip, same overscan, same gesture transform); it never
               takes a pointer event, so it can neither block a click nor steal a handle. */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden" }}>
+            <div data-export="skip" data-line-host-z={lineHostZ(parcelsFront)} style={{ position: "absolute", inset: 0, zIndex: lineHostZ(parcelsFront), overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden" }}>
               <div ref={geoTopWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                 <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
               </div>
@@ -24654,7 +24894,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                propagation included — that press is exactly the one being reasoned about). It is
                read-only and unconditional: it never touches the event, and it must NOT sit behind
                the touch-count guard below, because a press swallowed mid-pinch is still a press. */
-            onPointerDownCapture={(e) => { notePress(e); if (handleAddLeaderCapture(e)) return; if (handleStackPick(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
+            onPointerDownCapture={(e) => { notePress(e); if (handleAddLeaderCapture(e)) return; if (handleStackPick(e)) return; if (touchCountRef.current < 2 && handleIdentifyCapture(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             /* NEW-1 (2026-09-12) — Alt+right-click's stack pick is tried FIRST, matching the pointerdown
                capture chain one line up: Alt wins over vertex-edit mode's own context-menu capture
                exactly the way it already wins over its pointerdown capture for the left-click picker. */
@@ -24755,130 +24995,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {overlayBands.below.map(renderSheetOverlay)}
 
 
-              {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
-                  parcel draws none (B213: inherits active state, like the yield math).
-                  The visible dashed line stays pointer-inert; a companion fat hit-stroke (B420) makes
-                  the setback line a SECOND grab target for that lot — owner wants "boundary OR setback" —
-                  wired to the same startMoveParcel/right-click for that pc.id. The interior between the
-                  boundary and the setback line stays free for building work. The inboard value pills
-                  render later (on top) and keep their own stopPropagation, so editing them is unchanged. */}
-              {settings.showSetback && parcels.filter((pc) => pc.active !== false).map((pc) => {
-                const sb = parcelSetbacks(pc);
-                const posSb = sb.filter((v) => v > 0);
-                if (!posSb.length) return null;
-                // B880 — when the smallest setback's on-screen inset drops below ~3 px the dashed ring
-                // collapses onto the parcel boundary → the garbled double-line the owner saw on zoom-out.
-                // Suppress it there (it reappears on zoom-in), the same way a sub-pixel 6" curb drops (B719).
-                // NEW-1 (V481(f)): on the LABEL frame, so an export sheet keeps the setback ring
-                // whatever the live zoom — this sub-pixel gate silently dropped it from a wide-zoom PDF.
-                if (!insetRingVisible(Math.min(...posSb), labelPpf)) return null;
-                const o = offsetPolygon(pc.points, sb);
-                if (!o) return null;
-                // NEW-1 — LOUD FAILURE: setbacks wider than the lot leave nothing to build on; say so on the plan.
-                const gone = setbackEnvelope(pc.points, sb).collapsed;
-                const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
-                // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
-                // creation like the boundary's and overridable per parcel. An untouched parcel
-                // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
-                // NEW-2: colour / weight / dash resolve parcel override → workspace default → built-in; the weight is
-                // SCREEN PIXELS, constant across zoom (no strokeZoom factor).
-                const lkP = lookOf(pc), lkS = lkP.setback;
-                const sbs = { stroke: lkS.color, weight: lkS.weightPx, dash: setbackDashArray(lkS.dash, lkS.weightPx), opacity: pc.sbOpacity ?? 1 };
-                // B966627 — a DEFAULTED ring (nothing stored on this parcel; drawn only because
-                // `parcelSetbacks` fell back to the project default) must not paint identically to
-                // one someone actually set. A sparser dash + a lighter stroke is the same idiom this
-                // repo already uses for "not yet confirmed" (the uncalibrated-measurement amber), and
-                // it costs no panel copy (PANEL-BREVITY: this is the canvas, not a panel sentence).
-                const explicit = parcelSetbacksExplicit(pc);
-                const dash = explicit || lkP.from.setback.dashed !== "builtin" ? sbs.dash : "2 5"; // a dash someone CHOSE (parcel or workspace default) is honoured on a defaulted ring too; the 0.65 opacity still marks it defaulted
-                // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
-                const sbCase = sbs.weight + PARCEL_CASING_W;
-                const goneAt = gone ? polylabel(pc.points) : null;
-                return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
-                  {goneAt && (() => { const c = f2p(goneAt); return (
-                    <text data-testid="setback-collapsed-badge" x={c.x} y={c.y} textAnchor="middle" dominantBaseline="central" pointerEvents="none"
-                      style={{ fontSize: 12, fontWeight: 700, fill: "var(--danger-text)", paintOrder: "stroke", stroke: "var(--surface-raised)", strokeWidth: 3, strokeLinejoin: "round" }}>Setbacks exceed parcel — no buildable area</text>); })()}
-                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dash} strokeLinejoin="round" pointerEvents="none" />
-                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={sbs.weight} strokeDasharray={dash} strokeOpacity={sbs.opacity} pointerEvents="none" />
-                  {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
-                      selection-chrome layer with the chips, so it isn't buried under a building
-                      that sits hard against the setback line. Every other parcel keeps it here. */}
-                  {pc.id !== selParcel?.id && (
-                    <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                      style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : "crosshair" }}
-                      onPointerDown={(e) => startMoveParcel(e, pc.id)}
-                      onContextMenu={(e) => onParcelContext(e, pc.id)} />
-                  )}
-                </g>;
-              })}
-              {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
-                  when a translucent fill is toggled on); a companion transparent fat hit-stroke on the
-                  SAME ring is the only grab target, so a lot is selectable by its boundary edge, never
-                  by its empty interior. Interior presses fall through to whatever element is painted on
-                  top, else the background pan — exactly as on empty canvas. Reuses the B146 fat invisible
-                  hit-stroke; ~12 screen px (f2p already projects feet→pixels, so the grab is zoom-independent). B420. */}
-              {drawParcels.map((pc) => {
-                // B651 — a superseded (split) parent isn't drawn: its active children occupy the
-                // exact same ground, so a dimmed parent outline under them is redundant clutter.
-                // It stays selectable from the Parcel panel (nested, greyed).
-                if (supersededParcelIds.has(pc.id)) return null;
-                const isSel = sel?.kind === "parcel" && sel.id === pc.id;
-                const picked = combineSel.includes(pc.id);
-                const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
-                const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
-                const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
-                const lkB = lookOf(pc).boundary; // NEW-2: parcel override → workspace default → built-in
-                const baseW = lkB.weightPx; // screen pixels, constant across zoom (owner-locked)
-                // B619: no accent recolor on select — the property line keeps its own color; the square
-                // vertex handles carry the selection. B617: the boundary weight holds constant relative
-                // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
-                // NEW-2 — CASING: a dark under-stroke a touch wider than the line itself. The
-                // default boundary colour is a very saturated green and many of these sites are
-                // farmland, so without it a green property line can vanish into green ground; it
-                // does the same work on dark asphalt and on the topo basemap. Skipped while the
-                // line is already carrying a state colour of its own (remove-hover / multi-pick),
-                // where the colour IS the message, and on an inactive parcel, which is deliberately
-                // faint context.
-                const cased = !removeHover && !picked && !inactive;
-                const pcFillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0); // Fill is an option with its own opacity; 0 = no fill
-                // Parcels rework — while this parcel's page is open, its boundary SECTIONS answer a press (selecting
-                // the section for editing) and the selected one is drawn heavier. Off in Edit parcels, where the
-                // corners and edges own the press; a press still selects the parcel and a drag still pans.
-                const secOv = pageSections && pageSections.parcelId === pc.id && !editingCorners && tool === "select" ? pageSections.list : null;
-                return <g key={pc.id} data-feature={`parcel:${pc.id}`}>
-                  {cased && (
-                    <polygon data-testid="parcel-casing" points={ring} fill="none" stroke={PAL.lineCasing}
-                      strokeWidth={((isSel) ? Math.max(3, baseW) : baseW) + PARCEL_CASING_W}
-                      strokeDasharray={dashArray(lkB.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
-                  )}
-                  <polygon data-testid="parcel-outline" points={ring}
-                    fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
-                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : lkB.color} strokeWidth={(removeHover || picked || isSel) ? Math.max(3, baseW) : baseW}
-                    strokeDasharray={inactive ? "8 6" : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
-                    pointerEvents="none" />
-                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                    style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer"
-                      // NEW-1 (B1264944) — the SECOND of the mode's two legitimate cursor variations:
-                      // over the edge where Shift-click/right-click would insert a corner (the same
-                      // spot `insHint`'s dot already marks), the cursor says "add a point" rather than
-                      // the plain corner-editing crosshair. Scoped to the parcel actually being edited
-                      // so a stray insHint from some OTHER selected editable path can't paint this cursor.
-                      : (editingCorners && insHint && sel?.kind === "parcel" && sel.id === pc.id) ? "copy" : "crosshair" }}
-                    onPointerDown={(e) => startMoveParcel(e, pc.id)}
-                    onContextMenu={(e) => onParcelContext(e, pc.id)} />
-                  {secOv && secOv.map((sec, si) => {
-                    const sd = sectionPath(pc.points, sec).map((q) => { const c = f2p(q); return `${c.x},${c.y}`; }).join(" ");
-                    const on = sec.key === selSectionKey;
-                    return (
-                      <g key={sec.key} data-export="skip" data-testid={`map-section-${sec.key}`}>
-                        {on && <polyline points={sd} fill="none" stroke={sectionColor(si)} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
-                        <polyline points={sd} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" style={{ cursor: "pointer" }}
-                          onPointerDown={(e) => { setSelSectionKey(sec.key); startMoveParcel(e, pc.id); }} />
-                      </g>
-                    );
-                  })}
-                </g>;
-              })}
+              {/* NEW-1 — PARCELS IN FRONT (mapStack.js). The plan's own setback rings + parcels live in `parcelTierNodes`
+                  (built above the return) so ONE tree can be rendered in either of two places: HERE, between the
+                  references and the elements, which is the model's normal order — or, while the Parcels tool is up,
+                  after the annotations (see the `data-parcel-tier="top"` group further down), leaving only this empty
+                  slot behind. The slot is the export clone's marker: the sheet puts the group back here, so a PDF taken
+                  with the tool open prints the normal order (PDF-PARITY). */}
+              {parcelsFront ? <g {...{ [PARCEL_TIER_SLOT_ATTR]: "1" }} /> : parcelTierNodes}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
@@ -25333,7 +25456,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* Owner-only grading layers ("Level-pad limit at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
-              {grOn && grModel && (grModel.buildable || grModel.cutfill) && (
+              {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
                 <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
@@ -25473,6 +25596,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   saved before z-ordering shipped it is EVERY measurement, so nothing moves on load.
                   The BELOW band paints back with the ground surfaces — see the twin pass up there. */}
               {measureBands.above.map(({ m, i }) => renderMeasureNode(m, i))}
+              {/* NEW-1 — PARCELS IN FRONT. The TOP of the drawing while the Parcels tool is up (mapStack.parcelsOnTop): first the
+                  county lots on offer (a Leaflet pane hosted in a foreignObject, the lifted-GIS band's shape — `pointerEvents: none`,
+                  mirrored transforms, the SVG's registration shift undone), then the plan's own setbacks + parcels over them, then
+                  (further down) the parcel chips, the handle layer and in-progress drafts. The host is ALWAYS mounted (the panes are
+                  created once with the map; an empty one costs nothing) — only the parcel group moves, so a plan that never opens the
+                  Parcels tool renders byte-for-byte what it did. Both are `data-export="skip"` / re-slotted for the sheet. */}
+              {origin && (
+                <g {...{ [PARCEL_PICK_BAND_ATTR]: "1" }}>
+                  <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
+                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                      <div ref={geoPickWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
+                        <div ref={geoPickPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
+                      </div>
+                    </div>
+                  </foreignObject>
+                </g>
+              )}
+              {parcelsFront && <g {...{ [PARCEL_TIER_ATTR]: "top" }}>{parcelTierNodes}</g>}
               {/* in-progress measure draft */}
               {tool === "measure" && measDraft.length > 0 && (() => {
                 // Live point mirrors the commit: Shift = perpendicular / parallel / 45° to the
@@ -25715,6 +25857,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {sideAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
+                {grLimitHandles}
                 {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}

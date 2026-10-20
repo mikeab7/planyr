@@ -46,6 +46,11 @@ import { defaultFilters, hasActiveQuery, queryComps, countFiltered } from "../li
 import { loadQueryPrefs, saveQueryPrefs, clearQueryPrefs } from "../lib/compsQueryPrefs.js";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
+import { dismissDraftNotice } from "../lib/compDrafts.js";
+
+// LOUD-FAILURE telemetry for this panel's cloud writes — fire-and-forget, never throws, and the
+// telemetry module is loaded on demand so this lazy chunk never carries it statically.
+const tele = (kind, message, extra) => import("../../telemetry/clientErrors.js").then((m) => m.reportClientEvent(kind, message, extra)).catch(() => {});
 import { prepareCompForSave } from "../lib/compSavePrep.js";
 import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
 import { compLocationFor } from "../lib/compLocationText.js";
@@ -752,6 +757,11 @@ export default function CompsPanel({
   const [draftBusyId, setDraftBusyId] = useState(null);
   const [kmlImporting, setKmlImporting] = useState(false);
   const [kmlImportError, setKmlImportError] = useState(null);
+  // NEW-2 — "Pin this on the plan" on an EXISTING comp: the re-pin's cloud result, shown on the
+  // record (the detail view the person is standing in when the map click lands). Null = nothing
+  // to say. A failed re-pin used to be console-only: pin mode exited, the marker stayed put, and
+  // nothing distinguished that from a successful move.
+  const [pinNotice, setPinNotice] = useState(null);
   // B1066368 (owner live-drive report — "deleting a comp destroys it with no confirmation and no way
   // back") — "Recently deleted", mirroring SitePlansSection.jsx's own trash disclosure over
   // site_plan_overlays: fetched lazily, only once the disclosure is opened.
@@ -841,9 +851,24 @@ export default function CompsPanel({
     if (!repinCompAnchorRef) return undefined;
     repinCompAnchorRef.current = async (compId, anchor) => {
       const existing = compsRef.current.find((c) => c.id === compId);
-      if (!existing) return;
+      if (!existing) {
+        // NEW-2 — the comp vanished between arming and the click (deleted elsewhere, a stale
+        // list): say so rather than exit pin mode in silence.
+        setPinNotice("Couldn't move that pin — this comp isn't in the list any more. Reload and try again.");
+        tele("cloud-write-failed", "comp re-pin failed (comp not found)", { id: compId });
+        return;
+      }
       const { data, error } = await updateComp(compId, { ...existing, anchor });
-      if (error) { console.error("[comps] re-pin failed:", error); return; }
+      if (error) {
+        // NEW-2 — `updateComp` answers "Not saved — you can only edit comps you entered" on a
+        // 0-row RLS update, or the network/Postgres error. Pin mode has already exited (the map
+        // clears it on the click) and the marker did not move; the record says why.
+        console.error("[comps] re-pin failed:", error);
+        setPinNotice(error.message || "Couldn't move that pin");
+        tele("cloud-write-failed", "comp re-pin failed", { id: compId, error: error.message || String(error) });
+        return;
+      }
+      setPinNotice(null);
       setComps((list) => sortCompsByRecency(list.map((c) => (c.id === compId ? data : c))));
       setActiveComp((c) => (c && c.id === compId ? data : c));
     };
@@ -1008,7 +1033,7 @@ export default function CompsPanel({
     return [...byGroup.values()];
   })();
 
-  const openDetail = (c) => { setActiveComp(c); setView("detail"); setAssignNotice(null); };
+  const openDetail = (c) => { setActiveComp(c); setView("detail"); setAssignNotice(null); setPinNotice(null); };
   const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setAssignNotice(null); setView("form"); };
   const cancelForm = () => { setView(activeComp ? "detail" : "list"); setDraft(null); };
 
@@ -1194,8 +1219,17 @@ export default function CompsPanel({
 
   const dismissOneDraft = async (draftId) => {
     setDraftBusyId(draftId);
-    await deleteDraft(draftId);
+    const r = await deleteDraft(draftId);
     setDraftBusyId(null);
+    // NEW-6 — `deleteDraft` answers "Not deleted" on a 0-count delete (RLS / already gone) or the
+    // network error; the refetch below leaves the card on screen, so the reason has to be said.
+    const notice = dismissDraftNotice(r);
+    if (notice) {
+      setKmlImportError(notice);
+      tele("delete-zero-rows", "comp import draft dismiss refused", { id: draftId, error: (r && r.error && r.error.message) || null });
+      return;
+    }
+    setKmlImportError(null);
     if (armedRowId === draftId) setArmedRowId(null);
     setDraftAnchors((m) => { const next = { ...m }; delete next[draftId]; return next; });
     await reloadDrafts();
@@ -1327,6 +1361,14 @@ export default function CompsPanel({
           />
         )}
 
+        {/* NEW-2 — a re-pin that didn't save, said on the record it was about. */}
+        {!loading && view === "detail" && activeComp && pinNotice && (
+          <div role="alert" data-testid="comp-pin-notice" style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "10px 14px 0", padding: "6px 9px", fontSize: FONT_SIZE.control, lineHeight: 1.4, color: "var(--danger-text)", background: "var(--danger-bg)", border: "1px solid var(--danger-border)", borderRadius: RADIUS.md }}>
+            <span style={{ flex: 1 }}>Pin not moved — {pinNotice}</span>
+            <button onClick={() => setPinNotice(null)} aria-label="Dismiss" title="Dismiss"
+              style={{ flex: "none", cursor: "pointer", background: "transparent", color: "inherit", border: "none", fontSize: FONT_SIZE.control, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
+          </div>
+        )}
         {!loading && view === "detail" && activeComp && (
           <CompDetail
             comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}

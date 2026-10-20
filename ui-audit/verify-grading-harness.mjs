@@ -63,7 +63,8 @@ try {
   check("title line: Building 1 · 520×300 = 156,000 SF", /Building 1 · 156,000 SF/.test(await page.textContent("[data-card-title]")));
   check("FFE shown grey as auto", (await page.getAttribute("[data-ffe-value]", "data-ffe-value")) === "auto" && (await page.locator('[data-ffe-source="auto"]').count()) === 1);
   const basis = await page.textContent("[data-ffe-note]");
-  check("basis leads with the balance clause in plain words", /^Balances the dirt: \d+k? CY cut( on the \w+)?, \d+k? CY fill( on the \w+)?; (nothing to haul|[\d,]+k? CY (import|export))\./.test(basis), basis);
+  // round 4: the balance is over the WHOLE graded area and the clause says so
+  check("basis leads with the balance clause in plain words, over the graded area", /^(Balances the dirt|Closest the ground gets to balanced) over the graded area: \d+k? CY cut( on the \w+)?, \d+k? CY fill( on the \w+)?; (nothing to haul|[\d,]+k? CY (import|export))\./.test(basis), basis);
   check("basis has at most three sentences and no slope ratio", (basis.match(/\.(\s|$)/g) || []).length <= 3 && !/\d:1/.test(basis), basis);
   const ew = await page.textContent("[data-grading-earthwork]");
   check("earthwork is ONE line: Cut · Fill · import/export/balanced", /^Cut [\d,]+ · Fill [\d,]+ · (Balanced|[\d,]+ CY (import|export))$/.test(ew), ew);
@@ -124,7 +125,7 @@ try {
 
   // ---- layers: Cut & Fill (default ON) paints the SLOPES, never the pad
   await page.waitForSelector('[data-layer="cutfill"] image', { timeout: 30000 });
-  check("Cut & Fill is on by default and painted (image + daylight line)", (await page.locator('[data-layer="cutfill"] image').count()) === 1 && (await page.locator('[data-layer="cutfill"] path').count()) === 2);
+  check("Cut & Fill is on by default and painted (image + daylight line + the limit's dashed line)", (await page.locator('[data-layer="cutfill"] image').count()) === 1 && (await page.locator('[data-layer="cutfill"] path').count()) === 3 && (await page.locator('[data-grading-limit] path').count()) === 1);
   check("Level-pad limit is OFF by default: no tint, no line", (await page.locator('[data-layer="buildable"]').count()) === 0);
   // ---- per-plan switch + "Show cut and fill on the map" (NEW-1/NEW-2): one source of truth, clean when off
   await page.click('[data-testid="grading-show-on-map"]');
@@ -196,7 +197,7 @@ try {
   page = await open("?buildable=0&ppf=0.2");
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1500);
   await page.waitForSelector('[data-layer="cutfill"] image');
-  check("zoomed out (parcel not filling the map): the bands and the line stay, the pills go", (await page.locator("[data-grade-pill]").count()) === 0 && (await page.locator('[data-layer="cutfill"] path').count()) === 2);
+  check("zoomed out (parcel not filling the map): the bands and the line stay, the pills go", (await page.locator("[data-grade-pill]").count()) === 0 && (await page.locator('[data-layer="cutfill"] path').count()) === 3);
   await page.close();
 
   // ================= 3. pond spoil counts as fill =================
@@ -273,6 +274,131 @@ try {
       check("applying Move building clears the flag", (await page.locator('[data-grading-flag="1"]').count()) === 0);
     }
   }
+  await page.close();
+
+  // ================= 7. ROUND 4 — the grading limit: ONE rounded outline, bands wrap it as ONE ring, nothing painted inside =================
+  page = await open("?buildable=0");
+  await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1500);
+  const lim = await page.evaluate(() => {
+    const s = window.__harness.gradeSurface, L = s && s.grid && s.grid.limit, m = window.__harness.model;
+    if (!L) return null;
+    const limitD = m.cutfill && m.cutfill.limitD ? m.cutfill.limitD : "";
+    const inside = (pt) => L.regions.some((r) => { const ring = r.outer; let ok = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { if ((ring[i].y > pt.y) !== (ring[j].y > pt.y) && pt.x < ((ring[j].x - ring[i].x) * (pt.y - ring[i].y)) / (ring[j].y - ring[i].y) + ring[i].x) ok = !ok; } return ok; });
+    const wedgeInside = s.grid.cells.filter((c) => c.wedge && inside(c)).length;
+    const els = window.__harness.els;
+    const x0 = Math.min(...els.flatMap((e) => e.ring.map((p) => p.x))), y0 = Math.min(...els.flatMap((e) => e.ring.map((p) => p.y)));
+    return { regions: L.regions.length, mode: L.mode, source: L.source, areaAc: L.areaAc, subpaths: (limitD.match(/M/g) || []).length, verts: L.regions[0].outer.length,
+      cornerIn: inside({ x: x0 - 2, y: y0 - 2 }), edgeIn: inside({ x: x0 + 100, y: y0 - 2 }), wedgeInside, daylight: s.daylight.length, slopeCells: s.grid.cells.filter((c) => c.wedge).length,
+      gradedLine: (document.querySelector("[data-graded-area-line]") || {}).textContent, modeAttr: (document.querySelector("[data-graded-area]") || {}).getAttribute?.("data-limit-mode") };
+  });
+  check("ONE grading limit region around the building, its court and both parking rows (mode layout, source auto)", !!lim && lim.regions === 1 && lim.mode === "layout" && lim.source === "auto", JSON.stringify(lim));
+  check("the limit's dashed line is ONE closed subpath on the map", !!lim && lim.subpaths === 1);
+  check("the limit's ends are ROUNDED: the sharp layout corner is outside it, the straight edge inside", !!lim && lim.cornerIn === false && lim.edgeIn === true);
+  check("NO slope cell inside the limit; the slopes wrap it as ONE daylight ring", !!lim && lim.wedgeInside === 0 && lim.daylight === 1 && lim.slopeCells > 100);
+  check("the panel's graded-area line: 'Graded area · n AC · limit auto'", !!lim && /^Graded area · \d+\.\d AC · limit auto$/.test(lim.gradedLine || ""), lim && lim.gradedLine);
+  check("the mode control shows 'Around the layout' selected", lim && lim.modeAttr === "layout" && /Around the layout/.test(await page.textContent("[data-graded-area]")) && /To the boundary/.test(await page.textContent("[data-graded-area]")));
+  await page.click("[data-grading-gear]");
+  await page.waitForSelector('[data-testid="grading-shoulder"]', { state: "attached", timeout: 10000 }).catch(() => {});
+  check("the settings gear carries shoulder, corner radius and max pavement slope", (await page.locator('[data-testid="grading-shoulder"]').count()) === 1 && (await page.locator('[data-testid="grading-corner-radius"]').count()) === 1 && (await page.locator('[data-testid="grading-max-pavement-slope"]').count()) === 1);
+  await page.keyboard.press("Escape");
+  const inkL = await page.evaluate(async () => {
+    const m = window.__harness.model; const L = m.cutfill;
+    const img = new Image(); img.src = L.dataUrl; await img.decode();
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+    const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    const px = (ft) => { const i = Math.floor((ft.x - L.bboxFt.x) / (L.bboxFt.w / c.width)), j = Math.floor((ft.y - L.bboxFt.y) / (L.bboxFt.h / c.height)); return d[(j * c.width + i) * 4 + 3]; };
+    const els = window.__harness.els; const b = els[0].ring;
+    // the strip between the court's far edge and the limit (the shoulder) and the rounded corner inside the limit: no ink
+    return { shoulder: px({ x: b[0].x + 260, y: b[0].y + 300 + 130 + 2 }), pad: px({ x: b[0].x + 260, y: b[0].y + 150 }) };
+  });
+  check("the open ground inside the limit (the shoulder past the court) carries no ink, like the pad", inkL.shoulder === 0 && inkL.pad === 0, JSON.stringify(inkL));
+  // ---- edit outline: a stored ring, vertex count, reset
+  await page.click('[data-limit-action="edit"]');
+  await page.waitForSelector("[data-grading-limit-edit]", { timeout: 10000 });
+  const edited = await page.evaluate(() => ({ ring: (window.__harness.model && window.__harness.model.limit.source), editing: !!window.__harness.limitEdit, done: !!document.querySelector('[data-limit-action="done"]'), reset: !!document.querySelector('[data-limit-action="reset"]') }));
+  check("Edit outline stores the auto ring on the plan (source 'edited'), shows Done + Reset to auto and the dashed edit ring", edited.editing && edited.done && edited.reset);
+  await page.waitForFunction(() => window.__harness.model && window.__harness.model.limit.source === "edited", null, { timeout: 30000 });
+  check("the graded-area line now reads 'limit edited'", /limit edited/.test(await page.textContent("[data-graded-area-line]")));
+  await page.click('[data-limit-action="reset"]');
+  await page.waitForFunction(() => window.__harness.model && window.__harness.model.limit.source === "auto" && !document.querySelector("[data-grading-limit-edit]"), null, { timeout: 30000 });
+  check("Reset to auto returns the auto limit and leaves edit mode", true);
+  await page.screenshot({ path: "/tmp/grading-r4-limit.png" });
+
+  // ================= 8. ROUND 4 — proposed contours (traced in the worker off the stitched surface) =================
+  await page.click('[data-testid="grading-show-contours"]');
+  await page.waitForSelector('[data-layer="contours"] path', { state: "attached", timeout: 60000 });
+  const ct = await page.evaluate(() => {
+    const m = window.__harness.model, s = window.__harness.gradeSurface;
+    const lv = m.contours.levels; const idx = lv.filter((l) => l.isIndex);
+    const els = window.__harness.els; const b = els[0].ring;
+    const x0 = b[0].x, y0 = b[0].y;
+    // any contour vertex inside the pad? (the pad is flat: no line may cross it)
+    let onPad = 0, total = 0;
+    for (const l of lv) for (const mm of l.d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)) { total++; const x = +mm[1], y = +mm[2]; if (x > x0 + 5 && x < x0 + 515 && y > y0 + 5 && y < y0 + 295) onPad++; }
+    return { interval: m.contours.interval, levels: lv.length, index: idx.length, labels: m.contours.labels.length, onPad, total, layerPaths: document.querySelectorAll('[data-layer="contours"] path').length, labelsDom: document.querySelectorAll("[data-contour-label]").length, rowSub: (document.querySelector('[data-layer="contours"]') || {}).getAttribute?.("data-contour-interval") };
+  });
+  check("proposed contours: 1 ft interval, many levels, index levels every 5 ft with labels", ct.interval === 1 && ct.levels > 10 && ct.index >= 2 && ct.index * 4 < ct.levels + ct.index && ct.labels > 0, JSON.stringify(ct));
+  check("contours are drawn on the map (one path per level) with index labels", ct.layerPaths === ct.levels && ct.labelsDom > 0, JSON.stringify(ct));
+  check("open ground inside: no proposed contour crosses the flat pad", ct.onPad === 0, `${ct.onPad} of ${ct.total} vertices on the pad`);
+  await page.screenshot({ path: "/tmp/grading-r4-contours.png" });
+  await page.click('[data-testid="grading-show-contours"]');
+  await page.waitForFunction(() => !document.querySelector('[data-layer="contours"]'), null, { timeout: 15000 });
+  check("checkbox off: the contours go", true);
+  await page.close();
+
+  // ================= 9. ROUND 4 — 'Grade to the boundary': the plateau IS the Level-ground sweep's mask at the FFE =================
+  page = await open("?buildable=0&mode=boundary");
+  await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(2000);
+  await page.waitForFunction(() => { const s = window.__harness.gradeSurface; return s && s.grid.limit && s.grid.limit.mode === "boundary" && window.__harness.model && window.__harness.model.ground.status === "ready"; }, null, { timeout: 90000 });
+  const bnd = await page.evaluate(() => {
+    const s = window.__harness.gradeSurface, L = s.grid.limit, m = window.__harness.model;
+    return { mode: L.mode, plateaus: L.plateaus, areaAc: L.areaAc, slopeCells: s.grid.cells.filter((c) => c.wedge).length, infill: s.grid.cells.filter((c) => c.cls === "infill").length,
+      flatInfill: s.grid.cells.filter((c) => c.cls === "infill" && L.plateaus.some((p) => Math.abs(c.propFt - p.ffe) < 1e-6)).length,
+      gradedLine: (document.querySelector("[data-graded-area-line]") || {}).textContent, modeAttr: (document.querySelector("[data-graded-area]") || {}).getAttribute?.("data-limit-mode"),
+      editBtn: !!document.querySelector('[data-limit-action="edit"]'), ffe: m.autoFfe.get("b1") };
+  });
+  check("boundary mode: the limit is the setback, one plateau at the building's FFE, the open ground inside flat at it", bnd.mode === "boundary" && bnd.plateaus.length === 1 && bnd.flatInfill > 0 && bnd.flatInfill === bnd.infill, JSON.stringify({ ...bnd, plateaus: bnd.plateaus.length }));
+  check("the graded-area line reads the setback and the acreage grew past the layout's", /^Graded area · \d+\.\d AC · the setback$/.test(bnd.gradedLine || "") && bnd.areaAc > lim.areaAc, `${bnd.gradedLine} vs ${lim.areaAc.toFixed(1)}`);
+  check("no Edit outline in boundary mode; mode control shows 'To the boundary'", !bnd.editBtn && bnd.modeAttr === "boundary");
+  // B2376240 (owner live check 2026-10-20): the limit IS the setback and the slope is thrown INWARD from it — no graded cell
+  // outside the setback, the setback flag cannot fire (the north-edge "runs 16 ft past the setback" flag is absent), and the
+  // dotted daylight line is the setback itself (one ring per limit ring, holes included)
+  const bndOut = await page.evaluate(async () => {
+    const { pointInRing } = await import("/src/workspaces/site-planner/lib/pondGeom.js");
+    const s = window.__harness.gradeSurface, L = s.grid.limit; const rings = window.__harness.model.setback.rings;
+    const outsideCells = s.grid.cells.filter((c) => !rings.some((r) => pointInRing(c, r))).length;
+    const sameRing = (a, b) => a.length === b.length && a.every((p, i) => Math.abs(p.x - b[i].x) < 1e-6 && Math.abs(p.y - b[i].y) < 1e-6);
+    return { outsideCells, outCount: s.grid.outside ? s.grid.outside.count : -1, flag: document.querySelectorAll('[data-grading-flag="1"]').length,
+      clear: document.querySelectorAll('[data-grading-flag="clear"]').length, daylight: s.daylight.length, limitRings: L.limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0),
+      daylightIsLimit: s.daylight.length > 0 && sameRing(s.daylight[0].ring, L.limitRegions[0].outer), slopeCells: s.grid.cells.filter((c) => c.wedge).length };
+  });
+  check("B2376240: boundary mode grades nothing outside the setback and the setback flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.flag === 0 && bndOut.clear >= 1 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
+  check("B2376240: the daylight line in boundary mode IS the setback (one ring per limit ring)", bndOut.daylight === bndOut.limitRings && bndOut.daylightIsLimit, JSON.stringify({ daylight: bndOut.daylight, limitRings: bndOut.limitRings, daylightIsLimit: bndOut.daylightIsLimit }));
+  // the plateau vs the Level-ground sweep's own mask at that finish (the harness runs the worker's mask job at the FFE)
+  const cmp = await page.evaluate(async (E) => {
+    const { buildableMaskJob } = await import("/src/workspaces/site-planner/lib/buildableClient.js");
+    const h = window.__harness; const s = h.gradeSurface; const L = s.grid.limit;
+    const base = h.model.setback; const m = h.model;
+    const r = await buildableMaskJob({ origin: window.__origin, parcelRings: base.parcelRings, setbackRings: base.rings, holes: base.holes, s: m.cfg.slopeRatio, D: m.cfg.maxCutFillFt, E, dem: window.__dem });
+    let agree = 0, dis = 0;
+    for (const c of s.grid.cells) {
+      if (c.cls !== "infill" && !c.wedge) continue;
+      const i = Math.floor((c.x - r.x0) / r.cell), j = Math.floor((c.y - r.y0) / r.cell);
+      if (i < 0 || j < 0 || i >= r.nx || j >= r.ny) continue;
+      const inMask = !!r.mask[j * r.nx + i];
+      const plateau = c.cls === "infill" && Math.abs(c.propFt - E) < 1e-6;
+      if (inMask === plateau) agree++; else dis++;
+    }
+    return { agree, dis, maskAc: r.areaAc, plateauSf: L.plateaus[0].areaSf, E };
+  }, Math.round(bnd.ffe * 10) / 10);
+  check("the plateau matches the Level-ground sweep's mask at that finish within one cell (≥ 98% of cells agree)", cmp.agree > 500 && cmp.dis / (cmp.agree + cmp.dis) < 0.02, JSON.stringify(cmp));
+  // switch back to 'Around the layout' from the control: the picture and the acreage change
+  await page.click('[data-testid="grading-limit-mode"] button:first-child');
+  await page.waitForFunction(() => { const s = window.__harness.gradeSurface; return s && s.grid.limit && s.grid.limit.mode === "layout"; }, null, { timeout: 60000 });
+  const backTxt = await page.textContent("[data-graded-area-line]");
+  check("the mode control switches back to the layout limit and the acreage drops", /limit auto/.test(backTxt) && parseFloat((/· ([\d.]+) AC/.exec(backTxt) || [])[1]) < bnd.areaAc, backTxt);
+  await page.screenshot({ path: "/tmp/grading-r4-boundary.png" });
   await page.close();
 
   // ================= 6. NO FRAME OVER 100 MS (problem report 6cea9895) — the owner's real cross-dock, his screen =================

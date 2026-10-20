@@ -197,6 +197,57 @@ export function cellsPixels(cells, paintOnly = null) {
 /* The daylight line: the OUTER edge of the graded footprint+slope set (cells present), traced on the lattice. */
 export const cellsOutlinePath = (cp) => traceEdges((i, j) => !!cp.present[j * cp.nx + i], cp.nx, cp.ny, cp.x0, cp.y0, cp.dx, cp.dy);
 
+/* ---- ROUND 4: feet-space paths and the proposed-contour lattice ---- */
+export const CONTOUR_PROPOSED_RGB = "#7C3F12";        // design-exempt: SVG canvas ink over aerial imagery — terrainLayers.js's CONTOUR_COL, which does not theme
+export const CONTOUR_PROPOSED_INDEX_RGB = "#5B2E0D";  // design-exempt: SVG canvas ink over aerial imagery — terrainLayers.js's CONTOUR_INDEX_COL
+export const LIMIT_LINE_DASH = "6 4";
+
+/* Closed rings (feet) → one svg path string in FEET (the caller wraps it in the feet→screen transform). */
+export function ringsPathD(rings) {
+  const f = (v) => Math.round(v * 100) / 100;
+  const parts = [];
+  for (const ring of rings || []) {
+    if (!ring || ring.length < 3) continue;
+    parts.push(ring.map((p, i) => `${i ? "L" : "M"}${f(p.x)} ${f(p.y)}`).join("") + "Z");
+  }
+  return parts.join("");
+}
+
+/* The proposed surface as a value lattice for the contour tracer: one value per cell (the proposed elevation),
+ * NaN where nothing is proposed or the ground is void — so the lines end at the daylight line. The interval follows
+ * the existing Contour-lines rule (1 ft, coarsening only when the range would drown the picture). */
+export function surfaceValuesLattice(cells, { maxLevels = 60 } = {}) {
+  const L = cellsLattice(cells);
+  if (!L) return null;
+  const values = new Float32Array(L.nx * L.ny).fill(NaN);
+  let lo = Infinity, hi = -Infinity;
+  for (const c of cells) {
+    let z = null;
+    if (c.propFt != null && Number.isFinite(c.propFt) && c.dzFt != null) z = c.propFt;
+    else if (c.wedge && c.dzFt != null && Number.isFinite(c.gFt)) z = c.gFt + c.dzFt;
+    if (z == null) continue;
+    const { i, j } = L.at(c);
+    values[j * L.nx + i] = z;
+    if (z < lo) lo = z; if (z > hi) hi = z;
+  }
+  if (!(hi > lo)) return null;
+  let interval = 1;
+  for (const step of [1, 2, 5, 10, 20, 50]) { if ((hi - lo) / step <= maxLevels) { interval = step; break; } interval = 100; }
+  return { values, nx: L.nx, ny: L.ny, x0: L.x0, y0: L.y0, dx: L.dx, dy: L.dy, interval, lo, hi };
+}
+
+/* The worker's lattice-pixel lines → feet. */
+export function contourLinesToFeet(res, L) {
+  const toFt = (p) => ({ x: L.x0 + p[0] * L.dx, y: L.y0 + p[1] * L.dy });
+  const f = (v) => Math.round(v * 100) / 100;
+  const levels = (res.levels || []).map((lv) => ({
+    level: lv.level, isIndex: lv.isIndex,
+    d: lv.lines.map((line) => line.map((p, i) => { const q = toFt(p); return `${i ? "L" : "M"}${f(q.x)} ${f(q.y)}`; }).join("")).join(""),
+  }));
+  const labels = (res.labels || []).map((lb) => ({ pt: toFt([lb.px, lb.py]), level: lb.level, text: String(Math.round(lb.level)) }));
+  return { levels, labels };
+}
+
 /* ---- browser glue ---- */
 /* `slopeOnly` — the Cut & Fill layer's rule: only the slope bands (wedge cells) are ever painted. */
 export const slopeOnly = (c) => !!c.wedge;

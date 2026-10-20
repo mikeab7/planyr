@@ -32,7 +32,7 @@ import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
-import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR } from "./mapStack.js";
+import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
@@ -208,6 +208,12 @@ export function createExportSheet(ctx) {
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
+    /* NEW-1 — PARCELS IN FRONT is a SCREEN state (mapStack.parcelsOnTop): with the Parcels tool open the plan's own parcel +
+       setback group is rendered after the annotations. The sheet shows the NORMAL order, so the group goes back into the slot
+       the canvas left for it (PDF-PARITY: printing with the tool open prints what printing without it prints). */
+    const topTier = clone.querySelector(`[${PARCEL_TIER_ATTR}="top"]`);
+    const tierSlot = clone.querySelector(`[${PARCEL_TIER_SLOT_ATTR}]`);
+    if (topTier && tierSlot) { topTier.removeAttribute(PARCEL_TIER_ATTR); tierSlot.replaceWith(topTier); }
     /* NEW-1 — THE MEASUREMENT VALUE INVARIANT, asserted here rather than left to review: a
        measurement must never print its geometry without its value. The `withFullRender` pass above
        lifts every zoom gate off measurement labels precisely so this can't happen, but the label
@@ -1129,16 +1135,19 @@ export function createExportSheet(ctx) {
     /* NEW-1 (2026-10-05) — EDITABLE MARKUPS. With `annotate` (the PDF's "Flatten markups" toggle OFF) the
        annotation-class nodes are lifted OUT of the clone — AFTER the print restyle above, so their stroke
        weights and label sizes are exactly what the flattened sheet would have drawn — and written into
-       the PDF as native annotations by exportPDF. Everything else (aerial, GIS, parcels, buildings,
-       furniture) stays page content. The preview never passes `annotate`, so it still shows the markups. */
+       the PDF as native annotations by exportPDF. Since 2026-10-20 (B2384528, owner constraint #28) that is EVERY drawn
+       object — site elements included; the aerial, GIS, parcels, references and furniture stay page content. The preview
+       never passes `annotate`, so it still shows everything. */
     let annotationSet = null;
+    let annotationPins = [];
     let annotationsKeptInPage = 0; // NEW-1 — annotations stacked behind page content stay in the picture (see annotationExtract)
     if (annotate) {
       const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
       const mctx = document.createElement("canvas").getContext("2d");
       const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
-      const { descriptors, patterns, flattened } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, els, f2p, measureText });
+      const { descriptors, patterns, flattened, pinned, notes } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, els, f2p, measureText });
       annotationsKeptInPage = flattened.length;
+      annotationPins = pinned;
       // clone user units → PDF points: the nested <svg> is fitted "meet" into the plan box, then the page
       // unit (page.w units across wIn inches) converts to points; PDF y runs up, so it flips.
       const [vx, vy, vw, vh] = built.clone.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
@@ -1147,7 +1156,16 @@ export function createExportSheet(ctx) {
       const pu = (layout.page.wIn * 72) / layout.page.w, pageHpt = layout.page.hIn * 72, k = sFit * pu;
       const M0 = [k, 0, 0, -k, (ox - vx * sFit) * pu, pageHpt - (oy - vy * sFit) * pu];
       const frame = [ox * pu, pageHpt - (oy + vh * sFit) * pu, (ox + vw * sFit) * pu, pageHpt - oy * pu];
-      annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString() });
+      // feet per PDF point on this sheet (clone units per foot from f2p, then the page fit) — the scale every native
+      // measurement carries, so a viewer that recomputes a measured value gets Planyr's number (NEW-2, 2026-10-20)
+      const a0 = f2p({ x: 0, y: 0 }), a1 = f2p({ x: 1, y: 0 });
+      const unitsPerFt = Math.hypot(a1.x - a0.x, a1.y - a0.y);
+      const ftPerPt = unitsPerFt > 0 && k > 0 ? 1 / (unitsPerFt * k) : null;
+      annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString(), ftPerPt });
+      // LOUD-FAILURE: every object kept in the page, and why, rides the same warning list as any other simplification
+      const WHY = { "under-reference": "a reference drawing shown above the plan covers it", "under-pinned": "it sits under something that is printed into the page", "under-page": "page content drawn after it covers it", straddle: "it and another object each sit partly on top of the other" };
+      for (const pin of pinned) annotationSet.degraded.push(`${pin.name} is printed into the page, not editable: ${WHY[pin.why] || pin.why}${pin.by ? ` (${pin.by})` : ""}`);
+      for (const n of notes) annotationSet.degraded.push(n);
     }
     const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
     plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
@@ -1166,7 +1184,7 @@ export function createExportSheet(ctx) {
         : "Concept site plan — planning-level estimates, not a survey.",
       pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
     });
-    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage };
+    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage, annotationPins };
   };
 
   // NEW-1 (2026-10-05) — `flattenMarkups` (the compose screen's "Flatten markups" toggle). TRUE keeps the
@@ -1204,14 +1222,15 @@ export function createExportSheet(ctx) {
         const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName, annotations: annotationSet ? annotationSet.annots : [] });
         // LOUD-FAILURE: a markup that could not become a fully native annotation is still in the file (as a
         // look-alike) — but say so, never let it pass as a clean editable export.
-        if (annotationSet && annotationSet.degraded.length) {
-          try { console.debug("[pdf] annotation notes:", annotationSet.degraded); } catch (_) {}
-          flashWarn(`⚠ ${annotationSet.degraded.length} markup detail${annotationSet.degraded.length === 1 ? " was" : "s were"} simplified in the editable PDF (it looks the same, but may not edit exactly like a native Bluebeam markup). Turn on “Flatten markups” for an exact picture.`, 9000);
+        const simplified = annotationSet ? annotationSet.degraded.length - annotationsKeptInPage : 0; // pins are said below
+        if (annotationSet && annotationSet.degraded.length) try { console.debug("[pdf] annotation notes:", annotationSet.degraded); } catch (_) {}
+        if (simplified > 0) {
+          flashWarn(`⚠ ${simplified} detail${simplified === 1 ? " was" : "s were"} simplified in the editable PDF (it looks the same, but may not edit exactly like a native Bluebeam markup). Turn on “Flatten markups” for an exact picture.`, 9000);
         }
-        // NEW-1 — LOUD-FAILURE: a markup stacked behind the plan can't be a PDF markup (those always paint over
+        // NEW-1 — LOUD-FAILURE: an object page content must paint over can't be a PDF annotation (those always paint over
         // the page), so it was printed into the picture in its true place. Say so instead of leaving it looking editable.
         if (annotationsKeptInPage > 0) {
-          flashWarn(`⚠ ${annotationsKeptInPage} item${annotationsKeptInPage === 1 ? " sits" : "s sit"} behind the plan or under other drawing, so ${annotationsKeptInPage === 1 ? "it was" : "they were"} printed into the page to keep the stacking order (not editable in Bluebeam).`, 9000);
+          flashWarn(`⚠ ${annotationsKeptInPage} item${annotationsKeptInPage === 1 ? " was" : "s were"} printed into the page to keep the stacking order — usually because a reference drawing shown above the plan covers ${annotationsKeptInPage === 1 ? "it" : "them"} (not editable in Bluebeam).`, 9000);
         }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));

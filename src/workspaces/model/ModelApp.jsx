@@ -70,6 +70,7 @@ import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
+import { orgCloudOutcome } from "./lib/orgWorkbookOps.js";
 import { Button } from "../../shared/ui/controls.jsx";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
@@ -483,6 +484,21 @@ export default function ModelApp({
     return () => { live = false; };
   }, [orgMode, userId]);
 
+  // NEW-3 — every index op READS the cloud result. The three store functions never throw — they
+  // RESOLVE `{ ok:false, reason, error }` — so the old `.catch(() => {})` on each was dead code and
+  // the resolved failure was never read: a delete that the cloud refused vanished from the picker
+  // and was back on the next visit (the list effect above re-merges cloud rows), a rename held
+  // until the next cloud list reverted it, and a create existed on this device only with no notice.
+  // `orgCloudOutcome` (lib/orgWorkbookOps.js, unit-tested) is the one decision; the notice lands on
+  // the picker (the surface the op was made on) and on the header badge via `status`, the same
+  // surface the content push reports through.
+  const applyOrgOutcome = useCallback((op, r, id) => {
+    const o = orgCloudOutcome(op, r, { id });
+    if (o.notice) setOrgListNotice(o.notice);
+    if (o.status) setStatus(o.status);
+    if (o.telemetry) import("../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent(o.telemetry.kind, o.telemetry.message, o.telemetry.extra)).catch(() => {});
+    return o;
+  }, []);
   const onOrgCreate = useCallback(() => {
     const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const name = "Untitled workbook";
@@ -490,18 +506,24 @@ export default function ModelApp({
     writeLocalSheet(userId, id, wb);
     setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
     setOrgWorkbookId(id);
-    if (userId) saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }).catch(() => {});
-  }, [userId]);
+    if (userId) saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }).then((r) => applyOrgOutcome("create", r, id));
+  }, [userId, applyOrgOutcome]);
   const onOrgOpen = useCallback((id) => setOrgWorkbookId(id), []);
   const onOrgRename = useCallback((id, name) => {
     setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
-    if (userId) renameOrgWorkbookCloud(userId, id, name).catch(() => {});
-  }, [userId]);
-  const onOrgDelete = useCallback((id) => {
+    if (userId) renameOrgWorkbookCloud(userId, id, name).then((r) => applyOrgOutcome("rename", r, id));
+  }, [userId, applyOrgOutcome]);
+  // DELETE mirrors deleteSite's "tombstone, ask the server, remove locally only on confirmed
+  // removal" rule (site-planner/lib/storage.js): the local index entry is dropped only once the
+  // cloud tombstone landed (or the cloud genuinely holds nothing — not-provisioned / unavailable /
+  // signed out). On a refusal the row stays in the picker with the notice beside it.
+  const onOrgDelete = useCallback(async (id) => {
+    const r = userId ? await deleteOrgWorkbookCloud(userId, id) : undefined;
+    const o = applyOrgOutcome("delete", r, id);
+    if (!o.applyLocal) return;
     setOrgWorkbooks(removeLocalOrgIndexEntry(userId, id));
     setOrgWorkbookId((cur) => (cur === id ? null : cur));
-    if (userId) deleteOrgWorkbookCloud(userId, id).catch(() => {});
-  }, [userId]);
+  }, [userId, applyOrgOutcome]);
   const onBackToOrgWorkbooks = useCallback(() => setOrgWorkbookId(null), []);
 
   /* ---- load: local first (synchronous, always available), then reconcile against the cloud.
