@@ -265,6 +265,8 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 // B2191xxx — `owner_?name_?\d+` is HCAD's own spelling (`owner_name_1` / `owner_name_2`); without it the
 // Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
+/* Iowa (NEW-1, 2026-10-19): the county CAMA exports spell the owner `DEEDHOLD` (Benton, Boone, Cass, Harrison, Mahaska, Osceola, Warren, Winnebago…), `DeedHolder1` (Johnson), `DEEDHLDR` (Muscatine),
+ * `Tyler_Deed_Holder` (Cerro Gordo), `PRIMARYNAME1` / `PRIMARY_NAME` (Kossuth, Franklin) and `OwnerDeed` (Linn) — none of which resolved, so those counties' parcel pages showed no Owner line. */
 /* Alabama (B2302784): `OWNER_ALL` (the Central Alabama commission's merged roll — Autauga, Montgomery), `PropertyOwner` (Madison), `FULLNAME` (Greene) and
  * `Name1` (Mobile's Revenue Commission, Shelby's DOR roll, St. Clair's `NAME_1`) are the owner column of those sources; `name_?1` is as weak as bare `name`.
  * Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
@@ -273,7 +275,7 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 /* Missouri (NEW-1, 2026-10-19): the Integrity GIS counties publish the owner as `DEEDHOLDER` / `DEED_HOLDER` / `DEEDNAME` (Atchison's joined layer as
  * `REALDATA_DEEDHOLDER`), Greene as `OWN1`, Holt as `owner1_name`, St. Clair as `Owner_1`, Cape Girardeau as `Main_Name`. `pcloNAME` is Tuscaloosa AL's owner — it only looked resolved
  * because the bare `Name` beside it (the parcel number) used to win; a digits-only `Name` no longer counts as an owner. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?\d*|deed_?hldr|tyler_deed_holder|primary_?name_?\d*|owner_?deed|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name|owner_?last)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */

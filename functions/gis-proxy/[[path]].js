@@ -146,6 +146,11 @@ export const ALLOWED_HOSTS = new Set([
   "davisonreports.com", "www.davisonreports.com", // Davison County parcel viewer
   "sidbox.sidwellco.com", // Sidwell — Dakotas county parcel viewers
   "brookingscountysd.gov", "www.brookingscountysd.gov", "codington.sdcounty.gov", "brown.sd.us", // county sites whose GIS pages name the viewer
+  /* NEW-1 (Iowa, 2026-10-19) — hosts behind the wired Iowa counties; each was MEASURED through this relay before its counties were wired. */
+  "wfs.schneidercorp.com", // Schneider Geospatial's public county map servers (the feed behind the Beacon viewers) — 23 Iowa counties
+  "gis.pottcounty-ia.gov", // Pottawattamie County (Council Bluffs) GIS
+  "gis.dallascountyiowa.gov", // Dallas County (Adel) GIS
+  "magic-gis.com", // MAGIC — Muscatine Area GIS consortium (Muscatine County parcels)
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",

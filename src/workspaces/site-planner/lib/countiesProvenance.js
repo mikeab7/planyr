@@ -25,6 +25,7 @@ import { OKLAHOMA_VERIFICATION } from "./okProvenance.js"; // NEW-1 (Oklahoma)
 import { ARIZONA_VERIFICATION } from "./azProvenance.js"; // NEW-1 (B2365360)
 import { NEWMEXICO_VERIFICATION } from "./nmProvenance.js"; // NEW-1 (B2345888)
 import { KANSAS_VERIFICATION } from "./ksProvenance.js"; // NEW-1 (B2348000)
+import { IOWA_VERIFICATION } from "./iaProvenance.js"; // NEW-1 (Iowa, 2026-10-19)
 
 export const COUNTY_VERIFICATION = {
   ...ALABAMA_VERIFICATION,
@@ -40,6 +41,7 @@ export const COUNTY_VERIFICATION = {
   ...ARIZONA_VERIFICATION,
   ...NEWMEXICO_VERIFICATION,
   ...KANSAS_VERIFICATION,
+  ...IOWA_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
