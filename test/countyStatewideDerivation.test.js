@@ -176,7 +176,8 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // (57 new rows on top of 24) — real counties, one source, not a blind expansion.
     // ⛔ Bumped 400 → 600 (2026-10-19, NEW-1, B2317680): Missouri's 71 county rows (one table, measured per county) took it from ~360 to 431 —
     // real counties wired from per-county measurements, not a blind expansion. 16 sibling state sessions are adding rows the same day.
-    expect(keys.length).toBeLessThan(600);
+    // ⛔ Bumped 600 → 700 (2026-10-20, NEW-1, Michigan): 52 county rows from one measured table (Michigan 83 counties; 29 named gaps).
+    expect(keys.length).toBeLessThan(700);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
@@ -558,11 +559,12 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
  * Nevada, Ohio and every other statewide-only state offline to fix Michigan. */
 describe("B1597232 — an unsourced county is an ANSWER (no candidates), not a licence to ask its neighbour", () => {
   it("a state whose only county source is elsewhere returns NOTHING, not that source", () => {
-    // Michigan wires exactly two sources — Oakland County and the City of Detroit — and Wayne
-    // County is neither. Both Wayne paths (no bbox match; inside Oakland's padded bbox) are pinned
-    // at their exact measured points in test/cityScopes.test.js.
-    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual([]); // Taylor
-    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual([]); // Livonia
+    // Michigan wired only Oakland and Detroit when this was written (Wayne was the gap); since 2026-10-20 (NEW-1) Wayne has its own
+    // source, so the same rule is pinned on a county that is STILL unwired: Alcona (BS&A-only) must not be handed any neighbour's source.
+    // Both former Wayne paths (no bbox match; inside Oakland's padded bbox) now return Wayne ALONE — pinned in test/cityScopes.test.js.
+    expect(candidateCountiesForPoint(44.6852, -83.6154)).toEqual([]); // Alcona
+    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual(["mi_wayne"]); // Taylor
+    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual(["mi_wayne"]); // Livonia
   });
 
   it("the same rule, a different state: an unwired Louisiana parish never reaches the two wired ones", () => {

@@ -59,10 +59,12 @@ export const MI_ROWS = [
   ["vanburen","Van Buren","https://services3.arcgis.com/fOViEAUKl91t9cT6/arcgis/rest/services/Parcels/FeatureServer/0","PARCEL_NO","ADDRESSALL",1,42.248,-86.0497,[42.063, -86.3845, 42.433, -85.7555]],
   ["wayne","Wayne","https://services1.arcgis.com/b6rkZNtCd6Mx2gvB/ArcGIS/rest/services/Wayne_County_Parcel_Shape_File/FeatureServer/0","packedParc",null,1,42.2672,-83.3627,[42.024, -83.5655, 42.468, -82.865]],
 ];
+/* Isabella and Mecosta share ONE multi-county compile (a consultant's 16-county West-Michigan layer), so each row is scoped to its own county. */
+const MI_SCOPE = { isabella: "county_name='Isabella'", mecosta: "county_name='Mecosta'" };
 export const miRaw = () => Object.fromEntries(MI_ROWS.map(([k, n, url, id, addr]) => ["mi_" + k, {
-  state: "MI", label: n + " County, MI", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}),
+  state: "MI", label: n + " County, MI", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}), ...(MI_SCOPE[k] ? { scopeWhere: MI_SCOPE[k] } : {}),
   help: n + " County parcels (county / assessor GIS). Search by parcel number" + (addr ? " or a site address." : "."),
 }]));
 export const miMap = () => Object.fromEntries(MI_ROWS.map(([k, n, url, , , , la, ln, bb]) => ["mi_" + k, {
-  state: "MI", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url,
+  state: "MI", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url, ...(MI_SCOPE[k] ? { scopeWhere: MI_SCOPE[k] } : {}),
 }]));
