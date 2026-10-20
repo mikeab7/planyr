@@ -1,0 +1,1637 @@
+{
+ "source": "public/geo/county-polygons.json (Census-derived county polygons), state NY; interior points are inside the named county, line points are within the polygon's county-line band of it; `cross` are points on each side of the NY/NJ line (Rockland/Orange vs Bergen/Passaic/Sussex)",
+ "counties": [
+  {
+   "state": "NY",
+   "name": "Albany County",
+   "fips": "36001",
+   "lat": 42.59693,
+   "lng": -73.9645,
+   "bbox": [
+    42.4055,
+    -74.2505,
+    42.8085,
+    -73.6785
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Allegany County",
+   "fips": "36003",
+   "lat": 42.2635,
+   "lng": -78.0427,
+   "bbox": [
+    41.9975,
+    -78.3055,
+    42.5295,
+    -77.7215
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Bronx County",
+   "fips": "36005",
+   "lat": 40.86525,
+   "lng": -73.85865,
+   "bbox": [
+    40.803,
+    -73.923,
+    40.9275,
+    -73.78
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Broome County",
+   "fips": "36007",
+   "lat": 42.14262,
+   "lng": -75.94062,
+   "bbox": [
+    41.9965,
+    -76.1265,
+    42.414,
+    -75.383
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Cattaraugus County",
+   "fips": "36009",
+   "lat": 42.25838,
+   "lng": -78.56907,
+   "bbox": [
+    41.9995,
+    -79.0595,
+    42.5445,
+    -78.305
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Cayuga County",
+   "fips": "36011",
+   "lat": 42.78,
+   "lng": -76.58548,
+   "bbox": [
+    42.6215,
+    -76.7405,
+    43.414,
+    -76.2635
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Chautauqua County",
+   "fips": "36013",
+   "lat": 42.2301,
+   "lng": -79.30443,
+   "bbox": [
+    42.0005,
+    -79.763,
+    42.5745,
+    -79.0575
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Chemung County",
+   "fips": "36015",
+   "lat": 42.1475,
+   "lng": -76.82631,
+   "bbox": [
+    42.0025,
+    -76.9685,
+    42.2925,
+    -76.531
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Chenango County",
+   "fips": "36017",
+   "lat": 42.50008,
+   "lng": -75.63215,
+   "bbox": [
+    42.194,
+    -75.888,
+    42.7505,
+    -75.286
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Clinton County",
+   "fips": "36019",
+   "lat": 44.71525,
+   "lng": -73.69161,
+   "bbox": [
+    44.4245,
+    -74.0215,
+    45.006,
+    -73.327
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Columbia County",
+   "fips": "36021",
+   "lat": 42.1915,
+   "lng": -73.64375,
+   "bbox": [
+    41.9825,
+    -73.9365,
+    42.505,
+    -73.351
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Cortland County",
+   "fips": "36023",
+   "lat": 42.6005,
+   "lng": -76.07225,
+   "bbox": [
+    42.405,
+    -76.278,
+    42.796,
+    -75.8665
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Delaware County",
+   "fips": "36025",
+   "lat": 42.188,
+   "lng": -75.00073,
+   "bbox": [
+    41.856,
+    -75.427,
+    42.52,
+    -74.424
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Dutchess County",
+   "fips": "36027",
+   "lat": 41.77576,
+   "lng": -73.72862,
+   "bbox": [
+    41.4395,
+    -73.999,
+    42.08,
+    -73.484
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Erie County",
+   "fips": "36029",
+   "lat": 42.7064,
+   "lng": -78.6776,
+   "bbox": [
+    42.447,
+    -79.142,
+    43.0955,
+    -78.454
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Essex County",
+   "fips": "36031",
+   "lat": 44.10175,
+   "lng": -73.7606,
+   "bbox": [
+    43.7395,
+    -74.3315,
+    44.5445,
+    -73.2935
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Franklin County",
+   "fips": "36033",
+   "lat": 44.67905,
+   "lng": -74.30261,
+   "bbox": [
+    44.096,
+    -74.736,
+    44.993,
+    -73.9105
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Fulton County",
+   "fips": "36035",
+   "lat": 43.11085,
+   "lng": -74.4032,
+   "bbox": [
+    42.9825,
+    -74.775,
+    43.2845,
+    -74.099
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Genesee County",
+   "fips": "36037",
+   "lat": 43.0025,
+   "lng": -78.325,
+   "bbox": [
+    42.869,
+    -78.467,
+    43.136,
+    -77.899
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Greene County",
+   "fips": "36039",
+   "lat": 42.2603,
+   "lng": -74.15325,
+   "bbox": [
+    42.0965,
+    -74.5315,
+    42.4605,
+    -73.775
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Hamilton County",
+   "fips": "36041",
+   "lat": 43.52862,
+   "lng": -74.48387,
+   "bbox": [
+    43.211,
+    -74.871,
+    44.1185,
+    -74.056
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Herkimer County",
+   "fips": "36043",
+   "lat": 43.0806,
+   "lng": -74.95425,
+   "bbox": [
+    42.8275,
+    -75.214,
+    44.093,
+    -74.6945
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Jefferson County",
+   "fips": "36045",
+   "lat": 44.12088,
+   "lng": -75.8363,
+   "bbox": [
+    43.6715,
+    -76.363,
+    44.3905,
+    -75.447
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Kings County",
+   "fips": "36047",
+   "lat": 40.6368,
+   "lng": -73.96851,
+   "bbox": [
+    40.5815,
+    -74.0275,
+    40.7395,
+    -73.846
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Lewis County",
+   "fips": "36049",
+   "lat": 43.71969,
+   "lng": -75.483,
+   "bbox": [
+    43.4225,
+    -75.851,
+    44.215,
+    -75.115
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Livingston County",
+   "fips": "36051",
+   "lat": 42.71826,
+   "lng": -77.78317,
+   "bbox": [
+    42.4715,
+    -78.0525,
+    42.991,
+    -77.4855
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Madison County",
+   "fips": "36053",
+   "lat": 42.9111,
+   "lng": -75.70913,
+   "bbox": [
+    42.7275,
+    -75.9885,
+    43.1865,
+    -75.2435
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Monroe County",
+   "fips": "36055",
+   "lat": 43.154,
+   "lng": -77.7412,
+   "bbox": [
+    42.9425,
+    -77.992,
+    43.3655,
+    -77.365
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Montgomery County",
+   "fips": "36057",
+   "lat": 42.8792,
+   "lng": -74.425,
+   "bbox": [
+    42.769,
+    -74.7635,
+    43.0445,
+    -74.0865
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Nassau County",
+   "fips": "36059",
+   "lat": 40.76417,
+   "lng": -73.56806,
+   "bbox": [
+    40.5945,
+    -73.765,
+    40.903,
+    -73.4225
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "New York County",
+   "fips": "36061",
+   "lat": 40.8041,
+   "lng": -73.9482,
+   "bbox": [
+    40.704,
+    -74.0065,
+    40.886,
+    -73.9005
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Niagara County",
+   "fips": "36063",
+   "lat": 43.21473,
+   "lng": -78.59894,
+   "bbox": [
+    43.0225,
+    -79.062,
+    43.372,
+    -78.4645
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Oneida County",
+   "fips": "36065",
+   "lat": 43.22116,
+   "lng": -75.3936,
+   "bbox": [
+    42.868,
+    -75.882,
+    43.6115,
+    -75.068
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Onondaga County",
+   "fips": "36067",
+   "lat": 43.00025,
+   "lng": -76.17848,
+   "bbox": [
+    42.7775,
+    -76.494,
+    43.2725,
+    -75.893
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Ontario County",
+   "fips": "36069",
+   "lat": 42.9036,
+   "lng": -77.2221,
+   "bbox": [
+    42.583,
+    -77.6175,
+    43.041,
+    -76.9585
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Orange County",
+   "fips": "36071",
+   "lat": 41.38675,
+   "lng": -74.2768,
+   "bbox": [
+    41.1375,
+    -74.7595,
+    41.636,
+    -73.955
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Orleans County",
+   "fips": "36073",
+   "lat": 43.251,
+   "lng": -78.33574,
+   "bbox": [
+    43.13,
+    -78.4665,
+    43.372,
+    -77.991
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Oswego County",
+   "fips": "36075",
+   "lat": 43.432,
+   "lng": -76.06018,
+   "bbox": [
+    43.1585,
+    -76.6195,
+    43.7055,
+    -75.759
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Otsego County",
+   "fips": "36077",
+   "lat": 42.65699,
+   "lng": -75.08176,
+   "bbox": [
+    42.314,
+    -75.4105,
+    42.9105,
+    -74.637
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Putnam County",
+   "fips": "36079",
+   "lat": 41.44086,
+   "lng": -73.6206,
+   "bbox": [
+    41.325,
+    -73.981,
+    41.5265,
+    -73.5305
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Queens County",
+   "fips": "36081",
+   "lat": 40.71916,
+   "lng": -73.79644,
+   "bbox": [
+    40.5575,
+    -73.9555,
+    40.797,
+    -73.701
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Rensselaer County",
+   "fips": "36083",
+   "lat": 42.72011,
+   "lng": -73.48325,
+   "bbox": [
+    42.4605,
+    -73.788,
+    42.955,
+    -73.258
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Richmond County",
+   "fips": "36085",
+   "lat": 40.58492,
+   "lng": -74.14355,
+   "bbox": [
+    40.506,
+    -74.237,
+    40.6495,
+    -74.059
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Rockland County",
+   "fips": "36087",
+   "lat": 41.16175,
+   "lng": -74.0316,
+   "bbox": [
+    40.9985,
+    -74.2425,
+    41.325,
+    -73.891
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Saratoga County",
+   "fips": "36091",
+   "lat": 43.09711,
+   "lng": -73.9277,
+   "bbox": [
+    42.764,
+    -74.1595,
+    43.3985,
+    -73.58
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Schenectady County",
+   "fips": "36093",
+   "lat": 42.83671,
+   "lng": -74.02664,
+   "bbox": [
+    42.7115,
+    -74.3035,
+    42.95,
+    -73.822
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Schoharie County",
+   "fips": "36095",
+   "lat": 42.56995,
+   "lng": -74.4375,
+   "bbox": [
+    42.3535,
+    -74.718,
+    42.8345,
+    -74.157
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Schuyler County",
+   "fips": "36097",
+   "lat": 42.40421,
+   "lng": -76.79975,
+   "bbox": [
+    42.237,
+    -77.1035,
+    42.5555,
+    -76.6175
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Seneca County",
+   "fips": "36099",
+   "lat": 42.84825,
+   "lng": -76.84686,
+   "bbox": [
+    42.552,
+    -76.9715,
+    43.026,
+    -76.588
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "St. Lawrence County",
+   "fips": "36089",
+   "lat": 44.47545,
+   "lng": -74.99358,
+   "bbox": [
+    44.052,
+    -75.848,
+    44.993,
+    -74.5335
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Steuben County",
+   "fips": "36101",
+   "lat": 42.29125,
+   "lng": -77.4334,
+   "bbox": [
+    41.9975,
+    -77.745,
+    42.585,
+    -76.966
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Suffolk County",
+   "fips": "36103",
+   "lat": 40.8482,
+   "lng": -73.0358,
+   "bbox": [
+    40.6255,
+    -73.478,
+    41.1495,
+    -71.87
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Sullivan County",
+   "fips": "36105",
+   "lat": 41.74054,
+   "lng": -74.81785,
+   "bbox": [
+    41.43,
+    -75.1485,
+    42.0215,
+    -74.3705
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Tioga County",
+   "fips": "36107",
+   "lat": 42.15269,
+   "lng": -76.30754,
+   "bbox": [
+    41.9995,
+    -76.564,
+    42.408,
+    -76.0755
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Tompkins County",
+   "fips": "36109",
+   "lat": 42.46605,
+   "lng": -76.45902,
+   "bbox": [
+    42.262,
+    -76.7,
+    42.633,
+    -76.241
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Ulster County",
+   "fips": "36111",
+   "lat": 41.86539,
+   "lng": -74.20141,
+   "bbox": [
+    41.583,
+    -74.789,
+    42.1775,
+    -73.9185
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Warren County",
+   "fips": "36113",
+   "lat": 43.5704,
+   "lng": -73.8315,
+   "bbox": [
+    43.229,
+    -74.215,
+    43.798,
+    -73.448
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Washington County",
+   "fips": "36115",
+   "lat": 43.39291,
+   "lng": -73.43111,
+   "bbox": [
+    42.938,
+    -73.644,
+    43.8045,
+    -73.2385
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Wayne County",
+   "fips": "36117",
+   "lat": 43.1539,
+   "lng": -76.8505,
+   "bbox": [
+    43.0145,
+    -77.3775,
+    43.3425,
+    -76.6975
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Westchester County",
+   "fips": "36119",
+   "lat": 41.20982,
+   "lng": -73.79175,
+   "bbox": [
+    40.8865,
+    -73.98,
+    41.3655,
+    -73.478
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Wyoming County",
+   "fips": "36121",
+   "lat": 42.70325,
+   "lng": -78.1789,
+   "bbox": [
+    42.5285,
+    -78.4825,
+    42.878,
+    -77.9545
+   ]
+  },
+  {
+   "state": "NY",
+   "name": "Yates County",
+   "fips": "36123",
+   "lat": 42.62051,
+   "lng": -77.01705,
+   "bbox": [
+    42.4575,
+    -77.3665,
+    42.768,
+    -76.8845
+   ]
+  }
+ ],
+ "lines": [
+  {
+   "name": "Albany County \u2014 a point near its county line",
+   "county": "Albany County",
+   "lat": 42.77244,
+   "lng": -73.81226
+  },
+  {
+   "name": "Albany County \u2014 a point near its county line",
+   "county": "Albany County",
+   "lat": 42.40664,
+   "lng": -74.24886
+  },
+  {
+   "name": "Allegany County \u2014 a point near its county line",
+   "county": "Allegany County",
+   "lat": 42.52741,
+   "lng": -78.30382
+  },
+  {
+   "name": "Allegany County \u2014 a point near its county line",
+   "county": "Allegany County",
+   "lat": 42.47068,
+   "lng": -77.72332
+  },
+  {
+   "name": "Bronx County \u2014 a point near its county line",
+   "county": "Bronx County",
+   "lat": 40.8332,
+   "lng": -73.79837
+  },
+  {
+   "name": "Bronx County \u2014 a point near its county line",
+   "county": "Bronx County",
+   "lat": 40.87691,
+   "lng": -73.89882
+  },
+  {
+   "name": "Broome County \u2014 a point near its county line",
+   "county": "Broome County",
+   "lat": 42.20104,
+   "lng": -76.0735
+  },
+  {
+   "name": "Broome County \u2014 a point near its county line",
+   "county": "Broome County",
+   "lat": 42.40673,
+   "lng": -76.12495
+  },
+  {
+   "name": "Cattaraugus County \u2014 a point near its county line",
+   "county": "Cattaraugus County",
+   "lat": 42.4461,
+   "lng": -78.8821
+  },
+  {
+   "name": "Cattaraugus County \u2014 a point near its county line",
+   "county": "Cattaraugus County",
+   "lat": 42.0026,
+   "lng": -79.0583
+  },
+  {
+   "name": "Cayuga County \u2014 a point near its county line",
+   "county": "Cayuga County",
+   "lat": 43.1112,
+   "lng": -76.49488
+  },
+  {
+   "name": "Cayuga County \u2014 a point near its county line",
+   "county": "Cayuga County",
+   "lat": 42.75801,
+   "lng": -76.73918
+  },
+  {
+   "name": "Chautauqua County \u2014 a point near its county line",
+   "county": "Chautauqua County",
+   "lat": 42.00208,
+   "lng": -79.61128
+  },
+  {
+   "name": "Chautauqua County \u2014 a point near its county line",
+   "county": "Chautauqua County",
+   "lat": 42.49153,
+   "lng": -79.35534
+  },
+  {
+   "name": "Chemung County \u2014 a point near its county line",
+   "county": "Chemung County",
+   "lat": 42.27547,
+   "lng": -76.96407
+  },
+  {
+   "name": "Chemung County \u2014 a point near its county line",
+   "county": "Chemung County",
+   "lat": 42.05489,
+   "lng": -76.55094
+  },
+  {
+   "name": "Chenango County \u2014 a point near its county line",
+   "county": "Chenango County",
+   "lat": 42.19771,
+   "lng": -75.63047
+  },
+  {
+   "name": "Chenango County \u2014 a point near its county line",
+   "county": "Chenango County",
+   "lat": 42.66389,
+   "lng": -75.32268
+  },
+  {
+   "name": "Clinton County \u2014 a point near its county line",
+   "county": "Clinton County",
+   "lat": 44.66133,
+   "lng": -73.37499
+  },
+  {
+   "name": "Clinton County \u2014 a point near its county line",
+   "county": "Clinton County",
+   "lat": 44.53813,
+   "lng": -73.47066
+  },
+  {
+   "name": "Columbia County \u2014 a point near its county line",
+   "county": "Columbia County",
+   "lat": 42.04855,
+   "lng": -73.4857
+  },
+  {
+   "name": "Columbia County \u2014 a point near its county line",
+   "county": "Columbia County",
+   "lat": 42.44355,
+   "lng": -73.77455
+  },
+  {
+   "name": "Cortland County \u2014 a point near its county line",
+   "county": "Cortland County",
+   "lat": 42.77421,
+   "lng": -76.27572
+  },
+  {
+   "name": "Cortland County \u2014 a point near its county line",
+   "county": "Cortland County",
+   "lat": 42.41,
+   "lng": -76.12659
+  },
+  {
+   "name": "Delaware County \u2014 a point near its county line",
+   "county": "Delaware County",
+   "lat": 42.424,
+   "lng": -75.02238
+  },
+  {
+   "name": "Delaware County \u2014 a point near its county line",
+   "county": "Delaware County",
+   "lat": 42.19427,
+   "lng": -75.41952
+  },
+  {
+   "name": "Dutchess County \u2014 a point near its county line",
+   "county": "Dutchess County",
+   "lat": 41.52386,
+   "lng": -73.53197
+  },
+  {
+   "name": "Dutchess County \u2014 a point near its county line",
+   "county": "Dutchess County",
+   "lat": 41.52802,
+   "lng": -73.58979
+  },
+  {
+   "name": "Erie County \u2014 a point near its county line",
+   "county": "Erie County",
+   "lat": 43.02075,
+   "lng": -78.88203
+  },
+  {
+   "name": "Erie County \u2014 a point near its county line",
+   "county": "Erie County",
+   "lat": 42.4519,
+   "lng": -78.85138
+  },
+  {
+   "name": "Essex County \u2014 a point near its county line",
+   "county": "Essex County",
+   "lat": 43.79973,
+   "lng": -73.44901
+  },
+  {
+   "name": "Essex County \u2014 a point near its county line",
+   "county": "Essex County",
+   "lat": 43.98918,
+   "lng": -73.41911
+  },
+  {
+   "name": "Franklin County \u2014 a point near its county line",
+   "county": "Franklin County",
+   "lat": 44.94352,
+   "lng": -74.64716
+  },
+  {
+   "name": "Franklin County \u2014 a point near its county line",
+   "county": "Franklin County",
+   "lat": 44.42514,
+   "lng": -73.91239
+  },
+  {
+   "name": "Fulton County \u2014 a point near its county line",
+   "county": "Fulton County",
+   "lat": 43.10839,
+   "lng": -74.76804
+  },
+  {
+   "name": "Fulton County \u2014 a point near its county line",
+   "county": "Fulton County",
+   "lat": 43.21048,
+   "lng": -74.32243
+  },
+  {
+   "name": "Genesee County \u2014 a point near its county line",
+   "county": "Genesee County",
+   "lat": 43.04076,
+   "lng": -77.95736
+  },
+  {
+   "name": "Genesee County \u2014 a point near its county line",
+   "county": "Genesee County",
+   "lat": 42.95348,
+   "lng": -77.93194
+  },
+  {
+   "name": "Greene County \u2014 a point near its county line",
+   "county": "Greene County",
+   "lat": 42.11373,
+   "lng": -74.29292
+  },
+  {
+   "name": "Greene County \u2014 a point near its county line",
+   "county": "Greene County",
+   "lat": 42.39027,
+   "lng": -73.79486
+  },
+  {
+   "name": "Hamilton County \u2014 a point near its county line",
+   "county": "Hamilton County",
+   "lat": 43.9195,
+   "lng": -74.33147
+  },
+  {
+   "name": "Hamilton County \u2014 a point near its county line",
+   "county": "Hamilton County",
+   "lat": 43.254,
+   "lng": -74.14493
+  },
+  {
+   "name": "Herkimer County \u2014 a point near its county line",
+   "county": "Herkimer County",
+   "lat": 42.90196,
+   "lng": -74.88438
+  },
+  {
+   "name": "Herkimer County \u2014 a point near its county line",
+   "county": "Herkimer County",
+   "lat": 43.15478,
+   "lng": -74.72334
+  },
+  {
+   "name": "Jefferson County \u2014 a point near its county line",
+   "county": "Jefferson County",
+   "lat": 44.07234,
+   "lng": -75.49039
+  },
+  {
+   "name": "Jefferson County \u2014 a point near its county line",
+   "county": "Jefferson County",
+   "lat": 44.05142,
+   "lng": -75.50441
+  },
+  {
+   "name": "Kings County \u2014 a point near its county line",
+   "county": "Kings County",
+   "lat": 40.73763,
+   "lng": -73.9548
+  },
+  {
+   "name": "Kings County \u2014 a point near its county line",
+   "county": "Kings County",
+   "lat": 40.65292,
+   "lng": -73.84998
+  },
+  {
+   "name": "Lewis County \u2014 a point near its county line",
+   "county": "Lewis County",
+   "lat": 44.03953,
+   "lng": -75.49149
+  },
+  {
+   "name": "Lewis County \u2014 a point near its county line",
+   "county": "Lewis County",
+   "lat": 43.47134,
+   "lng": -75.75821
+  },
+  {
+   "name": "Livingston County \u2014 a point near its county line",
+   "county": "Livingston County",
+   "lat": 42.57613,
+   "lng": -78.02935
+  },
+  {
+   "name": "Livingston County \u2014 a point near its county line",
+   "county": "Livingston County",
+   "lat": 42.90922,
+   "lng": -77.93009
+  },
+  {
+   "name": "Madison County \u2014 a point near its county line",
+   "county": "Madison County",
+   "lat": 42.74967,
+   "lng": -75.28762
+  },
+  {
+   "name": "Madison County \u2014 a point near its county line",
+   "county": "Madison County",
+   "lat": 43.16055,
+   "lng": -75.91424
+  },
+  {
+   "name": "Monroe County \u2014 a point near its county line",
+   "county": "Monroe County",
+   "lat": 42.99053,
+   "lng": -77.90529
+  },
+  {
+   "name": "Monroe County \u2014 a point near its county line",
+   "county": "Monroe County",
+   "lat": 43.02227,
+   "lng": -77.89715
+  },
+  {
+   "name": "Montgomery County \u2014 a point near its county line",
+   "county": "Montgomery County",
+   "lat": 42.78358,
+   "lng": -74.37073
+  },
+  {
+   "name": "Montgomery County \u2014 a point near its county line",
+   "county": "Montgomery County",
+   "lat": 42.771,
+   "lng": -74.44893
+  },
+  {
+   "name": "Nassau County \u2014 a point near its county line",
+   "county": "Nassau County",
+   "lat": 40.66202,
+   "lng": -73.42443
+  },
+  {
+   "name": "Nassau County \u2014 a point near its county line",
+   "county": "Nassau County",
+   "lat": 40.61957,
+   "lng": -73.76027
+  },
+  {
+   "name": "New York County \u2014 a point near its county line",
+   "county": "New York County",
+   "lat": 40.74059,
+   "lng": -74.00396
+  },
+  {
+   "name": "New York County \u2014 a point near its county line",
+   "county": "New York County",
+   "lat": 40.87635,
+   "lng": -73.90163
+  },
+  {
+   "name": "Niagara County \u2014 a point near its county line",
+   "county": "Niagara County",
+   "lat": 43.02341,
+   "lng": -78.88122
+  },
+  {
+   "name": "Niagara County \u2014 a point near its county line",
+   "county": "Niagara County",
+   "lat": 43.07635,
+   "lng": -78.74074
+  },
+  {
+   "name": "Oneida County \u2014 a point near its county line",
+   "county": "Oneida County",
+   "lat": 42.9405,
+   "lng": -75.44301
+  },
+  {
+   "name": "Oneida County \u2014 a point near its county line",
+   "county": "Oneida County",
+   "lat": 42.88316,
+   "lng": -75.24662
+  },
+  {
+   "name": "Onondaga County \u2014 a point near its county line",
+   "county": "Onondaga County",
+   "lat": 42.80441,
+   "lng": -76.28292
+  },
+  {
+   "name": "Onondaga County \u2014 a point near its county line",
+   "county": "Onondaga County",
+   "lat": 42.77944,
+   "lng": -76.2775
+  },
+  {
+   "name": "Ontario County \u2014 a point near its county line",
+   "county": "Ontario County",
+   "lat": 42.76859,
+   "lng": -77.58559
+  },
+  {
+   "name": "Ontario County \u2014 a point near its county line",
+   "county": "Ontario County",
+   "lat": 42.769,
+   "lng": -76.97742
+  },
+  {
+   "name": "Orange County \u2014 a point near its county line",
+   "county": "Orange County",
+   "lat": 41.59259,
+   "lng": -74.36991
+  },
+  {
+   "name": "Orange County \u2014 a point near its county line",
+   "county": "Orange County",
+   "lat": 41.32578,
+   "lng": -73.98184
+  },
+  {
+   "name": "Orleans County \u2014 a point near its county line",
+   "county": "Orleans County",
+   "lat": 43.13209,
+   "lng": -77.99485
+  },
+  {
+   "name": "Orleans County \u2014 a point near its county line",
+   "county": "Orleans County",
+   "lat": 43.36436,
+   "lng": -77.99365
+  },
+  {
+   "name": "Oswego County \u2014 a point near its county line",
+   "county": "Oswego County",
+   "lat": 43.27402,
+   "lng": -76.1972
+  },
+  {
+   "name": "Oswego County \u2014 a point near its county line",
+   "county": "Oswego County",
+   "lat": 43.25759,
+   "lng": -76.5961
+  },
+  {
+   "name": "Otsego County \u2014 a point near its county line",
+   "county": "Otsego County",
+   "lat": 42.86151,
+   "lng": -75.13529
+  },
+  {
+   "name": "Otsego County \u2014 a point near its county line",
+   "county": "Otsego County",
+   "lat": 42.4545,
+   "lng": -74.99033
+  },
+  {
+   "name": "Putnam County \u2014 a point near its county line",
+   "county": "Putnam County",
+   "lat": 41.32669,
+   "lng": -73.97637
+  },
+  {
+   "name": "Putnam County \u2014 a point near its county line",
+   "county": "Putnam County",
+   "lat": 41.49032,
+   "lng": -73.92662
+  },
+  {
+   "name": "Queens County \u2014 a point near its county line",
+   "county": "Queens County",
+   "lat": 40.77579,
+   "lng": -73.74704
+  },
+  {
+   "name": "Queens County \u2014 a point near its county line",
+   "county": "Queens County",
+   "lat": 40.68852,
+   "lng": -73.86207
+  },
+  {
+   "name": "Rensselaer County \u2014 a point near its county line",
+   "county": "Rensselaer County",
+   "lat": 42.842,
+   "lng": -73.67327
+  },
+  {
+   "name": "Rensselaer County \u2014 a point near its county line",
+   "county": "Rensselaer County",
+   "lat": 42.95319,
+   "lng": -73.42986
+  },
+  {
+   "name": "Richmond County \u2014 a point near its county line",
+   "county": "Richmond County",
+   "lat": 40.50721,
+   "lng": -74.23541
+  },
+  {
+   "name": "Richmond County \u2014 a point near its county line",
+   "county": "Richmond County",
+   "lat": 40.64811,
+   "lng": -74.07444
+  },
+  {
+   "name": "Rockland County \u2014 a point near its county line",
+   "county": "Rockland County",
+   "lat": 41.00029,
+   "lng": -73.8974
+  },
+  {
+   "name": "Rockland County \u2014 a point near its county line",
+   "county": "Rockland County",
+   "lat": 41.13834,
+   "lng": -74.23859
+  },
+  {
+   "name": "Saratoga County \u2014 a point near its county line",
+   "county": "Saratoga County",
+   "lat": 43.27651,
+   "lng": -73.60634
+  },
+  {
+   "name": "Saratoga County \u2014 a point near its county line",
+   "county": "Saratoga County",
+   "lat": 42.89982,
+   "lng": -73.68032
+  },
+  {
+   "name": "Schenectady County \u2014 a point near its county line",
+   "county": "Schenectady County",
+   "lat": 42.94765,
+   "lng": -74.05776
+  },
+  {
+   "name": "Schenectady County \u2014 a point near its county line",
+   "county": "Schenectady County",
+   "lat": 42.91281,
+   "lng": -73.98011
+  },
+  {
+   "name": "Schoharie County \u2014 a point near its county line",
+   "county": "Schoharie County",
+   "lat": 42.37812,
+   "lng": -74.24521
+  },
+  {
+   "name": "Schoharie County \u2014 a point near its county line",
+   "county": "Schoharie County",
+   "lat": 42.75276,
+   "lng": -74.67114
+  },
+  {
+   "name": "Schuyler County \u2014 a point near its county line",
+   "county": "Schuyler County",
+   "lat": 42.46861,
+   "lng": -76.88385
+  },
+  {
+   "name": "Schuyler County \u2014 a point near its county line",
+   "county": "Schuyler County",
+   "lat": 42.25068,
+   "lng": -76.68411
+  },
+  {
+   "name": "Seneca County \u2014 a point near its county line",
+   "county": "Seneca County",
+   "lat": 42.75686,
+   "lng": -76.74247
+  },
+  {
+   "name": "Seneca County \u2014 a point near its county line",
+   "county": "Seneca County",
+   "lat": 42.55558,
+   "lng": -76.89521
+  },
+  {
+   "name": "St. Lawrence County \u2014 a point near its county line",
+   "county": "St. Lawrence County",
+   "lat": 44.09488,
+   "lng": -75.16333
+  },
+  {
+   "name": "St. Lawrence County \u2014 a point near its county line",
+   "county": "St. Lawrence County",
+   "lat": 44.51734,
+   "lng": -75.75651
+  },
+  {
+   "name": "Steuben County \u2014 a point near its county line",
+   "county": "Steuben County",
+   "lat": 42.581,
+   "lng": -77.36592
+  },
+  {
+   "name": "Steuben County \u2014 a point near its county line",
+   "county": "Steuben County",
+   "lat": 42.27764,
+   "lng": -77.0984
+  },
+  {
+   "name": "Suffolk County \u2014 a point near its county line",
+   "county": "Suffolk County",
+   "lat": 41.03012,
+   "lng": -71.92248
+  },
+  {
+   "name": "Suffolk County \u2014 a point near its county line",
+   "county": "Suffolk County",
+   "lat": 40.66367,
+   "lng": -73.41691
+  },
+  {
+   "name": "Sullivan County \u2014 a point near its county line",
+   "county": "Sullivan County",
+   "lat": 41.46394,
+   "lng": -74.89803
+  },
+  {
+   "name": "Sullivan County \u2014 a point near its county line",
+   "county": "Sullivan County",
+   "lat": 41.81277,
+   "lng": -75.07843
+  },
+  {
+   "name": "Tioga County \u2014 a point near its county line",
+   "county": "Tioga County",
+   "lat": 42.05464,
+   "lng": -76.54786
+  },
+  {
+   "name": "Tioga County \u2014 a point near its county line",
+   "county": "Tioga County",
+   "lat": 42.00428,
+   "lng": -76.56246
+  },
+  {
+   "name": "Tompkins County \u2014 a point near its county line",
+   "county": "Tompkins County",
+   "lat": 42.29762,
+   "lng": -76.25365
+  },
+  {
+   "name": "Tompkins County \u2014 a point near its county line",
+   "county": "Tompkins County",
+   "lat": 42.55459,
+   "lng": -76.69822
+  },
+  {
+   "name": "Ulster County \u2014 a point near its county line",
+   "county": "Ulster County",
+   "lat": 41.59031,
+   "lng": -74.13023
+  },
+  {
+   "name": "Ulster County \u2014 a point near its county line",
+   "county": "Ulster County",
+   "lat": 42.01983,
+   "lng": -74.78324
+  },
+  {
+   "name": "Warren County \u2014 a point near its county line",
+   "county": "Warren County",
+   "lat": 43.29636,
+   "lng": -73.66223
+  },
+  {
+   "name": "Warren County \u2014 a point near its county line",
+   "county": "Warren County",
+   "lat": 43.72101,
+   "lng": -74.21326
+  },
+  {
+   "name": "Washington County \u2014 a point near its county line",
+   "county": "Washington County",
+   "lat": 43.27947,
+   "lng": -73.60364
+  },
+  {
+   "name": "Washington County \u2014 a point near its county line",
+   "county": "Washington County",
+   "lat": 42.957,
+   "lng": -73.42913
+  },
+  {
+   "name": "Wayne County \u2014 a point near its county line",
+   "county": "Wayne County",
+   "lat": 43.27418,
+   "lng": -77.37372
+  },
+  {
+   "name": "Wayne County \u2014 a point near its county line",
+   "county": "Wayne County",
+   "lat": 43.01607,
+   "lng": -77.12781
+  },
+  {
+   "name": "Westchester County \u2014 a point near its county line",
+   "county": "Westchester County",
+   "lat": 40.9996,
+   "lng": -73.65467
+  },
+  {
+   "name": "Westchester County \u2014 a point near its county line",
+   "county": "Westchester County",
+   "lat": 41.19277,
+   "lng": -73.92543
+  },
+  {
+   "name": "Wyoming County \u2014 a point near its county line",
+   "county": "Wyoming County",
+   "lat": 42.59042,
+   "lng": -78.04177
+  },
+  {
+   "name": "Wyoming County \u2014 a point near its county line",
+   "county": "Wyoming County",
+   "lat": 42.52971,
+   "lng": -78.30391
+  },
+  {
+   "name": "Yates County \u2014 a point near its county line",
+   "county": "Yates County",
+   "lat": 42.65911,
+   "lng": -76.89129
+  },
+  {
+   "name": "Yates County \u2014 a point near its county line",
+   "county": "Yates County",
+   "lat": 42.76534,
+   "lng": -76.94761
+  }
+ ],
+ "cross": [
+  {
+   "state": "NY",
+   "county": "Rockland County",
+   "lat": 41.00118,
+   "lng": -73.89784,
+   "across": "Bergen County"
+  },
+  {
+   "state": "NY",
+   "county": "Rockland County",
+   "lat": 41.12438,
+   "lng": -74.21013,
+   "across": "Bergen County"
+  },
+  {
+   "state": "NJ",
+   "county": "Bergen County",
+   "lat": 41.12083,
+   "lng": -74.21164,
+   "across": "Rockland County"
+  },
+  {
+   "state": "NJ",
+   "county": "Bergen County",
+   "lat": 40.99708,
+   "lng": -73.89914,
+   "across": "Rockland County"
+  },
+  {
+   "state": "NY",
+   "county": "Orange County",
+   "lat": 41.1404,
+   "lng": -74.24328,
+   "across": "Passaic County"
+  },
+  {
+   "state": "NY",
+   "county": "Orange County",
+   "lat": 41.19897,
+   "lng": -74.3716,
+   "across": "Passaic County"
+  },
+  {
+   "state": "NJ",
+   "county": "Passaic County",
+   "lat": 41.1932,
+   "lng": -74.37093,
+   "across": "Orange County"
+  },
+  {
+   "state": "NY",
+   "county": "Orange County",
+   "lat": 41.35147,
+   "lng": -74.69716,
+   "across": "Sussex County"
+  },
+  {
+   "state": "NY",
+   "county": "Orange County",
+   "lat": 41.19897,
+   "lng": -74.3716,
+   "across": "Sussex County"
+  },
+  {
+   "state": "NJ",
+   "county": "Sussex County",
+   "lat": 41.34758,
+   "lng": -74.7007,
+   "across": "Orange County"
+  },
+  {
+   "state": "NJ",
+   "county": "Sussex County",
+   "lat": 41.1953,
+   "lng": -74.37492,
+   "across": "Orange County"
+  }
+ ],
+ "gaps": []
+}

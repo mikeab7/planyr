@@ -60,6 +60,7 @@ import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Orego
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
+import { nyRaw, nyMap, NY_UNCOVERED } from "./nyParcels.js"; // NEW-1 (New York, 2026-10-20) — the New York county rows beyond the statewide public layer
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -991,6 +992,7 @@ const COUNTIES_RAW = {
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
+  ...nyRaw(), // NEW-1 (New York 2026-10-20) — ny_* county rows (the statewide public layer holds the other 38 counties)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
   ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
@@ -2929,6 +2931,10 @@ const COUNTIES_MAP_RAW = {
     // official ArcGIS Online mirror (org account NYSGIS_GPO, not a third party) instead, the
     // same "prefer the reliable AGOL copy" call this file already made for Fort Bend (FBCAD).
     // Covers the counties+NYC that opted in; a companion Footprint layer (not wired) names which.
+    // NEW-1 (2026-10-20) — MEASURED: the layer holds 38 of New York's 62 counties (the five NYC boroughs among them; its Footprint
+    // layer /0 names them, and a per-county count of /1 agrees). The other 24 are listed in nyParcels.js NY_UNCOVERED: a click there is
+    // never sent to this layer — it reaches that county's own row, or the honest "<County> — no parcel data wired here yet." sentence.
+    excludedCounties: NY_UNCOVERED,
     state: "NY", center: [42.9, -75.5], zoom: 6, mapServer: null, statewide: true,
     layerUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1",
   },
@@ -3053,6 +3059,7 @@ const COUNTIES_MAP_RAW = {
   ...gaMap(), // NEW-1 (B2316720)
   ...laMap(),
   ...ksMap(), // NEW-1 (B2348000)
+  ...nyMap(), // NEW-1 (New York 2026-10-20)
   ...moMap(),
   ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)

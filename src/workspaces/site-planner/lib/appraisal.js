@@ -401,8 +401,9 @@ export const APPR_FIELDS = [
   [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
+  // NEW-1 (New York, 2026-10-20) — + ^print_?key$ (the tax-map number) and ^swis_?sbl_?id$ (municipality code + section/block/lot, set on every NYS roll parcel): the statewide layer leaves MUNI_PARCEL_ID blank for NYC and part of Suffolk (874k lots), so without a fallback the card showed no parcel id.
   // B2191xxx — + sched_?num (Denver), parcel_?(number|no|num) (Clackamas), ^pin$/taxpin (Montgomery, Gwinnett), assess…_num (E. Baton Rouge)
-  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$)/i, "Account / ID"],
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$|^print_?key$|^swis_?sbl_?id$)/i, "Account / ID"],
   // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
   // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
   [/^county_?name$/i, "County"],
