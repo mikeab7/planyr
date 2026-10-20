@@ -183,6 +183,12 @@ export const ALLOWED_HOSTS = new Set([
   "arcserver.madisoncountyky.us", // Madison County KY GIS
   "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
   "webgis.bgky.org", // Warren County City-County Planning Commission (CCPC parcels)
+  /* NEW-2 (Kentucky remaining counties, 2026-10-20) — hosts of the retest / lead counties. MEASURED through this relay before any county is wired to one. */
+  "maps2.bgadd.org", // Bluegrass ADD — Boyle (BoyleParcelBoundary) and any sibling Bluegrass counties it hosts
+  "gis.ccgisonline.com:6443", // Clark County KY GIS (certificate / reachability retest)
+  "gis.daviesskypva.org", // Daviess County PVA (name-resolution retest)
+  /* PROBE-ONLY (remove before merge): read-only reconnaissance of vendor viewers / the state hub, to learn which queryable endpoint they call. */
+  "gis.equatorstudios.com", "qpublic.schneidercorp.com", "opengisdata.ky.gov",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
