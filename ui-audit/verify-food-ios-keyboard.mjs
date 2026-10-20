@@ -153,7 +153,7 @@ try {
     // ── 1. THE REPORTED FIELD: The Buffalo Grill → "+ Add a dish" → dish name (autoFocus) ────────
     await section(`${mode} 1`, async () => {
       const { ctx, page, errs } = await open(browser, `${FIX}?buffalo=1`, mode);
-      check(`[${mode}] 1 sheet opens at half with the Dishes · Sort row`, (await page.locator('[data-testid="food-dishes-sort"]').count()) === 1
+      check(`[${mode}] 1 sheet opens at half with the dish list ("+ Add a dish")`, (await page.locator('[data-testid="food-add-dish-btn"]').count()) === 1
         && (await page.locator('[data-testid="food-bottom-sheet"]').getAttribute("data-sheet-snap")) === "half");
       await page.locator('[data-testid="food-add-dish-btn"]').tap();
       await page.waitForTimeout(900); // autoFocus → keyboard
