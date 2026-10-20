@@ -27,6 +27,19 @@ const OID = (globalThis.crypto || (await import("node:crypto"))).randomUUID();
 const results = [];
 const record = (step, ok, detail) => { results.push({ step, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${step}${detail ? " — " + detail : ""}`); };
 
+
+// A hash-only goto sometimes leaves the app on the Map (measured twice, 2026-10-20) — retry with a reload rather than
+// reading a timeout as a product failure.
+async function openProject(page, base, id) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.goto(`${base}/${attempt ? `?_=${Date.now()}` : ""}#/project/${id}/site`, { waitUntil: "domcontentloaded" });
+    if (attempt) await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+    const ok = await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false);
+    if (ok) return;
+  }
+  throw new Error(`project ${id} never opened in the planner after 3 tries`);
+}
+
 const s = await openSignedIn({ base });
 const { page } = s;
 let gid = null, uid = null;
@@ -39,8 +52,7 @@ try {
   uid = await sb(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 
   // ---- throwaway project (+ New project, rename → materialises the sites row) ----
-  await page.goto(`${base}/#/project/e2e-fixture/site`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 60000 });
+  await openProject(page, base, "e2e-fixture");
   const crumb = () => page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first();
   await crumb().click();
   await page.getByTestId("project-new").click();
@@ -74,8 +86,7 @@ try {
   if (!seeded.ok) throw new Error("fixture failed");
 
   // ---- A. All comps list: no deleted-site-plans section; comps' own Recently deleted still there (known-good arm) ----
-  await page.goto(`${base}/#/project/e2e-fixture/site`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 60000 });
+  await openProject(page, base, "e2e-fixture");
   await page.locator('[data-testid="dashboard-crumb"]:visible').click();
   await page.locator('[data-testid="map-toolbar-draw"]:visible').waitFor({ timeout: 30000 });
   await page.locator("button", { hasText: /^Records/ }).first().click();
@@ -86,8 +97,7 @@ try {
   await page.screenshot({ path: OUT + "deleted-site-plans-01-all-comps.png" });
 
   // ---- B. the plan menu of the throwaway project lists it ----
-  await page.goto(`${base}/#/project/${gid}/site`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 60000 });
+  await openProject(page, base, gid);
   await page.getByTestId("plan-crumb").click();
   const fileRow = page.getByTestId("deleted-site-plan-file").filter({ hasText: FILE });
   await fileRow.waitFor({ state: "visible", timeout: 20000 }).catch(() => {});

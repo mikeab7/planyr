@@ -234,17 +234,17 @@ function missingLast(list, valueOf, dir) {
   return rows.map((r) => r.comp);
 }
 
+const executedMs = (c) => (c.compDate ? Date.parse(String(c.compDate).slice(0, 10)) : null);
+
 /** A NEW array in `key` order. The incoming array is assumed to be in recency order already (the
  * panel's list is `sortCompsByRecency` output), which is what ties fall back to. */
 export function sortComps(comps, key = "newest") {
   const list = [...(comps || [])];
   switch (normalizeSort(key)) {
-    case "newest": return sortCompsByRecency(list);
-    case "oldest": {
-      // Executed-date ascending; an undated comp always sorts to the END.
-      const dated = (c) => (c.compDate ? Date.parse(String(c.compDate).slice(0, 10)) : null);
-      return missingLast(sortCompsByRecency(list), dated, "asc");
-    }
+    // Executed-date order both ways; an undated comp always sorts to the END (owner, 2026-10-20),
+    // so Newest is recency order with the undated comps (themselves by Date entered) moved last.
+    case "newest": return missingLast(sortCompsByRecency(list), executedMs, "desc");
+    case "oldest": return missingLast(sortCompsByRecency(list), executedMs, "asc");
     case "largest": return missingLast(sortCompsByRecency(list), compSizeSf, "desc");
     case "smallest": return missingLast(sortCompsByRecency(list), compSizeSf, "asc");
     case "rateHigh": return missingLast(sortCompsByRecency(list), leaseAnnualRate, "desc");

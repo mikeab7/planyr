@@ -170,6 +170,7 @@ try {
   await setSort("rateLow"); ok("sort Rate low→high: a Lease first, non-leases last", (await titles())[0].includes("Lease"));
   await setSort("psfHigh"); ok("sort Price/SF high→low runs", (await titles()).length === 7);
   await setSort("oldest"); ok("sort Oldest: undated last", (await titles()).at(-1) === T("Lease C undated"), (await titles()).at(-1));
+  await setSort("newest"); ok("sort Newest: undated last (B2367680)", (await titles()).at(-1) === T("Lease C undated") && (await titles())[0] !== T("Lease C undated"), (await titles()).join(" | "));
   await setSort("newest");
 
   // back-from-record keeps the view
