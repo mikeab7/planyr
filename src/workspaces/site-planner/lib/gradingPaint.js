@@ -246,15 +246,55 @@ export function surfaceValuesLattice(cells, { maxLevels = 60 } = {}) {
 export function contourLinesToFeet(res, L) {
   const toFt = (p) => ({ x: L.x0 + p[0] * L.dx, y: L.y0 + p[1] * L.dy });
   const f = (v) => Math.round(v * 100) / 100;
-  const levels = (res.levels || []).map((lv) => ({
-    level: lv.level, isIndex: lv.isIndex,
-    d: lv.lines.map((line) => line.map((p, i) => { const q = toFt(p); return `${i ? "L" : "M"}${f(q.x)} ${f(q.y)}`; }).join("")).join(""),
-  }));
+  const spFt = (cells) => (Number.isFinite(cells) ? cells * L.dx : Infinity);
+  const levels = (res.levels || []).map((lv) => {
+    // ROUND 6 (NEW-1): each piece keeps its own path and its contour spacing (feet between adjacent contours of this
+    // interval along it), so the canvas can thin a band whose lines would touch at the zoom drawn (`planContourDraw`)
+    const pieces = lv.lines.map((line, k) => ({
+      d: line.map((p, i) => { const q = toFt(p); return `${i ? "L" : "M"}${f(q.x)} ${f(q.y)}`; }).join(""),
+      spacingFt: spFt(lv.spacing ? lv.spacing[k] : Infinity), lenFt: polylineLengthPx(line) * L.dx,
+    }));
+    return { level: lv.level, isIndex: lv.isIndex, d: pieces.map((pc) => pc.d).join(""), pieces };
+  });
   const labels = (res.labels || []).map((lb) => ({ pt: toFt([lb.px, lb.py]), level: lb.level, text: String(Math.round(lb.level)),
-    angle: Number.isFinite(lb.angle) ? lb.angle : 0, lenFt: Number.isFinite(lb.lenCells) ? lb.lenCells * L.dx : null }));
+    angle: Number.isFinite(lb.angle) ? lb.angle : 0, lenFt: Number.isFinite(lb.lenCells) ? lb.lenCells * L.dx : null, spacingFt: spFt(lb.spacingCells) }));
   const toRing = (r) => r.map((p) => toFt(p));
   const daylight = res.daylight ? { rings: (res.daylight.rings || []).map(toRing), holes: (res.daylight.holes || []).map(toRing) } : null;
   return { levels, labels, daylight };
+}
+const polylineLengthPx = (line) => { let t = 0; for (let i = 1; i < line.length; i++) t += Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]); return t; };
+
+/* ROUND 6 (NEW-1) — DENSITY AND WEIGHT BY ZOOM. The traced set is always the full 1 ft (or the existing layer's) interval;
+ * WHAT IS DRAWN depends on the zoom: with the parcel filling the map (`rppf` under `indexOnlyBelowPpf`) only the index
+ * contours (every 5th) at a thin weight; with the building filling the map every level, intermediates hairline and index
+ * one step heavier. And two adjacent contours never touch on screen: a piece whose spacing × rppf is under `minPitchPx`
+ * is drawn only at the next coarser multiple of the interval that clears it (that band drops to 2 ft, 5 ft, 10 ft, …),
+ * so a steep bank reads as distinct parallel lines, never a fill. Pure, keyed on the zoom scalar only (VIEW-INDEPENDENT-ONCE). */
+export const CONTOUR_DRAW = Object.freeze({ minPitchPx: 4, indexOnlyBelowPpf: 1.0, multiples: [1, 2, 5, 10, 20, 50, 100], indexEvery: 5, thinPx: 0.9, hairPx: 0.55, indexPx: 1.3 });
+export function contourMultiple(spacingFt, rppf, { minPitchPx = CONTOUR_DRAW.minPitchPx, indexOnlyBelowPpf = CONTOUR_DRAW.indexOnlyBelowPpf, multiples = CONTOUR_DRAW.multiples, indexEvery = CONTOUR_DRAW.indexEvery } = {}) {
+  const floor = rppf < indexOnlyBelowPpf ? indexEvery : 1;
+  let m = multiples[multiples.length - 1];
+  for (const k of multiples) {
+    if (k < floor) continue;
+    if (!(spacingFt > 0) || !Number.isFinite(spacingFt) || spacingFt * k * rppf >= minPitchPx) { m = k; break; }
+  }
+  return m;
+}
+export function planContourDraw(contours, rppf, opts = {}) {
+  if (!contours || !contours.levels || !contours.levels.length || !(rppf > 0)) return { levels: [], labels: [], indexOnly: false, weights: { inter: CONTOUR_DRAW.hairPx, index: CONTOUR_DRAW.indexPx } };
+  const interval = contours.interval > 0 ? contours.interval : 1;
+  const indexOnly = rppf < (opts.indexOnlyBelowPpf ?? CONTOUR_DRAW.indexOnlyBelowPpf);
+  const weights = indexOnly ? { inter: CONTOUR_DRAW.thinPx, index: CONTOUR_DRAW.thinPx } : { inter: CONTOUR_DRAW.hairPx, index: CONTOUR_DRAW.indexPx };
+  const step = (level) => Math.round(level / interval);
+  const shows = (level, spacingFt) => step(level) % contourMultiple(spacingFt, rppf, opts) === 0;
+  const levels = [];
+  for (const lv of contours.levels) {
+    const pieces = lv.pieces || [{ d: lv.d, spacingFt: Infinity }];
+    const d = pieces.filter((pc) => shows(lv.level, pc.spacingFt)).map((pc) => pc.d).join("");
+    if (d) levels.push({ level: lv.level, isIndex: lv.isIndex, d, weight: lv.isIndex ? weights.index : weights.inter });
+  }
+  const labels = (contours.labels || []).filter((lb) => shows(lb.level, lb.spacingFt));
+  return { levels, labels, indexOnly, weights };
 }
 /* Feet rings → the lattice-pixel frame the worker traces in (the inverse of `contourLinesToFeet`'s mapping). */
 export const ringsToLatticePx = (rings, L) => (rings || []).map((r) => r.map((p) => [(p.x - L.x0) / L.dx, (p.y - L.y0) / L.dy]));

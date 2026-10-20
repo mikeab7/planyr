@@ -30,7 +30,7 @@ import {
   spotElevationsFor, courtDropReadout, padCornerSpots, padCorners, ringSf,
 } from "../lib/buildingGrade.js";
 import { loadTerrain } from "../lib/terrainLazy.js";
-import { LIMIT_MODE_LABEL, clipRegions, unionRings, subtractRings, bufferRings } from "../lib/gradingLimit.js";
+import { LIMIT_MODE_LABEL, unionRings, bufferRings } from "../lib/gradingLimit.js";
 import {
   suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps,
   balanceClause, dockClause, rockClause, depthClause, floorClause, composeBasis,
@@ -520,13 +520,11 @@ export default function GradingController({ input, onModel }) {
         if (my !== cSeq.current) return;
         // the daylight line in lat/lng, for the existing contour layer (drawn OUTSIDE it, by the same clipper)
         const feet = contourLinesToFeet(r, L);
-        // the existing Contour-lines layer is cut OUTSIDE the graded area: the traced daylight line (layout), or that
-        // area clipped to the setback (boundary — the graded field runs half a cell past the line it is cut at)
+        // the existing Contour-lines layer is cut OUTSIDE the graded area: the traced daylight line (layout), or — ROUND 6 (NEW-2),
+        // boundary mode — the limit itself, exactly: inside the setback everything is graded, so the setback line and its pond /
+        // buffer holes are the one ring both families are cut by (nothing existing inside it, nothing proposed outside it)
         let graded = feet.daylight;
-        if (graded && L.clipRings && L.clipRings.length) {
-          const regions = clipRegions(subtractRings(unionRings(graded.rings), graded.holes), L.clipRings, L.clipHoles || []);
-          graded = { rings: regions.map((q) => q.outer), holes: regions.flatMap((q) => q.holes) };
-        }
+        if (L.clipRings && L.clipRings.length) graded = { rings: L.clipRings, holes: L.clipHoles || [] };
         const toLL = (ring) => ring.map((p) => feetToLatLngPair(p, origin.lat, origin.lon));
         const clipLatLng = origin && graded ? { rings: graded.rings.map(toLL), holes: graded.holes.map(toLL) } : null;
         feet.daylight = graded;

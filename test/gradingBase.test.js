@@ -26,6 +26,13 @@ describe("gradingCfg", () => {
     expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false, paper: true });
     expect(GRADING_DEFAULTS.shoulderFt).toBe(5);
   });
+  it("ROUND 6: the open-ground slope defaults to 2%, a typed value rides into the engine pack, a negative one is refused", () => {
+    expect(GRADING_DEFAULTS.openGroundSlopePct).toBe(2);
+    expect(gradingCfg(undefined).openGroundSlopePct).toBe(2);
+    expect(gradingCfg({ openGroundSlopePct: 3.5 }).openGroundSlopePct).toBe(3.5);
+    expect(gradingCfg({ openGroundSlopePct: -1 }).openGroundSlopePct).toBe(2);
+    expect(gradingPack(gradingCfg({ openGroundSlopePct: 3.5 }), { rings: [], holes: [] }).openGroundSlopePct).toBe(3.5);
+  });
 });
 
 describe("gradingSetback — the existing setback feature, else the property line", () => {
