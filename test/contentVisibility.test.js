@@ -15,6 +15,7 @@ import {
   groupState, setVisible, setManyVisible, showAll, anyHidden, hiddenKeys,
   groupsFor, hiddenSummary, normalizeRetiredToggles,
 } from "../src/workspaces/site-planner/lib/contentVisibility.js";
+import { floodMasterState } from "../src/workspaces/site-planner/lib/floodGroup.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Recursive source walk (js/jsx only) — used by the "nothing writes the retired toggle" guard.
@@ -92,14 +93,15 @@ describe("groupState is the flood-master shape, stated in terms of SHOWN", () =>
     expect(groupState({}, []).all).toBe(false);
   });
 
-  it("⛔ matches LayerPanel's floodMaster contract — the two masters are ONE idea", () => {
-    /* If the flood row's shape changes, this fails and the two are reconciled deliberately rather
-     * than drifting into two mechanisms that look different for no reason. */
-    const src = readFileSync(resolve(here, "../src/workspaces/site-planner/components/LayerPanel.jsx"), "utf8");
-    expect(src).toMatch(/floodMaster\.all/);
-    expect(src).toMatch(/floodMaster\.any/);
-    expect(src).toMatch(/floodMaster\.onCount/);
-    expect(src).toMatch(/floodMaster\.ids/);
+  it("⛔ matches the flood group's master contract — the two masters are ONE idea", () => {
+    /* If the shape changes, this fails and the two are reconciled deliberately rather than drifting into two
+     * mechanisms that look different for no reason. NEW-1 (Imagery & Layers): the Layers panel no longer renders a
+     * "Show all flood & drainage" master row (owner), so the contract is checked against the pure function that
+     * defined it (floodGroup.floodMasterState) instead of the panel's source. */
+    const flood = floodMasterState([{ rows: [["a", {}]] }], { a: { on: true } });
+    expect(Object.keys(flood).sort()).toEqual(["all", "any", "ids", "onCount"]);
+    expect(flood).toEqual({ ids: ["a"], onCount: 1, all: true, any: true });
+    expect(groupState({}, ["a"])).toEqual(flood); // same shape, same meaning (SHOWN count) for a visible key
     expect(Object.keys(groupState({}, ["a"])).sort()).toEqual(["all", "any", "ids", "onCount"]);
   });
 });

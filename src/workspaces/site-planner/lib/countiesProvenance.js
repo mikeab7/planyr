@@ -18,15 +18,19 @@ import { IDAHO_VERIFICATION } from "./idProvenance.js"; // NEW-1 (B2317920)
 import { GEORGIA_VERIFICATION } from "./gaProvenance.js"; // NEW-1 (B2316720)
 import { LOUISIANA_VERIFICATION } from "./laProvenance.js"; // NEW-1 (Louisiana 2026-10-19)
 import { MISSOURI_VERIFICATION } from "./moProvenance.js"; // NEW-1 (B2317680)
+import { MICHIGAN_VERIFICATION } from "./miProvenance.js"; // NEW-1 (Michigan, 2026-10-20)
+import { SOUTH_CAROLINA_VERIFICATION } from "./scProvenance.js"; // NEW-1 (South Carolina 2026-10-19)
 import { PENNSYLVANIA_VERIFICATION } from "./paProvenance.js"; // NEW-1 (Pennsylvania, 2026-10-19)
 import { ILLINOIS_VERIFICATION } from "./ilProvenance.js"; // NEW-1 (B2372624)
 import { WASHINGTON_VERIFICATION } from "./waProvenance.js"; // NEW-1 (B2349360)
 import { OREGON_VERIFICATION } from "./orProvenance.js"; // NEW-1 (B2347696)
 import { OKLAHOMA_VERIFICATION } from "./okProvenance.js"; // NEW-1 (Oklahoma)
 import { ARIZONA_VERIFICATION } from "./azProvenance.js"; // NEW-1 (B2365360)
+import { NEW_YORK_VERIFICATION } from "./nyProvenance.js"; // NEW-1 (New York, 2026-10-20)
 import { NEWMEXICO_VERIFICATION } from "./nmProvenance.js"; // NEW-1 (B2345888)
 import { KANSAS_VERIFICATION } from "./ksProvenance.js"; // NEW-1 (B2348000)
 import { IOWA_VERIFICATION } from "./iaProvenance.js"; // NEW-1 (Iowa, 2026-10-19)
+import { KENTUCKY_VERIFICATION } from "./kyProvenance.js"; // NEW-1 (Kentucky)
 
 export const COUNTY_VERIFICATION = {
   ...ALABAMA_VERIFICATION,
@@ -35,15 +39,19 @@ export const COUNTY_VERIFICATION = {
   ...GEORGIA_VERIFICATION,
   ...LOUISIANA_VERIFICATION,
   ...MISSOURI_VERIFICATION,
+  ...MICHIGAN_VERIFICATION,
+  ...SOUTH_CAROLINA_VERIFICATION,
   ...PENNSYLVANIA_VERIFICATION,
   ...ILLINOIS_VERIFICATION,
   ...WASHINGTON_VERIFICATION,
   ...OREGON_VERIFICATION,
   ...OKLAHOMA_VERIFICATION,
   ...ARIZONA_VERIFICATION,
+  ...NEW_YORK_VERIFICATION,
   ...NEWMEXICO_VERIFICATION,
   ...KANSAS_VERIFICATION,
   ...IOWA_VERIFICATION,
+  ...KENTUCKY_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
@@ -687,7 +695,8 @@ export const COUNTY_VERIFICATION = {
   ky_jefferson: {
     publisher: "own",
     publisherName: "LOJIC (Louisville/Jefferson County Information Consortium)",
-    verifiedNote: "gis.lojic.org is blocked by this build environment's egress policy. Endpoint, feature count (272ms/7 populated fields) and county provenance (LOJIC — the Louisville/Jefferson County Information Consortium's own open-data service) are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
+    verifiedOn: "2026-10-19",
+    verifiedNote: "MEASURED 2026-10-19 through the Cloudflare preview of planyr.io/gis-proxy (gis.lojic.org is unreachable from the sandbox, and was never probed before): 4/5 spread interior points and 2/4 points ~300 m inside the county line returned a parcel polygon with PARCELID / LRSN; misses fall on river and road right-of-way. LOJIC's open-data layer carries no owner or address column.",
   },
   ms_desoto: {
     publisher: "third-party",

@@ -599,6 +599,17 @@ button { transition: filter .12s ease, background-color .12s ease, border-color 
 button:hover:not(:disabled) { filter: brightness(.97); }
 button:active:not(:disabled) { transform: translateY(0.5px); }
 button:disabled { opacity: .45; cursor: default; }
+/* CURSOR CONVENTION (docs/DESIGN.md "Cursor convention"): a disabled control shows the default arrow — never a
+   pointer, never not-allowed. !important so an INLINE `cursor: pointer` on a caller's button can't survive disabled
+   (inline beats a plain stylesheet rule — the most common defect in the 2026-10-19 audit). A control that is disabled
+   because it is WORKING says so with aria-busy="true" and shows progress. */
+button:disabled, input:disabled, select:disabled, textarea:disabled, [aria-disabled="true"], label:has(> input:disabled) { cursor: default !important; }
+button:disabled[aria-busy="true"], [aria-disabled="true"][aria-busy="true"] { cursor: progress !important; }
+/* Native checkbox / radio / select / range show the pointer app-wide (enabled only; the disabled rule above wins). */
+input[type="checkbox"]:enabled, input[type="radio"]:enabled, input[type="range"]:enabled, select:enabled, input[type="color"]:enabled, input[type="file"]:enabled { cursor: pointer; }
+input[type="range"]:enabled:active { cursor: grabbing; }
+/* Food: Drop-a-pin is armed — crosshair over the map and the pins on it (the armed mode owns the cursor). */
+.food-pin-mode, .food-pin-mode * { cursor: crosshair !important; }
 /* Menu items express "disabled" through a muted TEXT TOKEN (set inline), never a fade — the
    house rule forbids opacity-as-hierarchy (B925). Reset the global disabled fade for menu rows
    so the token color isn't double-dimmed into illegibility. */

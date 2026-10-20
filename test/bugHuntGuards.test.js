@@ -26,7 +26,9 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   it("B508: LayerPanel relevance control uses theme tokens, not hardcoded hex", () => {
     const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
     expect(src).not.toMatch(/#3b3a36|#fbfaf6|#b45309/);                       // the old hardcoded warm-dark hexes
-    expect(src).toMatch(/active \? "var\(--accent\)" : "transparent"/);       // tokenized active fill
+    // NEW-1 (Imagery & Layers): the relevance control is the shared SegmentedControl primitive now — its active fill is
+    // the primitive's own `var(--accent)` token, so the panel carries no fill of its own to hardcode.
+    expect(src).toMatch(/<SegmentedControl options=\{RELEVANCE_OPTIONS\}/);
     expect(src).toMatch(/var\(--warn-text\)/);                               // warn text stays a theme token (out-of-coverage caption)
     // B760 moved the stale stamp behind the per-row ⓘ: the stale → "warn" tone is decided in
     // the pure layerPanelInfo module and RowInfo renders that tone with the --warn-text token.
@@ -239,7 +241,10 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
 
   it("B557: LayerPanel group + reveal toggles announce aria-expanded", () => {
     const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
-    expect(src).toMatch(/aria-expanded=\{!collapsed\[g\]\}/);
+    // NEW-1 (Imagery & Layers): the collapsible groups became a two-pane tablist (selected → aria-selected) and each row's
+    // ▾ announces aria-expanded; the "no local data here" reveal keeps its own aria-expanded.
+    expect(src).toMatch(/aria-selected=\{on\}/);
+    expect(src).toMatch(/aria-expanded=\{open\}/);
     expect(src).toMatch(/aria-expanded=\{!!revealHidden\[groupKey\]\}/);
   });
 

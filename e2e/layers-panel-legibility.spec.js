@@ -14,6 +14,7 @@
  * no external GIS — so they are Claude-verifiable here, not parked for a live pass.
  */
 import { test, expect } from "@playwright/test";
+import { panelSel, openPlannerLayers, groupKeys, selectGroup, setLayer } from "./lib/layersPanel.js";
 import fs from "node:fs";
 
 const LAT = 29.735, LON = -94.977; // Goose Creek / Baytown
@@ -36,13 +37,15 @@ const SHOTS = "test-results/new34";
 async function openPlanner(page) {
   await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (route) => route.abort());
   await page.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [SITE.id]: SITE }));
+  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/#/site-planner", { waitUntil: "load" });
   await page.getByText("NEW34 Legibility", { exact: false }).first().click();
   await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
   await page.waitForTimeout(800);
-  await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).first().click();
-  const panel = page.getByTestId("layer-panel").filter({ visible: true }).first();
+  // NEW-1 (Imagery & Layers): the card opens through its own chip; the panel is two panes, so a spec that reads "the rows" reads one group at a time.
+  await openPlannerLayers(page);
+  const panel = page.locator(panelSel("planner")).first();
   await expect(panel).toBeVisible();
   return panel;
 }
@@ -112,102 +115,83 @@ test.describe("NEW-3 — the panel stops fighting the map", () => {
     expect(covered, `map chrome is painting over the open Layers panel at ${JSON.stringify(covered).slice(0, 400)}`).toEqual([]);
   });
 
-  test("every row is ONE line, and nothing is clipped by the panel edge", async ({ page }) => {
+  test("every row is ONE line, and nothing is clipped by the panel edge — in every group", async ({ page }) => {
     const panel = await openPlanner(page);
-    // "FEMA flood zones" wrapping to two lines and losing its chip was the specific report.
-    const bad = await panel.evaluate((root) => {
-      const out = [];
-      const scroller = root.closest('[data-wheelscroll="1"]') || root.parentElement;
-      const sBox = scroller.getBoundingClientRect();
-      for (const cb of root.querySelectorAll('input[type="checkbox"]')) {
-        const label = cb.closest("label");
-        if (!label) continue;
-        const span = label.querySelector("span");
-        if (!span) continue;
-        const r = span.getBoundingClientRect();
-        const oneLine = r.height <= 22; // a wrapped row is roughly double
-        if (!oneLine) out.push({ why: "wrapped", text: span.textContent.trim().slice(0, 40), h: Math.round(r.height) });
-        // Nothing on the row may extend past the scroller's right edge (where overflow clips it).
-        const row = label.parentElement;
-        const rr = row.getBoundingClientRect();
-        if (rr.right > sBox.right + 1) out.push({ why: "clipped", text: span.textContent.trim().slice(0, 40) });
-      }
-      return out;
-    });
-    expect(bad, `rows wrapping or clipped: ${JSON.stringify(bad).slice(0, 400)}`).toEqual([]);
+    // "FEMA flood zones" wrapping to two lines and losing its chip was the specific report; the redesign keeps the promise for EVERY group.
+    const bad = [];
+    for (const key of await groupKeys(panel)) {
+      await selectGroup(panel, key);
+      bad.push(...await panel.evaluate((root, group) => {
+        const out = [];
+        const scroller = root.closest('[data-wheelscroll="1"]') || root.parentElement;
+        const sBox = scroller.getBoundingClientRect();
+        for (const row of root.querySelectorAll('[data-testid^="layer-row-"]:not([data-testid$="-menu"])')) {
+          const line = row.firstElementChild;
+          const name = row.querySelector("label span[title]");
+          if (!line || !name) continue;
+          if (line.getBoundingClientRect().height > 34) out.push({ group, why: "wrapped", text: name.textContent.trim().slice(0, 40) });
+          if (name.scrollWidth > name.clientWidth + 1) out.push({ group, why: "ellipsised", text: name.textContent.trim().slice(0, 40) });
+          if (line.getBoundingClientRect().right > sBox.right + 1) out.push({ group, why: "clipped", text: name.textContent.trim().slice(0, 40) });
+        }
+        return out;
+      }, key));
+    }
+    expect(bad, `rows wrapping, ellipsised or clipped: ${JSON.stringify(bad).slice(0, 400)}`).toEqual([]);
   });
 
-  test("the list shows many more than four rows, and group headers stay put while scrolling", async ({ page }) => {
+  test("the group list stays put while a long group's rows scroll", async ({ page }) => {
     const panel = await openPlanner(page);
-    const visibleRows = await panel.evaluate((root) => {
-      const scroller = root.closest('[data-wheelscroll="1"]') || root.parentElement;
-      const s = scroller.getBoundingClientRect();
-      let n = 0;
-      for (const cb of root.querySelectorAll('input[type="checkbox"]')) {
-        const r = cb.getBoundingClientRect();
-        if (r.top >= s.top - 1 && r.bottom <= s.bottom + 1) n++;
-      }
-      return n;
-    });
-    // The owner counted about four. Anything in double figures is a different panel.
-    expect(visibleRows, "rows visible without scrolling").toBeGreaterThanOrEqual(10);
-
-    // The group header is sticky, so scrolling the list does not scroll it out of the scrollport.
-    /* ⛔ This must PROVE the list actually scrolled first. The first version did not, and it
-     * passed with the sticky rule removed — because a panel tall enough to need no scrolling
-     * leaves the header where it was and the check succeeded for the wrong reason. A guard that
-     * cannot distinguish "sticky" from "nothing moved" is not a guard. */
+    await selectGroup(panel, "flood"); // the longest group
+    /* ⛔ This must PROVE the list actually scrolled first (the old header-stickiness guard passed with the rule removed, because a panel
+     * tall enough to need no scrolling leaves the header where it was). A guard that cannot tell "sticky" from "nothing moved" is not one. */
     const stuck = await panel.evaluate((root) => {
-      // The scroller is the panel root's own scrolling ancestor — find it by asking which
-      // ancestor actually has `overflow-y: auto`, rather than assuming a particular wrapper.
       let scroller = root.parentElement;
       while (scroller && getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement;
       if (!scroller) return { ok: false, why: "no scrolling ancestor" };
-      const hdr = root.querySelector(".pf-sticky-group-hdr");
-      if (!hdr) return { ok: false, why: "no sticky header element" };
-      // Collapse the box so the list MUST overflow, then scroll it for real.
-      scroller.style.maxHeight = "180px";
-      scroller.style.height = "180px";
-      const first = root.querySelector('input[type="checkbox"]');
-      const rowBefore = first ? first.getBoundingClientRect().top : null;
-      scroller.scrollTop = 300;
+      const nav = root.querySelector('[data-testid="layer-group-nav"]');
+      if (!nav) return { ok: false, why: "no group list" };
+      // Shorter than the content, but taller than the group list itself (a list taller than its box cannot stick whole).
+      scroller.style.maxHeight = "270px";
+      scroller.style.height = "270px";
+      const first = root.querySelector('[data-testid^="layer-row-"] input[type="checkbox"]');
+      const rowBefore = first.getBoundingClientRect().top;
+      scroller.scrollTop = 50; // within the panel's own height — the card holds more below it, and a sticky list ends with its panel
       const s = scroller.getBoundingClientRect();
-      const rowAfter = first ? first.getBoundingClientRect().top : null;
-      const scrolled = scroller.scrollTop > 0 && rowBefore != null && Math.abs(rowAfter - rowBefore) > 20;
-      const after = hdr.getBoundingClientRect().top;
-      return { ok: scrolled && after >= s.top - 1 && after <= s.top + 4, scrolled, scrollTop: scroller.scrollTop,
-        after: Math.round(after), top: Math.round(s.top), rowMoved: rowBefore == null ? null : Math.round(rowAfter - rowBefore) };
+      const rowAfter = first.getBoundingClientRect().top;
+      const scrolled = scroller.scrollTop > 0 && Math.abs(rowAfter - rowBefore) > 10;
+      const after = nav.getBoundingClientRect().top;
+      return { ok: scrolled && after >= s.top - 1 && after <= s.top + 60, scrolled, after: Math.round(after), top: Math.round(s.top) };
     });
     expect(stuck.scrolled, `the list did not actually scroll, so stickiness was never exercised: ${JSON.stringify(stuck)}`).toBe(true);
-    expect(stuck.ok, `the group header scrolled out of the box instead of sticking: ${JSON.stringify(stuck)}`).toBe(true);
+    expect(stuck.ok, `the group list scrolled out of the box instead of sticking: ${JSON.stringify(stuck)}`).toBe(true);
   });
 });
 
 test.describe("NEW-4 — the plan stays the most legible thing on screen", () => {
-  test("one click turns every reference layer off, and leaves the plan and the ground alone", async ({ page }) => {
+  test("one click turns every reference layer off (⋯ menu), and leaves the plan and the ground alone", async ({ page }) => {
     const panel = await openPlanner(page);
+    const onIds = () => page.evaluate(() => (window.__plannerLayers ? window.__plannerLayers().on : []));
 
-    // Turn several layers on the way the owner would — by clicking their boxes.
-    const boxes = panel.locator('input[type="checkbox"]:not([disabled])');
-    const n = Math.min(6, await boxes.count());
-    for (let i = 0; i < n; i++) await boxes.nth(i).check({ force: true }).catch(() => {});
+    // Turn several layers on the way the owner would — by clicking their boxes, across groups.
+    for (const id of ["fema", "wetlands", "contours", "jur_county", "txdot_aadt"]) await setLayer(page, id, true).catch(() => {});
     await page.waitForTimeout(400);
-    const onBefore = await panel.locator('input[type="checkbox"]:checked').count();
-    expect(onBefore, "layers on before the sweep").toBeGreaterThan(0);
+    expect((await onIds()).length, "layers on before the sweep").toBeGreaterThan(0);
     await page.screenshot({ path: `${SHOTS}/after-layers-on.png` });
 
-    // THE ESCAPE HATCH — one control, named with the count it will clear.
-    const clear = page.getByTestId("layers-clear-all").filter({ visible: true }).first();
+    // THE ESCAPE HATCH — moved into the ⋯ menu (NEW-1, Imagery & Layers): "Turn all layers off", same sweep, no count bar.
+    await panel.getByTestId("layers-more").click();
+    const clear = page.getByTestId("layers-clear-all");
     await expect(clear).toBeVisible();
-    await expect(clear).toContainText(/Turn all \d+ layers? off/);
+    await expect(clear).toBeEnabled();
     await clear.click();
     await page.waitForTimeout(500);
 
-    expect(await panel.locator('input[type="checkbox"]:checked').count(), "every layer off after one click").toBe(0);
+    expect(await onIds(), "every layer off after one click").toEqual([]);
     // …and the plan is still there. The sweep clears reference data, never the drawing.
     await expect(page.getByTestId("planner-canvas")).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/after-cleared.png` });
-    // The control disappears once there is nothing left to clear — never dead chrome.
-    await expect(page.getByTestId("layers-clear-all")).toHaveCount(0);
+    // The menu item is disabled once there is nothing left to clear — never dead chrome that looks live.
+    await panel.getByTestId("layers-more").click();
+    await expect(page.getByTestId("layers-clear-all")).toBeDisabled();
   });
 });

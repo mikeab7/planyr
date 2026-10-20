@@ -28,7 +28,7 @@ import { decodeGrid } from "./lercGrid.js";
 // The marching-squares tracer is worker-only and is the only `d3-contour` consumer, so
 // it lives in its own module (B1095) — same reasoning as lercGrid.js above. Static here:
 // the worker is its own bundle, so it costs the page nothing.
-import { buildContours } from "./contourTrace.js";
+import { buildContours, buildProposedContours } from "./contourTrace.js";
 import { flowArrows } from "./flowField.js";
 // NEW-1 (owner-only grading layer): the buildable-ground sweep rides this same worker. Both modules
 // are pure (no DOM, no Leaflet) — buildableLattice resamples the site DEM onto the 10-ft feet lattice
@@ -76,17 +76,22 @@ function buildableJob(id, d) {
   self.postMessage({ id, ok: true, summary: sum, lattice: { x0: ctx.lattice.x0, y0: ctx.lattice.y0, nx: ctx.lattice.nx, ny: ctx.lattice.ny, cell: ctx.lattice.cell }, zMin: ctx.zMin, zMax: ctx.zMax });
 }
 
-/* ROUND 4 (B2349122) — PROPOSED contours: the same marching-squares tracer over the proposed surface's own lattice
- * (one value per cell, NaN = nothing proposed / a DEM void), so the proposed lines come off the surface the earthwork
- * priced, in the worker, never in a render. Lines come back in LATTICE PIXEL coordinates (the caller maps them to feet:
- * x = x0 + px·dx, y = y0 + py·dy). `interval` is the caller's (the existing layer's rule). */
+/* ROUND 4 (B2349122) / ROUND 5 — PROPOSED contours: marching squares (interpolated) over the proposed-surface CONTOUR
+ * LATTICE (proposedSurface.contourLatticeSteps: one value per cell — proposed inside the daylight line, existing ground
+ * outside it, NaN over a pond / a DEM void), clipped to the daylight line, cut out of the building pads, smoothed and
+ * labelled along the line (contourTrace.buildProposedContours) — in the worker, never in a render. Lines come back in
+ * LATTICE PIXEL coordinates (the caller maps them to feet: x = x0 + px·dx, y = y0 + py·dy); `clipRings` / `clipHoles` /
+ * `cutRings` arrive already in that frame. `interval` is the caller's (the existing layer's rule). */
 function proposedContoursJob(id, d) {
   const { values, nx, ny, interval } = d;
   const mask = new Uint8Array(nx * ny);
   const work = new Float32Array(nx * ny);
   for (let k = 0; k < mask.length; k++) { const v = values[k]; if (v === v) { mask[k] = 1; work[k] = v; } }
-  const c = buildContours({ values: work, mask, width: nx, height: ny }, { interval: interval > 0 ? interval : null, maxLevels: 400, labelCap: 200, labelArcCells: d.labelArcCells || 60, labelMinRunCells: d.labelMinRunCells || 6 });
-  self.postMessage({ id, ok: true, interval: c.interval, levels: c.levels, labels: c.labels });
+  const c = buildProposedContours({ values: work, mask, width: nx, height: ny }, {
+    interval: interval > 0 ? interval : 1, inside: d.inside || null, clipRings: d.clipRings || null, clipHoles: d.clipHoles || null, cutRings: d.cutRings || [],
+    smoothPasses: d.smoothPasses ?? 2, minPieceCells: d.minPieceCells ?? 1, labelMinCells: d.labelMinCells ?? 8,
+  });
+  self.postMessage({ id, ok: true, interval: c.interval, levels: c.levels, labels: c.labels, daylight: c.daylight });
 }
 
 self.onmessage = (e) => {
@@ -118,7 +123,7 @@ self.onmessage = (e) => {
     const c = buildContours({
       values: maskedSmooth(values, mask, width, height, sigmaC),
       mask, width, height,
-    }, { clip });
+    }, { clip, minInterval: opts.contourInterval > 0 ? opts.contourInterval : null });
     const contours = {
       interval: c.interval,
       levels: c.levels.map((l) => ({

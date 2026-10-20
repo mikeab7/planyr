@@ -55,11 +55,13 @@ describe("cityScopeAnswer — pure geometry (B1583296)", () => {
 });
 
 describe("Detroit wired as a CITY, not as Wayne County (B1583296)", () => {
-  it("mi_detroit is a real, distinct entry — never registered as wayne/mi_wayne", () => {
+  it("mi_detroit is a real, distinct entry — and Wayne County (wired 2026-10-20, NEW-1) is its OWN, different source", () => {
     expect(COUNTIES_MAP.mi_detroit).toBeTruthy();
     expect(COUNTIES.mi_detroit.layerUrl).toMatch(/Detroit_MP_Parcel_Authoritative/);
     expect(COUNTIES_MAP.wayne).toBeUndefined();
-    expect(COUNTIES_MAP.mi_wayne).toBeUndefined();
+    expect(COUNTIES_MAP.mi_wayne).toBeTruthy();
+    expect(COUNTIES.mi_wayne.layerUrl).not.toBe(COUNTIES.mi_detroit.layerUrl);
+    expect(COUNTIES_MAP.mi_wayne.cityScoped).toBeFalsy();
   });
 
   it("mi_detroit is flagged cityScoped so it never rides the blind per-state fallback", () => {
@@ -74,12 +76,12 @@ describe("Detroit wired as a CITY, not as Wayne County (B1583296)", () => {
     expect(candidateCountiesForPoint(...DOWNTOWN_DETROIT)).toEqual(["mi_detroit"]);
   });
 
-  it("Livonia and Taylor report NO SOURCE — never a query against the Detroit-only layer", () => {
+  it("Livonia and Taylor resolve to the WAYNE COUNTY source — never a query against the Detroit-only layer", () => {
     for (const pt of [LIVONIA, TAYLOR]) {
       const id = countyIdentity(...pt);
-      expect(id.status).toBe("no-source");
+      expect(id.status).toBe("ok");
       expect(id.state).toBe("MI");
-      expect(id.key).toBeNull();
+      expect(id.key).toBe("mi_wayne");
 
       // The whole point of the item: neither point may ever be handed mi_detroit as a candidate
       // to query, at any stage of candidateCountiesForPoint's resolution (bbox match, confident
@@ -119,22 +121,23 @@ describe("a Wayne County point never reaches Oakland County's service (B1597232)
   it.each([
     ["23555 Goddard Rd, Taylor (matched no county bbox)", GODDARD_RD_TAYLOR],
     ["33000 Civic Center Dr, Livonia (fell inside Oakland's padded bbox)", CIVIC_CENTER_LIVONIA],
-  ])("%s queries NOTHING — not Oakland, not Detroit, not anything", (_label, pt) => {
-    expect(candidateCountiesForPoint(...pt)).toEqual([]);
+  ])("%s queries ONLY the Wayne County source — not Oakland, not Detroit", (_label, pt) => {
+    expect(candidateCountiesForPoint(...pt)).toEqual(["mi_wayne"]);
   });
 
   it.each([
     ["Taylor", GODDARD_RD_TAYLOR],
     ["Livonia", CIVIC_CENTER_LIVONIA],
-  ])("%s is reported as a NAMED gap, so the empty list reads as a fact and not as a stall", (_label, pt) => {
+  ])("%s is attributed to Wayne County (wired 2026-10-20) — the list holds that one source", (_label, pt) => {
     const id = countyIdentity(...pt);
-    expect(id.status).toBe("no-source");
+    expect(id.status).toBe("ok");
+    expect(id.key).toBe("mi_wayne");
     expect(id.name).toBe("Wayne County");
     expect(id.state).toBe("MI");
     // Confidently inside Wayne — not a near-edge point where a wired neighbour may legitimately
     // own the lot, which is the one case that still keeps the old multi-candidate behaviour.
     expect(id.nearEdge).toBe(false);
-    expect(noParcelSourceNote(id)).toBe("Wayne County — no parcel data wired here yet.");
+    expect(noParcelSourceNote(id)).toBeNull();
   });
 
   it("THE CONTROL — 1 Woodward Ave still resolves to the Detroit city source ALONE", () => {

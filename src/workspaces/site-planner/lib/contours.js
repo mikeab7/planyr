@@ -11,6 +11,7 @@
  * Pure — no Leaflet, no DOM; unit-tested in plain node.
  */
 import { WEB_MERC_R, mercYToLat, groundScale } from "./demGrid.js";
+import { clipPolyline, pointInRings } from "./polylineClip.js";
 
 /* THE ONE PLACE a contour label's text is built. The unit is appended HERE and only
  * here, so no code path can ever produce "150 ft ft" by concatenating twice.
@@ -372,7 +373,7 @@ export function contourLineKey(ln) {
   const c = ln && ln.coords;
   if (!c || c.length < 2) return null;
   const a = c[0], b = c[c.length - 1], m = c[c.length >> 1];
-  return `L|${ln.level}|${c.length}|${a[0]},${a[1]}|${m[0]},${m[1]}|${b[0]},${b[1]}`;
+  return `L|${ln.level}|${c.length}|${a[0]},${a[1]}|${m[0]},${m[1]}|${b[0]},${b[1]}${ln.isIndex ? "|i" : ""}`;
 }
 
 /* A label's identity: its ground anchor + level (both already round6'd by the worker).
@@ -400,3 +401,15 @@ export function diffKeyedPaint(items, prevKeys) {
   if (prevKeys) for (const k of prevKeys.keys ? prevKeys.keys() : prevKeys) if (!seen.has(k)) remove.push(k);
   return { add, remove };
 }
+
+/* ROUND 5 (NEW-3) — the EXISTING contour lines cut OUTSIDE the graded area (`clip`: { rings, holes } of [lat,lng] pairs,
+ * the proposed surface's daylight line), by the same clipper the terrain worker cuts the proposed lines INSIDE it with
+ * (polylineClip.js), so a proposed contour of level E and the existing one of level E meet on the line. Pure. */
+export function clipContourLinesOutside(lines, clip) {
+  if (!clip || !clip.rings || !clip.rings.length) return lines;
+  const rings = [...clip.rings, ...(clip.holes || [])];
+  const out = [];
+  for (const ln of lines) for (const piece of clipPolyline(ln.coords, rings, { keepInside: false })) out.push({ ...ln, coords: piece });
+  return out;
+}
+export const labelInsideClip = (lab, clip) => !!(clip && clip.rings && clip.rings.length && pointInRings(lab.ll, [...clip.rings, ...(clip.holes || [])]));

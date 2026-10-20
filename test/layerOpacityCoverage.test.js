@@ -10,6 +10,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 
 import { ALL_LAYERS, defaultOverlayState } from "../src/workspaces/site-planner/lib/layers.js";
 import { buildGroupSlots } from "../src/workspaces/site-planner/lib/layerPanelInfo.js";
+import { panelGroupOf } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/" + rel, import.meta.url)), "utf8");
 
@@ -28,47 +29,50 @@ describe("NEW-2 — every toggleable GIS layer exposes opacity", () => {
     }
   });
 
-  it("every layer reaches a panel row — solo, composite, or merge slot — and no row shape is opacity-less", () => {
+  it("every layer reaches a panel row — solo or merge slot — and every row's dropdown carries the ONE Opacity control", () => {
     const panel = read("components/LayerPanel.jsx");
-    // Exactly ONE opacity control implementation, used by all three GIS row shapes plus the
-    // basemap's own Road names companion (B427410 ×3 — not a registered GIS layer, so it can't
-    // be reached through buildGroupSlots below, but it must still be the SAME slider, not a
-    // fourth one hand-rolled for one control).
-    expect((panel.match(/const opacityControl = /g) || []).length).toBe(1);
-    expect((panel.match(/opacityControl\(/g) || []).length).toBe(4); // solo · City-limits composite · merge group · Road names
+    // Exactly ONE Opacity control implementation (OpacityRow), rendered from the one row dropdown that every row shape —
+    // solo, merge group (Water & Sewer, Counties & Cities, Pipelines…) and the basemap's Road Names companion — goes through.
+    expect((panel.match(/^function OpacityRow\(/gm) || []).length).toBe(1);
+    expect((panel.match(/<OpacityRow /g) || []).length).toBe(1);
     // …and no row shape may hand-roll a second slider.
     expect(panel).not.toMatch(/<input type="range"[\s\S]{0,200}opacity: \+e\.target\.value/);
 
-    // Every layer is reachable through buildGroupSlots for its group (a merge member folds into
-    // its group's single slot, which carries the one slider that drives every member).
-    const groups = new Set(Object.values(ALL_LAYERS).map((c) => c.group).filter(Boolean));
+    // Every layer is reachable through buildGroupSlots for its PANEL group (a merge member folds into its group's single
+    // slot, which carries the one slider that drives every member).
+    const byPanel = {};
+    for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
+      const pg = panelGroupOf(cfg);
+      if (pg) (byPanel[pg] = byPanel[pg] || []).push([id, cfg]);
+    }
     const reached = new Set();
-    for (const g of groups) {
-      const entries = Object.entries(ALL_LAYERS).filter(([, c]) => c.group === g);
-      for (const slot of buildGroupSlots(entries)) {
+    for (const entries of Object.values(byPanel)) {
+      for (const slot of buildGroupSlots(entries.filter(([, c]) => !c.settingOf))) {
         if (slot.kind === "merge") slot.members.forEach(([id]) => reached.add(id));
-        else {
-          reached.add(slot.entry[0]);
-          if (slot.entry[1].mergeWith) reached.add(slot.entry[1].mergeWith);
-        }
+        else reached.add(slot.entry[0]);
       }
     }
-    // Only the county-scoped rows (folded into the Basemap group at render time) have no `group`.
-    const ungrouped = Object.entries(ALL_LAYERS).filter(([, c]) => !c.group).map(([id]) => id);
+    // Only the county-scoped fold row (it has no `group`; the panel folds it into Topography) and the Pipelines row's
+    // easement-corridor SETTING (a checkbox + width inside the Pipelines dropdown, drawn at its declared default opacity)
+    // are not rows of their own.
+    const ungrouped = Object.entries(ALL_LAYERS).filter(([, c]) => !panelGroupOf(c)).map(([id]) => id);
     expect(ungrouped).toEqual(["fb_contours"]);
+    const settings = Object.entries(ALL_LAYERS).filter(([, c]) => c.settingOf).map(([id]) => id);
+    expect(settings).toEqual(["txrrc_pipe_easement"]);
     for (const id of Object.keys(ALL_LAYERS)) {
-      if (ungrouped.includes(id)) continue;
+      if (ungrouped.includes(id) || settings.includes(id)) continue;
       expect(reached.has(id), `${id} never reaches a panel row, so it has no opacity control`).toBe(true);
     }
   });
 
-  it("the control is DISCOVERABLE — named, labelled, and showing its value", () => {
+  it("the control is DISCOVERABLE — named, labelled, typed-% as well as a slider, and showing its value", () => {
     const panel = read("components/LayerPanel.jsx");
-    const block = panel.slice(panel.indexOf("const opacityControl = "), panel.indexOf("const row = (k, cfg"));
-    expect(block).toContain("See through this layer"); // hover explanation
-    expect(block).toMatch(/aria-label=\{`\$\{label\} opacity`\}/); // screen-reader name
-    expect(block).toContain("◐"); // a glyph that reads as see-through, not an anonymous slider
-    expect(block).toMatch(/Math\.round\(value \* 100\)/); // live feedback that the drag did something
+    const block = panel.slice(panel.indexOf("function OpacityRow("), panel.indexOf("\nfunction Select("));
+    expect(block).toContain("Opacity"); // the visible name (owner: always Opacity, never "See-through")
+    expect(block).toMatch(/aria-label=\{`\$\{label\} opacity`\}/); // screen-reader name for the slider
+    expect(block).toMatch(/aria-label=\{`\$\{label\} opacity percent`\}/); // …and for the typed % box
+    expect(block).toMatch(/percentOf\(value\)/); // live feedback that the drag did something
+    expect(panel).not.toMatch(/See-through|See through/i); // renamed EVERYWHERE
   });
 
   it("every layer KIND actually implements setOpacity — a slider that moves nothing is worse than none", () => {

@@ -151,6 +151,7 @@ export default function StoragePanel() {
           <button
             onClick={clearCaptures}
             disabled={busy}
+            aria-busy={busy ? "true" : undefined}
             data-testid="clear-perf-captures"
             style={{ marginTop: 8, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", borderRadius: 7, cursor: busy ? "default" : "pointer", border: `1px solid ${PAL.line}`, background: PAL.raised, color: PAL.ink }}
           >
@@ -163,6 +164,7 @@ export default function StoragePanel() {
       <button
         onClick={clearCache}
         disabled={busy || reclaimable <= 0}
+        aria-busy={busy ? "true" : undefined}
         data-testid="clear-map-cache"
         style={{ width: "100%", padding: "8px 12px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", borderRadius: RADIUS.md, cursor: busy || reclaimable <= 0 ? "default" : "pointer", border: `1px solid ${PAL.line}`, background: PAL.raised, color: PAL.ink, opacity: reclaimable <= 0 ? 0.55 : 1 }}
       >

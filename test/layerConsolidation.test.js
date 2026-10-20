@@ -65,8 +65,8 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
       expect(cfg.source, `${cfg.label} has no provenance for the ⓘ`).toBeTruthy();
     }
   });
-  it("MERGE_GROUPS.water_sewer has the single consolidated label 'Water & sewer'", () => {
-    expect(MERGE_GROUPS.water_sewer.label).toBe("Water & sewer");
+  it("MERGE_GROUPS.water_sewer has the single consolidated label 'Water & Sewer'", () => {
+    expect(MERGE_GROUPS.water_sewer.label).toBe("Water & Sewer");
   });
   it("MERGE_GROUPS.water_sewer note is explicitly inclusive, never AHJ-exclusive", () => {
     expect(MERGE_GROUPS.water_sewer.note).toMatch(/every provider|not just the parcel/i);
@@ -94,8 +94,8 @@ describe("B898 — Fire hydrants consolidated to ONE layer", () => {
     const members = membersOf("fire_hydrants");
     expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "osm_hydrants"].sort());
   });
-  it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire hydrants'", () => {
-    expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire hydrants");
+  it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire Hydrants'", () => {
+    expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire Hydrants");
   });
   it("no standalone provider-named hydrant label survives", () => {
     const banned = ["Fire hydrants (OSM)", "Fire hydrants (City of Houston)"];
@@ -109,7 +109,7 @@ describe("B898 — Electric consolidated to ONE layer", () => {
     expect(members.map(([id]) => id).sort()).toEqual(["hifld_substations", "hifld_tx", "osm_power"].sort());
   });
   it("MERGE_GROUPS.electric has the single consolidated label", () => {
-    expect(MERGE_GROUPS.electric.label).toBe("Electric (lines, substations & poles)");
+    expect(MERGE_GROUPS.electric.label).toBe("Electric");
   });
   it("no standalone provider-named electric label survives", () => {
     const banned = ["Power lines & poles (OSM)", "Transmission lines (HIFLD)", "Electric substations (HIFLD)"];
@@ -125,10 +125,18 @@ describe("B898 — every merge-group member is tagged 'utilities' and no group s
     for (const id of w) { expect(e.has(id)).toBe(false); expect(f.has(id)).toBe(false); }
     for (const id of e) expect(f.has(id)).toBe(false);
   });
-  it("every mergeGroup member lives in the Utilities group", () => {
+  it("every mergeGroup member lives in its merge group's ONE registry group", () => {
+    /* NEW-1 (Imagery & Layers) — B898 had three merge groups, all Utilities. The redesign adds Counties & Cities (Jurisdictions) and Pipelines
+     * (Environmental). The invariant that mattered was never "utilities" — it is that a merge group is ONE panel row in ONE group, so every
+     * member must share the same registry `group`. */
+    const groupOf = {};
     for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
-      if (cfg.mergeGroup) expect(cfg.group, `${id} (mergeGroup ${cfg.mergeGroup})`).toBe("utilities");
+      if (!cfg.mergeGroup) continue;
+      groupOf[cfg.mergeGroup] = groupOf[cfg.mergeGroup] || cfg.group;
+      expect(cfg.group, `${id} (mergeGroup ${cfg.mergeGroup})`).toBe(groupOf[cfg.mergeGroup]);
+      expect(MERGE_GROUPS[cfg.mergeGroup], `${cfg.mergeGroup} has a MERGE_GROUPS record`).toBeTruthy();
     }
+    expect(groupOf).toMatchObject({ water_sewer: "utilities", electric: "utilities", fire_hydrants: "utilities", counties_cities: "jurisdiction", pipelines: "environmental" });
   });
 });
 
@@ -147,8 +155,8 @@ describe("B898 — function-first labels: no bare provider-code suffix on a solo
 
 describe("B898 — Flood & drainage rename (auto by AHJ, no hard-coded 'Houston' label)", () => {
   it("hcfcd_row / coh_storm carry function-first labels, not provider names", () => {
-    expect(ALL_LAYERS.hcfcd_row.label).toBe("Drainage channels & ROW");
-    expect(ALL_LAYERS.coh_storm.label).toBe("Storm sewer");
+    expect(ALL_LAYERS.hcfcd_row.label).toBe("Channels & ROW");
+    expect(ALL_LAYERS.coh_storm.label).toBe("Storm Sewer");
     expect(ALL_LAYERS.hcfcd_row.group).toBe("flood");
     expect(ALL_LAYERS.coh_storm.group).toBe("flood");
   });
@@ -168,14 +176,14 @@ describe("B898 — Flood & drainage rename (auto by AHJ, no hard-coded 'Houston'
  * layer with no geometry in hand declines rather than guessing.
  * ------------------------------------------------------------------------- */
 describe("identifyOverlaysAt (B1092)", () => {
-  const HIT = { title: "District drainage easements", rows: [{ label: "Easement width", text: "70 ft", href: null }], note: "hard constraint", sourceName: "BKDD" };
+  const HIT = { title: "Drainage Easements", rows: [{ label: "Easement width", text: "70 ft", href: null }], note: "hard constraint", sourceName: "BKDD" };
   const layer = (hit) => ({ identifyAt: () => hit });
   const at = { lat: 29.77938, lng: -95.89503, tolDeg: 0.0001 };
 
   it("returns the feature under the point, tagged with the layer it came from", () => {
     const out = identifyOverlaysAt({ bkdd_easements: layer(HIT) }, { bkdd_easements: { on: true } }, at);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ id: "bkdd_easements", layerLabel: "District drainage easements", title: "District drainage easements" });
+    expect(out[0]).toMatchObject({ id: "bkdd_easements", layerLabel: "Drainage Easements", title: "Drainage Easements" });
     expect(out[0].rows[0].text).toBe("70 ft");
   });
   it("a layer that is OFF is never identified — you can't click what isn't drawn", () => {

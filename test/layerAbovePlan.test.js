@@ -376,32 +376,26 @@ describe("NEW-1 — the lift is remembered PER SITE, like every other per-plan d
 describe("NEW-1 — the panel offers the lift, and stops calling opacity the answer", () => {
   const panel = read("components/LayerPanel.jsx");
 
-  it("there is exactly ONE control implementation, on all three row shapes", () => {
-    // The B1206 discipline: one answer, in the same place, on every layer in every group — and
-    // one CALL SITE too, so the three row shapes cannot drift in how they read or write the lift.
-    expect((panel.match(/const abovePlanControl = /g) || []).length).toBe(1);
-    expect((panel.match(/abovePlanControl\(/g) || []).length).toBe(1);
-    expect((panel.match(/aboveRow\(/g) || []).length).toBe(3); // solo · City-limits composite · merge group
+  it("there is exactly ONE control implementation, rendered from ONE dropdown for every row shape", () => {
+    // The B1206 discipline: one answer, in the same place, on every layer in every group. NEW-1 (Imagery & Layers): the
+    // control lives in the row's ▾ dropdown (RowDropdown) — solo rows, merge groups and Counties & Cities all go through it.
+    expect((panel.match(/case "above":/g) || []).length).toBe(1);
+    expect((panel.match(/<span>Draw above plan<\/span>/g) || []).length).toBe(1);
   });
 
   it("it is named for what it does, and carries a per-layer accessible name", () => {
-    const at = panel.indexOf("const abovePlanControl = ");
-    const block = panel.slice(at, panel.indexOf("const showAbove =", at));
-    expect(block).toContain("Show above plan");
-    expect(block).toMatch(/aria-label=\{`Show \$\{label\} above plan`\}/);
+    const at = panel.indexOf('case "above":');
+    const block = panel.slice(at, panel.indexOf('case "ramp":', at));
+    expect(block).toContain("Draw above plan");
+    expect(block).toMatch(/aria-label=\{`Draw \$\{spec\.label\} above plan`\}/);
     expect(block).toContain('type="checkbox"'); // two-state, not a free-form order picker
   });
 
-  it("an already-above layer shows the control in its ON state, inert — never hidden", () => {
-    // Hiding it would leave the row's silence to be interpreted ("already above?" vs "not offered
-    // here?"). Reading where a layer sits is the point of adding the control at all.
-    const at = panel.indexOf("const abovePlanControl = ");
-    const block = panel.slice(at, panel.indexOf("const showAbove =", at));
-    expect(block).toMatch(/disabled=\{!liftable\}/);
-    expect(block).toContain("Already drawn over your plan");
-    // …and the shared row helper passes `true` for the un-liftable case rather than skipping the
-    // render, so EVERY row shape shows the state instead of leaving a silence to be interpreted.
-    expect(panel).toMatch(/lift \? entries\.some\(\(\[id\]\) => overlays\[id\]\?\.above === true\) : true/);
+  it("it is offered only where a lift can move something (AREA layers) — a line or point layer is over the plan already", () => {
+    // Owner spec (2026-10-20): "Draw above plan … area layers only". The old inert/checked state for line layers is retired;
+    // the dropdown plan simply does not list "above" for them, and the model decides (never a local guess).
+    expect(panel).toMatch(/const lift = showAbove && members\.some\(\(\[, c\]\) => configCanLift\(c\)\)/);
+    expect(panel).toMatch(/canLift: lift/);
   });
 
   it("liftability comes from the model, never from a local guess about a layer's shape", () => {
@@ -410,20 +404,16 @@ describe("NEW-1 — the panel offers the lift, and stops calling opacity the ans
 
   it("it is a PLANNER affordance — the map finder has no plan for a layer to be above", () => {
     expect(panel).toMatch(/const showAbove = surface === "planner"/);
-    expect((panel.match(/showAbove && /g) || []).length).toBe(3);
+    expect((panel.match(/showAbove && /g) || []).length).toBe(1);
   });
 
   it("⛔ opacity no longer claims to answer 'I can't see through my plan'", () => {
-    // The correction, guarded: the opacity control's own copy must not promise occlusion relief,
-    // and the file must say plainly which control does.
-    const at = panel.indexOf("const opacityControl = ");
-    // Bounded to the control's own EXPRESSION, not to the next declaration — the comment block
-    // that introduces abovePlanControl is allowed to say the word this one may not.
-    const block = panel.slice(at, panel.indexOf("\n  );", at));
-    expect(block).toContain("See through this layer"); // B1206's hover, unchanged and still true
+    // The correction, guarded: the Opacity control's own copy must not promise occlusion relief, and the lift's own hover says
+    // why opacity is not the substitute.
+    const at = panel.indexOf("function OpacityRow(");
+    const block = panel.slice(at, panel.indexOf("\nfunction Select(", at));
+    expect(block).toContain("Opacity");
     expect(block).not.toMatch(/escape hatch/i);
-    expect(panel.slice(0, at)).toMatch(/CORRECTED BY NEW-1/);
-    // And the lift's own hover says why opacity is not the substitute.
     expect(panel).toMatch(/Opacity can't do this/);
   });
 

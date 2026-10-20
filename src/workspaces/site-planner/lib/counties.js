@@ -54,6 +54,8 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { miRaw, miMap } from "./miParcels.js"; // NEW-1 (Michigan, 2026-10-20) — the Michigan county rows (mi_oakland / mi_macomb / mi_detroit stay hand-written)
+import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
 import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
 import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
 import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
@@ -61,7 +63,9 @@ import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Orego
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
+import { nyRaw, nyMap, NY_UNCOVERED } from "./nyParcels.js"; // NEW-1 (New York, 2026-10-20) — the New York county rows beyond the statewide public layer
 import { iaRaw, iaMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
+import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -827,8 +831,8 @@ const COUNTIES_RAW = {
   },
   ky_jefferson: {
     state: "KY", label: "Jefferson County, KY",
-    layerUrl: "https://gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1",
-    idField: "PARCELID", // unconfirmed — gis.lojic.org is blocked from this build environment.
+    layerUrl: "/gis-proxy/gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1", // NEW-1 (Kentucky): relayed; measured 2026-10-19
+    idField: "PARCELID",
     help: "Jefferson County (Louisville) PVA parcels (LOJIC open data). Search by parcel ID or a site address.",
   },
   ms_desoto: {
@@ -991,11 +995,14 @@ const COUNTIES_RAW = {
   ...msMarisRaw(),
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...miRaw(), // NEW-1 (Michigan, 2026-10-20) — 52 Michigan counties (see miParcels.js)
   ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
+  ...nyRaw(), // NEW-1 (New York 2026-10-20) — ny_* county rows (the statewide public layer holds the other 38 counties)
   ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
   ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
   ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
   ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
@@ -1004,6 +1011,7 @@ const COUNTIES_RAW = {
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
   ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
   ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
+  ...kyRaw(), // NEW-1 (Kentucky) — Kentucky (ky_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -2451,7 +2459,7 @@ const JURISDICTION_LAYERS_RAW = {
         // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
         // single-layer county, so it no longer gets its own dropdown). Label names the county
         // + authority since it sits next to the statewide USGS contours there.
-        label: "1-ft contours (Fort Bend DD)",
+        label: "1-Ft Contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
         // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every
@@ -2883,10 +2891,16 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosaic/MapServer/1",
   },
   nj_statewide: {
-    // Verify: live — maps.nj.gov is blocked in this build environment. Owner-name values are
-    // reported redacted for many records under NJ's Daniel's Law privacy statute.
+    /* NEW-1 (B2384880, 2026-10-20) — NJOGIS's OWN ArcGIS Online copy of the same composite (item 533599bb…, owner NJOGIS, "Parcels and MOD-IV
+     * Composite of NJ, Web Mercator (3857)"), the same "prefer the official AGOL mirror" call ny_statewide and Fort Bend make: maps.nj.gov is a
+     * `.gov` host this build environment's egress policy blocks (no measurement possible from here), the mirror answers 200 with `access-control-allow-origin: *`
+     * so it needs no relay, and its parcels ARE the statewide composite — MEASURED 2026-10-20: 3,481,240 polygons, 21 counties, ALL 564 municipalities
+     * present (docs/STATEWIDE-PARCELS.md "New Jersey municipalities"), maxRecordCount 2000, point query 0.28–0.66 s. Fields: PAMS_PIN (the parcel id),
+     * PROP_LOC (the situs), OWNER_NAME (REDACTED for web use under Daniel's Law — that is the source's choice; the card shows what is there), CALC_ACRE,
+     * MUN_NAME / COUNTY. ~11% of parcels (403,260) carry geometry with no MOD-IV attributes (right-of-way / unmatched) — they answer with their lot lines. */
     state: "NJ", center: [40.1, -74.7], zoom: 8, mapServer: null, statewide: true,
-    layerUrl: "https://maps.nj.gov/arcgis/rest/services/Framework/Cadastral/MapServer/0",
+    idField: "PAMS_PIN", addrField: "PROP_LOC",
+    layerUrl: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0",
   },
   /* B1455632 (2026-09-10) — NEVADA, corrected. The prior finding declined Nevada on a LEGAL basis
    * (the state demographer/DCNR mosaic is restricted from public redistribution under NRS 250) —
@@ -2933,6 +2947,10 @@ const COUNTIES_MAP_RAW = {
     // official ArcGIS Online mirror (org account NYSGIS_GPO, not a third party) instead, the
     // same "prefer the reliable AGOL copy" call this file already made for Fort Bend (FBCAD).
     // Covers the counties+NYC that opted in; a companion Footprint layer (not wired) names which.
+    // NEW-1 (2026-10-20) — MEASURED: the layer holds 38 of New York's 62 counties (the five NYC boroughs among them; its Footprint
+    // layer /0 names them, and a per-county count of /1 agrees). The other 24 are listed in nyParcels.js NY_UNCOVERED: a click there is
+    // never sent to this layer — it reaches that county's own row, or the honest "<County> — no parcel data wired here yet." sentence.
+    excludedCounties: NY_UNCOVERED,
     state: "NY", center: [42.9, -75.5], zoom: 6, mapServer: null, statewide: true,
     layerUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1",
   },
@@ -3056,13 +3074,17 @@ const COUNTIES_MAP_RAW = {
   ...nmMap(), // NEW-1 (B2345888)
   ...gaMap(), // NEW-1 (B2316720)
   ...laMap(),
+  ...miMap(),
   ...ksMap(), // NEW-1 (B2348000)
+  ...nyMap(), // NEW-1 (New York 2026-10-20)
   ...moMap(),
+  ...scMap(),
   ...paMap(),
   ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)
   ...iaMap(),
+  ...kyMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
@@ -3555,6 +3577,18 @@ export function candidateCountiesForPoint(lat, lng) {
   return keys.filter((k) => !statewideExcludesCounty(k, id.name));
 }
 
+/* NEW-1 (B2384880) — NEW JERSEY'S BARRIER ISLANDS AND SHORELINE FALL OUTSIDE THE BUNDLED COUNTY POLYGONS. The simplified nationwide county asset
+ * stops short of the Atlantic and Delaware Bay shore, so a click on a real lot in Atlantic City, Cape May, Long Beach Island, Seaside Heights, Sea Bright,
+ * Highlands, Brigantine … resolves to NO county and `candidateCountiesForPoint` used to return nothing at all — measured 2026-10-20: 87 of 1,692 sampled
+ * NJ parcels (3 per municipality, 564 municipalities) had no candidate. A point that no county polygon holds AND sits inside New Jersey's envelope is
+ * either water or one of those lots; asking the NJ composite is free in the first case (it answers empty) and the whole answer in the second.
+ * Only reached when no county polygon holds the point, so it can never override a real county answer in NY/PA/DE. */
+const NJ_ENVELOPE = [38.9, -75.6, 41.37, -73.85]; // [south, west, north, east]
+function njCoastalGapState(lat, lng) {
+  const e = NJ_ENVELOPE;
+  return lat >= e[0] && lat <= e[2] && lng >= e[1] && lng <= e[3] ? "NJ" : null;
+}
+
 function candidateCountiesRaw(lat, lng) {
   const entries = countyEntries();
   const within = entries
@@ -3692,7 +3726,7 @@ function candidateCountiesRaw(lat, lng) {
     // (verified: Livonia and Taylor, MI — both outside Detroit's bbox and outside Oakland's bbox —
     // must not include mi_detroit here). See cityScopes.js's header for why the flag lives on the
     // entry rather than being re-derived.
-    const st = resolvedState(lat, lng);
+    const st = resolvedState(lat, lng) || njCoastalGapState(lat, lng);
     return st ? entries.filter(([, c]) => c.state === st && !c.cityScoped).map(([k]) => k) : [];
   }
   /* ⛔ NEW-6 — A CONFIDENT GEOMETRY ANSWER DECIDES *MEMBERSHIP*, NOT JUST ORDER.
