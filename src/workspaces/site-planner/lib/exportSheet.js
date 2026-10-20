@@ -32,7 +32,7 @@ import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
-import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR } from "./mapStack.js";
+import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
@@ -208,6 +208,12 @@ export function createExportSheet(ctx) {
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
+    /* NEW-1 — PARCELS IN FRONT is a SCREEN state (mapStack.parcelsOnTop): with the Parcels tool open the plan's own parcel +
+       setback group is rendered after the annotations. The sheet shows the NORMAL order, so the group goes back into the slot
+       the canvas left for it (PDF-PARITY: printing with the tool open prints what printing without it prints). */
+    const topTier = clone.querySelector(`[${PARCEL_TIER_ATTR}="top"]`);
+    const tierSlot = clone.querySelector(`[${PARCEL_TIER_SLOT_ATTR}]`);
+    if (topTier && tierSlot) { topTier.removeAttribute(PARCEL_TIER_ATTR); tierSlot.replaceWith(topTier); }
     /* NEW-1 — THE MEASUREMENT VALUE INVARIANT, asserted here rather than left to review: a
        measurement must never print its geometry without its value. The `withFullRender` pass above
        lifts every zoom gate off measurement labels precisely so this can't happen, but the label

@@ -465,7 +465,7 @@ describe("source guard — the render must keep stamping what the resolver reads
     // NEW-2 (B806081) — Add Leader placement (handleAddLeaderCapture) shares this same capture
     // handler and is checked ahead of the stack picker, for the identical reason: it has to win the
     // press before any element/markup's own bubble-phase handler can steal it.
-    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\)/);
+    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; (?:if \(touchCountRef\.current < 2 && handleIdentifyCapture\(e\)\) return; )?if \(touchCountRef\.current < 2\)/);
   });
 
   /* ⛔ NEW-1 — CHROME-NEVER-EATS-A-PRESS, instance five, and the reason it is TWO guards: the
@@ -736,7 +736,7 @@ describe("the picker is wired into the canvas's own capture-phase press handler"
     // NEW-2 (B806081) — handleAddLeaderCapture was inserted ahead of the stack picker in this same
     // chain (it must win over Alt+click too, since Add Leader is a modal placement, not a modifier).
     expect(SP, "the picker must be wired into the SAME capture handler as the double-click anchor's notePress")
-      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
+      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; (?:if \(touchCountRef\.current < 2 && handleIdentifyCapture\(e\)\) return; )?if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
   });
 
   /* NEW-1 (2026-09-12, click-ownership audit) — the gating that used to live directly in
