@@ -290,6 +290,74 @@ describe("boundary mode — the plateau IS the Level-ground sweep's mask at the 
   });
 });
 
+/* B2376240 (owner live check 2026-10-20, Georgia Test Site › Concept A, "To the boundary"): the limit IS the setback and
+ * the slope is thrown INWARD from it, so by construction no graded cell may lie outside the setback and the setback /
+ * property-line flag can never fire — the band starts exactly at the setback line (the daylight line IS the limit). */
+describe("boundary mode never grades outside the setback and never flags (B2376240)", () => {
+  const tilt = (p) => 90 + 0.02 * p.x + 0.01 * p.y;
+  const inSb = (c) => pointInRing(c, SB) || SB.some((q) => Math.hypot(q.x - c.x, q.y - c.y) < 1e-6);
+  it("synthetic scene on tilted ground: zero cells outside the setback, zero flagged, the daylight line is the setback", () => {
+    const s = build(scene(), tilt, {}, { mode: "boundary" });
+    expect(s.grid.limit.mode).toBe("boundary");
+    expect(s.grid.cells.length).toBeGreaterThan(1000);
+    expect(s.grid.cells.filter((c) => !inSb(c)).length).toBe(0);
+    expect(s.grid.cells.filter((c) => c.out).length).toBe(0);
+    expect(s.grid.outside).toEqual(expect.objectContaining({ count: 0, sf: 0, maxPastFt: 0 }));
+    expect(describeFlag(s, new Set(["b"]), { buildingCentre: { x: 100, y: 50 } })).toBeNull();
+    expect(s.violations.filter((v) => v.id === "offsite-fill" || /setback/i.test(v.id)).length).toBe(0);
+    // the band: slope cells only between the plateau and the setback, and the daylight ring is the limit itself
+    const slope = s.grid.cells.filter((c) => c.wedge);
+    expect(slope.length).toBeGreaterThan(50);
+    expect(slope.every(inSb)).toBe(true);
+    expect(s.daylight.length).toBe(s.grid.limit.limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0));
+    expect(s.daylight[0].ring).toEqual(s.grid.limit.limitRegions[0].outer);
+    // the band is CONTINUOUS from the limit: a slope cell a few feet inside the setback edge is a shallow one, and the depth
+    // grows toward the plateau (the slope daylights AT the setback, not past it)
+    const nearEdge = slope.filter((c) => Math.abs(c.x - (-300)) < 6 && c.y > -100 && c.y < 100);
+    const deeper = slope.filter((c) => Math.abs(c.x - (-300)) > 20 && Math.abs(c.x - (-300)) < 40 && c.y > -100 && c.y < 100);
+    expect(nearEdge.length).toBeGreaterThan(0); expect(deeper.length).toBeGreaterThan(0);
+    const mean = (a) => a.reduce((t, c) => t + Math.abs(c.dzFt), 0) / a.length;
+    expect(mean(nearEdge)).toBeLessThan(mean(deeper));
+    // the probe agrees with the lattice at a band cell and refuses a point outside the limit
+    const c0 = slope[Math.floor(slope.length / 2)];
+    expect(sampleProposedAt(s.grid, c0, tilt).ft).toBeCloseTo(c0.propFt, 6);
+    expect(sampleProposedAt(s.grid, { x: -340, y: 0 }, tilt).status).toBe("none");
+  });
+  it("the real Chehaw ground: zero cells outside the ring, zero flagged, the surface still builds in budget", () => {
+    const F = new URL("./fixtures/chehaw-218-02007", import.meta.url).pathname;
+    const pj = JSON.parse(readFileSync(F + ".parcel.json", "utf8"));
+    const ll = pj.ringLngLat.slice(0, -1);
+    const lat0 = ll.reduce((a, p) => a + p[1], 0) / ll.length, lon0 = ll.reduce((a, p) => a + p[0], 0) / ll.length;
+    const ring = ll.map(([lo, la]) => lngLatToFeet(lo, la, lon0, lat0));
+    const bx = -560, by = -1326;
+    const els = [
+      { id: "b1", type: "building", ring: rect(bx, by, 520, 300), padElevFt: 795 },
+      { id: "c1", type: "paving", ring: rect(bx, by + 300, 520, 130), hostId: "b1", dockStack: { x: bx + 260, y: by + 150 } },
+      { id: "p1", type: "parking", ring: rect(bx, by - 62, 520, 62), hostId: "b1" },
+    ];
+    const req = JSON.parse(readFileSync(F + ".req.json", "utf8"));
+    const grid = decodeGrid(new Uint8Array(readFileSync(F + ".lerc")).buffer, req);
+    const existAt = (pt) => { const [la, lo] = feetToLatLngPair(pt, lat0, lon0); return sampleAtLatLng(grid, req, la, lo); };
+    const t = performance.now();
+    const s = buildProposedSurface({ els, ffeFt: 795, dockDropFt: 4, existAt, parcelRings: [ring],
+      grading: { pavementSlopePct: 1.5, lotDropFt: 0.5, slopeRatio: 2, shoulderFt: 5, setbackRings: [ring], limit: { mode: "boundary", maxCutFillFt: 12 } }, opts: { maxCells: 9000, existKey: "chehaw-b" } });
+    const ms = performance.now() - t;
+    expect(s.grid.limit.mode).toBe("boundary");
+    expect(s.grid.cells.length).toBeGreaterThan(2000);
+    expect(s.grid.cells.filter((c) => !pointInRing(c, ring)).length).toBe(0);
+    expect(s.grid.outside.count).toBe(0);
+    expect(describeFlag(s, new Set(["b1"]), { buildingCentre: { x: bx + 260, y: by + 150 } })).toBeNull();
+    expect(s.grid.cells.filter((c) => c.wedge).length).toBeGreaterThan(100);
+    expect(s.daylight.length).toBe(1);
+    expect(s.daylight[0].ring).toEqual(s.grid.limit.limitRegions[0].outer);
+    // every open-ground cell inside the (clipped) plateau is flat at the FFE — none falls through to the inverse-distance infill
+    const infill = s.grid.cells.filter((c) => c.cls === "infill");
+    expect(infill.length).toBeGreaterThan(500);
+    expect(infill.filter((c) => Math.abs(c.propFt - 795) > 1e-6).length).toBe(0);
+    expect(ms).toBeLessThan(1500);
+  });
+});
+
 describe("the real Chehaw ring: one rounded outline around a building with courts and a car lot", () => {
   it("one region, rounded ends, inside the setback", () => {
     const F = new URL("./fixtures/chehaw-218-02007", import.meta.url).pathname;

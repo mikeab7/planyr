@@ -361,6 +361,20 @@ try {
   check("boundary mode: the limit is the setback, one plateau at the building's FFE, the open ground inside flat at it", bnd.mode === "boundary" && bnd.plateaus.length === 1 && bnd.flatInfill > 0 && bnd.flatInfill === bnd.infill, JSON.stringify({ ...bnd, plateaus: bnd.plateaus.length }));
   check("the graded-area line reads the setback and the acreage grew past the layout's", /^Graded area · \d+\.\d AC · the setback$/.test(bnd.gradedLine || "") && bnd.areaAc > lim.areaAc, `${bnd.gradedLine} vs ${lim.areaAc.toFixed(1)}`);
   check("no Edit outline in boundary mode; mode control shows 'To the boundary'", !bnd.editBtn && bnd.modeAttr === "boundary");
+  // B2376240 (owner live check 2026-10-20): the limit IS the setback and the slope is thrown INWARD from it — no graded cell
+  // outside the setback, the setback flag cannot fire (the north-edge "runs 16 ft past the setback" flag is absent), and the
+  // dotted daylight line is the setback itself (one ring per limit ring, holes included)
+  const bndOut = await page.evaluate(async () => {
+    const { pointInRing } = await import("/src/workspaces/site-planner/lib/pondGeom.js");
+    const s = window.__harness.gradeSurface, L = s.grid.limit; const rings = window.__harness.model.setback.rings;
+    const outsideCells = s.grid.cells.filter((c) => !rings.some((r) => pointInRing(c, r))).length;
+    const sameRing = (a, b) => a.length === b.length && a.every((p, i) => Math.abs(p.x - b[i].x) < 1e-6 && Math.abs(p.y - b[i].y) < 1e-6);
+    return { outsideCells, outCount: s.grid.outside ? s.grid.outside.count : -1, flag: document.querySelectorAll('[data-grading-flag="1"]').length,
+      clear: document.querySelectorAll('[data-grading-flag="clear"]').length, daylight: s.daylight.length, limitRings: L.limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0),
+      daylightIsLimit: s.daylight.length > 0 && sameRing(s.daylight[0].ring, L.limitRegions[0].outer), slopeCells: s.grid.cells.filter((c) => c.wedge).length };
+  });
+  check("B2376240: boundary mode grades nothing outside the setback and the setback flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.flag === 0 && bndOut.clear >= 1 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
+  check("B2376240: the daylight line in boundary mode IS the setback (one ring per limit ring)", bndOut.daylight === bndOut.limitRings && bndOut.daylightIsLimit, JSON.stringify({ daylight: bndOut.daylight, limitRings: bndOut.limitRings, daylightIsLimit: bndOut.daylightIsLimit }));
   // the plateau vs the Level-ground sweep's own mask at that finish (the harness runs the worker's mask job at the FFE)
   const cmp = await page.evaluate(async (E) => {
     const { buildableMaskJob } = await import("/src/workspaces/site-planner/lib/buildableClient.js");
