@@ -173,6 +173,7 @@ export const ALLOWED_HOSTS = new Set([
   "maps.watertown-ny.gov", // City of Watertown (Jefferson County) parcels
   "gis.washingtoncountyny.gov", // Washington County GIS
   "dg.fultoncountyny.gov", // Fulton County GIS
+  "gis2.erie.gov", // Erie County GIS — also hosts a Niagara County viewer
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
