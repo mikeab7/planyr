@@ -183,7 +183,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
-import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
+import RotationStepper, { normalizeDeg, formatDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
@@ -398,7 +398,7 @@ import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, sh
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
-import { calloutStyle } from "./lib/calloutStyle.js";
+import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
 import { scaledPatch } from "./lib/overlayPanelModel.js";
 import { hasCrop, cropClipShapeScreen, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
@@ -964,6 +964,8 @@ const measMode = (m) => m.mode || "line";
 // SAME vertex idiom as a building footprint / polygon markup, per spec.
 const MK_VERTEX_KINDS = ["line", "polyline", "polygon", "cloud"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
+// NEW-1 (layout "A") — the neutral drawing markups that share the three-section inspector.
+const NEUTRAL_MARKUP_KINDS = ["line", "polyline", "rect", "ellipse", "polygon", "cloud"];
 // Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
 // so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
 const MK_HIT_PX = 12;
@@ -5269,7 +5271,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // pushHistory's own "edit" default; it is just not labeled with the more specific kind.
   const DRAG_OP_KIND = {
     move: "move", groupMove: "move", mkMove: "move", moveSheetOverlay: "move", callout: "move", measureMove: "move",
-    resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize",
+    resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize", calloutResizeH: "resize",
     vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize", grLimitVertex: "resize",
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
@@ -7288,7 +7290,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (s?.kind === "callout") {
           e.preventDefault();
           const c = (stateRef.current.callouts || []).find((x) => x.id === s.id);
-          if (c && c.boxW != null) { pushHistory(); setCallout(s.id, { boxW: null }); }
+          if (c && (c.boxW != null || c.boxH != null)) { pushHistory(); setCallout(s.id, { boxW: null, boxH: null }); }
           return;
         }
       }
@@ -8979,6 +8981,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const c = callouts.find((x) => x.id === id);
     if (!c || c.locked) return;
+    // CHROME-NEVER-EATS-A-PRESS — a grip sits ON the box's border, so a double-click aimed at the border must still reach the box's own
+    // double-tap pairing (ONE key per feature: the callout id). Grips only exist while selected.
+    if (isDoubleTap(e, id, true)) { calloutDblAction(e, id); return; }
     const st = calloutStyle(c);
     const { w } = calloutLayout(c, st, view.ppf);
     const wFt = w / view.ppf;
@@ -8991,6 +8996,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fixed = { x: c.box.x + oppLocal.x, y: c.box.y + oppLocal.y };
     setSel({ kind: "callout", id });
     drag.current = { mode: "calloutResize", id, hx, rot, fixed, minWFt: minCalloutWidthFt(st, view.ppf), ...startGate(e) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  // NEW-1 (layout "A") — drag a text-box / callout TOP or BOTTOM grip → an explicit `boxH` (feet), the
+  // exact mirror of startCalloutResize: `vy` (∈ {-1,+1}) is which horizontal edge moves, the opposite edge
+  // stays fixed in the box's own (possibly rotated) local frame. The box can never be dragged SHORTER than
+  // its text (calloutLayout floors it), so `minHFt` is the text's natural height. Cleared by Fit to text / Alt+Z.
+  const startCalloutResizeH = (e, id, vy) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const c = callouts.find((x) => x.id === id);
+    if (!c || c.locked) return;
+    if (isDoubleTap(e, id, true)) { calloutDblAction(e, id); return; } // CHROME-NEVER-EATS-A-PRESS — see startCalloutResize
+    const st = calloutStyle(c);
+    const { h, naturalH } = calloutLayout(c, st, view.ppf);
+    const hFt = h / view.ppf;
+    const rot = c.rot || 0;
+    const oppLocal = rot2(0, -vy * hFt / 2, rot);
+    const fixed = { x: c.box.x + oppLocal.x, y: c.box.y + oppLocal.y };
+    setSel({ kind: "callout", id });
+    drag.current = { mode: "calloutResizeH", id, vy, rot, fixed, minHFt: naturalH / view.ppf, ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startCalloutRotate = (e, id) => {
@@ -9443,6 +9468,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const halfLocal = rot2(d.hx * newWFt / 2, 0, d.rot);   // keep the opposite edge fixed
       const newCenter = { x: d.fixed.x + halfLocal.x, y: d.fixed.y + halfLocal.y };
       setCallouts((a) => a.map((c) => c.id === d.id ? { ...c, boxW: newWFt, box: newCenter } : c));
+      return;
+    }
+    if (d.mode === "calloutResizeH") { // NEW-1 (layout "A"): drag a top / bottom grip → explicit boxH (text can sit top / middle / bottom inside)
+      const local = rot2(fp.x - d.fixed.x, fp.y - d.fixed.y, -d.rot);
+      const signed = d.vy * local.y;
+      const newHFt = Math.max(d.minHFt, Math.min(MAX_DIM, signed));
+      const halfLocal = rot2(0, d.vy * newHFt / 2, d.rot);
+      const newCenter = { x: d.fixed.x + halfLocal.x, y: d.fixed.y + halfLocal.y };
+      setCallouts((a) => a.map((c) => c.id === d.id ? { ...c, boxH: newHFt, box: newCenter } : c));
       return;
     }
     if (d.mode === "calloutRotate") { // NEW-2 (B1612641) — rotate about the box's own centre (15° steps when Snap is on)
@@ -19484,6 +19518,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined}
             onContextMenu={(e) => onCalloutContext(e, c.id, -1)} />
         ); })}
+        {/* NEW-1 (layout "A") — the TOP / BOTTOM mid grips set a fixed height (boxH), the vertical twin of the
+            side grips above. Same rotated-local-frame `at()`, same right-click forwarding (CHROME-NEVER-EATS-A-PRESS). */}
+        {[[-h / 2, -1], [h / 2, 1]].map(([ly, dir]) => { const p = at(0, ly); return (
+          <rect key={`h${dir}`} data-handle="callout-height" data-testid={`callout-handle-${dir > 0 ? "b" : "t"}`} x={p.x - 4} y={p.y - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
+            pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ns-resize" } : undefined}
+            onPointerDown={canResize ? (e) => startCalloutResizeH(e, c.id, dir) : undefined}
+            onContextMenu={(e) => onCalloutContext(e, c.id, -1)} />
+        ); })}
         {/* Per-leader re-aim grip. NEW-5 — no × delete badge (owner rule): a single leader is
             removed by right-clicking it → "Delete Leader"; Delete removes the whole callout.
             NEW-3 (B806082) — the grip sits exactly at the arrowhead, the single most obvious place
@@ -23589,7 +23631,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
                 // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
                 // committed box, its handles, and the inline editor can't drift.
-                const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, rppf);
+                const { fontPx, lineH, padX, padY, w, h, lines, textOffsetY } = calloutLayout(c, st, rppf);
                 const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
                 const leaderDash = dashArray(st.dash, st.weight); // NEW-1 (B1652704) — shared with the box border below
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
@@ -23699,8 +23741,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         text block rigidly, so the per-line slot symmetry (a LOCAL, box-relative
                         property) is untouched by the box's world-facing angle. */}
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
-                      <text key={i} x={tx} y={bp.y - h / 2 + padY + lineH / 2 + i * lineH} textAnchor={anchor} dominantBaseline="middle"
-                        fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
+                      <text key={i} x={tx} y={bp.y - h / 2 + textOffsetY + padY + lineH / 2 + i * lineH} textAnchor={anchor} dominantBaseline="middle"
+                        fontSize={fontPx} fill={st.color} textDecoration={calloutTextDecoration(st)}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
                     </g>
@@ -24163,7 +24205,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // swallowing every off-road click. A freshly drawn, unlocked shape is not that case.
                 // markupPick.js reads the SAME fill-or-unlocked rule, so the JS cycle (B921) and this
                 // declarative hit area never diverge.
-                const hasHatch = ["rect", "ellipse", "polygon"].includes(m.kind) && !!m.hatch && m.hatch !== "none";
+                const hasHatch = ["rect", "ellipse", "polygon", "cloud"].includes(m.kind) && !!m.hatch && m.hatch !== "none";
                 const closedFill = (m.fillOpacity ?? 0) > 0 || hasHatch;
                 const visFill = hasHatch
                   ? { fill: `url(#pat-markup-${m.id})` }
@@ -24339,7 +24381,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} data-markup={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
-                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" {...visibleStroke} pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
                       {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
                     </g>
@@ -24350,7 +24392,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} data-markup={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
-                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
+                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visibleStroke} pointerEvents="none" />
                       {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
                     </g>
                   );
@@ -24964,7 +25006,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })}
               {/* Closed markup hatch uses the shared catalog. Fill color remains the wash while
                   hatch color controls only the pattern, matching the two controls in Properties. */}
-              {markups.filter((m) => ["rect", "ellipse", "polygon"].includes(m.kind) && m.hatch && m.hatch !== "none").map((m) => (
+              {markups.filter((m) => ["rect", "ellipse", "polygon", "cloud"].includes(m.kind) && m.hatch && m.hatch !== "none").map((m) => (
                 <HatchPatternDef key={`pat-mk-${m.id}`} id={`pat-markup-${m.id}`} hatchKey={m.hatch}
                   color={m.hatchColor || m.stroke || m.fill} washColor={m.fill} wash={m.fillOpacity ?? 0}
                   lineOpacity={1} labelK={labelK} anchor={hatchAnchor} />
@@ -25517,8 +25559,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // committed. B913 — when the callout has an explicit width (boxW), the editor takes that
                 // exact width and SOFT-WRAPS (matching the committed wrap); otherwise it auto-sizes and
                 // never wraps, as before. A screen-px minimum (64×30) keeps a tiny/empty box usable.
-                const geo = calloutLayout({ text: editCallout.text || "", boxW: c.boxW }, st, rppf);
-                const { fontPx, lineH, padX, padY } = geo;
+                const geo = calloutLayout({ text: editCallout.text || "", boxW: c.boxW, boxH: c.boxH }, st, rppf);
+                const { fontPx, lineH, padX, padY, textOffsetY } = geo;
                 const wrapped = geo.wrapped;
                 const w = wrapped ? geo.w : Math.max(64, geo.w), h = Math.max(30, geo.h);
                 const cr = calloutCornerRadius(w, h); // NEW-1 — match the committed box so edit ↔ commit don't jump
@@ -25548,7 +25590,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); commitEditCallout(); }
                         // B932 — Alt+Z autosizes to fit even while still typing (Bluebeam parity): drop
                         // the fixed width so the box hugs the text; the editor re-flows to auto on the spot.
-                        else if (e.altKey && e.code === "KeyZ") { e.stopPropagation(); e.preventDefault(); setCallout(editCallout.id, { boxW: null }); }
+                        else if (e.altKey && e.code === "KeyZ") { e.stopPropagation(); e.preventDefault(); setCallout(editCallout.id, { boxW: null, boxH: null }); }
                       }}
                       placeholder="Type…"
                       maxLength={2000}
@@ -25557,7 +25599,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                          active-edit ring is an OUTLINE (not a border) so it doesn't consume any content
                          box — the padded text area then equals the committed SVG text region exactly (a
                          2px border would shrink each axis by 4px and clip the last line / caret). */
-                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: wrapped ? "pre-wrap" : "pre", overflowWrap: wrapped ? "break-word" : undefined, border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: cr, padding: `${padY}px ${padX}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: wrapped ? "pre-wrap" : "pre", overflowWrap: wrapped ? "break-word" : undefined, border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: cr, padding: `${padY + textOffsetY}px ${padX}px ${padY}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: calloutTextDecoration(st) || "none", textTransform: st.caps ? "uppercase" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -27532,113 +27574,93 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </Section>
             );
           })()}
-          {/* selected markup shape — geometry + style */}
-          {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && (() => {
-            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
-            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
-            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
-            // control you click to change a colour showed no colour. Leave it to ColorField.
+          {/* NEW-1 (layout "A", owner-approved 2026-10-20) — the neutral markups (line · polyline · rectangle · ellipse · polygon · cloud)
+              share ONE three-section inspector: TEXT (text boxes / callouts only — below) · APPEARANCE · SIZE & POSITION. Closed shapes and
+              the cloud use the OUTLINE | FILL table; a line / polyline is one column. Weight has no unit, pattern selects are right-aligned,
+              and every number box fills its column so the right edges line up. The easement / deed / measurement panels are untouched. */}
+          {!multiStyleable && selMarkup && NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {
+            // NO `background` on the swatch — ColorField paints the current colour as the chip's background and spreads this on top.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            // NEW-3 — the same bold/tabular-numeral value style the measurement panel's Area/Length
-            // rows already use, so a markup's size reads exactly like every other size in this app.
             const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
             const isCloud = selMarkup.kind === "cloud";
-            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon" || isCloud;
-            const isOpenPath = selMarkup.kind === "line" || selMarkup.kind === "polyline";
-            // Cloud writes its OWN sticky style (mkCloudStyle), never the shared mkStyle every other
-            // markup tool draws from next — see MK_CLOUD_DEFAULT.
+            const closed = selMarkup.kind !== "line" && selMarkup.kind !== "polyline";
+            const isBox = MK_BOX_KINDS.includes(selMarkup.kind);
+            // Cloud writes its OWN sticky style (mkCloudStyle), never the shared mkStyle every other markup tool draws from next.
             const setStyle = isCloud ? setSelMarkupCloud : setSelMarkup;
             const liveStyle = isCloud ? liveMarkupCloud : liveMarkup;
+            const hatchOn = closed && !!selMarkup.hatch && selMarkup.hatch !== "none";
+            const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
+            const dashSel = <select autoComplete="off" aria-label="Line pattern" style={patSel} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>{DASH_OPTIONS}</select>;
+            const weightBox = <NumInput boxed fill ariaLabel="Line weight" testid="markup-weight" value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} />;
+            const size = closed ? closedMarkupSize(selMarkup) : null;
             return (
-              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
               <Section title={null}>
-                {/* NEW-1 (B1618656) — the owner's two-column properties-panel mockup: OUTLINE and FILL
-                    as column heads over a shared label gutter (PairedFieldHead/PairedField), so
-                    "Colour"/"Pattern"/"Opacity" are written once instead of twice and the two sides
-                    can be compared at a glance. The 2026-09-07 revert to one column (below, superseded)
-                    was fixing fixed-width controls that didn't fit a value column, not the pairing
-                    itself — this pass fixes that directly: every select here is flexible width, and
-                    Opacity is a compact percent field rather than the slider that had no room to fit
-                    two abreast. */}
-                {simpleClosedMarkup ? (<>
+                <StdSubLabel section="appearance">Appearance</StdSubLabel>
+                {closed ? (<>
                   <PairedFieldHead left="Outline" right="Fill" />
                   <PairedField label="Colour"
                     left={<ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
                     right={<ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
                   />
-                  <PairedField label="Width"
-                    left={<span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}><NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /><span style={{ fontSize: 11, color: PAL.muted, flex: "none" }}>pt</span></span>}
-                  />
-                  <PairedField label="Pattern"
-                    left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
-                    right={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={selMarkup.hatch || "none"} onChange={(e) => setStyle({ hatch: e.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select>}
-                  />
-                  <PairedField label="Hatch colour"
-                    right={<ColorField value={toHex6(selMarkup.hatchColor || selMarkup.stroke || selMarkup.fill)} {...colorCtl((v) => liveStyle({ hatchColor: v }))} seed={COLOR_SEED} title="Hatch color" style={swatch} />}
-                  />
                   <PairedField label="Opacity"
-                    left={<PercentField value={selMarkup.strokeOpacity ?? 1} onCommit={(v) => setStyle({ strokeOpacity: v })} inputStyle={numInput} ariaLabel="Line opacity" />}
-                    right={<PercentField value={selMarkup.fillOpacity ?? 0} onCommit={(v) => setStyle({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                    left={<PercentField boxed value={selMarkup.strokeOpacity ?? 1} onCommit={(v) => setStyle({ strokeOpacity: v })} ariaLabel="Outline opacity" />}
+                    right={<PercentField boxed value={selMarkup.fillOpacity ?? 0} onCommit={(v) => setStyle({ fillOpacity: v })} ariaLabel="Fill opacity" />}
                   />
-                </>) : (<>
-                  <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                  <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
-                  <Field label="Dash">
-                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
-                      {DASH_OPTIONS}
-                    </select>
-                  </Field>
-                  {isCloud && (
-                    <Field label="Opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.opacity ?? 1} {...sliderHistory((e) => liveStyle({ opacity: +e.target.value }))} /></Field>
+                  <PairedField label="Weight" left={weightBox} />
+                  <PairedField label="Pattern"
+                    left={dashSel}
+                    right={<select autoComplete="off" aria-label="Fill pattern" style={patSel} value={selMarkup.hatch || "none"} onChange={(e) => setStyle({ hatch: e.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.key === "none" ? "Flat" : h.label}</option>)}</select>}
+                  />
+                  {hatchOn && (
+                    <PairedField label="Hatch colour"
+                      right={<ColorField value={toHex6(selMarkup.hatchColor || selMarkup.stroke || selMarkup.fill)} {...colorCtl((v) => liveStyle({ hatchColor: v }))} seed={COLOR_SEED} title="Hatch color" style={swatch} />}
+                    />
                   )}
+                </>) : (<>
+                  <Field label="Colour"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} /></Field>
+                  <Field label="Opacity"><PercentField boxed value={selMarkup.strokeOpacity ?? 1} onCommit={(v) => setStyle({ strokeOpacity: v })} ariaLabel="Line opacity" /></Field>
+                  <Field label="Weight">{weightBox}</Field>
+                  <Field label="Pattern">{dashSel}</Field>
                 </>)}
-                {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
-                    place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
-                    drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
-                {isOpenPath && (<>
-                  {/* NEW-3 — the drawn line/polyline's LENGTH, off the same points the renderer draws. */}
+
+                <StdSubLabel section="size">Size & position</StdSubLabel>
+                {/* A closed shape's SIZE, read off the SAME geometry the canvas draws (markupPick.js's `closedMarkupSize`). */}
+                {size && (<>
+                  <Field label="Area"><span style={valStyle}>{fmtSf(size.area)} · {fmtAcres(size.area / SQFT_PER_ACRE)}</span></Field>
+                  <Field label="Perimeter"><span style={valStyle}>{fmtFeet(size.perimeter)}</span></Field>
+                </>)}
+                {isBox && (<>
+                  <Field label="Width"><NumInput boxed fill unit="ft" ariaLabel="Width" value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} /></Field>
+                  <Field label="Height"><NumInput boxed fill unit="ft" ariaLabel="Height" value={Math.round(selMarkup.h)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ h: n })} /></Field>
+                </>)}
+                {isCloud && (
+                  <Field label="Arc size"><NumInput boxed fill unit="ft" ariaLabel="Arc size" value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={CLOUD_ARC_STEP_FT} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} /></Field>
+                )}
+                {isBox && (
+                  <Field label="Rotation"><RotationField value={selMarkup.rot || 0} locked={!!selMarkup.locked} lockedReason="Unlock this markup to rotate it"
+                    onCommit={(deg) => setSelMarkupGeom({ rot: deg })}
+                    onStep={(d) => setSelMarkupGeom({ rot: normalizeDeg((selMarkup.rot || 0) + d) })} /></Field>
+                )}
+                {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in place). NON-sticky
+                    (direct setMarkups, never setMkStyle); onFocus pushes ONE undo frame per edit (not one per keystroke). */}
+                {!closed && (<>
                   <Field label="Length"><span style={valStyle}>{fmtFeet(openMarkupLength(selMarkup) || 0)}</span></Field>
-                  <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
+                  <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input autoComplete="off" value={selMarkup.inlineLabel || ""} maxLength={120}
                     onFocus={() => pushHistory()}
                     onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
-                    placeholder={'e.g. 18" SANITARY SEWER'} style={textInput} /></Field>
+                    placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...textInput, width: "100%", minWidth: 0 }} /></Field>
                   {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
-                {closed && !simpleClosedMarkup && <>
-                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /></Field>
-                </>}
-                {/* NEW-3 — a closed shape's SIZE, read off the SAME geometry the canvas draws (never
-                    a second calculation): reuses markupPick.js's `closedMarkupSize`, which derives
-                    from the identical ring/area the hit-test already computes. Same place + format
-                    the building Footprint line and the measurement panel's Area row already use. */}
-                {closed && (() => {
-                  const size = closedMarkupSize(selMarkup);
-                  if (!size) return null;
-                  return (<>
-                    <StdSubLabel>Size</StdSubLabel>
-                    <Field label="Area"><span style={valStyle}>{fmtSf(size.area)} · {fmtAcres(size.area / SQFT_PER_ACRE)}</span></Field>
-                    <Field label="Perimeter"><span style={valStyle}>{fmtFeet(size.perimeter)}</span></Field>
-                  </>);
-                })()}
                 {isCloud && (() => {
-                  const cs = { display: "flex", gap: 5, width: 150 };
                   const fmtWhen = (iso) => { try { return iso ? new Date(iso).toLocaleString() : "—"; } catch (_) { return "—"; } };
+                  const cs = { display: "flex", gap: 5, width: 150 };
                   return (
                     <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                      <Field label="Arc size">
-                        <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                          <NumInput style={{ ...numInput, width: 56 }} value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={CLOUD_ARC_STEP_FT} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} />
-                          <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                        </span>
-                      </Field>
-                      {/* NEW-4 — the reviewer metadata the owner never uses is tucked into ONE collapsed "More"
-                          (nothing deleted: every value still round-trips when expanded and edited), with the
-                          Created / Modified dates inside it. */}
+                      {/* NEW-4 — the reviewer metadata the owner never uses is tucked into ONE collapsed "More" (nothing deleted: every value still round-trips when expanded and edited). */}
                       <Collapse sectionId="cloud-more" title="More" defaultOpen={false}>
-                      <Field label="Subject"><input value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
+                      <Field label="Subject"><input autoComplete="off" value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
                       <Field label="Comment" title="Reviewer notes on this markup"><textarea value={selMarkup.comment ?? ""} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, comment: e.target.value, modifiedAt: new Date().toISOString() } : m)))} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                       <Field label="Status">
                         <span style={cs}>
@@ -27647,9 +27669,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </select>
                         </span>
                       </Field>
-                      <Field label="Label"><input value={selMarkup.label ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, label: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. 1" style={textInput} /></Field>
-                      <Field label="Layer"><input value={selMarkup.layer ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, layer: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. Reviewer 1" style={textInput} /></Field>
-                      <Field label="Author"><input value={selMarkup.author ?? ""} maxLength={60} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, author: e.target.value, modifiedAt: new Date().toISOString() } : m)))} style={textInput} /></Field>
+                      <Field label="Label"><input autoComplete="off" value={selMarkup.label ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, label: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. 1" style={textInput} /></Field>
+                      <Field label="Layer"><input autoComplete="off" value={selMarkup.layer ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, layer: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. Reviewer 1" style={textInput} /></Field>
+                      <Field label="Author"><input autoComplete="off" value={selMarkup.author ?? ""} maxLength={60} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, author: e.target.value, modifiedAt: new Date().toISOString() } : m)))} style={textInput} /></Field>
                       <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.6, marginTop: 4 }}>
                         Created {fmtWhen(selMarkup.createdAt)}<br />Modified {fmtWhen(selMarkup.modifiedAt)}
                       </div>
@@ -27657,6 +27679,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </div>
                   );
                 })()}
+                {/* NEW-5 — the Cloud panel carries NO how-to text (owner 2026-10-08); the gestures themselves are unchanged. */}
+                {!isCloud && (
+                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
+                    {/* B922/NEW-3 — a locked markup renders no reshape dots, so say so instead of "drag a dot". */}
+                    {selMarkup.locked
+                      ? "Locked — click Unlock below to move or reshape it."
+                      : isBox
+                      ? "Drag the corner/edge grips to resize, the top handle to rotate."
+                      : selMarkup.kind === "line"
+                        ? "Drag either end dot to move it."
+                        // NEW-1/B649504 — Shift-click never removed a point (only adds, on an edge); removal is right-click a dot, or select + Delete.
+                        : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
+                  </div>
+                )}
+                {!["rect", "ellipse", "polygon"].includes(selMarkup.kind) && <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
+                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
+                </div>}
+              </Section>
+              </div>
+            );
+          })()}
+          {/* selected markup shape — geometry + style. The neutral kinds have their own three-section panel above; this is the
+              remaining non-neutral kind (a deed encumbrance), unchanged. */}
+          {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && !NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {
+            // NEW-1 — NO `background` here. ColorField paints the CURRENT COLOUR as the chip's background and then spreads this override on top.
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
+            return (
+              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
+              <div>
+              <Section title={null}>
+                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
+                <Field label="Dash">
+                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
+                    {DASH_OPTIONS}
+                  </select>
+                </Field>
                 {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
                     model: fill / fill opacity / hatch, type default + per-element override. Not
                     "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
@@ -27679,15 +27739,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
                   </>;
                 })()}
-                {!simpleClosedMarkup && MK_BOX_KINDS.includes(selMarkup.kind) && <>
-                  <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
-                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} />
-                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.h)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ h: n })} />
-                  </span></Field>
-                  <Field label="Rotation°"><RotationStepper value={selMarkup.rot || 0} disabled={!!selMarkup.locked} disabledReason="Unlock this markup to rotate it"
-                    onCommit={(deg) => setSelMarkupGeom({ rot: deg })}
-                    onStep={(d) => setSelMarkupGeom({ rot: normalizeDeg((selMarkup.rot || 0) + d) })} /></Field>
-                </>}
                 {selMarkup.kind === "encumbrance" && (() => {
                   const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
                   const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
@@ -27740,127 +27791,95 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </div>
                   );
                 })()}
-                {/* NEW-5 — the Cloud panel carries NO how-to text (owner 2026-10-08); the gestures themselves are unchanged. */}
-                {!isCloud && (
-                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                    {/* B922/NEW-3 — a locked markup renders no reshape dots (editablePath returns null
-                        when locked), so the "drag a dot" instruction was a lie. Tell the truth instead. */}
-                    {selMarkup.locked
-                      ? "Locked — click Unlock below to move or reshape it."
-                      : MK_BOX_KINDS.includes(selMarkup.kind)
-                      ? "Drag the corner/edge grips to resize, the top handle to rotate."
-                      : selMarkup.kind === "encumbrance"
-                        ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
-                        : selMarkup.kind === "line"
-                          ? "Drag either end dot to move it."
-                          // NEW-1/B649504 — see the easement hint above: Shift-click never removed a point
-                          // (only adds, on an edge); removal is right-click a dot, or select + Delete.
-                          : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
-                  </div>
-                )}
-                {!simpleClosedMarkup && <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
+                  {selMarkup.locked
+                    ? "Locked — click Unlock below to move or reshape it."
+                    : selMarkup.kind === "encumbrance"
+                      ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
+                      : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
-                </div>}
+                </div>
               </Section>
               </div>
             );
           })()}
-          {/* selected callout — text styling */}
+          {/* selected callout / text box — NEW-1 (layout "A", owner-approved 2026-10-20): ✎ Edit text on top, then TEXT · APPEARANCE · SIZE & POSITION. */}
           {!multiStyleable && selCallout && (() => {
             const cs = calloutStyle(selCallout);
-            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
-            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
-            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
-            // control you click to change a colour showed no colour. Leave it to ColorField.
+            // NO `background` on the swatch — ColorField paints the current colour as the chip's background and spreads this on top.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            // NEW-3 (B1765730) — a small, fixed-size icon-button toggle (never flex:1 — see the
-            // Style field below, which used to stretch six of these across two full-width rows).
-            const segSm = (on) => ({ width: 26, height: 26, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: RADIUS.sm, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12 });
-            // NEW-3 (B1652706) — the div-flexbox rows below (colour + Size in one row, B/I/U +
-            // align in another, a hand-joined "Padding X / Y" field) were the one panel B-A3 never
-            // converted to the shared row primitive (Field/PairedField/PairedFieldHead — see the
-            // parcel Outline group and the closed-markup Outline/Fill group for the pattern this
-            // follows). Rebuilt on it here so it inherits the 64px label gutter every other panel
-            // shares, and gains the FILL | LINE pair the outline's new weight/dash/opacity (NEW-1/
-            // NEW-2, B1652704/B1652705) needs a home for. A divider (a bare bordered-top div)
-            // separates the three groups; nothing below is removed, only relaid out.
-            const dividerStyle = { borderTop: BORDER_1, margin: "10px 0" };
+            // B1765730 — a small, fixed-size icon-button toggle (never flex:1).
+            const segSm = (on) => ({ width: 26, height: 26, flex: "none", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: RADIUS.sm, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "var(--on-accent)" : PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12 });
+            const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
+            const vAlignHint = "shows once the box is taller than its text — drag the box's top or bottom grip";
+            const fixedExtent = selCallout.boxW != null || selCallout.boxH != null;
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
               <Section title={null}>
-                <StdSubLabel>Text</StdSubLabel>
+                {/* A plain (white, normal border) full-width button at the very top — it moved up from the bottom. */}
+                <button type="button" data-testid="callout-edit-text" style={{ ...chip, width: "100%", marginBottom: SPACE.sm }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
+
+                <StdSubLabel section="text">Text</StdSubLabel>
                 <Field label="Colour"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /></Field>
-                <Field label="Size"><NumInput style={numInput} value={cs.size} min={1} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
-                {/* NEW-3 (B1765730) — bold/italic/underline + align used to be two rows of six
-                    flex:1 buttons, each stretched to fill a third of the panel's width — far
-                    bigger than the glyph it held. One row of small fixed-size icon buttons
-                    (matching the compact controls elsewhere in this panel, e.g. the zoning-tier
-                    toggles) says the same thing in a fraction of the height. B681 — familiar
-                    Word-style alignment icons instead of the cryptic ⇤ ≣ ⇥ unicode. */}
+                <Field label="Size"><NumInput boxed fill unit="pt" ariaLabel="Text size" value={cs.size} min={1} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
                 <Field label="Style">
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <button style={{ ...segSm(cs.bold), fontWeight: 800 }} title="Bold" aria-label="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
-                    <button style={{ ...segSm(cs.italic), fontStyle: "italic" }} title="Italic" aria-label="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
-                    <button style={{ ...segSm(cs.underline), textDecoration: "underline" }} title="Underline" aria-label="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
-                    <div style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 2px" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                    <button type="button" style={{ ...segSm(cs.bold), fontWeight: 800 }} title="Bold" aria-label="Bold" aria-pressed={cs.bold} onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
+                    <button type="button" style={{ ...segSm(cs.italic), fontStyle: "italic" }} title="Italic" aria-label="Italic" aria-pressed={cs.italic} onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
+                    <button type="button" style={{ ...segSm(cs.underline), textDecoration: "underline" }} title="Underline" aria-label="Underline" aria-pressed={cs.underline} onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
+                    <button type="button" data-testid="callout-strike" style={{ ...segSm(cs.strike), textDecoration: "line-through" }} title="Strikethrough" aria-label="Strikethrough" aria-pressed={cs.strike} onClick={() => setSelCallout({ strike: !cs.strike })}>S</button>
+                    <button type="button" data-testid="callout-caps" style={{ ...segSm(cs.caps), fontSize: 10.5, fontWeight: 700, letterSpacing: "-0.02em" }} title="All caps (display only — the typed text is not changed)" aria-label="All caps" aria-pressed={cs.caps} onClick={() => setSelCallout({ caps: !cs.caps })}>AA</button>
+                  </div>
+                </Field>
+                <Field label="Align">
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                     {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
-                      <button key={a} style={segSm(cs.align === a)} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
+                      <button type="button" key={a} style={segSm(cs.align === a)} title={lbl} aria-label={lbl} aria-pressed={cs.align === a} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
+                    ))}
+                    <div aria-hidden="true" style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 2px", flex: "none" }} />
+                    {[["top", "Align text to the top"], ["middle", "Align text to the middle"], ["bottom", "Align text to the bottom"]].map(([a, lbl]) => (
+                      <button type="button" key={a} data-testid={`callout-valign-${a}`} style={segSm(cs.valign === a)} title={`${lbl} (${vAlignHint})`} aria-label={lbl} aria-pressed={cs.valign === a} onClick={() => setSelCallout({ valign: a })}><VAlignIcon dir={a} /></button>
                     ))}
                   </div>
                 </Field>
-                <Field label="Spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
+                <Field label="Spacing"><NumInput boxed fill unit="×" ariaLabel="Line spacing" value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
 
-                <div style={dividerStyle} />
-
-                {/* NEW-1/NEW-2 (B1652704/B1652705) — the outline gains a weight, a dash pattern
-                    and its own opacity (reusing lib/calloutStyle.js + the shared DASH_OPTIONS
-                    list — never a second dash list), and the fill gains its own independent
-                    opacity. Fill has no weight and no pattern, so those two cells carry the
-                    shared em-dash placeholder (PairedField's default when `left` is omitted). */}
-                <PairedFieldHead left="Fill" right="Line" />
+                <StdSubLabel section="appearance">Appearance</StdSubLabel>
+                {/* NEW-1/NEW-2 (B1652704/B1652705) — the outline carries a weight, a dash pattern and its own opacity (lib/calloutStyle.js +
+                    the shared DASH_OPTIONS list), and the fill its own opacity. Fill has no weight / pattern, so those cells carry the shared em-dash. */}
+                <PairedFieldHead left="Outline" right="Fill" />
                 <PairedField label="Colour"
-                  left={<ColorField value={toHex6(cs.fill)} {...colorCtl((v) => liveCallout({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
-                  right={<ColorField value={toHex6(cs.stroke)} {...colorCtl((v) => liveCallout({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                />
-                <PairedField label="Weight"
-                  right={<NumInput style={{ ...numInput, width: "100%" }} value={cs.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelCallout({ weight: n })} />}
-                />
-                <PairedField label="Pattern"
-                  right={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={cs.dash} onChange={(e) => setSelCallout({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
+                  left={<ColorField value={toHex6(cs.stroke)} {...colorCtl((v) => liveCallout({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                  right={<ColorField value={toHex6(cs.fill)} {...colorCtl((v) => liveCallout({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
                 />
                 <PairedField label="Opacity"
-                  left={<PercentField value={cs.fillOpacity} onCommit={(v) => setSelCallout({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
-                  right={<PercentField value={cs.opacity} onCommit={(v) => setSelCallout({ opacity: v })} inputStyle={numInput} ariaLabel="Outline opacity" />}
+                  left={<PercentField boxed value={cs.opacity} onCommit={(v) => setSelCallout({ opacity: v })} ariaLabel="Outline opacity" />}
+                  right={<PercentField boxed value={cs.fillOpacity} onCommit={(v) => setSelCallout({ fillOpacity: v })} ariaLabel="Fill opacity" />}
                 />
+                <PairedField label="Weight" left={<NumInput boxed fill ariaLabel="Line weight" testid="callout-weight" value={cs.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelCallout({ weight: n })} />} />
+                <PairedField label="Pattern" left={<select autoComplete="off" aria-label="Line pattern" style={patSel} value={cs.dash} onChange={(e) => setSelCallout({ dash: e.target.value })}>{DASH_OPTIONS}</select>} />
 
-                <div style={dividerStyle} />
-
+                <StdSubLabel section="size">Size & position</StdSubLabel>
                 <PairedFieldHead left="X" right="Y" />
-                <PairedField label="Padding"
-                  left={<NumInput style={{ ...numInput, width: "100%" }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} />}
-                  right={<NumInput style={{ ...numInput, width: "100%" }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} />}
+                <PairedField label="Margin"
+                  left={<NumInput boxed fill ariaLabel="Margin X" value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} />}
+                  right={<NumInput boxed fill ariaLabel="Margin Y" value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} />}
                 />
-                {/* NEW-2 (B1612641) — same RotationStepper the markup/element/overlay inspectors
-                    already use, so a text box/callout rotates through the exact panel control the
-                    owner already knows from every other rotatable object, not a new one. */}
-                <Field label="Rotation°"><RotationStepper value={selCallout.rot || 0} disabled={!!selCallout.locked} disabledReason="Unlock this callout to rotate it"
+                {/* NEW-2 (B1612641) — the same rotation control every other rotatable object uses, now with the angle glyph, quarter turns and Level. */}
+                <Field label="Rotation"><RotationField value={selCallout.rot || 0} locked={!!selCallout.locked} lockedReason="Unlock this callout to rotate it"
                   onCommit={(deg) => setSelCallout({ rot: deg })}
                   onStep={(d) => setSelCallout({ rot: normalizeDeg((selCallout.rot || 0) + d) })} /></Field>
-
+                {/* B913 — a fixed width (side grip) and/or fixed height (top / bottom grip) was set. "Fit to text" clears both so the box
+                    auto-sizes to its content again (matches the per-element inspector). */}
+                {fixedExtent && (
+                  <button type="button" style={{ ...chip, width: "100%" }} title="Clear the fixed width and height — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null, boxH: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
+                )}
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={{ ...chip, flex: 1 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
-                  {/* B913 — an explicit width was set by dragging a side handle (text wraps to it). "Fit to
-                      text" clears it so the box auto-sizes to its content again (matches the per-element inspector). */}
-                  {selCallout.boxW != null && (
-                    <button style={{ ...chip, flex: 1 }} title="Clear the fixed width — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  {/* NEW-1 — the markup and measurement inspectors both carry a Lock chip here; this
-                      one carried only Delete, so an annotation was the one drawn object with no lock
-                      control anywhere in the app despite the render honouring `locked` throughout. */}
+                  {/* NEW-1 — the markup and measurement inspectors both carry a Lock chip here; an annotation was the one drawn object with no lock control. */}
                   <button style={chip} onClick={() => toggleCalloutLock(selCallout.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selCallout.locked} size={13} />{selCallout.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:callout" })}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
@@ -32709,7 +32728,13 @@ function DockLayerPanel({ kind, size, grade, style, pinned, onPin, removal, onRe
 // no drag-history batching needed, unlike the slider it replaces. `inputStyle` is the caller's own
 // local `numInput` const (this function lives at module scope, above the component that defines
 // it, so it cannot close over it) — every call site already has one in scope.
-function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 100 }) {
+function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 100, boxed = false }) {
+  // NEW-1 (layout "A") — `boxed`: the SAME field drawn as the shared NumberBox (value · % · ▲▼) filling its column, so every
+  // Appearance number box shares one right edge. Callers that do not pass it are unchanged.
+  if (boxed) {
+    return <NumInput boxed fill unit="%" ariaLabel={ariaLabel} value={Math.round((value ?? 0) * 100)} min={min} max={max} step={5} coarse={25}
+      onCommit={(n) => onCommit(Math.max(min, Math.min(max, Math.round(n))) / 100)} />;
+  }
   return (
     <span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0 }}>
       <NumInput style={{ ...inputStyle, width: "100%", minWidth: 0 }} value={Math.round((value ?? 0) * 100)} min={min} max={max} step={5}
@@ -32785,9 +32810,9 @@ function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, disabledR
  * parcel boundary vs. its setback line — two different lines, neither one "the fill side" of the
  * other, so they stay two stacked single-column groups rather than a paired grid). Hierarchy comes
  * from weight + uppercase letter-spacing, never from fading the text toward the background (theme rule). */
-function StdSubLabel({ children }) {
+function StdSubLabel({ children, section }) {
   return (
-    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 0 7px" }}>{children}</div>
+    <div data-panel-section={section} style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 0 7px" }}>{children}</div>
   );
 }
 // B681 — familiar Word-style paragraph-alignment glyph: four stacked rows, long rows spanning the
@@ -32803,6 +32828,46 @@ function AlignIcon({ dir }) {
         return <line key={i} x1={x} y1={ys[i]} x2={x + len} y2={ys[i]} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />;
       })}
     </svg>
+  );
+}
+// NEW-1 (layout "A") — vertical-align glyph: a box outline with a short text bar pinned to the top / middle / bottom.
+function VAlignIcon({ dir }) {
+  const y = dir === "top" ? 3.4 : dir === "bottom" ? 11.6 : 7.5;
+  return (
+    <svg width="14" height="15" viewBox="0 0 14 15" aria-hidden="true" focusable="false" style={{ display: "block", pointerEvents: "none" }}>
+      <rect x="1" y="1" width="12" height="13" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.55" />
+      <line x1="3.6" y1={y} x2="10.4" y2={y} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+// NEW-1 (layout "A") — the rotation row's angle glyph: a small dial whose needle is drawn at the CURRENT angle (clockwise from
+// 12 o'clock, the way the canvas turns), so the tilt reads at a glance. Display only — not an interactive dial.
+function AngleGlyph({ deg }) {
+  const a = ((Number.isFinite(deg) ? deg : 0) * Math.PI) / 180;
+  const cx = 10, cy = 10, r = 7.5;
+  return (
+    <svg data-testid="rotation-glyph" data-angle={String(Number.isFinite(deg) ? deg : 0)} width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false" style={{ display: "block", flex: "none", pointerEvents: "none" }}>
+      <circle cx={cx} cy={cy} r={r + 1} fill="none" stroke="var(--border-strong)" strokeWidth="1" />
+      <line x1={cx} y1={cy} x2={cx + r * Math.sin(a)} y2={cy - r * Math.cos(a)} stroke="var(--text-primary)" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="1.3" fill="var(--text-primary)" />
+    </svg>
+  );
+}
+// NEW-1 (layout "A") — the ONE rotation row for markups / text boxes / callouts: the shared RotationStepper (unchanged behaviour,
+// locked state included) with the angle glyph beside it, two icon-only quarter-turn buttons and a Level button that exists
+// only while the angle is not 0. Module scope (MODULE-SCOPE-COMPONENTS).
+function RotationField({ value, locked, lockedReason, onCommit, onStep }) {
+  const deg = Number.isFinite(value) ? value : 0;
+  const tilted = formatDeg(deg) !== "0";
+  const icoBtn = { flex: "none", width: 26, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", fontSize: 14, lineHeight: 1, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", opacity: locked ? 0.5 : 1 };
+  return (
+    <div data-testid="rotation-field" style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+      <AngleGlyph deg={deg} />
+      <RotationStepper boxed boxWidth="100%" style={{ flex: "1 1 0", minWidth: 0 }} data-testid="rotation-input" value={deg} disabled={locked} disabledReason={lockedReason} onCommit={onCommit} onStep={onStep} />
+      <button type="button" data-testid="rotation-quarter-left" style={icoBtn} disabled={locked} title={locked ? lockedReason : "Quarter turn left"} aria-label="Quarter turn left" onClick={() => onStep(-90)}>↺</button>
+      <button type="button" data-testid="rotation-quarter-right" style={icoBtn} disabled={locked} title={locked ? lockedReason : "Quarter turn right"} aria-label="Quarter turn right" onClick={() => onStep(90)}>↻</button>
+      {tilted && <button type="button" data-testid="rotation-level" style={{ ...icoBtn, width: "auto", padding: "0 8px", fontSize: FONT_SIZE.label, fontWeight: 600 }} disabled={locked} title={locked ? lockedReason : "Set the angle back to 0°"} onClick={() => onCommit(0)}>Level</button>}
+    </div>
   );
 }
 // NEW-1 — the Properties panel's "Building number" field. Deliberately its OWN tiny control
@@ -33248,7 +33313,7 @@ function LineSample({ weight }) {
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
 /* `boxed` (Building panel v3, NEW-2) draws the field as the shared NumberBox: ONE bordered box holding the value,
  * `unit` and a stacked ▲▼ (when `step` is set). Same commit/clamp/"Using N" logic — only the chrome changes. */
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid, seed, muted = false, syncExternal = false }) {
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid, seed, muted = false, syncExternal = false, fill = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
    * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
@@ -33451,14 +33516,14 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
    * invisible to every unit test. Same family as MODULE-SCOPE-COMPONENTS: keep the tree stable and
    * let the CONTENT change. */
   const stack = (row) => (
-    <span data-field-group="1" style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: noteLine ? 3 : 0 }}>
+    <span data-field-group="1" style={{ display: fill ? "flex" : "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: noteLine ? 3 : 0, ...(fill ? { width: "100%", minWidth: 0 } : null) }}>
       {row}{noteLine}
     </span>
   );
 
   if (boxed) {
     return stack(
-      <NumberBox unit={boxUnit} width={boxWidth} onUp={step != null ? (e) => nudge(e && e.shiftKey ? coarseStep : step) : undefined} onDown={step != null ? (e) => nudge(-(e && e.shiftKey ? coarseStep : step)) : undefined}
+      <NumberBox unit={boxUnit} width={fill ? "100%" : boxWidth} onUp={step != null ? (e) => nudge(e && e.shiftKey ? coarseStep : step) : undefined} onDown={step != null ? (e) => nudge(-(e && e.shiftKey ? coarseStep : step)) : undefined}
         upTitle="Increase (↑ · Shift for a larger step)" downTitle="Decrease (↓ · Shift for a larger step)">
         {input}
       </NumberBox>

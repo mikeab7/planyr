@@ -36,7 +36,7 @@ describe("NEW-1 — one title, the thing's own type name", () => {
     expect(SP).not.toMatch(/Markup · Cloud|`Markup · |`Measurement · |`Selected · |`Easement · /);
     expect(SP).not.toMatch(/Element\{\(\(\) =>/);
     // the per-kind inner Sections render title-less
-    for (const re of [/<Section title=\{null\}>\s*\{\/\* NEW-1 \(B1618656\)/, /<Section title=\{null\}>\s*<StdSubLabel>Text<\/StdSubLabel>/]) {
+    for (const re of [/<Section title=\{null\}>\s*<StdSubLabel section="appearance">Appearance<\/StdSubLabel>/, /<Section title=\{null\}>\s*\{\/\* A plain \(white, normal border\) full-width button at the very top/]) {
       expect(SP).toMatch(re);
     }
   });

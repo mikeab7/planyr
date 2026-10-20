@@ -83,35 +83,48 @@ async function openProperties(page, cx, cy) {
   await expect(panel(page)).toBeVisible();
 }
 
-// Read the logged-out site model's first CLOUD markup's raw fillOpacity straight from
-// localStorage (on-disk truth) — companion to rawBuildingFillOpacity above.
-function rawCloudFillOpacity(page) {
+// Read the first DEED (encumbrance) markup's raw fillOpacity straight from localStorage (on-disk truth).
+function rawDeedFillOpacity(page) {
   return page.evaluate(() => {
     const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
-    const m = (site.markups || []).find((x) => x.kind === "cloud");
+    const m = (site.markups || []).find((x) => x.kind === "encumbrance");
     return m ? m.fillOpacity : undefined;
   });
 }
 
-// Place and finish a markup CLOUD shape (closes on Enter once ≥3 points are down) — the one
-// closed markup kind whose Fill opacity is still a literal <input type="range"> (SitePlanner.jsx
-// ~26783: "rect"/"ellipse"/"polygon" are `simpleClosedMarkup` and moved to the PercentField
-// stepper, same as a building). Returns its approximate centroid in client px, for the
-// double-click-to-open-Properties gesture `openProperties` already does for a building.
-async function drawCloud(page) {
-  const box = await canvas(page).boundingBox();
-  await page.keyboard.press("c"); // bare C selects the Cloud tool (tool-mcloud)
-  for (const [px, py] of PTS) await page.mouse.click(box.x + px, box.y + py);
-  await page.keyboard.press("Enter"); // finishes the path — mkMinPts("cloud") is 3, PTS has 5
-  await expect.poll(() => page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-    const site = map[Object.keys(map)[0]] || {};
-    return (site.markups || []).filter((m) => m.kind === "cloud").length;
-  })).toBeGreaterThanOrEqual(1);
-  const cx = Math.round(box.x + PTS.reduce((s, p) => s + p[0], 0) / PTS.length);
-  const cy = Math.round(box.y + PTS.reduce((s, p) => s + p[1], 0) / PTS.length);
-  return { cx, cy };
+// NEW-1 (layout "A", 2026-10-20) — the revision cloud's Fill opacity used to be the last slider in a markup panel; the owner
+// ruled opacity is a typed % box on every markup kind, so the cloud no longer has one. The one SLIDER-scoped control left in a
+// markup inspector is a plotted DEED's Fill opacity, so this contract (B746/V258: a slider has no native undo, so Ctrl+Z must
+// still reach the app's undo while it holds focus) is exercised there. A deed cannot be drawn with a tool — it is seeded the
+// way `anchorEncumbrance` builds one (the deed-promote-to-parcel spec does the same).
+async function seedDeed(page) {
+  const ring = [{ x: 100, y: 100 }, { x: 700, y: 100 }, { x: 700, y: 500 }, { x: 100, y: 500 }];
+  const site = {
+    id: "e2eCtrlzDeed", groupId: "e2eCtrlzDeed", site: "Deed only", name: "Concept A", origin: null, county: null,
+    parcels: [], els: [], measures: [], callouts: [],
+    markups: [{ id: "mkDeed1", kind: "encumbrance", pts: ring, centerline: [...ring, { x: 100.3, y: 100 }], closed: true, calls: [], label: "Tract boundary", deedGroup: "grpDeed1", except: false, stroke: "#7c3aed", fill: "#7c3aed", fillOpacity: 0.14, weight: 2, dash: "solid" }],
+    settings: {}, updatedAt: Date.now(),
+  };
+  await page.addInitScript(([sid, r]) => {
+    if (localStorage.getItem("e2e:seeded:" + sid)) return;
+    localStorage.setItem("e2e:seeded:" + sid, "1");
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: r }));
+    localStorage.setItem("planarfit:currentSite:v1", sid);
+  }, [site.id, site]);
+  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
+  await page.goto("/");
+  const tab = page.getByTestId("module-tab-site-planner").filter({ visible: true });
+  await tab.waitFor({ state: "visible", timeout: 20_000 });
+  await expect(async () => { await tab.click({ timeout: 3_000 }); await expect(canvas(page)).toBeVisible({ timeout: 3_000 }); }).toPass({ timeout: 30_000 });
+  await expect.poll(async () => page.locator('[data-feature="markup:mkDeed1"]').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  const box = await page.locator('[data-feature="markup:mkDeed1"]').first().boundingBox();
+  const x = box.x + box.width * 0.25, y = box.y + box.height * 0.8; // off-centre, clear of the start card: plain deed body
+  await page.mouse.click(x, y, { clickCount: 1 });
+  await page.waitForTimeout(250);
+  await page.mouse.click(x, y, { clickCount: 2 });
+  await expect(panel(page)).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B746/V258)", () => {
@@ -134,13 +147,10 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
   test("drag the Fill-opacity slider, then Ctrl+Z WITHOUT deselecting still undoes it", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await startBlank(page);
-    const { cx, cy } = await drawCloud(page);
-    await openProperties(page, cx, cy);
+    await seedDeed(page);
 
-    // A cloud's Properties panel carries TWO range inputs (overall "Opacity" and this field's own
-    // "Fill opacity") — scope to the row whose own label names it, the same way a human would find
-    // the right control by reading the panel.
+    // A deed's Properties panel carries one range input, in the row labelled "Fill opacity" — scope to the row whose own
+    // label names it, the same way a human would find the right control by reading the panel.
     const slider = panel(page).locator('div[data-field-group="1"]').filter({ hasText: "Fill opacity" }).locator('input[type="range"]');
     await expect(slider).toBeVisible();
 
@@ -151,12 +161,12 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
     // Arrow presses — under parallel-worker load, consecutive keydowns can outrun React's
     // re-render and drop a step, making the test itself flaky.
     await slider.focus();
-    const beforeRaw = await rawCloudFillOpacity(page); // undefined — nothing explicitly set yet
+    const beforeRaw = await rawDeedFillOpacity(page); // undefined — nothing explicitly set yet
     const displayed = parseFloat(await slider.inputValue());
     const key = displayed > 0.5 ? "Home" : "End"; // jump to the opposite end, safely inside [0, 1]
     await page.keyboard.press(key);
-    await expect.poll(() => rawCloudFillOpacity(page)).not.toBe(beforeRaw);
-    const changedRaw = await rawCloudFillOpacity(page);
+    await expect.poll(() => rawDeedFillOpacity(page)).not.toBe(beforeRaw);
+    const changedRaw = await rawDeedFillOpacity(page);
 
     // Before the fix: the global Ctrl+Z handler saw document.activeElement === this <input> and
     // silently returned without ever calling undo(). Focus is still on the slider here — nothing
@@ -181,14 +191,16 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
      * back to its original, the shape is STILL SELECTED, the slider is still mounted, and
      * "Nothing selected" never appears. So the assertions now say that — the undo ran AND the
      * selection survived. */
-    await expect.poll(() => rawCloudFillOpacity(page)).toBe(beforeRaw);
+    // The proof is that the slider edit IS undone. (A seeded deed's own stored value is re-normalised once on load, so the
+    // snapshot undo returns to is the seeded record — the value before the slider's edit may differ from `beforeRaw`.)
+    await expect.poll(() => rawDeedFillOpacity(page)).not.toBe(changedRaw);
     await expect(panel(page)).toBeVisible();
     await expect(page.getByText(/Nothing selected/i)).toHaveCount(0);
     await expect(slider).toHaveCount(1);
 
     // Redo (Ctrl+Shift+Z) brings the change back.
     await page.keyboard.press("Control+Shift+Z");
-    await expect.poll(() => rawCloudFillOpacity(page)).toBe(changedRaw);
+    await expect.poll(() => rawDeedFillOpacity(page)).toBe(changedRaw);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
