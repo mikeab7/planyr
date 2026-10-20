@@ -91,17 +91,9 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
-  /* NEW-1 (Michigan, 2026-10-19) — county hosts the Michigan sweep found (the GDIT "Parcels - MI -" index on ArcGIS Online, each county's own viewer config,
-   * regional bodies). The sandbox reaches none of them, so each is relayed and MEASURED through here before a county is wired to it. */
-  "gis.emmetcounty.org", "gis.miottawa.org", "arcgisweb.countyofnewaygo.com", "gis.mijackson.org", "gis.kentcountymi.gov", "gis.macombgov.org",
-  "gis.grandtraverse.org", "gis.gtcountymi.gov", "gis.allegancounty.org", "gis.kalcounty.com", "gis.stclaircounty.org", "a2maps.a2gov.org",
-  /* TEMPORARY discovery-only hosts (documentation pages + vendor probes) — removed again before this PR leaves draft. */
-  "www.michigan.gov", "www.emcog.org", "wuppdr.org", "www.discovernortheastmichigan.org", "shiawassee.net", "legacy.stclaircounty.org", "stclaircounty.org",
-  /* TEMPORARY discovery-only (county landing pages) — removed before this PR leaves draft. */
-  "alconatownship.com", "emmetcounty.org", "geodelta-deltatownship.hub.arcgis.com", "gis.allegancounty.org", "gis.kentcountymi.gov", "gis.macombgov.org", "gis.mijackson.org", "gis.miottawa.org", "gis.oakgov.com", "gis.vanburencountymi.gov", "home-ecgis.hub.arcgis.com", "ingham-equalization.rsgis.msu.edu", "lapeercountymi.gov", "maps.calhouncountymi.gov", "maps.muskegoncountygis.com", "midlandcountymi.gov", "milivcounty.gov", "presqueislecounty.org", "shiawassee.net", "wexfordcounty.org", "www.algercounty.gov", "www.alpenacounty.org", "www.antrimcountymi.gov", "www.baragacounty.org", "www.barrycounty.org", "www.benzieco.gov", "www.berriencounty.org", "www.charlevoixcounty.org", "www.cheboygancounty.net", "www.clinton-county.org", "www.co.hillsdale.mi.us", "www.co.marquette.mi.us", "www.co.monroe.mi.us", "www.dickinsoncountymi.gov", "www.geneseecountymi.gov", "www.gogebiccountymi.gov", "www.gtcountymi.gov", "www.kalcounty.com", "www.kalkaskacounty.net", "www.keweenawcountyonline.org", "www.leelanau.gov", "www.mackinaccounty.net", "www.manisteecountymi.gov", "www.masoncounty.net", "www.mecostacounty.org", "www.menomineecounty.com", "www.missaukee.org", "www.montcalm.us", "www.montcounty.org", "www.newaygocountymi.gov", "www.ontonagoncounty.org", "www.osceola-county.org", "www.oscodacountymi.com", "www.otsegocountymi.gov", "www.stclaircounty.org", "www.stjosephcountymi.org", "www.washtenaw.org", "www.waynecounty.com",
-  "gis.mocogeo.org", "gis.calhouncountymi.gov", "colligogis.com", "www.colligogis.com", "gisappsecure.ewashtenaw.org", "gis.vanburencountymi.gov", "data-washtenaw.opendata.arcgis.com", "maps.liaa.org", "maps.muskegoncountygis.com", "maps.grandtraverse.org", "arcgisweb.countyofnewaygo.com",
-  "www.baycountymi.gov", "app.fetchgis.com", "fetchgis.com", "api.fetchgis.com", "maps.fetchgis.com", "maps.stclaircounty.org", "www.co.marquette.mi.us", "stjosephcountymi.gov",
-  "python.it.mtu.edu:6080", "portal1-geo.sabu.mtu.edu:6443", "maps.deltami.gov", "gis.deltami.gov", "arcgis1.midland-mi.org", "baycitymiportal.org",
+  /* NEW-1 (Michigan, 2026-10-20) — the six county-hosted services a wired Michigan county rides (each MEASURED through this relay on the PR preview before it was wired);
+   * the other 46 Michigan rows read *.arcgis.com directly. */
+  "gis.kentcountymi.gov", "gis.miottawa.org", "gis.mijackson.org", "gis.gtcountymi.gov", "maps.stclaircounty.org", "gis.mocogeo.org",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

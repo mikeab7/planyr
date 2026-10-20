@@ -278,6 +278,10 @@ export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owne
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
 export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm)$/i;
+/* Michigan (NEW-1, 2026-10-20): the BS&A-export columns are published with dropped letters — `ONERNAME1` is the owner (Clinton, Kalamazoo, St. Joseph; Montcalm prefixes it `BSAEXPORT_`); Lenawee's is `OWNNM1`,
+ * Monroe's `parcelmaster_ownername1`, Marquette's project layer `Owner_Merg`, Mason's `ParcelMast` (the parcel-master name), Ionia's joined `Parcel_Data_OWNERNAME`. Strictly the fallback pass, like the Idaho spellings above. */
+export const OWNER_KEY_MI_RE = /^((bsaexport_)?onername\d|ownnm1|parcelmaster_ownername1|owner_merg|parcelmast|parcel_data_ownername)$/i;
+
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
@@ -310,7 +314,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
   // column resolves exactly as before, so no existing source can change its answer.
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
-    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key))) continue;
+    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key)) && !OWNER_KEY_MI_RE.test(leafKey(key))) continue;
     if (isPlaceholderValue(attrs[key])) continue;
     return key;
   }
