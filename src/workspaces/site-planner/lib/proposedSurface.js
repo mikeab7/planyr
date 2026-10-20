@@ -65,7 +65,7 @@ export function drainSteps(gen) {
   return r.value;
 }
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
-import { resolveGradingLimit, unionRings, maskRegions, pointInRegions, regionsAreaSf, ringHash as limitRingHash } from "./gradingLimit.js";
+import { resolveGradingLimit, unionRings, clipRegions, maskRegions, pointInRegions, regionsAreaSf, ringHash as limitRingHash } from "./gradingLimit.js";
 import { prepareSweep, cachedMaskAt, CELL_FT as SWEEP_CELL_FT, DEFAULT_MAX_DEPTH_FT } from "./buildableGround.js";
 
 export const TIE_DROP_FT = 0.15;   // threshold tie: paving meets the doors just below slab FF
@@ -688,6 +688,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   let plateaus = [];
   let plateauAt = () => null;
   let srcRegions = limit.regions;
+  let bs = null, bandDevMax = 0;                      // the sweep's boundary samples (boundary mode only)
   if (limit.mode === "boundary" && limit.regions.length && typeof existAt === "function") {
     const ctx = yield* sweepContextSteps({ existAt, existKey: opts.existKey, regions: limit.regions });
     const D = Number.isFinite(spec.maxCutFillFt) && spec.maxCutFillFt > 0 ? spec.maxCutFillFt : DEFAULT_MAX_DEPTH_FT;
@@ -705,17 +706,50 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const { x0, y0, nx, ny, cell } = ctx.lattice;
     const plateauRegions = maskRegions({ mask: unionMask, nx, ny, x0, y0, cell });
     plateaus = masks.map((m) => ({ id: m.id, ffe: m.ffe, areaSf: m.areaSf }));
-    plateauAt = (pt) => {
-      const i = Math.floor((pt.x - x0) / cell), j = Math.floor((pt.y - y0) / cell);
+    const ffeAtCell = (i, j) => {
       if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
       const k = j * nx + i;
       for (const m of masks) if (m.mask[k]) return m.ffe;
       return null;
     };
+    plateauAt = (pt) => {
+      const fi = (pt.x - x0) / cell, fj = (pt.y - y0) / cell;
+      const i = Math.floor(fi), j = Math.floor(fj);
+      const z = ffeAtCell(i, j);
+      if (z != null) return z;
+      // the plateau polygon is traced along sweep-cell EDGES: a point on such an edge floors into the neighbour that is
+      // off the mask, so look at the cell on the other side of the nearest edge too (B2376240: one lattice cell did this)
+      const di = fi - i < 0.5 ? -1 : 1, dj = fj - j < 0.5 ? -1 : 1;
+      return ffeAtCell(i + di, j) ?? ffeAtCell(i, j + dj) ?? ffeAtCell(i + di, j + dj);
+    };
     yield;
-    srcRegions = unionRings([...plateauRegions.map((r) => r.outer), ...graded.map((g) => g.el.ring)]);
+    srcRegions = clipRegions(unionRings([...plateauRegions.map((r) => r.outer), ...graded.map((g) => g.el.ring)]),
+      limit.regions.map((r) => r.outer), limit.regions.flatMap((r) => r.holes));   // the traced mask runs on cell edges: never past the limit
+    bs = ctx.bs;
+    for (let q = 0; q < bs.z.length; q++) for (const m of masks) { const dv = Math.abs(bs.z[q] - m.ffe); if (dv > bandDevMax) bandDevMax = dv; }
   }
   if (!srcRegions.length) return null;
+  // B2376240 — boundary mode: the slope is thrown INWARD from the limit (the setback), never outward from the plateau.
+  // Every boundary sample b (the SAME samples the Level-ground sweep paints its blocking discs from) bounds the surface
+  // at a point p to [z(b) − d/ratio, z(b) + d/ratio]; the pad elevation ze clamped into every such band is the slope,
+  // and a point no sample constrains is the plateau — which is exactly the sweep's own disc rule, so the two agree by
+  // construction. Nothing outside the limit is ever graded, so the setback flag cannot fire in this mode.
+  const boundary = limit.mode === "boundary";
+  const bandR2 = bs ? Math.pow(apronRatio * (bandDevMax + 10), 2) : 0;   // a sample further than this constrains nothing
+  const bandZ = (pt, ze) => {
+    if (!bs) return ze;
+    let L = -Infinity, U = Infinity;
+    const bx = bs.x, by = bs.y, bz = bs.z;
+    for (let q = 0; q < bx.length; q++) {
+      const ddx = pt.x - bx[q], ddy = pt.y - by[q], d2 = ddx * ddx + ddy * ddy;
+      if (d2 > bandR2) continue;
+      const d = Math.sqrt(d2) / apronRatio;
+      const lo = bz[q] - d, hi = bz[q] + d;
+      if (lo > L) L = lo;
+      if (hi < U) U = hi;
+    }
+    return Math.min(Math.max(ze, L), U);
+  };
   // the open ground inside the limit: the plateau in boundary mode, else inverse-distance between the planes it touches
   const infillZ = (pt) => {
     const pz = plateauAt(pt);
@@ -767,7 +801,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const sbRings = Array.isArray(G.setbackRings) && G.setbackRings.length ? G.setbackRings : null;
   const outAgg = sbRings ? { count: 0, sf: 0, maxPastFt: 0, sx: 0, sy: 0, beyondParcel: 0, cutSf: 0, fillSf: 0, perEl: {} } : null;
   const noteOut = (pt, A, dz, elId, cell) => {
-    if (!outAgg || inAnyRing(pt, sbRings)) return;
+    if (boundary || !outAgg || inAnyRing(pt, sbRings)) return;   // boundary mode grades nothing outside the limit
     const past = distToRingEdges(pt, sbRings) + Math.sqrt(A) / 2;
     cell.out = true; cell.pastFt = past;
     outAgg.count++; outAgg.sf += A; outAgg.sx += pt.x; outAgg.sy += pt.y;
@@ -779,8 +813,9 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     if (past > pe.maxPastFt) pe.maxPastFt = past;
     if (dz != null && dz > PL_FILL_EPS_FT) pe.fillSf += A; else if (dz != null && dz < -PL_FILL_EPS_FT) pe.cutSf += A;
   };
-  const [bx0, by0, bx1, by1] = bboxOfRings(srcRegions.map((r) => r.outer).concat(graded.map((g) => g.el.ring)));
-  const x0 = bx0 - reach, y0 = by0 - reach, w = bx1 - bx0 + 2 * reach, h = by1 - by0 + 2 * reach;
+  const [bx0, by0, bx1, by1] = bboxOfRings((boundary ? limit.regions : srcRegions).map((r) => r.outer).concat(graded.map((g) => g.el.ring)));
+  const pad = boundary ? 0 : reach;
+  const x0 = bx0 - pad, y0 = by0 - pad, w = bx1 - bx0 + 2 * pad, h = by1 - by0 + 2 * pad;
   if (!(w > 0) || !(h > 0)) return null;
   const cellFt = Math.max(minCellFt, Math.sqrt((w * h) / maxCells));
   const nx = Math.max(1, Math.ceil(w / cellFt)), ny = Math.max(1, Math.ceil(h / cellFt));
@@ -823,6 +858,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
         }
         continue;
       }
+      if (boundary && regionIndexOf(pt, limit.regions) < 0) continue;   // B2376240: outside the limit is never graded
       const k = regionIndexOf(pt, srcRegions);
       if (k >= 0) {
         // open ground inside the limit
@@ -843,15 +879,22 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
         }
         continue;
       }
-      if (!apronsOn || !(reach > 0)) continue;
-      // outside the limit: the daylight slope thrown FROM the limit
+      if (!apronsOn) continue;
+      if (!boundary && !(reach > 0)) continue;
+      // outside the plateau: the daylight slope — thrown FROM the limit outward (layout), or INWARD from it (boundary)
       const nr = nearestOnRegions(pt, srcRegions);
-      if (!nr || nr.d > reach) continue;
+      if (!nr || (!boundary && nr.d > reach)) continue;
       const id = `limit:${nr.k}`;
       if (!gOk) { voidCells++; cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: null, elId: id, cls: "transition", wedge: true, regionId: nr.k }); continue; }
       const ze = edgeZ(nr.q, pt);
       if (ze == null) continue;
-      const dz = wedgeDz(ze, g0, nr.d, apronRatio, 0);
+      let dz;
+      if (boundary) {
+        const zb = bandZ(pt, ze);
+        // a cell no boundary sample constrains but the sweep still left out (too deep, or off the main plateau) keeps the
+        // plateau-edge taper down to the ground it sits on; every other band cell is the inward slope from the limit
+        dz = Math.abs(zb - ze) < 1e-9 ? wedgeDz(ze, g0, nr.d, apronRatio, 0) : zb - g0;
+      } else dz = wedgeDz(ze, g0, nr.d, apronRatio, 0);
       if (Math.abs(dz) < PL_FILL_EPS_FT) continue;                   // at/past the daylight line
       wedgeSf += A; regionStats[nr.k].slopeSf += A;
       const cell = { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: g0 + dz, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: nr.k };
@@ -867,7 +910,10 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   }
   // the daylight line: each limit ring sample pushed outward by |dz| × ratio — the same taper the slope cells price
   const daylight = [];
-  if (edgeSamples.length) {
+  if (boundary) {
+    // the band starts exactly at the limit: the setback line (and the pond / buffer hole edges) IS the daylight line
+    limit.regions.forEach((r, k) => { daylight.push({ elId: `limit:${k}`, ring: r.outer, hole: false }); for (const hring of r.holes) daylight.push({ elId: `limit:${k}`, ring: hring, hole: true }); });
+  } else if (edgeSamples.length) {
     const byRing = new Map();
     for (const s of edgeSamples) { let l = byRing.get(s.ring); if (!l) byRing.set(s.ring, (l = { k: s.k, pts: [] })); l.pts.push(s); }
     for (const [ring, l] of byRing) {
@@ -888,15 +934,21 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     if (inAnyRing(pt, pondRings)) return { status: "none", reason: "pond" };
     const g = elementAt(pt);
     if (g) return { status: "value", ft: zOf(g, pt), elId: g.el.id, cls: g.plane.classId, wedge: false };
+    if (boundary && regionIndexOf(pt, limit.regions) < 0) return { status: "none", reason: "outside" };
     const k = regionIndexOf(pt, srcRegions);
     if (k >= 0) { const z = infillZ(pt); return z == null ? { status: "none", reason: "outside" } : { status: "value", ft: z, elId: `infill:${k}`, cls: "infill", wedge: false }; }
     if (!apronsOn) return { status: "none", reason: "outside" };
     const nr = nearestOnRegions(pt, srcRegions);
-    if (!nr || nr.d > reach) return { status: "none", reason: "outside" };
+    if (!nr || (!boundary && nr.d > reach)) return { status: "none", reason: "outside" };
     const g0 = existAt(pt);
     if (g0 == null || !isFinite(g0)) return { status: "none", reason: "void" };
     const ze = edgeZ(nr.q, pt);
     if (ze == null) return { status: "none", reason: "outside" };
+    if (boundary) {
+      const zb = bandZ(pt, ze);
+      const ft = Math.abs(zb - ze) < 1e-9 ? g0 + wedgeDz(ze, g0, nr.d, apronRatio, 0) : zb;
+      return { status: "value", ft, elId: `limit:${nr.k}`, cls: "transition", wedge: true };
+    }
     return { status: "value", ft: g0 + wedgeDz(ze, g0, nr.d, apronRatio, 0), elId: `limit:${nr.k}`, cls: "transition", wedge: true };
   };
   return {
