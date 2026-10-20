@@ -1,0 +1,634 @@
+{
+ "source": "public/geo/county-polygons.json (Census-derived county polygons), state NM; interior points are inside the named county, line points are within the polygon's county-line band of it",
+ "counties": [
+  {
+   "state": "NM",
+   "name": "Bernalillo County",
+   "fips": "35001",
+   "lat": 35.06,
+   "lng": -106.66,
+   "bbox": [
+    -107.18,
+    34.86,
+    -106.12,
+    35.23
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Catron County",
+   "fips": "35003",
+   "lat": 33.92,
+   "lng": -108.4,
+   "bbox": [
+    -109.06,
+    33.19,
+    -107.69,
+    34.6
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Chaves County",
+   "fips": "35005",
+   "lat": 33.37,
+   "lng": -104.46,
+   "bbox": [
+    -105.35,
+    32.52,
+    -103.48,
+    34.1
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Cibola County",
+   "fips": "35006",
+   "lat": 34.92,
+   "lng": -107.99,
+   "bbox": [
+    -109.05,
+    34.57,
+    -107.04,
+    35.36
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Colfax County",
+   "fips": "35007",
+   "lat": 36.61,
+   "lng": -104.63,
+   "bbox": [
+    -105.36,
+    36.2,
+    -103.98,
+    37
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Curry County",
+   "fips": "35009",
+   "lat": 34.58,
+   "lng": -103.33,
+   "bbox": [
+    -103.73,
+    34.29,
+    -103.01,
+    34.97
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "De Baca County",
+   "fips": "35011",
+   "lat": 34.35,
+   "lng": -104.4,
+   "bbox": [
+    -104.89,
+    33.99,
+    -103.92,
+    34.78
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Doña Ana County",
+   "fips": "35013",
+   "lat": 32.36,
+   "lng": -106.82,
+   "bbox": [
+    -107.29,
+    31.78,
+    -106.31,
+    33.06
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Eddy County",
+   "fips": "35015",
+   "lat": 32.47,
+   "lng": -104.29,
+   "bbox": [
+    -104.86,
+    32,
+    -103.69,
+    32.97
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Grant County",
+   "fips": "35017",
+   "lat": 32.74,
+   "lng": -108.38,
+   "bbox": [
+    -109.06,
+    31.86,
+    -107.65,
+    33.21
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Guadalupe County",
+   "fips": "35019",
+   "lat": 34.86,
+   "lng": -104.78,
+   "bbox": [
+    -105.31,
+    34.34,
+    -104.1,
+    35.22
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Harding County",
+   "fips": "35021",
+   "lat": 35.87,
+   "lng": -103.81,
+   "bbox": [
+    -104.43,
+    35.38,
+    -103.34,
+    36.23
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Hidalgo County",
+   "fips": "35023",
+   "lat": 31.93,
+   "lng": -108.71,
+   "bbox": [
+    -109.06,
+    31.34,
+    -108.19,
+    32.79
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Lea County",
+   "fips": "35025",
+   "lat": 32.79,
+   "lng": -103.4,
+   "bbox": [
+    -103.81,
+    32,
+    -103.02,
+    33.57
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Lincoln County",
+   "fips": "35027",
+   "lat": 33.75,
+   "lng": -105.45,
+   "bbox": [
+    -106.37,
+    33.12,
+    -104.86,
+    34.36
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Los Alamos County",
+   "fips": "35028",
+   "lat": 35.89,
+   "lng": -106.3,
+   "bbox": [
+    -106.41,
+    35.76,
+    -106.15,
+    35.99
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Luna County",
+   "fips": "35029",
+   "lat": 32.18,
+   "lng": -107.74,
+   "bbox": [
+    -108.23,
+    31.78,
+    -107.27,
+    32.61
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "McKinley County",
+   "fips": "35031",
+   "lat": 35.58,
+   "lng": -108.26,
+   "bbox": [
+    -109.05,
+    34.94,
+    -107.28,
+    36.01
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Mora County",
+   "fips": "35033",
+   "lat": 36.02,
+   "lng": -104.94,
+   "bbox": [
+    -105.72,
+    35.76,
+    -104.31,
+    36.28
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Otero County",
+   "fips": "35035",
+   "lat": 32.62,
+   "lng": -105.73,
+   "bbox": [
+    -106.38,
+    32,
+    -104.83,
+    33.4
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Quay County",
+   "fips": "35037",
+   "lat": 35.11,
+   "lng": -103.54,
+   "bbox": [
+    -104.12,
+    34.59,
+    -103.01,
+    35.75
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Rio Arriba County",
+   "fips": "35039",
+   "lat": 36.51,
+   "lng": -106.69,
+   "bbox": [
+    -107.63,
+    35.93,
+    -105.49,
+    37
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Roosevelt County",
+   "fips": "35041",
+   "lat": 34.02,
+   "lng": -103.47,
+   "bbox": [
+    -103.94,
+    33.55,
+    -103.01,
+    34.61
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Sandoval County",
+   "fips": "35043",
+   "lat": 35.7,
+   "lng": -106.86,
+   "bbox": [
+    -107.63,
+    35.21,
+    -106.22,
+    36.23
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "San Juan County",
+   "fips": "35045",
+   "lat": 36.5,
+   "lng": -108.32,
+   "bbox": [
+    -109.05,
+    35.98,
+    -107.4,
+    37
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "San Miguel County",
+   "fips": "35047",
+   "lat": 35.49,
+   "lng": -104.8,
+   "bbox": [
+    -105.72,
+    35.03,
+    -103.61,
+    35.89
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Santa Fe County",
+   "fips": "35049",
+   "lat": 35.51,
+   "lng": -105.97,
+   "bbox": [
+    -106.25,
+    35.03,
+    -105.68,
+    36.01
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Sierra County",
+   "fips": "35051",
+   "lat": 33.13,
+   "lng": -107.18,
+   "bbox": [
+    -108,
+    32.59,
+    -106.31,
+    33.49
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Socorro County",
+   "fips": "35053",
+   "lat": 34.01,
+   "lng": -106.92,
+   "bbox": [
+    -107.73,
+    33.46,
+    -105.9,
+    34.59
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Taos County",
+   "fips": "35055",
+   "lat": 36.58,
+   "lng": -105.62,
+   "bbox": [
+    -106.05,
+    36.01,
+    -105.17,
+    37
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Torrance County",
+   "fips": "35057",
+   "lat": 34.65,
+   "lng": -105.84,
+   "bbox": [
+    -106.47,
+    34.25,
+    -105.26,
+    35.05
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Union County",
+   "fips": "35059",
+   "lat": 36.48,
+   "lng": -103.46,
+   "bbox": [
+    -104.01,
+    35.73,
+    -102.98,
+    37
+   ]
+  },
+  {
+   "state": "NM",
+   "name": "Valencia County",
+   "fips": "35061",
+   "lat": 34.72,
+   "lng": -106.81,
+   "bbox": [
+    -107.22,
+    34.43,
+    -106.39,
+    34.97
+   ]
+  }
+ ],
+ "lines": [
+  {
+   "name": "Bernalillo County (line)",
+   "county": "Bernalillo County",
+   "lat": 34.88,
+   "lng": -106.4
+  },
+  {
+   "name": "Catron County (line)",
+   "county": "Catron County",
+   "lat": 33.21,
+   "lng": -109.05
+  },
+  {
+   "name": "Chaves County (line)",
+   "county": "Chaves County",
+   "lat": 32.53,
+   "lng": -104.83
+  },
+  {
+   "name": "Cibola County (line)",
+   "county": "Cibola County",
+   "lat": 34.59,
+   "lng": -108.85
+  },
+  {
+   "name": "Colfax County (line)",
+   "county": "Colfax County",
+   "lat": 36.22,
+   "lng": -104.84
+  },
+  {
+   "name": "Curry County (line)",
+   "county": "Curry County",
+   "lat": 34.31,
+   "lng": -103.03
+  },
+  {
+   "name": "De Baca County (line)",
+   "county": "De Baca County",
+   "lat": 34.01,
+   "lng": -104.15
+  },
+  {
+   "name": "Doña Ana County (line)",
+   "county": "Doña Ana County",
+   "lat": 31.79,
+   "lng": -106.55
+  },
+  {
+   "name": "Eddy County (line)",
+   "county": "Eddy County",
+   "lat": 32.01,
+   "lng": -104.85
+  },
+  {
+   "name": "Grant County (line)",
+   "county": "Grant County",
+   "lat": 31.87,
+   "lng": -108.21
+  },
+  {
+   "name": "Guadalupe County (line)",
+   "county": "Guadalupe County",
+   "lat": 34.36,
+   "lng": -105.3
+  },
+  {
+   "name": "Harding County (line)",
+   "county": "Harding County",
+   "lat": 35.4,
+   "lng": -103.39
+  },
+  {
+   "name": "Hidalgo County (line)",
+   "county": "Hidalgo County",
+   "lat": 31.38,
+   "lng": -108.21
+  },
+  {
+   "name": "Lea County (line)",
+   "county": "Lea County",
+   "lat": 32.13,
+   "lng": -103.72
+  },
+  {
+   "name": "Lincoln County (line)",
+   "county": "Lincoln County",
+   "lat": 33.14,
+   "lng": -105.05
+  },
+  {
+   "name": "Los Alamos County (line)",
+   "county": "Los Alamos County",
+   "lat": 35.78,
+   "lng": -106.25
+  },
+  {
+   "name": "Luna County (line)",
+   "county": "Luna County",
+   "lat": 32.46,
+   "lng": -108.22
+  },
+  {
+   "name": "McKinley County (line)",
+   "county": "McKinley County",
+   "lat": 34.96,
+   "lng": -108.46
+  },
+  {
+   "name": "Mora County (line)",
+   "county": "Mora County",
+   "lat": 35.78,
+   "lng": -105.02
+  },
+  {
+   "name": "Otero County (line)",
+   "county": "Otero County",
+   "lat": 32.03,
+   "lng": -104.85
+  },
+  {
+   "name": "Quay County (line)",
+   "county": "Quay County",
+   "lat": 34.79,
+   "lng": -103.38
+  },
+  {
+   "name": "Rio Arriba County (line)",
+   "county": "Rio Arriba County",
+   "lat": 35.98,
+   "lng": -105.71
+  },
+  {
+   "name": "Roosevelt County (line)",
+   "county": "Roosevelt County",
+   "lat": 34.25,
+   "lng": -103.03
+  },
+  {
+   "name": "Sandoval County (line)",
+   "county": "Sandoval County",
+   "lat": 35.28,
+   "lng": -107.21
+  },
+  {
+   "name": "San Juan County (line)",
+   "county": "San Juan County",
+   "lat": 36,
+   "lng": -108.61
+  },
+  {
+   "name": "San Miguel County (line)",
+   "county": "San Miguel County",
+   "lat": 35.15,
+   "lng": -104.11
+  },
+  {
+   "name": "Santa Fe County (line)",
+   "county": "Santa Fe County",
+   "lat": 35.3,
+   "lng": -105.71
+  },
+  {
+   "name": "Sierra County (line)",
+   "county": "Sierra County",
+   "lat": 32.72,
+   "lng": -107.71
+  },
+  {
+   "name": "Socorro County (line)",
+   "county": "Socorro County",
+   "lat": 33.48,
+   "lng": -107.7
+  },
+  {
+   "name": "Taos County (line)",
+   "county": "Taos County",
+   "lat": 36.03,
+   "lng": -105.52
+  },
+  {
+   "name": "Torrance County (line)",
+   "county": "Torrance County",
+   "lat": 34.27,
+   "lng": -105.3
+  },
+  {
+   "name": "Union County (line)",
+   "county": "Union County",
+   "lat": 35.84,
+   "lng": -103.36
+  },
+  {
+   "name": "Valencia County (line)",
+   "county": "Valencia County",
+   "lat": 34.45,
+   "lng": -106.42
+  }
+ ]
+}
