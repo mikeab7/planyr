@@ -88,6 +88,7 @@ try {
   await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
   const hist = await page.locator('[data-testid="dish-history-entry"]').count();
   check("3h the sheet now shows BOTH ratings (history kept, only once there are two)", hist === 2, `entries=${hist}`);
+  await tap(page, page.locator('[data-testid="dish-sheet-back"]'), "back to the restaurant"); // the row (and its note line) is only visible once the sheet is closed
   db = await rows(page);
   check("3i two rating rows in the database, the latest higher", db.length === 2 && Number(db[1].score) > Number(db[0].score), JSON.stringify(db.map((d) => [d.score, d.rated_on])));
   await shot(page, "2-history");
@@ -95,6 +96,7 @@ try {
   // ── NEW-4 · the note: row (truncated), full on tap, edit, clear ──────────────────────────────────────
   const rowNote = await page.locator('[data-testid="dish-row-note"]').first().evaluate((e) => ({ t: e.textContent, ell: getComputedStyle(e).textOverflow, ws: getComputedStyle(e).whiteSpace }));
   check("4a the note shows on the dish row on ONE truncated line", rowNote.t === "ask for extra sauce" && rowNote.ell === "ellipsis" && rowNote.ws === "nowrap", JSON.stringify(rowNote));
+  await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
   check("4b the full note is in the sheet a tap opens", (await page.locator('[data-testid="dish-sheet-note"]').inputValue()) === "ask for extra sauce");
 
   // suggestions: a misspelling finds the saved dish; picking it re-rates it
