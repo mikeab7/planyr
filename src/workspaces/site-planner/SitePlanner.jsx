@@ -3617,9 +3617,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
+  /* ROUND 5 (NEW-3) — while the owner-only proposed contours are on for this plan, the EXISTING Contour-lines layer is drawn
+   * too (outside the daylight line, dashed — the layer clips itself through `setGradingClip`), without the Layers-panel
+   * toggle having to be on. Forced in the EFFECTIVE overlay set only — nothing is written to the per-site layer prefs, and
+   * the object identity is untouched whenever nothing is forced (B385040: three effects key on it). */
+  const gradingOn = useGradingEnabled();
+  const grContoursWanted = gradingOn && !!(settings.grading && settings.grading.enabled === true && settings.grading.layers && settings.grading.layers.contours);
+  const overlaysEff = useMemo(() => {
+    if (!grContoursWanted || !overlays || (overlays.contours && overlays.contours.on)) return overlays;
+    return { ...overlays, contours: { ...(overlays.contours || { opacity: ALL_LAYERS.contours?.opacity ?? 0.9 }), on: true } };
+  }, [overlays, grContoursWanted]);
+  const grContourClipRef = useRef(null);
+  const applyGradingClip = useCallback(() => {
+    const lyr = overlayRefs.current && overlayRefs.current.contours;
+    if (lyr && typeof lyr.setGradingClip === "function") lyr.setGradingClip(grContourClipRef.current);
+  }, []);
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
     if (!origin) return;
+    const overlays = overlaysEff; // eslint-disable-line no-shadow
     /* NEW-3 — overlays load OFF the critical path, in priority order.
        Restoring a fully-enabled Layers panel fired 465 requests across 17 hosts in one
        burst, all of it racing the first paint (and starving the coarse basemap backfill
@@ -3675,7 +3691,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // county is the right key: it is what the site was filed under, and it is stable across a
       // pan, which the map-view county is not.
       countyKey: restored?.county || county || null,
-      onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
+      onStatus: (id, state, msg, extra) => {
+        if (id === "contours" && grContourClipRef.current) applyGradingClip();   // ROUND 5: a freshly mounted/painted layer takes the clip
+        setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null }));
+      },
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
     });
     const idle = (fn) => (typeof requestIdleCallback === "function"
@@ -3697,7 +3716,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+  }, [overlaysEff, origin, basemapOn, layerGateReady]); // eslint-disable-line
 
   /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
    * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
@@ -14275,7 +14294,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const gsMedianGrade = fmElev.existGradeFt;
   // Owner-only grading layer: the gate, then the small always-loaded glue (settings, the setback polygon, a
   // ground sampler that does not need a drainage check to have run). All inert for every other account.
-  const gradingOn = useGradingEnabled();
+  // (the owner gate `gradingOn` is read above the overlay sync effect — ROUND 5 forces the Contour-lines layer on there)
   // The model GradingController publishes (declared here, ahead of the surface inputs, because its SUGGESTED finish
   // elevations feed them — see `padElevFt` below).
   const [grModel, setGrModel] = useState(null);
@@ -14296,6 +14315,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback, extraRings: grLimitExtraRings, aisleFt: Number.isFinite(settings.aisle) && settings.aisle > 0 ? settings.aisle : 24 });
   const grOn = grBase.on;
   const grHosts = grOn ? grHostsPre : null;
+  // ROUND 5 (NEW-3) — hand the existing Contour-lines layer the graded area to stay out of (null clears it)
+  const grContourClip = grOn && grContoursWanted && grModel && grModel.contours && grModel.contours.clipLatLng ? grModel.contours.clipLatLng : null;
+  useEffect(() => { grContourClipRef.current = grContourClip; applyGradingClip(); }, [grContourClip, applyGradingClip]);
   // ROUND 4 — "Edit outline": the edited grading limit is dragged by vertex handles like a parcel outline; `highlight` is
   // the offending span the flag's "pull the limit in" fix opened it on. Session state only; the ring itself is on the plan.
   const [grLimitEdit, setGrLimitEdit] = useState(null);
@@ -23223,6 +23245,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <GradingPanel planOn={grOn} showOnMap={!!(settings.grading || {}).layers?.cutfill} onPlanOn={(v) => grSetCfg({ enabled: v ? true : null })}
                 onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
                 showContours={!!(settings.grading || {}).layers?.contours} onShowContours={(v) => grSetLayer("contours", v)}
+                showPaper={(settings.grading || {}).layers?.paper !== false} onShowPaper={(v) => grSetLayer("paper", v)}
                 onPullLimit={(id, span) => grEditLimit(span)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
@@ -25037,6 +25060,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 attribute instead of re-emitting every host element. It is undefined at rest and on
                 every export pass, so nothing outside a live pan sees a transform at all. */}
             <g transform={panT}>
+              {/* ROUND 5 (NEW-6) — the paper background under the whole grading picture (owner-only, per plan, on by default
+                  while cut and fill or the proposed contours are on): the sheet's white over the parcel out past the slopes, so
+                  the aerial drops out there. The very bottom of the drawing — references, parcels, elements and every grading
+                  layer paint over it; the export clone carries it by construction (PDF-PARITY). */}
+              {grOn && grModel && grModel.paper && (
+                <g data-layer="paper" pointerEvents="none" transform={`translate(${f2p({ x: 0, y: 0 }).x} ${f2p({ x: 0, y: 0 }).y}) scale(${rppf})`}>
+                  <path d={grModel.paper.d} fill={grModel.paper.fill} fillOpacity={grModel.paper.opacity} fillRule="evenodd" />
+                </g>
+              )}
               {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space, above the
                   basemap. NEW-2 — this is the DEFAULT "below" band: beneath the parcel, the
                   setback ring, the elements and the markups, so your own property line stays

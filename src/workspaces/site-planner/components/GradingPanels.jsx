@@ -13,7 +13,7 @@
  *
  * Module-scope components only (MODULE-SCOPE-COMPONENTS). Colours are theme tokens; the SVG half takes its
  * hex from the planner's PAL (SVG attributes cannot use var()). */
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, SegmentedControl, IconButton } from "../../../shared/ui/controls.jsx";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
@@ -23,7 +23,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { LIMIT_MODES, LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
-import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH } from "../lib/gradingPaint.js";
+import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels } from "../lib/gradingPaint.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
 import { gradingPanelView } from "../lib/gradingPanelModel.js";
@@ -335,7 +335,7 @@ export function GradedAreaLine({ limit, actions }) {
  * show-on-map button. It only READS `model` (published by the controller SitePlanner mounts whether or not this
  * panel is open); opening it starts no build. `headerSlot` is the panel chrome's action element (the ⓘ + gear portal there). */
 export const OFF_LINE = "Turn this on to suggest finish elevations and show cut and fill for this plan.";
-export function GradingPanel({ planOn = true, showOnMap = false, showContours = false, onPlanOn = null, onShowOnMap = null, onShowContours = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null }) {
+export function GradingPanel({ planOn = true, showOnMap = false, showContours = false, showPaper = true, onPlanOn = null, onShowOnMap = null, onShowContours = null, onShowPaper = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null }) {
   const view = gradingPanelView(model);
   const toggles = (
     <div data-grading-switches="1" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 0 10px" }}>
@@ -350,6 +350,12 @@ export function GradingPanel({ planOn = true, showOnMap = false, showContours = 
       {planOn && (
         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <input type="checkbox" data-testid="grading-show-contours" checked={!!showContours} onChange={(e) => onShowContours && onShowContours(e.target.checked)} /> Show proposed contours
+        </label>
+      )}
+      {planOn && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* ROUND 5 (NEW-6) — the sheet-white fill under the grading picture; on by default, per plan */}
+          <input type="checkbox" data-testid="grading-show-paper" checked={!!showPaper} onChange={(e) => onShowPaper && onShowPaper(e.target.checked)} /> Paper background
         </label>
       )}
     </div>
@@ -399,6 +405,8 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
  * stroke, so a pan never recomputes a thing (VIEW-INDEPENDENT-ONCE). */
 export function GradingCanvas({ model, f2p, rppf, PAL }) {
   const { buildable, cutfill, labels, cfg, contours, limit } = model;
+  const contourLabels = contours && contours.labels;
+  const placedLabels = useMemo(() => placeContourLabels(contourLabels || [], rppf), [contourLabels, rppf]);
   const o = f2p({ x: 0, y: 0 });
   const feetG = (d, stroke, w, dash, cap = "butt") => (
     <g transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
@@ -438,11 +446,12 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
               <path d={lv.d} fill="none" stroke={lv.isIndex ? CONTOUR_PROPOSED_INDEX_RGB : CONTOUR_PROPOSED_RGB} strokeWidth={lv.isIndex ? 1.8 : 1.1} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
             </g>
           ))}
-          {rppf >= 0.35 && (contours.labels || []).map((lb, i) => {
+          {/* ROUND 5 — labels ride the line (rotated with it, upright), one per index piece, never stacked (placeContourLabels) */}
+          {placedLabels.map((lb, i) => {
             const p = f2p(lb.pt);
             return (
-              <text key={i} data-contour-label={lb.level} x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={10} fontWeight={700}
-                fill={CONTOUR_PROPOSED_INDEX_RGB} stroke={PAL.paper} strokeWidth={2.5} paintOrder="stroke" style={{ fontFamily: "ui-monospace, monospace" }}>{lb.text}</text>
+              <text key={i} data-contour-label={lb.level} data-contour-label-deg={lb.deg} transform={`translate(${p.x} ${p.y}) rotate(${lb.deg})`} y={3.5} textAnchor="middle" fontSize={10} fontWeight={700}
+                fill={CONTOUR_PROPOSED_INDEX_RGB} stroke={GRADING_PAPER_RGB} strokeWidth={2.5} paintOrder="stroke" style={{ fontFamily: "ui-monospace, monospace" }}>{lb.text}</text>
             );
           })}
         </g>
