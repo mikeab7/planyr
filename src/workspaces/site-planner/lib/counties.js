@@ -60,6 +60,7 @@ import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Orego
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
+import { iaRaw, iaMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -991,6 +992,7 @@ const COUNTIES_RAW = {
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
+  ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
   ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
@@ -3057,6 +3059,7 @@ const COUNTIES_MAP_RAW = {
   ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)
+  ...iaMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
