@@ -31,7 +31,9 @@ describe("NEW-1 (B1612640): callout/chip text is centred on its slot, not a magi
   });
 
   it("the callout/text-box body centres each line via dominantBaseline=\"middle\" at its own slot", () => {
-    expect(SP).toMatch(/y=\{bp\.y - h \/ 2 \+ padY \+ lineH \/ 2 \+ i \* lineH\}[^>]*dominantBaseline="middle"/);
+    // NEW-1 (layout "A") — `textOffsetY` is 0 for every box that hugs its text (no fixed height), so the slot symmetry is unchanged;
+    // it only shifts the whole block when the user has dragged a taller box and chosen middle / bottom alignment.
+    expect(SP).toMatch(/y=\{bp\.y - h \/ 2 \+ textOffsetY \+ padY \+ lineH \/ 2 \+ i \* lineH\}[^>]*dominantBaseline="middle"/);
   });
 
   it("the parcel acreage chip centres its single line the same way", () => {

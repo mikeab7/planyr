@@ -330,6 +330,7 @@ export function flattenTree(tree, M0, patterns = {}) {
         fill: fillC, fillA: fillC.a * (parseFloat(cur["fill-opacity"] ?? 1) || 1) * cur.opacity,
         halo, haloA: cur.opacity * (strokeC ? strokeC.a : 1),
         underline: /underline/.test(cur["text-decoration"] || ""),
+        strike: /line-through/.test(cur["text-decoration"] || ""),
       });
       return;
     }
@@ -459,6 +460,12 @@ export function itemsToStream(items) {
       const fillOps = () => { out.push("q", `/${gsName(it.fillA, it.fillA)} gs`, `${rg(it.fill)} rg`); draw(0); out.push("Q"); };
       const haloOps = () => { out.push("q", `/${gsName(it.haloA, it.haloA)} gs`, `${rg(it.halo.c)} RG`, `${n3(it.halo.w)} w`, "1 j"); draw(1); out.push("Q"); };
       if (it.halo && it.halo.under) { haloOps(); fillOps(); } else { fillOps(); if (it.halo) haloOps(); }
+      if (it.strike) {
+        // NEW-1 (layout "A") — strikethrough: a rule through the x-height, offset along the text's own normal so it follows a rotated box.
+        const off = it.size * 0.3, sx = it.x - s * off, sy = it.y + c * off;
+        out.push("q", `/${gsName(it.fillA, it.fillA)} gs`, `${rg(it.fill)} RG`, `${n3(Math.max(0.3, it.size * 0.06))} w`,
+          `${n3(sx)} ${n3(sy)} m ${n3(sx + c * it.w)} ${n3(sy + s * it.w)} l S`, "Q");
+      }
       if (it.underline) {
         const ux = it.x + (c * 0), uy = it.y - it.size * 0.12;
         out.push("q", `/${gsName(it.fillA, it.fillA)} gs`, `${rg(it.fill)} RG`, `${n3(Math.max(0.3, it.size * 0.06))} w`,
@@ -683,6 +690,9 @@ export function buildAnnotations(descriptors, opts) {
         extraLeaders: Math.max(0, runs.length - 1),
         rotated: !!(d.meta && d.meta.rot && d.meta.rot % 90 !== 0) || (d.meta && d.meta.rot % 90 === 0 && d.meta.rot !== 0),
       });
+      // NEW-1 (layout "A") — what a regenerating viewer (Bluebeam/Acrobat editing the annotation) cannot express: a FreeText
+      // has no strikethrough and no vertical alignment. The appearance stream (what shows until then) is correct for both.
+      if (d.meta && (d.meta.strike || d.meta.valignFixed)) degraded.push(`${cl ? "callout" : "text box"} ${d.id}: ${[d.meta.strike ? "strikethrough" : null, d.meta.valignFixed ? "vertical alignment" : null].filter(Boolean).join(" and ")} ${d.meta.strike && d.meta.valignFixed ? "are" : "is"} in the appearance only (a PDF FreeText annotation cannot store ${d.meta.strike && d.meta.valignFixed ? "them" : "it"}; a viewer that regenerates the box will drop ${d.meta.strike && d.meta.valignFixed ? "them" : "it"})`);
       if (runs.length > 1) degraded.push(`callout ${d.id}: ${runs.length - 1} extra leader(s) are drawn in the appearance only (a PDF callout carries one native leader)`);
     } else if (d.family === "parcel-label") {
       // a parcel's acreage chip that a lifted site element would otherwise cover: its own small label, never a building's

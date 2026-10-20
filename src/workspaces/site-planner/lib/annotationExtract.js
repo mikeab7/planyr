@@ -422,7 +422,7 @@ export function extractMarkupAnnotations(clone, ctx) {
       const st = calloutStyle(c);
       descriptors.push({
         family: "callout", id, kind: parseInt(node.getAttribute("data-callout-leaders"), 10) > 0 ? "callout" : "textbox", tree,
-        meta: { lines, align: st.align, rot: c.rot || 0, subject: c.subject || null, author: c.author || null, createdAt: c.createdAt || null, modifiedAt: c.modifiedAt || null },
+        meta: { lines, align: st.align, strike: !!st.strike, valignFixed: c.boxH != null && st.valign !== "top", rot: c.rot || 0, subject: c.subject || null, author: c.author || null, createdAt: c.createdAt || null, modifiedAt: c.modifiedAt || null },
       });
     } else if (fam === "measure") {
       const m = model;

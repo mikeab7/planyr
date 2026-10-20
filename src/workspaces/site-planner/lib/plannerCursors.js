@@ -46,7 +46,7 @@ const DRAG_KIND = {
   elVertex: "move", grLimitVertex: "move", easeVertex: "move",
   rotate: ROTATE_CURSOR, mkRotate: ROTATE_CURSOR, ovRotate: ROTATE_CURSOR, calloutRotate: ROTATE_CURSOR,
   easeLabelRot: ROTATE_CURSOR,
-  resize: null, mkResize: null, edgeResize: null, printResize: null, ovScale: null, calloutResize: null,
+  resize: null, mkResize: null, edgeResize: null, printResize: null, ovScale: null, calloutResize: null, calloutResizeH: null,
 };
 
 /** The cursor a live drag shows for its whole gesture. `pressCursor` = what the pressed grip showed. */
