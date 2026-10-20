@@ -102,6 +102,15 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Washington, 2026-10-19, B2349360) — the county-run ArcGIS Server hosts the wired Washington counties sit on (each MEASURED through this relay on the PR preview before it was wired). */
+  "atlas.co.chelan.wa.us", // Chelan County
+  "gis.cowlitzwa.gov", // Cowlitz County Assessor
+  "gisweb.jeffcowa.us", // Jefferson County
+  "gis.co.kittitas.wa.us", // Kittitas County
+  "gis.sanjuancountywa.gov", // San Juan County
+  "gis.skagitcountywa.gov", // Skagit County Assessor
+  "tconline.co.thurston.wa.us", // Thurston County
+  "wcgis.whatcomcounty.us", // Whatcom County
   /* NEW-1 (Oregon, 2026-10-19, B2347696) — the county / state hosts the wired Oregon counties sit on (found through the state's "Publicly Accessible
    * Oregon County Parcel Data" page, each county viewer's web-map config and a REST-directory search). The build sandbox reaches none of them, so each was
    * MEASURED through this relay on the PR preview before a county was wired to it. Hosts that were probed and NOT used (Polk's server answers a web-adaptor
