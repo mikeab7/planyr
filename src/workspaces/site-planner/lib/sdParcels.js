@@ -8,7 +8,7 @@
  * padded bbox]. Provenance prose lives in sdProvenance.js (build-time only, never shipped to the browser). */
 export const SD_ROWS = [
   ["beadle","Beadle","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Beadle/beadleparcels/MapServer/0","PARCEL_ID",null,null,1,44.414,-98.281,[44.165, -98.735, 44.663, -97.826]],
-  ["brown","Brown","https://services5.arcgis.com/H3Xuuu0h4PaTeWwU/arcgis/rest/services/Parcels_2025/FeatureServer/0","nParcelID",null,null,1,45.591,-98.355,[45.214, -98.762, 45.968, -97.949]],
+  ["brown","Brown","https://services5.arcgis.com/H3Xuuu0h4PaTeWwU/arcgis/rest/services/Parcels_2025/FeatureServer/0","nParcelID",null,"FEAT_TYPE IN ('RURAL PARCEL','CITY PARCEL','CEMETERY LOT')",1,45.591,-98.355,[45.214, -98.762, 45.968, -97.949]],
   ["clark","Clark","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Clark/clarkmapnetpro/MapServer/1","PARCEL_ID",null,null,1,44.849,-97.74,[44.51, -98.015, 45.187, -97.465]],
   ["codington","Codington","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Codington/codingtonmapnetpro/MapServer/9","RECORD","PROP_STREE",null,1,44.978,-97.193,[44.769, -97.531, 45.187, -96.856]],
   ["deuel","Deuel","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Deuel/deuelmapnetpro/MapServer/2","RECORD","PROP_STREE",null,1,44.756,-96.673,[44.508, -96.92, 45.003, -96.425]],
