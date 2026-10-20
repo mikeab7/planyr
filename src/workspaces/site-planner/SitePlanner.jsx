@@ -32970,7 +32970,7 @@ function AngleGlyph({ deg }) {
 function RotationField({ value, locked, lockedReason, onCommit, onStep }) {
   const deg = Number.isFinite(value) ? value : 0;
   const tilted = formatDeg(deg) !== "0";
-  const icoBtn = { flex: "none", width: 26, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", fontSize: 14, lineHeight: 1, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", opacity: locked ? 0.5 : 1 };
+  const icoBtn = { flex: "none", width: 26, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", fontSize: 14, lineHeight: 1, fontFamily: "inherit", cursor: locked ? "default" : "pointer", opacity: locked ? 0.5 : 1 };
   return (
     <div data-testid="rotation-field" style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
       <AngleGlyph deg={deg} />
