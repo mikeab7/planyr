@@ -1,12 +1,13 @@
 /* NEW-1 (Pennsylvania, 2026-10-19) — PENNSYLVANIA county parcel sources. Pennsylvania has NO single free statewide parcel service with owners: PASDA (Penn State's state data clearinghouse) hosts one MapServer per
  * county for ~36 counties (each the county's OWN published layer, submitted to PASDA — the 2026-09-08 note that PASDA held "exactly one" parcel service was wrong), the PA DEP "PA_Parcels" layer is a PARTIAL
  * compilation (kept only as the last-resort source for the four counties with nothing better), and the rest of the counties publish through their own ArcGIS Server / ArcGIS Online. Each county below is wired to
- * the best MEASURED source (county-run first, then PASDA, then DEP), and Armstrong — which says on its own site that it has no public GIS viewer — stays a named gap: docs/STATEWIDE-PARCELS.md "Pennsylvania counties
+ * the best MEASURED source (county-run first, then PASDA, then DEP), and Armstrong (wired 2026-10-20, from an ArcGIS Online account rather than the county — its own site says it has no public viewer) completes all 67: docs/STATEWIDE-PARCELS.md "Pennsylvania counties
  * (2026-10-19)" has the per-county table and what was searched. pa_allegheny, pa_northampton, pa_cumberland, pa_lehigh, pa_luzerne and pa_lackawanna stay hand-written in counties.js (wired 2026-09).
  * Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy), idField, addrField, centre lat, lng, padded bbox, scopeWhere?]. scopeWhere is set only for the four rows that share the DEP layer (text search stays inside the county; Elk's rows carry no COUNTY_NAME, so its scope is the null clause the search ignores — an Elk number search is statewide, ids are 8-digit and distinct). Provenance prose lives in paProvenance.js (build-time only, never shipped to the browser). */
 const PAS = (svc, n) => "/gis-proxy/mapservices.pasda.psu.edu/server/rest/services/pasda/" + svc + "/MapServer/" + n; // PASDA's per-county MapServer
 const DEP = "/gis-proxy/gis.dep.pa.gov/depgisprd/rest/services/Parcels/PA_Parcels/MapServer/0"; // PA DEP partial statewide layer — last resort
 export const PA_ROWS = [
+  ["armstrong", "Armstrong", "https://services5.arcgis.com/beeAx3XQCWXfcm0Q/arcgis/rest/services/Armstrong_County_Parcels/FeatureServer/8", "PARCELNUM", null, 40.7977, -79.4781, [40.498, -79.73, 41.205, -79.186]], // layer 8, NOT 0 (/0 answers "400 Invalid URL")
   ["adams", "Adams", PAS("AdamsCounty",2), "Parcel_ID", "COMBINED_S", 39.8813, -77.1584, [39.69, -77.508, 40.102, -76.937]],
   ["beaver", "Beaver", "/gis-proxy/gis.beavercountypa.gov/server/rest/services/InfoAtlas/Parcels_with_Owner/MapServer/22", "Parcel_ID", "Location_Street", 40.6837, -80.3526, [40.449, -80.555, 40.887, -80.12]],
   ["bedford", "Bedford", PAS("BedfordCounty",0), "Name", null, 39.9745, -78.505, [39.693, -78.848, 40.357, -78.105]],

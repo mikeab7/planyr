@@ -90,7 +90,7 @@ describe("the wired Pennsylvania rows", () => {
   const ROW_KEYS = PA_ROWS.map(([k]) => "pa_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(PA_ROWS).toHaveLength(60);
+    expect(PA_ROWS).toHaveLength(61);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
@@ -123,7 +123,7 @@ describe("the wired Pennsylvania rows", () => {
 
 describe("a recorded real lot from each source reads back parcel id, address, acreage and (where the layer has one) owner", () => {
   // Counties whose recorded row carries no owner column the card can read — geometry + parcel id only (the owner/tax table is not on the published layer).
-  const NO_OWNER = new Set(["Blair", "Cambria", "Centre", "Columbia", "Crawford", "Delaware", "Elk", "Erie", "Fulton", "Lycoming", "McKean", "Mifflin", "Monroe", "Montour", "Perry", "Snyder", "Sullivan", "Tioga", "Union", "Venango", "Warren"]);
+  const NO_OWNER = new Set(["Armstrong", "Blair", "Cambria", "Centre", "Columbia", "Crawford", "Delaware", "Elk", "Erie", "Fulton", "Lycoming", "McKean", "Mifflin", "Monroe", "Montour", "Perry", "Snyder", "Sullivan", "Tioga", "Union", "Venango", "Warren"]);
   it("the fixture covers every wired county", () => {
     expect(Object.keys(SAMPLES).sort()).toEqual(PA_ROWS.map(([, n]) => n + " County").sort());
   });
@@ -161,5 +161,33 @@ describe("measured on the live relay (recorded by the wiring session)", () => {
     expect(s.measured.edgeHits, `${name}: points beside the county line`).toBeGreaterThanOrEqual(1);
     const ext = s.measured.extent;
     if (ext) expect(ext[0] >= -80.6 && ext[2] <= -74.6 && ext[1] >= 39.6 && ext[3] <= 42.4, `${name}: extent inside Pennsylvania`).toBe(true);
+  });
+});
+
+describe("Armstrong County is wired (NEW-1, 2026-10-20) — the earlier 'no source' finding read layer 0 of the wrong service", () => {
+  // RED-PROOF: on 2500b00 Armstrong is a named gap — countyIdentity says 'no-source' and the note reads "Armstrong County — no parcel data wired here yet."
+  it("a click in Kittanning, Ford City and Leechburg resolves to the Armstrong row, not 'no parcel data'", () => {
+    for (const [la, ln] of [[40.8165, -79.5223], [40.7723, -79.5284], [40.6381, -79.6048]]) {
+      const id = countyIdentity(la, ln);
+      expect(id.status).toBe("ok");
+      expect(id.key).toBe("pa_armstrong");
+      expect(noParcelSourceNote(id), "no gap sentence for a wired county").toBeNull();
+    }
+  });
+  it("points the owner's chat measured just inside each neighbour's side still read Armstrong; points just across read THAT county, never Armstrong", () => {
+    const inside = [[40.6554, -79.632], [40.85, -79.225], [40.6505, -79.351], [40.556, -79.438], [41.003, -79.6009]];
+    for (const [la, ln] of inside) expect(countyIdentity(la, ln).key, `${la},${ln}`).toBe("pa_armstrong");
+    const across = { pa_butler: [40.85, -79.702], pa_westmoreland: [40.6533, -79.639], pa_indiana: [40.647, -79.344], pa_clarion: [40.99, -79.45] };
+    for (const [key, [la, ln]] of Object.entries(across)) expect(countyIdentity(la, ln).key, key).toBe(key);
+  });
+  it("the row is layer 8 of the ArcGIS Online service (layer 0 is 'Invalid URL'), keyed on PARCELNUM, with its ACREAGE string readable", () => {
+    expect(COUNTIES.pa_armstrong.layerUrl).toMatch(/Armstrong_County_Parcels\/FeatureServer\/8$/);
+    expect(COUNTIES.pa_armstrong.idField).toBe("PARCELNUM");
+    expect(PENNSYLVANIA_VERIFICATION.pa_armstrong.publisher).toBe("third-party"); // an ArcGIS Online account, not the county
+    expect(PENNSYLVANIA_VERIFICATION.pa_armstrong.publisherName).toMatch(/NOT by Armstrong County/);
+  });
+  it("Pennsylvania has no named gaps left", () => {
+    expect(Object.keys(FX.gaps)).toHaveLength(0);
+    expect(wiredKeys).toHaveLength(67);
   });
 });
