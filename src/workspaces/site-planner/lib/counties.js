@@ -2879,10 +2879,16 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosaic/MapServer/1",
   },
   nj_statewide: {
-    // Verify: live — maps.nj.gov is blocked in this build environment. Owner-name values are
-    // reported redacted for many records under NJ's Daniel's Law privacy statute.
+    /* NEW-1 (B2384880, 2026-10-20) — NJOGIS's OWN ArcGIS Online copy of the same composite (item 533599bb…, owner NJOGIS, "Parcels and MOD-IV
+     * Composite of NJ, Web Mercator (3857)"), the same "prefer the official AGOL mirror" call ny_statewide and Fort Bend make: maps.nj.gov is a
+     * `.gov` host this build environment's egress policy blocks (no measurement possible from here), the mirror answers 200 with `access-control-allow-origin: *`
+     * so it needs no relay, and its parcels ARE the statewide composite — MEASURED 2026-10-20: 3,481,240 polygons, 21 counties, ALL 564 municipalities
+     * present (docs/STATEWIDE-PARCELS.md "New Jersey municipalities"), maxRecordCount 2000, point query 0.28–0.66 s. Fields: PAMS_PIN (the parcel id),
+     * PROP_LOC (the situs), OWNER_NAME (REDACTED for web use under Daniel's Law — that is the source's choice; the card shows what is there), CALC_ACRE,
+     * MUN_NAME / COUNTY. ~11% of parcels (403,260) carry geometry with no MOD-IV attributes (right-of-way / unmatched) — they answer with their lot lines. */
     state: "NJ", center: [40.1, -74.7], zoom: 8, mapServer: null, statewide: true,
-    layerUrl: "https://maps.nj.gov/arcgis/rest/services/Framework/Cadastral/MapServer/0",
+    idField: "PAMS_PIN", addrField: "PROP_LOC",
+    layerUrl: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0",
   },
   /* B1455632 (2026-09-10) — NEVADA, corrected. The prior finding declined Nevada on a LEGAL basis
    * (the state demographer/DCNR mosaic is restricted from public redistribution under NRS 250) —
