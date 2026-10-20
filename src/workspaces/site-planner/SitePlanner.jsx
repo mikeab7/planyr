@@ -22060,7 +22060,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   section is gone. Restore puts the drawing back on the site exactly as the old list did. */}
               {deletedFilesHere.map((f) => {
                 if (planPurgeArm === f.id) return (
-                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
+                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: `color-mix(in srgb, ${PAL.danger} 8%, transparent)` }}>
                     <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete the site plan “${f.name}”? This can't be undone — there's no restoring it after this.`}>Permanently delete site plan “{f.name}”? No restore after this.</span>
                     <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === f.id} onClick={() => handlePurgeDeletedFile(f)}>Delete</button>
                     <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
@@ -22074,7 +22074,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
                     <button title="Delete this site plan forever" aria-label={`Delete site plan ${f.name} forever`} disabled={deletedPlansBusy === f.id} onClick={() => setPlanPurgeArm(f.id)}
                       style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = PAL.danger; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = PAL.danger; e.currentTarget.style.background = `color-mix(in srgb, ${PAL.danger} 10%, transparent)`; }}
                       onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
                   </div>
                 );

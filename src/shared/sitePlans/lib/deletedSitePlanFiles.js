@@ -3,7 +3,7 @@
  *
  * NEW-1 (owner, 2026-10-20: "I don't know that we need to keep recently deleted site plans in the
  * site records area"). They used to be listed on the Site page's All comps list (added there by
- * #2406 because the record had been their only restore point); this is a MOVE, not a behaviour
+ * PR 2406 because the record had been their only restore point); this is a MOVE, not a behaviour
  * change — same soft-delete bin, same Restore, same permanent delete (with the same tracked-site
  * tidy-up), same retention (none: the bin is never auto-purged). Nothing here is a second bin.
  *
