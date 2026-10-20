@@ -82,6 +82,10 @@ describe("the wired South Dakota rows", () => {
   it("Dewey excludes the tribal-trust polygons whose parcel id reads TRIBAL", () => {
     expect(COUNTIES.sd_dewey.scopeWhere).toMatch(/TRIBAL/);
   });
+  it("Brown keeps only parcel-type polygons, never road / rail / water rows", () => {
+    expect(COUNTIES.sd_brown.scopeWhere).toMatch(/CITY PARCEL/);
+    expect(COUNTIES.sd_brown.scopeWhere).not.toMatch(/ROAD ROW|WATER|RAILROAD/);
+  });
   it("each county's bbox contains its centre point", () => {
     for (const [, n, , , , , , la, ln, bb] of SD_ROWS) expect(la >= bb[0] && la <= bb[2] && ln >= bb[1] && ln <= bb[3], n).toBe(true);
   });
