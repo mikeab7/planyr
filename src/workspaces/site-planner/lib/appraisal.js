@@ -42,7 +42,7 @@ export const leafKey = (key) => String(key).replace(/^.*\./, "");
 
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
 export const MAILING_KEY_RE =
-  /(mail|owner_?ad(dr)?|owner_?(city|state|zip)|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
+  /(mail|owner_?ad(dr)?|owner_?(city|state|zip)|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state)|^cama_temp_address)/i; // ^cama_temp_address: Lee County SC's CAMA join publishes the OWNER's mailing lines under it (NEW-1, 2026-10-19)
 
 /* NEW-1 (Louisiana parishes) — keys that CONTAIN the word "address" but hold something that is not
  * one, measured on real Regrid-schema parish layers: Cameron's `ADDRESS_SO` reads the literal
@@ -73,7 +73,7 @@ export const SITUS_LADDER = [
   /situs/i,
   // 2 — the land's own address under another name. `prop_?street(?!_)` matches CCAD's Prop_Street
   //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
-  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$)/i,
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$|^property_?l(oc(ation)?)?$)/i, // Kentucky (NEW-1): Simpson's `Property_L` is the situs line beside a mailing `Address_Li`
   // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
   //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
   //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
@@ -144,6 +144,8 @@ export function situsKey(attrs, { skip = null } = {}) {
         if (wantComposed === false && COMPOSED_ADDR_RE.test(lk)) continue; // already tried above
         const v = attrs[key];
         if (isPlaceholderValue(v) || looksLikeJsonBlob(v)) continue;
+        // Kentucky (NEW-1): Henderson's `LOCATION` is the jurisdiction flag ("COUNTY" / "CITY"), not an address.
+        if (/^\s*(county|city)\s*$/i.test(String(v))) continue;
         // NEW-1 (Louisiana) — below the bare-`situs` rung, a value that is a bare house NUMBER
         // ("1653", "240") is one half of a split address (Address_Nu + Street_Nam on Lafourche, St. Mary,
         // St. John, St. Bernard, Iberville, Webster), never a situs: as a card title it names nothing.
@@ -267,6 +269,8 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 // Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
 /* Iowa (NEW-1, 2026-10-19): the county CAMA exports spell the owner `DEEDHOLD` (Benton, Boone, Cass, Harrison, Mahaska, Osceola, Warren, Winnebago…), `DeedHolder1` (Johnson), `DEEDHLDR` (Muscatine),
  * `Tyler_Deed_Holder` (Cerro Gordo), `PRIMARYNAME1` / `PRIMARY_NAME` (Kossuth, Franklin) and `OwnerDeed` (Linn) — none of which resolved, so those counties' parcel pages showed no Owner line. */
+/* Kentucky (NEW-1, 2026-10-19): `PRCLOWNR1` is Boone County's planning-commission owner column. Fayette's PVA layer (LFUCG) has a bare `NAME`, but it is the
+ * STREET NAME of the situs (siblings NUM1 / DIR / TYPE → `ownerKey` skips it): a street shown as the owner would be a false owner. */
 /* Alabama (B2302784): `OWNER_ALL` (the Central Alabama commission's merged roll — Autauga, Montgomery), `PropertyOwner` (Madison), `FULLNAME` (Greene) and
  * `Name1` (Mobile's Revenue Commission, Shelby's DOR roll, St. Clair's `NAME_1`) are the owner column of those sources; `name_?1` is as weak as bare `name`.
  * Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
@@ -275,7 +279,7 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 /* Missouri (NEW-1, 2026-10-19): the Integrity GIS counties publish the owner as `DEEDHOLDER` / `DEED_HOLDER` / `DEEDNAME` (Atchison's joined layer as
  * `REALDATA_DEEDHOLDER`), Greene as `OWN1`, Holt as `owner1_name`, St. Clair as `Owner_1`, Cape Girardeau as `Main_Name`. `pcloNAME` is Tuscaloosa AL's owner — it only looked resolved
  * because the bare `Name` beside it (the parcel number) used to win; a digits-only `Name` no longer counts as an owner. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?\d*|deed_?hldr|tyler_deed_holder|primary_?name_?\d*|owner_?deed|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?\d*|deed_?hldr|tyler_deed_holder|primary_?name_?\d*|owner_?deed|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name|prclownr1)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name|owner_?last)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */
@@ -287,7 +291,7 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
 /* New York (2026-10-20): `primary_ow` (the shapefile-truncated PRIMARY_OWNER — Nassau, Franklin and Jefferson via the north-country parcel model, Orleans, Seneca) Fallback pass only. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name)$/i;
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
 /* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
  * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
 export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
@@ -316,6 +320,8 @@ export function ownerWithFirstName(attrs, key) {
 export function ownerKey(attrs, { skip = null } = {}) {
   if (!attrs) return null;
   let best = null, bestSeq = Infinity;
+  const ks = Object.keys(attrs).map((k) => leafKey(k).toLowerCase());
+  const streetParts = ks.includes("num1") && ks.includes("type"); // Fayette KY: NAME is the street name of the situs
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
     const lk = leafKey(key);
@@ -327,6 +333,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
     if (lk !== key && /^name$/i.test(lk)) continue;
     // …and a bare `name` holding only digits / dots / dashes is a parcel NUMBER (Buchanan MO's `Name` = "11-4.0-17-000-000-005.002"), never an owner.
     if (/^name$/i.test(lk) && (/^[0-9][0-9.\-\s/]*$/.test(String(attrs[key]).trim()) || PARCEL_NUMBER_SHAPE(String(attrs[key]).trim()))) continue;
+    if (/^name$/i.test(lk) && streetParts) continue;
     // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
     // NUMBER), so any real owner column outranks it whatever order the service lists them in.
     const seq = ownerSeq(lk) + (/^name(_?1)?$/i.test(lk) ? 1000 : 0);
@@ -627,7 +634,9 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
     owner: ownerName(attrs) || null,
     /* …and where the generic resolver caught only a FRAGMENT of the county's declared parcel number (Missouri's Henry County publishes `PARCEL_NUM` "11"
      * beside `PID` "18-2.0-04-001-004-011.000"; Cole's `PARCELNUM` is "55"), the declared column — which contains it and says more — is the account. */
-    account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); return gen && dec && dec.length > gen.length && dec.includes(gen) ? dec : (gen || dec || clean(acct)); })(),
+    /* …and where the generic resolver caught a GEOID — South Carolina RFA's statewide layer carries `GeoID` (the county/district FIPS-style code, "4500720" for every Aiken lot) beside its real tax-map number
+     * `T_Map_Number` — it is a jurisdiction code, never the account, so the county's declared parcel column wins over it. */
+    account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); const geoOnly = !!(gen && dec && Object.keys(attrs || {}).some((key) => /^geo_?id$/i.test(leafKey(key)) && clean(attrs[key]) === gen)); return gen && dec && !geoOnly && dec.length > gen.length && dec.includes(gen) ? dec : (geoOnly ? dec : (gen || dec || clean(acct))); })(),
     address: clean(situsAddress(attrs)) || streetFromParts(attrs) || declared(addrField) || clean(addr),
     deedAcres: deed,
     taxYear,

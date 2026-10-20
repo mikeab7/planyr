@@ -201,6 +201,10 @@ export const cellsOutlinePath = (cp) => traceEdges((i, j) => !!cp.present[j * cp
 export const CONTOUR_PROPOSED_RGB = "#7C3F12";        // design-exempt: SVG canvas ink over aerial imagery — terrainLayers.js's CONTOUR_COL, which does not theme
 export const CONTOUR_PROPOSED_INDEX_RGB = "#5B2E0D";  // design-exempt: SVG canvas ink over aerial imagery — terrainLayers.js's CONTOUR_INDEX_COL
 export const LIMIT_LINE_DASH = "6 4";
+/* ROUND 5 (NEW-6) — the paper tone the sheet is printed on: the flat white the print view uses, so the grading picture
+ * reads on paper, not on imagery; the same in both themes on purpose (a drawing, not chrome). */
+export const GRADING_PAPER_RGB = "#FFFFFF";  // design-exempt: SVG canvas ink over aerial imagery — the print sheet's white, does not theme
+export const GRADING_PAPER_OPACITY = 0.92;
 
 /* Closed rings (feet) → one svg path string in FEET (the caller wraps it in the feet→screen transform). */
 export function ringsPathD(rings) {
@@ -236,7 +240,9 @@ export function surfaceValuesLattice(cells, { maxLevels = 60 } = {}) {
   return { values, nx: L.nx, ny: L.ny, x0: L.x0, y0: L.y0, dx: L.dx, dy: L.dy, interval, lo, hi };
 }
 
-/* The worker's lattice-pixel lines → feet. */
+/* The worker's lattice-pixel lines → feet. ROUND 5: a label carries the line's angle (radians, the same orientation in
+ * the lattice, feet and screen frames — x east, y down) and its piece's length in feet, so the canvas can set the text
+ * along the line and drop a label the line is too short to carry. */
 export function contourLinesToFeet(res, L) {
   const toFt = (p) => ({ x: L.x0 + p[0] * L.dx, y: L.y0 + p[1] * L.dy });
   const f = (v) => Math.round(v * 100) / 100;
@@ -244,8 +250,38 @@ export function contourLinesToFeet(res, L) {
     level: lv.level, isIndex: lv.isIndex,
     d: lv.lines.map((line) => line.map((p, i) => { const q = toFt(p); return `${i ? "L" : "M"}${f(q.x)} ${f(q.y)}`; }).join("")).join(""),
   }));
-  const labels = (res.labels || []).map((lb) => ({ pt: toFt([lb.px, lb.py]), level: lb.level, text: String(Math.round(lb.level)) }));
-  return { levels, labels };
+  const labels = (res.labels || []).map((lb) => ({ pt: toFt([lb.px, lb.py]), level: lb.level, text: String(Math.round(lb.level)),
+    angle: Number.isFinite(lb.angle) ? lb.angle : 0, lenFt: Number.isFinite(lb.lenCells) ? lb.lenCells * L.dx : null }));
+  const toRing = (r) => r.map((p) => toFt(p));
+  const daylight = res.daylight ? { rings: (res.daylight.rings || []).map(toRing), holes: (res.daylight.holes || []).map(toRing) } : null;
+  return { levels, labels, daylight };
+}
+/* Feet rings → the lattice-pixel frame the worker traces in (the inverse of `contourLinesToFeet`'s mapping). */
+export const ringsToLatticePx = (rings, L) => (rings || []).map((r) => r.map((p) => [(p.x - L.x0) / L.dx, (p.y - L.y0) / L.dy]));
+
+/* ROUND 5 (NEW-2) — WHICH proposed-contour labels to draw at a zoom, and how: one per index piece (the tracer's choice),
+ * along the line (`deg`, upright: never upside down), only on a piece longer than the label, and never two on top of
+ * each other (a greedy screen-space sweep, longest pieces first). Pure and translation-free — a box is measured at
+ * `pt × rppf`, so a pan never changes the answer and the caller memoises on (labels, rppf) alone (VIEW-INDEPENDENT-ONCE). */
+export const CONTOUR_LABEL_PX = Object.freeze({ charW: 6.6, h: 12, pad: 3, minPpf: 0.35, minPieceK: 1.6 });
+export function placeContourLabels(labels, rppf, { charW = CONTOUR_LABEL_PX.charW, h = CONTOUR_LABEL_PX.h, pad = CONTOUR_LABEL_PX.pad, minPpf = CONTOUR_LABEL_PX.minPpf, minPieceK = CONTOUR_LABEL_PX.minPieceK } = {}) {
+  if (!labels || !labels.length || !(rppf >= minPpf)) return [];
+  const cands = labels.map((lb) => {
+    let deg = (Number.isFinite(lb.angle) ? lb.angle : 0) * 180 / Math.PI;
+    if (deg > 90) deg -= 180; else if (deg < -90) deg += 180;           // upright
+    const w = String(lb.text).length * charW + pad * 2, hh = h + pad * 2;
+    const c = Math.abs(Math.cos(deg * Math.PI / 180)), sn = Math.abs(Math.sin(deg * Math.PI / 180));
+    const bw = w * c + hh * sn, bh = w * sn + hh * c;                   // the rotated box's axis-aligned extent
+    const cx = lb.pt.x * rppf, cy = lb.pt.y * rppf;
+    return { lb, deg, w, box: [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], lenPx: lb.lenFt != null ? lb.lenFt * rppf : Infinity };
+  }).filter((c) => c.lenPx >= c.w * minPieceK);
+  cands.sort((a, b) => b.lenPx - a.lenPx);
+  const placed = [];
+  for (const c of cands) {
+    if (placed.some((q) => c.box[0] < q.box[2] && q.box[0] < c.box[2] && c.box[1] < q.box[3] && q.box[1] < c.box[3])) continue;
+    placed.push(c);
+  }
+  return placed.map((c) => ({ pt: c.lb.pt, text: c.lb.text, level: c.lb.level, deg: Math.round(c.deg * 10) / 10 }));
 }
 
 /* ---- browser glue ---- */

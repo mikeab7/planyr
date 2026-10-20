@@ -76,5 +76,5 @@ export function installDefaultMarkerIcon() {
  * from `pointSymbolOptions` (pure). `interactive` follows the layer — an interactive layer's
  * points must accept pointer events for the hover identify to fire on them. */
 export function pointToLayerFor(cfg, opacity, { interactive = false } = {}) {
-  return (_feature, latlng) => L.circleMarker(latlng, { ...pointSymbolOptions(cfg, opacity), interactive });
+  return (_feature, latlng) => L.circleMarker(latlng, { ...pointSymbolOptions(cfg, opacity), interactive, ...(interactive ? { className: "pf-hover-only" } : {}) });
 }

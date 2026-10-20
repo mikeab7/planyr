@@ -17,6 +17,7 @@ import { isQuietEmphasized } from "../lib/pursuitsList.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { IconButton, MenuItem } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 const EMPTY = { fontSize: 12, color: "var(--text-secondary)", fontStyle: "italic" };
 const dayWord = (n) => (n === 1 ? "day" : "days");
@@ -110,6 +111,7 @@ export function PursuitsCard({ rows, yieldBySite, onOpenProject, onMove, orderEr
     const scroller = scrollerOf(rowRefs.current.get(id));
     let y = e.clientY, raf = 0, last = atFor(y);
     setDrag({ id, at: last });
+    const releaseCursor = pinDragCursor("grabbing"); // stays grabbing off the grip for the whole reorder
     const tick = () => {
       if (scroller) { // edge auto-scroll, so a long list can be dragged past what is visible
         const b = scroller.getBoundingClientRect();
@@ -129,6 +131,7 @@ export function PursuitsCard({ rows, yieldBySite, onOpenProject, onMove, orderEr
       window.removeEventListener("pointercancel", cancel);
       window.removeEventListener("keydown", key, true);
       cancelAnimationFrame(raf);
+      releaseCursor();
       stopRef.current = null;
       setDrag(null);
       if (commit) onMove(id, { index: last });

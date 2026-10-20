@@ -120,6 +120,13 @@ export function unionRings(rings) {
   if (!paths.length) return [];
   return regionsOf(paths);
 }
+/* Feet rings pushed OUT by `deltaFt` (round joins) → regions. ROUND 5 (NEW-6): the paper background's margin past the
+ * daylight line. */
+export function bufferRings(rings, deltaFt) {
+  const paths = cleanPaths(rings);
+  if (!paths.length) return [];
+  return regionsOf(offsetPaths(regionsToPaths(regionsOf(paths)), deltaFt, "round"));
+}
 /* regions ∩ (clipRings − clipHoles). No clip rings → the regions unchanged. */
 export function clipRegions(regions, clipRings, clipHoles = []) {
   const clip = cleanPaths(clipRings);

@@ -55,6 +55,7 @@ import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
 import ContextMenu from "./ContextMenu.jsx";
 import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 // B1007281 — AutoFilter (Sort & Filter). One column header's own filter trigger + checkbox
 // popover. `allowed` is the column's current filter (a Set of DISPLAY-value strings still
@@ -619,6 +620,7 @@ const SheetView = forwardRef(function SheetView({
   const startColResize = useCallback((e, colIndex) => {
     e.preventDefault(); e.stopPropagation();
     const startWidth = colWidthAt(colIndex);
+    const releaseCursor = pinDragCursor("col-resize"); // the resize arrow stays for the whole drag, even off the 6px edge
     dragStateRef.current = { kind: "col", colIndex, startX: e.clientX, startWidth };
     const onMove = (ev) => {
       const st = dragStateRef.current;
@@ -628,6 +630,7 @@ const SheetView = forwardRef(function SheetView({
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      releaseCursor();
       const st = dragStateRef.current;
       dragStateRef.current = null;
       setColResizePreview(null);
@@ -640,6 +643,7 @@ const SheetView = forwardRef(function SheetView({
   const startRowResize = useCallback((e, rowIndex) => {
     e.preventDefault(); e.stopPropagation();
     const startHeight = rowHAt(rowIndex);
+    const releaseCursor = pinDragCursor("row-resize"); // the resize arrow stays for the whole drag, even off the 6px edge
     dragStateRef.current = { kind: "row", rowIndex, startY: e.clientY, startHeight };
     const onMove = (ev) => {
       const st = dragStateRef.current;
@@ -649,6 +653,7 @@ const SheetView = forwardRef(function SheetView({
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      releaseCursor();
       const st = dragStateRef.current;
       dragStateRef.current = null;
       setRowResizePreview(null);
@@ -669,6 +674,7 @@ const SheetView = forwardRef(function SheetView({
   const startFillDrag = useCallback((e) => {
     e.preventDefault(); e.stopPropagation();
     const source = { r1, c1, c2 };
+    const releaseCursor = pinDragCursor("crosshair"); // the fill handle is an armed place gesture
     fillDragRef.current = source;
     fillToRef.current = r2;
     setFillTo(r2);
@@ -684,6 +690,7 @@ const SheetView = forwardRef(function SheetView({
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      releaseCursor();
       const src = fillDragRef.current;
       const target = fillToRef.current;
       fillDragRef.current = null;

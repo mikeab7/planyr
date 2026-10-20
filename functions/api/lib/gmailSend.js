@@ -61,7 +61,7 @@ export function buildMime({ from, to, subject, text, html, boundary = "planyr-" 
 const tokenCache = new Map(); // sender -> { token, exp } (per isolate; tokens last an hour)
 
 /* Returns { ok:true } or { ok:false, error }. Never throws. */
-export async function sendViaGmail({ serviceAccountJson, sender, to, subject, html, text, fromName = "Planyr", fetchImpl = fetch, now = () => Math.floor(Date.now() / 1000) }) {
+export async function sendViaGmail({ serviceAccountJson, sender, fromEmail, to, subject, html, text, fromName = "Planyr", fetchImpl = fetch, now = () => Math.floor(Date.now() / 1000) }) {
   const sa = parseServiceAccount(serviceAccountJson);
   if (!sa) return { ok: false, error: "GMAIL_SERVICE_ACCOUNT_JSON is not a valid service-account key." };
   try {
@@ -81,7 +81,7 @@ export async function sendViaGmail({ serviceAccountJson, sender, to, subject, ht
       tok = { token: tj.access_token, exp: now() + (tj.expires_in || 3600) };
       tokenCache.set(sender, tok);
     }
-    const raw = b64urlStr(buildMime({ from: `${fromName} <${sender}>`, to, subject, text, html }));
+    const raw = b64urlStr(buildMime({ from: `${fromName} <${fromEmail || sender}>`, to, subject, text, html }));
     const res = await fetchImpl(SEND_URL, {
       method: "POST",
       headers: { authorization: `Bearer ${tok.token}`, "content-type": "application/json" },

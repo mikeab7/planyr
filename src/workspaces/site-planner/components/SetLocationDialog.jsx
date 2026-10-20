@@ -18,6 +18,7 @@
  *
  * Lazily loaded — it is a modal a session opens at most once, and it carries a Leaflet map.
  */
+import { setMapCursor, installPlannerCursorStyle } from "../lib/plannerCursors.js";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { contactField } from "../../../shared/ui/noAutofill.js";
@@ -48,6 +49,8 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
     const map = L.map(mapBoxRef.current, { attributionControl: false, zoomControl: true })
       .setView(start ? [start.lat, start.lon] : [31.0, -97.5], start ? 16 : 6);
     L.tileLayer(BASEMAPS.esri.tiles, { maxNativeZoom: BASEMAPS.esri.maxNative, maxZoom: 21 }).addTo(map);
+    installPlannerCursorStyle();
+    setMapCursor(map.getContainer(), "crosshair"); // a click here IS one of the ways to answer — the aerial is a pick surface
     map.on("click", (e) => {
       const o = normalizeOrigin({ lat: e.latlng.lat, lon: e.latlng.lng });
       if (o) { setPicked(o); setLabel(""); setErr(""); }
@@ -62,7 +65,7 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !picked) return;
-    if (!markerRef.current) markerRef.current = L.circleMarker([picked.lat, picked.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#EF6C33", fillOpacity: 1 }).addTo(map);
+    if (!markerRef.current) markerRef.current = L.circleMarker([picked.lat, picked.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#EF6C33", fillOpacity: 1, interactive: false }).addTo(map);
     else markerRef.current.setLatLng([picked.lat, picked.lon]);
     if (map.getZoom() < 15) map.setView([picked.lat, picked.lon], 17);
     else map.panTo([picked.lat, picked.lon]);

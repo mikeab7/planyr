@@ -156,7 +156,7 @@ describe("NEW-6 — Lock only blocks direct drags on the map", () => {
     expect(section).toMatch(/existing\.locked && !\(opts && opts\.explicit\) && activeIdRef\.current !== id/);
   });
   it("direct drags stay blocked: a locked plan is not click-selectable, and a map drag cannot arm it", () => {
-    expect(layers).toMatch(/else if \(!o\.locked && !pinTargetId && !calibrating\)/);
+    expect(layers).toMatch(/else if \(!o\.locked && !pinTargetId && !calibrating( && !blockSelect)?\)/);
   });
   it("the map handles show for the explicitly armed plan, locked or not (the lock check left the active lookup)", () => {
     const i = layers.indexOf("const active = (ovs || []).find(");

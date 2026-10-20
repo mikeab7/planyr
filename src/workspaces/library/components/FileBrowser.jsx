@@ -769,7 +769,7 @@ export default function FileBrowser({
     <div
       ref={rootRef}
       onDragEnter={(e) => { if (hasFilesDrag(e)) e.preventDefault(); }}
-      onDragOver={(e) => { if (hasFilesDrag(e)) e.preventDefault(); }}
+      onDragOver={(e) => { if (hasFilesDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
       onDrop={onDrop}
       style={{ flex: 1, display: "flex", minHeight: 0, position: "relative", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
 
@@ -996,7 +996,7 @@ export default function FileBrowser({
                   if (e.target !== e.currentTarget) return; // keys inside the row's own controls/inputs are theirs
                   if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); openFileMenu(f, r.left + 24, r.bottom - 6); }
                 }}
-                style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
+                style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)", cursor: canDrag && !renaming ? "grab" : undefined }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                   {renaming && renaming.id === f.id ? (
                     <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
@@ -1137,7 +1137,7 @@ function MoveRow({ choices, folderId, currentId, busy, onChange, onMove, onCance
       style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
       <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, flex: "none" }}>Move to:</span>
       <FolderPicker choices={choices} value={folderId} currentId={currentId} onChange={onChange} ariaLabel="Folder to move into" testId="library-move-folder" ctl={ctl} />
-      <button onClick={onMove} disabled={busy || same} data-testid="library-move-confirm" title={same ? "Pick a different folder" : "Move this file"}
+      <button onClick={onMove} disabled={busy || same} aria-busy={busy ? "true" : undefined} data-testid="library-move-confirm" title={same ? "Pick a different folder" : "Move this file"}
         style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: busy || same ? "default" : "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>{busy ? "Moving…" : "Move"}</button>
       <button onClick={onCancel} style={miniBtn}>Cancel</button>
     </div>

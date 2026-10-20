@@ -24,13 +24,13 @@
  * The surface itself is NOT built here: it is SitePlanner's `gradeSurface` (the B826 engine with the
  * grading model on), passed in. Cards, picture and earthwork rows therefore cannot disagree. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildProposedSurfaceSteps } from "../lib/proposedSurface.js";
+import { buildProposedSurfaceSteps, contourLatticeSteps } from "../lib/proposedSurface.js";
 import {
   assemblyIds, cardEarthwork, scopeIds, describeFlag, withFfe, shiftAssembly, findFfeFix, findMoveFix, runChunked,
   spotElevationsFor, courtDropReadout, padCornerSpots, padCorners, ringSf,
 } from "../lib/buildingGrade.js";
 import { loadTerrain } from "../lib/terrainLazy.js";
-import { LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
+import { LIMIT_MODE_LABEL, clipRegions, unionRings, subtractRings, bufferRings } from "../lib/gradingLimit.js";
 import {
   suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps,
   balanceClause, dockClause, rockClause, depthClause, floorClause, composeBasis,
@@ -38,10 +38,11 @@ import {
 import { feetToLatLngPair } from "../lib/mapLock.js";
 import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
-  ringsPathD, surfaceValuesLattice, contourLinesToFeet,
+  ringsPathD, contourLinesToFeet, ringsToLatticePx, GRADING_PAPER_RGB, GRADING_PAPER_OPACITY,
 } from "../lib/gradingPaint.js";
 
 const EMPTY = [];
+export const PAPER_MARGIN_FT = 60;   // ROUND 5 (NEW-6): how far past the daylight line the paper reaches
 const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
 const fmtE = (v) => f1(v).replace(/\.0$/, "");
 const centreOf = (ring) => {
@@ -490,8 +491,10 @@ export default function GradingController({ input, onModel }) {
     };
   }, [cfg.layers.cutfill, grid, gradeSurface, selBuildingId, facts, labelIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ---------------- ROUND 4 (B2349122) — proposed contours, traced in the terrain worker off the surface lattice ---------------- */
-  // Never in a render: an effect ships the lattice (one value per cell) to the worker, superseded by a token; the previous
+  /* ---------------- ROUND 4 (B2349122) / ROUND 5 — proposed contours, traced in the terrain worker ---------------- */
+  // Never in a render: an effect SAMPLES the contour lattice off the finished surface (proposedSurface.contourLatticeSteps —
+  // chunked, the pad exactly at the FFE, existing ground past the daylight line), ships it to the worker with the daylight
+  // line and the pad rings in lattice px (clip / cut there, one clipper on both sides), superseded by a token; the previous
   // contours stay published while a trace is in flight (the surface build itself already keeps its previous picture).
   const [contoursRes, setContoursRes] = useState(null);
   const cSeq = useRef(0);
@@ -501,15 +504,33 @@ export default function GradingController({ input, onModel }) {
     if (!contourKey) { if (!wantContours) setContoursRes(null); return undefined; }
     const my = ++cSeq.current;
     const g = grid;
+    const existAt = inRef.current.gsInputs.existAt;
     const t = setTimeout(async () => {
       try {
-        const L = surfaceValuesLattice(g.cells);
-        if (!L) { if (my === cSeq.current) setContoursRes(null); return; }
+        const L = await runChunked(contourLatticeSteps(g, { existAt }), { isStale: () => my !== cSeq.current });
+        if (my !== cSeq.current) return;
+        if (!L || L.stale) { if (!L) setContoursRes(null); return; }
         const terrain = await loadTerrain();
         // the existing Contour-lines rule: 1 ft, coarsening only when the range would drown the picture
-        const r = await terrain.runProposedContoursJob({ values: L.values, nx: L.nx, ny: L.ny, interval: L.interval });
+        const r = await terrain.runProposedContoursJob({
+          values: L.values, inside: L.inside, nx: L.nx, ny: L.ny, interval: L.interval,
+          clipRings: L.clipRings ? ringsToLatticePx(L.clipRings, L) : null, clipHoles: L.clipHoles ? ringsToLatticePx(L.clipHoles, L) : null, cutRings: ringsToLatticePx(L.pads, L),
+          labelMinCells: Math.max(8, Math.ceil(40 / L.cellFt)),
+        });
         if (my !== cSeq.current) return;
-        setContoursRes({ key: contourKey, interval: r.interval, ...contourLinesToFeet(r, L) });
+        // the daylight line in lat/lng, for the existing contour layer (drawn OUTSIDE it, by the same clipper)
+        const feet = contourLinesToFeet(r, L);
+        // the existing Contour-lines layer is cut OUTSIDE the graded area: the traced daylight line (layout), or that
+        // area clipped to the setback (boundary — the graded field runs half a cell past the line it is cut at)
+        let graded = feet.daylight;
+        if (graded && L.clipRings && L.clipRings.length) {
+          const regions = clipRegions(subtractRings(unionRings(graded.rings), graded.holes), L.clipRings, L.clipHoles || []);
+          graded = { rings: regions.map((q) => q.outer), holes: regions.flatMap((q) => q.holes) };
+        }
+        const toLL = (ring) => ring.map((p) => feetToLatLngPair(p, origin.lat, origin.lon));
+        const clipLatLng = origin && graded ? { rings: graded.rings.map(toLL), holes: graded.holes.map(toLL) } : null;
+        feet.daylight = graded;
+        setContoursRes({ key: contourKey, interval: r.interval, cellFt: L.cellFt, lattice: { x0: L.x0, y0: L.y0, dx: L.dx, dy: L.dy, nx: L.nx, ny: L.ny }, clipLatLng, ...feet });
       } catch (e) {
         if (my === cSeq.current) setContoursRes({ key: contourKey, error: String((e && e.message) || e), levels: [], labels: [] });
       }
@@ -517,6 +538,21 @@ export default function GradingController({ input, onModel }) {
     return () => { clearTimeout(t); };
   }, [contourKey, wantContours]); // eslint-disable-line react-hooks/exhaustive-deps
   const contours = useMemo(() => (cfg.layers.contours && contoursRes ? contoursRes : null), [cfg.layers.contours, contoursRes]);
+
+  /* ---------------- ROUND 5 (NEW-6) — the paper background: the parcel, out to the daylight line plus a margin ---------------- */
+  // One feet-space path (the active parcel rings ∪ the daylight rings pushed out by the margin) the planner paints at the very
+  // bottom of the drawing in the sheet's white, so the aerial drops out under the grading picture. Only while a map layer is on.
+  const paperWanted = cfg.layers.paper && (cfg.layers.cutfill || cfg.layers.contours);
+  const paperDaylight = grid ? grid.daylight : null;
+  const paper = useMemo(() => {
+    if (!paperWanted || !setback) return null;
+    const rings = [...(setback.parcelRings || [])];
+    const dl = (paperDaylight || []).filter((d) => d && !d.hole && Array.isArray(d.ring) && d.ring.length >= 3).map((d) => d.ring);
+    let regions = [];
+    try { regions = unionRings([...rings, ...bufferRings(dl, PAPER_MARGIN_FT).map((r) => r.outer)]); } catch (_) { regions = unionRings(rings); }
+    if (!regions.length) return null;
+    return { d: ringsPathD(regions.flatMap((r) => [r.outer, ...r.holes])), fill: GRADING_PAPER_RGB, opacity: GRADING_PAPER_OPACITY, marginFt: PAPER_MARGIN_FT };
+  }, [paperWanted, setback, paperDaylight]);
 
   /* ---------------- actions ---------------- */
   const typeFfe = (id, v) => {
@@ -542,7 +578,7 @@ export default function GradingController({ input, onModel }) {
     on: true, cfg, setback, groundBasis: input.groundBasis, demStatus: base.dem.status, demError: base.dem.error, retryDem: base.dem.retry,
     ground: { ...ground, retry: () => setGRetry((n) => n + 1) },
     bestFinish: best ? best.E : null,
-    autoFfe, buildable, cutfill, labels, cards, focusId, limit: limitInfo, contours, seams: gradeSurface && gradeSurface.grid ? gradeSurface.grid.seams || [] : [],
+    autoFfe, buildable, cutfill, labels, cards, focusId, limit: limitInfo, contours, paper, seams: gradeSurface && gradeSurface.grid ? gradeSurface.grid.seams || [] : [],
     rock: { status: rock.status, error: rock.error, retry: () => setRockRetry((n) => n + 1), count: rock.polys ? rock.polys.length : 0 },
     solving: solvingId,
     layerRows: [
@@ -557,14 +593,18 @@ export default function GradingController({ input, onModel }) {
       // ROUND 4 (B2349122) — the proposed contours, off the stitched surface
       { id: "contours", label: "Proposed contours", on: cfg.layers.contours,
         sub: contours ? (contours.error ? "couldn't trace the surface" : `${contours.interval} ft, index every ${contours.interval * 5} ft`) : "traced off the proposed surface",
-        info: "Contours of the PROPOSED surface — the pad, the pavement, the open ground inside the limit and the slopes to daylight — at the existing Contour-lines interval, bold in the contour brown with index lines labelled, clipped to the daylight line. Outside it the existing contours continue unchanged." },
+        info: "Contours of the PROPOSED surface — the pad, the pavement, the open ground inside the limit and the slopes to daylight — at the existing Contour-lines interval, bold in the contour brown with index lines labelled along the line, clipped to the daylight line. The existing Contour-lines layer is drawn outside that line automatically, dashed, and meets the proposed lines on it." },
+      // ROUND 5 (NEW-6) — the paper background under the grading picture
+      { id: "paper", label: "Paper background", on: cfg.layers.paper,
+        sub: cfg.layers.cutfill || cfg.layers.contours ? "the parcel, out past the slopes" : "shows while cut and fill or contours are on",
+        info: "Fills the parcel — out to the daylight line plus a margin — with the sheet's flat white while cut and fill or the proposed contours are on, so the aerial drops out under the grading picture. Everything drawn (existing and proposed contours, the bands, the limit, the daylight line, the setback, the elements) paints on top of it; the aerial stays outside it. Turn it off to see the imagery again." },
     ],
     actions: { typeFfe, resetFfe, applyMoveFix,
       setLimitMode: (m) => inRef.current.actions.setLimitMode && inRef.current.actions.setLimitMode(m),
       editLimit: (span) => inRef.current.actions.editLimit && inRef.current.actions.editLimit(span || null),
       doneEditLimit: () => inRef.current.actions.doneEditLimit && inRef.current.actions.doneEditLimit(),
       resetLimit: () => inRef.current.actions.resetLimit && inRef.current.actions.resetLimit() },
-  }), [cfg, setback, input.groundBasis, base.dem, ground, best, autoFfe, buildable, cutfill, labels, cards, focusId, rock, solvingId, maskE, maskSource, selBuildingId, namesKey, limitInfo, contours, gl, gradeSurface]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [cfg, setback, input.groundBasis, base.dem, ground, best, autoFfe, buildable, cutfill, labels, cards, focusId, rock, solvingId, maskE, maskSource, selBuildingId, namesKey, limitInfo, contours, paper, gl, gradeSurface]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { onModel(model); }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onModel(null), []); // eslint-disable-line react-hooks/exhaustive-deps
