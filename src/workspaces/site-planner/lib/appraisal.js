@@ -290,7 +290,8 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Randolph, Union, Henderson, Mercer), `Owner1Name` (Effingham), `TSC_Owner1` / `TSC_Name1` (the tax-roll export's own prefix — Clinton, Clay, Fayette), `PrimaryName` (De Witt, Marshall, Stark,
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
+/* New York (2026-10-20): `primary_ow` (the shapefile-truncated PRIMARY_OWNER — Nassau, Franklin and Jefferson via the north-country parcel model, Orleans, Seneca) Fallback pass only. */
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
 /* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
  * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
 export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
@@ -421,8 +422,9 @@ export const APPR_FIELDS = [
   [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
+  // NEW-1 (New York, 2026-10-20) — + ^print_?key$ (the tax-map number) and ^swis_?sbl_?id$ (municipality code + section/block/lot, set on every NYS roll parcel): the statewide layer leaves MUNI_PARCEL_ID blank for NYC and part of Suffolk (874k lots), so without a fallback the card showed no parcel id.
   // B2191xxx — + sched_?num (Denver), parcel_?(number|no|num) (Clackamas), ^pin$/taxpin (Montgomery, Gwinnett), assess…_num (E. Baton Rouge)
-  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$)/i, "Account / ID"],
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$|^print_?key$|^swis_?sbl_?id$)/i, "Account / ID"],
   // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
   // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
   [/^county_?name$/i, "County"],

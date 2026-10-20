@@ -176,6 +176,19 @@ export const ALLOWED_HOSTS = new Set([
   "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
   "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
   "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
+  /* NEW-1 (New York, 2026-10-20) — county / city parcel hosts this build sandbox's egress blocks (CONNECT 403), so their layers could only be
+   * measured through this relay on the PR preview; relayed server-side so the app never depends on their ACAO header. */
+  "maps2.cattco.org", // Cattaraugus County GIS (ArcGIS Enterprise web adaptor)
+  "spatial.vhb.com", // VHB spatial viewers — Delaware County COMIT, Schoharie, Schenectady (consultant-run, county-owned)
+  "spatialags.vhb.com", // VHB ArcGIS Server behind those viewers
+  "maps.dancgis.org", // Development Authority of the North Country — Franklin County parcel model
+  "gis.niagaracounty.com", // Niagara County GIS
+  "gisportal.yatescounty.org", // Yates County GIS portal
+  "maps.monroecounty.gov", // Monroe County DES GIS (current parcel roll)
+  "maps.watertown-ny.gov", // City of Watertown (Jefferson County) parcels
+  "gis.washingtoncountyny.gov", // Washington County GIS
+  "dg.fultoncountyny.gov", // Fulton County GIS
+  "gis2.erie.gov", // Erie County GIS — also hosts a Niagara County viewer
   /* NEW-1 (Kentucky, 2026-10-19) — the Kentucky Division of Geographic Information publishes one PVA parcel service per county
    * (WGS84WM_Services/Ky_PVA_<County>_Parcels_WGS84WM); LOJIC is Jefferson County's own server. The sandbox cannot reach either, so each is
    * relayed and MEASURED through this relay before a county is wired to it. */
