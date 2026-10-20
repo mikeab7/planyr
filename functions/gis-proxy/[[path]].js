@@ -155,6 +155,11 @@ export const ALLOWED_HOSTS = new Set([
   "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
   "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
   "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
+  /* NEW-1 (Illinois round 2, 2026-10-20) — hosts named by the counties' own AGOL registrations / web maps (Madison, Tazewell, Sangamon, Macon, Rock Island, Kankakee K3, McHenry's bare host, SAGIS)
+   * and the Bhamaps services2 host; each is MEASURED through this relay before a county is wired to it. */
+  "gis.madisoncountyil.gov", "gisportal.co.madison.il.us", "gis.tazewell-il.gov", "gis.co.sangamon.il.us", "sangis.co.sangamon.il.us", "pub.sagis.org", "k3gis.net",
+  "mchenrycountygis.org", "gis.rockislandcountyil.gov", "macongis.co.macon.il.us", "services2.bhamaps.com", "gis.stclaircounty.org", "gis.cityofdanville.org",
+  "gis.ci.pekin.il.us", "portal.greenvilleillinois.com", "maps.decaturil.gov", "redqueen.ci.galesburg.il.us",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
