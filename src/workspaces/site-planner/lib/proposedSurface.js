@@ -66,7 +66,7 @@ export function drainSteps(gen) {
 }
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
 import { resolveGradingLimit, unionRings, maskRegions, pointInRegions, regionsAreaSf, ringHash as limitRingHash } from "./gradingLimit.js";
-import { buildLattice, prepareSweep, cachedMaskAt, CELL_FT as SWEEP_CELL_FT, DEFAULT_MAX_DEPTH_FT } from "./buildableGround.js";
+import { prepareSweep, cachedMaskAt, CELL_FT as SWEEP_CELL_FT, DEFAULT_MAX_DEPTH_FT } from "./buildableGround.js";
 
 export const TIE_DROP_FT = 0.15;   // threshold tie: paving meets the doors just below slab FF
 export const DOCK_BREAK_FT = 0.75; // adjoining-pavement step at a court edge a truck can't cross
@@ -651,7 +651,6 @@ function* sweepContextSteps({ existAt, existKey, regions }) {
   if (sweepCache.size > SWEEP_CACHE_MAX) sweepCache.delete(sweepCache.keys().next().value);
   return ctx;
 }
-void buildLattice;
 
 /* The lattice for the round-4 model. `graded` = [{ el, plane, bbox }] sorted by precedence (building → dock → rest). */
 function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRings, opts, G, apronRatio, maxCells, minCellFt, inAnyRing }) {
@@ -665,7 +664,6 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const maxPav = Number.isFinite(spec.maxPavementSlopePct) ? spec.maxPavementSlopePct : 5;
   const { seams, steps: seamSteps } = buildSeams(graded, { maxPavementSlopePct: maxPav });
   yield;
-  const byId = new Map(graded.map((g) => [g.el.id, g]));
   // the seam-blended elevation of element g at pt — the ONE surface inside the limit
   const zOf = (g, pt) => {
     let z = g.plane.zAt(pt);
@@ -736,7 +734,6 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     return sz / sw;
   };
   const insideZ = (pt) => { const g = elementAt(pt); return g ? zOf(g, pt) : infillZ(pt); };
-  const insideAt = (pt) => !!elementAt(pt) || pointInRegions(pt, srcRegions);
   // the edge elevation at a point ON the limit: read a hair inside
   const edgeZ = (q, from) => {
     const dx = q.x - from.x, dy = q.y - from.y, L = Math.hypot(dx, dy) || 1;

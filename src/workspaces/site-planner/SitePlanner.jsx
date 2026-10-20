@@ -5257,7 +5257,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const DRAG_OP_KIND = {
     move: "move", groupMove: "move", mkMove: "move", moveSheetOverlay: "move", callout: "move", measureMove: "move",
     resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize",
-    vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize",
+    vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize", grLimitVertex: "resize",
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
@@ -9679,6 +9679,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const sp = snapPt(fp);
       scheduleFrameJob("geom", () => setParcels((a) => a.map((pc) => pc.id === d.id
         ? { ...pc, points: pc.points.map((p, i) => (i === d.index ? sp : p)) } : pc)));
+      return;
+    }
+    if (d.mode === "grLimitVertex") { // ROUND 4 (B2349120) — a vertex of the edited grading limit (stored on the plan)
+      const sp = snapPt(fp);
+      scheduleFrameJob("geom", () => setSettings((sx) => {
+        const g = sx.grading || {}, ring = Array.isArray(g.limitRing) ? g.limitRing : null;
+        if (!ring || !ring[d.index]) return sx;
+        return { ...sx, grading: { ...g, limitRing: ring.map((p, i) => (i === d.index ? { x: sp.x, y: sp.y } : p)) } };
+      }));
       return;
     }
     if (d.mode === "elVertex") {
@@ -14196,9 +14205,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Per-plan switch (NEW-1, amends B2315856): `gradingOn` is the owner gate; grading WORKS on this plan only when the owner has
   // also switched it on in the Grading panel. While off, `grOn` is false and everything below is the non-owner planner.
   const grPlanOn = gradingOn && (settings.grading || {}).enabled === true;
-  const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback });
+  // ROUND 4 (B2349120) — the rings that join the GRADING LIMIT without being graded planes: drive aisles / roads inside
+  // the site and the walks / landscape strips hosted by a building. The graded planes themselves (FM_FILL_TYPES) join
+  // through gsEls. Fresh array per render; useGradingBase memoises it on its value signature.
+  const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
+    if (e.type === "road") {
+      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), undefined) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
+    }
+    if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
+    return [];
+  }) : null;
+  const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback, extraRings: grLimitExtraRings, aisleFt: Number.isFinite(settings.aisle) && settings.aisle > 0 ? settings.aisle : 24 });
   const grOn = grBase.on;
-  const grHosts = grOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const grHosts = grOn ? grHostsPre : null;
+  // ROUND 4 — "Edit outline": the edited grading limit is dragged by vertex handles like a parcel outline; `highlight` is
+  // the offending span the flag's "pull the limit in" fix opened it on. Session state only; the ring itself is on the plan.
+  const [grLimitEdit, setGrLimitEdit] = useState(null);
+  useEffect(() => { if (!grOn && grLimitEdit) setGrLimitEdit(null); }, [grOn, grLimitEdit]);
   const gsExistAt = fmGradeAt || (grOn && grBase.existAt) || (gsMedianGrade != null ? () => gsMedianGrade : null);
   const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : (grOn && grBase.existAt) ? grBase.existKey : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
   const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type)).map((e) => {
@@ -14335,6 +14359,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }));
   };
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
+  // ROUND 4 — the grading limit's edit actions (every one an ordinary settings edit: undoable, one write path)
+  const grLimitRingNow = () => { const g = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const regs = g && g.limitRegions ? g.limitRegions : []; let best = null; for (const r of regs) if (!best || polyArea(r.outer) > polyArea(best.outer)) best = r; return best ? best.outer.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })) : null; };
+  const grEditLimit = (span) => {
+    const g = settings.grading || {};
+    if (!Array.isArray(g.limitRing) || g.limitRing.length < 3) {
+      const ring = grLimitRingNow();
+      if (!ring) { flashWarn("The grading limit isn't computed yet — try again in a moment.", 3000); return; }
+      grSetCfg({ limitRing: ring, limitMode: "layout" });
+    } else if (g.limitMode === "boundary") grSetCfg({ limitMode: "layout" });
+    setGrLimitEdit({ highlight: span || null });
+  };
+  const grDoneEditLimit = () => setGrLimitEdit(null);
+  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null }); };
+  const grSetLimitMode = (m) => { if (m !== "layout") setGrLimitEdit(null); grSetCfg({ limitMode: m }); };
+  const grStartLimitVertex = (e, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    drag.current = { mode: "grLimitVertex", index, ...startGate(e, { rebase: false }) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -14630,7 +14674,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     siteFloorFt: Number.isFinite(fmEffectivePadFt) ? fmEffectivePadFt : null,
     dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
     accent: PAL.accent, isDragging: () => !!drag.current,
-    actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly },
+    limitEditing: !!grLimitEdit, limitHighlight: grLimitEdit ? grLimitEdit.highlight : null,
+    actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly, setLimitMode: grSetLimitMode, editLimit: grEditLimit, doneEditLimit: grDoneEditLimit, resetLimit: grResetLimit },
   } : null;
 
   // ---- B707/B712: the floodplain-mitigation ledger — a SEPARATE ledger from
@@ -18972,6 +19017,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{decimatedHandles(pc.points, on).map((h) => vtxRect(`pv${h.i}`, { x: h.x, y: h.y }, on(h.i), "move", (e) => startVertex(e, pc.id, h.i)))}</g>;
   })();
 
+  // ROUND 4 (B2349120) — the EDITED grading limit while "Edit outline" is on: the ring itself (dashed, blue) and a
+  // draggable square per vertex, exactly the parcel-outline affordance. Session-only chrome in the handle layer.
+  const grLimitHandles = (() => {
+    if (!grOn || !grLimitEdit || tool !== "select") return null;
+    const ring = (settings.grading || {}).limitRing;
+    if (!Array.isArray(ring) || ring.length < 3) return null;
+    const pts = ring.map(f2p);
+    return (
+      <g data-grading-limit-edit="1">
+        <polygon data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+        {decimatedHandles(ring, () => false).map((h) => vtxRect(`glv${h.i}`, { x: h.x, y: h.y }, false, "move", (e) => grStartLimitVertex(e, h.i)))}
+      </g>
+    );
+  })();
+
   // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
   // to move a corner. Add via Shift-click / right-click an edge; delete via right-click / Delete.
   // NEW-2 — same screen-space decimation: an imported / traced pond outline carries the identical
@@ -23009,6 +23069,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted }}>Loading grading…</div>}>
               <GradingPanel planOn={grOn} showOnMap={!!(settings.grading || {}).layers?.cutfill} onPlanOn={(v) => grSetCfg({ enabled: v ? true : null })}
                 onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
+                showContours={!!(settings.grading || {}).layers?.contours} onShowContours={(v) => grSetLayer("contours", v)}
+                onPullLimit={(id, span) => grEditLimit(span)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
                 onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
@@ -25277,7 +25339,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* Owner-only grading layers ("Level-pad limit at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
-              {grOn && grModel && (grModel.buildable || grModel.cutfill) && (
+              {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
                 <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
@@ -25659,6 +25721,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {sideAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
+                {grLimitHandles}
                 {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}

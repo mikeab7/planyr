@@ -7,7 +7,9 @@
  *                   (GradingHeaderActions). Site Analysis carries NONE of this.
  *   GroundSection — "Level ground at 2:1, no walls" + relief + steepness + the show-on-map button.
  *   GradingCanvas — the slope bands, daylight line, level-pad line, spot elevations, corner pills, the
- *                   setback-breach dot (SVG, inside the plan canvas).
+ *                   setback-breach dot (SVG, inside the plan canvas); round 4: the grading limit's dashed line, the
+ *                   proposed contours and the edit-outline highlight.
+ *   GradedAreaLine — round 4 (B2349123): "Graded area · n AC · limit auto", the mode control, Edit outline / Reset.
  *
  * Module-scope components only (MODULE-SCOPE-COMPONENTS). Colours are theme tokens; the SVG half takes its
  * hex from the planner's PAL (SVG attributes cannot use var()). */
@@ -20,6 +22,8 @@ import RowInfo from "../../../shared/ui/RowInfo.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
+import { LIMIT_MODES, LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
+import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH } from "../lib/gradingPaint.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
 import { gradingPanelView } from "../lib/gradingPanelModel.js";
@@ -164,7 +168,11 @@ function GradingSettings({ model, dockDropFt, onCfg, onDockDrop }) {
       <Row label="Grading slopes">
         <SegmentedControl options={SLOPE_RATIOS.map((r) => ({ key: r, label: `${r}:1` }))} value={cfg.slopeRatio} onChange={(v) => onCfg({ slopeRatio: v })} />
       </Row>
-      <span style={muted}>No walls · 5 ft shoulder before the slope starts. Bank volumes.</span>
+      {/* ROUND 4 (B2349123) — the grading limit's own settings */}
+      <Row label="Shoulder past the pavement"><NumField value={cfg.shoulderFt} min={0} step={1} unit="ft" testid="grading-shoulder" ariaLabel="Shoulder past the pavement" onCommit={(v) => onCfg({ shoulderFt: v })} /></Row>
+      <Row label="Limit corner radius"><NumField value={cfg.cornerRadiusFt} min={0} step={5} unit="ft" testid="grading-corner-radius" ariaLabel="Limit corner radius" onCommit={(v) => onCfg({ cornerRadiusFt: v })} /></Row>
+      <Row label="Max pavement slope"><NumField value={cfg.maxPavementSlopePct} min={0.5} step={0.5} unit="%" testid="grading-max-pavement-slope" ariaLabel="Max pavement slope" onCommit={(v) => onCfg({ maxPavementSlopePct: v })} /></Row>
+      <span style={muted}>No walls · the slope starts at the grading limit. Bank volumes.</span>
       {rockLine && <span data-rock-status={rock.status} style={muted}>{rockLine}</span>}
       {rock.status === "failed" && (
         <span data-rock-status="failed" style={{ ...muted, color: "var(--warn-text)" }}>
@@ -204,7 +212,7 @@ function FfeLine({ c, actions }) {
   );
 }
 
-function FlagCard({ c, onApplyFfeFix, onApplyMoveFix }) {
+function FlagCard({ c, onApplyFfeFix, onApplyMoveFix, onPullLimit = null }) {
   const flag = c.flag;
   const fx = c.fixes || { status: "idle", ffe: null, move: null };
   return (
@@ -219,13 +227,18 @@ function FlagCard({ c, onApplyFfeFix, onApplyMoveFix }) {
         <Button variant="secondary" size="sm" data-fix="move" disabled={!(fx.move)} onClick={() => fx.move && onApplyMoveFix(c.id, fx.move)}>
           {fx.status === "computing" ? "Finding a move…" : fx.move ? `Move building ${fx.move.distFt} ft ${fx.move.direction}` : "No move within 240 ft clears it"}
         </Button>
+        {flag.limit && (
+          <Button variant="secondary" size="sm" data-fix="limit" disabled={!onPullLimit} onClick={() => onPullLimit && onPullLimit(c.id, (fx.limit && fx.limit.span) || flag.span)}>
+            Pull the limit in · edit the outline
+          </Button>
+        )}
         <Button variant="secondary" size="sm" data-fix="wall" disabled>Allow a wall on that edge · later</Button>
       </div>
     </div>
   );
 }
 
-function BuildingCard({ c, model, onSelect, onApplyFfeFix, onApplyMoveFix }) {
+function BuildingCard({ c, model, onSelect, onApplyFfeFix, onApplyMoveFix, onPullLimit = null }) {
   const e = c.earthwork;
   if (!c.focus) {
     return (
@@ -261,7 +274,7 @@ function BuildingCard({ c, model, onSelect, onApplyFfeFix, onApplyMoveFix }) {
           </div>
         : <div data-grading-earthwork="pending" style={muted}>{c.ffe == null ? "…" : "Reading the ground…"}</div>}
       {c.flag
-        ? <FlagCard c={c} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} />
+        ? <FlagCard c={c} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} onPullLimit={onPullLimit} />
         : e && <div data-grading-flag="clear" style={{ color: "var(--success-text)", fontSize: FONT_SIZE.label }}>Slopes daylight inside the setback.</div>}
     </div>
   );
@@ -288,11 +301,41 @@ export function GradingHeaderActions({ model, dockDropFt, onCfg, onDockDrop }) {
   );
 }
 
+/* ROUND 4 (B2349120 / B2349123) — the GRADED AREA line under the checkboxes: "Graded area · 32.4 AC · limit auto", the
+ * limit MODE as a two-option control ("Around the layout | To the boundary"), and — in layout mode — Edit outline /
+ * Done / Reset to auto, plus one line when an edited limit grew to re-admit a moved element. */
+export const LIMIT_MODE_OPTIONS = LIMIT_MODES.map((m) => ({ key: m, label: LIMIT_MODE_LABEL[m] }));
+export function GradedAreaLine({ limit, actions }) {
+  if (!limit) return null;
+  const ac = limit.areaAc == null ? "…" : `${f1(limit.areaAc)} AC`;
+  const src = limit.mode === "boundary" ? "the setback" : limit.source === "edited" ? "limit edited" : "limit auto";
+  const layout = limit.mode !== "boundary";
+  return (
+    <div data-graded-area="1" data-limit-mode={limit.mode} data-limit-source={limit.source} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0 0 8px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <span data-graded-area-line="1" style={{ fontVariantNumeric: "tabular-nums" }}>Graded area · {ac} · {src}</span>
+        <SegmentedControl options={LIMIT_MODE_OPTIONS} value={limit.mode} onChange={(m) => actions.setLimitMode && actions.setLimitMode(m)} aria-label="Grading limit mode" data-testid="grading-limit-mode" />
+      </div>
+      {layout && (
+        <div data-limit-controls="1" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {limit.editing
+            ? <button type="button" data-limit-action="done" style={linkBtn} onClick={() => actions.doneEditLimit && actions.doneEditLimit()}>Done editing</button>
+            : <button type="button" data-limit-action="edit" style={linkBtn} onClick={() => actions.editLimit && actions.editLimit(null)}>Edit outline</button>}
+          {limit.source === "edited" && <button type="button" data-limit-action="reset" style={linkBtn} onClick={() => actions.resetLimit && actions.resetLimit()}>Reset to auto</button>}
+        </div>
+      )}
+      {layout && limit.grew && limit.grew.length > 0 && (
+        <div data-limit-grew="1" style={muted}>Limit grew to include {limit.grew.join(", ")}.</div>
+      )}
+    </div>
+  );
+}
+
 /* The left-dock Grading panel (NEW-1, amends B2315856): the per-building cards, then the three Ground rows + the
  * show-on-map button. It only READS `model` (published by the controller SitePlanner mounts whether or not this
  * panel is open); opening it starts no build. `headerSlot` is the panel chrome's action element (the ⓘ + gear portal there). */
 export const OFF_LINE = "Turn this on to suggest finish elevations and show cut and fill for this plan.";
-export function GradingPanel({ planOn = true, showOnMap = false, onPlanOn = null, onShowOnMap = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false }) {
+export function GradingPanel({ planOn = true, showOnMap = false, showContours = false, onPlanOn = null, onShowOnMap = null, onShowContours = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null }) {
   const view = gradingPanelView(model);
   const toggles = (
     <div data-grading-switches="1" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 0 10px" }}>
@@ -302,6 +345,11 @@ export function GradingPanel({ planOn = true, showOnMap = false, onPlanOn = null
       {planOn && (
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" data-testid="grading-show-on-map" checked={!!showOnMap} onChange={(e) => onShowOnMap && onShowOnMap(e.target.checked)} /> Show cut and fill on the map
+        </label>
+      )}
+      {planOn && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" data-testid="grading-show-contours" checked={!!showContours} onChange={(e) => onShowContours && onShowContours(e.target.checked)} /> Show proposed contours
         </label>
       )}
     </div>
@@ -319,11 +367,12 @@ export function GradingPanel({ planOn = true, showOnMap = false, onPlanOn = null
     <div data-testid="grading-panel" data-grading-panel={view.state}
       style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", display: "flex", flexDirection: "column" }}>
       {toggles}
+      {model && <GradedAreaLine limit={model.limit} actions={model.actions} />}
       {model && headerSlot && createPortal(<GradingHeaderActions model={model} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />, headerSlot)}
       <div data-section="grading" style={{ padding: "0 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
         {view.state === "cards"
           ? view.cards.map((c) => (
-              <BuildingCard key={c.id} c={c} model={model} onSelect={onSelectBuilding} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} />
+              <BuildingCard key={c.id} c={c} model={model} onSelect={onSelectBuilding} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} onPullLimit={onPullLimit} />
             ))
           : <div data-grading-empty={view.state} style={muted}>{view.line}</div>}
       </div>
@@ -349,7 +398,7 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
  * the cut/fill image is a single <image> and the outlines one path each in feet space with a non-scaling
  * stroke, so a pan never recomputes a thing (VIEW-INDEPENDENT-ONCE). */
 export function GradingCanvas({ model, f2p, rppf, PAL }) {
-  const { buildable, cutfill, labels, cfg } = model;
+  const { buildable, cutfill, labels, cfg, contours, limit } = model;
   const o = f2p({ x: 0, y: 0 });
   const feetG = (d, stroke, w, dash, cap = "butt") => (
     <g transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
@@ -376,8 +425,33 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
           {img(cutfill, "cimg", false)}
           {feetG(cutfill.outlineD, PAL.paper, 3.4, null)}
           {feetG(cutfill.outlineD, PAL.ink, 1.6, "1.5 3.5", "round")}
+          {/* ROUND 4 — the grading limit: the thin dashed ink line the slope is thrown from */}
+          {cutfill.limitD && <g data-grading-limit="1">{feetG(cutfill.limitD, PAL.ink, 1, LIMIT_LINE_DASH)}</g>}
         </g>
       )}
+      {/* ROUND 4 (B2349122) — the proposed contours: bold brown lines, index lines heavier and labelled, clipped to daylight */}
+      {contours && contours.levels && contours.levels.length > 0 && (
+        <g data-layer="contours" data-contour-interval={contours.interval}>
+          {contours.levels.map((lv) => (
+            <g key={lv.level} data-contour-level={lv.level} data-contour-index={lv.isIndex ? "1" : "0"}
+              transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
+              <path d={lv.d} fill="none" stroke={lv.isIndex ? CONTOUR_PROPOSED_INDEX_RGB : CONTOUR_PROPOSED_RGB} strokeWidth={lv.isIndex ? 1.8 : 1.1} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+            </g>
+          ))}
+          {rppf >= 0.35 && (contours.labels || []).map((lb, i) => {
+            const p = f2p(lb.pt);
+            return (
+              <text key={i} data-contour-label={lb.level} x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={10} fontWeight={700}
+                fill={CONTOUR_PROPOSED_INDEX_RGB} stroke={PAL.paper} strokeWidth={2.5} paintOrder="stroke" style={{ fontFamily: "ui-monospace, monospace" }}>{lb.text}</text>
+            );
+          })}
+        </g>
+      )}
+      {/* ROUND 4 — while the outline is being edited for a flag: the offending span, circled */}
+      {limit && limit.editing && limit.highlight && (() => {
+        const c = f2p(limit.highlight.pt);
+        return <circle data-limit-highlight="1" cx={c.x} cy={c.y} r={Math.max(24, limit.highlight.radiusFt * rppf)} fill="none" stroke={PAL.danger} strokeWidth={1.5} strokeDasharray="4 4" />;
+      })()}
       {showCutfillLabels && (labels || []).map((L) => {
         if (px(L.minSideFt) < LABELS_MIN_PX) return null;      // below the working zoom: bands and the daylight line only
         const c0 = f2p(L.centre);
