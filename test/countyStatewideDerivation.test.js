@@ -176,7 +176,8 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // (57 new rows on top of 24) — real counties, one source, not a blind expansion.
     // ⛔ Bumped 400 → 600 (2026-10-19, NEW-1, B2317680): Missouri's 71 county rows (one table, measured per county) took it from ~360 to 431 —
     // real counties wired from per-county measurements, not a blind expansion. 16 sibling state sessions are adding rows the same day.
-    expect(keys.length).toBeLessThan(600);
+    // ⛔ Bumped 600 → 800 (2026-10-20, NEW-1, B2348000): Kansas's 49 county rows (one table, measured per county) plus the sibling states merged the same day took it to 657.
+    expect(keys.length).toBeLessThan(800);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
