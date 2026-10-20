@@ -183,16 +183,10 @@ export const ALLOWED_HOSTS = new Set([
   "arcserver.madisoncountyky.us", // Madison County KY GIS
   "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
   "webgis.bgky.org", // Warren County City-County Planning Commission (CCPC parcels)
-  /* NEW-2 (Kentucky remaining counties, 2026-10-20) — hosts of the retest / lead counties. MEASURED through this relay before any county is wired to one. */
-  "maps2.bgadd.org", // Bluegrass ADD — Boyle (BoyleParcelBoundary) and any sibling Bluegrass counties it hosts
-  "gis.ccgisonline.com:6443", // Clark County KY GIS (certificate / reachability retest)
-  "gis.daviesskypva.org", // Daviess County PVA (name-resolution retest)
-  "kygisportalservices.ky.gov", // Kentucky COT/DGI Enterprise portal — Ky_PVA_<County>_Parcels_WM feature services (found in the DGI Knott web map)
-  "www.hopkinscountygis.com:6443", "www.hopkinscountygis.com:6080", // Hopkins County KY GIS (own server; the earlier 'only Texas' note was an AGOL title search)
-  "carroll.countygis.org", "gallatinky.wthgis.com", // Carroll / Gallatin county GIS sites named by AssessorSearch listings
-  "gis.owensboro.org", // City of Owensboro / OMPC (second Daviess host; measured only if the AGOL copy ever disappears)
-  /* PROBE-ONLY (remove before merge): read-only reconnaissance of vendor viewers / the state hub, to learn which queryable endpoint they call. */
-  "gis.equatorstudios.com", "qpublic.schneidercorp.com", "opengisdata.ky.gov",
+  /* NEW-2 (Kentucky remaining counties, 2026-10-20) — the one non-arcgis.com host the newly wired counties sit on. MEASURED through this relay before
+   * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
+   * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
+  "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

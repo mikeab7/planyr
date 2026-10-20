@@ -69,7 +69,7 @@ describe("the wired Kentucky rows", () => {
     for (const [, n, , , , , , la, ln, bb] of KY_ROWS) expect(la >= bb[0] && la <= bb[2] && ln >= bb[1] && ln <= bb[3], n).toBe(true);
   });
   it("every row carries a dated verification record", () => {
-    for (const k of wiredKeys()) expect(COUNTY_VERIFICATION[k]?.verifiedOn, k).toBe("2026-10-19");
+    for (const k of wiredKeys()) expect(COUNTY_VERIFICATION[k]?.verifiedOn, k).toMatch(/^2026-10-(19|20)$/);
   });
   it("a trap rejected on measurement stays rejected: no Kentucky row points at another state's same-named county", () => {
     const urls = wiredKeys().map((k) => COUNTIES[k].layerUrl).join("\n");
@@ -89,5 +89,36 @@ describe("a recorded real lot from each source reads back parcel id and (where t
     if (name === "Simpson") expect(rec.address, "the property line, not the owner PO box").toBe("3100 BOWLING GREEN ROAD");
     if (name === "Henderson") expect(rec.address, "LOCATION=COUNTY is a jurisdiction flag, never an address").toBeNull();
     if (name === "Boone") expect(rec.owner, "Boone's PRCLOWNR1").toBeTruthy();
+  });
+});
+
+/* NEW-2 (Kentucky remaining counties, 2026-10-20) — counties that were named gaps on main until their source was found by reading
+ * planner / E911 / ADD layers (not by title search) and measured. RED-PROOF: on main (2500b00 + #2450) every one of these resolves to
+ * "<County> — no parcel data wired here yet"; the per-county cases above already go red for them, and this block pins WHY each is trusted. */
+const NEW2 = ["Hopkins", "Jessamine", "Spencer", "Hardin", "Bullitt", "Daviess", "Mercer", "Anderson", "Montgomery", "Rowan", "Pulaski"];
+describe("NEW-2: counties wired from layers a title search could not find", () => {
+  it.each(NEW2)("%s is wired, measured 2026-10-20, with a recorded real lot", (n) => {
+    const key = "ky_" + n.toLowerCase();
+    expect(COUNTIES[key], key).toBeTruthy();
+    expect(COUNTY_VERIFICATION[key].verifiedOn).toBe("2026-10-20");
+    expect(SAMPLES[n], n).toBeTruthy();
+    expect(FX.gaps).not.toContain(n);
+  });
+  it("owner-bearing sources read an owner back; id-only sources say nothing rather than guess", () => {
+    const own = (n) => countyRecord(SAMPLES[n].attrs, { idField: COUNTIES["ky_" + n.toLowerCase()].idField, addrField: COUNTIES["ky_" + n.toLowerCase()].addrField }).owner;
+    for (const n of ["Jessamine", "Hardin", "Bullitt", "Daviess", "Mercer", "Pulaski"]) expect(own(n), n).toBeTruthy();
+    for (const n of ["Spencer", "Anderson", "Montgomery", "Rowan", "Hopkins"]) expect(own(n), n).toBeNull();
+  });
+  it("Hopkins is KENTUCKY's own server (port 6443 through the relay), never the Texas layer the first pass found", () => {
+    expect(COUNTIES.ky_hopkins.layerUrl).toBe("/gis-proxy/www.hopkinscountygis.com:6443/arcgis/rest/services/Parcel/MapServer/0");
+    expect(COUNTIES.ky_hopkins.layerUrl).not.toMatch(/S14quRRuDSaYoUKA/);
+    expect(ALLOWED_HOSTS.has("www.hopkinscountygis.com:6443")).toBe(true);
+  });
+  it("Montgomery uses the layer WITH a parcel id, not the id-less Montgomery_Parcels_view trap", () => {
+    expect(COUNTIES.ky_montgomery.layerUrl).not.toMatch(/Montgomery_Parcels_view/);
+    expect(COUNTIES.ky_montgomery.idField).toBe("PARCEL_ID");
+  });
+  it("the probe-only vendor hosts never ship in the relay allow-list", () => {
+    for (const h of ["gis.equatorstudios.com", "qpublic.schneidercorp.com", "opengisdata.ky.gov"]) expect(ALLOWED_HOSTS.has(h), h).toBe(false);
   });
 });
