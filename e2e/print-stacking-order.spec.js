@@ -114,20 +114,23 @@ test("the full feature stack in the sheet equals the canvas stack", async ({ pag
 
 /* ⛔ THE ACTUAL OWNER REPORT. The PDF's default ("Flatten markups" OFF) lifts markups out of the page and writes them
  * as PDF annotations — which a PDF always paints ABOVE the page. So a polygon sent behind the buildings printed on top
- * of them. This drives the real composed sheet and asserts the behind-the-plan polygon is NOT lifted (it stays in the
- * page, in its true place) while one on top of the plan still is (still editable in Bluebeam). */
+ * of them. NEW-1 (2026-10-20): the buildings are annotations now too, and a PDF paints annotations in /Annots order, so
+ * the stacking is carried by that ORDER: the polygon sent behind is written BEFORE the building, brought to front AFTER
+ * it — and both stay editable in Bluebeam. Nothing is printed into the page. */
 async function composed(page) {
-  return page.evaluate(async (mk) => {
+  return page.evaluate(async ([mk, el]) => {
     const c = await window.__plannerExportComposed();
     const doc = new DOMParser().parseFromString(c.sheetSvg, "image/svg+xml");
-    return { lifted: c.liftedIds, kept: c.keptInPage, polygonInPage: !!doc.querySelector(`[data-feature="markup:${mk}"]`) };
-  }, MK);
+    const at = (nm) => c.annots.findIndex((a) => a.nm === nm);
+    const m = at(`planyr-markup-${mk}`), b = at(`planyr-building-${el}`);
+    return { kept: c.keptInPage, polygonInPage: !!doc.querySelector(`[data-feature="markup:${mk}"]`), lifted: m >= 0 && b >= 0, polygonAbove: m > b };
+  }, [MK, BLDG]);
 }
 
-test("editable PDF: a polygon on top is a PDF markup; sent to back it stays in the page, under the building", async ({ page }) => {
+test("editable PDF: a polygon on top is written after the building; sent to back, before it — both editable", async ({ page }) => {
   await loadPlan(page);
   const top = await composed(page);
-  expect(top).toMatchObject({ lifted: 1, kept: 0, polygonInPage: false }); // on top of everything → editable, as before
+  expect(top).toMatchObject({ lifted: true, kept: 0, polygonInPage: false, polygonAbove: true }); // on top → written after the building
   const pt = await overlapPoint(page);
   await page.mouse.move(pt.x, pt.y);
   await page.mouse.click(pt.x, pt.y, { button: "right" });
@@ -135,21 +138,13 @@ test("editable PDF: a polygon on top is a PDF markup; sent to back it stays in t
   await expect.poll(async () => (await coverage(page)).canvas).toBe(false);
   await page.mouse.click(pt.x - 900, pt.y - 400);
   const back = await composed(page);
-  expect(back).toMatchObject({ lifted: 0, kept: 1, polygonInPage: true });
-  // …and in the page picture it is beneath the building
-  const under = await page.evaluate(async ([mk, el]) => {
-    const c = await window.__plannerExportComposed();
-    const doc = new DOMParser().parseFromString(c.sheetSvg, "image/svg+xml");
-    const m = doc.querySelector(`[data-feature="markup:${mk}"]`), b = doc.querySelector(`[data-feature="el:${el}"]`);
-    return !!(m && b && (m.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
-  }, [MK, BLDG]);
-  expect(under).toBe(true);
-  // Bring to Front puts it back on top → editable again
+  expect(back).toMatchObject({ lifted: true, kept: 0, polygonInPage: false, polygonAbove: false }); // written BEFORE the building
+  // Bring to Front puts it back on top → written after the building again
   await page.mouse.click(pt.x, pt.y, { button: "right" });
   await page.getByRole("button", { name: /^Bring to Front/ }).click();
   await expect.poll(async () => (await coverage(page)).canvas).toBe(true);
   await page.mouse.click(pt.x - 900, pt.y - 400);
-  expect(await composed(page)).toMatchObject({ lifted: 1, kept: 0, polygonInPage: false });
+  expect(await composed(page)).toMatchObject({ lifted: true, kept: 0, polygonInPage: false, polygonAbove: true });
 });
 
 
@@ -167,9 +162,9 @@ test("order survives a reload; a SELECTED building does not change what prints",
   /* el-tier: readiness gate — waits for the building band to be on the canvas; the markup is asserted on its own line. */
   await expect.poll(async () => page.locator("[data-el-id]").count(), { timeout: 20_000 }).toBeGreaterThan(10);
   await page.waitForTimeout(1200);
-  expect(await composed(page)).toMatchObject({ lifted: 0, kept: 1, polygonInPage: true });   // persisted z, read by print
+  expect(await composed(page)).toMatchObject({ lifted: true, kept: 0, polygonAbove: false });   // persisted z, read by print
   // select the building (the canvas lifts a selected element while selected): the markup must still print beneath it
   const pt2 = await overlapPoint(page);
   await page.mouse.click(pt2.x, pt2.y);
-  expect(await composed(page)).toMatchObject({ lifted: 0, kept: 1, polygonInPage: true });
+  expect(await composed(page)).toMatchObject({ lifted: true, kept: 0, polygonAbove: false });
 });
