@@ -25,6 +25,7 @@ import {
   searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
   manualWishlistFromRows, manualGroupKey, manualPinKey,
   fetchAllDishes, insertDish, updateDish, updateDishes, deleteDish,
+  fetchAllPlacePrefs, upsertPlacePref,
   fetchAllDishWishlist, markDishDone,
   fetchAllLists, fetchAllListItems, createList, updateList, deleteList, addListItem, removeListItem,
 } from "./lib/foodStore.js";
@@ -57,6 +58,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [dishes, setDishes] = useState([]); // per-dish ratings (B1873008) — food_dishes rows
   const [dishWishlist, setDishWishlist] = useState([]); // dish-level "want to try" (NEW-3) — food_dish_wishlist rows
   const [dishPending, setDishPending] = useState(false);
+  const [placePrefs, setPlacePrefs] = useState([]); // per-restaurant facts — today the PRICE LEVEL (NEW-1, 2026-10-20) — food_place_prefs rows
   const [savedNotice, setSavedNotice] = useState(null); // {visitId, at, kind, dishes} — what the open place card confirms after a save (VisitPanel)
   // Named restaurant lists (NEW-1 / B2088288) — a grouping orthogonal to status; see lib/foodLists.js.
   const [lists, setLists] = useState([]);
@@ -148,6 +150,14 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     setDishWishlist(data);
   }, [accountActive]);
   useEffect(() => { reloadDishWishlist(); }, [reloadDishWishlist]);
+
+  // Per-restaurant facts — the PRICE LEVEL (NEW-1, 2026-10-20). food_place_prefs, fetched in full like the wishlist.
+  const reloadPlacePrefs = useCallback(async () => {
+    if (!accountActive) { setPlacePrefs([]); return; }
+    const { data } = await fetchAllPlacePrefs();
+    setPlacePrefs(data);
+  }, [accountActive]);
+  useEffect(() => { reloadPlacePrefs(); }, [reloadPlacePrefs]);
 
   const reloadLists = useCallback(async () => {
     if (!accountActive) { setLists([]); setListItems([]); return; }
@@ -673,6 +683,38 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     return true;
   }, [selected, dishWishlist, dishesForSelected, reloadDishes, reloadDishWishlist]);
 
+  // The selected restaurant's identity as a food_place_prefs row sees it (a snapshot place or a manual pin; a not-yet-saved new pin has none).
+  const selectedPrefIdentity = useMemo(() => {
+    if (!selected) return null;
+    if (selected.kind === "place") return { place_id: selected.place.id };
+    if (selected.kind === "manualPin") return { custom_name: selected.pin.name, custom_lat: selected.pin.lat, custom_lon: selected.pin.lon };
+    return null;
+  }, [selected]);
+  const prefForSelected = useMemo(() => {
+    if (!selectedPrefIdentity) return null;
+    return placePrefs.find((r) => (selectedPrefIdentity.place_id
+      ? r.place_id === selectedPrefIdentity.place_id
+      : !r.place_id && manualGroupKey(r.custom_name, r.custom_lat, r.custom_lon) === manualGroupKey(selectedPrefIdentity.custom_name, selectedPrefIdentity.custom_lat, selectedPrefIdentity.custom_lon))) || null;
+  }, [placePrefs, selectedPrefIdentity]);
+  const priceLevelForSelected = prefForSelected?.price_level ?? null;
+
+  // Price level (NEW-1): optimistic — the $ signs fill the instant he taps — then the one upsert; a failed write reverts and says so
+  // (LOUD-FAILURE: never a level that looks set but isn't saved).
+  const setPriceLevel = useCallback(async (level) => {
+    if (!selectedPrefIdentity) return false;
+    const before = placePrefs;
+    setPlacePrefs((rows) => {
+      const i = rows.findIndex((r) => (selectedPrefIdentity.place_id ? r.place_id === selectedPrefIdentity.place_id : !r.place_id && manualGroupKey(r.custom_name, r.custom_lat, r.custom_lon) === manualGroupKey(selectedPrefIdentity.custom_name, selectedPrefIdentity.custom_lat, selectedPrefIdentity.custom_lon)));
+      if (i >= 0) return rows.map((r, j) => (j === i ? { ...r, price_level: level } : r));
+      return [...rows, { id: `pending:${Date.now()}`, ...selectedPrefIdentity, price_level: level }];
+    });
+    setError(null);
+    const { error: err } = await upsertPlacePref(selectedPrefIdentity, { price_level: level });
+    if (err) { setPlacePrefs(before); setError(err.message || "Couldn't save the price level."); return false; }
+    await reloadPlacePrefs();
+    return true;
+  }, [selectedPrefIdentity, placePrefs, reloadPlacePrefs]);
+
   const removeDish = useCallback(async (id) => {
     const { error: err } = await deleteDish(id);
     if (err) { setError(err.message || "Couldn't delete that dish."); return; }
@@ -900,8 +942,10 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onDeleteDish={removeDish}
             dishPending={dishPending}
             openDishWishlistNames={openDishWishlistNamesForSelected}
+            priceLevel={priceLevelForSelected}
+            onSetPriceLevel={accountActive && selectedPrefIdentity ? setPriceLevel : undefined}
             listsControl={accountActive ? (
-              <AddToListControl lists={lists} onListIds={listIdsForSelected} onToggle={toggleSelectedOnList} onCreate={async (name) => {
+              <AddToListControl variant="pill" lists={lists} onListIds={listIdsForSelected} onToggle={toggleSelectedOnList} onCreate={async (name) => {
                 const r = await createListNamed(name);
                 if (r.ok) await toggleSelectedOnList(r.list.id);
                 return r;
