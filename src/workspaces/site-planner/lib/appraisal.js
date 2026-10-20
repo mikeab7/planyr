@@ -273,7 +273,7 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 /* Missouri (NEW-1, 2026-10-19): the Integrity GIS counties publish the owner as `DEEDHOLDER` / `DEED_HOLDER` / `DEEDNAME` (Atchison's joined layer as
  * `REALDATA_DEEDHOLDER`), Greene as `OWN1`, Holt as `owner1_name`, St. Clair as `Owner_1`, Cape Girardeau as `Main_Name`. `pcloNAME` is Tuscaloosa AL's owner — it only looked resolved
  * because the bare `Name` beside it (the parcel number) used to win; a digits-only `Name` no longer counts as an owner. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name)$/i;
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */
