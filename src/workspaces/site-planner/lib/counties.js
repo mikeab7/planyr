@@ -2459,7 +2459,7 @@ const JURISDICTION_LAYERS_RAW = {
         // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
         // single-layer county, so it no longer gets its own dropdown). Label names the county
         // + authority since it sits next to the statewide USGS contours there.
-        label: "1-ft contours (Fort Bend DD)",
+        label: "1-Ft Contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
         // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every

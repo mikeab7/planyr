@@ -286,7 +286,7 @@ describe("NEW-6 — the Map view's Leaflet map is capped like the planner's", ()
 
   it("the 45s overlay re-probe does not run for a hidden map", () => {
     expect(finder).toContain("if (!visible) return undefined;");
-    expect(finder).toContain("}, [overlays, visible]);");
+    expect(finder).toContain("}, [overlaysDrawn, visible]);");
   });
 
   it("nothing here downgrades what is DRAWN — retina is untouched", () => {

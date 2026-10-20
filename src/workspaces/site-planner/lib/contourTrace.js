@@ -196,6 +196,9 @@ export function buildContours(grid, {
   maxLevels = 50, labelCap = 40, indexEvery = 5, clip = null,
   labelArcCells = LABEL_ARC_CELLS, labelMinRunCells = LABEL_MIN_RUN_CELLS,
   interval: forcedInterval = null,   // ROUND 4 (B2349122): the proposed-surface contours ride the EXISTING layer's interval
+  /* NEW-1 (Imagery & Layers): the owner's chosen Interval (1/2/5/10 ft) as a FLOOR under the automatic pick, so a
+   * steep view that must coarsen to stay readable still does, but a flat Houston view traces at the chosen step. */
+  minInterval = null,
 } = {}) {
   const { values, mask, width, height } = grid;
   let min = Infinity, max = -Infinity;
@@ -206,7 +209,7 @@ export function buildContours(grid, {
     if (v > max) max = v;
   }
   if (!(max > min)) return { interval: 1, levels: [], labels: [], validMin: null, validMax: null };
-  const interval = forcedInterval > 0 ? forcedInterval : pickInterval(max - min, maxLevels);
+  const interval = forcedInterval > 0 ? forcedInterval : Math.max(minInterval > 0 ? minInterval : 0, pickInterval(max - min, maxLevels));
   const first = Math.ceil(min / interval) * interval;
   const thresholds = [];
   for (let lv = first; lv <= max; lv += interval) thresholds.push(lv);

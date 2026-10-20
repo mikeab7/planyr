@@ -24,6 +24,8 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layerZoomGate.js";
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
+// NEW-1 (Imagery & Layers) — the owner's contour interval (1/2/5/10 ft), a device pref; a tiny leaf, safe on the boot path.
+import { getContourInterval, subscribeContourInterval } from "./contourIntervalPref.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureBaseStyle, featureRetryDecision,
   wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable,
@@ -88,16 +90,30 @@ export const LAYER_GROUP_LABEL = {
  * per-row ⓘ lists every contributing provider by name so a user can tell whose main/territory each
  * feature belongs to. Applies to ALL THREE merge groups below, not just Water & sewer. */
 export const MERGE_GROUPS = {
+  /* NEW-1 (Imagery & Layers redesign) — ONE row for the boundary sets: the county line, the city
+   * limits and (Texas only) the ETJ. Drives the existing keys; each member keeps its own fetch. The
+   * panel reads only the members that can serve the site, so a Georgia site drives ga_county +
+   * ga_city and never sees an ETJ. */
+  counties_cities: {
+    label: "Counties & Cities",
+    note: "County lines (heavier), city limits (thin) and, in Texas, the city ETJ (dashed) — one switch for all of them.",
+  },
+  /* NEW-1 — ONE Pipelines row: the authoritative TxRRC lines in Texas, the four approximate EIA
+   * transmission rows in Florida / Georgia (one product = one colour in every state). */
+  pipelines: {
+    label: "Pipelines",
+    note: "Mapped pipeline routes by product. Schematic and approximate — never a survey; confirm with the title commitment, an ALTA survey and an 811 locate.",
+  },
   water_sewer: {
-    label: "Water & sewer",
+    label: "Water & Sewer",
     note: "Mains AND service territory (who is entitled to serve — CCN/MUD) from every provider whose data reaches this area — not just the parcel's own jurisdiction, so a neighboring provider's main or territory still shows.",
   },
   electric: {
-    label: "Electric (lines, substations & poles)",
+    label: "Electric",
     note: "Overhead lines, substations and poles from every source that reaches this area.",
   },
   fire_hydrants: {
-    label: "Fire hydrants",
+    label: "Fire Hydrants",
     note: "Best-available hydrant locations from every source that reaches this area. Overlapping points from different sources are shown as each source reports them — not yet merged into one marker (follow-up: NEW-2, needs coh_hydrants converted from a raster export to a queryable vector layer before points can be compared).",
   },
 };
@@ -146,10 +162,11 @@ const eiaPipelineRow = (regKey, { label, bucket, order, title }) => {
   const b = commodityBucketRecord(bucket);
   const w = Math.min(b.weight, 3); // the layer hierarchy caps a constraint line at 3 (the HVL class is 4 on the Texas layer)
   return {
-  kind: "esriFeature", label,
+  kind: "esriFeature", label, mergeGroup: "pipelines", // NEW-1 (Imagery & Layers) — the four EIA rows drive the ONE Pipelines row on a Florida / Georgia site
   source: "US EIA (via Esri U.S. Federal Datasets)",
   url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color: b.color, weight: w, opacity: 0.85,
   styleFn: (_props, opacity) => ({ color: b.color, weight: w, dashArray: b.dash || null, opacity, fill: false }),
+  legendDash: !!b.dash, // NEW-1 (Imagery & Layers) — the merged Pipelines key draws the same dash the map does
   hoverIdentify: true, canvasIdentify: true, hoverTitle: title + " (approximate)", hoverSource: "US EIA",
   hoverFields: [{ names: ["Pipename", "PIPENAME"] }, { names: ["Operator", "Opername", "OPERATOR"] }],
   sublabel: EIA_APPROX_INFO,
@@ -167,7 +184,7 @@ const eiaPipelineRow = (regKey, { label, bucket, order, title }) => {
 
 export const STATEWIDE = {
   fema: {
-    label: "FEMA flood zones",
+    label: "FEMA Flood Zones", swatch: "#1e9bb0",
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
     // NFHL sublayers 27 (Flood Hazard Boundaries) + 28 (Flood Hazard Zones), standard
     // symbology. Both are scale-gated AT THE SOURCE (minScale ~1:36,112), so they only
@@ -213,7 +230,7 @@ export const STATEWIDE = {
     canvasIdentify: false,
   },
   wetlands: {
-    kind: "dynamic", label: "Wetlands",
+    kind: "dynamic", label: "Wetlands", swatch: "#2b8a6e",
     source: "National Wetlands Inventory (USFWS)",
     // CRISP VECTOR NWI — the look of the official USFWS Wetlands Mapper (true polygon outlines +
     // Cowardin class labels like PFO1A / PSS1A / PUBH), NOT a coarse raster. History: the old vector
@@ -246,7 +263,7 @@ export const STATEWIDE = {
     // falling back to the agency raster (imageFallback below) only when zoomed far out. The
     // VECTOR_SOURCES.txrrc_pipe row (vectorLayers.js) owns the /query pull + commodity styling;
     // this config is the panel/legend/fallback glue. Registry drives it — one source of truth.
-    kind: "vectorLine", label: "Pipelines",
+    kind: "vectorLine", label: "Pipelines", mergeGroup: "pipelines",
     source: "Texas Railroad Commission (RRC)",
     legend: PIPELINE_LEGEND, // six commodity classes, named under the row while on
     // B517: the AUTHORITATIVE statewide RRC service — matches the GIS source registry
@@ -268,7 +285,7 @@ export const STATEWIDE = {
     // B752: ASSUMED easement screening corridor — a translucent band off the B751 pipeline
     // centerlines (shares that pull/cache; draws only the bands, tinted by commodity, beneath the
     // lines). NOT a surveyed easement — the caveat below is as prominent as the band.
-    kind: "pipelineCorridor", label: "Pipeline easement corridor (assumed)",
+    kind: "pipelineCorridor", label: "Pipeline Easement Corridor (Assumed)", settingOf: "txrrc_pipe",
     pipelineSource: "txrrc_pipe", corridorWidth: true, // corridorWidth → LayerPanel shows the inline width control
     // NEW-1 — DECLARED so the Layers panel can say "not showing at this zoom" and offer the
     // fix. The corridor only exists where the centrelines came back as VECTORS, so its gate is
@@ -283,7 +300,7 @@ export const STATEWIDE = {
     group: "environmental", order: 3,
   },
   txrrc_wells: {
-    label: "Oil & gas wells",
+    label: "Oil & Gas Wells", swatch: "#7f1d1d",
     source: "Texas Railroad Commission (RRC)",
     // B517: authoritative statewide RRC service (see txrrc_pipe). Was the Harris-clipped host.
     url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
@@ -295,10 +312,10 @@ export const STATEWIDE = {
     states: ["TX"],
     group: "environmental", order: 4,
   },
-  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", bucket: "gas", order: 8 }),
-  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", bucket: "refined", order: 9 }),
-  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", bucket: "crude", order: 10 }),
-  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", bucket: "hvl", order: 11 }),
+  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas Pipelines (Approx.)", title: "Natural gas pipeline", bucket: "gas", order: 8 }),
+  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum Product Pipelines (Approx.)", title: "Petroleum product pipeline", bucket: "refined", order: 9 }),
+  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude Oil Pipelines (Approx.)", title: "Crude oil pipeline", bucket: "crude", order: 10 }),
+  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas Liquids Pipelines (Approx.)", title: "Hydrocarbon gas liquids pipeline", bucket: "hvl", order: 11 }),
   ccn_service: {
     // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
     // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
@@ -311,7 +328,7 @@ export const STATEWIDE = {
     // B898: this is now a MEMBER of the "Water & sewer" consolidated layer (mergeGroup
     // water_sewer, alongside coh_water/coh_ww/jur_mud below) — its own row/label no longer
     // shows solo; `label` here is the per-provider line the merged row's ⓘ lists.
-    kind: "dynamic", label: "Water/sewer service territory (CCN)",
+    kind: "dynamic", label: "Water/Sewer Service Territory (CCN)", swatch: "#0e7490",
     source: "PUC CCN, via Harris County GIS",
     url: GIS_SOURCES.ccnSewer.serviceUrl, layers: [1, 2], opacity: 0.5,
     note: "PUC water (blue) + sewer (green) certificate-of-convenience service areas — who is certificated to serve retail water/sewer. A boundary is a retail monopoly to serve, NOT proof a line is in the ground. Houston-region coverage. Screening only — confirm with the utility/PUC.",
@@ -325,7 +342,7 @@ export const STATEWIDE = {
     // Public-data screening PHASE 2 — TCEQ leaking petroleum storage tank (LPST) sites. The
     // Site Analysis "Leaking petroleum tanks" card drives this overlay (mapLayer: "env_lpst").
     // Agency /export image (MapServer, CORS-exempt <img>), URL from the registry (no inline).
-    kind: "dynamic", label: "Leaking petroleum tanks (LPST)",
+    kind: "dynamic", label: "Leaking Petroleum Tanks", swatch: "#a21caf",
     source: "Texas Commission on Environmental Quality (TCEQ)",
     url: GIS_SOURCES.lpst.serviceUrl, layers: [0], opacity: 0.55,
     note: "TCEQ Leaking Petroleum Storage Tank sites — documented petroleum-UST releases. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in.",
@@ -338,7 +355,7 @@ export const STATEWIDE = {
     // Public-data screening PHASE 2 — EPA Superfund (NPL) + RCRA cleanup sites (FRS-derived).
     // FeatureServer point layer → esriFeature (vector markers); gated to zoomed-in (national
     // dataset). URL from the registry. Drives the "EPA Superfund / RCRA cleanups" card.
-    kind: "esriFeature", label: "EPA Superfund / RCRA cleanups",
+    kind: "esriFeature", label: "EPA Superfund & RCRA",
     source: "US EPA",
     url: GIS_SOURCES.epaCleanups.serviceUrl, minZoom: 11, color: "#b45309", weight: 2, opacity: 0.55,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cleanup site", hoverSource: "US EPA",
@@ -352,7 +369,7 @@ export const STATEWIDE = {
     // Public-data screening PHASE 3 — Houston-area active surface growth-fault traces. The Site
     // Analysis "Active surface faults" card drives this overlay (mapLayer: "faults"). FeatureServer
     // line layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
-    kind: "esriFeature", label: "Active surface faults",
+    kind: "esriFeature", label: "Active Surface Faults", regions: ["houston"],
     source: "USGS SIM 2874, via University of Houston GIS",
     url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.85,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Surface fault trace", hoverSource: "USGS SIM 2874",
@@ -367,7 +384,7 @@ export const STATEWIDE = {
     // Public-data screening PHASE 6 (access tier) — TxDOT AADT traffic-count points. The Site
     // Analysis "Traffic (AADT)" card drives this overlay (mapLayer: "txdot_aadt"). FeatureServer
     // point layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
-    kind: "esriFeature", label: "Traffic counts (AADT)",
+    kind: "esriFeature", label: "Traffic Counts",
     source: "TxDOT",
     url: GIS_SOURCES.aadt.serviceUrl, minZoom: 11, color: "#0369a1", weight: 1.6, opacity: 0.4,
     pointRadius: 3.5,
@@ -383,20 +400,20 @@ export const STATEWIDE = {
     // B2081249 — NATIONAL. FHWA's STAA National Network (USDOT BTS National Transportation Atlas). The service ALSO holds
     // segments listed WITHOUT national-network status (NN = 0), so the row carries its source's `where` — never draw it
     // unfiltered. Georgia DOT publishes no truck-route service of its own; this is the federal answer for every state.
-    kind: "esriFeature", label: "Truck routes (STAA National Network)", source: "USDOT BTS — FHWA National Network",
+    kind: "esriFeature", label: "Truck Routes", source: "USDOT BTS — FHWA National Network",
     url: GIS_SOURCES.ntaNationalNetwork.serviceUrl, where: GIS_SOURCES.ntaNationalNetwork.where,
     minZoom: 11, color: "#7c2d12", weight: 2, opacity: 0.55,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "National Network route", hoverSource: "USDOT BTS",
     hoverFields: [{ names: ["SIGN1", "ROUTEID"], label: "route" }, { names: ["AADT"], label: "AADT" }, { names: ["AADT_COM"], label: "combination trucks/day" }, { names: ["AADT_SINGL"], label: "single-unit trucks/day" }],
     note: "The federal STAA National Network — the routes a 53-ft trailer / 80,000-lb truck may use (Interstates and the connecting highways). Data year 2018; a federal reference list, NOT a state permit or current restriction. A road missing here is not proven closed to trucks: it may be a state-designated route this file never listed. Confirm access and any turning-radius limits with the state DOT.",
     infoCaveat: "Federal reference, data year 2018 (layer last edited April 2023). Truck counts are AADT of combination and single-unit trucks where the file carries them.",
-    role: "line", group: "access", order: 2,
+    role: "line", group: "access", order: 4,
   },
   hpms_aadt: {
     // B2081249 — NATIONAL. FHWA HPMS 2022 traffic on the National Highway System (the data each state DOT reports to FHWA).
     // Coexists with the Texas/Colorado state count layers: it is the FEDERAL copy on the NHS only, different vintage and
     // method, off by default — both are offered and both say what they are.
-    kind: "esriFeature", label: "Traffic volumes (HPMS 2022, highways)", source: "USDOT BTS — FHWA HPMS",
+    kind: "esriFeature", label: "Traffic Volumes", source: "USDOT BTS — FHWA HPMS",
     url: GIS_SOURCES.hpmsAadt.serviceUrl,
     minZoom: 11, color: "#2563eb", weight: 2, opacity: 0.55,
     // AADT bands: grey = reported without a count · blue < 10k · indigo 10–30k · violet 30–60k · magenta 60k+
@@ -412,13 +429,13 @@ export const STATEWIDE = {
     hoverFields: [{ names: ["AADT"], label: "AADT" }, { names: ["F_SYSTEM"], label: "HPMS functional class" }],
     note: "FHWA HPMS 2022 average daily traffic on the NATIONAL HIGHWAY SYSTEM only — Interstates, freeways, principal arterials and the connectors. Colour = AADT: blue under 10,000 · indigo 10–30,000 · violet 30,000–60,000 · magenta over 60,000 · grey = on the system but no count reported. A road off the system has NO line here: that is a coverage gap, never low traffic. In Texas and Colorado the state's own count layer is the closer read; this is the federal copy.",
     infoCaveat: "HPMS 2022 as published by USDOT BTS (layer edited February 2025). An access / visibility proxy, not a traffic study.",
-    role: "line", group: "access", order: 3,
+    role: "line", group: "access", order: 5,
   },
   bts_rail: {
     // Public-data screening PHASE 6 (access tier) — BTS/FRA rail-network lines. The Site Analysis
     // "Rail access" card drives this overlay (mapLayer: "bts_rail"). FeatureServer line layer →
     // esriFeature (vector), zoom-gated. URL from the registry.
-    kind: "esriFeature", label: "Rail lines",
+    kind: "esriFeature", label: "Rail Lines",
     source: "BTS/FRA North American Rail Network",
     url: GIS_SOURCES.rail.serviceUrl, minZoom: 11, color: "#334155", weight: 2, opacity: 0.55,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Rail line", hoverSource: "BTS/FRA",
@@ -432,7 +449,7 @@ export const STATEWIDE = {
     // Public-data screening PHASE 6 (access tier) — FAA airports. The Site Analysis "Airport
     // proximity (FAA Part 77)" card drives this overlay (mapLayer: "faa_airports"). FeatureServer
     // point layer → esriFeature (vector), zoom-gated. URL from the registry.
-    kind: "esriFeature", label: "Airports (Part 77/FAA)",
+    kind: "esriFeature", label: "Airports",
     source: "FAA",
     url: GIS_SOURCES.airports.serviceUrl, minZoom: 10, color: "#0f766e", weight: 1.6, opacity: 0.4,
     pointRadius: 5,
@@ -456,7 +473,7 @@ export const EVIDENCE = {
   osm_power: {
     // B898: MEMBER of the consolidated "Electric" layer (mergeGroup electric, alongside
     // hifld_tx/hifld_substations below) — `label` is the per-provider ⓘ line, not a solo row.
-    kind: "overpass", label: "Power lines & poles", source: "OpenStreetMap", opacity: 0.55,
+    kind: "overpass", label: "Power Lines & Poles", swatch: "#b91c1c", source: "OpenStreetMap", opacity: 0.55,
     minZoom: OSM_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state, not static advice
     query: { lines: true, poles: true, substations: true },
     note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
@@ -465,7 +482,7 @@ export const EVIDENCE = {
     group: "utilities", mergeGroup: "electric", order: 2,
   },
   hifld_tx: {
-    kind: "esriFeature", label: "Transmission lines", source: "HIFLD (US DOE/NETL)",
+    kind: "esriFeature", label: "Transmission Lines", source: "HIFLD (US DOE/NETL)",
     // US DOE / NETL hosted HIFLD transmission lines (layer 18) — vector, crisp at
     // any zoom, on a federal-government server. Loads zoomed in (national dataset).
     url: "https://arcgis.netl.doe.gov/server/rest/services/Hosted/Energy_Transition_Atlas_493d6/FeatureServer/18",
@@ -503,7 +520,7 @@ export const EVIDENCE = {
   osm_hydrants: {
     // B898: MEMBER of the consolidated "Fire hydrants" layer (mergeGroup fire_hydrants,
     // alongside coh_hydrants/mapillary below).
-    kind: "overpass", label: "Fire hydrants", source: "OpenStreetMap", opacity: 0.55,
+    kind: "overpass", label: "Fire Hydrants", swatch: "#dc2626", source: "OpenStreetMap", opacity: 0.55,
     minZoom: OSM_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state, not static advice
     query: { hydrants: true },
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
@@ -512,7 +529,7 @@ export const EVIDENCE = {
     group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
   coh_hydrants: {
-    kind: "dynamic", label: "Fire hydrants", source: "City of Houston Public Works",
+    kind: "dynamic", label: "Fire Hydrants", swatch: "#dc2626", regions: ["houston"], source: "City of Houston Public Works",
     url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Public_safety/MapServer",
     layers: [9], opacity: 0.55, county: "harris",
     note: "City of Houston Public Works fire hydrants.",
@@ -530,7 +547,7 @@ export const EVIDENCE = {
     // B898: also a MEMBER of "Fire hydrants" (its detections include hydrants AND nearby
     // poles — the note is honest about both; it surfaces under Fire hydrants since that's
     // its primary siting use, per the brief's explicit "3 hydrant layers" grouping).
-    kind: "mapillary", label: "Poles & hydrants from street imagery",
+    kind: "mapillary", label: "Poles & Hydrants from Street Imagery", swatch: "#0891b2",
     minZoom: MAPILLARY_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state
     sublabel: "Detected in crowdsourced street-level photos.",
     source: "Mapillary", opacity: 0.55,
@@ -546,7 +563,7 @@ export const EVIDENCE = {
  * the layer keeps its id (`elevation`) and every saved toggle state survives. */
 export const TERRAIN = {
   elevation: {
-    kind: "esriImage", label: "Elevation shading", // B760: plain label; the blue→red key lives in the ⓘ note
+    kind: "esriImage", label: "Elevation Shading", swatch: "#74add1", // B760: plain label; the blue→red key lives in the ⓘ note
 
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
     // B703: a custom rendering-rule CHAIN (object, passed through whole by
@@ -585,7 +602,7 @@ export const TERRAIN = {
       },
     },
     opacity: 0.55, source: "USGS 3DEP",
-    note: "Low = blue, high = red. Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data. Loads at site/neighborhood zoom.",
+    note: "Low = blue, high = red. The colours stretch to what is on screen — the ramp re-fits to the lowest and highest ground in view, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data. Loads at site/neighborhood zoom.",
     // NEW-1 stacking role (lib/mapStack.js): A continuous hillshade/relief WASH — the definition of a fill that buries what it covers.
     role: "area",
     group: "base", order: 1,
@@ -596,13 +613,13 @@ export const TERRAIN = {
    * traced in the terrain Web Worker (terrainLayers.js + terrainWorker.js). No `url`:
    * kind dispatch handles it, and the pipeline reuses DEP_URL from elevation.js. */
   contours: {
-    kind: "contours", label: "Contour lines (1 ft)",
+    kind: "contours", label: "Contour Lines", swatch: "#7C3F12",
     source: "USGS 3DEP", opacity: 0.9,
     // NEW-1 — THE ROW THE OWNER REPORTED. Declaring the gate here is what lets the Layers panel
     // render this row as DORMANT (on, but suppressed) with a live "zoom in N levels" fix,
     // instead of a static sentence under a checkbox that says ON.
     minZoom: TERRAIN_MIN_ZOOM,
-    note: `1-ft lines traced from LiDAR bare-earth ground heights (NAVD88), heavier line every 5 ft. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
+    note: `Lines traced from LiDAR bare-earth ground heights (NAVD88) at the Interval you pick — 1, 2, 5 or 10 ft (remembered on this device) — with a heavier line every 5th interval (1 ft → every 5 ft, 2 → 10, 5 → 25, 10 → 50). A very steep view coarsens on its own so it never drowns in lines. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
     // NEW-1 stacking role (lib/mapStack.js): THE owner case: 1-ft contour hairlines must cross his buildings, not hide behind them.
     role: "line",
     group: "base", order: 2,
@@ -611,7 +628,7 @@ export const TERRAIN = {
    * the tract sheets. Flat/ambiguous ground gets NO arrow (never invent a direction).
    * Seed of the future storm-outfall flow-accumulation feature (D8 in flowField.js). */
   flowdir: {
-    kind: "flowdir", label: "Water flow direction", // B760: plain label; arrow semantics live in the ⓘ note
+    kind: "flowdir", label: "Water Flow Direction", swatch: "#0369A1", // B760: plain label; arrow semantics live in the ⓘ note
     source: "USGS 3DEP", opacity: 0.9,
     minZoom: TERRAIN_MIN_ZOOM, // NEW-1 — same terrain gate as contours; declared for the panel's live state
     note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
@@ -624,7 +641,7 @@ export const TERRAIN = {
     // elevation shading), as a custom raster-function chain: Slope (percent rise) → Remap into five classes →
     // Colormap. ZFactor 1.2 corrects the Web-Mercator export's horizontal stretch at Georgia latitudes
     // (1/cos 33° ≈ 1.19), so a 10% slope reads as 10% rather than 8%.
-    kind: "esriImage", label: "Slope classes",
+    kind: "esriImage", label: "Slope Classes", swatch: "#f97316",
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
     states: ["GA"],
     rendering: {
@@ -650,7 +667,7 @@ export const TERRAIN = {
     // B2081251 — SHALLOW ROCK, national (USDA NRCS SSURGO via the SDM WFS + Soil Data Access). Not an ArcGIS source,
     // so it lives here and in ssurgoBedrock.js rather than GIS_SOURCES (whose verifier is /query-shaped); the live
     // check is ui-audit/verify-ssurgo-bedrock.mjs. Drawn client-side, view-driven, like the OSM layers.
-    kind: "sdaBedrock", label: "Shallow rock (depth to bedrock)", source: "USDA NRCS — SSURGO soils",
+    kind: "sdaBedrock", label: "Shallow Rock", swatch: "#a16207", source: "USDA NRCS — SSURGO soils",
     minZoom: SOIL_BEDROCK_MIN_ZOOM, opacity: 0.55,
     note: "Soil map units where bedrock is recorded within 5 ft: dark red under 20 in, orange 20–40 in, yellow 40–60 in. Depth is the SHALLOWEST soil in each map unit, so rock can be that shallow somewhere in the unit, not everywhere. A unit left unpainted has no rock recorded in the soil profile (described to about 6 ft) — that is not proof there is none. A desktop soils read, never a boring: it prices rock excavation and utility trenching only as a flag to investigate.",
     infoCaveat: "Screening only — SSURGO map units are generalised polygons; a geotechnical boring governs.",
@@ -677,7 +694,7 @@ const HGAC_ETJ = ETJ_SOURCES.find((s) => s.id === "etj_hgac");
  * nothing cached — never a blank layer). */
 export const JURISDICTIONS = {
   jur_county: {
-    kind: "vector", label: "County boundaries",
+    kind: "vector", label: "County Boundaries", mergeGroup: "counties_cities",
     url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
     note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (fill: false).
@@ -693,10 +710,10 @@ export const JURISDICTIONS = {
   // the SAME hue (line-style, not color, is the limits-vs-ETJ distinction — it survives every
   // basemap and colorblindness). The merged row's ⓘ carries both sources + the caveat below.
   jur_city: {
-    kind: "vector", label: "City limits",
+    kind: "vector", label: "City Limits", mergeGroup: "counties_cities",
     url: JURISDICTION_SOURCES.city.url, minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
     note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. NOT proof of utility service.",
-    mergeWith: "jur_etj", mergeLabel: "City limits & ETJ", // B761: the composite panel row
+    // B761's pairwise City-limits-&-ETJ composite is superseded by the Counties & Cities merge group (NEW-1, Imagery & Layers).
     infoCaveat: "A boundary means the city HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects utilities to a parcel.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines.
     role: "line",
@@ -707,7 +724,7 @@ export const JURISDICTIONS = {
     group: "jurisdiction", order: 2,
   },
   jur_etj: {
-    kind: "vector", label: "City ETJ (Houston & Dallas–Fort Worth)",
+    kind: "vector", label: "City ETJ (Houston & Dallas–Fort Worth)", mergeGroup: "counties_cities",
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.4, // B761: same hue as city, dashed
     noLiveFallback: true, // NEW-1 (DFW): several services drawn as one — see vectorLayers.js jur_etj
     note: "City ETJ — Houston region (H-GAC + Baytown), Dallas–Fort Worth (Collin, Rockwall, Denton, Dallas, Ellis, Johnson, Grayson and Kaufman-side publishers, Fort Worth, Mansfield, Corsicana) and Austin. Blank elsewhere: there is no statewide ETJ layer, and NCTCOG publishes none. A blank inside those areas — most of Tarrant, Parker, Wise, Hill, Henderson, Van Zandt — is NOT proof of no ETJ. ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
@@ -726,7 +743,7 @@ export const JURISDICTIONS = {
     // line on a Texas tax bill, and was the most glaring absence in this group. Cached vector
     // tier (VECTOR_SOURCES.jur_isd) with zoom-gated name labels + click-identify; the `url` is
     // the live esri-leaflet fallback. Violet — the hue freed up when ETJ moved to city blue (B761).
-    kind: "vector", label: "School districts (ISD)", source: "Texas Education Agency (TEA)",
+    kind: "vector", label: "School Districts", source: "Texas Education Agency (TEA)",
     url: JURISDICTION_SOURCES.isd.url, minZoom: 8, color: "#7c3aed", weight: 1.6, opacity: 0.4,
     note: "Texas school-district boundaries (TEA, SY 2022-23). A taxing/attendance boundary — NOT a service network. Verify with the district.",
     infoCaveat: "ISD lines are TAXING / attendance boundaries (usually the biggest line on a Texas tax bill) — not a utility service area.",
@@ -749,7 +766,7 @@ export const JURISDICTIONS = {
     // shows the "who is entitled to serve" service-territory half alongside the mains
     // (coh_water/coh_ww) and the CCN half (ccn_service). No longer a standalone Jurisdictions
     // boundary row; `label` is now the per-provider ⓘ line.
-    kind: "dynamic", label: "Water district boundaries (MUD)",
+    kind: "dynamic", label: "Water District Boundaries (MUD)", swatch: "#0e7490",
     source: "TCEQ, via HARC",
     url: GIS_SOURCES.mud.serviceUrl, layers: [0], opacity: 0.55, // registry row (B629) — render + identify share one source of truth
     // NEW-4: PINNED to the one data sublayer. `layers: null` sent no `layers=show:` at all,
@@ -776,14 +793,14 @@ export const JURISDICTIONS = {
     // esri-leaflet does its own viewport-bbox tiled fetching on top. Display-only screening
     // overlay on the EPSG:4326 basemap — never feeds the editable layer / measurements / the
     // 2278 site frame.
-    kind: "esriFeature", label: "Road maintenance authority",
+    kind: "esriFeature", label: "Road Ownership",
     url: JURISDICTION_SOURCES.road.url, minZoom: 14, weight: 2, opacity: 0.55,
     fields: ["OBJECTID", "RDWAY_MAINT_AGCY", "HSYS"],
     styleFn: roadAuthorityStyle, legend: ROAD_AUTHORITY_LEGEND,
     // Only the three `fields` above are fetched, so hover may name no others.
     hoverIdentify: true, hoverTitle: "Road", hoverSource: "TxDOT Roadway Inventory",
     hoverFields: [{ names: ["RDWAY_MAINT_AGCY"], label: "maintained by" }, { names: ["HSYS"] }],
-    note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
+    note: "Who owns each road. The data is the maintaining agency TxDOT's Roadway Inventory reports for the segment — for a public road that is nearly always its owner, but it is a maintenance record, not a deed or a title search. City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
     // NEW-1 stacking role (lib/mapStack.js): Per-maintainer coloured roadway centrelines.
     role: "line",
     states: ["TX"],
@@ -801,7 +818,7 @@ export const JURISDICTIONS = {
  * data exists, and the coverage/Relevance system (never AHJ-exclusive) handles dimming. */
 export const AHJ_LAYERS = {
   hcfcd_row: {
-    kind: "dynamic", label: "Drainage channels & ROW",
+    kind: "dynamic", label: "Channels & ROW", swatch: "#1d4ed8", regions: ["houston"],
     source: "Harris County Flood Control District (HCFCD)",
     url: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/ROW_FC/MapServer",
     layers: [0], // NEW-4 — pinned (see the jur_mud note): never let an agency render its own label sublayers over the plan
@@ -831,7 +848,7 @@ export const AHJ_LAYERS = {
   // swap to a prod host later if the City exposes one.
   coh_ww: {
     // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer).
-    kind: "dynamic", label: "Wastewater mains",
+    kind: "dynamic", label: "Wastewater Mains", swatch: "#92400e", regions: ["houston"],
     source: "City of Houston (test GIS host)",
     url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
     layers: [2, 6], // 2 Gravity Main (≥~1:40k), 6 Force Main
@@ -843,7 +860,7 @@ export const AHJ_LAYERS = {
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   coh_storm: {
-    kind: "dynamic", label: "Storm sewer",
+    kind: "dynamic", label: "Storm Sewer", swatch: "#1e3a8a", regions: ["houston"],
     source: "City of Houston (test GIS host)",
     url: "https://geogimstest.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
     layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
@@ -867,7 +884,7 @@ export const AHJ_LAYERS = {
   },
   coh_water: {
     // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer).
-    kind: "dynamic", label: "Water mains",
+    kind: "dynamic", label: "Water Mains", swatch: "#0369a1", regions: ["houston"],
     source: "City of Houston (test GIS host)",
     url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
     layers: [0, 1], // 0 Water Lines, 1 Water Main (both draw at any zoom)
@@ -893,7 +910,7 @@ export const AHJ_LAYERS = {
    * second), so at 15 s the panel would have gone amber on EVERY first visit for a source
    * that is perfectly healthy — a false alarm is as dishonest as a false all-clear. */
   bkdd_drainage: {
-    kind: "dynamic", label: "District streams, watersheds & BFE",
+    kind: "dynamic", label: "Watersheds & BFE", swatch: "#2563eb", regions: ["houston"],
     source: "Brookshire–Katy Drainage District (via Quiddity)",
     url: GIS_SOURCES.bkddStreams.serviceUrl, // …/Drainage_Information/MapServer
     // 108 Major Streams · 121 All Streams (TNRIS) · 116 Sub-Watersheds (DMP) ·
@@ -913,7 +930,7 @@ export const AHJ_LAYERS = {
     // VECTOR (not raster) on purpose: a district drainage easement is a hard
     // buildable-area constraint, so its width + recorded exhibit have to be clickable —
     // a band on the map that can't tell you it's 70 ft wide is half the answer.
-    kind: "vector", label: "District drainage easements",
+    kind: "vector", label: "Drainage Easements", regions: ["houston"],
     source: "Brookshire–Katy Drainage District (via Quiddity)",
     url: GIS_SOURCES.bkddEasements.serviceUrl + "/" + GIS_SOURCES.bkddEasements.layerId,
     color: "#b45309", weight: 2,
@@ -934,7 +951,7 @@ export const AHJ_LAYERS = {
     stallMs: 25000,
   },
   bkdd_dmp: {
-    kind: "dynamic", label: "Master Plan floodplains & improvements",
+    kind: "dynamic", label: "Master Plan Floodplains", swatch: "#7c3aed", regions: ["houston"],
     source: "Brookshire–Katy Drainage District (via Quiddity) — Drainage Master Plan",
     url: GIS_SOURCES.bkddDmpFloodplain.serviceUrl, // …/Drainage_Master_Plan/MapServer
     // 19 100-yr Atlas-14 · 20 Harvey · 17 10-yr · 5 Conveyance Channel ·
@@ -961,7 +978,7 @@ export const AHJ_LAYERS = {
    * channel just because its drainage district publishes no GIS. Tier 3 (physical
    * hydrography), never district-scoped, explicitly labelled an inventory. */
   nhd_flowlines: {
-    kind: "vectorLine", label: "Streams, canals & ditches",
+    kind: "vectorLine", label: "Streams, Canals & Ditches", swatch: "#3b82f6",
     source: "U.S. Geological Survey — National Hydrography Dataset",
     url: GIS_SOURCES.nhdHydro.serviceUrl + "/" + GIS_SOURCES.nhdHydro.layerId,
     imageFallback: { url: GIS_SOURCES.nhdHydro.serviceUrl, layers: null },
@@ -994,14 +1011,14 @@ export const AHJ_LAYERS = {
    * Texas rows demote on a Georgia view and these demote on a Texas one — and the attribution each layer
    * contributes is Georgia's alone. Georgia has NO ETJ, so there is deliberately no Georgia ETJ row. */
   ga_county: {
-    kind: "vector", label: "County boundaries (Georgia)", source: "Georgia DCA",
+    kind: "vector", label: "County Boundaries (Georgia)", mergeGroup: "counties_cities", source: "Georgia DCA",
     url: GIS_SOURCES.countyGa.serviceUrl, states: ["GA"],
     minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
     note: "Georgia county lines (DCA, all 159 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
   ga_city: {
-    kind: "vector", label: "City limits (Georgia)", source: "Georgia DCA",
+    kind: "vector", label: "City Limits (Georgia)", mergeGroup: "counties_cities", source: "Georgia DCA",
     url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
     minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
     note: "Georgia municipal boundaries (DCA). Inside = in the city; outside = unincorporated county. NOT proof of utility service.",
@@ -1013,14 +1030,14 @@ export const AHJ_LAYERS = {
    * the Texas rows demote on a California view and these demote on a Texas one — and the attribution each layer
    * contributes is California's alone. California has NO ETJ, so there is deliberately no California ETJ row. */
   ca_county: {
-    kind: "vector", label: "County boundaries (California)", source: "California CDT State Geoportal",
+    kind: "vector", label: "County Boundaries (California)", mergeGroup: "counties_cities", source: "California CDT State Geoportal",
     url: GIS_SOURCES.countyCa.serviceUrl, states: ["CA"],
     minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
     note: "California county lines (CDT State Geoportal, all 58 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
   ca_city: {
-    kind: "vector", label: "City limits (California)", source: "California CDT State Geoportal",
+    kind: "vector", label: "City Limits (California)", mergeGroup: "counties_cities", source: "California CDT State Geoportal",
     url: GIS_SOURCES.cityCa.serviceUrl, states: ["CA"],
     minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
     note: "California incorporated-city limits (CDT State Geoportal, 482 cities). Inside = in the city; outside = unincorporated county. Spheres of influence are planning lines, not jurisdiction, and are not shown. NOT proof of utility service.",
@@ -1033,7 +1050,7 @@ export const AHJ_LAYERS = {
    * traffic/truck routes, the coastal-marsh jurisdiction line and SSURGO depth-to-bedrock are NOT here: their hosts
    * could not be reached from the build sandbox (see BACKLOG) and an unconfirmed URL is how a row ships dead. */
   ga_hsi: {
-    kind: "esriFeature", label: "Hazardous sites (Georgia EPD)", source: "Georgia EPD — Hazardous Site Inventory",
+    kind: "esriFeature", label: "Hazardous Sites", source: "Georgia EPD — Hazardous Site Inventory",
     url: GIS_SOURCES.hsiGa.serviceUrl, states: ["GA"],
     minZoom: 9, color: "#9a3412", weight: 2, opacity: 0.55, pointRadius: 5,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Hazardous site", hoverSource: "Georgia EPD",
@@ -1043,7 +1060,7 @@ export const AHJ_LAYERS = {
   },
   ga_ust: {
     // NEW-1 (B2095744) — Georgia EPD's REGISTER of underground storage tank facilities (not a leak list; see GIS_SOURCES.ustGa).
-    kind: "esriFeature", label: "Underground storage tanks (Georgia EPD)", source: "Georgia EPD — UST Management Program",
+    kind: "esriFeature", label: "Underground Storage Tanks", source: "Georgia EPD — UST Management Program",
     url: GIS_SOURCES.ustGa.serviceUrl, states: ["GA"],
     minZoom: 12, color: "#854d0e", weight: 2, opacity: 0.55, pointRadius: 3.5,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "UST facility", hoverSource: "Georgia EPD",
@@ -1052,7 +1069,7 @@ export const AHJ_LAYERS = {
     role: "point", group: "environmental", order: 11,
   },
   ga_nrhp: {
-    kind: "esriFeature", label: "Historic places (National Register)", source: "National Park Service — National Register of Historic Places",
+    kind: "esriFeature", label: "Historic Places", source: "National Park Service — National Register of Historic Places",
     url: GIS_SOURCES.nrhp.serviceUrl, states: ["GA"],
     minZoom: 11, color: "#6d28d9", weight: 2, opacity: 0.55, pointRadius: 4,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Historic place", hoverSource: "NPS National Register",
@@ -1061,7 +1078,7 @@ export const AHJ_LAYERS = {
     role: "point", group: "environmental", order: 13,
   },
   ga_cemeteries: {
-    kind: "esriFeature", label: "Cemeteries (incomplete)", source: "USGS — GNIS cemeteries",
+    kind: "esriFeature", label: "Cemeteries", source: "USGS — GNIS cemeteries",
     url: GIS_SOURCES.cemeteries.serviceUrl, states: ["GA"],
     minZoom: 12, color: "#475569", weight: 2, opacity: 0.55, pointRadius: 3.5,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cemetery", hoverSource: "USGS GNIS",
@@ -1070,7 +1087,7 @@ export const AHJ_LAYERS = {
     role: "point", group: "environmental", order: 14,
   },
   ga_crit_habitat: {
-    kind: "esriFeature", label: "Critical habitat (USFWS)", source: "U.S. Fish & Wildlife Service",
+    kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
     url: GIS_SOURCES.critHabitat.serviceUrl, states: ["GA"],
     minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45,
     // A designated area, drawn as a light fill + outline (a bare outline vanishes over aerial imagery).
@@ -1081,7 +1098,7 @@ export const AHJ_LAYERS = {
     role: "area", group: "environmental", order: 15,
   },
   ga_gopher_tortoise: {
-    kind: "esriFeature", label: "Gopher tortoise soils (DNR)", source: "Georgia DNR — Wildlife Resources Division",
+    kind: "esriFeature", label: "Gopher Tortoise Soils", source: "Georgia DNR — Wildlife Resources Division",
     url: GIS_SOURCES.gopherTortoiseGa.serviceUrl, states: ["GA"],
     minZoom: 12, color: "#a16207", weight: 1, opacity: 0.45,
     styleFn: (props, opacity) => {
@@ -1094,7 +1111,7 @@ export const AHJ_LAYERS = {
     role: "area", group: "environmental", order: 16,
   },
   ga_trout: {
-    kind: "esriFeature", label: "Trout streams (Georgia DNR)", source: "Georgia DNR — Wildlife Resources Division",
+    kind: "esriFeature", label: "Trout Streams", source: "Georgia DNR — Wildlife Resources Division",
     url: GIS_SOURCES.troutGa.serviceUrl, states: ["GA"],
     minZoom: 9, color: "#0f766e", weight: 2, opacity: 0.55,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Trout stream", hoverSource: "Georgia DNR",
@@ -1106,7 +1123,7 @@ export const AHJ_LAYERS = {
   ga_stream_buffers: {
     // Georgia screening — computed buffer bands off the cached NHD + DNR trout + District-outline geometry (see
     // vectorOverlay.cachedStreamBufferLayer and lib/georgiaStreamBuffers.js, which holds every rule).
-    kind: "pipelineCorridor", label: "Stream buffers (Georgia)", bufferRule: "ga_streams",
+    kind: "pipelineCorridor", label: "Stream Buffers", swatch: "#3b82f6", bufferRule: "ga_streams",
     source: "USGS NHD + Georgia DNR trout streams + Atlanta Regional Commission (computed)",
     states: ["GA"],
     // Vector-only: the bands exist only where the NHD centrelines came back as VECTORS, so the gate is the NHD
@@ -1118,7 +1135,7 @@ export const AHJ_LAYERS = {
     floodTier: "hydrography", agency: "USGS / Georgia DNR",
   },
   co_city: {
-    kind: "vector", label: "City limits (Colorado)", source: "Colorado DOLA (via State of Colorado OIT GIS)",
+    kind: "vector", label: "City Limits (Colorado)", mergeGroup: "counties_cities", source: "Colorado DOLA (via State of Colorado OIT GIS)",
     url: GIS_SOURCES.cityCo.serviceUrl, states: ["CO"],
     minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
     note: "Colorado municipal boundaries (DOLA). Inside = in a municipality; outside = unincorporated county. NOT proof of utility service.",
@@ -1126,14 +1143,14 @@ export const AHJ_LAYERS = {
     role: "line", group: "jurisdiction", order: 2,
   },
   co_isd: {
-    kind: "vector", label: "School districts (Colorado)", source: "Colorado DOLA (via State of Colorado OIT GIS)",
+    kind: "vector", label: "School Districts", source: "Colorado DOLA (via State of Colorado OIT GIS)",
     url: GIS_SOURCES.isdCo.serviceUrl, states: ["CO"],
     minZoom: 8, color: "#7c3aed", weight: 1.6, opacity: 0.4,
     note: "Colorado school-district boundaries (DOLA). A taxing / attendance boundary — not a service network.",
     role: "line", group: "jurisdiction", order: 4,
   },
   co_road: {
-    kind: "vector", label: "State highways (CDOT)", source: "Colorado DOT",
+    kind: "vector", label: "State Highways", source: "Colorado DOT",
     url: GIS_SOURCES.roadCo.serviceUrl, states: ["CO"],
     minZoom: 10, color: "#0f766e", weight: 1.6, opacity: 0.4,
     // Deliberately narrower than the Texas road-authority layer, and the note says so — CDOT
@@ -1143,7 +1160,7 @@ export const AHJ_LAYERS = {
     role: "line", group: "jurisdiction", order: 3,
   },
   co_metro_districts: {
-    kind: "vector", label: "Metropolitan districts (Colorado)", source: "Colorado DOLA",
+    kind: "vector", label: "Metropolitan Districts", source: "Colorado DOLA",
     url: GIS_SOURCES.metroDistrictCo.serviceUrl, states: ["CO"],
     minZoom: 9, color: "#a16207", weight: 1.6, opacity: 0.4,
     note: "Title 32 metro districts — infrastructure-financing districts that levy a mill against property inside them. A real carry cost on an industrial deal. A boundary, not proof of service.",
@@ -1151,7 +1168,7 @@ export const AHJ_LAYERS = {
     role: "line", group: "jurisdiction", order: 5,
   },
   co_water_districts: {
-    kind: "vector", label: "Water & sanitation districts (Colorado)", source: "Colorado DOLA",
+    kind: "vector", label: "Water & Sanitation Districts (Colorado)", source: "Colorado DOLA",
     url: GIS_SOURCES.waterDistrictCo.serviceUrl, states: ["CO"],
     minZoom: 9, color: "#0e7490", weight: 2, opacity: 0.55,
     // ⛔ NOT a CCN. Colorado has no certificated retail monopoly, and a site outside every
@@ -1161,7 +1178,7 @@ export const AHJ_LAYERS = {
     role: "line", group: "utilities", mergeGroup: "water_sewer", order: 2,
   },
   co_aadt: {
-    kind: "esriFeature", label: "Traffic counts (CDOT)", source: "Colorado DOT",
+    kind: "esriFeature", label: "Traffic Counts", source: "Colorado DOT",
     url: GIS_SOURCES.aadtCo.serviceUrl, states: ["CO"],
     minZoom: 11, color: "#0369a1", weight: 1.6, opacity: 0.4, pointRadius: 3.5,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Traffic count", hoverSource: "CDOT",
@@ -1170,7 +1187,7 @@ export const AHJ_LAYERS = {
     role: "line", group: "access", order: 1,
   },
   co_env_cleanups: {
-    kind: "esriFeature", label: "Cleanup & brownfield sites (CDPHE)", source: "Colorado Dept. of Public Health & Environment",
+    kind: "esriFeature", label: "Cleanup & Brownfield Sites", source: "Colorado Dept. of Public Health & Environment",
     url: GIS_SOURCES.cdpheCleanups.serviceUrl, states: ["CO"],
     minZoom: 11, color: "#b45309", weight: 2, opacity: 0.55,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cleanup site", hoverSource: "CDPHE",
@@ -1183,7 +1200,7 @@ export const AHJ_LAYERS = {
     // Arapahoe, Boulder, Broomfield, Denver, Douglas and Jefferson — where the owner's Commerce
     // City, Arapahoe and Broomfield sites all sit. Before this, those sites had NO local
     // drainage authority data at all: the whole tier above is Texas.
-    kind: "vector", label: "District drainageways & basins (MHFD)", source: "Mile High Flood District",
+    kind: "vector", label: "Drainageways & Basins", source: "Mile High Flood District",
     url: GIS_SOURCES.mhfdStreams.serviceUrl, states: ["CO"],
     minZoom: 10, color: "#0369a1", weight: 2, opacity: 0.85,
     note: "Mile High Flood District drainageway centrelines. Screening adjacency — never a surveyed alignment or a conveyance capacity.",
@@ -1192,7 +1209,7 @@ export const AHJ_LAYERS = {
     canvasIdentify: true,
   },
   mhfd_easements: {
-    kind: "vector", label: "District channels & outfalls (MHFD)", source: "Mile High Flood District",
+    kind: "vector", label: "Channels & Outfalls", source: "Mile High Flood District",
     url: GIS_SOURCES.mhfdChannels.serviceUrl, states: ["CO"],
     minZoom: 12, color: "#0891b2", weight: 2, opacity: 0.85,
     note: "The district's built channel inventory, carrying owner / maintainer / jurisdiction per reach — who is responsible for the channel a site would discharge into.",
@@ -1759,7 +1776,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // layer (the releaseLayer discipline). A failed import fails LOUDLY, like a probe.
         loadTerrain().then(({ contourLayer, flowLayer }) => {
           if (refs[k] !== "pending" || !overlays[k] || !overlays[k].on) return;
-          const tOpts = { pane: lyrPane, labelPane: lyrLabelPane };
+          const tOpts = { pane: lyrPane, labelPane: lyrLabelPane, interval: { get: getContourInterval, subscribe: subscribeContourInterval } };
           const lyr = cfg.kind === "contours" ? contourLayer(cfg, report, tOpts) : flowLayer(cfg, report, tOpts);
           lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
         }, (e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "terrain module failed to load"}`); });
