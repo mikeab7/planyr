@@ -10,7 +10,7 @@
  * the thin-clobber guard + take-over banner themselves only run signed-in → that half is the V### check):
  *   1. Seed a cross-dock building; boot the planner.
  *   2. Build a full dock stack (court → trailer parking → buffer) on both dock sides.
- *   3. Select a TRUCK COURT and click "Remove truck court (+ outer)" (removeFeature) — its whole chain
+ *   3. Select a TRUCK COURT, click "Remove truck court" and confirm "Remove all three" (removeFeature) — its whole chain
  *      (court + trailer + buffer) leaves `els`… and EVERY id that left is written to `deletedIds` (the fix).
  *   4. Select the building and click "Pull every dock side" (removeOuterDockZone) — same invariant on the
  *      remaining side's outermost zone.
@@ -118,7 +118,7 @@ const builtZones = zoneIdsOf(built);
 check("built a full dock stack (court+trailer+buffer on both sides = 6 zones)", builtZones.length === 6, `zones=${builtZones.length}`);
 await page.screenshot({ path: OUT + "new1-stack-built.png" });
 
-// ---- Scenario A — the owner's exact action: select a TRUCK COURT, "Remove truck court (+ outer)" ----
+// ---- Scenario A — the owner's exact action: select a TRUCK COURT, "Remove truck court" → confirm ----
 const courtRect = (await zones()).filter((z) => z.kind === "court").sort((a, b) => b.w * b.h - a.w * a.h)[0];
 let scenarioA = false;
 const removeCourtVisible = () => page.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.offsetParent !== null && /Remove truck court/i.test(b.textContent || "")));
@@ -131,7 +131,9 @@ if (courtRect) {
     await page.waitForTimeout(300);
     if (await removeCourtVisible()) { selectedCourt = true; break; }
   }
-  const clicked = selectedCourt ? await clickBtn(/Remove truck court/i, { optional: true }) : null;
+  let clicked = selectedCourt ? await clickBtn(/^Remove truck court$/i, { optional: true }) : null;
+  // NEW-1 (dock-layer panel redesign): the one Remove opens an inline confirm card — "Remove all three" completes it.
+  if (clicked) { await page.getByTestId("dock-confirm-remove").click(); }
   if (clicked) {
     scenarioA = true;
     await page.waitForTimeout(1500); // immediate mirror + debounced autosave

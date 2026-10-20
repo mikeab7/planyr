@@ -881,6 +881,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // lets the Comps list's own "+ Site plan" button (no comp open yet — order (a), upload-first)
   // reach SitePlansSection's upload flow the same way `commitPlacementRef`/`dropIntakeRef` do.
   const [focusedComp, setFocusedComp] = useState(null);
+  const [compsView, setCompsView] = useState("list"); // NEW-1 (site-record panel V1): CompsPanel's current view
+  const [docsSlot, setDocsSlot] = useState(null); // NEW-1: the node inside CompsPanel's scroller the Documents section portals into
   const startOverlayUploadRef = useRef(null);
   // NEW-6 (bug fix, 2026-09-27) — "+ Site plan" → "Place on map" with no project chosen used to
   // mint a tracked ("market record") site asynchronously with nothing here ever learning its id,
@@ -1213,6 +1215,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [showCompsLayer, setShowCompsLayer] = useState(() => {
     try { return localStorage.getItem("planarfit:mapShowComps:v1") !== "0"; } catch (_) { return true; }
   });
+  // NEW-1 (Records filter) — the ids the Records list currently shows, or null when nothing narrows it.
+  // The comp MARKERS follow it; `comps` itself (the KMZ export, everything else) stays the full list.
+  const [visibleCompIds, setVisibleCompIds] = useState(null);
+  const mapComps = useMemo(() => (visibleCompIds ? comps.filter((c) => visibleCompIds.has(c.id)) : comps), [comps, visibleCompIds]);
   const toggleShowSitesLayer = (v) => { setShowSitesLayer(v); try { localStorage.setItem("planarfit:mapShowSites:v1", v ? "1" : "0"); } catch (_) {} };
   const toggleShowCompsLayer = (v) => { setShowCompsLayer(v); try { localStorage.setItem("planarfit:mapShowComps:v1", v ? "1" : "0"); } catch (_) {} };
   const [hoverRow, setHoverRow] = useState(null);
@@ -1741,12 +1747,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const a = siteAnchorLatLon(s, siteDrawParcels(s, parcelSummary)) || s.origin;
       pts.push({ id: `site:${s.id}`, lat: a.lat, lon: a.lon });
     }
-    if (showCompsLayer) for (const c of comps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
+    if (showCompsLayer) for (const c of mapComps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
     if (showNotesLayer) for (const n of mapNotes) if (n?.anchor) pts.push({ id: `note:${n.id}`, lat: n.anchor.lat, lon: n.anchor.lon });
     const next = pinClusterOffsets(pts);
     return pinOffsetsSig(next) === pinOffsetsSig(pinOffsetsRef.current) ? pinOffsetsRef.current : next;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pursuitSites, parcelSummary, comps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
+  }, [pursuitSites, parcelSummary, mapComps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
   pinOffsetsRef.current = pinOffsets;
   const shiftAnchor = (anchor, id) => { const o = pinOffsets.get(id); return o ? [anchor[0] - o[0], anchor[1] - o[1]] : anchor; };
 
@@ -2600,7 +2606,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const group = L.layerGroup();
       // B831778 (NEW-3) — gated ONLY on the "Comps" checkbox, never on `mode` or the rail tab —
       // the same decoupling rule as the sites layer above.
-      (showCompsLayer ? comps : []).forEach((c) => {
+      (showCompsLayer ? mapComps : []).forEach((c) => {
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
         const { size, anchor } = compMarkerSize(false);
         const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
@@ -2626,7 +2632,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
+  }, [mapComps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
@@ -5155,6 +5161,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   onFocusHandled={onCompFocusHandled}
                   projects={sites}
                   onCompsChange={onCompsChange}
+                  onVisibleCompsChange={setVisibleCompIds}
                   overlaysById={overlaysById}
                   onOpenBrochure={openOverlayBrochure}
                   reloadToken={compsReloadToken}
@@ -5180,6 +5187,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   // SitePlansSection's OverlayRow, not here) writes back into; the ref-triggered
                   // upload for the list's own "+ Site plan" button (no comp open yet).
                   onDetailCompChange={setFocusedComp}
+                  onViewChange={setCompsView}
+                  docsSlotRef={setDocsSlot}
                   repinCompAnchorRef={repinCompAnchorRef}
                   startUploadRef={startOverlayUploadRef}
                 />
@@ -5203,7 +5212,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                     onRejectFile={onRejectDroppedFile}
                     onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
                     rasterFailedIds={rasterFailedIds}
-                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
+                    showPlanTrash={compsView === "list"}
+                    docsSlot={docsSlot}
                     onZoomToOverlay={zoomToOverlay}
                     focusedProjectId={focusedComp?.projectId ?? focusedTrackedProjectId ?? null}
                     focusedCompId={focusedComp?.id ?? null}

@@ -38,11 +38,11 @@ describe("CompsPanel: a comp's LOCATION, not its rate, is the row/detail fallbac
     expect(html).toContain("West Hardy tract");
   });
 
-  it("CompDetail: Location resolves a real place, and the APN gets its OWN row", () => {
+  it("CompDetail: the place leads the record (as its name, since this comp is untitled), and the APN gets its OWN row", () => {
     const html = renderToStaticMarkup(createElement(CompDetail, {
       comp: PARCEL_COMP, canEdit: true, onEdit: () => {}, onDelete: () => {}, onBack: () => {},
     }));
-    expect(html).toContain("Location");
+    expect(html).toContain('data-testid="comp-record-name"');
     expect(html).toContain("Chambers County, TX");
     expect(html).toContain("Parcel ID (APN)");
     expect(html).toContain("123-456-789");
