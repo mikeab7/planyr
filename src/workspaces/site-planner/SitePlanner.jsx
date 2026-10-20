@@ -1654,6 +1654,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * listDeletedPlansInGroup headers). Fetched fresh whenever the plan menu opens. */
   const [deletedPlansHere, setDeletedPlansHere] = useState([]);
   const [deletedPlansBusy, setDeletedPlansBusy] = useState(null);   // id currently being restored/purged
+  /* NEW-1 (2026-10-20) — the same project's deleted SITE-PLAN FILES (uploaded drawings, `site_plan_overlays`),
+   * moved here from the Site page's All comps list. Listed in the same "Recently deleted" group, below the
+   * plans; `deletedPlansBusy` / `planPurgeArm` carry their ids too (overlay ids and plan ids never collide). */
+  const [deletedFilesHere, setDeletedFilesHere] = useState([]);
   const [planPurgeArm, setPlanPurgeArm] = useState(null);           // id whose "Delete forever" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
@@ -17292,6 +17296,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * account-wide bin deliberately never lists. Fetched fresh whenever the plan menu opens. */
   const refreshDeletedPlansHere = () => {
     Promise.resolve(listDeletedPlansInGroup(groupId)).then((r) => setDeletedPlansHere((r && r.ok && r.plans) || []));
+    // Site-plan FILES: dynamic import — the overlay store must not ride the Site route's critical path.
+    import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
+      .then((m) => m.listDeletedSitePlanFiles(groupId))
+      .then((r) => {
+        setDeletedFilesHere(r.ok ? r.files : []);
+        if (!r.ok) flashWarn(`Couldn't load deleted site plan files — ${r.error}`);
+      })
+      .catch(() => flashWarn("Couldn't load deleted site plan files — check your connection and try again."));
+  };
+  /* NEW-1 — Restore / Delete forever for a deleted site-plan FILE: the same two store calls the All comps
+   * list's row used (restoreOverlay / permanentlyDeleteOverlay + its tracked-site tidy-up), unchanged. */
+  const handleRestoreDeletedFile = (f) => {
+    setDeletedPlansBusy(f.id);
+    import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
+      .then((m) => m.restoreSitePlanFile(f.id))
+      .then((res) => { if (!res.ok) flashWarn(`“${f.name}” couldn't be restored — ${res.error}`); })
+      .catch(() => flashWarn(`“${f.name}” couldn't be restored — check your connection and try again.`))
+      .finally(() => { refreshDeletedPlansHere(); setDeletedPlansBusy(null); });
+  };
+  const handlePurgeDeletedFile = (f) => {
+    setDeletedPlansBusy(f.id); setPlanPurgeArm(null);
+    import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
+      .then((m) => m.purgeSitePlanFile(f))
+      .then((res) => { if (!res.ok) flashWarn(`“${f.name}” couldn't be permanently deleted — ${res.error}`); })
+      .catch(() => flashWarn(`“${f.name}” couldn't be permanently deleted — check your connection and try again.`))
+      .finally(() => { refreshDeletedPlansHere(); setDeletedPlansBusy(null); });
   };
   const handleRestoreDeletedPlan = (p) => {
     setDeletedPlansBusy(p.id);
@@ -21993,7 +22023,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               hard-deleted with no restore ever having been offered (see storage.js's
               purgeExpiredDeletedProjects header) — it is now exempt from that auto-purge for as
               long as this group stays live, and restorable/purgeable only from right here. */}
-          {deletedPlansHere.length > 0 && (
+          {(deletedPlansHere.length > 0 || deletedFilesHere.length > 0) && (
             <>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Recently deleted</div>
               {deletedPlansHere.map((p) => {
@@ -22021,6 +22051,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <button title="Delete this plan forever" aria-label={`Delete plan ${p.name} forever`} disabled={deletedPlansBusy === p.id} onClick={() => setPlanPurgeArm(p.id)}
                       style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
                       onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
+                  </div>
+                );
+              })}
+              {/* NEW-1 — deleted site-plan FILES for this project (the uploaded drawings), same row shape as the
+                  plans above; moved here from the Site page's All comps list, whose "Recently deleted site plans"
+                  section is gone. Restore puts the drawing back on the site exactly as the old list did. */}
+              {deletedFilesHere.map((f) => {
+                if (planPurgeArm === f.id) return (
+                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: `color-mix(in srgb, ${PAL.danger} 8%, transparent)` }}>
+                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete the site plan “${f.name}”? This can't be undone — there's no restoring it after this.`}>Permanently delete site plan “{f.name}”? No restore after this.</span>
+                    <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === f.id} onClick={() => handlePurgeDeletedFile(f)}>Delete</button>
+                    <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
+                  </div>
+                );
+                return (
+                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 2 }} data-testid="deleted-site-plan-file">
+                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.fileName || f.name}>{f.name} <span style={{ color: PAL.disabled }}>· site plan{f.page ? ` p.${f.page}` : ""}</span></span>
+                    {f.deletedAt ? <span style={{ flex: "none", color: PAL.disabled, fontSize: 11 }}>{relTime(f.deletedAt)}</span> : null}
+                    <button title="Restore this site plan" aria-label={`Restore site plan ${f.name}`} disabled={deletedPlansBusy === f.id} onClick={() => handleRestoreDeletedFile(f)}
+                      style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
+                    <button title="Delete this site plan forever" aria-label={`Delete site plan ${f.name} forever`} disabled={deletedPlansBusy === f.id} onClick={() => setPlanPurgeArm(f.id)}
+                      style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = PAL.danger; e.currentTarget.style.background = `color-mix(in srgb, ${PAL.danger} 10%, transparent)`; }}
                       onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
                   </div>
                 );
