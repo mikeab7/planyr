@@ -54,6 +54,7 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { miRaw, miMap } from "./miParcels.js"; // NEW-1 (Michigan, 2026-10-20) — the Michigan county rows (mi_oakland / mi_macomb / mi_detroit stay hand-written)
 import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
 import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
 import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
@@ -994,6 +995,7 @@ const COUNTIES_RAW = {
   ...msMarisRaw(),
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...miRaw(), // NEW-1 (Michigan, 2026-10-20) — 52 Michigan counties (see miParcels.js)
   ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
@@ -3066,6 +3068,7 @@ const COUNTIES_MAP_RAW = {
   ...nmMap(), // NEW-1 (B2345888)
   ...gaMap(), // NEW-1 (B2316720)
   ...laMap(),
+  ...miMap(),
   ...ksMap(), // NEW-1 (B2348000)
   ...nyMap(), // NEW-1 (New York 2026-10-20)
   ...moMap(),

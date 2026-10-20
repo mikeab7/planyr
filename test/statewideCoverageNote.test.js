@@ -29,9 +29,9 @@ describe("a statewide-covered county never reads as a coverage gap", () => {
     expect(noParcelSourceNote(id)).toBeNull();
   });
 
-  it("genuine gaps keep their sentence: Wayne County MI, Pointe Coupee Parish LA", () => {
+  it("genuine gaps keep their sentence: Alcona County MI, Pointe Coupee Parish LA", () => {
     // Pointe Coupee (New Roads) is on the 2026-09-30 not-found list; Lafayette was this example until it was wired.
-    expect(noParcelSourceNote(countyIdentity(42.224770, -83.263421))).toBe("Wayne County — no parcel data wired here yet.");
+    expect(noParcelSourceNote(countyIdentity(44.6852, -83.6154))).toBe("Alcona County — no parcel data wired here yet."); // was Wayne County until it was wired (NEW-1, 2026-10-20)
     expect(noParcelSourceNote(countyIdentity(30.6996, -91.4368))).toBe("Pointe Coupee Parish — no parcel data wired here yet.");
   });
 

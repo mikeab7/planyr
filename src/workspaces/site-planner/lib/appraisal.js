@@ -284,6 +284,10 @@ export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owne
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name|owner_?last)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */
 /* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
+/* Michigan (NEW-1, 2026-10-20): the BS&A-export columns are published with dropped letters — `ONERNAME1` is the owner (Clinton, Kalamazoo, St. Joseph; Montcalm prefixes it `BSAEXPORT_`); Lenawee's is `OWNNM1`,
+ * Monroe's `parcelmaster_ownername1`, Marquette's project layer `Owner_Merg`, Mason's `ParcelMast` (the parcel-master name), Ionia's joined `Parcel_Data_OWNERNAME`. Strictly the fallback pass, like the Idaho spellings above. */
+export const OWNER_KEY_MI_RE = /^((bsaexport_)?onername\d|ownnm1|parcelmaster_ownername1|owner_merg|parcelmast|parcel_data_ownername)$/i;
+
 /* Oregon (B2347696): `FEEOWNER` (Jackson), `OWNER_LINE` (Clatsop), `OwnerLine1` (Lake) and `MAILING_NAME` (Umatilla, the assessor roll's owner of record) — fallback pass only, like the Idaho spellings. */
 /* South Dakota (B2343936): `TAXPAYER_NAME` (Grant, First District roll), `CURRENT_OW` (Lawrence's shapefile-truncated CURRENT_OWNER) and `vcPayerLas` (Brown's payer last-or-entity name — the first name sits in a sibling column) are those sources' owner column; `deedhold` (Moody) is a spelling of the deed-holder column in OWNER_KEY_RE. */
 /* Illinois (B2372624): the Devnet / Tyler-CAMA county exports spell the owner a dozen ways. `owner1_nam` (the shapefile-truncated owner1_name — Douglas, Franklin, Fulton, Jackson, Johnson, Morgan,
@@ -352,7 +356,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
   }
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
-    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key))) continue;
+    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key)) && !OWNER_KEY_MI_RE.test(leafKey(key))) continue;
     if (isPlaceholderValue(attrs[key])) continue;
     return key;
   }

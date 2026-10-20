@@ -1105,4 +1105,5 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 
 - **Decide (B2189604):** the test account can read your real company schedules (Goose Creek, Kilgore, Bee Sand) but cannot save any. Is that intended (read-only company document) or should a stranger account see nothing? Either answer unblocks the schedule checks.
 
+- **Decision (B2366657, Michigan parcels):** about 25 Michigan counties' official parcel maps are run by one vendor, FetchGIS (Amalgam LLC). Their data server refuses anything but their own web page, so Planyr cannot read it today (and will not imitate their page to get in). Calhoun, Delta and Otsego have nothing else. Do you want me to draft a data-access request to Amalgam, or leave those counties as "not wired"?
 - **Check (B2380080, 2 minutes):** team invite emails now send From `Planyr <no-reply@planyr.io>`. For Google to accept that, `no-reply@` must be an alias on the same mailbox as the `INVITE_SENDER` setting in Cloudflare Pages. After that, send one test team invite and confirm the From line reads `Planyr <no-reply@planyr.io>`. If it shows the mailbox address instead, tell me and I'll fix it.
