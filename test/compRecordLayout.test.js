@@ -98,15 +98,26 @@ describe("CompDetail — the rendered record", () => {
 
 describe("SitePlansSection — the Documents block", () => {
   const src = readFileSync("src/shared/sitePlans/components/SitePlansSection.jsx", "utf8");
-  it("the record no longer has a Site dropdown, the zoom warning, or its own Recently deleted", () => {
+  it("the record no longer has a Site dropdown, the zoom warning, or any Recently deleted", () => {
     expect(src).not.toContain("No site (detached)");
     expect(src).not.toContain("Zoomed out too far");
-    expect(src.match(/\btrashBlock\b/g).length).toBe(2); // its definition + the one comps-list use
+    expect(src).not.toContain("Recently deleted");
   });
-  it("Documents has Add and a Zoom to link, and the plan trash shows on the comps list only", () => {
+  it("Documents has Add and a Zoom to link", () => {
     expect(src).toContain('title="Documents"');
     expect(src).toContain("comp-record-add-doc");
     expect(src).toContain("comp-record-zoom-to");
-    expect(src).toMatch(/!focusedProjectId && !flow && showPlanTrash && trashBlock/);
+  });
+  // NEW-1 (2026-10-20, owner: "I don't know that we need to keep recently deleted site plans in the site
+  // records area"): the All comps list lists NO deleted site plans — they restore from the Site Planner's plan
+  // menu instead. The restore path must keep existing: removing the list without it would be silent data loss.
+  it("the All comps list carries no deleted-site-plans section; the restore moved to the plan menu", () => {
+    expect(src).not.toMatch(/showPlanTrash|trashBlock|fetchDeletedOverlays|restoreOverlay|permanentlyDeleteOverlay/);
+    const mf = readFileSync("src/workspaces/site-planner/MapFinder.jsx", "utf8");
+    expect(mf).not.toContain("showPlanTrash");
+    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    expect(sp).toContain("listDeletedSitePlanFiles");
+    expect(sp).toContain("restoreSitePlanFile");
+    expect(sp).toContain("deleted-site-plan-file");
   });
 });

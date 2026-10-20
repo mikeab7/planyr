@@ -34,10 +34,7 @@ import { MAP_CHROME_Z, panelMaxHeight, SCALE_BAR_CLEARANCE_PX } from "../../../w
 import {
   fetchAllOverlays, insertOverlay, updateOverlay, deleteOverlay,
   fetchOverlayCompPoints, commitOverlayPlacementWithComps,
-  fetchDeletedOverlays, restoreOverlay, permanentlyDeleteOverlay,
-  countLiveOverlaysForProject,
 } from "../lib/sitePlanOverlayStore.js";
-import { countLiveCompsForProject } from "../../comps/lib/compsStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
 import { imagePointToLatLon } from "../../overlay/overlayPlacement.js";
 import { friendlySaveError, classifyOverlayWriteFailure } from "../lib/overlayErrors.js";
@@ -633,9 +630,6 @@ export default function SitePlansSection({
   onStopPinOnOverlay, pinningOverlayId,
   commitPlacementRef, dropIntakeRef, onRejectFile, onCompPositionsChanged, rasterFailedIds,
   onZoomToOverlay,
-  // NEW-1 (site-record panel V1) — true while the Records rail shows the comps LIST; the only place the
-  // binned site plans are listed now (the single-record view no longer carries a "Recently deleted").
-  showPlanTrash = false,
   // NEW-1 — the node inside the comps panel's scroll area the Documents section is portaled into, so the
   // record reads (and scrolls) as ONE panel; null before it mounts, in which case it renders inline.
   docsSlot = null,
@@ -681,16 +675,8 @@ export default function SitePlansSection({
   // the Adjust panel needs to know WHICH one it is for. The map-selected overlay wins (see
   // `focusedOverlay`), else the last one whose ⋮ → Adjust was pressed, else the first.
   const [adjustTargetId, setAdjustTargetId] = useState(null);
-  // B972512-HARDENING item 6 — "Recently deleted": deleting a site plan is now RECOVERABLE
-  // (soft delete) rather than permanent, matching sites/doc_reviews' own trash pattern. Fetched
-  // lazily, only once the disclosure is opened — empty in the common case, costs nothing until
-  // someone actually wants it. Declared here (before this component's `if (!open) return null`
-  // below) — every hook must run unconditionally on every render.
-  const [trash, setTrash] = useState([]);
-  const [trashOpen, setTrashOpen] = useState(false);
-  const [trashLoading, setTrashLoading] = useState(false);
-  // B1134754 NEW-21 — same rule as `trash` above: declared before the `if (!open) return null`
-  // below, so this hook still runs unconditionally on every render even while the panel is closed.
+  // B1134754 NEW-21 — declared before the `if (!open) return null` below, so this hook still runs
+  // unconditionally on every render even while the panel is closed.
   const [cropTarget, setCropTarget] = useState(null); // { overlay, src } while the crop tool is open
 
   // B849840/NEW-1 — arming an overlay for editing via ANY path must reveal the same controls
@@ -1298,57 +1284,11 @@ export default function SitePlansSection({
   // matching this row's own confirm-dialog copy below ("Comps pinned to it keep their location
   // but lose the link back"), which used to be untrue (the delete was refused instead). See
   // comps_site_plan_overlay_delete_reverts_to_pin.sql for the full mechanism and reasoning.
-  // NEW-6 Part B — an auto-created tracked ("market record") site is otherwise permanent and
-  // invisible once its last plan (and last comp) are gone. Mirrors CompsPanel.jsx's own
-  // purgeForever tidy-up (countLiveCompsForProject + binOrphanedTrackedSite) exactly, INCLUDING
-  // where it fires: PERMANENT delete only, never ordinary soft-delete — a soft-deleted overlay is
-  // restorable for 30 days (storage.js's own comment on this same deliberate scoping), and
-  // `countLiveOverlaysForProject` already excludes it, so retiring the tracked site at soft-delete
-  // time would strand a later restore with no site to reattach to. Best-effort, never blocks or
-  // reports a failure over this: `binOrphanedTrackedSite` already refuses unless the site is still
-  // `role:"tracked"` and genuinely empty, so it's safe to call speculatively.
-  const maybeRetireTrackedSite = async (projectId) => {
-    if (!projectId) return;
-    try {
-      const [liveOverlays, liveComps] = await Promise.all([
-        countLiveOverlaysForProject(projectId),
-        countLiveCompsForProject(projectId),
-      ]);
-      if (liveOverlays === 0 && liveComps === 0) {
-        const { binOrphanedTrackedSite } = await import("../../../workspaces/site-planner/lib/storage.js");
-        await binOrphanedTrackedSite(projectId);
-      }
-    } catch (_) { /* best-effort tidy-up */ }
-  };
   const remove = async (o) => {
     const { error } = await deleteOverlay(o.id);
     if (error) { console.error("[sitePlanOverlays] delete failed:", error); setPanelError(friendlySaveError(error)); }
     else if (activeOverlayId === o.id) onActivateOverlay && onActivateOverlay(null);
     await reload();
-  };
-
-  const loadTrash = async () => {
-    setTrashLoading(true);
-    const { data } = await fetchDeletedOverlays();
-    setTrashLoading(false);
-    setTrash(data || []);
-  };
-  const toggleTrash = () => {
-    setTrashOpen((was) => { if (!was) loadTrash(); return !was; });
-  };
-  const restore = async (o) => {
-    const { error } = await restoreOverlay(o.id);
-    if (error) { console.error("[sitePlanOverlays] restore failed:", error); setPanelError(friendlySaveError(error)); }
-    await reload();
-    await loadTrash();
-  };
-  const purgeForever = async (o) => {
-    const { error } = await permanentlyDeleteOverlay(o.id);
-    if (error) { console.error("[sitePlanOverlays] permanent delete failed:", error); setPanelError(friendlySaveError(error)); }
-    // NEW-6 Part B — `o` here is a raw trash-select row (fetchDeletedOverlays doesn't run
-    // rowToOverlay), so its owning site is `project_id`, not `projectId`.
-    else if (o.project_id) await maybeRetireTrackedSite(o.project_id);
-    await loadTrash();
   };
 
   // B1167712-B1167714 (NEW-1/2/3, owner decision 2026-09-07) — "we really shouldn't even show
@@ -1361,11 +1301,6 @@ export default function SitePlansSection({
   const focusedOverlay = (activeOverlayId && docOverlays.find((o) => o.id === activeOverlayId))
     || docOverlays.find((o) => o.id === adjustTargetId) || docOverlays[0] || null;
   const showEmbeddedCard = !!focusedProjectId && !flow;
-  // The binned-plans list: this site's own plans plus any never-resolved orphan while a record is
-  // open (kept for the Adjust flow's own bookkeeping), every binned plan on the comps LIST — the one
-  // place it is shown (NEW-1, owner: no "Recently deleted" inside the record). `o.project_id` here is
-  // the raw select row (fetchDeletedOverlays doesn't run rowToOverlay).
-  const scopedTrash = focusedProjectId ? trash.filter((o) => o.project_id === focusedProjectId || !o.project_id) : trash;
   // A plan the owner has explicitly detached (or one that was never resolved and the reload
   // sweep hasn't reached yet) has no site of its own — the ONLY way back to it once the old
   // standalone list is gone, so a record with no documents offers it directly rather than stranding
@@ -1412,35 +1347,6 @@ export default function SitePlansSection({
     }}>
       <div style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>{panelError}</div>
       <IconButton size={22} aria-label="Dismiss" title="Dismiss" onClick={() => setPanelError(null)}>✕</IconButton>
-    </div>
-  );
-
-  const trashBlock = (
-    <div style={{ margin: "6px 14px 10px" }}>
-      <button onClick={toggleTrash} style={{
-        border: "none", background: "none", padding: "4px 0", cursor: "pointer", fontFamily: "inherit",
-        fontSize: FONT_SIZE.label, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 4,
-      }}>
-        <span style={{ display: "inline-block", transform: trashOpen ? "none" : "rotate(-90deg)" }}>▾</span>
-        Recently deleted site plans{trashOpen && scopedTrash.length ? ` (${scopedTrash.length})` : ""}
-      </button>
-      {trashOpen && (
-        trashLoading ? (
-          <div style={{ ...metaText, padding: "4px 0" }}>Loading…</div>
-        ) : scopedTrash.length === 0 ? (
-          <div style={{ ...metaText, padding: "4px 0" }}>Nothing here.</div>
-        ) : (
-          scopedTrash.map((o) => (
-            <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderTop: "1px solid var(--border-default)" }}>
-              <div style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={o.source_file_name || undefined}>
-                {o.doc_title || "Untitled site plan"} <span style={metaText}>· p.{o.page}</span>
-              </div>
-              <Button size="sm" variant="ghost" onClick={() => restore(o)}>Restore</Button>
-              <Button size="sm" variant="ghost" style={{ color: "var(--danger-text)" }} onClick={() => purgeForever(o)}>Delete forever</Button>
-            </div>
-          ))
-        )
-      )}
     </div>
   );
 
@@ -1497,9 +1403,6 @@ export default function SitePlansSection({
         )}
       </div>
     )}
-
-    {/* The binned site plans — on the comps LIST only, never inside a record. */}
-    {!focusedProjectId && !flow && showPlanTrash && trashBlock}
 
     {flow && (
       <div style={{ borderBottom: "1px solid var(--border-default)", padding: "10px 14px" }}>
