@@ -177,6 +177,7 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // ⛔ Bumped 400 → 600 (2026-10-19, NEW-1, B2317680): Missouri's 71 county rows (one table, measured per county) took it from ~360 to 431 —
     // real counties wired from per-county measurements, not a blind expansion. 16 sibling state sessions are adding rows the same day.
     // ⛔ Bumped 600 → 900 (2026-10-19, NEW-1, Pennsylvania): 60 county rows from one measured table (PASDA's per-county layers + county-run servers), 10 more sibling state sessions landing the same day.
+    // ⛔ Bumped 600 → 900 (2026-10-20, NEW-1, B2349360): Washington (34), Oklahoma, South Dakota, New Mexico and the other same-day state sessions each wired a measured per-county table — real counties, not a blind expansion.
     expect(keys.length).toBeLessThan(900);
   });
 

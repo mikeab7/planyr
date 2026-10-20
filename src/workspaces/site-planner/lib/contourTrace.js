@@ -194,6 +194,7 @@ export function anchorLabels(run, { arcStep = LABEL_ARC_CELLS, minRun = LABEL_MI
 export function buildContours(grid, {
   maxLevels = 50, labelCap = 40, indexEvery = 5, clip = null,
   labelArcCells = LABEL_ARC_CELLS, labelMinRunCells = LABEL_MIN_RUN_CELLS,
+  interval: forcedInterval = null,   // ROUND 4 (B2349122): the proposed-surface contours ride the EXISTING layer's interval
 } = {}) {
   const { values, mask, width, height } = grid;
   let min = Infinity, max = -Infinity;
@@ -204,7 +205,7 @@ export function buildContours(grid, {
     if (v > max) max = v;
   }
   if (!(max > min)) return { interval: 1, levels: [], labels: [], validMin: null, validMax: null };
-  const interval = pickInterval(max - min, maxLevels);
+  const interval = forcedInterval > 0 ? forcedInterval : pickInterval(max - min, maxLevels);
   const first = Math.ceil(min / interval) * interval;
   const thresholds = [];
   for (let lv = first; lv <= max; lv += interval) thresholds.push(lv);

@@ -109,6 +109,17 @@ export function runBuildableJob(payload) {
     catch (e) { pending.delete(id); reject(e); }
   });
 }
+/* ROUND 4 (B2349122) — trace the PROPOSED surface's contours on the same worker: { values: Float32Array (NaN = none),
+ * nx, ny, interval } → { interval, levels: [{ level, isIndex, lines: [[[px, py]…]] }], labels }. The values buffer is
+ * TRANSFERRED (the caller builds it for this call). */
+export function runProposedContoursJob(payload) {
+  return new Promise((resolve, reject) => {
+    const id = ++seq;
+    pending.set(id, { resolve, reject });
+    try { getWorker().postMessage({ id, kind: "contours-proposed", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []); }
+    catch (e) { pending.delete(id); reject(e); }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Grid registry (B706): the last few decoded grids, newest last. Distinguishes

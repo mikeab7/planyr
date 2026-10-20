@@ -107,6 +107,29 @@ export const ALLOWED_HOSTS = new Set([
   "arcgis.lancastercountypa.gov", "fcgis.franklincountypa.gov", "gis.beavercountypa.gov", "gis.carboncounty.com", "gis.delcopa.gov",
   "gis.dep.pa.gov", "gis.leoc.net:6443", "gis.mckeancountypa.gov", "gis.pikepa.org", "maps.clintoncountypa.gov", "maps.pottercountypa.net",
   "mapservices.pasda.psu.edu", "services.co.schuylkill.pa.us", "tiogagis.tiogacountypa.us",
+  /* NEW-1 (Washington, 2026-10-19, B2349360) — the county-run ArcGIS Server hosts the wired Washington counties sit on (each MEASURED through this relay on the PR preview before it was wired). */
+  "atlas.co.chelan.wa.us", // Chelan County
+  "gis.cowlitzwa.gov", // Cowlitz County Assessor
+  "gisweb.jeffcowa.us", // Jefferson County
+  "gis.co.kittitas.wa.us", // Kittitas County
+  "gis.sanjuancountywa.gov", // San Juan County
+  "gis.skagitcountywa.gov", // Skagit County Assessor
+  "tconline.co.thurston.wa.us", // Thurston County
+  "wcgis.whatcomcounty.us", // Whatcom County
+  /* NEW-1 (Oregon, 2026-10-19, B2347696) — the county / state hosts the wired Oregon counties sit on (found through the state's "Publicly Accessible
+   * Oregon County Parcel Data" page, each county viewer's web-map config and a REST-directory search). The build sandbox reaches none of them, so each was
+   * MEASURED through this relay on the PR preview before a county was wired to it. Hosts that were probed and NOT used (Polk's server answers a web-adaptor
+   * error, Jefferson's times out, ODF's TaxlotsDisplay has no Query) are deliberately not listed. */
+  "gis.co.benton.or.us", // Benton County
+  "gis.columbiacountymaps.com", // Columbia County
+  "gis.crookcountyor.gov", // Crook County
+  "gis.co.douglas.or.us", // Douglas County
+  "jcportal.jacksoncountyor.gov", // Jackson County
+  "lcmaps.lanecounty.org", // Lane County
+  "gis.co.linn.or.us", // Linn County
+  "gispub.co.washington.or.us", // Washington County
+  "public.co.wasco.or.us", // Wasco County
+  "gis.wrd.state.or.us", // Oregon Water Resources Department public tax-lot query (Curry, Jefferson, Lincoln)
   /* NEW-1 (Oklahoma, 2026-10-19) — county / regional hosts named by the Oklahoma parcel sweep; each is MEASURED through this relay before any county is wired to it. */
   "gis.okco14.org", "gis.clevelandcountyassessor.us", // Cleveland County assessor
   "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services
@@ -114,6 +137,9 @@ export const ALLOWED_HOSTS = new Set([
   "okmaps.onenet.net", // OneNet-hosted state GIS server
   "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
   "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
+  /* NEW-1 (Arizona, 2026-10-19) — Mohave County's own GIS server (Mohave is the one Arizona county neither the ADWR compile nor an ArcGIS Online layer covers).
+   * The build sandbox cannot reach it, so it is relayed and MEASURED through here (on the PR preview) before the county is wired to it. */
+  "mcgis.mohave.gov", // Mohave County GIS — PARCELS MapServer
   /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
    * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
   "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
@@ -128,6 +154,18 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",
+  /* NEW-1 (Illinois, 2026-10-20, B2372624) — exactly the county / university hosts the 62 wired Illinois rows use (ilParcels.js), each MEASURED through this relay before its row existed.
+   * The probe hosts that could not be used were pruned: the ISGS statewide service answers Token Required; the Bhamaps hosts (ags/services2.bhamaps.com) and Lee/Tazewell's older hosts answer
+   * Cloudflare 526/522 from a Worker (B2379936 re-measures them from a browser). */
+  "maps.boonecountyil.org", "www.colesco.illinois.gov", "maps.grundyco.org", "maps.co.kendall.il.us", "gis.knoxcountyil.gov", "gis.lasallecounty.org", "maps.lakecountyil.gov", "gisportal.co.madison.il.us",
+  "www.mcgisweb.org", "sangis.co.sangamon.il.us", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell-il.gov", "rockgis.rockfordil.gov", // Winnebago County's ownership layer (City of Rockford GIS)
+  "gis.wiu.edu", // Western Illinois University GIS Center — Henderson and McDonough counties
+  /* NEW-1 (Kansas, 2026-10-19, B2348000) — the non-arcgis.com hosts the wired Kansas counties sit on; each was MEASURED through this relay on the PR preview before its county was wired. */
+  "ww1.bucoks.com", // Butler County GIS
+  "geodataportal.net", // Eagleview's MultiPlatformParcels host — Ellis County appraiser
+  "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
+  "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
+  "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

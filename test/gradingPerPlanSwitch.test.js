@@ -32,7 +32,7 @@ describe("grading is off per plan until switched on", () => {
     expect(sp).toMatch(/model=\{grOn \? \(grModel \|\| null\) : null\}/);
   });
   it("the canvas paint and the two Layers rows are behind grOn", () => {
-    expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill\)/);
+    expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill \|\| grModel\.contours \|\| grLimitEdit\)/);
     expect(sp).toMatch(/gradingRows=\{grOn && grModel \?/);
   });
   it("the dock item stays on the owner gate so the switch is reachable", () => {

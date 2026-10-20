@@ -13,7 +13,7 @@
  * (the exact county-named sentence). The one forbidden outcome for a county with no source is the generic "No parcel right there".
  * /version.json is read IN THE SAME CALL as every row's assertion. Results → --out <file.json> (default: scratch JSON next to cwd).
  *
- * Run: E2E_LOGIN_KEY=… node ui-audit/verify-memphis-radius-live.mjs [https://planyr.io] [--only a|b] [--states TN,MS] [--out f.json]
+ * Run: E2E_LOGIN_KEY=… node ui-audit/verify-memphis-radius-live.mjs [https://planyr.io] [--only a|b] [--states TN,MS] [--out f.json]   (--az-all: Arizona, B2365360)
  * The throwaway plan (id zz-livechk-memphis-…) is deleted at the end and the deletion is re-read (owner rule 15). */
 import { readFileSync, writeFileSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -25,8 +25,9 @@ const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : n
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const ONLY = flag("--only");
 const STATES = flag("--states") ? new Set(flag("--states").split(",")) : null;
-const OUT = flag("--out") || (args.includes("--al-all") ? "alabama-live.json" : "memphis-radius-live.json");
+const OUT = flag("--out") || (args.includes("--az-all") ? "arizona-live.json" : args.includes("--al-all") ? "alabama-live.json" : "memphis-radius-live.json");
 const MS_ALL = args.includes("--ms-all"); // NEW-1 Mississippi: all 82 MS counties + 20 near-county-line points, + the Texas controls
+const AZ_ALL = args.includes("--az-all"); // NEW-1 (B2365360) Arizona: a verified real lot in each of the 13 newly wired counties + Phoenix (Maricopa) and Casa Grande (Pinal) + the Texas controls — test/fixtures/arizonaLotPoints.json
 const AL_ALL = args.includes("--al-all"); // NEW-1 (B2302784) Alabama: all 67 AL counties (35 lots + 32 named gaps) + county-line / AL-MS state-line points, + the Texas controls
 
 const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
@@ -34,8 +35,17 @@ const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounti
 const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
 const MSFX = MS_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/mississippiCounties.json", import.meta.url), "utf8")) : null;
+const AZFX = AZ_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/arizonaLotPoints.json", import.meta.url), "utf8")) : null;
 const ALFX = AL_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/alabamaCounties.json", import.meta.url), "utf8")) : null;
-const ARMS_ALL = AL_ALL ? [
+const ARMS_ALL = AZ_ALL ? [
+  { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
+  { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
+  { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
+  { name: "TX Waller (Brookshire)", state: "TX", lat: 29.786, lng: -95.951, expect: "lot", control: true },
+  { name: "AZ Maricopa (Phoenix) — already wired", state: "AZ", lat: 33.4484, lng: -112.0740, expect: "lot", county: "Maricopa County" },
+  { name: "AZ Pinal (Casa Grande) — already wired", state: "AZ", lat: 32.8795, lng: -111.7574, expect: "lot", county: "Pinal County" },
+  ...AZFX.points.map((c) => ({ name: `AZ ${c.county}`, state: "AZ", lat: c.lat, lng: c.lng, expect: "lot", county: c.county })),
+] : AL_ALL ? [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
   { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },

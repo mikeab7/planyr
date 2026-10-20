@@ -1,0 +1,467 @@
+{
+ "source": "public/geo/county-polygons.json (Census-derived county polygons), state AZ; interior points are inside the named county, line points are within the polygon's county-line band of it",
+ "counties": [
+  {
+   "state": "AZ",
+   "name": "Apache County",
+   "fips": "04001",
+   "lat": 36.43341,
+   "lng": -109.52152,
+   "bbox": [
+    -109.997,
+    33.4805,
+    -109.0465,
+    36.9965
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Cochise County",
+   "fips": "04003",
+   "lat": 31.89042,
+   "lng": -109.85364,
+   "bbox": [
+    -110.4585,
+    31.3375,
+    -109.0455,
+    32.4455
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Coconino County",
+   "fips": "04005",
+   "lat": 35.97521,
+   "lng": -111.7294,
+   "bbox": [
+    -113.347,
+    34.2615,
+    -110.74,
+    37.0025
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Gila County",
+   "fips": "04007",
+   "lat": 33.63859,
+   "lng": -110.71143,
+   "bbox": [
+    -111.7075,
+    32.9895,
+    -109.992,
+    34.521
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Graham County",
+   "fips": "04009",
+   "lat": 32.92913,
+   "lng": -109.96244,
+   "bbox": [
+    -110.4575,
+    32.44,
+    -109.125,
+    33.6535
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Greenlee County",
+   "fips": "04011",
+   "lat": 33.52448,
+   "lng": -109.27453,
+   "bbox": [
+    -109.5,
+    32.442,
+    -109.0495,
+    33.786
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "La Paz County",
+   "fips": "04012",
+   "lat": 33.81698,
+   "lng": -113.72684,
+   "bbox": [
+    -114.7355,
+    33.027,
+    -113.327,
+    34.3365
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Maricopa County",
+   "fips": "04013",
+   "lat": 33.4319,
+   "lng": -112.76244,
+   "bbox": [
+    -113.3315,
+    32.5115,
+    -111.0425,
+    34.049
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Mohave County",
+   "fips": "04015",
+   "lat": 35.42768,
+   "lng": -113.95709,
+   "bbox": [
+    -114.736,
+    34.208,
+    -112.5235,
+    36.998
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Navajo County",
+   "fips": "04017",
+   "lat": 34.91335,
+   "lng": -110.28888,
+   "bbox": [
+    -110.7425,
+    33.574,
+    -109.8245,
+    37.004
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Pima County",
+   "fips": "04019",
+   "lat": 32.01402,
+   "lng": -111.56587,
+   "bbox": [
+    -113.33,
+    31.4315,
+    -110.4465,
+    32.5255
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Pinal County",
+   "fips": "04021",
+   "lat": 32.94099,
+   "lng": -111.25077,
+   "bbox": [
+    -112.208,
+    32.5115,
+    -110.447,
+    33.4765
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Santa Cruz County",
+   "fips": "04023",
+   "lat": 31.5382,
+   "lng": -110.79226,
+   "bbox": [
+    -111.3695,
+    31.3355,
+    -110.4505,
+    31.7405
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Yavapai County",
+   "fips": "04025",
+   "lat": 34.5831,
+   "lng": -112.75083,
+   "bbox": [
+    -113.3315,
+    33.899,
+    -111.459,
+    35.541
+   ]
+  },
+  {
+   "state": "AZ",
+   "name": "Yuma County",
+   "fips": "04027",
+   "lat": 32.7356,
+   "lng": -113.84594,
+   "bbox": [
+    -114.822,
+    32.0435,
+    -113.329,
+    33.501
+   ]
+  }
+ ],
+ "lines": [
+  {
+   "name": "Apache County \u2014 a point near its county line",
+   "county": "Apache County",
+   "lat": 33.56536,
+   "lng": -109.8654
+  },
+  {
+   "name": "Apache County \u2014 a point near its county line",
+   "county": "Apache County",
+   "lat": 34.29999,
+   "lng": -109.84705
+  },
+  {
+   "name": "Apache County \u2014 a point near its county line",
+   "county": "Apache County",
+   "lat": 35.20275,
+   "lng": -109.8353
+  },
+  {
+   "name": "Cochise County \u2014 a point near its county line",
+   "county": "Cochise County",
+   "lat": 31.3412,
+   "lng": -109.749
+  },
+  {
+   "name": "Cochise County \u2014 a point near its county line",
+   "county": "Cochise County",
+   "lat": 31.49701,
+   "lng": -110.4548
+  },
+  {
+   "name": "Cochise County \u2014 a point near its county line",
+   "county": "Cochise County",
+   "lat": 32.26052,
+   "lng": -110.45005
+  },
+  {
+   "name": "Coconino County \u2014 a point near its county line",
+   "county": "Coconino County",
+   "lat": 35.67775,
+   "lng": -113.32005
+  },
+  {
+   "name": "Coconino County \u2014 a point near its county line",
+   "county": "Coconino County",
+   "lat": 36.18812,
+   "lng": -113.08495
+  },
+  {
+   "name": "Coconino County \u2014 a point near its county line",
+   "county": "Coconino County",
+   "lat": 36.50446,
+   "lng": -112.63372
+  },
+  {
+   "name": "Gila County \u2014 a point near its county line",
+   "county": "Gila County",
+   "lat": 34.14845,
+   "lng": -111.58575
+  },
+  {
+   "name": "Gila County \u2014 a point near its county line",
+   "county": "Gila County",
+   "lat": 34.35018,
+   "lng": -110.9909
+  },
+  {
+   "name": "Gila County \u2014 a point near its county line",
+   "county": "Gila County",
+   "lat": 33.52651,
+   "lng": -109.9932
+  },
+  {
+   "name": "Graham County \u2014 a point near its county line",
+   "county": "Graham County",
+   "lat": 32.85824,
+   "lng": -110.45155
+  },
+  {
+   "name": "Graham County \u2014 a point near its county line",
+   "county": "Graham County",
+   "lat": 33.4423,
+   "lng": -110.25019
+  },
+  {
+   "name": "Graham County \u2014 a point near its county line",
+   "county": "Graham County",
+   "lat": 33.35974,
+   "lng": -109.49745
+  },
+  {
+   "name": "Greenlee County \u2014 a point near its county line",
+   "county": "Greenlee County",
+   "lat": 32.4427,
+   "lng": -109.08725
+  },
+  {
+   "name": "Greenlee County \u2014 a point near its county line",
+   "county": "Greenlee County",
+   "lat": 32.95414,
+   "lng": -109.41792
+  },
+  {
+   "name": "Greenlee County \u2014 a point near its county line",
+   "county": "Greenlee County",
+   "lat": 33.78405,
+   "lng": -109.19776
+  },
+  {
+   "name": "La Paz County \u2014 a point near its county line",
+   "county": "La Paz County",
+   "lat": 33.3787,
+   "lng": -113.64425
+  },
+  {
+   "name": "La Paz County \u2014 a point near its county line",
+   "county": "La Paz County",
+   "lat": 33.265,
+   "lng": -114.2722
+  },
+  {
+   "name": "La Paz County \u2014 a point near its county line",
+   "county": "La Paz County",
+   "lat": 33.79895,
+   "lng": -114.51208
+  },
+  {
+   "name": "Maricopa County \u2014 a point near its county line",
+   "county": "Maricopa County",
+   "lat": 33.47695,
+   "lng": -111.31325
+  },
+  {
+   "name": "Maricopa County \u2014 a point near its county line",
+   "county": "Maricopa County",
+   "lat": 33.2122,
+   "lng": -111.82975
+  },
+  {
+   "name": "Maricopa County \u2014 a point near its county line",
+   "county": "Maricopa County",
+   "lat": 32.5162,
+   "lng": -112.66801
+  },
+  {
+   "name": "Mohave County \u2014 a point near its county line",
+   "county": "Mohave County",
+   "lat": 34.79625,
+   "lng": -114.55535
+  },
+  {
+   "name": "Mohave County \u2014 a point near its county line",
+   "county": "Mohave County",
+   "lat": 35.33177,
+   "lng": -114.58805
+  },
+  {
+   "name": "Mohave County \u2014 a point near its county line",
+   "county": "Mohave County",
+   "lat": 35.9498,
+   "lng": -114.71712
+  },
+  {
+   "name": "Navajo County \u2014 a point near its county line",
+   "county": "Navajo County",
+   "lat": 33.79326,
+   "lng": -109.99305
+  },
+  {
+   "name": "Navajo County \u2014 a point near its county line",
+   "county": "Navajo County",
+   "lat": 35.50475,
+   "lng": -110.74055
+  },
+  {
+   "name": "Navajo County \u2014 a point near its county line",
+   "county": "Navajo County",
+   "lat": 37.00255,
+   "lng": -110.612
+  },
+  {
+   "name": "Pima County \u2014 a point near its county line",
+   "county": "Pima County",
+   "lat": 31.73895,
+   "lng": -110.64924
+  },
+  {
+   "name": "Pima County \u2014 a point near its county line",
+   "county": "Pima County",
+   "lat": 31.6335,
+   "lng": -111.15745
+  },
+  {
+   "name": "Pima County \u2014 a point near its county line",
+   "county": "Pima County",
+   "lat": 31.73817,
+   "lng": -112.34904
+  },
+  {
+   "name": "Pinal County \u2014 a point near its county line",
+   "county": "Pinal County",
+   "lat": 33.42392,
+   "lng": -111.01537
+  },
+  {
+   "name": "Pinal County \u2014 a point near its county line",
+   "county": "Pinal County",
+   "lat": 33.18805,
+   "lng": -110.48045
+  },
+  {
+   "name": "Pinal County \u2014 a point near its county line",
+   "county": "Pinal County",
+   "lat": 32.5192,
+   "lng": -111.01276
+  },
+  {
+   "name": "Santa Cruz County \u2014 a point near its county line",
+   "county": "Santa Cruz County",
+   "lat": 31.3372,
+   "lng": -110.76225
+  },
+  {
+   "name": "Santa Cruz County \u2014 a point near its county line",
+   "county": "Santa Cruz County",
+   "lat": 31.4825,
+   "lng": -111.3688
+  },
+  {
+   "name": "Yavapai County \u2014 a point near its county line",
+   "county": "Yavapai County",
+   "lat": 34.0072,
+   "lng": -111.611
+  },
+  {
+   "name": "Yavapai County \u2014 a point near its county line",
+   "county": "Yavapai County",
+   "lat": 33.91336,
+   "lng": -112.26334
+  },
+  {
+   "name": "Yavapai County \u2014 a point near its county line",
+   "county": "Yavapai County",
+   "lat": 34.01095,
+   "lng": -113.03275
+  },
+  {
+   "name": "Yuma County \u2014 a point near its county line",
+   "county": "Yuma County",
+   "lat": 32.26592,
+   "lng": -114.0753
+  },
+  {
+   "name": "Yuma County \u2014 a point near its county line",
+   "county": "Yuma County",
+   "lat": 32.55143,
+   "lng": -114.81505
+  },
+  {
+   "name": "Yuma County \u2014 a point near its county line",
+   "county": "Yuma County",
+   "lat": 33.00326,
+   "lng": -114.49402
+  }
+ ],
+ "gaps": []
+}

@@ -14,7 +14,7 @@ describe("gradingCfg", () => {
   it("defaults: 1.5% pavement, 12 ft depth, 2:1", () => {
     const c = gradingCfg(undefined);
     expect([c.pavementSlopePct, c.maxCutFillFt, c.slopeRatio]).toEqual([1.5, 12, 2]);
-    expect(c.layers).toEqual({ buildable: false, cutfill: false });     // per-plan: both map layers OFF until asked for
+    expect(c.layers).toEqual({ buildable: false, cutfill: false, contours: false });     // per-plan: both map layers OFF until asked for
     expect(c.enabled).toBe(false);                                        // grading itself is OFF for a plan until switched on
   });
   it("pavement slope is never below 0.5%; ratio is 2/3/4 only; depth must be positive", () => {
@@ -23,7 +23,7 @@ describe("gradingCfg", () => {
     expect(gradingCfg({ slopeRatio: 3 }).slopeRatio).toBe(3);
     expect(gradingCfg({ slopeRatio: 5 }).slopeRatio).toBe(2);
     expect(gradingCfg({ maxCutFillFt: -4 }).maxCutFillFt).toBe(12);
-    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false });
+    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false });
     expect(GRADING_DEFAULTS.shoulderFt).toBe(5);
   });
 });
@@ -67,9 +67,9 @@ describe("gradingSetback — the existing setback feature, else the property lin
 
 describe("gradingCfg layer defaults", () => {
   it("Level-pad limit and Cut & Fill are both OFF until asked for; grading is a per-plan switch, OFF until turned on", () => {
-    expect(gradingCfg({}).layers).toEqual({ buildable: false, cutfill: false });
-    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false });
-    expect(gradingCfg({ layers: { cutfill: true } }).layers).toEqual({ buildable: false, cutfill: true });
+    expect(gradingCfg({}).layers).toEqual({ buildable: false, cutfill: false, contours: false });
+    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false });
+    expect(gradingCfg({ layers: { cutfill: true } }).layers).toEqual({ buildable: false, cutfill: true, contours: false });
     expect(gradingCfg({}).enabled).toBe(false);
     expect(gradingCfg({ enabled: true }).enabled).toBe(true);
     expect(gradingCfg({ enabled: "yes" }).enabled).toBe(false);
