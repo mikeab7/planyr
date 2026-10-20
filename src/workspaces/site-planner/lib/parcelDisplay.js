@@ -174,7 +174,7 @@ export function makeParcelLayer(url, opts) {
    * `lotNumberField`/`idField` for this URL) names the attribute; `labels:false` opts out;
    * `getObstacles` hands the label engine the screen boxes a number must clear (the Site planner's
    * parcel chips). None of these are esri-leaflet options, so they are split off before the spread. */
-  const { lotNumberHint, labels, getObstacles, getInset, ...layerOpts } = opts || {};
+  const { lotNumberHint, labels, getObstacles, getInset, pane, labelPane, ...layerOpts } = opts || {};
   const lotHint = labels === false ? null : (lotNumberHint !== undefined ? lotNumberHint : lotNumberFieldForUrl(url));
   /* B1976336 — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave` only removes when
    * `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse) just before calling it, so
@@ -196,7 +196,7 @@ export function makeParcelLayer(url, opts) {
     style: () => PARCEL_OUTLINE_STYLE,
     ...layerOpts,
   });
-  if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset });
+  if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset, pane: labelPane });
   else holdForIdField(layer); // NEW-1 — a source with no lot number still needs its real id field name (MARIS: FID)
   // NEW-1 — children are ghosts (no per-lot Path, no per-settle projection); see ParcelGhost above.
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
@@ -301,7 +301,7 @@ export function makeParcelLayer(url, opts) {
     mapRef = layer._map;
     if (!mapRef) return;
     mapRef.on("moveend zoomend", onMoved);
-    tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
+    tiles = new ParcelTiles(index, { pane: pane || "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 }); // `pane`: the planner's Parcels-in-front host (mapStack PANE_PARCEL_PICK); everyone else keeps the overlay pane
     tiles._busy = () => queue.pending > 0;
     tiles.addTo(mapRef);
   });
@@ -342,7 +342,7 @@ export function parcelDisplayIsImageOnly(url) {
  * `dynamicLayers` is the whole layer definition for the request.) */
 export function makeParcelImageLayer(url, opts) {
   const m = MAPSERVER_LAYER_RE.exec(trimUrl(url));
-  if (!m) return makeParcelLayer(url);
+  if (!m) return makeParcelLayer(url, opts);
   const [, service, id] = m;
   const layer = guardRasterOpacity(EL.dynamicMapLayer({
     url: service,
@@ -385,7 +385,9 @@ export function makeParcelAdaptiveLayer(url, opts) {
  * every zoom, not just a wide one), every queryable CAD as the three-regime adaptive
  * layer above (which also backs the instant client-side click highlight while close-in). */
 export function makeParcelDisplayLayer(url, opts) {
-  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelAdaptiveLayer(url, opts);
+  /* `pane` is the one option the image-only source honours (the planner's Parcels-in-front host); the rest of `opts`
+   * is the vector layer's label plumbing, which an image has no use for and must not spread into the esri request. */
+  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url, opts && opts.pane ? { pane: opts.pane } : undefined) : makeParcelAdaptiveLayer(url, opts);
 }
 
 /* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629). `optimisticHitAt` (which iterates `eachFeature`)
