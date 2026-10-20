@@ -580,7 +580,7 @@ export default function GradingController({ input, onModel }) {
     rock: { status: rock.status, error: rock.error, retry: () => setRockRetry((n) => n + 1), count: rock.polys ? rock.polys.length : 0 },
     solving: solvingId,
     layerRows: [
-      { id: "buildable", label: `Level-pad limit at ${cfg.slopeRatio}:1`, on: cfg.layers.buildable,
+      { id: "buildable", label: `Level-Pad Limit at ${cfg.slopeRatio}:1`, on: cfg.layers.buildable,
         sub: cfg.layers.buildable && maskE != null
           ? `where a single level pad can sit without walls · ${maskSource === "building" ? `at ${buildingName(selBuildingId)}'s finish, ${fmtE(maskE)} ft` : `at the best finish, ${fmtE(maskE)} ft`}`
           : "where a single level pad can sit without walls",
@@ -589,11 +589,11 @@ export default function GradingController({ input, onModel }) {
         sub: gl ? `the slopes outside the grading limit (${limitInfo.modeLabel.toLowerCase()})` : selBuildingId ? `${buildingName(selBuildingId)}'s slopes` : "all buildings' slopes",
         info: "The slopes outside the grading limit: the grading run from the limit to existing ground, around the whole graded area as one ring. Rust is cut, blue is fill, stronger colour is deeper. The thin dashed line is the limit the slope is thrown from; the dotted line is where the slopes meet existing ground; red is slope outside the setback. Nothing inside the limit is tinted." },
       // ROUND 4 (B2349122) — the proposed contours, off the stitched surface
-      { id: "contours", label: "Proposed contours", on: cfg.layers.contours,
+      { id: "contours", label: "Proposed Contours", on: cfg.layers.contours,
         sub: contours ? (contours.error ? "couldn't trace the surface" : `${contours.interval} ft, index every ${contours.interval * 5} ft`) : "traced off the proposed surface",
         info: "Contours of the PROPOSED surface — the pad, the pavement, the open ground inside the limit and the slopes to daylight — at the existing Contour-lines interval, bold in the contour brown with index lines labelled along the line, clipped to the daylight line. The existing Contour-lines layer is drawn outside that line automatically, dashed, and meets the proposed lines on it." },
       // ROUND 5 (NEW-6) — the paper background under the grading picture
-      { id: "paper", label: "Paper background", on: cfg.layers.paper,
+      { id: "paper", label: "Paper Background", on: cfg.layers.paper,
         sub: cfg.layers.cutfill || cfg.layers.contours ? "the parcel, out past the slopes" : "shows while cut and fill or contours are on",
         info: "Fills the parcel — out to the daylight line plus a margin — with the sheet's flat white while cut and fill or the proposed contours are on, so the aerial drops out under the grading picture. Everything drawn (existing and proposed contours, the bands, the limit, the daylight line, the setback, the elements) paints on top of it; the aerial stays outside it. Turn it off to see the imagery again." },
     ],

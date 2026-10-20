@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
         "approvedAt": "2026-10-20",
-        "approvedCommit": "aae0246bf",
-        "note": "B2391216: Imagery & Layers redesigned as an open two-pane card (Map finder landing now shows the panel open; planner layers card restyled). Owner-approved mockup round 3. [CI-authored by run 39497437757 on aae0246bfdea669e2d06aab499e6a6baef6b24dd]"
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     }
   }
