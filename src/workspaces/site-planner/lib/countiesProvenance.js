@@ -18,6 +18,7 @@ import { IDAHO_VERIFICATION } from "./idProvenance.js"; // NEW-1 (B2317920)
 import { GEORGIA_VERIFICATION } from "./gaProvenance.js"; // NEW-1 (B2316720)
 import { LOUISIANA_VERIFICATION } from "./laProvenance.js"; // NEW-1 (Louisiana 2026-10-19)
 import { MISSOURI_VERIFICATION } from "./moProvenance.js"; // NEW-1 (B2317680)
+import { PENNSYLVANIA_VERIFICATION } from "./paProvenance.js"; // NEW-1 (Pennsylvania, 2026-10-19)
 import { NEWMEXICO_VERIFICATION } from "./nmProvenance.js"; // NEW-1 (B2345888)
 
 export const COUNTY_VERIFICATION = {
@@ -27,6 +28,7 @@ export const COUNTY_VERIFICATION = {
   ...GEORGIA_VERIFICATION,
   ...LOUISIANA_VERIFICATION,
   ...MISSOURI_VERIFICATION,
+  ...PENNSYLVANIA_VERIFICATION,
   ...NEWMEXICO_VERIFICATION,
   harris: {
     publisher: "own",
