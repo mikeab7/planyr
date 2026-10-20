@@ -41,6 +41,7 @@ import { friendlySaveError, classifyOverlayWriteFailure } from "../lib/overlayEr
 import { withResolvedCounties } from "../lib/overlayCompCounty.js";
 import { notifyCompsChanged } from "../../comps/lib/compsChanged.js";
 import { uploadOverlayRaster, downloadOverlayRasterUrl } from "../lib/overlayRasterStorage.js";
+import { attachOverlayRaster, attachFailureMessage } from "../lib/overlayRasterAttach.js";
 import ImageCropTool from "./ImageCropTool.jsx";
 import CropModal from "./CropModal.jsx";
 import { hasCrop } from "../../overlay/overlayCrop.js";
@@ -1063,8 +1064,24 @@ export default function SitePlansSection({
         console.error("[sitePlanOverlays] raster upload failed:", rasterError);
         setPanelError(`Saved “${overlay.docTitle || "this site plan"}”, but its image didn't upload — ${friendlySaveError(rasterError)} You can retry from “Change page…”.`);
       } else {
-        const { data } = await updateOverlay(overlay.id, { ...overlay, rasterKey });
-        overlay = data || overlay;
+        // NEW-5 — the ATTACH write is the other half of item 9: `updateOverlay` answers
+        // `{ data: null, error }` on a Postgres error, an RLS 0-row refusal, or a CAS `conflict`,
+        // and this used to read only `data` — the image was in the bucket, the row kept
+        // `raster_key: null`, and the plan sat on the map with no picture and "This plan doesn't
+        // have an image yet — try Change page…" with nothing saying why. A conflict is retried
+        // ONCE with the fresh version (patchAndReload's own shape); anything else is said.
+        const attached = await attachOverlayRaster({
+          overlay, rasterKey, updateOverlay, fetchAllOverlays,
+          expectedVersion: Number.isFinite(overlayVersionsRef.current[overlay.id]) ? overlayVersionsRef.current[overlay.id] : undefined,
+        });
+        if (attached.data) {
+          overlay = attached.data;
+          if (Number.isFinite(overlay.version)) noteVersion(overlay.id, overlay.version);
+        } else {
+          console.error("[sitePlanOverlays] raster_key write failed:", attached.error);
+          setPanelError(attachFailureMessage(attached.error, friendlySaveError));
+          import("../../telemetry/clientErrors.js").then((m) => m.reportClientEvent("cloud-write-failed", "overlay raster_key write failed", { id: overlay.id, conflict: !!attached.conflict, retried: !!attached.retried, error: (attached.error && attached.error.message) || null })).catch(() => {});
+        }
       }
       // NEW-6 — a fresh upload placed with no project chosen used to resolve/mint its tracked
       // ("market record") site only through reload()'s own fire-and-forget sweep below, which

@@ -2,8 +2,13 @@ import { describe, it, expect } from "vitest";
 import { summarizeProjectHealth, summarizeScheduleHealth } from "../src/workspaces/dashboard/lib/scheduleHealth.js";
 
 const NOW = Date.parse("2026-09-05T00:00:00Z");
-const daysAgo = (n) => new Date(NOW - n * 86400000).toISOString().slice(0, 10);
-const daysFromNow = (n) => new Date(NOW + n * 86400000).toISOString().slice(0, 10);
+// NEW-7 — the product's contract is LOCAL "today" (scheduleHealth.js `localIso`), so these helpers
+// build LOCAL calendar days too. `toISOString().slice(0, 10)` gave the UTC day: at NOW (midnight
+// UTC) that is 09-05 while Central's "today" is 09-04, so daysAgo(1) = 09-04 read as "due today",
+// not overdue — 4 of this file's assertions failed anywhere west of Greenwich.
+const localDay = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const daysAgo = (n) => localDay(NOW - n * 86400000);
+const daysFromNow = (n) => localDay(NOW + n * 86400000);
 // B1953795 (S4) — health is evaluated by the SAME rules the grid uses (the account's settings.healthRules;
 // here the grid's own suggested defaults: 1+ day past finish = red, due within 3 days = yellow, each
 // "unless Complete/Paused"). The old fixed 7-day heuristic is gone.

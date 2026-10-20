@@ -40,12 +40,21 @@ async function authToken() {
 }
 
 // All of a project's folder rows (trashed included, so subtree math is correct), client-shaped.
+// ⛔ NEW-4 — answers `{ ok, rows, error }`, NEVER a bare `[]` on failure: a failed read used to be
+// indistinguishable from an empty project, so FolderTree rendered the "Create the standard
+// N-folder structure" template over a project with a real tree, and `addFolder`/`trashSubtree`
+// computed siblings / the subtree from an EMPTY list — a delete trashed only `[id]`, reported
+// `ok: true`, and left the children live under a trashed parent (treeify re-parents them to top
+// level, the Drive mirror trashes only the root). Signed out / no project is an honest empty
+// success (`skipped`), not a failure. Every caller reads `.ok` (folderLoadDecision.js applies it).
 export async function listFolders(projectId) {
-  if (!supabase || !projectId) return [];
+  if (!supabase || !projectId) return { ok: true, rows: [], skipped: true, error: null };
   const { data, error } = await supabase.from("project_folders").select(COLS).eq("project_id", projectId);
-  if (error) { console.warn("listFolders failed:", error.message); return []; }
-  return (data || []).map(toClientRow);
+  if (error) { console.warn("listFolders failed:", error.message); return { ok: false, rows: [], error: error.message }; }
+  return { ok: true, rows: (data || []).map(toClientRow), error: null };
 }
+
+const READ_REFUSED = (what, error) => ({ ok: false, error: `Couldn't read the folder tree, so ${what} wasn't done — ${error || "the cloud didn't answer"}. Try again.`, readFailed: true });
 
 // In-tab guard: the in-flight seed PROMISE per project, so a double-mount awaits the SAME seed
 // and gets its real result (returning a premature {seeded:false} let the caller then read zero
@@ -101,7 +110,9 @@ export async function ensureSeeded(projectId) {
 // Add one folder under a parent (null = top level). `order` = next among live siblings.
 export async function addFolder({ projectId, parentId = null, name }) {
   if (!supabase || !projectId) return { ok: false, skipped: true };
-  const siblings = childrenOf(await listFolders(projectId), parentId);
+  const read = await listFolders(projectId);
+  if (!read.ok) return READ_REFUSED("the folder", read.error); // NEW-4 — never act on an empty list that isn't one
+  const siblings = childrenOf(read.rows, parentId);
   const order = siblings.reduce((m, r) => Math.max(m, r.order || 0), 0) + 1;
   const id = makeId();
   const { error } = await supabase.from("project_folders").insert({
@@ -129,7 +140,9 @@ export async function moveFolder(id, newParentId = null) {
  * the enumerated confirmation the user already approved lives in the UI (planFolderDelete). */
 export async function trashSubtree(projectId, id) {
   if (!supabase || !projectId) return { ok: false, skipped: true };
-  const ids = [...subtreeIds(await listFolders(projectId), id)];
+  const read = await listFolders(projectId);
+  if (!read.ok) return READ_REFUSED("the delete", read.error); // NEW-4 — a failed read would trash only [id] and strand the children
+  const ids = [...subtreeIds(read.rows, id)];
   const { error } = await supabase.from("project_folders")
     .update({ trashed: true, updated_at: new Date().toISOString() }).in("id", ids);
   return error ? { ok: false, error: error.message } : { ok: true, ids };

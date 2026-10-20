@@ -34,3 +34,13 @@ export function importDraftToInsertRow(row) {
     status: row.status || "pending",
   };
 }
+
+/** NEW-6 — what "Dismiss" on an import draft says when `deleteDraft` reports a failure.
+ *  `deleteDraft` (compDraftsStore.js) answers `{ error }` — `"Not deleted"` on a 0-count delete
+ *  (RLS / already gone) or the network/Postgres error — and the panel used to discard it: the
+ *  refetch left the card on screen with no reason shown. Pure: result → notice string or null. */
+export function dismissDraftNotice(r) {
+  if (!r || !r.error) return null;
+  const msg = r.error.message || (typeof r.error === "string" ? r.error : "");
+  return `Couldn't dismiss that draft — ${msg || "the cloud didn't answer"}. It's still here; try again.`;
+}
