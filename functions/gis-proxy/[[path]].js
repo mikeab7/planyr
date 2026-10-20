@@ -105,6 +105,13 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (Michigan, 2026-10-20) — the six county-hosted services a wired Michigan county rides (each MEASURED through this relay on the PR preview before it was wired);
    * the other 46 Michigan rows read *.arcgis.com directly. */
   "gis.kentcountymi.gov", "gis.miottawa.org", "gis.mijackson.org", "gis.gtcountymi.gov", "maps.stclaircounty.org", "gis.mocogeo.org",
+  /* NEW-1 (Oklahoma, 2026-10-19) — county / regional hosts named by the Oklahoma parcel sweep; each is MEASURED through this relay before any county is wired to it. */
+  "gis.okco14.org", "gis.clevelandcountyassessor.us", // Cleveland County assessor
+  "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services
+  "asps0305.tulsacounty.org", // Tulsa County Assessor
+  "okmaps.onenet.net", // OneNet-hosted state GIS server
+  "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
+  "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
   /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
    * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
   "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
