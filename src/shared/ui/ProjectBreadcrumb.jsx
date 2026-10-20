@@ -1297,6 +1297,7 @@ export default function ProjectBreadcrumb({
                       <button
                         data-testid={`project-purge-confirm-${p.id}`}
                         disabled={binBusy === p.id}
+                        aria-busy={binBusy === p.id ? "true" : undefined}
                         onClick={() => doPurge(p)}
                         style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--danger, #dc2626)", color: "#fff" }}
                       >Delete forever</button>
@@ -1310,6 +1311,7 @@ export default function ProjectBreadcrumb({
                       <button
                         data-testid={`project-restore-${p.id}`}
                         disabled={binBusy === p.id}
+                        aria-busy={binBusy === p.id ? "true" : undefined}
                         onClick={() => doRestore(p)}
                         title={`Restore ${p.name}`}
                         style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--hover-menu)", color: "var(--text-primary)" }}

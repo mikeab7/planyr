@@ -319,12 +319,13 @@ export default function FolderTree({
           title={`${node.name} — right-click for options`}
           style={{
             display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", paddingLeft: 8 + depth * 16,
-            borderRadius: 6, color: T.text, minHeight: 30,
+            borderRadius: 6, color: T.text, minHeight: 30, cursor: !isEditing && (embedded || kids.length) ? "pointer" : "default",
             outline: isDropTarget ? `1.5px dashed ${T.accent}` : "none", outlineOffset: -1.5,
             background: isDropTarget ? "var(--hover-menu)"
               : isSelected ? "var(--hover-menu)"
               : (hoveredId === node.id || (menu && menu.node && menu.node.id === node.id)) ? T.raised : "transparent",
           }}
+          onClick={(e) => { if (e.target === e.currentTarget && !isEditing && (embedded || kids.length)) onNameClick(); }}
           onMouseEnter={() => setHoveredId(node.id)}
           onMouseLeave={() => setHoveredId((h) => (h === node.id ? null : h))}
           onContextMenu={(e) => { if (isEditing || isMoving) return; e.preventDefault(); e.stopPropagation(); setMenu({ node, x: e.clientX, y: e.clientY }); }}
@@ -342,6 +343,7 @@ export default function FolderTree({
           onDragOver={onFileDrop ? (e) => {
             if (!hasFilesDrag(e) && !isFileMoveDrag(e.dataTransfer)) return;
             e.preventDefault(); e.stopPropagation();
+            e.dataTransfer.dropEffect = isFileMoveDrag(e.dataTransfer) ? "move" : "copy";
             if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
           } : undefined}
           onDragLeave={onFileDrop ? (e) => {
@@ -446,8 +448,10 @@ export default function FolderTree({
               if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
             } : undefined}
             onDragOver={onFileDrop ? (e) => {
-              if (!hasFilesDrag(e) || isFileMoveDrag(e.dataTransfer)) return;
+              if (isFileMoveDrag(e.dataTransfer)) { e.dataTransfer.dropEffect = "none"; return; } // an in-app row is refused here: no-drop cursor
+              if (!hasFilesDrag(e)) return;
               e.preventDefault(); e.stopPropagation();
+              e.dataTransfer.dropEffect = "copy";
               if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
             } : undefined}
             onDragLeave={onFileDrop ? (e) => {

@@ -130,7 +130,7 @@ export const Button = forwardRef(function Button({ variant = "primary", size = "
 export function ToggleChip({ active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
   return (
     <button style={{
-      padding: "6px 11px", fontSize: FONT.sm, borderRadius: CONTROL_RADIUS.pill, cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 650 : 500,
+      padding: "6px 11px", fontSize: FONT.sm, borderRadius: CONTROL_RADIUS.pill, cursor: rest.disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: active ? 650 : 500,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
       background: active ? accent : "var(--surface-raised)",
       color: active ? onAccent : "var(--text-primary)",
@@ -223,7 +223,7 @@ export const IconButton = forwardRef(function IconButton({ size = 30, active = f
     // regardless of `size`, without growing its visible box. See that class's own header.
     <button ref={ref} className={className ? `tap-target ${className}` : "tap-target"} style={{
       width: size, height: size, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center",
-      borderRadius: CONTROL_RADIUS.control, cursor: "pointer", boxShadow: REST_SHADOW,
+      borderRadius: CONTROL_RADIUS.control, cursor: rest.disabled ? "default" : "pointer", boxShadow: REST_SHADOW,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
       background: active ? accent : "var(--surface-raised)",
       color: active ? onAccent : "var(--text-primary)", ...style,
@@ -370,7 +370,7 @@ export function Tab({
         color: active || hover ? textColor : idleColor,
         fontFamily: "inherit", fontSize: FONT.md,
         fontWeight: active ? 600 : 500,
-        cursor: "pointer", whiteSpace: "nowrap",
+        cursor: rest.disabled ? "default" : "pointer", whiteSpace: "nowrap",
         transition: "color 0.15s, border-color 0.15s",
       }}
       {...rest}
@@ -417,7 +417,7 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
         height: s.height, padding: s.padding, maxWidth: 220,
         borderRadius: CONTROL_RADIUS.control, border: "1px solid var(--chrome-divider)",
         background: "var(--chrome-bg-elev)", color: textColor,
-        cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: s.fontSize,
+        cursor: rest.disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: s.fontSize,
         whiteSpace: "nowrap",
       }}
       {...rest}

@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import PanelChrome from "./PanelChrome.jsx";
 import { clampToBounds, FLOAT_SIZE } from "./floatingPanel.js";
+import { pinDragCursor } from "./cursors.js";
 
 /**
  * FloatingPanel — a Site Planner left-rail panel detached into a draggable card over the map
@@ -66,11 +67,13 @@ export default function FloatingPanel({ title, icon, subtitle, actionsRef, pos, 
     const sx = e.clientX, sy = e.clientY;
     const ox = posRef.current.x, oy = posRef.current.y;
     const size = cardSize();
+    const releaseCursor = pinDragCursor("move"); // cursor stays "move" for the whole drag, even off the header
     const move = (ev) => {
       const b = boundsRef?.current?.getBoundingClientRect();
       onMove(clampToBounds({ x: ox + ev.clientX - sx, y: oy + ev.clientY - sy }, size, b));
     };
     const up = () => {
+      releaseCursor();
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };

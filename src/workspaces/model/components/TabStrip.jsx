@@ -60,6 +60,7 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { RADIUS, nestedIn } from "../../../shared/ui/radius.js";
 import ContextMenu from "./ContextMenu.jsx";
+import { pinDragCursor } from "../../../shared/ui/cursors.js";
 
 // SPACE.xs/SPACE.sm/SPACE.md and FONT_SIZE.control/FONT_SIZE.display literals (4/6/8, 12/14) —
 // deliberately NOT imported from designTokens.js. Same reasoning SheetView.jsx/Ribbon.jsx already
@@ -129,7 +130,9 @@ const TabStrip = forwardRef(function TabStrip({ sheets, activeSheetId, onSelect,
     setDragIndex(index);
     setDropIndex(index);
     dropIndexRef.current = index;
+    let releaseCursor = null; // pinned on the first move, so a plain click never flashes grabbing
     const onMove = (ev) => {
+      if (!releaseCursor) releaseCursor = pinDragCursor("grabbing");
       const hit = document.elementsFromPoint(ev.clientX, ev.clientY).find((n) => n instanceof HTMLElement && n.dataset.tabIndex != null);
       if (!hit) return;
       const idx = Number(hit.dataset.tabIndex);
@@ -139,6 +142,7 @@ const TabStrip = forwardRef(function TabStrip({ sheets, activeSheetId, onSelect,
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      releaseCursor?.();
       const from = index, to = dropIndexRef.current;
       setDragIndex(null);
       setDropIndex(null);

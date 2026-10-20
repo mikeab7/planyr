@@ -223,6 +223,7 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
   const adminData = useAdminData();
   const [state, setState] = useState({ loading: true, error: null, data: null });
   const [view, setView] = useState({ k: 1, x: 0, y: 0 });
+  const [panning, setPanning] = useState(false); // a pan drag is live → grabbing
   const [hover, setHover] = useState(null);   // county index under the cursor
   const [picked, setPicked] = useState(null); // { idx, x, y } — the clicked county and where the click landed
   const [hint, setHint] = useState(false);
@@ -389,6 +390,7 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
     if (!isTap(d.moved)) {
       if (!d.captured) {
         d.captured = true;
+        setPanning(true);
         try { svgRef.current.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
       }
       const scale = toBox(0, 0)[2];
@@ -408,11 +410,12 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
         }
       }
       drag.current = null;
+      setPanning(false);
     } else if (d) d.pinch = null;
   };
   const onPointerCancel = (e) => { // the browser took the gesture (e.g. a touch scroll): never a tap
     pointers.current.delete(e.pointerId);
-    if (pointers.current.size === 0) drag.current = null;
+    if (pointers.current.size === 0) { drag.current = null; setPanning(false); }
   };
 
   const rows = data ? data.coverage.rows : null;
@@ -462,7 +465,7 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
               viewBox={`0 0 ${W} ${H}`}
               role="img"
               aria-label="Map of US counties wired to a parcel source"
-              style={{ display: "block", width: "100%", height: "auto", maxHeight: cap || undefined, touchAction: view.k > 1 ? "none" : "pan-y", cursor: view.k > 1 ? "grab" : "default" }}
+              style={{ display: "block", width: "100%", height: "auto", maxHeight: cap || undefined, touchAction: view.k > 1 ? "none" : "pan-y", cursor: panning ? "grabbing" : hover != null ? "pointer" : view.k > 1 ? "grab" : "default" }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}

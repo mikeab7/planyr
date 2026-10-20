@@ -309,7 +309,7 @@ function OverlayRow({
               style={{ ...inputStyle, fontSize: FONT_SIZE.display, fontWeight: 600, padding: "3px 6px" }} />
           ) : (
             <button onClick={() => setEditingName(true)} title={o.sourceFileName ? `${o.sourceFileName} — click to rename` : "Rename"} style={{
-              border: "none", background: "none", padding: 0, textAlign: "left", cursor: "text", fontFamily: "inherit",
+              border: "none", background: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit",
               ...RECORD_BODY, fontWeight: 600, color: "var(--text-primary)", display: "block", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>{o.docTitle || "Untitled site plan"}</button>
           )}
@@ -608,7 +608,7 @@ function SitePlanAdjustPanel({
               resized by dragging it directly on the map. Crop is never gated by it, so a locked plan
               can still be cropped (and its scale set, below). */}
           <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey}
-            onClick={onStartCrop} data-testid="site-plan-adjust-crop" style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "not-allowed" : "pointer" }}
+            onClick={onStartCrop} data-testid="site-plan-adjust-crop" style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "default" : "pointer" }}
             title={!o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
             <CropIcon />{hasCrop(o) ? "Edit crop" : "Crop…"}
           </ToggleChip>

@@ -118,7 +118,7 @@ export default function RotationStepper({
     width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5,
     lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4,
     background: "var(--surface-raised)", color: "var(--text-secondary)",
-    cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
+    cursor: disabled ? "default" : "pointer", fontFamily: "inherit",
   };
   const reason = disabled && disabledReason ? disabledReason : undefined;
 
