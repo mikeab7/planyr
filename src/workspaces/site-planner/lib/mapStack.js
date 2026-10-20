@@ -137,6 +137,48 @@ export const CANVAS_Z = Object.freeze({
   gisLine: 2, // the map-top host: the gisLine pane, above the plan, below the canvas chrome
 });
 
+/** The CSS z-index the map-top (line band) host takes: above the plan normally, and DOWN at the
+ *  backdrop's level while the Parcels tool is up so no GIS stroke can draw over a parcel. It is
+ *  still a later sibling than the backdrop box, so it paints over the imagery and under the plan. */
+export const lineHostZ = (parcelsFront = false) => (parcelsFront ? CANVAS_Z.basemap : CANVAS_Z.gisLine);
+
+/* ---------------------------------------------------------------------------------
+ * PARCELS IN FRONT — the one MODE-GATED exception to the fixed order above (NEW-1).
+ *
+ * Owner, 2026-10-20: "When I click the parcels tool, the parcels should show above anything that
+ * I've got on the screen. Like if I click add county lots, that should show above anything else."
+ *
+ * While the Parcels tool is the thing being worked — the Land panel open, "Pick county lots",
+ * Draw / Split / Combine / Edit corners — the parcel geometry (the county lots on offer AND the
+ * plan's own lots: fill, outline, selection weight, setback ring) is the TOP of the drawing: over
+ * the elements, the markups and callouts, the promoted references, the lifted GIS fills and the
+ * GIS line band. Closing the tool puts everything back exactly where the model above says. This is
+ * RENDER ORDER ONLY — nothing is written to the plan, no layer's saved order or lift changes, and
+ * there is still no z-order picker. The decision is `parcelsOnTop`, the ONE function; the three
+ * moves it causes are made by the planner and named here so they cannot drift:
+ *   1. the plan's own parcel + setback group renders at the PARCEL_TIER_SLOT's late twin
+ *      (PARCEL_TIER_ATTR="top"), after the annotations, before the labels and the handle layer;
+ *   2. the county lots on offer mount in PANE_PARCEL_PICK, hosted in a foreignObject INSIDE the
+ *      plan SVG immediately under that group (PARCEL_PICK_BAND_ATTR) — a Leaflet pane inside the
+ *      backdrop map can never clear the SVG;
+ *   3. the GIS LINE band (a host OUTSIDE the SVG, above it) sinks to the backdrop's level
+ *      (`lineHostZ`) so a flood boundary or contour cannot draw over a parcel. Its saved on/off
+ *      and lift state are untouched; it is simply back above the plan the moment the tool closes.
+ * PDF-PARITY: the sheet shows the NORMAL order. The export clone puts the moved group back in its
+ * slot (exportSheet.js), so printing with the tool open prints what printing without it prints. */
+export const PANE_PARCEL_PICK = "parcelPickPane";
+export const PANE_PARCEL_PICK_LABEL = "parcelPickLabelPane";
+export const PARCEL_TIER_ATTR = "data-parcel-tier";            // on the moved group ("top")
+export const PARCEL_TIER_SLOT_ATTR = "data-parcel-tier-slot";  // left in the normal place while it is moved
+export const PARCEL_PICK_BAND_ATTR = "data-parcel-pick-band";  // the in-SVG host of the county-lot panes
+
+/** Is the Parcels tool the thing being worked right now? The inputs are the planner's own state
+ *  (nothing is stored). Pure. */
+export function parcelsOnTop({ leftPanel = null, floating = null, identifyMode = false, tool = "select", mergePick = false, boundaryEdit = false } = {}) {
+  return !!(identifyMode || mergePick || boundaryEdit || leftPanel === "parcel" || (floating && floating.parcel)
+    || tool === "parcel" || tool === "split");
+}
+
 /* ---------------------------------------------------------------------------------
  * ROLES — declared per GIS source, never inferred at render time from the geometry
  * that happens to come back. An explicit property is auditable and testable; a runtime

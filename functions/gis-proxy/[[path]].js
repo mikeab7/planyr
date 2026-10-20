@@ -123,6 +123,9 @@ export const ALLOWED_HOSTS = new Set([
   "okmaps.onenet.net", // OneNet-hosted state GIS server
   "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
   "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
+  /* NEW-1 (Arizona, 2026-10-19) — Mohave County's own GIS server (Mohave is the one Arizona county neither the ADWR compile nor an ArcGIS Online layer covers).
+   * The build sandbox cannot reach it, so it is relayed and MEASURED through here (on the PR preview) before the county is wired to it. */
+  "mcgis.mohave.gov", // Mohave County GIS — PARCELS MapServer
   /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
    * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
   "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
@@ -146,6 +149,11 @@ export const ALLOWED_HOSTS = new Set([
   "www.mcgisweb.org", "gis.peoriacounty.gov", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell.com", "maps.grundyco.org", "maps.lakecountyil.gov", "adamscountyarcserver.com",
   "rockgis.rockfordil.gov", // City of Rockford (Winnebago County layer)
   "gis.cookcountyil.gov", "gis12.cookcountyil.gov", "gis.dupageco.org", "gis.willcountyillinois.com", // the three counties wired by hand since 2026-09 (re-measured here)
+  /* NEW-1 (Illinois round 2, 2026-10-20) — hosts named by the counties' own AGOL registrations / web maps (Madison, Tazewell, Sangamon, Macon, Rock Island, Kankakee K3, McHenry's bare host, SAGIS)
+   * and the Bhamaps services2 host; each is MEASURED through this relay before a county is wired to it. */
+  "gis.madisoncountyil.gov", "gisportal.co.madison.il.us", "gis.tazewell-il.gov", "gis.co.sangamon.il.us", "sangis.co.sangamon.il.us", "pub.sagis.org", "k3gis.net",
+  "mchenrycountygis.org", "gis.rockislandcountyil.gov", "macongis.co.macon.il.us", "services2.bhamaps.com", "gis.stclaircounty.org", "gis.cityofdanville.org",
+  "gis.ci.pekin.il.us", "portal.greenvilleillinois.com", "maps.decaturil.gov", "redqueen.ci.galesburg.il.us",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
