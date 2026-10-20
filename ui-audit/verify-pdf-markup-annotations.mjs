@@ -50,6 +50,10 @@ const ST = { stroke: "#dc2626", weight: 2, dash: "solid", fill: "none", fillOpac
 function scene(fx, kind) {
   const f = JSON.parse(JSON.stringify(fx));
   f.markups = []; f.callouts = []; f.measures = [];
+  // NEW-1 (2026-10-20): site elements are annotations now too, so this MARKUP harness draws its markups over the parcels
+  // alone — every element (and its Helvetica-set label) would otherwise ride the parity ratio it measures against the
+  // markups' own ink weight. Elements are covered by verify-pdf-site-elements (the owner's real plan, every type).
+  f.els = [];
   f.settings = { ...(f.settings || {}), printBuildingsTable: false };
   if (kind === "blank") return f;
   const z = (i) => 900000 + i;
