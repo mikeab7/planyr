@@ -2891,10 +2891,16 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosaic/MapServer/1",
   },
   nj_statewide: {
-    // Verify: live — maps.nj.gov is blocked in this build environment. Owner-name values are
-    // reported redacted for many records under NJ's Daniel's Law privacy statute.
+    /* NEW-1 (B2384880, 2026-10-20) — NJOGIS's OWN ArcGIS Online copy of the same composite (item 533599bb…, owner NJOGIS, "Parcels and MOD-IV
+     * Composite of NJ, Web Mercator (3857)"), the same "prefer the official AGOL mirror" call ny_statewide and Fort Bend make: maps.nj.gov is a
+     * `.gov` host this build environment's egress policy blocks (no measurement possible from here), the mirror answers 200 with `access-control-allow-origin: *`
+     * so it needs no relay, and its parcels ARE the statewide composite — MEASURED 2026-10-20: 3,481,240 polygons, 21 counties, ALL 564 municipalities
+     * present (docs/STATEWIDE-PARCELS.md "New Jersey municipalities"), maxRecordCount 2000, point query 0.28–0.66 s. Fields: PAMS_PIN (the parcel id),
+     * PROP_LOC (the situs), OWNER_NAME (REDACTED for web use under Daniel's Law — that is the source's choice; the card shows what is there), CALC_ACRE,
+     * MUN_NAME / COUNTY. ~11% of parcels (403,260) carry geometry with no MOD-IV attributes (right-of-way / unmatched) — they answer with their lot lines. */
     state: "NJ", center: [40.1, -74.7], zoom: 8, mapServer: null, statewide: true,
-    layerUrl: "https://maps.nj.gov/arcgis/rest/services/Framework/Cadastral/MapServer/0",
+    idField: "PAMS_PIN", addrField: "PROP_LOC",
+    layerUrl: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0",
   },
   /* B1455632 (2026-09-10) — NEVADA, corrected. The prior finding declined Nevada on a LEGAL basis
    * (the state demographer/DCNR mosaic is restricted from public redistribution under NRS 250) —
@@ -3571,6 +3577,18 @@ export function candidateCountiesForPoint(lat, lng) {
   return keys.filter((k) => !statewideExcludesCounty(k, id.name));
 }
 
+/* NEW-1 (B2384880) — NEW JERSEY'S BARRIER ISLANDS AND SHORELINE FALL OUTSIDE THE BUNDLED COUNTY POLYGONS. The simplified nationwide county asset
+ * stops short of the Atlantic and Delaware Bay shore, so a click on a real lot in Atlantic City, Cape May, Long Beach Island, Seaside Heights, Sea Bright,
+ * Highlands, Brigantine … resolves to NO county and `candidateCountiesForPoint` used to return nothing at all — measured 2026-10-20: 87 of 1,692 sampled
+ * NJ parcels (3 per municipality, 564 municipalities) had no candidate. A point that no county polygon holds AND sits inside New Jersey's envelope is
+ * either water or one of those lots; asking the NJ composite is free in the first case (it answers empty) and the whole answer in the second.
+ * Only reached when no county polygon holds the point, so it can never override a real county answer in NY/PA/DE. */
+const NJ_ENVELOPE = [38.9, -75.6, 41.37, -73.85]; // [south, west, north, east]
+function njCoastalGapState(lat, lng) {
+  const e = NJ_ENVELOPE;
+  return lat >= e[0] && lat <= e[2] && lng >= e[1] && lng <= e[3] ? "NJ" : null;
+}
+
 function candidateCountiesRaw(lat, lng) {
   const entries = countyEntries();
   const within = entries
@@ -3708,7 +3726,7 @@ function candidateCountiesRaw(lat, lng) {
     // (verified: Livonia and Taylor, MI — both outside Detroit's bbox and outside Oakland's bbox —
     // must not include mi_detroit here). See cityScopes.js's header for why the flag lives on the
     // entry rather than being re-derived.
-    const st = resolvedState(lat, lng);
+    const st = resolvedState(lat, lng) || njCoastalGapState(lat, lng);
     return st ? entries.filter(([, c]) => c.state === st && !c.cityScoped).map(([k]) => k) : [];
   }
   /* ⛔ NEW-6 — A CONFIDENT GEOMETRY ANSWER DECIDES *MEMBERSHIP*, NOT JUST ORDER.

@@ -79,7 +79,7 @@
 | North Dakota (ND) | county | measured-reachable | [ND State Parcel Program (NDIT, aggregated by AppGeo from 51+ counties)](https://services1.arcgis.com/GOcSXpzwBHyk2nog/arcgis/rest/services/NDGISHUB_Parcels/FeatureServer/0) | gov | yes (200, 251ms) | 742,200 | esriGeometryPolygon | parcelId=absent, owner=`Ownership`, situsAddress=absent, landArea=`CalculatedAcres`, appraisedValue=absent | lat 99% · lon 100% of state | 324ms, 2000 feat. | ✅ |
 | Nebraska (NE) | county | blocked-in-sandbox | [Nebraska Statewide Parcels External (NE OCIO, Enterprise)](https://gis.ne.gov/Enterprise/rest/services/StatewideParcelsExternal/FeatureServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — gis.ne.gov) |
 | New Hampshire (NH) | town/municipal (RSA 76; NH DRA provides oversight/equalization only) | blocked-in-sandbox | [NH Parcel Mosaic — layer 1 'Parcels' (NH GRANIT / UNH)](https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosaic/MapServer/1) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — nhgeodata.unh.edu) |
-| New Jersey (NJ) | municipal (each municipality has its own Tax Assessor) | blocked-in-sandbox | [Parcels and MOD-IV Composite of New Jersey (NJOGIS + NJ Treasury MOD-IV)](https://maps.nj.gov/arcgis/rest/services/Framework/Cadastral/MapServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — maps.nj.gov) |
+| New Jersey (NJ) | municipal (564 municipalities, each with its own Tax Assessor) | measured-reachable (**564 of 564 municipalities**) | [Parcels and MOD-IV Composite of NJ, Web Mercator (NJOGIS's own AGOL copy)](https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0) | agol | yes (200, 280–660ms) | 3,481,240 | esriGeometryPolygon | parcelId=`PAMS_PIN`, owner=`OWNER_NAME` (redacted, Daniel's Law), situsAddress=`PROP_LOC`, landArea=`CALC_ACRE`, appraisedValue=`NET_VALUE` | lat 38.9–41.4 / lng -75.6 – -73.9 | ✅ (Verify: live — Newark, Cape May, Delaware River click) |
 | New Mexico (NM) | county | measured-reachable (per-county layers; **33 of 33 wired**) | [County_Parcels_2025 — one layer per county (NM Office of the State Engineer)](https://gis.ose.nm.gov/server_s/rest/services/Parcels/County_Parcels_2025/MapServer) | gov (via relay) | via /gis-proxy | 33 layers, 1,074–255,181 each | esriGeometryPolygon | parcelId=`UPC`/`AccountNumber`, owner=`Owner1`, situs=`SitusAddress1` | per-county | — | ✅ (23 on this service, 9 on fresher county layers, Bernalillo pre-existing; 5 counties partial — see "New Mexico counties (2026-10-19)") |
 | Nevada (NV) | county | measured-reachable | [County_Parcels_In_Nevada_Yellow (Nevada Division of Water Resources)](https://arcgis.water.nv.gov/arcgis/rest/services/BaseLayers/County_Parcels_In_Nevada_Yellow/MapServer/0) | gov | blocked (sandbox policy) | 1,394,188 | esriGeometryPolygon | parcelId=`APN`, owner=absent, situsAddress=absent (`SiteCity` only), landArea=`Acres`, appraisedValue=absent | — | 5-point spread: Las Vegas 132ms · Reno 203ms · Elko 147ms · Carson City 103ms · Pahrump 178ms | ✅ (Verify: live — arcgis.water.nv.gov) — B1455632: the sibling `County_Parcels_in_Nevada` service this row wired originally went empty (0 layers, `/0` → 404) between 8:50 PM and 10:57 PM Central on 2026-09-10; the state had republished the same 1,394,188-feature data one service name over on the same host, re-verified 2026-09-11 morning. Rejects `resultRecordCount` ("Pagination is not supported"); accepts `returnCountOnly`. |
 | New York (NY) | town/municipal (city/town assessors; NYS ORPTS provides oversight/certification) | measured-reachable | [NYS Tax Parcels Public — official ArcGIS Online mirror (NYS ITS Geospatial Services + Dept. of Taxation & Finance ORPTS, org account NYSGIS_GPO)](https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1) | gov | yes (200, 342ms) | 3,827,530 | esriGeometryPolygon | parcelId=`MUNI_PARCEL_ID`, owner=`PRIMARY_OWNER`, situsAddress=absent, landArea=`ACRES`, appraisedValue=`FULL_MARKET_VAL` | lat 100% · lon 101% of state | 501ms, 1000 feat. | ✅ — holds 38 of 62 counties (incl. the 5 NYC boroughs); the other 24: 23 wired county-by-county, Niagara a named gap — see "New York counties (2026-10-20)" |
@@ -2706,6 +2706,45 @@ Kinds: `none-found` (nothing public anywhere we looked) · `relay-tls` (a real p
 | Williamson | `relay-tls` | The county's assessor tax-map service is real and public (WilliamsonIL_PAT_Taxmap/MapServer/0 on ags.bhamaps.com, listed in the 'Parcels - IL' index), but Planyr's relay cannot reach it: Cloudflare answers 526 (the host's TLS certificate chain is rejected from the edge), and the sandbox cannot reach the host directly. Not wired because a source nobody could measure may not ship; B2379936 re-measures it from a browser that accepts the chain (the owner's chat), and wires it if it answers with CORS or through a fixed relay. |
 
 **Re-run recipe.** The discovery scripts are throw-away; the method is above and each gap's reason is in its table row. A county leaves the gap list the day a current, countywide layer with a parcel id is found *and* answers at the county's two largest places: add its row to `ilParcels.js` (+ `ilProvenance.js`), drop it from `test/fixtures/ilCounties.json` `gaps`, record its sample in `ilSamples.json`, and measure it the way the paragraph above says (a directory walk of the host beats a title search — that is how Madison, Tazewell, Sangamon, Knox and Coles' new domain were found).
+
+## New Jersey municipalities (2026-10-20)
+
+**Result: all 564 municipalities in 21 counties are covered by ONE source. No municipality is uncovered, and nothing needed a county-level row.** (B2384880.)
+
+- **Source:** NJOGIS's own ArcGIS Online copy of the statewide composite — `services2.arcgis.com/XVOqAjTOJ5P6ngMu/.../Parcels_Composite_NJ_WM/FeatureServer/0` (item `533599bb…`, owner NJOGIS; "Parcels and MOD-IV Composite of NJ, Web Mercator"). Chosen over `maps.nj.gov` because that host is blocked from the build sandbox (unmeasurable) and the mirror is official, answers with `access-control-allow-origin: *` (no relay needed) and is the same composite. `maps.nj.gov` was therefore NOT added to the `/gis-proxy` allow-list.
+- **Measured 2026-10-20 (direct, from the sandbox):** 3,481,240 polygons · `esriGeometryPolygon` · `maxRecordCount` 2000 · JSON/geoJSON/PBF · point query 0.28–0.66 s (12 city points). Fields: `PAMS_PIN` (parcel id; pinned as `idField`), `PROP_LOC` (property location; pinned as `addrField` and added to the situs ladder), `OWNER_NAME`, `ST_ADDRESS` / `CITY_STATE` / `ZIP_CODE` (the OWNER's mailing lines — now excluded from situs), `CALC_ACRE`, `MUN_NAME`, `COUNTY`, `PCL_MUN`, land/improvement/net value, deed, sale, year built.
+- **Owner names are blank** in this public copy ("`OWNER_NAME` is redacted per Daniel's Law for public web access" — the service's own description). Source's choice; no non-redacted copy was sought. The card shows parcel id, address, acreage (measured from the ring) and values.
+- **Municipality proof:** a group-by on `PCL_MUN` returns exactly 564 codes, every one with MOD-IV attributes; one real parcel (up to three) was then fetched per municipality and routed through the app's own resolver (`test/newJerseyMunicipalities.test.js`, fixture `test/fixtures/njMunicipalities.json`, 1,692 points). ~11% of parcels (403,260) carry geometry with no MOD-IV match (right-of-way / unmatched) and answer with lot lines only.
+
+| County | Municipalities | Parcels |
+|---|---|---|
+| Atlantic | 23 | 144,352 |
+| Bergen | 70 | 281,646 |
+| Burlington | 40 | 174,852 |
+| Camden | 36 | 191,292 |
+| Cape May | 16 | 95,290 |
+| Cumberland | 14 | 63,411 |
+| Essex | 22 | 178,089 |
+| Gloucester | 24 | 112,792 |
+| Hudson | 12 | 143,305 |
+| Hunterdon | 26 | 52,902 |
+| Mercer | 12 | 127,186 |
+| Middlesex | 25 | 243,019 |
+| Monmouth | 53 | 249,796 |
+| Morris | 39 | 177,533 |
+| Ocean | 33 | 299,346 |
+| Passaic | 16 | 125,785 |
+| Salem | 15 | 31,223 |
+| Somerset | 21 | 117,387 |
+| Sussex | 24 | 74,214 |
+| Union | 21 | 147,628 |
+| Warren | 22 | 46,932 |
+
+- **Routing defect found and fixed.** The bundled county polygons stop short of the shore: 87 of the 1,692 sampled lots (Atlantic City, Brigantine, Margate, Ventnor, Longport, Cape May, Long Beach Island, Seaside Heights, Sea Bright, Highlands …) fell in no county, so a click there queried nothing. `counties.js` `njCoastalGapState` now routes a point that no county polygon holds but that sits in New Jersey's envelope to `nj_statewide` (never overrides a real county answer). Red on main eccb06e: 88 failures; green after.
+- **State lines (NJ/NY, NJ/PA):** a NJ-side point either resolves to NJ directly or, when the simplified line puts it across, is reached by the existing second pass (`lineNeighbourKeysForPoint` → `identifyWithFallback`). All 1,692 samples reach `nj_statewide` by one of the two. The Phillipsburg riverfront no longer lists `pa_northampton` first. The NY side belongs to the sibling NY work.
+- **Pinelands (`Pinelands_Parcels`, 622,323 features):** not needed — the statewide composite covers the Pinelands municipalities (e.g. Shamong, Washington Twp); kept only as a documented fallback.
+- **Not verified here (live check pending, V1813264):** the in-app click at a Newark lot, a Cape May lot and a Delaware River town lot.
+
 
 ## New York counties (2026-10-20) — 61 of 62 reachable (38 statewide layer + 23 county rows), Niagara a named gap (NEW-1, B2387344)
 
