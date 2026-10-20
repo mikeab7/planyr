@@ -207,9 +207,14 @@ export function legendFor(members, mergeKey) {
  *   hasRamp     the legend is a continuous colour bar (Elevation Shading)
  *   hasInfo     there is source / vintage / caveat text behind the ⓘ
  */
+/* The settings that are a standing preference about HOW a layer draws (not a second layer with its own switch), so they stay reachable on an off row. */
+export const OFF_ROW_SETTINGS = new Set(["interval"]);
 export function dropdownPlan(ctx = {}) {
   const out = [];
-  if (!ctx.on) { if (ctx.hasInfo) out.push("info"); return out; }
+  /* A SETTING (contour interval, corridor width, the Mapillary token) is the person's choice about the layer, not a fact about what is
+   * drawing — so it is reachable whether the row is on or off. Everything else (status, zoom, opacity, lift, legend) is about a layer
+   * that is drawing, so an off row offers only its settings and its ⓘ. */
+  if (!ctx.on) { for (const st of ctx.settings || []) if (OFF_ROW_SETTINGS.has(st)) out.push(st); if (ctx.hasInfo) out.push("info"); return out; }
   if (ctx.hasStatus) out.push("status");
   if (ctx.zoomGated) out.push("zoom");
   out.push("opacity");

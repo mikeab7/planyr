@@ -98,7 +98,9 @@ function StatusDot({ meta, loading, dormant, hidden, title }) {
 }
 
 function Swatch({ color, show }) {
-  if (!color) return null; // a row with no map colour (labels, "Your Data") reserves no gap
+  /* EVERY row reserves the slot — a row with no map colour (labels, Your Data, the owner-only grading rows) keeps it empty — so every
+   * row's name starts at the same x in every pane. */
+  if (!color) return <span aria-hidden="true" data-swatch="none" style={{ width: 12, height: 12, flex: "none" }} />;
   return (
     <span aria-hidden="true" data-swatch={show && color ? "on" : "none"}
       style={{ width: 12, height: 12, flex: "none", boxSizing: "border-box",
@@ -703,16 +705,6 @@ export default function LayerPanel({
           {groupRows(t.rows, `flood-${t.key}`, floodRowFor)}
         </div>
       ))}
-      {floodScope.offRows.length > 0 && (
-        <div style={{ marginTop: 6 }}>
-          <button type="button" onClick={() => setRevealHidden((s) => ({ ...s, floodOff: !s.floodOff }))} aria-expanded={!!revealHidden.floodOff}
-            aria-label={`${revealHidden.floodOff ? "Hide" : "Show"} ${floodScope.offRows.length} flood and drainage source${floodScope.offRows.length > 1 ? "s" : ""} that don't cover this site`}
-            style={{ background: "transparent", border: "none", color: MUTED, fontFamily: "inherit", fontSize: TEXT, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
-            {revealHidden.floodOff ? "▾ Hide" : "▸ Show"} the {floodScope.offRows.length} source{floodScope.offRows.length > 1 ? "s" : ""} that don&rsquo;t cover this site
-          </button>
-          {revealHidden.floodOff && floodScope.offRows.map((entry) => floodRowFor({ kind: "solo", entry }, { why: floodScope.notes[entry[0]] || null }))}
-        </div>
-      )}
     </>
   );
 

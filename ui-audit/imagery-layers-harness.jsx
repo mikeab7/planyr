@@ -55,6 +55,13 @@ function Host() {
           <LayerPanel overlays={ov} setOverlays={setOv} county={county} siteCounty={state === "TX" ? county : null} layerStatus={{}} coverage={{}} surface={surface}
             siteState={state} siteLocation={lat != null && lng != null ? { lat, lng } : null}
             mapZoom={zoom} onZoomTo={(z) => setLastZoom(z)} onCollapse={() => setCollapsed(true)}
+            gradingRows={q.get("grading") === "1" && surface === "planner" ? { rows: [
+              // the owner-only grading rows, with the labels GradingController publishes (test/imageryLayersPolish.test.js pins that source)
+              { id: "buildable", label: "Level-Pad Limit at 2:1", on: false, info: "The line around the part of the parcel that can be ONE level pad." },
+              { id: "cutfill", label: "Cut & Fill", on: false, info: "The slopes outside the grading limit." },
+              { id: "contours", label: "Proposed Contours", on: false, info: "Contours of the proposed surface." },
+              { id: "paper", label: "Paper Background", on: true, info: "Fills the parcel with the sheet's flat white." },
+            ], onToggle: () => {} } : undefined}
             gisNote={unlocated ? "GIS layers (flood, wetlands, boundaries, utilities) appear here once this plan has a location." : null}
             onSetLocation={unlocated ? () => {} : null}
             basemap={{ choices: finder ? FINDER_BASEMAP_CHOICES : PLANNER_BASEMAP_CHOICES, value: bm, onChange: setBm, status: "loaded", disabledReason: unlocated ? "This plan has no location yet — the aerial needs a real-world spot to anchor to." : null }}

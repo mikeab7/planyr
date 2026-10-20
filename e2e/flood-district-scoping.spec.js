@@ -81,14 +81,12 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
       await expect(page.getByRole("checkbox", { name: label, exact: true })).toBeVisible({ timeout: 10000 });
     }
 
-    // 3. HCFCD and the City of Houston storm sewer are the ones that can't reach Waller —
-    //    demoted behind the one collapsed line, each naming its own reason.
-    const collapsed = page.getByRole("button", { name: /sources? that don't cover this site/i });
-    await expect(collapsed).toBeVisible({ timeout: 10000 });
-    await collapsed.click();
-    // NEW-1 (Imagery & Layers): each demoted row names its own reason in its ⓘ (reachable, never persistent text under a row).
-    expect(await readRowInfo(page, "hcfcd_row")).toMatch(/Harris County Flood Control District doesn.{0,3}t cover Waller County/i);
-    expect(await readRowInfo(page, "coh_storm")).toMatch(/City of Houston.{0,3}s system doesn.{0,3}t reach Waller County/i);
+    // 3. HCFCD and the City of Houston storm sewer cannot reach Waller: they are NOT SHOWN at all (owner rule — a source that can't
+    //    serve this site is not listed), and there is no "show the N sources…" line to open them from.
+    const panelLoc = page.locator(panelSel("planner")).first();
+    await expect(panelLoc.getByTestId("layer-row-hcfcd_row")).toHaveCount(0);
+    await expect(panelLoc.getByTestId("layer-row-coh_storm")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sources? that don't cover this site/i })).toHaveCount(0);
 
     expect(errors, errors.join(" | ")).toHaveLength(0);
   });
@@ -167,11 +165,9 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
     // …and the facts ARE in hand, so the not-checked state stays quiet.
     expect(await readRowInfo(page, "fema")).not.toMatch(/not checked here yet/i);
 
-    // 2. The scoping reasons are there, on the rows they explain.
-    const collapsed = live.getByRole("button", { name: /sources? that don't cover this site/i });
-    await expect(collapsed).toBeVisible({ timeout: 10000 });
-    await collapsed.click();
-    expect(await readRowInfo(page, "hcfcd_row")).toMatch(/Harris County Flood Control District doesn.{0,3}t cover Waller County/i);
+    // 2. The sources that cannot reach this site are not shown, and no line offers to reveal them.
+    await expect(live.getByTestId("layer-row-hcfcd_row")).toHaveCount(0);
+    await expect(live.getByRole("button", { name: /sources? that don't cover this site/i })).toHaveCount(0);
 
     // 3. The keep-alive copy: same component, out of the accessibility tree entirely.
     const finder = page.locator('[data-testid="layer-panel"][data-surface="finder"]');

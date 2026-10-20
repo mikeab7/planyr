@@ -389,6 +389,84 @@ try {
     await page.close();
   }
 
+  // ───────────────────────── 3b) polish round (B2391216 follow-up): name alignment · no reveal line · Interval on an off row ─────────────────────────
+  {
+    const ALIGN = [
+      ["planner", "desktop", "light", 520, 384], ["planner", "desktop", "dark", 520, 384], ["planner", "phone", "light", 340, 300], ["planner", "phone", "dark", 340, 300],
+      ["finder", "desktop", "light", 520, 384], ["finder", "desktop", "dark", 520, 384], ["finder", "phone", "light", 340, 300], ["finder", "phone", "dark", 340, 300],
+    ];
+    const nameXs = (page) => page.evaluate(() => {
+      const pane = document.querySelector('[data-testid="layer-pane"]');
+      const left = pane.getBoundingClientRect().left;
+      return [...pane.querySelectorAll('[data-testid^="layer-row-"]')].filter((r) => !r.getAttribute("data-testid").endsWith("-menu")).map((r) => {
+        const sp = r.querySelector("label > span:last-child") || r.querySelector("label span");
+        return { id: r.getAttribute("data-testid").replace("layer-row-", ""), x: Math.round((sp.getBoundingClientRect().left - left) * 10) / 10 };
+      });
+    });
+    for (const [surf, size, theme, vw, w] of ALIGN) {
+      const tag = `${surf} · ${size} · ${theme}`;
+      const page = await open(`surface=${surf}&w=${w}&theme=${theme}&grading=1&${HOUSTON}`, vw);
+      const keys = await visibleGroupKeys(page);
+      const all = {};
+      let rows = 0;
+      for (const k of keys) {
+        await selectGroup(page, k);
+        for (const r of await nameXs(page)) { all[`${k}/${r.id}`] = r.x; rows++; }
+      }
+      const xs = [...new Set(Object.values(all))];
+      ok(`${tag}: every row's name starts at the same x in every pane`, rows > 20 && xs.length === 1, `${rows} rows, x values ${JSON.stringify(xs)}${xs.length > 1 ? " e.g. " + JSON.stringify(Object.entries(all).filter(([, x]) => x !== xs[0]).slice(0, 4)) : ""}`);
+      if (surf === "planner") {
+        await selectGroup(page, "topo");
+        const labels = await rowLabels(page);
+        ok(`${tag}: the grading rows are Title-Cased`, ["Level-Pad Limit at 2:1", "Cut & Fill", "Proposed Contours", "Paper Background"].every((n) => labels.includes(n)), JSON.stringify(labels));
+        const rowsXs = await nameXs(page);
+        const el = rowsXs.find((r) => r.id === "elevation"), gr = rowsXs.find((r) => r.id === "grading-cutfill");
+        ok(`${tag}: a grading row's name lines up with Elevation Shading's (known-good arm)`, !!el && !!gr && el.x === gr.x, JSON.stringify({ el, gr }));
+      }
+      await page.close();
+    }
+
+    // item 2 — Flood & Drainage on Chambers County (the owner's Grand Port): no "Show the N sources that don't cover this site" line, anywhere
+    for (const [size, theme, vw, w] of [["desktop", "light", 520, 384], ["desktop", "dark", 520, 384], ["phone", "light", 340, 300], ["phone", "dark", 340, 300]]) {
+      const page = await open(`surface=planner&w=${w}&theme=${theme}&state=TX&lat=29.77&lng=-94.70&county=chambers`, vw);
+      await selectGroup(page, "flood");
+      const t = await paneText(page);
+      const btns = await page.$$eval('[data-testid="layer-pane"] button', (bs) => bs.map((b) => (b.getAttribute("aria-label") || "") + " " + b.textContent).filter((x) => /cover this site|sources? that/i.test(x)));
+      ok(`Chambers · ${size} · ${theme}: Flood & Drainage lists no reveal line for sources that don't cover the site`, !/cover this site/i.test(t) && btns.length === 0, JSON.stringify({ btns, tail: t.slice(-120) }));
+      await page.close();
+    }
+    {
+      // known-good arm for the same check: a plain Harris site must still list its district rows (the group is not simply empty)
+      const page = await open(`surface=planner&w=384&${HOUSTON}`);
+      await selectGroup(page, "flood");
+      const labels = await rowLabels(page);
+      ok("Harris (known-good arm): Flood & Drainage still lists its rows, incl. the HCFCD district row (Channels & ROW)", labels.length >= 6 && labels.includes("Channels & ROW"), JSON.stringify(labels));
+      await page.close();
+    }
+
+    // item 3 — Contour Lines' ▾ carries the Interval whether the layer is off or on, at both widths and both themes
+    for (const [size, theme, vw, w] of [["desktop", "light", 520, 384], ["desktop", "dark", 520, 384], ["phone", "light", 340, 300], ["phone", "dark", 340, 300]]) {
+      const tag = `${size} · ${theme}`;
+      const page = await open(`surface=planner&w=${w}&theme=${theme}&${HOUSTON}`, vw);
+      await selectGroup(page, "topo");
+      const off = await page.evaluate(() => ({ checked: document.querySelector('[data-testid="layer-row-contours"] input[type="checkbox"]').checked, value: document.querySelector('[data-testid="layer-value-contours"]')?.textContent.trim() }));
+      await page.evaluate(() => localStorage.removeItem("planyr:contourInterval"));
+      await page.click('[data-testid="layer-caret-contours"]');
+      const plan = await page.getAttribute('[data-testid="layer-row-contours-menu"]', "data-plan");
+      ok(`${tag}: Contour Lines is OFF and its ▾ still offers Interval (and ⓘ)`, off.checked === false && /(^|,)interval(,|$)/.test(plan) && /info/.test(plan) && !/opacity/.test(plan), JSON.stringify({ off, plan }));
+      const iv = await page.$('[data-testid="contour-interval"]');
+      if (!iv) { ok(`${tag}: the off-row Interval select exists (the rest of this arm cannot run without it)`, false, plan); await page.close(); continue; }
+      ok(`${tag}: the off-row Interval select shows the row's current value (${off.value})`, (await iv.evaluate((e) => e.value)) === String(parseFloat(off.value)), off.value);
+      await page.selectOption('[data-testid="contour-interval"]', "5");
+      ok(`${tag}: changing Interval on an OFF row sticks and the row's value follows`, (await page.textContent('[data-testid="layer-value-contours"]')).trim() === "5′" && (await page.evaluate(() => localStorage.getItem("planyr:contourInterval"))) === "5");
+      await page.check('[data-testid="layer-row-contours"] input[type="checkbox"]');
+      const on = await page.getAttribute('[data-testid="layer-row-contours-menu"]', "data-plan");
+      ok(`${tag}: turned ON it keeps the Interval and gains the drawing controls (known-good arm)`, /interval/.test(on) && /opacity/.test(on) && (await page.$eval('[data-testid="contour-interval"]', (e) => e.value)) === "5", on);
+      await page.evaluate(() => localStorage.removeItem("planyr:contourInterval"));
+      await page.close();
+    }
+  }
+
   // ───────────────────────── 4) brevity numbers (PANEL-BREVITY rule 7) ─────────────────────────
   {
     const page = await open(`surface=planner&w=384&${HOUSTON}&on=fema,contours`);

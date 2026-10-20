@@ -286,7 +286,7 @@ try {
     const gone = await page.waitForFunction(() => !document.querySelector('[data-layer="paper"]'), null, { timeout: 15000 }).then(() => true, () => false);
     check("unchecking it removes the paper (the aerial would show again); the contours stay", gone && (await page.locator('[data-layer="contours"] path').count()) > 0);
     const row = await page.evaluate(() => window.__harness.model.layerRows.find((r) => r.id === "paper"));
-    check("the Layers popover carries a 'Paper background' row bound to the same setting", !!row && row.label === "Paper background" && row.on === false, JSON.stringify(row));
+    check("the Layers popover carries a 'Paper background' row bound to the same setting", !!row && row.label === "Paper Background" && row.on === false, JSON.stringify(row));
     await page.close();
   }
   const real = errs.filter((e) => !/Failed to load resource|ERR_TUNNEL|ERR_CONNECTION/.test(e));
