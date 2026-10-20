@@ -338,7 +338,7 @@ export default function ParcelsPanel({
           </div>
           <button type="button" disabled={!(preview && preview.ok)} onClick={() => { handlers.onCombine(checkedIds); setChecked(new Set()); }} data-testid="parcels-bar-combine"
             title={preview && !preview.ok ? preview.message : "Combine the selected parcels into one"}
-            style={{ ...textBtn, background: "var(--accent-site)", color: "var(--on-accent-site)", borderColor: "var(--accent-site)", opacity: preview && preview.ok ? 1 : 0.5, cursor: preview && preview.ok ? "pointer" : "not-allowed" }}>Combine</button>
+            style={{ ...textBtn, background: "var(--accent-site)", color: "var(--on-accent-site)", borderColor: "var(--accent-site)", opacity: preview && preview.ok ? 1 : 0.5, cursor: preview && preview.ok ? "pointer" : "default" }}>Combine</button>
           <button type="button" onClick={() => setChecked(new Set())} aria-label="Clear selection" data-testid="parcels-bar-clear" style={iconBtn}><CloseIcon /></button>
         </div>
       )}

@@ -46,6 +46,8 @@ export function wireFeatureHover(lyr, cfg, identifyOk) {
     const feature = e.layer && e.layer.feature;
     const props = (feature && feature.properties) || {};
     try { e.layer.setStyle(restyle(feature, true)); } catch (_) {}
+    // hover-only (a tooltip, nothing to click): never advertise the pointer hand Leaflet gives every interactive feature
+    try { const el = e.layer.getElement && e.layer.getElement(); if (el) el.style.cursor = "inherit"; } catch (_) {}
     try { e.layer.bindTooltip(hoverText(cfg, props), { sticky: true, direction: "top" }).openTooltip(); } catch (_) {}
   });
   lyr.on("mouseout", (e) => {
