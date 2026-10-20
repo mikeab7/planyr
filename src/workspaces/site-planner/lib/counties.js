@@ -55,6 +55,7 @@ import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georg
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
+import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -987,6 +988,7 @@ const COUNTIES_RAW = {
   ...okRaw(), // NEW-1 (Oklahoma)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   ...sdRaw(), // NEW-1 (B2343936) — South Dakota counties (sd_beadle … sd_roberts)
+  ...azRaw(), // NEW-1 (Arizona 2026-10-19) — az_* rows beyond the hand-written az_pinal / az_maricopa
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
   ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
   ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
@@ -3036,6 +3038,7 @@ const COUNTIES_MAP_RAW = {
   ...msMarisMap(),
   ...alMap(),
   ...sdMap(), // NEW-1 (B2343936)
+  ...azMap(), // NEW-1 (Arizona 2026-10-19)
   ...idMap(), // NEW-1 (B2317920)
   ...nmMap(), // NEW-1 (B2345888)
   ...gaMap(), // NEW-1 (B2316720)
