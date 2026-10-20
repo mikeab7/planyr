@@ -154,7 +154,7 @@ describe("the removed controls stay removed (source sweep)", () => {
   it("the header: name + plain CloseX on ONE line, cuisine · city · price control, grey address ending in Directions", () => {
     const hdr = panel.slice(panel.indexOf("function PanelHeader"), panel.indexOf("/* Score pills"));
     expect(hdr).toMatch(/justifyContent: "space-between", alignItems: "center"/);
-    expect(hdr).toMatch(/<CloseX onClick=\{onClose\} label="Close" testId="food-panel-close" \/>/);
+    expect(hdr).toMatch(/<CloseX onClick=\{onClose\} label="Close" testId="food-panel-close" style=\{\{ margin: "-10px -8px -10px 0" \}\} \/>/); // the 44-square target overhangs the name row
     expect(hdr).toMatch(/<PriceLevelControl level=\{priceLevel\} onChange=\{onSetPriceLevel\} \/>/);
     expect(hdr).toMatch(/· <span style=\{\{ fontWeight: 700 \}\}>Directions<\/span>/);
   });
