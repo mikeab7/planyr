@@ -65,7 +65,11 @@ function Harness({ data }) {
       { id: "c2", type: "paving", truckCourt: true, attachedTo: "b2", ring: rect(x2, by + 200, 300, 110), dockStack: { x: x2 + 150, y: by + 100 } },
     ]);
   });
-  const [settings, setSettings] = useState({ grading: { enabled: new URLSearchParams(location.search).get("off") !== "1", layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: new URLSearchParams(location.search).get("cutfill") !== "0" } } });
+  const [settings, setSettings] = useState({ grading: { enabled: new URLSearchParams(location.search).get("off") !== "1",
+    // round 4: the limit MODE (?mode=boundary), the proposed contours (?contours=1)
+    limitMode: new URLSearchParams(location.search).get("mode") === "boundary" ? "boundary" : "layout",
+    layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: new URLSearchParams(location.search).get("cutfill") !== "0", contours: new URLSearchParams(location.search).get("contours") === "1" } } });
+  const [limitEdit, setLimitEdit] = useState(null);
   const [model, setModel] = useState(null);
   const [headEl, setHeadEl] = useState(null);
   const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") === "1" ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
@@ -85,12 +89,12 @@ function Harness({ data }) {
   });
   const hostBuildings = els.filter((e) => e.type === "building" && !hosts.has(e.id));
   const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: gradingPack(cfg, setback) };
-  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt;
+  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + JSON.stringify(cfg.limitRing || null);
   const anyFfe = gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   // SitePlanner's wiring: the grading layer builds the surface OFF the render path and holds it while a drag is in flight.
   const dragRef = React.useRef(false);
   const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
-  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
   const qs = new URLSearchParams(location.search);
   const rockFt = qs.get("rock") ? +qs.get("rock") : null, pondCy = +(qs.get("pond") || 0);
@@ -102,12 +106,24 @@ function Harness({ data }) {
     const box = [[w - 0.01, s2 - 0.01], [e2 + 0.01, s2 - 0.01], [e2 + 0.01, n2 + 0.01], [w - 0.01, n2 + 0.01], [w - 0.01, s2 - 0.01]];
     return [{ depthCm: rockFt * 30.48, polygons: [[box]] }];
   }, [rockFt, ring, origin]);
+  const grCfg = (patch) => setSettings((s2) => ({ grading: { ...s2.grading, ...patch } }));
+  const limitActions = {
+    setLimitMode: (m) => { if (m !== "layout") setLimitEdit(null); grCfg({ limitMode: m }); },
+    editLimit: (span) => {
+      const g = settings.grading;
+      if (!Array.isArray(g.limitRing)) { const L = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const r = L && L.limitRegions[0] ? L.limitRegions[0].outer : null; if (!r) return; grCfg({ limitRing: r, limitMode: "layout" }); }
+      setLimitEdit({ highlight: span || null });
+    },
+    doneEditLimit: () => setLimitEdit(null),
+    resetLimit: () => { setLimitEdit(null); grCfg({ limitRing: null }); },
+  };
   const input = { base, origin, gsInputs, gsSig, gradeSurface, selBuildingId: sel, multiBuildings: sel ? 1 : 0, rawBuilding: els.find((e) => e.id === sel) || null,
+    limitEditing: !!limitEdit, limitHighlight: limitEdit ? limitEdit.highlight : null,
     rawBuildings: new Map(hostBuildings.map((e) => [e.id, e])), buildingNames: new Map(hostBuildings.map((e, i) => [e.id, `Building ${i + 1}`])), buildingOrder: hostBuildings.map((e) => e.id),
     pondCutCy: pondCy, siteFloorFt: null, rockPolys, dockDropFt: 4, groundBasis: "grid", accent: "#0e7a52", isDragging: () => dragRef.current,
-    actions: { patchBuilding: (id, p) => patchBuilding(id, p),
+    actions: { patchBuilding: (id, p) => patchBuilding(id, p), ...limitActions,
       moveAssembly: (id, dx, dy, freeze) => setEls((a) => shiftAssembly(a, new Set(a.map((e) => e.id)), dx, dy).map((e) => (e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freeze) ? { ...e, padElevFt: freeze, ffeBasis: "typed" } : e))) } };
-  window.__harness = { els, model, setSel, gradeSurface,
+  window.__harness = { els, model, setSel, gradeSurface, limitEdit, setLimitEdit,
     // a real gesture's shape: dragging=true, one assembly move per pointer step, then release (dragging=false + a final commit)
     dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings };
   const PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
@@ -119,9 +135,11 @@ function Harness({ data }) {
         {planOn && <React.Suspense fallback={null}><GradingController input={input} onModel={setModel} /></React.Suspense>}
         {/* the SitePlanner dock: the panel chrome's header slot (the gear + info portal there), then the panel body */}
         <div id="panel-header" data-testid="panel-chrome-grading"><span>GRADING</span><span ref={setHeadEl} id="panel-header-actions" /></div>
-        <GradingPanel planOn={planOn} showOnMap={!!settings.grading.layers.cutfill}
+        <GradingPanel planOn={planOn} showOnMap={!!settings.grading.layers.cutfill} showContours={!!settings.grading.layers.contours}
           onPlanOn={(v) => setSettings((s) => ({ grading: { ...s.grading, enabled: v } }))}
           onShowOnMap={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, cutfill: v } } }))}
+          onShowContours={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, contours: v } } }))}
+          onPullLimit={(id, span) => limitActions.editLimit(span)}
           model={planOn ? model : null} headerSlot={headEl} dockDropFt={4} buildableOn={!!(model && model.cfg.layers.buildable)}
           onToggleBuildable={() => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, buildable: !s.grading.layers.buildable } } }))}
           onCfg={(p) => setSettings((s) => ({ grading: { ...s.grading, ...p } }))} onDockDrop={() => {}}
@@ -132,9 +150,10 @@ function Harness({ data }) {
       <svg id="canvas" width="1400" height="1000" style={{ background: "#e8efe6" }}>
         {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
+        {limitEdit && Array.isArray(settings.grading.limitRing) && <polygon data-grading-limit-edit="1" points={settings.grading.limitRing.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#1d4ed8" strokeWidth="1.5" strokeDasharray="6 4" />}
         <polygon points={ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#0a0" strokeWidth="1.5" />
       </svg>
     </>
   );
 }
-load().then((data) => { createRoot(document.getElementById("root")).render(<Harness data={data} />); window.__ready = true; });
+load().then((data) => { window.__origin = data.origin; window.__dem = data.dem; createRoot(document.getElementById("root")).render(<Harness data={data} />); window.__ready = true; });

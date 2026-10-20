@@ -75,7 +75,7 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
   });
   it("every render site is behind grOn (the gate)", () => {
     expect(sp).toMatch(/\{grOn && grInput && \(\s*<Suspense fallback=\{null\}><GradingController/);
-    expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill\)/);
+    expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill \|\| grModel\.contours \|\| grLimitEdit\)/);
     expect(sp).toMatch(/gradingRows=\{grOn && grModel \?/);
     // NEW-1 (amends B2315856): grading is its own dock panel, rendered only behind the gate; Site Analysis carries none of it
     expect(sp).toMatch(/_pid === "grading" && gradingOn && \(/);
