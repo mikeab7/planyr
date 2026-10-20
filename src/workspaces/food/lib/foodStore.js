@@ -456,17 +456,24 @@ export async function fetchAllPlacePrefs() {
   return { data: data || [], error };
 }
 
-/** `identity` is { place_id } or { custom_name, custom_lat, custom_lon }; `patch` today is { price_level }. */
+/** `identity` is { place_id } or { custom_name, custom_lat, custom_lon }; `patch` today is { price_level }.
+ *  ⛔ NOT an `.upsert()`: the table's uniqueness is two PARTIAL unique indexes (`where place_id is not null` / `is null`, the
+ *  manual one over rounded expressions), and `ON CONFLICT (cols)` cannot name a partial index's predicate through PostgREST —
+ *  measured live 2026-10-20 (V1795840 first run): the $$ tap looked saved, the insert was refused, nothing persisted. So: find
+ *  the restaurant's row, UPDATE it by id, else INSERT. A duplicate slipping past the lookup is still refused by the index (loud). */
 export async function upsertPlacePref(identity, patch) {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
   const { uid, error: authErr } = await signedInUserId("Sign in to set a price level");
   if (authErr) return { data: null, error: authErr };
-  const onConflict = identity.place_id ? "user_id,place_id" : "user_id,custom_name,round(custom_lat::numeric, 4),round(custom_lon::numeric, 4)";
-  const { data, error } = await supabase
-    .from("food_place_prefs")
-    .upsert({ ...identity, ...patch, user_id: uid }, { onConflict })
-    .select()
-    .maybeSingle();
+  let find = supabase.from("food_place_prefs").select("id").eq("user_id", uid);
+  find = identity.place_id
+    ? find.eq("place_id", identity.place_id)
+    : find.is("place_id", null).eq("custom_name", identity.custom_name).eq("custom_lat", identity.custom_lat).eq("custom_lon", identity.custom_lon);
+  const { data: existing, error: findErr } = await find.limit(1).maybeSingle();
+  if (findErr) return { data: null, error: findErr };
+  const { data, error } = existing
+    ? await supabase.from("food_place_prefs").update(patch).eq("id", existing.id).select().maybeSingle()
+    : await supabase.from("food_place_prefs").insert({ ...identity, ...patch, user_id: uid }).select().maybeSingle();
   return { data, error };
 }
 

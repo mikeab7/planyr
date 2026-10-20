@@ -60,7 +60,14 @@ describe("price level — $ to $$$$, one per restaurant, tap the current one to 
     expect(sql).not.toMatch(/to anon/);
     const manifest = JSON.parse(readFileSync(join(__dirname, "../scripts/denormalisedCopies.json"), "utf8"));
     expect(JSON.stringify(manifest)).toContain("food_place_prefs");
-    expect(read("lib/foodStore.js")).toMatch(/export async function upsertPlacePref\(identity, patch\)/);
+    const store = read("lib/foodStore.js");
+    expect(store).toMatch(/export async function upsertPlacePref\(identity, patch\)/);
+    // Measured live 2026-10-20: `.upsert(..., { onConflict })` cannot target a PARTIAL unique index through PostgREST — the insert was
+    // refused and the $$ tap never persisted. The write is find → update-by-id, else insert.
+    const fn = store.slice(store.indexOf("export async function upsertPlacePref"), store.indexOf("/** ── Named restaurant lists"));
+    expect(fn).not.toMatch(/\.upsert\(/);
+    expect(fn).toMatch(/\.update\(patch\)\.eq\("id", existing\.id\)/);
+    expect(fn).toMatch(/\.insert\(\{ \.\.\.identity, \.\.\.patch, user_id: uid \}\)/);
   });
   it("FoodApp writes it optimistically and REVERTS + says so on a failed write (LOUD-FAILURE)", () => {
     const app = read("FoodApp.jsx");
