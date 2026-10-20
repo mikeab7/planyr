@@ -18,6 +18,11 @@
 // Exact hostnames only — never a pattern. Extend here as a new CORS-blocked regional/county host
 // is wired (see docs/STATEWIDE-PARCELS.md's "GIS pass-through" section).
 export const ALLOWED_HOSTS = new Set([
+  /* NEW-1 (South Carolina, 2026-10-19) — the three county hosts a South Carolina county is wired to (each MEASURED through this relay on the PR preview). The statewide base layer is on
+   * *.arcgis.com and needs no relay. */
+  "www.laurenscountygis.org", // Laurens County
+  "gis.sumter-sc.com", // City / County of Sumter
+  "maps.spartanburgcounty.org", // Spartanburg County
   "www.sgrcmaps.com", // Southern Georgia Regional Commission — Tift + 10 sibling GA counties
   "mgrcmaps.org", // Middle Georgia Regional Commission
   "maps.crc.ga.gov", // Coastal Regional Commission (not yet wired to a county)
@@ -171,6 +176,18 @@ export const ALLOWED_HOSTS = new Set([
   "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
   "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
   "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
+  /* NEW-1 (Kentucky, 2026-10-19) — the Kentucky Division of Geographic Information publishes one PVA parcel service per county
+   * (WGS84WM_Services/Ky_PVA_<County>_Parcels_WGS84WM); LOJIC is Jefferson County's own server. The sandbox cannot reach either, so each is
+   * relayed and MEASURED through this relay before a county is wired to it. */
+  "kygisserver.ky.gov", // Kentucky DGI — county PVA parcel MapServers
+  "kygeonet.ky.gov", // Kentucky DGI — county PVA viewers (read to find a county's real service)
+  /* NEW-1 (Kentucky, 2026-10-19) — county hosts the Kentucky parcel sources sit on. The sandbox cannot reach any of them, so each is
+   * relayed and was MEASURED through this relay before a county was wired to it (docs/STATEWIDE-PARCELS.md "Kentucky counties"). */
+  "gis.lojic.org", // LOJIC — Jefferson County (Louisville) PVA parcels
+  "maps.linkgis.org", // LINK-GIS — Campbell / Kenton / Pendleton parcels
+  "arcserver.madisoncountyky.us", // Madison County KY GIS
+  "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
+  "webgis.bgky.org", // Warren County City-County Planning Commission (CCPC parcels)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

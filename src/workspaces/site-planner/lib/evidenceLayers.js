@@ -64,11 +64,11 @@ function renderOverpass(els, group, opacity) {
     if (el.type === "way" && el.geometry) {
       const pts = el.geometry.map((g) => [g.lat, g.lon]);
       if (tags.power === "substation") {
-        L.polygon(pts, { color: COL.substation, weight: 1.5, opacity: op, fillColor: COL.substation, fillOpacity: op * 0.18 })
+        L.polygon(pts, { className: "pf-hover-only", color: COL.substation, weight: 1.5, opacity: op, fillColor: COL.substation, fillOpacity: op * 0.18 })
           .bindTooltip("Substation (OSM)").addTo(group);
       } else {
         const minor = tags.power === "minor_line";
-        L.polyline(pts, { color: minor ? COL.distribution : COL.transmission, weight: minor ? 1.6 : 2.6, opacity: op, dashArray: minor ? "5 4" : null })
+        L.polyline(pts, { className: "pf-hover-only", color: minor ? COL.distribution : COL.transmission, weight: minor ? 1.6 : 2.6, opacity: op, dashArray: minor ? "5 4" : null })
           .bindTooltip(`${minor ? "Distribution" : "Transmission"} line (OSM)${tags.voltage ? ` · ${tags.voltage} V` : ""}`).addTo(group);
       }
     } else if (el.type === "node" && el.lat != null) {
@@ -76,7 +76,7 @@ function renderOverpass(els, group, opacity) {
       const isSub = tags.power === "substation";
       const isTower = tags.power === "tower";
       const color = isHyd ? COL.hydrant : isSub ? COL.substation : COL.pole;
-      L.circleMarker([el.lat, el.lon], { radius: isHyd ? 4 : isTower ? 3.5 : 2.6, color, weight: 1.2, opacity: op, fillColor: color, fillOpacity: op * 0.85 })
+      L.circleMarker([el.lat, el.lon], { className: "pf-hover-only", radius: isHyd ? 4 : isTower ? 3.5 : 2.6, color, weight: 1.2, opacity: op, fillColor: color, fillOpacity: op * 0.85 })
         .bindTooltip(isHyd ? "Fire hydrant (OSM)" : isSub ? "Substation (OSM)" : isTower ? "Transmission tower (OSM)" : "Power pole (OSM)").addTo(group);
     }
   });
@@ -208,7 +208,7 @@ export function mapillaryLayer(onStatus) {
       const g = f.geometry; if (!g || !g.coordinates) return;
       const [lon, lat] = g.coordinates;
       const isHyd = /hydrant/i.test(f.object_value || "");
-      L.circleMarker([lat, lon], { radius: 4, color: COL.mly, weight: 1.4, opacity, fillColor: isHyd ? COL.hydrant : COL.mly, fillOpacity: opacity })
+      L.circleMarker([lat, lon], { className: "pf-hover-only", radius: 4, color: COL.mly, weight: 1.4, opacity, fillColor: isHyd ? COL.hydrant : COL.mly, fillOpacity: opacity })
         .bindTooltip(`${isHyd ? "Hydrant" : "Pole"} · crowdsourced detection (Mapillary)`).addTo(group);
     });
   };
@@ -230,7 +230,7 @@ function renderBedrock(polys, group, opacity) {
     const tip = `${p.muname || "Soil map unit"} · bedrock as shallow as ${inches} in (${(inches / 12).toFixed(1)} ft) in the shallowest soil of this unit (USDA SSURGO)`;
     for (const rings of p.polygons) {
       L.polygon(rings.map((r) => r.map(([lng, lat]) => [lat, lng])), {
-        color: p.cls.color, weight: 0.8, opacity: Math.min(1, op + 0.2), fillColor: p.cls.color, fillOpacity: op * 0.7,
+        className: "pf-hover-only", color: p.cls.color, weight: 0.8, opacity: Math.min(1, op + 0.2), fillColor: p.cls.color, fillOpacity: op * 0.7,
       }).bindTooltip(tip, { sticky: true }).addTo(group);
     }
   }

@@ -384,6 +384,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     // results list then opened over the sheet). Touch never selects here; mouse-only so a tap stays a tap.
     if (e.pointerType === "mouse") e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.currentTarget.style.cursor = "grabbing"; // grab at rest, grabbing for the whole pull (capture keeps this element the cursor owner)
     beginDrag(e.clientY, { pointerId: e.pointerId });
   }, [beginDrag]);
   const onHandlePointerMove = useCallback((e) => {
@@ -392,6 +393,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     moveDrag(e.clientY);
   }, [moveDrag]);
   const onHandlePointerEnd = useCallback((e) => {
+    e.currentTarget.style.cursor = "";
     const drag = dragRef.current;
     if (!drag || e.pointerId !== drag.pointerId) return;
     endDrag(e.clientY);

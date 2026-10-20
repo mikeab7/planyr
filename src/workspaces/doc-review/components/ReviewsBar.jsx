@@ -7,7 +7,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
-import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
+import { listReviews, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
+import { useReviewTrash, TrashNotice, UndoToast } from "../../library/components/ReviewTrash.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
@@ -26,7 +27,6 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
   const [rows, setRows] = useState(null);     // saved reviews (null = not loaded)
   const [projects, setProjects] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [pendingDel, setPendingDel] = useState(null); // inline two-step delete arm (NEW-F3 — no window.confirm)
   const ref = useRef(null);
   const reqRef = useRef(0); // in-flight token: a newer refresh supersedes an older slow one (B44)
 
@@ -37,8 +37,22 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
     finally { if (tok === reqRef.current) setBusy(false); }
   };
 
+  // NEW-1 — the delete is the Library's own `useReviewTrash` (library/components/ReviewTrash.jsx):
+  // ONE delete path, ONE reading of `deleteReview`'s result (deleteOutcome.js). Before this the
+  // menu did `await deleteReview(id); refresh();` and dropped the result, so a delete RLS refused
+  // (a teammate's review), made offline, or aimed at an already-deleted row cleared the confirm
+  // row, refreshed, and left the review in the list with nothing saying why. Now the same
+  // `TrashNotice` the Library shows ("Couldn't delete that file — …") renders in this menu, and a
+  // delete that really landed offers the same Undo, inline. `pendingDel` is the hook's two-step arm.
+  const trash = useReviewTrash({
+    titleOf: (id) => (rows || []).find((r) => r.id === id)?.title || "untitled review",
+    refresh,
+    surface: "reviews-menu",
+  });
+  const { pendingDel, setPendingDel, delNotice, setDelNotice, undoDel, setUndoDel, undoDelete } = trash;
+
   useEffect(() => { // fetch the lists when the menu opens / auth flips (refresh is token-guarded)
-    if (!open) { setPendingDel(null); return; } // closing the menu disarms any pending delete confirm
+    if (!open) { setPendingDel(null); setDelNotice(null); setUndoDel(null); return; } // closing the menu disarms any pending delete confirm
     if (signedIn) refresh(); else { setRows([]); setProjects([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, signedIn]);
@@ -61,13 +75,11 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
   // Inline two-step delete (NEW-F3): first click arms the row, second confirms — the
   // window.confirm dialog is gone (owner rule: no dialog-box edits/confirms). The delete
   // itself is SOFT (Recently deleted, ~30-day restore in the Library), so the light inline
-  // confirm matches the stakes.
+  // confirm matches the stakes. The confirmed click is the hook's `del` (NEW-1, above).
   const del = async (e, id) => {
     e.stopPropagation();
     if (pendingDel !== id) { setPendingDel(id); return; }
-    setPendingDel(null);
-    await deleteReview(id);
-    refresh();
+    await trash.del(id);
   };
 
   return (
@@ -108,6 +120,10 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
 
           <div style={{ borderTop: `1px solid ${PAL.line}`, margin: "12px -12px 0", padding: "10px 12px 0" }}>
             <div style={lbl}>Saved reviews</div>
+            {/* NEW-1 — a refused delete says so, right here, in the Library's own words. */}
+            <TrashNotice notice={delNotice} onDismiss={() => setDelNotice(null)} style={{ margin: "8px 0 0" }} />
+            <UndoToast undo={undoDel} onUndo={undoDelete} onDismiss={() => setUndoDel(null)}
+              style={{ position: "static", margin: "8px 0 0", padding: "7px 10px", boxShadow: "none", fontSize: 11.5 }} />
             {busy && <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Loading…</div>}
             {!busy && rows && rows.length === 0 && <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>{signedIn ? "No saved reviews yet." : "—"}</div>}
             {!busy && rows && rows.map((r) => (

@@ -43,7 +43,7 @@ async function resolveRasterUrl(key) {
  * per overlay whose raster failed to load (permission, network, or a deleted object) — so the
  * caller can surface something legible instead of the map just silently showing nothing where
  * a plan should be (B972512-HARDENING item 4). */
-export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement, onRasterUnavailable, calibrating } = {}) {
+export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement, onRasterUnavailable, calibrating, blockSelect } = {}) {
   const layersRef = useRef(new Map()); // overlay id -> layer handle
   const handlesRef = useRef(null);
   const cbRef = useRef({});
@@ -114,8 +114,8 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
       handle.setOpacity(o.opacity);
       handle.setVisible(o.visible);
       if (pinTargetId === o.id) {
-        handle.setClickable((latlng) => cbRef.current.onPinClick && cbRef.current.onPinClick(o, latlng));
-      } else if (!o.locked && !pinTargetId && !calibrating) { // NEW-7: while calibrating, every click belongs to the calibration
+        handle.setClickable((latlng) => cbRef.current.onPinClick && cbRef.current.onPinClick(o, latlng), "pin");
+      } else if (!o.locked && !pinTargetId && !calibrating && !blockSelect) { // NEW-7: while calibrating, every click belongs to the calibration
         handle.setClickable(() => cbRef.current.onSelect && cbRef.current.onSelect(o.id));
       } else {
         handle.setClickable(null);
@@ -134,7 +134,7 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
 
     syncHandles();
     return undefined;
-  }, [map, overlays, activeId, pinTargetId, calibrating]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map, overlays, activeId, pinTargetId, calibrating, blockSelect]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Full teardown when the map itself goes away (route switch).
   useEffect(() => () => { for (const handle of layersRef.current.values()) handle.destroy(); layersRef.current.clear(); }, [map]);

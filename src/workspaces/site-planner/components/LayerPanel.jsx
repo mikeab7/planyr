@@ -646,7 +646,7 @@ export default function LayerPanel({
             <select aria-label="Satellite imagery source" data-testid="basemap-source" value={basemap.value}
               disabled={!!basemap.disabledReason} onChange={(e) => !basemap.disabledReason && basemap.onChange(e.target.value)}
               title={basemap.disabledReason || "Which aerial imagery draws under the plan."}
-              style={{ ...fieldBase, flex: 1, minWidth: 0, padding: "4px 6px", cursor: basemap.disabledReason ? "not-allowed" : "pointer", opacity: basemap.disabledReason ? 0.5 : 1 }}>
+              style={{ ...fieldBase, flex: 1, minWidth: 0, padding: "4px 6px", cursor: basemap.disabledReason ? "default" : "pointer", opacity: basemap.disabledReason ? 0.5 : 1 }}>
               {(basemap.choices || []).map((c) => <option key={c.key} value={c.key} title={c.title}>{c.label}</option>)}
             </select>
             {bmStatus && !basemap.disabledReason && basemap.value !== "off" && (

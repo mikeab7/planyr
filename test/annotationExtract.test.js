@@ -44,22 +44,28 @@ describe("NEW-1 — a drawing markup in its default band stays editable", () => 
     const full = root(mkRect("m1", 100, 100), h("g", { "data-gis-front-band": "1" }, h("image", { x: 0, y: 0, width: 1000, height: 800, "data-export-overlay": "1" })));
     expect(keysOf(extractMarkupAnnotations(full, { markups: markups({ id: "m1" }), f2p }))).toEqual(["markup:m1"]);
   });
-  it("(c) a markup sent behind the plan stays in the page, even with a building over it", () => {
+  it("(c) a markup sent behind the plan, with a building over it: BOTH lift, the markup written first (under the building)", () => {
     const clone = root(mkRect("back", 100, 100), buildingNode("b1", 80, 80, 200, 120), mkRect("front", 600, 100));
-    const r = extractMarkupAnnotations(clone, { markups: markups({ id: "back", behindEls: true }, { id: "front" }), els: [], f2p });
-    expect(keysOf(r)).toEqual(["markup:front"]);
-    expect(r.flattened).toEqual(["markup:back"]);
-    expect(clone.querySelectorAll("[data-feature]").map((n) => n.getAttribute("data-feature"))).toEqual(["markup:back", "el:b1"]);
+    const r = extractMarkupAnnotations(clone, { markups: markups({ id: "back", behindEls: true }, { id: "front" }), els: [{ id: "b1", type: "building", cx: 180, cy: 140, w: 200, h: 120, rot: 0 }], f2p });
+    expect(keysOf(r)).toEqual(["markup:back", "building:b1", "markup:front"]);
+    expect(r.flattened).toEqual([]);
+    expect(clone.querySelectorAll("[data-feature]")).toHaveLength(0);
   });
-  it("a behind-the-plan callout and measurement are pinned too, and relative order of the lifted ones is DOM order", () => {
+  it("(c') an element NOT in the model (unknown) is page content and still pins what it covers — named in `pinned`", () => {
+    const clone = root(mkRect("back", 100, 100), buildingNode("ghost", 80, 80, 200, 120));
+    const r = extractMarkupAnnotations(clone, { markups: markups({ id: "back", behindEls: true }), els: [], f2p });
+    expect(keysOf(r)).toEqual([]);
+    expect(r.pinned).toEqual([{ key: "markup:back", why: "under-page", by: "el:ghost", name: "markup:back" }]);
+  });
+  it("NEW-1 (2026-10-20): a behind-the-plan callout and measurement LIFT too — /Annots order is paint order, so nothing needs pinning", () => {
     const clone = root(
       h("g", { "data-feature": "callout:c1" }, h("rect", { x: 10, y: 10, width: 50, height: 20, fill: "#fff", stroke: "#334155" })),
       mkRect("a", 300, 300), mkRect("b", 400, 400),
       h("g", { "data-feature": "measure:0", "data-measure-mode": "line" }, h("polyline", { points: "0,0 90,90", fill: "none", stroke: "#0ea5e9", "stroke-width": 1.2 })),
     );
     const r = extractMarkupAnnotations(clone, { markups: markups({ id: "a" }, { id: "b" }), callouts: [{ id: "c1", behindEls: true }], measures: [{ id: "M1", mode: "line" }], f2p });
-    expect(r.flattened).toEqual(["callout:c1"]);
-    expect(keysOf(r)).toEqual(["markup:a", "markup:b", "measure:M1"]);
+    expect(r.flattened).toEqual([]);
+    expect(keysOf(r)).toEqual(["callout:c1", "markup:a", "markup:b", "measure:M1"]);
   });
   it("a LATER ELEMENT that overlaps a markup still keeps it in the page (the selection-lift case); one that doesn't, doesn't", () => {
     const over = root(mkRect("m1", 100, 100), h("g", { "data-feature": "el:p1" }, h("rect", { x: 120, y: 110, width: 100, height: 100, fill: "#bbb" })));
@@ -68,11 +74,13 @@ describe("NEW-1 — a drawing markup in its default band stays editable", () => 
     const apart = root(mkRect("m1", 100, 100), h("g", { "data-feature": "el:p1" }, h("rect", { x: 500, y: 500, width: 100, height: 100, fill: "#bbb" })));
     expect(keysOf(extractMarkupAnnotations(apart, { markups: markups({ id: "m1" }), f2p }))).toEqual(["markup:m1"]);
   });
-  it("an easement/encumbrance (site data in the markups array) is page content, never lifted", () => {
+  it("NEW-1 (2026-10-20): an easement (site data in the markups array) is drawn site data and lifts as an editable Polygon", () => {
     const clone = root(rectNode("markup:e1", 100, 100, 80, 40), mkRect("m1", 600, 100));
-    const r = extractMarkupAnnotations(clone, { markups: markups({ id: "e1", kind: "easement" }, { id: "m1" }), f2p });
-    expect(keysOf(r)).toEqual(["markup:m1"]);
-    expect(clone.querySelector("[data-feature]").getAttribute("data-feature")).toBe("markup:e1");
+    const r = extractMarkupAnnotations(clone, { markups: markups({ id: "e1", kind: "easement", name: "Pipeline esmt" }, { id: "m1" }), f2p });
+    expect(keysOf(r)).toEqual(["markup:e1", "markup:m1"]);
+    const a = buildAnnotations(r.descriptors, { M0, frame }).annots[0];
+    expect(a.subtype).toBe("Polygon"); expect(a.subj).toBe("Easement"); expect(a.contents).toBe("Pipeline esmt");
+    expect(clone.querySelector("[data-feature]")).toBe(null);
   });
   it("(d) the full fixture still yields one annotation per markup", () => {
     const built = buildAnnotations(fixtureDescriptors, { M0, frame });
@@ -115,9 +123,13 @@ describe("NEW-2 — buildings lift as native Polygon annotations", () => {
     const a = buildAnnotations(r.descriptors, { M0, frame }).annots[0];
     expect(a.subtype).toBe("Polygon"); expect(a.vertices).toHaveLength(10);
   });
-  it("a road or pond is never lifted", () => {
-    const c = root(h("g", { "data-feature": "el:r1" }, h("rect", { x: 0, y: 0, width: 50, height: 50, fill: "#999" })));
-    expect(run(c, { els: [{ id: "r1", type: "road" }] }).descriptors).toEqual([]);
+  it("NEW-1 (2026-10-20): a road and a pond lift too, as Polygons named in plain words", () => {
+    const c = root(h("g", { "data-feature": "el:r1" }, h("rect", { x: 0, y: 0, width: 50, height: 50, fill: "#999" })),
+      h("g", { "data-feature": "el:p1" }, h("path", { d: "M100 100L200 100L220 180L90 190Z", fill: "#7dd3fc", stroke: "#0369a1" })));
+    const r = run(c, { els: [{ id: "r1", type: "road" }, { id: "p1", type: "pond", points: [] }] });
+    expect(keysOf(r)).toEqual(["element:r1", "element:p1"]);
+    const an = buildAnnotations(r.descriptors, { M0, frame }).annots;
+    expect(an.map((a) => [a.subtype, a.subj, a.vertices.length])).toEqual([["Polygon", "Road", 8], ["Polygon", "Detention pond", 8]]);
   });
   it("a LATER element painted over the building keeps it in the page (the flattened picture's order wins)", () => {
     const c = root(buildingNode("b1", 200, 140, 200, 120), h("g", { "data-feature": "el:lot" }, h("rect", { x: 250, y: 180, width: 300, height: 200, fill: "#bbb", "fill-opacity": 0.9 })));
@@ -129,27 +141,34 @@ describe("NEW-2 — buildings lift as native Polygon annotations", () => {
     const c = root(buildingNode("b1", 200, 140, 200, 120), h("g", { "data-feature": "el:court" }, h("rect", { x: 200, y: 260, width: 200, height: 130, fill: "#bbb", stroke: "#666", "stroke-width": 1 })));
     expect(keysOf(run(c))).toEqual(["building:b1"]);
   });
-  it("a reference drawing or lifted GIS layer over the building pins IT (parity), but an empty GIS band does not", () => {
+  it("a reference drawing over the building pins IT (named, with its reason); a lifted GIS layer pins nothing but is NOTED; an empty band is silent", () => {
     const withRef = root(buildingNode("b1", 200, 140, 200, 120), refNode("r", 150, 100, 400, 300));
-    expect(run(withRef).flattened).toEqual(["el:b1"]);
+    const rr = run(withRef);
+    expect(rr.flattened).toEqual(["el:b1"]);
+    expect(rr.pinned[0]).toMatchObject({ key: "el:b1", why: "under-reference", name: "Building b1" });
     const withGis = root(buildingNode("b1", 200, 140, 200, 120), h("g", { "data-gis-front-band": "1" }, h("image", { x: 0, y: 0, width: 1000, height: 800 })));
-    expect(run(withGis).flattened).toEqual(["el:b1"]);
+    const rg = run(withGis);
+    expect(rg.flattened).toEqual([]); expect(keysOf(rg)).toContain("building:b1");
+    expect(rg.notes.join(" ")).toMatch(/map layer shown above the plan/);
     const emptyGis = root(buildingNode("b1", 200, 140, 200, 120), h("g", { "data-gis-front-band": "1" }, h("foreignObject", { "data-export": "skip" })));
     expect(keysOf(run(emptyGis))).toEqual(["building:b1"]);
   });
-  it("a markup sent behind the plan under a building: markup pinned in the page, building lifted over it", () => {
+  it("a markup sent behind the plan under a building: both lift, markup first", () => {
     const c = root(mkRect("back", 220, 150), buildingNode("b1", 200, 140, 200, 120));
     const r = extractMarkupAnnotations(c, { markups: markups({ id: "back", behindEls: true }), els, f2p });
-    expect(r.flattened).toEqual(["markup:back"]); expect(keysOf(r)).toEqual(["building:b1"]);
+    expect(r.flattened).toEqual([]); expect(keysOf(r)).toEqual(["markup:back", "building:b1"]);
   });
-  it("a parcel acreage chip painted over the building travels inside its appearance; one clear of it stays on the page", () => {
+  it("NEW-1 (2026-10-20): a parcel acreage chip over a building is the PARCEL's — its own annotation, never inside the building; one clear of it stays on the page", () => {
     const chip = (id, x, y) => h("g", { "data-print-chip": "acre", "data-feature": `parcel:${id}` }, txt("24.79 AC", { x, y, "font-size": 12, fill: "#111", "text-anchor": "middle" }));
     const c = root(buildingNode("b1", 200, 140, 200, 120), chip("pc1", 300, 200), chip("pc2", 800, 700));
     const r = run(c);
     const built = buildAnnotations(r.descriptors, { M0, frame, patterns: r.patterns });
-    expect(built.annots[0].ap.stream).toContain("(24.79 AC) Tj");
+    expect(keysOf(r)).toEqual(["building:b1", "parcel-label:pc1"]);
+    expect(built.annots[0].ap.stream).not.toContain("24.79 AC");
+    const lab = built.annots[1];
+    expect(lab.subj).toBe("Parcel label"); expect(lab.contents).toBe("24.79 AC"); expect(lab.ap.stream).toContain("(24.79 AC) Tj");
     const left = c.querySelectorAll("[data-feature]").map((n) => n.getAttribute("data-feature"));
-    expect(left).toEqual(["parcel:pc2"]); // pc1 left the page with the building; pc2 never overlapped it
+    expect(left).toEqual(["parcel:pc2"]); // pc1 is its own annotation; pc2 never overlapped anything lifted
   });
   it("without the plan's elements there is nothing to lift (callers that pass no els keep the old behaviour)", () => {
     const r = extractMarkupAnnotations(clone(), { markups: markups({ id: "m1" }), f2p });
@@ -193,24 +212,24 @@ describe("NEW-1 (2026-10-19) — a building and its corner bump-outs are ONE ann
     expect(b.ap.stream).toMatch(/Tj/);
     expect(b.ic).toBeTruthy(); expect(b.color).toBeTruthy(); // regeneration inputs still read off the host's footprint
   });
-  it("a building with NO bump-outs is unchanged (4 vertices); a bump-out whose host is not drawn stays page content", () => {
+  it("a building with NO bump-outs is unchanged (4 vertices); a bump-out whose host is not drawn lifts on its own", () => {
     const c = root(hostNode(), mkRect("m1", 900, 100));
     const r = run(c, { els: [host] });
     expect(buildAnnotations(r.descriptors, { M0, frame, patterns: r.patterns }).annots[0].vertices).toHaveLength(8);
     const orphan = root(bumpNode("bpL"), mkRect("m1", 900, 100));
     const r2 = run(orphan);
-    expect(keysOf(r2)).toEqual(["markup:m1"]); expect(left(orphan)).toEqual(["el:bpL"]);
+    expect(keysOf(r2)).toEqual(["element:bpL", "markup:m1"]); expect(left(orphan)).toEqual([]);
   });
   it("a bump-out painted BEFORE its host (Arrange) is still a member; a markup between them is judged against each member at its own position", () => {
     // the markup sits under the host only: lifting the building paints exactly what the page painted → building lifted
     const c = root(bumpNode("bpL"), mkRect("under", 600, 400), hostNode(), bumpNode("bpR"));
     const r = extractMarkupAnnotations(c, { markups: markups({ id: "under", behindEls: true }), els, f2p });
-    expect(r.flattened).toEqual(["markup:under"]); expect(keysOf(r)).toEqual(["building:b1"]);
-    expect(left(c)).toEqual(["markup:under"]);
+    expect(r.flattened).toEqual([]); expect(keysOf(r)).toEqual(["markup:under", "building:b1"]);
+    expect(left(c)).toEqual([]);
     // the markup ALSO lies over the earlier bump-out: a lifted building would paint that bump-out over it → pinned
     const c2 = root(bumpNode("bpL"), mkRect("under", 380, 580), hostNode(), bumpNode("bpR"));
     const r2 = extractMarkupAnnotations(c2, { markups: markups({ id: "under", behindEls: true }), els, f2p });
-    expect(r2.flattened).toEqual(["markup:under", "el:b1"]); expect(keysOf(r2)).toEqual([]);
+    expect(r2.flattened.sort()).toEqual(["el:b1", "markup:under"]); expect(keysOf(r2)).toEqual([]);
     expect(left(c2)).toEqual(["el:bpL", "markup:under", "el:b1", "el:bpR"]);
   });
   it("two buildings whose members interleave: the annotation order follows the page (A's bump-out over B's host → A written after B)", () => {
@@ -232,13 +251,13 @@ describe("NEW-1 (2026-10-19) — a building and its corner bump-outs are ONE ann
     expect(keysOf(r)).toEqual([]); expect(r.flattened).toEqual(["el:b1"]);
     expect(left(c)).toEqual(["el:b1", "el:bpL", "el:bpR", "el:lot"]); // nothing moved
   });
-  it("a truck court flush against a bump-out does not pin it; a parcel chip over a bump-out travels with the building", () => {
+  it("a truck court flush against a bump-out does not pin it; a parcel chip over a bump-out is its own label", () => {
     const court = h("g", { "data-feature": "el:court" }, h("rect", { x: 405, y: 600, width: 390, height: 130, fill: "#bbb", stroke: "#666", "stroke-width": 1 }));
     const chip = h("g", { "data-print-chip": "acre", "data-feature": "parcel:pc1" }, txt("24.79 AC", { x: 822, y: 640, "font-size": 12, fill: "#111", "text-anchor": "middle" }));
     const c = root(hostNode(), bumpNode("bpL"), bumpNode("bpR"), court, chip);
     const r = run(c);
-    expect(keysOf(r)).toEqual(["building:b1"]);
-    expect(buildAnnotations(r.descriptors, { M0, frame, patterns: r.patterns }).annots[0].ap.stream).toContain("(24.79 AC) Tj");
+    expect(keysOf(r)).toEqual(["building:b1", "parcel-label:pc1"]);
+    expect(buildAnnotations(r.descriptors, { M0, frame, patterns: r.patterns }).annots[0].ap.stream).not.toContain("24.79 AC");
     expect(left(c)).toEqual(["el:court"]);
   });
   it("a rotated building with bump-outs lifts as one Polygon with eight vertices", () => {

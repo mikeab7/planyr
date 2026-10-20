@@ -43,7 +43,7 @@ describe("server send core", () => {
     expect(net.sends()).toBe(1);
     const raw = JSON.parse(net.calls.find((c) => c.url.includes("gmail.googleapis.com")).init.body).raw;
     const mime = Buffer.from(raw, "base64url").toString("utf8");
-    expect(mime).toMatch(/^From: Planyr <mike@planyr\.io>/m);
+    expect(mime).toMatch(/^From: Planyr <no-reply@planyr\.io>/m); // From = the public alias; auth `sub` below stays the mailbox
     expect(mime).toMatch(/^To: a@b\.com/m);
     const subj = /^Subject: =\?UTF-8\?B\?(.+)\?=/m.exec(mime)[1];
     expect(Buffer.from(subj, "base64").toString("utf8")).toBe("Mike Abbott invited you to HIP Houston on Planyr");

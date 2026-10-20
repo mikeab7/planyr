@@ -50,6 +50,7 @@ import { resolveCountyForPoint } from "../../sitePlans/lib/overlayCompCounty.js"
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 import { MOBILE_BREAKPOINT_PX } from "../lib/compMobileLayout.js";
 import CompEntryMobileSheet from "./CompEntryMobileSheet.jsx";
+import { pinDragCursor } from "../../ui/controls.jsx";
 
 // B1091712 — below MOBILE_BREAKPOINT_PX this whole panel renders CompEntryMobileSheet
 // instead of the table below (a transposed, one-comp-per-screen layout — see that file's own
@@ -1882,12 +1883,14 @@ export default function CompEntryGrid({
     e.preventDefault();
     const sy = e.clientY;
     const startH = dockHeightRef.current;
+    const releaseCursor = pinDragCursor("row-resize"); // stays a resize arrow even when the pointer outruns the 6px edge
     const move = (ev) => {
       const h = typeof window !== "undefined" ? window.innerHeight : 800;
       const next = clamp(startH + (sy - ev.clientY), DOCK_HEIGHT_MIN, Math.min(DOCK_HEIGHT_MAX, h - 80));
       setDockHeight(next);
     };
     const up = () => {
+      releaseCursor();
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       try { window.localStorage?.setItem(DOCK_HEIGHT_KEY, String(dockHeightRef.current)); } catch { /* private mode / quota — height just won't persist */ }
@@ -2085,7 +2088,7 @@ export default function CompEntryGrid({
           total content exceeds `dockHeight` — same intent as HARDENING-28, now paid for by the
           panel shrinking to content instead of a floor forced onto the grid regardless of row count. */}
       <div onPointerDown={startResize} title="Drag to resize"
-        style={{ flex: "none", height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
+        style={{ flex: "none", height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "row-resize", background: "var(--border-default)" }} />
       <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>Paste comps</span>
         <button onClick={requestClose} aria-label="Close"
