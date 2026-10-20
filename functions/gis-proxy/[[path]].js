@@ -107,6 +107,11 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Pennsylvania, 2026-10-19) — the hosts the wired Pennsylvania counties sit on, each MEASURED through this relay (on the PR preview) before its county was wired: PASDA (Penn State's state data
+   * clearinghouse — one MapServer per county for ~36 counties), the PA DEP partial statewide layer (last-resort source for four counties), and the county-run ArcGIS servers. */
+  "arcgis.lancastercountypa.gov", "fcgis.franklincountypa.gov", "gis.beavercountypa.gov", "gis.carboncounty.com", "gis.delcopa.gov",
+  "gis.dep.pa.gov", "gis.leoc.net:6443", "gis.mckeancountypa.gov", "gis.pikepa.org", "maps.clintoncountypa.gov", "maps.pottercountypa.net",
+  "mapservices.pasda.psu.edu", "services.co.schuylkill.pa.us", "tiogagis.tiogacountypa.us",
   /* NEW-1 (Washington, 2026-10-19, B2349360) — the county-run ArcGIS Server hosts the wired Washington counties sit on (each MEASURED through this relay on the PR preview before it was wired). */
   "atlas.co.chelan.wa.us", // Chelan County
   "gis.cowlitzwa.gov", // Cowlitz County Assessor
@@ -151,6 +156,11 @@ export const ALLOWED_HOSTS = new Set([
   "davisonreports.com", "www.davisonreports.com", // Davison County parcel viewer
   "sidbox.sidwellco.com", // Sidwell — Dakotas county parcel viewers
   "brookingscountysd.gov", "www.brookingscountysd.gov", "codington.sdcounty.gov", "brown.sd.us", // county sites whose GIS pages name the viewer
+  /* NEW-1 (Iowa, 2026-10-19) — hosts behind the wired Iowa counties; each was MEASURED through this relay before its counties were wired. */
+  "wfs.schneidercorp.com", // Schneider Geospatial's public county map servers (the feed behind the Beacon viewers) — 23 Iowa counties
+  "gis.pottcounty-ia.gov", // Pottawattamie County (Council Bluffs) GIS
+  "gis.dallascountyiowa.gov", // Dallas County (Adel) GIS
+  "magic-gis.com", // MAGIC — Muscatine Area GIS consortium (Muscatine County parcels)
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",

@@ -23944,10 +23944,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         sheetSvg: c.sheetSvg,
         liftedIds: (c.annotationSet?.annots || []).length,
         keptInPage: c.annotationsKeptInPage || 0,
+        pins: c.annotationPins || [],
+        annots: (c.annotationSet?.annots || []).map((a) => ({ subtype: a.subtype, nm: a.nm, subj: a.subj, contents: a.contents, family: a.family, kind: a.kind })),
+        degraded: c.annotationSet?.degraded || [],
       };
     };
     window.__plannerExportComposed = composedHook;
-    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; }; // NEW-3 — see the note on __plannerView
+    /* NEW-1 (2026-10-20) — the feet → clone-unit map the export used, as an affine (origin, +x foot, +y foot), so a test
+       fixture captured from __plannerExportSvg can be replayed through the extractor in node. Read-only; same gate. */
+    const f2pHook = () => { const c = exportCtx(); return [c.f2p({ x: 0, y: 0 }), c.f2p({ x: 1, y: 0 }), c.f2p({ x: 0, y: 1 })]; };
+    window.__plannerExportF2p = f2pHook;
+    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; if (window.__plannerExportF2p === f2pHook) window.__plannerExportF2p = null; }; // NEW-3 — see the note on __plannerView
   });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.

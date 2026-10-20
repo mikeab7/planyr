@@ -257,7 +257,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   useEffect(() => {
     if (!active || !pinnedFolderProjectKey) return;
     let live = true;
-    Promise.all(pinnedFolderProjectKey.split(",").map((pid) => listFolders(pid).catch(() => [])))
+    Promise.all(pinnedFolderProjectKey.split(",").map((pid) => listFolders(pid).then((r) => (r && r.ok ? r.rows : [])).catch(() => []))) // NEW-4 shape; a miss keeps the pin-time label
       .then((lists) => { if (live) setFolderNames(new Map(lists.flat().map((f) => [f.id, f]))); })
       .catch(() => { /* fallback to the pin-time label */ });
     return () => { live = false; };
