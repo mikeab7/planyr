@@ -13,9 +13,11 @@ describe("B761 — merged City-limits-&-ETJ config (solid limits / dashed same-h
   const layers = read("../src/workspaces/site-planner/lib/layers.js");
   const overlay = read("../src/workspaces/site-planner/lib/vectorOverlay.js");
 
-  it("jur_city is the merge primary with the composite label", () => {
-    expect(layers).toMatch(/mergeWith: "jur_etj"/);
-    expect(layers).toMatch(/mergeLabel: "City limits & ETJ"/);
+  it("county, city and ETJ are ONE Counties & Cities merge group (the pairwise mergeWith composite is superseded)", () => {
+    // NEW-1 (Imagery & Layers): B761's `jur_city.mergeWith: "jur_etj"` pair is now the N-ary `counties_cities` group.
+    expect(layers).not.toMatch(/mergeWith: "jur_etj"/);
+    expect((layers.match(/mergeGroup: "counties_cities"/g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(layers).toMatch(/counties_cities: \{\s*label: "Counties & Cities"/);
   });
 
   it("jur_etj is the SAME hue as city and dashed", () => {
@@ -32,7 +34,7 @@ describe("B761 — merged City-limits-&-ETJ config (solid limits / dashed same-h
 describe("B762 — Fort Bend single-layer county folds into Basemap", () => {
   it("fb_contours is relabeled for its new home under the USGS contour row", () => {
     const counties = read("../src/workspaces/site-planner/lib/counties.js");
-    expect(counties).toMatch(/label: "1-ft contours \(Fort Bend DD\)"/);
+    expect(counties).toMatch(/label: "1-Ft Contours \(Fort Bend DD\)"/);
   });
   it("the panel folds a single-layer county and gates its own group on ≥2 layers", () => {
     const panel = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
@@ -50,7 +52,7 @@ describe("B760 — the group disclaimer paragraphs are gone, one footer remains"
     expect(panel).not.toMatch(/verify with the issuing agency/);
     expect(panel).not.toMatch(/const groupNote =/);                    // the paragraph style is retired
   });
-  it("exactly one screening footer", () => {
-    expect((panel.match(/Screening data — verify before relying on it\./g) || []).length).toBe(1);
+  it("exactly one screening footer — now the last line of the ⋯ menu", () => {
+    expect((panel.match(/Screening data\. Verify before relying on it\./g) || []).length).toBe(1);
   });
 });

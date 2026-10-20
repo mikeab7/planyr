@@ -88,7 +88,7 @@ test.describe("NEW-5 — route ↔ project binding", () => {
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
 
     // Open the Layers panel so a duplicate would be observable at all.
-    await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).first().click();
+    await page.getByTestId("layers-expand").filter({ visible: true }).first().click();
     await expect(page.getByTestId("layer-panel").filter({ visible: true }).first()).toBeVisible();
 
     const countVisible = async (sel) => page.locator(sel).filter({ visible: true }).count();

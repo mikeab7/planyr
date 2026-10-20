@@ -83,7 +83,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack, PLANNER_BASEMAP_CHOICES } from "../../shared/basemaps/basemaps.js";
 import { loadRoadNamesPref, saveRoadNamesPref } from "./lib/roadNamesPref.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
@@ -186,6 +186,9 @@ import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
+// NEW-1 (Imagery & Layers) — what the MAP draws: the saved overlays minus Hide Layers (session-only) minus rows that cannot serve this location.
+import { useDrawnOverlays } from "./lib/useDrawnOverlays.js";
+import { setLayersHidden } from "./lib/layerHide.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -3627,6 +3630,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!grContoursWanted || !overlays || (overlays.contours && overlays.contours.on)) return overlays;
     return { ...overlays, contours: { ...(overlays.contours || { opacity: ALL_LAYERS.contours?.opacity ?? 0.9 }), on: true } };
   }, [overlays, grContoursWanted]);
+  /* NEW-1 (Imagery & Layers) — WHAT THE MAP DRAWS, distinct from what the Layers panel SHOWS CHECKED.
+   * `overlays` stays the saved choice (checkboxes, `layerOverrides`, undo). `overlaysDrawn` is the EFFECTIVE set (`overlaysEff`: the saved choice plus whatever grading forces on) minus
+   * (a) Hide Layers — a session-only pill, never written anywhere — and (b) a layer left ON at a place its source
+   * cannot serve (kept in saved state, simply not drawn there). Everything that PAINTS or asks "what is on the map"
+   * reads this; everything that PERSISTS reads `overlays`. It is the INPUT object itself whenever nothing is filtered. */
+  const layerScopeState = origin ? resolveSiteState({ lat: origin.lat, lng: origin.lon }) : null;
+  const overlaysDrawn = useDrawnOverlays(overlaysEff, layerScopeState, origin ? { lat: origin.lat, lng: origin.lon } : null);
   const grContourClipRef = useRef(null);
   const applyGradingClip = useCallback(() => {
     const lyr = overlayRefs.current && overlayRefs.current.contours;
@@ -3635,7 +3645,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
     if (!origin) return;
-    const overlays = overlaysEff; // eslint-disable-line no-shadow
     /* NEW-3 — overlays load OFF the critical path, in priority order.
        Restoring a fully-enabled Layers panel fired 465 requests across 17 hosts in one
        burst, all of it racing the first paint (and starving the coarse basemap backfill
@@ -3655,7 +3664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // point.
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
-    const order = orderLayersByPriority(overlays, ALL_LAYERS);
+    const order = orderLayersByPriority(overlaysDrawn, ALL_LAYERS);
     /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
      *
      * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
@@ -3678,7 +3687,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
      * the staging gate it composes with. */
     const gateResolved = layerGateReady;
-    const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(geoMapRef.current, overlaysDrawn, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
       panes: {
@@ -3716,7 +3725,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [overlaysEff, origin, basemapOn, layerGateReady]); // eslint-disable-line
+  }, [overlaysDrawn, origin, basemapOn, layerGateReady]); // eslint-disable-line
 
   /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
    * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
@@ -3751,7 +3760,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) return;
     let t;
     const recompute = () => {
-      const next = computeCoverage(boundsFromLeaflet(geoMapRef.current), overlays, getNearbyRadiusMiles());
+      const next = computeCoverage(boundsFromLeaflet(geoMapRef.current), overlaysDrawn, getNearbyRadiusMiles());
       if (sameCoverage(coverageRef.current, next)) return; // guard the DISPATCH — an equal map is not a change
       coverageRef.current = next;
       setCoverage(next);
@@ -3760,7 +3769,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     t = setTimeout(recompute, 300); // let the basemap commit (≤160ms) settle first
     const unsub = subscribeRelevance(recompute);
     return () => { clearTimeout(t); unsub(); };
-  }, [overlays, origin, view.ppf, view.offX, view.offY, size.w, size.h]); // value deps: re-measure when the view/size NUMBERS move, never on identity
+  }, [overlaysDrawn, origin, view.ppf, view.offX, view.offY, size.w, size.h]); // value deps: re-measure when the view/size NUMBERS move, never on identity
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
@@ -6066,11 +6075,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hook = () => ({
       ids: Object.keys(overlays || {}),
       on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
+      // NEW-1 (Imagery & Layers) — what the map is actually told to draw (Hide Layers / hidden-here applied) and what has a LIVE layer right now.
+      drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
+      live: Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k] && overlayRefs.current[k] !== "pending"),
       identityEpoch: epoch,
     });
     window.__plannerLayers = hook;
     return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
-  }, [overlays]);
+  }, [overlays, overlaysDrawn]);
   /* B2335056 — click-ack rings riding the LIVE view (see beginIdentifyPress). Layout effect: re-projected
      in the same frame as the view change, never a frame behind it. */
   const ackMoversRef = useRef(new Set());
@@ -6659,7 +6671,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) ensureBasemapOn();
+    // NEW-1 (Imagery & Layers): turning a layer ON while Hide Layers is active ends the hide — never a silent no-op.
+    if (wantOn) { setLayersHidden(false); ensureBasemapOn(); }
   }, [setOverlays, ensureBasemapOn]);
 
   /* NEW-1 — a "Calls to make" tick, persisted PER SITE in the plan's own settings (sparse: only ticked ids exist). */
@@ -6710,7 +6723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayerHiddenToast({
     enabled: !!(active && origin && layerGateReady),
     zoom: origin ? ppfToZoom(view.ppf, origin.lat) : null,
-    overlays, pushToast, dismissByKey: dismissToastByKey, zoomTo: animateZoomTo,
+    overlays: overlaysDrawn, pushToast, dismissByKey: dismissToastByKey, zoomTo: animateZoomTo,
   });
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
@@ -7819,7 +7832,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // converted to feet, then to degrees (the smaller ft-per-degree of the two axes, so
     // the tolerance is never tighter than it looks on screen).
     const tolFt = CANVAS_IDENTIFY_SLOP_PX / Math.max(0.0001, view.ppf);
-    const items = identifyOverlaysAt(overlayRefs.current, overlays, { lat, lng, tolDeg: tolFt / FT_PER_DEG_MIN });
+    const items = identifyOverlaysAt(overlayRefs.current, overlaysDrawn, { lat, lng, tolDeg: tolFt / FT_PER_DEG_MIN });
     if (!items.length) { setGisHit(null); return; }
     const r = wrapRef.current ? wrapRef.current.getBoundingClientRect() : null;
     setGisHit({ x: e.clientX - (r ? r.left : 0), y: e.clientY - (r ? r.top : 0), items });
@@ -7889,13 +7902,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!pt) { setGisHover(null); return; }
       const anchor = { x: pt.x - (r ? r.left : 0), y: pt.y - (r ? r.top : 0) };
       // VECTOR first — it is already in hand, so it answers instantly and for free.
-      const items = identifyOverlaysAt(overlayRefs.current, overlays, at, { limit: 1 });
+      const items = identifyOverlaysAt(overlayRefs.current, overlaysDrawn, at, { limit: 1 });
       if (items.length) { rasterHover.current?.cancel(); setGisHover({ ...anchor, items }); return; }
       /* Nothing in the vector layers. The RASTER-painted overlays (FEMA, wetlands, the City
        * mains, HCFCD, BKDD, the wells) hold no geometry at all — they are pictures — so the
        * only way to name what is under the cursor is to ask their service. Debounced above,
        * cancelled on the next move, and always ending in a stated outcome. */
-      const layers = rasterIdentifyLayers(overlays, {
+      const layers = rasterIdentifyLayers(overlaysDrawn, {
         layerHealthy: (id) => (layerStatus?.[id]?.state ?? null) !== "failed",
       });
       if (!layers.length) { setGisHover(null); return; }
@@ -7906,7 +7919,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }, CANVAS_HOVER_IDENTIFY_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursorLL, overlays, tool, gisHit, panning, view.ppf]);
+  }, [cursorLL, overlaysDrawn, tool, gisHit, panning, view.ppf]);
   // A zoom moves the ground out from under a screen-anchored card, exactly as it does for the
   // pinned one (B1092's note) — drop it rather than let it point at ground it no longer covers.
   // NEW-4(c) — same ref guard as gisHit above, same reason: this fired on every zoom step and
@@ -17533,7 +17546,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
     hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
-    basemapOn, basemapSrc, overlays, layerStatus,
+    basemapOn, basemapSrc, overlays: overlaysDrawn, layerStatus, // NEW-1 (Imagery & Layers) — the sheet carries what the map shows (PDF-PARITY)
     PAL, f0,
     siteName, siteLabel, planLabel, printFrame,
     printMetricPairs, printStormwaterBars,
@@ -26222,18 +26235,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               actually exists, and the flex column is what lets the scroll box — not the card —
               take the overflow. */}
           {(
-            <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
+            <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? "min(384px, calc(100vw - 20px))" : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
               {/* ⛔ TOOLBAR PASS (B727504) — the old "❖" glyph is a tofu box on fonts that lack it,
                   indistinguishable from a shape tool, a stop button, or a crop. Replaced with the
                   two-offset-sheets mark Google Maps / Photoshop / Figma all use for "layers", so it
                   needs no learning; plus the aria-label + tooltip an icon alone can't provide. */}
-              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)"
-                title="Layers — map data layers (flood, utilities, parcels, aerial…)"
-                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
-                <span aria-hidden style={{ color: PAL.accent, display: "flex" }}><LayersIcon size={16} /></span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
-              </button>
+              {/* NEW-1 (Imagery & Layers) — OPEN, the panel's own header row carries the ▾ + title (click collapses), the Hide Layers pill
+                  and the ⋯ menu; COLLAPSED, this is the one chip that brings it back. */}
+              {!layersOpen && (
+                <button onClick={() => setLayersOpen(true)} aria-expanded={false} aria-label="Imagery & Layers — map data layers (flood, utilities, parcels, aerial…)"
+                  title="Imagery & Layers — map data layers (flood, utilities, parcels, aerial…)" data-testid="layers-expand"
+                  style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
+                  <span aria-hidden style={{ color: PAL.accent, display: "flex" }}><LayersIcon size={16} /></span> Imagery &amp; Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>▸</span>
+                </button>
+              )}
               {layersOpen && (
-                <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
+                <div style={{ padding: "8px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
                   <LazyPanel name="Layers panel" minHeight={140}>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
                     /* B1076/B1077 — the flood group scopes its district rows off the SAME
@@ -26253,7 +26270,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        silently produces an empty map — on a due-diligence screen those are
                        different facts, and only one of them is a finding. */
                     siteState={siteStateId}
+                    siteLocation={origin ? { lat: origin.lat, lng: origin.lon } : null}
+                    onCollapse={() => setLayersOpen(false)}
                     basemap={{
+                      choices: PLANNER_BASEMAP_CHOICES,
                       value: origin ? (showAerial ? basemapSrc : "off") : "off", // NEW-1 (B2217648): with the snapshot row gone from Overlays, this control is where a hidden (`aerialHidden`) aerial shows as Off and is turned back on
                       // B688864 — a direct pick here is an explicit, authoritative choice about
                       // what's visible, so it stands down any earlier "Hide aerial" from the

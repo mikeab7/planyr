@@ -154,7 +154,7 @@ describe("NEW-1 — no FREE-FORM z-order UI, and no second stacking scheme", () 
       expect(panel, `LayerPanel must not offer "${banned}" — the model is fixed`).not.toContain(banned);
     }
     // …and the ONE sanctioned ordering affordance is the named two-state lift.
-    expect(panel).toContain("Show above plan");
+    expect(panel).toContain("Draw above plan");
   });
 
   it("the planner names panes from the model instead of picking its own z-index", () => {

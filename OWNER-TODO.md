@@ -7,6 +7,9 @@
 
 _Last updated: 2026-10-05._
 
+## 🗺 A decision: two New York counties ride consultants' copies of commercial parcel data (B2387344)
+- [ ] **Decide.** To make every New York county answer, Chenango and Herkimer are wired to layers published by engineering/planning consultants (not the counties) that are built on Regrid-sourced data; Nassau is a land trust's copy of the 2020 roll and Dutchess an unconfirmed account's copy. They work and are labelled that way, but a consultant can remove a layer, and Regrid's licence on redistribution is your call. **Option A (my recommendation):** keep them until each county publishes its own; **Option B:** drop Chenango/Herkimer to a named "no parcel data" gap. Niagara County's own server is down today (B2387345).
+
 ## 🛠 Admin page: two small one-time steps to finish the automatic Ops refresh and report clean-up (B2159504–B2159507)
 Everything else is built and live. Two things only you can do (the files are attached in chat):
 1. **Ops refreshes itself after every merge** — make up a random string (32+ characters), save it as a GitHub secret named `OPS_INGEST_TOKEN` (repo → Settings → Secrets and variables → Actions), then run the one-line `insert into public.ops_ingest_tokens …` from the top of `admin_ops_ingest.sql` once in the Supabase SQL editor, pasting the SAME string. Until then Ops shows "Not updating" after 3 days.
@@ -1102,4 +1105,5 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 
 - **Decide (B2189604):** the test account can read your real company schedules (Goose Creek, Kilgore, Bee Sand) but cannot save any. Is that intended (read-only company document) or should a stranger account see nothing? Either answer unblocks the schedule checks.
 
+- **Decision (B2366657, Michigan parcels):** about 25 Michigan counties' official parcel maps are run by one vendor, FetchGIS (Amalgam LLC). Their data server refuses anything but their own web page, so Planyr cannot read it today (and will not imitate their page to get in). Calhoun, Delta and Otsego have nothing else. Do you want me to draft a data-access request to Amalgam, or leave those counties as "not wired"?
 - **Check (B2380080, 2 minutes):** team invite emails now send From `Planyr <no-reply@planyr.io>`. For Google to accept that, `no-reply@` must be an alias on the same mailbox as the `INVITE_SENDER` setting in Cloudflare Pages. After that, send one test team invite and confirm the From line reads `Planyr <no-reply@planyr.io>`. If it shows the mailbox address instead, tell me and I'll fix it.

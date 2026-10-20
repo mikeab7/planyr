@@ -284,13 +284,18 @@ export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owne
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name|owner_?last)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */
 /* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
+/* Michigan (NEW-1, 2026-10-20): the BS&A-export columns are published with dropped letters — `ONERNAME1` is the owner (Clinton, Kalamazoo, St. Joseph; Montcalm prefixes it `BSAEXPORT_`); Lenawee's is `OWNNM1`,
+ * Monroe's `parcelmaster_ownername1`, Marquette's project layer `Owner_Merg`, Mason's `ParcelMast` (the parcel-master name), Ionia's joined `Parcel_Data_OWNERNAME`. Strictly the fallback pass, like the Idaho spellings above. */
+export const OWNER_KEY_MI_RE = /^((bsaexport_)?onername\d|ownnm1|parcelmaster_ownername1|owner_merg|parcelmast|parcel_data_ownername)$/i;
+
 /* Oregon (B2347696): `FEEOWNER` (Jackson), `OWNER_LINE` (Clatsop), `OwnerLine1` (Lake) and `MAILING_NAME` (Umatilla, the assessor roll's owner of record) — fallback pass only, like the Idaho spellings. */
 /* South Dakota (B2343936): `TAXPAYER_NAME` (Grant, First District roll), `CURRENT_OW` (Lawrence's shapefile-truncated CURRENT_OWNER) and `vcPayerLas` (Brown's payer last-or-entity name — the first name sits in a sibling column) are those sources' owner column; `deedhold` (Moody) is a spelling of the deed-holder column in OWNER_KEY_RE. */
 /* Illinois (B2372624): the Devnet / Tyler-CAMA county exports spell the owner a dozen ways. `owner1_nam` (the shapefile-truncated owner1_name — Douglas, Franklin, Fulton, Jackson, Johnson, Morgan,
  * Randolph, Union, Henderson, Mercer), `Owner1Name` (Effingham), `TSC_Owner1` / `TSC_Name1` (the tax-roll export's own prefix — Clinton, Clay, Fayette), `PrimaryName` (De Witt, Marshall, Stark,
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
+/* New York (2026-10-20): `primary_ow` (the shapefile-truncated PRIMARY_OWNER — Nassau, Franklin and Jefferson via the north-country parcel model, Orleans, Seneca) Fallback pass only. */
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
 /* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
  * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
 export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
@@ -351,7 +356,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
   }
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
-    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key))) continue;
+    if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key)) && !OWNER_KEY_MI_RE.test(leafKey(key))) continue;
     if (isPlaceholderValue(attrs[key])) continue;
     return key;
   }
@@ -421,8 +426,9 @@ export const APPR_FIELDS = [
   [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
+  // NEW-1 (New York, 2026-10-20) — + ^print_?key$ (the tax-map number) and ^swis_?sbl_?id$ (municipality code + section/block/lot, set on every NYS roll parcel): the statewide layer leaves MUNI_PARCEL_ID blank for NYC and part of Suffolk (874k lots), so without a fallback the card showed no parcel id.
   // B2191xxx — + sched_?num (Denver), parcel_?(number|no|num) (Clackamas), ^pin$/taxpin (Montgomery, Gwinnett), assess…_num (E. Baton Rouge)
-  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$)/i, "Account / ID"],
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num|^l15parce_2$|^print_?key$|^swis_?sbl_?id$)/i, "Account / ID"],
   // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
   // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
   [/^county_?name$/i, "County"],

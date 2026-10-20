@@ -14,6 +14,7 @@
  * no pointer event — so a click still selects the building underneath it.
  */
 import { test, expect } from "@playwright/test";
+import { openPlannerLayers, setLayer, openRowMenu } from "./lib/layersPanel.js";
 
 // The Tsakiris tract (Waller County, inside BKDD) — the same coordinates the identify spec uses.
 const LAT = 29.77938, LON = -95.89503;
@@ -48,7 +49,6 @@ const HYDRO_JSON = {
   }],
 };
 
-const toggle = (page, name) => page.getByRole("checkbox", { name, exact: true });
 
 test.describe("NEW-1 — map layer stacking", () => {
   test("area layers paint under the plan, line layers over it, and the top band steals no clicks", async ({ page }) => {
@@ -92,13 +92,9 @@ test.describe("NEW-1 — map layer stacking", () => {
     expect(order.topHostEvents).toBe("none");
 
     /* 2. Turn ON one layer of each role and prove each landed in its own band. */
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const easements = toggle(page, "District drainage easements"); // AREA role
-    await expect(easements).toBeVisible({ timeout: 10000 });
-    await easements.click();
-    const streams = toggle(page, "Streams, canals & ditches"); // LINE role
-    await expect(streams).toBeVisible({ timeout: 10000 });
-    await streams.click();
+    await openPlannerLayers(page);
+    await setLayer(page, "bkdd_easements", true); // AREA role  (Flood & Drainage › Drainage Easements)
+    await setLayer(page, "nhd_flowlines", true);  // LINE role  (Flood & Drainage › Streams, Canals & Ditches)
     await page.waitForTimeout(2000); // the (stubbed) pulls + paint
 
     const where = await page.evaluate(() => {
@@ -215,10 +211,8 @@ test.describe("NEW-1 — show a layer above the plan", () => {
     expect(hostInSvg.inSvg).toBe(true);
     expect(hostInSvg.hasForeign, "the lifted band has no foreignObject host — a Leaflet pane cannot live in the SVG without one").toBe(true);
 
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const easements = toggle(page, "District drainage easements"); // an AREA-role source: liftable
-    await expect(easements).toBeVisible({ timeout: 10000 });
-    await easements.click();
+    await openPlannerLayers(page);
+    await setLayer(page, "bkdd_easements", true); // an AREA-role source: liftable
     await page.waitForTimeout(2000);
 
     // (a) THE DEFAULT: under the plan, in the backdrop map's own pane. No interaction needed for
@@ -236,12 +230,15 @@ test.describe("NEW-1 — show a layer above the plan", () => {
     expect(before.inBackdrop, "the stubbed easement painted nothing in the default band").toBeGreaterThan(0);
     expect(before.inFront, "nothing may sit in the lifted band before anything is lifted").toBe(0);
 
-    // The control itself: a line layer is already above, so its control renders in the on state
-    // and inert — the row never has to be interpreted.
-    const lift = page.getByRole("checkbox", { name: "Show District drainage easements above plan", exact: true });
+    // The control itself (NEW-1, Imagery & Layers): "Draw above plan" lives in the row's ▾ dropdown and is offered for AREA layers ONLY —
+    // a line layer is over the plan already, so its dropdown simply has no such control (the old checked-and-inert state is retired).
+    const menu = await openRowMenu(page, "bkdd_easements");
+    const lift = menu.getByRole("checkbox", { name: "Draw Drainage Easements above plan", exact: true });
     await expect(lift).toBeVisible({ timeout: 10000 });
     await expect(lift).not.toBeChecked();
     await expect(lift).toBeEnabled();
+    expect(await (await openRowMenu(page, "nhd_flowlines")).getByRole("checkbox", { name: /above plan/ }).count(), "a LINE layer has nothing to lift").toBe(0);
+    await openRowMenu(page, "bkdd_easements");
 
     /* WHERE to look for the change, derived rather than guessed: the rectangle where the layer's
      * painted geometry ACTUALLY crosses the building. A clip picked by eye (the footprint's

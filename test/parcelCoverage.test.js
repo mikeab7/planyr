@@ -62,10 +62,8 @@ describe("parcel coverage join (NEW-1)", () => {
     // a county with no source of its own but a city one is painted as city-level only — not "wired"
     // (Jackson MO stopped being one on 2026-10-19: Missouri's countywide parcel layer was found — B2317680 — and the two city scopes still win inside their limits.)
     expect(rowFor(cov, "MO", "Jackson County")).toMatchObject({ wired: true, cityOnly: false, kind: "own" });
-    for (const [st, nm] of [["MI", "Wayne County"]]) {
-      expect(rowFor(cov, st, nm)).toMatchObject({ wired: false, cityOnly: true, kind: null });
-      expect(rowFor(cov, st, nm).cityKind).toBeTruthy();
-    }
+    // Wayne MI stopped being one on 2026-10-20 (NEW-1, Michigan): its countywide layer was found; Detroit's city layer still wins inside the city.
+    expect(rowFor(cov, "MI", "Wayne County")).toMatchObject({ wired: true, cityOnly: false, kind: "own" });
     // a county that already has its own source keeps it (Sioux Falls fills a hole in Minnehaha's)
     expect(rowFor(cov, "SD", "Minnehaha County")).toMatchObject({ wired: true, cityOnly: false, kind: "own" });
   });
@@ -74,8 +72,8 @@ describe("parcel coverage join (NEW-1)", () => {
     const t = cov.totals;
     expect(Object.values(t.byKind).reduce((a, b) => a + b, 0)).toBe(t.counties);
     expect(t.cityOnly).toBe(cov.rows.filter((r) => r.cityOnly).length);
-    expect(t.cityOnly).toBe(1); // Wayne MI (Jackson MO has a countywide source since B2317680)
-    expect(totalLine(t)).toContain("Plus 1 with city-level parcels only");
+    expect(t.cityOnly).toBe(0); // no county is city-only now: Jackson MO (B2317680) and Wayne MI (2026-10-20) both have countywide sources
+    expect(totalLine(t)).not.toContain("city-level parcels only");
     // wiring counts are what they were before the city sources were placed
     expect(t.counties).toBe(cov.rows.filter((r) => r.wired).length);
   });
@@ -88,7 +86,7 @@ describe("parcel coverage join (NEW-1)", () => {
     expect(harris.host).toBeTruthy();
     expect(harris.fields.map((f) => f[0])).toContain("Parcel ID field");
     const wayne = countyDetail(rowFor(cov, "MI", "Wayne County"), live());
-    expect(wayne).toMatchObject({ wired: false, kindWord: "City-level parcels only", registryKey: null });
+    expect(wayne).toMatchObject({ wired: true, kindWord: "County's own server", registryKey: "mi_wayne" });
     expect(wayne.cityParcels[0]).toMatchObject({ cityName: "Detroit", registryKey: "mi_detroit" });
     expect(wayne.cityParcels[0].layerUrl).toMatch(/Detroit_MP_Parcel/);
     const dead = countyDetail(cov.rows.find((r) => !r.wired && !r.cityOnly), live());

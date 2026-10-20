@@ -1,0 +1,70 @@
+/* NEW-1 (Michigan, 2026-10-20) — MICHIGAN county parcel sources. Michigan has NO free statewide parcel service (the State's DTMB confirms a statewide parcel layer exists inside the Michigan
+ * Geographic Framework but keeps it for internal state use; it is not on the Open Data portal), and the assessing unit is the township / city, so the countywide layers are published by each county's
+ * equalization / GIS / drain office (most on ArcGIS Online, a few on the county's own ArcGIS Server through the /gis-proxy relay) or, where the county has none, by a consultant on its behalf.
+ * A county absent from this table AND from counties.js (mi_oakland, mi_macomb, mi_detroit are the hand-written rows) has no usable open service and says so by name
+ * ("<County> — no parcel data wired here yet"): docs/STATEWIDE-PARCELS.md "Michigan counties (2026-10-19)" has the per-county table, what was searched, and the reason for every gap.
+ * Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy), idField, addrField, owner column?, centre lat, lng, padded bbox]. Provenance prose lives in miProvenance.js (build-time only,
+ * never shipped to the browser). Keys are mi_<slug> with the slug the squished county name (mi_stclair, mi_grandtraverse, mi_vanburen). */
+export const MI_ROWS = [
+  ["allegan","Allegan","https://services7.arcgis.com/abcn8A25PPQFVHHF/arcgis/rest/services/Parcels/FeatureServer/4","MAPPING_ID",null,1,42.5987,-86.063,[42.4125, -86.295, 42.785, -85.535]],
+  ["antrim","Antrim","https://services6.arcgis.com/ZcCP0G3kEnUDVego/arcgis/rest/services/AllParcels_shp/FeatureServer/0","PARCEL_NO",null,1,44.9926,-85.2517,[44.8035, -85.4615, 45.2215, -84.842]],
+  ["arenac","Arenac","https://services8.arcgis.com/SWvtgOskziun2bFF/arcgis/rest/services/Arenac_Parcel_2026/FeatureServer/37","PID","PROPERTY_A",1,44.0564,-83.9474,[43.907, -84.177, 44.1805, -83.558]],
+  ["barry","Barry","https://services.arcgis.com/i0SsdDzLI3mLGmPR/arcgis/rest/services/Parcels_OpenData_View/FeatureServer/14","Tparcel",null,0,42.5993,-85.2566,[42.416, -85.558, 42.7825, -85.0655]],
+  ["bay","Bay","https://services7.arcgis.com/NsdAMAHBh4C0qHfJ/arcgis/rest/services/Parcels2025/FeatureServer/0","PARCELID",null,1,43.7257,-84.0526,[43.474, -84.1805, 44.012, -83.689]],
+  ["benzie","Benzie","https://services5.arcgis.com/lcdRo4JSOTVu3FMR/arcgis/rest/services/Benzie_County_Parcels/FeatureServer/1","PNUM","PROPSTREET",1,44.6465,-85.948,[44.505, -86.2685, 44.788, -85.805]],
+  ["berrien","Berrien","https://services5.arcgis.com/v2WhhBBaFU3T6oWm/arcgis/rest/services/Berrien_County_Parcels_2024/FeatureServer/1","PIN","Full_Address",1,41.9346,-86.4094,[41.755, -86.845, 42.2595, -86.217]],
+  ["branch","Branch","https://services9.arcgis.com/TwBMgIvGpeiBjKXc/arcgis/rest/services/Branch_County_Parcels/FeatureServer/0","PARCELID","ADDRESS",1,41.9188,-84.9919,[41.752, -85.31, 42.0855, -84.816]],
+  ["cass","Cass","https://services3.arcgis.com/2Pxs2zBdOuEfbewK/arcgis/rest/services/county_parcels/FeatureServer/0","Parcel_Num","Physical",1,41.919,-85.9198,[41.7535, -86.2445, 42.0845, -85.7525]],
+  ["charlevoix","Charlevoix","https://services9.arcgis.com/y5L48PgYtx9anhMP/arcgis/rest/services/Parcels_with_attributes/FeatureServer/0","PIN",null,1,45.2311,-85.1051,[45.1075, -85.4, 45.38, -84.7225]],
+  ["cheboygan","Cheboygan","https://services6.arcgis.com/j6ueqNZduqQcCpQQ/arcgis/rest/services/Relationship_class/FeatureServer/0","PARCEL_NO",null,1,45.4334,-84.5055,[45.192, -84.745, 45.7905, -84.1955]],
+  ["clinton","Clinton","https://services5.arcgis.com/nax8we6GhQgsO77P/arcgis/rest/services/Clinton_Parcels_2026/FeatureServer/0","PARCEL_NUM",null,1,42.9493,-84.6506,[42.7615, -84.85, 43.137, -84.3565]],
+  ["eaton","Eaton","https://services2.arcgis.com/c9l1e4fKpsCnqD7H/arcgis/rest/services/Parcels_AGO/FeatureServer/0","LPARCEL","SITEADDRESS",1,42.5995,-84.8185,[42.4145, -85.09, 42.7845, -84.5945]],
+  ["emmet","Emmet","https://services8.arcgis.com/TzdChaahFQokwXas/arcgis/rest/services/ParcelOverlay/FeatureServer/4","PID","PAR_ADDR",1,45.563,-84.8826,[45.2685, -85.1305, 45.7905, -84.714]],
+  ["genesee","Genesee","https://services2.arcgis.com/PrYwGqAi1wKjoFb1/arcgis/rest/services/Parcels2025County/FeatureServer/0","ParcelID",null,1,43.0491,-83.7335,[42.7715, -83.942, 43.2375, -83.4455]],
+  ["gladwin","Gladwin","https://services.arcgis.com/edGXqVKidagzAIPB/arcgis/rest/services/Gladwin_County_Parcels/FeatureServer/0","ParcelNumb","PropertyAd",1,43.9942,-84.4255,[43.8095, -84.6205, 44.179, -84.1565]],
+  ["grandtraverse","Grand Traverse","/gis-proxy/gis.gtcountymi.gov/arcgis/rest/services/Public_Services/Tax_Parcel_Public/MapServer/0","PARCELID","SITEADDRESS",1,44.6462,-85.6496,[44.503, -85.8295, 44.8705, -85.324]],
+  ["gratiot","Gratiot","https://services.arcgis.com/RukRjumVrIALMGTk/arcgis/rest/services/Gratiot_Parcels_2024_view_read_only/FeatureServer/1","PID",null,0,43.2982,-84.5774,[43.1155, -84.8605, 43.481, -84.3585]],
+  ["hillsdale","Hillsdale","https://services.arcgis.com/OeX2IGuO6RXdWbJX/arcgis/rest/services/County_Parcels___20241031/FeatureServer/0","Parcel_No",null,1,41.8877,-84.6358,[41.6875, -84.8435, 42.088, -84.349]],
+  ["huron","Huron","https://services5.arcgis.com/bxGiocAXHsIv3mRb/arcgis/rest/services/HuronParcels2025/FeatureServer/434","PIN",null,1,43.8705,-82.9356,[43.661, -83.4765, 44.08, -82.5955]],
+  ["ingham","Ingham","https://services3.arcgis.com/ySzhFSJfYeginRjx/arcgis/rest/services/Ingham_County_Parcels_2025_view/FeatureServer/1","PARCELNUM",null,1,42.603,-84.327,[42.418, -84.619, 42.788, -84.129]],
+  ["ionia","Ionia","https://services9.arcgis.com/i2awudUyJK8gxxEe/arcgis/rest/services/Ionia_County_Tax_Parcels/FeatureServer/0","CountyParcels_PIN","PROPERTYFULLADDR",1,42.9498,-85.1313,[42.7625, -85.324, 43.137, -84.8275]],
+  ["isabella","Isabella","https://services.arcgis.com/04HiymDgLlsbhaV4/arcgis/rest/services/Copperton_Projects_Parcels/FeatureServer/0","parcel_id","address",1,43.6438,-84.7865,[43.458, -85.1005, 43.8295, -84.6005]],
+  ["jackson","Jackson","/gis-proxy/gis.mijackson.org/countygis/rest/services/ParcelViewer/Parcels/FeatureServer/0","PIN","P_FULLADD",1,42.2513,-84.3403,[42.064, -84.738, 42.4385, -84.1215]],
+  ["kalamazoo","Kalamazoo","https://services3.arcgis.com/RGltUbqpl4h9E3Qh/arcgis/rest/services/Parcels_2025_view/FeatureServer/11","PELNUMBER","PCOMBINED",1,42.251,-85.4798,[42.0645, -85.779, 42.4375, -85.29]],
+  ["kent","Kent","/gis-proxy/gis.kentcountymi.gov/agisprod/rest/services/ParcelsWithCondos/FeatureServer/0","PNUM","PROPERTYADDRESS",1,43.0615,-85.556,[42.7595, -85.808, 43.3105, -85.304]],
+  ["lake","Lake","https://services6.arcgis.com/077PZZsPIOhJKfvk/arcgis/rest/services/Parcels2026_View/FeatureServer/0","PARCELID","PROPADDRESS",1,43.994,-85.8598,[43.806, -86.054, 44.182, -85.5535]],
+  ["lapeer","Lapeer","https://services8.arcgis.com/n1QQsnAVBkeegRxs/arcgis/rest/services/Parcels_2023/FeatureServer/0","PID","Address",1,43.0998,-83.1976,[42.875, -83.47, 43.3395, -82.973]],
+  ["leelanau","Leelanau","https://services.arcgis.com/F7SeTaZ2Nijdg6lG/arcgis/rest/services/Tax_Parcels/FeatureServer/0","PARCEL","SITE_ADD",1,44.8863,-85.7607,[44.7635, -86.108, 45.2065, -85.5555]],
+  ["lenawee","Lenawee","https://services6.arcgis.com/mjEvhc9AE3ceAXtG/arcgis/rest/services/Lenawee_Parcels_Public/FeatureServer/2","TAXID","PRADDCOMB",1,41.896,-84.0144,[41.698, -84.375, 42.094, -83.754]],
+  ["mackinac","Mackinac","https://services7.arcgis.com/wWwid2HdqJ8HIOOi/arcgis/rest/services/MackinacCo_Parcels/FeatureServer/0","TaxPIN",null,0,46.11,-85.7144,[45.8455, -85.87, 46.257, -84.1025]],
+  ["manistee","Manistee","https://services5.arcgis.com/QwUGi3frbpIwhPdx/arcgis/rest/services/6_16_26_BSA_Parcels_legals/FeatureServer/0","BSA_PIN","propstreet",1,44.3465,-86.0841,[44.1605, -86.3965, 44.5325, -85.8095]],
+  ["marquette","Marquette","https://services.arcgis.com/oOYhhFJlpjePln8M/arcgis/rest/services/Marquette_Landowner_Classification/FeatureServer/41","PARCEL_ID",null,1,46.5266,-87.7628,[45.977, -88.124, 46.922, -87.1005]],
+  ["mason","Mason","https://services6.arcgis.com/eojfSqF7rM94Z7MZ/arcgis/rest/services/Owner/FeatureServer/0","Parcel",null,1,44.0005,-86.2633,[43.808, -86.5285, 44.193, -86.03]],
+  ["mecosta","Mecosta","https://services.arcgis.com/04HiymDgLlsbhaV4/arcgis/rest/services/Copperton_Projects_Parcels/FeatureServer/0","parcel_id","address",1,43.6433,-85.3897,[43.4605, -85.5735, 43.826, -85.0795]],
+  ["midland","Midland","https://services6.arcgis.com/9ALftzD3ElQ7KAgT/arcgis/rest/services/MCOGIS_GIS_TaxParcelBsa/FeatureServer/0","Name",null,0,43.6429,-84.4349,[43.457, -84.6235, 43.841, -84.157]],
+  ["monroe","Monroe","/gis-proxy/gis.mocogeo.org/server/rest/services/Hosted/Parcel_View_2026_view/FeatureServer/0","parcelid","parcelmaster_propstreetcombined",1,41.9055,-83.5712,[41.707, -83.7865, 42.104, -83.18]],
+  ["montcalm","Montcalm","https://services6.arcgis.com/GJ2uZAPsEvtmqpe1/arcgis/rest/services/Tax_Parcels/FeatureServer/0","TaxParcel_PARCELID","BSAEXPORT_PCOMBINED",1,43.299,-85.139,[43.1165, -85.574, 43.4815, -84.8255]],
+  ["muskegon","Muskegon","https://services3.arcgis.com/DvTqoyLKkslnGFR5/arcgis/rest/services/Muskegon_County/FeatureServer/0","PIN","Address",0,43.3098,-86.1964,[43.111, -86.473, 43.485, -85.7865]],
+  ["newaygo","Newaygo","https://services6.arcgis.com/pcT1Mx8rlQHDmzpy/arcgis/rest/services/PivotPointParcelsNewaygo/FeatureServer/0","PIN",null,1,43.5744,-85.8015,[43.286, -86.05, 43.828, -85.553]],
+  ["oceana","Oceana","https://services8.arcgis.com/qB4jROUe2zYBi3yY/arcgis/rest/services/Parcel_View_Layer_New/FeatureServer/0","PIN",null,0,43.644,-86.2149,[43.458, -86.5515, 43.83, -86.029]],
+  ["osceola","Osceola","https://services8.arcgis.com/FmKMwUEmDSC75SQm/arcgis/rest/services/OsceolaCountyParcels_view/FeatureServer/0","PIN","PROPADD",1,43.993,-85.2722,[43.8045, -85.5745, 44.1815, -85.0805]],
+  ["ottawa","Ottawa","/gis-proxy/gis.miottawa.org/arcgis/rest/services/HostedServices/ParcelsPublic/FeatureServer/0","FinalPIN",null,1,42.9458,-85.9649,[42.761, -86.284, 43.218, -85.776]],
+  ["roscommon","Roscommon","https://services3.arcgis.com/rAGekBpQuVeYptc1/arcgis/rest/services/Parcels_2025_layer_TAX_ADDED_shp/FeatureServer/0","PIN","Property_A",1,44.3403,-84.678,[44.157, -84.8655, 44.5235, -84.3615]],
+  ["saginaw","Saginaw","https://services3.arcgis.com/CmHnqlf5e6ltOCrY/arcgis/rest/services/County_Parcels/FeatureServer/1","PIN",null,1,43.3214,-84.0881,[43.122, -84.381, 43.579, -83.682]],
+  ["sanilac","Sanilac","https://services7.arcgis.com/uns3DkaXlVtg1Y2Q/arcgis/rest/services/Sanilac___St__Clair_Drain_WFL1/FeatureServer/10","PIN",null,0,43.4455,-82.8105,[43.151, -83.127, 43.7045, -82.494]],
+  ["shiawassee","Shiawassee","https://services7.arcgis.com/zssqyzc5LZ9oAgzn/arcgis/rest/services/Shiawassee_Parcel_PEA/FeatureServer/0","Parcel_Num","PROPERTY_A",1,42.9563,-84.1623,[42.765, -84.379, 43.1475, -83.916]],
+  ["stclair","St. Clair","/gis-proxy/maps.stclaircounty.org/GeoCortex_wa/rest/services/Public_GISweb/TaxParcels_History/MapServer/17","PARCEL_NUMBER","PROP_ADDRESS_COMBINED",1,43.0102,-82.6107,[42.6215, -83.002, 43.1825, -82.41]],
+  ["stjoseph","St. Joseph","https://services5.arcgis.com/jvZ2ldpSLd1kK0tx/arcgis/rest/services/StJoeCoParcelsAGOWM/FeatureServer/0","Tax_ID","PCOMBINED",1,41.9188,-85.5647,[41.7525, -85.809, 42.085, -85.287]],
+  ["tuscola","Tuscola","https://services6.arcgis.com/FA2StDZ4LO95Cm3q/arcgis/rest/services/TuscolaCountyParcelsCurrentYearAddresses/FeatureServer/53","PIN",null,1,43.4687,-83.4916,[43.2165, -83.7095, 43.7555, -83.0955]],
+  ["vanburen","Van Buren","https://services3.arcgis.com/fOViEAUKl91t9cT6/arcgis/rest/services/Parcels/FeatureServer/0","PARCEL_NO","ADDRESSALL",1,42.248,-86.0497,[42.063, -86.3845, 42.433, -85.7555]],
+  ["wayne","Wayne","https://services1.arcgis.com/b6rkZNtCd6Mx2gvB/ArcGIS/rest/services/Wayne_County_Parcel_Shape_File/FeatureServer/0","packedParc",null,1,42.2672,-83.3627,[42.024, -83.5655, 42.468, -82.865]],
+];
+/* Isabella and Mecosta share ONE multi-county compile (a consultant's 16-county West-Michigan layer), so each row is scoped to its own county. */
+const MI_SCOPE = { isabella: "county_name='Isabella'", mecosta: "county_name='Mecosta'" };
+export const miRaw = () => Object.fromEntries(MI_ROWS.map(([k, n, url, id, addr]) => ["mi_" + k, {
+  state: "MI", label: n + " County, MI", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}), ...(MI_SCOPE[k] ? { scopeWhere: MI_SCOPE[k] } : {}),
+  help: n + " County parcels (county / assessor GIS). Search by parcel number" + (addr ? " or a site address." : "."),
+}]));
+export const miMap = () => Object.fromEntries(MI_ROWS.map(([k, n, url, , , , la, ln, bb]) => ["mi_" + k, {
+  state: "MI", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url, ...(MI_SCOPE[k] ? { scopeWhere: MI_SCOPE[k] } : {}),
+}]));

@@ -54,6 +54,7 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { miRaw, miMap } from "./miParcels.js"; // NEW-1 (Michigan, 2026-10-20) — the Michigan county rows (mi_oakland / mi_macomb / mi_detroit stay hand-written)
 import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
 import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
 import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
@@ -62,6 +63,7 @@ import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Orego
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
+import { nyRaw, nyMap, NY_UNCOVERED } from "./nyParcels.js"; // NEW-1 (New York, 2026-10-20) — the New York county rows beyond the statewide public layer
 import { iaRaw, iaMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
 import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
 
@@ -993,9 +995,11 @@ const COUNTIES_RAW = {
   ...msMarisRaw(),
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...miRaw(), // NEW-1 (Michigan, 2026-10-20) — 52 Michigan counties (see miParcels.js)
   ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
+  ...nyRaw(), // NEW-1 (New York 2026-10-20) — ny_* county rows (the statewide public layer holds the other 38 counties)
   ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
@@ -2455,7 +2459,7 @@ const JURISDICTION_LAYERS_RAW = {
         // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
         // single-layer county, so it no longer gets its own dropdown). Label names the county
         // + authority since it sits next to the statewide USGS contours there.
-        label: "1-ft contours (Fort Bend DD)",
+        label: "1-Ft Contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
         // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every
@@ -2937,6 +2941,10 @@ const COUNTIES_MAP_RAW = {
     // official ArcGIS Online mirror (org account NYSGIS_GPO, not a third party) instead, the
     // same "prefer the reliable AGOL copy" call this file already made for Fort Bend (FBCAD).
     // Covers the counties+NYC that opted in; a companion Footprint layer (not wired) names which.
+    // NEW-1 (2026-10-20) — MEASURED: the layer holds 38 of New York's 62 counties (the five NYC boroughs among them; its Footprint
+    // layer /0 names them, and a per-county count of /1 agrees). The other 24 are listed in nyParcels.js NY_UNCOVERED: a click there is
+    // never sent to this layer — it reaches that county's own row, or the honest "<County> — no parcel data wired here yet." sentence.
+    excludedCounties: NY_UNCOVERED,
     state: "NY", center: [42.9, -75.5], zoom: 6, mapServer: null, statewide: true,
     layerUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1",
   },
@@ -3060,7 +3068,9 @@ const COUNTIES_MAP_RAW = {
   ...nmMap(), // NEW-1 (B2345888)
   ...gaMap(), // NEW-1 (B2316720)
   ...laMap(),
+  ...miMap(),
   ...ksMap(), // NEW-1 (B2348000)
+  ...nyMap(), // NEW-1 (New York 2026-10-20)
   ...moMap(),
   ...scMap(),
   ...paMap(),
