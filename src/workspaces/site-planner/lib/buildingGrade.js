@@ -65,6 +65,17 @@ export function assemblyEarthwork(grid, ids) {
   return { cutCy, fillCy, netCy, balanced: Math.abs(netCy) < BALANCE_TOL_CY, dirtCy: cutCy + fillCy };
 }
 /* The tile label for the net: "CY export" / "CY import" / "CY net, balanced". */
+/* ROUND 4 — the earthwork of the WHOLE graded area: every element, the open ground inside the limit and the slope
+ * bands. The balance, the suggestion and every card read this when the surface carries a limit. */
+export function gradedAreaEarthwork(grid) {
+  if (!grid || grid.cutCy == null) return null;
+  const cutCy = grid.cutCy, fillCy = grid.fillCy, netCy = fillCy - cutCy;
+  return { cutCy, fillCy, netCy, balanced: Math.abs(netCy) < BALANCE_TOL_CY, dirtCy: cutCy + fillCy };
+}
+/* Earthwork for a building's card: the whole graded area when the surface has a limit, else its own assembly. */
+export const cardEarthwork = (grid, ids) => (grid && grid.limit ? gradedAreaEarthwork(grid) : assemblyEarthwork(grid, ids));
+/* The ids a search/scan sees: the whole graded area when the surface has a limit, else the assembly. */
+export const scopeIds = (grid, ids) => (grid && grid.limit && grid.gradedIds ? grid.gradedIds : ids);
 export function netLabel(netCy) {
   if (Math.abs(netCy) < BALANCE_TOL_CY) return "CY net, balanced";
   return netCy < 0 ? "CY export" : "CY import";
@@ -96,6 +107,31 @@ export const rolePhrase = (r) => ROLE_PHRASE[r] || "the building";
 export function describeFlag(surface, ids, { buildingCentre, elements = [], slopeRatio = 2 } = {}) {
   const out = surface && surface.grid && surface.grid.outside;
   if (!out || !out.count) return null;
+  // ROUND 4 (B2349121) — one pad inside a grading limit: the flag belongs to the GRADED AREA, named by its edge
+  // ("the south edge of the graded area"), and the slope it describes is the one thrown from the limit.
+  if (surface.grid.limit) {
+    let worst = null, cx = 0, cy = 0, n = 0, fillSf = 0, cutSf = 0;
+    for (const [id, p] of Object.entries(out.perEl || {})) {
+      n += p.count; cx += p.centroid.x * p.count; cy += p.centroid.y * p.count; fillSf += p.fillSf; cutSf += p.cutSf;
+      if (!worst || p.maxPastFt > worst.maxPastFt) worst = { id, ...p };
+    }
+    if (!n) return null;
+    const centroid = { x: cx / n, y: cy / n };
+    const bc = buildingCentre || centroid;
+    const side = compass8(centroid.x - bc.x, centroid.y - bc.y);
+    const kind = fillSf >= cutSf ? "fill" : "cut";
+    const over = Math.max(1, Math.round(worst.maxPastFt));
+    const property = out.beyondParcel > 0;
+    const edge = `the ${side} edge of the graded area`;
+    return {
+      side: cap(side), over, kind, property, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
+      span: { pt: centroid, radiusFt: Math.max(60, Math.sqrt(out.sf) / 2) },
+      text: {
+        title: `Slope crosses ${property ? "the property line" : `the setback · ${cap(side)}`}`,
+        body: `The ${kind} slope on ${edge} runs ${over} ft past the ${property ? "property line" : "setback"} at ${slopeRatio}:1. Pick a fix:`,
+      },
+    };
+  }
   // only this assembly's cells count for ITS flag
   let worst = null, cx = 0, cy = 0, n = 0, fillSf = 0, cutSf = 0, beyond = 0;
   for (const id of ids) {

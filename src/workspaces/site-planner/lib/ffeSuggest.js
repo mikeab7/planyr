@@ -17,7 +17,7 @@
  * Pure, no DOM, Node-tested. Feet and cubic yards. The solvers are GENERATORS that `yield` before every surface
  * build so runChunked can keep the UI alive between builds; every surface build goes through ONE closure the
  * caller supplies, so a verdict here can never differ from what the tiles paint. */
-import { solveBalanced, compass8, cap, BALANCE_TOL_CY, evalSteps } from "./buildingGrade.js";
+import { solveBalanced, compass8, cap, BALANCE_TOL_CY, evalSteps, scopeIds } from "./buildingGrade.js";
 
 export const ROCK_CLEARANCE_FT = 2;      // cut may go no deeper than depth-to-rock minus this
 export const DOCK_UPHILL_MIN_FT = 1;     // a court is "uphill" when its ground is this much above the pad's mean ground
@@ -144,6 +144,7 @@ export const ROCK_SCAN_CHUNK = 400;
 export function* rockViolationSteps(grid, ids, rockAt) {
   const out = { raiseFt: 0, at: null, depthFt: null };
   if (!grid || !grid.cells || typeof rockAt !== "function") return out;
+  ids = scopeIds(grid, ids);   // ROUND 4: under a grading limit the open ground inside it is pavement too
   let k = 0;
   for (const c of grid.cells) {
     if (++k % ROCK_SCAN_CHUNK === 0) yield;
@@ -201,10 +202,11 @@ export function courtReport({ grid, planes, els, buildingId, ids, existAt, centr
 /* The balance clause. `e` = the assembly's earthwork { cutCy, fillCy, netCy } (the pad's own — the pond is NOT in it);
  * `cutSide` / `fillSide` = where the cut and the fill sit relative to the building; `pondCy` = the spoil credited to
  * THIS building, `pondWhole` = the pond's whole cut when several buildings share it. */
-export function balanceClause({ e, cutSide, fillSide, pondCy = 0, pondWhole = null, achieved = true }) {
+export function balanceClause({ e, cutSide, fillSide, pondCy = 0, pondWhole = null, achieved = true, wholeArea = false }) {
   const net = e.netCy - pondCy;
   const w = netWord(net);
-  const lead = achieved || w === "balanced" ? "Balances the dirt" : "Closest the ground gets to balanced";
+  // ROUND 4: under a grading limit the numbers describe the WHOLE graded area, and the clause says so
+  const lead = (achieved || w === "balanced" ? "Balances the dirt" : "Closest the ground gets to balanced") + (wholeArea ? " over the graded area" : "");
   const cut = `${fmtCyShort(e.cutCy)} CY cut${cutSide ? ` on the ${cutSide}` : ""}`;
   const fill = `${fmtCyShort(e.fillCy)} CY fill${fillSide ? ` on the ${fillSide}` : ""}`;
   const pond = pondCy > 0 ? `; the pond digs ${fmtCyShort(pondWhole != null ? pondWhole : pondCy)} CY that ${fillSide ? `fills the ${fillSide} side` : "goes into the fill"}` : "";

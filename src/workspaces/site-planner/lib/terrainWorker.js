@@ -76,10 +76,27 @@ function buildableJob(id, d) {
   self.postMessage({ id, ok: true, summary: sum, lattice: { x0: ctx.lattice.x0, y0: ctx.lattice.y0, nx: ctx.lattice.nx, ny: ctx.lattice.ny, cell: ctx.lattice.cell }, zMin: ctx.zMin, zMax: ctx.zMax });
 }
 
+/* ROUND 4 (B2349122) — PROPOSED contours: the same marching-squares tracer over the proposed surface's own lattice
+ * (one value per cell, NaN = nothing proposed / a DEM void), so the proposed lines come off the surface the earthwork
+ * priced, in the worker, never in a render. Lines come back in LATTICE PIXEL coordinates (the caller maps them to feet:
+ * x = x0 + px·dx, y = y0 + py·dy). `interval` is the caller's (the existing layer's rule). */
+function proposedContoursJob(id, d) {
+  const { values, nx, ny, interval } = d;
+  const mask = new Uint8Array(nx * ny);
+  const work = new Float32Array(nx * ny);
+  for (let k = 0; k < mask.length; k++) { const v = values[k]; if (v === v) { mask[k] = 1; work[k] = v; } }
+  const c = buildContours({ values: work, mask, width: nx, height: ny }, { interval: interval > 0 ? interval : null, maxLevels: 400, labelCap: 200, labelArcCells: d.labelArcCells || 60, labelMinRunCells: d.labelMinRunCells || 6 });
+  self.postMessage({ id, ok: true, interval: c.interval, levels: c.levels, labels: c.labels });
+}
+
 self.onmessage = (e) => {
   const { id, req, buffer, opts = {} } = e.data || {};
   if (e.data && e.data.kind === "buildable") {
     try { buildableJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+    return;
+  }
+  if (e.data && e.data.kind === "contours-proposed") {
+    try { proposedContoursJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
     return;
   }
   try {
