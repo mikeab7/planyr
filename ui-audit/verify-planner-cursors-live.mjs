@@ -73,6 +73,7 @@ try {
   await page.goto(`${base}/#/project/${ID}/site`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
   await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
+  // el-tier: the throwaway plan seeds exactly three buildings, so the element tier IS the readiness gate
   await page.waitForFunction(() => document.querySelectorAll("[data-el-id]").length >= 3, null, { timeout: 30000 });
   await page.waitForTimeout(3000);
   await page.mouse.click(5, 5); await page.keyboard.press("Escape");
