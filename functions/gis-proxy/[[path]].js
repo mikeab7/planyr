@@ -187,6 +187,10 @@ export const ALLOWED_HOSTS = new Set([
   "maps2.bgadd.org", // Bluegrass ADD — Boyle (BoyleParcelBoundary) and any sibling Bluegrass counties it hosts
   "gis.ccgisonline.com:6443", // Clark County KY GIS (certificate / reachability retest)
   "gis.daviesskypva.org", // Daviess County PVA (name-resolution retest)
+  "kygisportalservices.ky.gov", // Kentucky COT/DGI Enterprise portal — Ky_PVA_<County>_Parcels_WM feature services (found in the DGI Knott web map)
+  "www.hopkinscountygis.com:6443", "www.hopkinscountygis.com:6080", // Hopkins County KY GIS (own server; the earlier 'only Texas' note was an AGOL title search)
+  "carroll.countygis.org", "gallatinky.wthgis.com", // Carroll / Gallatin county GIS sites named by AssessorSearch listings
+  "gis.owensboro.org", // City of Owensboro / OMPC (second Daviess host; measured only if the AGOL copy ever disappears)
   /* PROBE-ONLY (remove before merge): read-only reconnaissance of vendor viewers / the state hub, to learn which queryable endpoint they call. */
   "gis.equatorstudios.com", "qpublic.schneidercorp.com", "opengisdata.ky.gov",
 ]);
