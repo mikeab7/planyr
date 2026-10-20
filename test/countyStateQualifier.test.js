@@ -108,7 +108,7 @@ describe("a county name outside the configured states resolves to nothing, never
   // county (Florida is wired statewide-only, no per-county Florida keys exist) so this describe
   // keeps testing what it was written to test.
   it.each([
-    ["Montgomery County", "PA"],
+    ["Montgomery County", "NY"], // NEW-1 (Pennsylvania, 2026-10-19) — pa_montgomery is wired now, so the same-named-key trap is asserted with a state that has no Montgomery key
     ["Liberty County", "FL"],
     ["Colbert County", "TN"], // B2312352 — every Alabama county is wired now, so the same-named-key trap is asserted with the WRONG state instead
     ["Harris County", "FL"], // B2316720 — ga_harris is wired now, so the same-named-key trap is asserted with a state that has no per-county keys

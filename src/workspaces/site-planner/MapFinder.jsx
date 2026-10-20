@@ -105,6 +105,7 @@ import { idAttrFor } from "./lib/parcelQuery.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { setMapCursor, installPlannerCursorStyle } from "./lib/plannerCursors.js";
 import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js";
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line // NEW-1 — one rule for "may a parcel banner be raised right now"
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
@@ -822,14 +823,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // wanted): {lat, lon} | null. The decide bar's second target, beside a parcel selection.
   const [droppedPin, setDroppedPin] = useState(null);
   useEffect(() => {
-    if (!mapRef.current) return;
-    if (placingCompPin) mapRef.current.getContainer().style.cursor = ADD_CURSOR;
-    else if (!selectMode) mapRef.current.getContainer().style.cursor = "";
-    // selectMode's OWN cursor is owned by its own effect elsewhere in this file; this effect only
-    // needs to react to placingCompPin toggling, reading selectMode's current value to avoid
-    // stomping on that other effect's cursor when comp-placing mode turns off.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placingCompPin]);
+    // The cursor for every armed mode is written in ONE place (`mapBaseCursor`, above) — this effect once raced the select-mode
+    // effect and the pin ended on the open hand. Runs after every render (idempotent) so a map built later still gets it.
+    const map = mapRef.current;
+    if (!map || draggingRef.current) return;
+    const c = map.getContainer(), applied = mapCursorAppliedRef.current;
+    if (applied && applied.c === c && applied.v === mapCursorBaseRef.current) return; // unchanged — leave the hover-driven +/− alone
+    mapCursorAppliedRef.current = { c, v: mapCursorBaseRef.current };
+    setMapCursor(c, mapCursorBaseRef.current);
+  });
 
   /* ⛔ B850016 (NEW-11) — the `mode` state THAT USED TO LIVE HERE IS GONE (NEW-1, 2026-09-08),
    * along with its `planarfit:mapMode:v1` key. It answered "what does an address search create?"
@@ -930,7 +932,19 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // "Match 2 points", started from the Adjust panel). The map only COLLECTS the clicks (every click while
   // this is set belongs to the calibration — see the once-bound onClick) and draws them; the panel owns the
   // inputs and the Apply, so this is plain state + three tiny setters, nothing to desync.
+  useEffect(() => { installPlannerCursorStyle({ add: ADD_CURSOR, remove: REMOVE_CURSOR }); }, []);
   const [calibration, setCalibration] = useState(null); // { kind, id, pts: [{lat, lng}] } | null
+  /* Cursor convention (owner-approved 2026-10-20) — the Map view has ONE cursor owner. Whichever surface is armed decides what the
+   * map shows, over EVERYTHING it can be clicked on (pins, site shapes, boundary fills, GIS layers, a placed plan image): a pin
+   * drop and a calibration click are crosshair, Select parcels is the +/− cursor, and a pan shows grabbing and then goes back to
+   * whatever mode is armed — it used to fall back to the open hand while the next click still dropped the pin. Written by the
+   * layout effect below and the pan/hover handlers; never assigned directly (see `setMapCursor`). */
+  const mapBaseCursor = (placingCompPin || !!calibration || !!clickableOverlayId) ? "crosshair" : selectMode ? ADD_CURSOR : "";
+  const mapCursorBaseRef = useRef("");
+  const mapCursorAppliedRef = useRef(null);
+  mapCursorBaseRef.current = mapBaseCursor;
+  // While a pin / note / select-parcels mode is armed, site pins and shapes are inert (the click belongs to the armed mode).
+  const sitesInert = selectMode || placingCompPin || !!editingNote;
   const calibRef = useRef(null);
   calibRef.current = calibration;
   const startCalibration = (kind, id) => { setActiveOverlayId(null); setClickableOverlayId(null); setCalibration({ kind, id, pts: [] }); };
@@ -983,6 +997,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const onRasterUnavailable = (id) => setRasterFailedIds((s) => (s.has(id) ? s : new Set(s).add(id)));
   useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, {
     pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay, calibrating: !!calibration,
+    blockSelect: sitesInert, // while a pin is armed / Select parcels is on / a note is being written, a plan image must not swallow the click to "select" itself
     activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
     onRasterUnavailable,
   });
@@ -1461,10 +1476,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         }
       });
     }
-    const el = map.getContainer();
-    const prevCursor = el.style.cursor;
-    el.style.cursor = "crosshair";
-    return () => { g.remove(); el.style.cursor = prevCursor; };
+    return () => { g.remove(); };
   }, [calibration]); // eslint-disable-line react-hooks/exhaustive-deps
   // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
   // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
@@ -1925,12 +1937,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // Leaflet's `movestart`/`zoomstart`, which our own programmatic `setView` also fires.
     const markUserMoved = () => { userMovedRef.current = true; landedRef.current = true; };
     const onMouseMove = (e) => {
-      if (!selectModeRef.current || draggingRef.current) return; // don't fight the grab cursor while panning
+      // don't fight the grab cursor while panning; and only when Select parcels itself is what owns the cursor (not a pin drop)
+      if (!selectModeRef.current || draggingRef.current || mapCursorBaseRef.current !== ADD_CURSOR && mapCursorBaseRef.current !== REMOVE_CURSOR) return;
       const inside = selectedRef.current.some((s) => (s.latlngsList || []).some((ll) => pointInPoly(e.latlng.lat, e.latlng.lng, ll)));
-      map.getContainer().style.cursor = inside ? REMOVE_CURSOR : ADD_CURSOR;
+      setMapCursor(map.getContainer(), inside ? REMOVE_CURSOR : ADD_CURSOR);
     };
-    const onDragStart = () => { draggingRef.current = true; map.getContainer().style.cursor = "grabbing"; };
-    const onDragEnd = () => { draggingRef.current = false; map.getContainer().style.cursor = selectModeRef.current ? ADD_CURSOR : ""; };
+    const onDragStart = () => { draggingRef.current = true; setMapCursor(map.getContainer(), "grabbing"); };
+    const onDragEnd = () => { draggingRef.current = false; setMapCursor(map.getContainer(), mapCursorBaseRef.current); };
     // Live "you are here" GPS readout (B683): the cursor's WGS84 lat/long, coalesced to one
     // update per animation frame so a fast mousemove can't thrash React. Cleared on mouse-out.
     // NEW-1 rides THIS handler — the contour under the cursor is answered from the same
@@ -2482,14 +2495,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         // hovering ANY parcel or element polygon opens this one tooltip, without each of up to ~157
         // polygons per site carrying (and independently opening/closing) its own copy.
         const siteGroup = L.featureGroup();
-        if (!selectMode) siteGroup.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
+        if (!sitesInert) siteGroup.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
         siteGroup.addTo(group); // cheap: siteGroup is still empty here, so this projects nothing
         drawParcels.forEach((p) => {
           if (!p.points?.length) return;
           ops.push(() => {
             L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
               color: lineColor, weight: lineWeight, dashArray: t.dashed ? "5 4" : "6 5",
-              fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
+              fillColor: lineColor, fillOpacity: 0.05, interactive: !sitesInert,
               className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
             }).addTo(siteGroup);
           });
@@ -2507,7 +2520,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             L.polygon(ring.map((pt) => feetToLatLng(pt, lat, lon)), {
               color: st.stroke, weight: strokeW, fillColor: st.fill,
               fillOpacity: Math.min(MAP_ELEMENT_FILL_OPACITY_CAP, st.fillOpacity ?? 1),
-              interactive: !selectMode,
+              interactive: !sitesInert,
               className: "map-site-feature",
             }).addTo(siteGroup);
           });
@@ -2526,8 +2539,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
         // pursuit where they overlap; the open site floats above its tier (B365).
         const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
-        const marker = L.marker([anchor.lat, anchor.lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
-        if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
+        const marker = L.marker([anchor.lat, anchor.lon], { icon: sitePinIcon(status, active), interactive: !sitesInert, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
+        if (!sitesInert) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
 
         // B1923744 — at PARCEL_ZOOM and above, also draw the record's OWN active/selected
@@ -2584,7 +2597,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (!visibleNowRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showActiveParcel, showSitesLayer, nameFilter]);
+  }, [sites, parcelSummary, activeSiteId, sitesInert, showPlans, showActiveParcel, showSitesLayer, nameFilter]);
   useLayoutEffect(() => {
     if (!visible || pressedRef.current || !pendingRebuildRef.current) return;
     const fn = pendingRebuildRef.current; pendingRebuildRef.current = null; fn();
@@ -3269,13 +3282,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
        * sweeps, layer construction) in ONE task: 43–85 ms measured, 283 ms on Michael's Chrome. The sync is
        * its own task now (next tick) so the toggle's commit paints first; nothing reads the displays between. */
       let t = setTimeout(() => syncDisplaysToView(true), 0);
-      map.getContainer().style.cursor = ADD_CURSOR;
       const onViewMoved = () => { clearTimeout(t); t = setTimeout(syncDisplaysToView, 200); };
       map.on("moveend", onViewMoved);
       return () => { clearTimeout(t); map.off("moveend", onViewMoved); };
     } else {
       clearDisplays();
-      map.getContainer().style.cursor = "";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectMode]);

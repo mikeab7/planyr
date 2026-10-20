@@ -1,0 +1,1632 @@
+{
+ "recorded": "2026-10-19",
+ "note": "One real record per wired South Carolina source (attributes as the service returned them, empties and Shape/GlobalID dropped), with the live measurement at 9 interior + 4 county-line points: 'hits' = interior points that returned a polygon with the declared parcel id (of 'spreadPoints'), 'edgeHits' = county-line points that did (of 'edgePoints'), 'extent' = the layer's returned extent (lng/lat) \u2014 scoped to the county for the shared RFA layer. Misses are roads, water and public land with no tax parcel, and fall on the same points in the county's own layer where one was compared (Oconee, Anderson, Berkeley).",
+ "rows": {
+  "Abbeville County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2957510,
+    "T_Map_Number": "068-00-00-017",
+    "County": "Abbeville County",
+    "Ownership": "SMITH STANLEY",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 133.43692783,
+    "Centroid_Latitude": 34.24501677,
+    "Centroid_Longitude": -82.48794952,
+    "SD_Name": "Abbeville County School District",
+    "DistrictID": 160,
+    "GeoID": "4500690"
+   },
+   "measured": {
+    "hits": 5,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -82.759,
+     33.992,
+     -82.21,
+     34.51
+    ]
+   }
+  },
+  "Aiken County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 81068,
+    "T_Map_Number": "172-00-01-002",
+    "County": "Aiken County",
+    "L_Value": 2480,
+    "M_Value": 2480,
+    "Ownership": "GORDON MCVEY",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 23.90785483,
+    "Centroid_Latitude": 33.53489139,
+    "Centroid_Longitude": -81.60211122,
+    "SD_Name": "Aiken County School District",
+    "DistrictID": 201,
+    "GeoID": "4500720"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 2,
+    "edgePoints": 4,
+    "extent": [
+     -82.041,
+     33.161,
+     -81.167,
+     33.906
+    ]
+   }
+  },
+  "Allendale County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2950877,
+    "T_Map_Number": "091-00-00-016",
+    "County": "Allendale County",
+    "Ownership": "SHARP DON C III",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 220.47011373,
+    "Centroid_Latitude": 32.95226731,
+    "Centroid_Longitude": -81.34680216,
+    "SD_Name": "Allendale County School District",
+    "DistrictID": 301,
+    "GeoID": "4500750"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.644,
+     32.722,
+     -81.064,
+     33.163
+    ]
+   }
+  },
+  "Anderson County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 160509,
+    "T_Map_Number": "2110003010",
+    "County": "Anderson County",
+    "M_Value": 430770,
+    "Ownership": "MARATHON COMMUNITY CHURCH",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 20.78443042,
+    "Centroid_Latitude": 34.80146053,
+    "Centroid_Longitude": -82.49833563,
+    "SD_Name": "Anderson School District 1",
+    "DistrictID": 401,
+    "GeoID": "4500780"
+   },
+   "measured": {
+    "hits": 4,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -83.007,
+     34.188,
+     -82.283,
+     34.849
+    ]
+   }
+  },
+  "Bamberg County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 222572,
+    "T_Map_Number": "0090-00-00-011",
+    "County": "Bamberg County",
+    "M_Value": 276800,
+    "Ownership": "HUGHES WAYNE A. HEIRS",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 129.65546171,
+    "Centroid_Latitude": 33.23009238,
+    "Centroid_Longitude": -81.00871217,
+    "SD_Name": "Bamberg County School District",
+    "DistrictID": 503,
+    "GeoID": "4503916"
+   },
+   "measured": {
+    "hits": 9,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.256,
+     33.01,
+     -80.773,
+     33.439
+    ]
+   }
+  },
+  "Barnwell County": {
+   "idField": "TaxPIN",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 1411,
+    "TaxPIN": "021-00-00-001",
+    "EditDate": 1239148800000,
+    "EditName": "BPB",
+    "ECode": 0,
+    "DeedAc": 900.05,
+    "Discrepanc": 0.987198705469,
+    "CreationDate": 1781552440110,
+    "Creator": "BarnwellCountySC",
+    "EditDate_1": 1781552440110,
+    "Editor": "BarnwellCountySC",
+    "Map_Number": "021-00-00-001",
+    "Real_MH": "R",
+    "Name": "Chem-Nuclear Systems LLC",
+    "Address_1": "740 Osborne Road",
+    "Address_2": "Barnwell SC",
+    "Zip_Code": "298120000",
+    "District": "45",
+    "Fire_Code": "SN",
+    "Instrmnt_Dt_YYYYMMDD": 19961231,
+    "Deed_Ref_Dt_YYYYMMDD": 19801016,
+    "F2Deed_Ref_YYYYMMDD": 0,
+    "Deed_Book": "PER",
+    "Deed_Page": "MERGER",
+    "Plat_Book": "P",
+    "Plat_Page": "32",
+    "Consideration__": 0,
+    "Prev_Owner": "Chem-Nuclear Systems Inc",
+    "Prev_Deed_Ref": "16-F141",
+    "Tot_Assesd_Value": 91810,
+    "Tot_Agri_Use_Acres": 900.05,
+    "Tot_Agri_Use_Value": 1530100,
+    "Tot_Number_Acres": 0,
+    "Tot_Market_Acres": 0,
+    "Tot_Tax_Acres": 1530100,
+    "Tot_Assesd_Acres": 91810,
+    "Tot_Number_Lots": 0,
+    "Tot_Market_Lots": 0,
+    "Tot_Tax_Lots": 0,
+    "Tot_Assesd_Lots": 0,
+    "Tot_Number_Bldgs": 0,
+    "Tot_Market_Bldgs": 0,
+    "Tot_Tax_Bldgs": 0,
+    "Tot_Assesd_Bldgs": 0,
+    "Agricltrl": "Y",
+    "Exempt_Parcel": "N",
+    "Year_Built": 0,
+    "MH_Fair_Mkt_Val": 0,
+    "SqFt_Total": 0,
+    "Zip_Code_E911": 0,
+    "Description_Location": "1973 SC Law #563 Manual Bill Hwy 21",
+    "Class_1": 323,
+    "SqFt_1st": 0,
+    "SqFt_2nd": 0,
+    "SqFt_Garage": 0,
+    "SqFt_Storage": 0,
+    "SqFt_Basement": 0,
+    "SqFt_Carport": 0,
+    "F__Pools": 0,
+    "F__Stories": 0,
+    "F__Barns": 0,
+    "Value_Barns": 0,
+    "Tot_Tax_Cap_Appr": 1530100,
+    "F__Baths": 0,
+    "F__Bedrms": 0,
+    "MH_Length": 0,
+    "MH_Width": 0,
+    "Curr_Next": "C",
+    "Deleted": "NO"
+   },
+   "measured": {
+    "hits": 9,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.769,
+     33.093,
+     -81.194,
+     33.491
+    ]
+   }
+  },
+  "Beaufort County": {
+   "idField": "PIN",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 27789,
+    "PIN_": "R112 032 000 0232 0000",
+    "KEYNO": "08218813",
+    "GEO_FEATUR": "0000009748",
+    "GIS_AREA": 9624.02979625,
+    "GIS_ACRES": 0.22093821,
+    "EFF_TAX_YR": 0,
+    "DISTRICT": 112,
+    "CALCA": 0,
+    "EDITOR": "SDE",
+    "EDITDATE": 1600079387000,
+    "CREATOR": "gisadmin",
+    "CREATEDATE": 1537357981000,
+    "OBJECTID_1": 21576,
+    "PIN": "R112 032 000 0232 0000",
+    "AIN": 8218813,
+    "Status": "A",
+    "TAG": 112,
+    "LEGRES": "LegRes",
+    "SitusAddre": "31 WRIGHTS POINT CIR",
+    "AreaCode": 163,
+    "AreaName": "WRIGHTS POINT",
+    "ClassCd": 1025010,
+    "ClassCode": "ResImp SingleFamily",
+    "Owner1": "HUNTER REVOCABLE TRUST AGREEMENT",
+    "MailingAdd": "31 WRIGHTS POINT DR",
+    "City": "BEAUFORT",
+    "State": "SC",
+    "ZIP": "29902",
+    "SaleDate": "7/2/2020",
+    "RecordDate": "7/21/2020",
+    "Book": "3887",
+    "Page": "51",
+    "SalePrice": 1,
+    "EventType": 430025,
+    "EventTypeD": "Change of Ownership/Transfer",
+    "EventDate": "8/10/2020",
+    "Acres": 0.24,
+    "ResSquareF": 1984,
+    "ComSquareF": 0,
+    "MinYrBuilt": 2018,
+    "MaxYrBuilt": 2018,
+    "Bldgs": 1,
+    "Land": 48000,
+    "Improvemen": 363400,
+    "Appraised": 411400,
+    "Capped": 393645,
+    "Assessed": 15750,
+    "Exemption": 2000,
+    "Taxable": 13750,
+    "LegalDescr": "LOT 19 WRIGHT'S POINT S/D PH I PB64 P150 PB65 P46 PB66 P184 PB69 P122"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -81.016,
+     32.08,
+     -80.421,
+     32.704
+    ]
+   }
+  },
+  "Berkeley County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 383635,
+    "T_Map_Number": "144-00-02-002",
+    "County": "Berkeley County",
+    "M_Value": 6841600,
+    "Ownership": "PINE HOPE LLC",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 981.48727408,
+    "Centroid_Latitude": 33.19036719,
+    "Centroid_Longitude": -79.90584285,
+    "SD_Name": "Berkeley County School District",
+    "DistrictID": 801,
+    "GeoID": "4501170"
+   },
+   "measured": {
+    "hits": 4,
+    "spreadPoints": 9,
+    "edgeHits": 1,
+    "edgePoints": 4,
+    "extent": [
+     -80.405,
+     32.782,
+     -79.415,
+     33.534
+    ]
+   }
+  },
+  "Calhoun County": {
+   "idField": "TMS",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 13812,
+    "TMS": "024-00-00-001",
+    "Name1": "DAK AMERICAS LLC",
+    "Mailing_Address": "5925 CARNEIGIE BLVD STE 500",
+    "Mailing_City_State": "CHARLOTTE NC",
+    "Mailing_ZIP_Code": "28209-0011",
+    "Mailing_City_State_ZIP": "CHARLOTTE NC 28209-0011",
+    "Sale_Price": "10",
+    "Sale_Date": "00000000",
+    "Property_Street_Number": "500",
+    "Property_Street_Name": "K",
+    "Property_Address": "500 K",
+    "District": "3-1",
+    "Lots": "0",
+    "Acres": "960.50",
+    "Tot_Market_Appr": "4,418,300",
+    "Test_Date": 1792184597000
+   },
+   "measured": {
+    "hits": 5,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.061,
+     33.466,
+     -80.5,
+     33.879
+    ]
+   }
+  },
+  "Charleston County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 536097,
+    "T_Map_Number": "7900000019",
+    "County": "Charleston County",
+    "L_Value": 101798,
+    "M_Value": 101798,
+    "Ownership": "WHITE OAK FORESTRY CORPORATION ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 513.74663399,
+    "Centroid_Latitude": 33.20232115,
+    "Centroid_Longitude": -79.45797842,
+    "SD_Name": "Charleston County School District",
+    "DistrictID": 1001,
+    "GeoID": "4501440"
+   },
+   "measured": {
+    "hits": 4,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -80.479,
+     32.411,
+     -79.26,
+     33.295
+    ]
+   }
+  },
+  "Cherokee County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 701173,
+    "T_Map_Number": "1220000007000",
+    "County": "Cherokee County",
+    "Ownership": "PHILLIPS SARAH ELIZABETH HERMN",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 43.21362573,
+    "Centroid_Latitude": 35.01069499,
+    "Centroid_Longitude": -81.61293316,
+    "SD_Name": "Cherokee County School District",
+    "DistrictID": 1101,
+    "GeoID": "4501500"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.941,
+     34.835,
+     -81.367,
+     35.204
+    ]
+   }
+  },
+  "Chester County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 720577,
+    "T_Map_Number": "090-00-00-070-000",
+    "County": "Chester County",
+    "L_Value": 83500,
+    "M_Value": 83500,
+    "Ownership": "LONG CLIFFORD",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 11.41526021,
+    "Centroid_Latitude": 34.67963112,
+    "Centroid_Longitude": -81.17675808,
+    "SD_Name": "Chester County School District",
+    "DistrictID": 1201,
+    "GeoID": "4501530"
+   },
+   "measured": {
+    "hits": 6,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.512,
+     34.531,
+     -80.848,
+     34.865
+    ]
+   }
+  },
+  "Chesterfield County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 741972,
+    "T_Map_Number": "137 000 000 001",
+    "County": "Chesterfield County",
+    "L_Value": 0,
+    "Ownership": "UNITED STATE OF AMERICA",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 78.46950509,
+    "Centroid_Latitude": 34.59378482,
+    "Centroid_Longitude": -80.1695317,
+    "SD_Name": "Chesterfield County School District",
+    "DistrictID": 1301,
+    "GeoID": "4501560"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.613,
+     34.327,
+     -79.755,
+     34.859
+    ]
+   }
+  },
+  "Clarendon County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 768558,
+    "T_Map_Number": "187-03-03-016-00",
+    "County": "Clarendon County",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 0.89364948,
+    "Centroid_Latitude": 33.69300709,
+    "Centroid_Longitude": -80.2085615,
+    "SD_Name": "Clarendon County School District",
+    "DistrictID": 1406,
+    "GeoID": "4503915"
+   },
+   "measured": {
+    "hits": 5,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -80.531,
+     33.443,
+     -79.869,
+     33.988
+    ]
+   }
+  },
+  "Colleton County": {
+   "idField": "PIN",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 5714,
+    "PIN": "207-00-00-003.000",
+    "Acreage": 52.8,
+    "LegalAcres": 250,
+    "PropertyAddress": "640 CROSBY CORNER RD                                            ",
+    "PropertyCity": "WALTERBORO                      ",
+    "PropertyState": "SC  ",
+    "PropertyZip": "29488           ",
+    "OwnerName1": "CROSBY MARY ALICE O & DONALD E CROSBY",
+    "OwnerAddress1": "38 CROSBY CORNER RD                                             ",
+    "OwnerCity": "WALTERBORO                                                      ",
+    "OwnerState": "SC  ",
+    "OwnerZip": "29488           ",
+    "PropertyClass": "IMPROVED AGRICULTURAL         ",
+    "TaxDistrict": "County Unincorporated"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.075,
+     32.469,
+     -80.248,
+     33.181
+    ]
+   }
+  },
+  "Darlington County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 829474,
+    "T_Map_Number": "104-00-01-134",
+    "County": "Darlington County",
+    "M_Value": 102000,
+    "Ownership": "CASSIDY JIMMY WILLIAM & J DARRELL CASSIDY",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 46.6260414,
+    "Centroid_Latitude": 34.30963822,
+    "Centroid_Longitude": -79.97439333,
+    "SD_Name": "Darlington County School District",
+    "DistrictID": 1601,
+    "GeoID": "4501860"
+   },
+   "measured": {
+    "hits": 9,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.321,
+     34.052,
+     -79.63,
+     34.572
+    ]
+   }
+  },
+  "Dillon County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 837091,
+    "T_Map_Number": "059-08-11-020",
+    "County": "Dillon County",
+    "M_Value": 6600,
+    "Ownership": "PEACOCK W LEON & PATRICIA",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 6.06831512,
+    "Centroid_Latitude": 34.42139438,
+    "Centroid_Longitude": -79.35556674,
+    "SD_Name": "Dillon School District 4",
+    "DistrictID": 1704,
+    "GeoID": "4501920"
+   },
+   "measured": {
+    "hits": 6,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -79.641,
+     34.189,
+     -79.032,
+     34.634
+    ]
+   }
+  },
+  "Dorchester County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2785312,
+    "T_Map_Number": "105-00-00-050",
+    "County": "Dorchester County",
+    "Ownership": "OWENS STEVEN & ASHLEY (JTROS)",
+    "Zoning": "AR_DC",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 8.62935001,
+    "Centroid_Latitude": 33.07305497,
+    "Centroid_Longitude": -80.43977923,
+    "SD_Name": "Dorchester School District 4",
+    "DistrictID": 1804,
+    "GeoID": "4500002"
+   },
+   "measured": {
+    "hits": 9,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -80.825,
+     32.813,
+     -80.037,
+     33.356
+    ]
+   }
+  },
+  "Edgefield County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2051484,
+    "T_Map_Number": "139-00-00-017-000",
+    "County": "Edgefield County",
+    "M_Value": 0,
+    "Ownership": "UNITED STATES OF AMERICA  ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 242.48140947,
+    "Centroid_Latitude": 33.75668055,
+    "Centroid_Longitude": -81.91791508,
+    "SD_Name": "Edgefield County School District",
+    "DistrictID": 1901,
+    "GeoID": "4502070"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -82.2,
+     33.511,
+     -81.637,
+     33.993
+    ]
+   }
+  },
+  "Fairfield County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 859461,
+    "T_Map_Number": "126-03-02-055-000",
+    "County": "Fairfield County",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 4.74900655,
+    "Centroid_Latitude": 34.36955033,
+    "Centroid_Longitude": -81.09476153,
+    "SD_Name": "Fairfield County School District",
+    "DistrictID": 2001,
+    "GeoID": "4502100"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -81.463,
+     34.146,
+     -80.755,
+     34.585
+    ]
+   }
+  },
+  "Florence County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 933877,
+    "T_Map_Number": "00252-01-038",
+    "County": "Florence County",
+    "Ownership": "POSTON JENELLE              ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 22.62329164,
+    "Centroid_Latitude": 34.04159011,
+    "Centroid_Longitude": -79.6903636,
+    "SD_Name": "Florence School District 1",
+    "DistrictID": 2101,
+    "GeoID": "4502130"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.104,
+     33.759,
+     -79.253,
+     34.341
+    ]
+   }
+  },
+  "Georgetown County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2304524,
+    "T_Map_Number": "02-1005-010-00-00",
+    "County": "Georgetown County",
+    "Land_Use": "E890",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 3087.43734236,
+    "Centroid_Latitude": 33.44752275,
+    "Centroid_Longitude": -79.3401476,
+    "SD_Name": "Georgetown County School District",
+    "DistrictID": 2201,
+    "GeoID": "4502280"
+   },
+   "measured": {
+    "hits": 9,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -79.701,
+     33.097,
+     -78.978,
+     33.807
+    ]
+   }
+  },
+  "Greenwood County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2839546,
+    "T_Map_Number": "6865-793-455",
+    "County": "Greenwood County",
+    "L_Value": 28800,
+    "M_Value": 54500,
+    "Ownership": "TAYLOR ROXIE GAIL",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 2.50661719,
+    "Centroid_Latitude": 34.1772339,
+    "Centroid_Longitude": -82.09804738,
+    "SD_Name": "Greenwood School District 50",
+    "DistrictID": 2450,
+    "GeoID": "4502340"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -82.369,
+     33.942,
+     -81.843,
+     34.415
+    ]
+   }
+  },
+  "Hampton County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2685851,
+    "T_Map_Number": "105-00-00-032.",
+    "County": "Hampton County",
+    "M_Value": 249858,
+    "Ownership": "SAULS W J JR  ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 178.59446738,
+    "Centroid_Latitude": 32.78871574,
+    "Centroid_Longitude": -81.12150667,
+    "SD_Name": "Hampton County School District",
+    "DistrictID": 2503,
+    "GeoID": "4503912"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.441,
+     32.519,
+     -80.794,
+     33.055
+    ]
+   }
+  },
+  "Horry County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1158062,
+    "T_Map_Number": "27300000016",
+    "County": "Horry County",
+    "L_Value": 0,
+    "M_Value": 749928,
+    "Ownership": "HOLMES-JORDAN PROPERTIES LLC ",
+    "Land_Use": "113",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 53.80048119,
+    "Centroid_Latitude": 33.93762997,
+    "Centroid_Longitude": -78.95583348,
+    "SD_Name": "Horry County School District",
+    "DistrictID": 2601,
+    "GeoID": "4502490"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -79.387,
+     33.523,
+     -78.486,
+     34.32
+    ]
+   }
+  },
+  "Jasper County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1239484,
+    "T_Map_Number": "027-00 -02-034",
+    "County": "Jasper County",
+    "M_Value": 444010,
+    "Ownership": "OKEETEE CLUB  ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 15219.42497882,
+    "Centroid_Latitude": 32.38061806,
+    "Centroid_Longitude": -81.06920262,
+    "SD_Name": "Jasper County School District",
+    "DistrictID": 2701,
+    "GeoID": "4502520"
+   },
+   "measured": {
+    "hits": 6,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.329,
+     32.036,
+     -80.796,
+     32.772
+    ]
+   }
+  },
+  "Kershaw County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1274455,
+    "T_Map_Number": "213-00-00-051",
+    "County": "Kershaw County",
+    "M_Value": 1284940,
+    "Ownership": "RICHLAND MANAGEMENT LLC",
+    "Zoning": "RD-1",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 363.08924482,
+    "Centroid_Latitude": 34.33264596,
+    "Centroid_Longitude": -80.5759993,
+    "SD_Name": "Kershaw County School District",
+    "DistrictID": 2801,
+    "GeoID": "4502550"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 2,
+    "edgePoints": 4,
+    "extent": [
+     -80.921,
+     34.039,
+     -80.257,
+     34.651
+    ]
+   }
+  },
+  "Lancaster County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1346230,
+    "T_Map_Number": "0059-00-008.04",
+    "County": "Lancaster County",
+    "Ownership": "LINGLE LYNDA C  ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 58.46260704,
+    "Centroid_Latitude": 34.76018297,
+    "Centroid_Longitude": -80.66089875,
+    "SD_Name": "Lancaster County School District",
+    "DistrictID": 2901,
+    "GeoID": "4502580"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.976,
+     34.422,
+     -80.358,
+     35.076
+    ]
+   }
+  },
+  "Laurens County": {
+   "idField": "TMS",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 34253,
+    "TMS": "553-00-00-021",
+    "Name1": "TONEY ANTOINETTE L &",
+    "Name2": "BINGHAM RAY D JR & DEDRIE T",
+    "Owner": "TONEY ANTOINETTE L &<br>BINGHAM RAY D JR & DEDRIE T",
+    "Mailing_Address": "207 STEADMAN WAY",
+    "Mailing_City_State_ZIP": "GREER SC 29650",
+    "Sale_Price": "10",
+    "Sale_Date": "20190730",
+    "Deed_Book": "1466",
+    "Deed_Page": "33",
+    "Plat_Book": "43",
+    "Plat_Page": "91",
+    "Property_Address": "146 DRAWDY RD",
+    "Neighborhood": "ISLAND FORD",
+    "District": "56",
+    "Fire_Code": "D121",
+    "Lots": "1",
+    "Acres": ".00",
+    "Test_Date": 1792182167000
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 2,
+    "edgePoints": 4,
+    "extent": [
+     -82.315,
+     34.206,
+     -81.643,
+     34.785
+    ]
+   }
+  },
+  "Lee County": {
+   "idField": "Parcel_Polygons_PID",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 6201,
+    "Parcel_Polygons_FEAT_CODE": "PARCEL",
+    "Parcel_Polygons_PID": "044-00-00-004-000",
+    "Parcel_Polygons_PIDANNO": "044-004",
+    "Parcel_Polygons_GISAC": 246.3169829411186,
+    "Parcel_Polygons_DEEDAC": 211,
+    "Parcel_Polygons_DISCREPANCY": 35.316982941118596,
+    "Parcel_Polygons_ACCEPTANCE": 5,
+    "CAMA_TEMP_OBJECTID": 14027,
+    "CAMA_TEMP_Map_Number": "044-00-00-004-000",
+    "CAMA_TEMP_Name": "OLIVE MONTGOMERY LLC",
+    "CAMA_TEMP_Address_1": "130 PLANTATION DRIVE",
+    "CAMA_TEMP_Address_3": "GREENWOOD      SC",
+    "CAMA_TEMP_Deed_Book": "469",
+    "CAMA_TEMP_Deed_Page": "195",
+    "CAMA_TEMP_Plat_Page": "0000",
+    "CAMA_TEMP_Tot_Number_Acres": 211,
+    "CAMA_TEMP_Tot_Number_Bldgs": 0,
+    "CAMA_TEMP_Tot_Number_Lots": 0,
+    "CAMA_TEMP_Tot_Market_Acres": 0,
+    "CAMA_TEMP_Tot_Market_Bldgs": 0,
+    "CAMA_TEMP_Tot_Market_Lots": 479500,
+    "CAMA_TEMP_Class_1": "AG",
+    "CAMA_TEMP_Class_2": "MV",
+    "CAMA_TEMP_Instrmnt_Dt_YYYYMMDD": "20250407",
+    "CAMA_TEMP_Consideration": 10,
+    "CAMA_TEMP_Tot_Taxable_Appr": 46645,
+    "CAMA_TEMP_Tot_Assesd_Acres": 1870,
+    "CAMA_TEMP_Tot_Assesd_Bldgs": 0,
+    "CAMA_TEMP_Tot_Assesd_Lots": 0,
+    "CAMA_TEMP_True_Sale": "N",
+    "CAMA_TEMP_District": 1,
+    "CAMA_TEMP_PT163_Class": 2,
+    "CAMA_TEMP_Real_MH": "R",
+    "CAMA_TEMP_Curr_Next": "C",
+    "Publish_Date": 1792427389000
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.487,
+     33.95,
+     -79.997,
+     34.37
+    ]
+   }
+  },
+  "Lexington County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1506331,
+    "T_Map_Number": "006500-04-042",
+    "County": "Lexington County",
+    "L_Value": 5226,
+    "M_Value": 779985,
+    "Ownership": "WILKIE DEVELOPMENT LLC",
+    "Zoning": "RD",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 22.72525687,
+    "Centroid_Latitude": 33.92217211,
+    "Centroid_Longitude": -81.24214843,
+    "SD_Name": "Lexington School District 1",
+    "DistrictID": 3201,
+    "GeoID": "4502700"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 1,
+    "edgePoints": 4,
+    "extent": [
+     -81.591,
+     33.634,
+     -80.881,
+     34.212
+    ]
+   }
+  },
+  "Marion County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1583312,
+    "T_Map_Number": "1410000022000",
+    "County": "Marion County",
+    "Ownership": "ROARK JAMES E  ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 82.6721943,
+    "Centroid_Latitude": 33.9964293,
+    "Centroid_Longitude": -79.34928082,
+    "SD_Name": "Marion School District 10",
+    "DistrictID": 3410,
+    "GeoID": "4503908"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -79.63,
+     33.691,
+     -79.116,
+     34.322
+    ]
+   }
+  },
+  "Marlboro County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1603982,
+    "T_Map_Number": "046-00-02-046",
+    "County": "Marlboro County",
+    "M_Value": 783704,
+    "Ownership": "BFP AGRICULTURAL 4 LLC",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 195.18665171,
+    "Centroid_Latitude": 34.55319233,
+    "Centroid_Longitude": -79.68986256,
+    "SD_Name": "Marlboro County School District",
+    "DistrictID": 3501,
+    "GeoID": "4502970"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -79.992,
+     34.285,
+     -79.428,
+     34.827
+    ]
+   }
+  },
+  "McCormick County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1616317,
+    "T_Map_Number": "021-00-00-003.",
+    "County": "McCormick County",
+    "M_Value": 609210,
+    "Ownership": "CAROLINA PLANTATION LP  ",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 274.56609779,
+    "Centroid_Latitude": 34.06263928,
+    "Centroid_Longitude": -82.51437929,
+    "SD_Name": "McCormick County School District",
+    "DistrictID": 3301,
+    "GeoID": "4503000"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 1,
+    "edgePoints": 4,
+    "extent": [
+     -82.627,
+     33.587,
+     -82.038,
+     34.088
+    ]
+   }
+  },
+  "Newberry County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1632809,
+    "T_Map_Number": "341-1-25-31",
+    "County": "Newberry County",
+    "L_Value": 9000,
+    "M_Value": 9000,
+    "Ownership": "SCHNELL SABRINA K  ",
+    "Land_Use": "6RI",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 0.20932949,
+    "Centroid_Latitude": 34.29315235,
+    "Centroid_Longitude": -81.62311329,
+    "SD_Name": "Newberry County School District",
+    "DistrictID": 3601,
+    "GeoID": "4503030"
+   },
+   "measured": {
+    "hits": 5,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.953,
+     34.065,
+     -81.287,
+     34.552
+    ]
+   }
+  },
+  "Oconee County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1710068,
+    "T_Map_Number": "343-00-01-002",
+    "County": "Oconee County",
+    "Ownership": "U S A",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 78002.70888699,
+    "Centroid_Latitude": 34.83626294,
+    "Centroid_Longitude": -83.17555941,
+    "SD_Name": "Oconee County School District",
+    "DistrictID": 3701,
+    "GeoID": "4503060"
+   },
+   "measured": {
+    "hits": 2,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -83.371,
+     34.474,
+     -82.818,
+     35.081
+    ]
+   }
+  },
+  "Orangeburg County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1732148,
+    "T_Map_Number": "0205-00-02-048.000",
+    "County": "Orangeburg County",
+    "Ownership": "RICHARDSON LEROY & PAULETTE",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 5.33963514,
+    "Centroid_Latitude": 33.44081739,
+    "Centroid_Longitude": -80.79310778,
+    "SD_Name": "Orangeburg County School District",
+    "DistrictID": 3809,
+    "GeoID": "4503910"
+   },
+   "measured": {
+    "hits": 6,
+    "spreadPoints": 9,
+    "edgeHits": 2,
+    "edgePoints": 4,
+    "extent": [
+     -81.401,
+     33.134,
+     -80.193,
+     33.729
+    ]
+   }
+  },
+  "Pickens County": {
+   "idField": "PIN",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 17215,
+    "PIN": "4089-00-79-1803",
+    "NAME1": "ROPER JOHN GARY",
+    "ADD1": "125 SPENCER LN",
+    "CITY": "LIBERTY",
+    "STATE": "SC",
+    "ZIP": 296573011,
+    "LOCADD": "125  SPENCER  LN",
+    "LOCCITY": "LIBERTY",
+    "LOCZIP": 29657,
+    "TAXAREA": "A13",
+    "TAXAREA_X": 0,
+    "TAXAREA_Y": 0,
+    "BLDGS": 1,
+    "ACRES": 5.8,
+    "ACCTNO": "R0092530",
+    "STATUS": "A",
+    "ACTUALVAL": "0",
+    "TAXYEAR": 2027,
+    "SALEP": 0,
+    "CalcArea": 239241.752451,
+    "CalcAcres": 5.49223490475
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -82.934,
+     34.607,
+     -82.476,
+     35.086
+    ]
+   }
+  },
+  "Richland County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2195013,
+    "T_Map_Number": "R16602-03-23",
+    "County": "Richland County",
+    "L_Value": 77200,
+    "M_Value": 77200,
+    "Ownership": "HOME OWNERS ASSOCIATION OF LAKE KATHERINE INC C/O CAMP MORING WISE & CANNON",
+    "Zoning": "RSF-1",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 151.68152147,
+    "Centroid_Latitude": 34.00253364,
+    "Centroid_Longitude": -80.96439838,
+    "SD_Name": "Richland School District 1",
+    "DistrictID": 4001,
+    "GeoID": "4503360"
+   },
+   "measured": {
+    "hits": 5,
+    "spreadPoints": 9,
+    "edgeHits": 2,
+    "edgePoints": 4,
+    "extent": [
+     -81.388,
+     33.741,
+     -80.543,
+     34.309
+    ]
+   }
+  },
+  "Saluda County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1778970,
+    "T_Map_Number": "100-00-00-038",
+    "County": "Saluda County",
+    "L_Value": 0,
+    "M_Value": 0,
+    "Zoning": "EX",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 20.71170786,
+    "Centroid_Latitude": 33.99541623,
+    "Centroid_Longitude": -81.73536078,
+    "SD_Name": "Saluda County School District",
+    "DistrictID": 4101,
+    "GeoID": "4503460"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -82.022,
+     33.804,
+     -81.465,
+     34.205
+    ]
+   }
+  },
+  "Spartanburg County": {
+   "idField": "MAPNUMBER",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 64965,
+    "MAPNUMBER": "6-29-00-085.00",
+    "DEEDACREAGE": 17.23,
+    "PARCELNUMBER": "85",
+    "AccountNumber": 124796,
+    "CardNumber": 1,
+    "CardCount": 1,
+    "District": "6A00",
+    "DeedBook": "155P",
+    "DeedPage": "124",
+    "SaleDate": 1766361600000,
+    "LandSizeDescription": "ACRE",
+    "Acreage": 17.23,
+    "OwnerName": "SIEMENS CORPORATION ",
+    "TaxpayerName": "SIEMENS CORPORATION ",
+    "StreetAddress": "200 WOOD AVE S STE 200",
+    "City": "ISELIN",
+    "State": "NJ",
+    "Zip": "08830",
+    "PreviousOwnerName": "DUKE ENERGY CORPORATION",
+    "PropertyLocation": "1360 OLD GEORGIA RD ROEBUCK",
+    "LegalDescription": "P/O TRACT B JOHN C ANDERSON & J D EDWARDS SURVEY PB 91-192/2 PB 157-504",
+    "PropertyType": "TIDX",
+    "PermitDate": -2208988800000,
+    "PermitValue": 0,
+    "GISParcelNumber": "7111-12-1731.31",
+    "CurrentAppraisedLandValue": 0.0,
+    "CurrentAppraisedBuildingValue": 0.0,
+    "CurrentTaxableLandValue": 0.0,
+    "CurrentTaxableBuildingValue": 0.0,
+    "PreviousAssessedLandValue": 0.0,
+    "PreviousAssessedBuildingValue": 0.0,
+    "CurrentAssessedLandValue": 0.0,
+    "CurrentAssessedBuildingValue": 0.0,
+    "YearBuilt": 0,
+    "Census": "220.01",
+    "FireDistrict": "RF      ",
+    "LandUse": "OTHER UNDEVELOPED LAND/WATER",
+    "ReviewDate": -2208988800000,
+    "ConditionFactor": "AV  ",
+    "Units": 0,
+    "FullBaths": 0,
+    "HalfBaths": 0,
+    "BedRooms": 0,
+    "Fireplaces": 0,
+    "CDUC": "AVERAGE",
+    "Utility1": "PUBLIC WATER",
+    "Utility2": "SEPTIC",
+    "RoadType": "PAVED",
+    "Topo": "LEVEL",
+    "AssessmentCode": "DOR UT VAC",
+    "StreetNumber": "1360",
+    "StreetName": "OLD GEORGIA RD",
+    "StreetCommunity": "ROEBUCK",
+    "StreetZip": "29376",
+    "OwnerLookup": 4742147,
+    "LocationLookup": 1215897,
+    "InstrumentNumber": "DEE-2025-58744"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 3,
+    "edgePoints": 4,
+    "extent": [
+     -82.227,
+     34.58,
+     -81.714,
+     35.196
+    ]
+   }
+  },
+  "Sumter County": {
+   "idField": "parcel_number",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 32371919,
+    "parid": "2860002005",
+    "JURISDICTION": "COUNTY",
+    "parcel_number": "286-00-02-005",
+    "lot_no": "-",
+    "deedacre": 150.51,
+    "Calculated_ACREAGE": 150.07407622,
+    "parcel_address_one": "MYRTLE BEACH HWY",
+    "owner_name": "NEWMAN AND THOMPSON LLC",
+    "owner_address_one": "500 MYTRLE BEACH HWY",
+    "owner_city": "SUMTER",
+    "owner_state": "SC",
+    "owner_zip": "29153",
+    "assessed_value_land": 1070,
+    "assessed_value_building": 0,
+    "deed_book": "1337",
+    "deed_page": "4320",
+    "legal_description": "F4-128 150.51 AC  PB89-1234",
+    "WebURL": "https://qpublic.schneidercorp.com/Application.aspx?AppID=1154&LayerID=30904&PageTypeID=4&PageID=12534&Q=398823987&KeyValue=286-00-02-005",
+    "ExtractDate": 1792379341000,
+    "market_value_land": 26736,
+    "market_value_sfyi": 0,
+    "market_value_building": 0,
+    "market_value_total": 26736
+   },
+   "measured": {
+    "hits": 9,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.648,
+     33.64,
+     -79.891,
+     34.17
+    ]
+   }
+  },
+  "Union County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 1972409,
+    "T_Map_Number": "093-00-00-065",
+    "County": "Union County",
+    "M_Value": 323400,
+    "Ownership": "BAILEY ROGER D",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 59.34449246,
+    "Centroid_Latitude": 34.67539165,
+    "Centroid_Longitude": -81.64124231,
+    "SD_Name": "Union County School District",
+    "DistrictID": 4401,
+    "GeoID": "4503750"
+   },
+   "measured": {
+    "hits": 7,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.865,
+     34.436,
+     -81.38,
+     34.922
+    ]
+   }
+  },
+  "Williamsburg County": {
+   "idField": "T_Map_Number",
+   "source": "rfa",
+   "attrs": {
+    "OBJECTID": 2867799,
+    "T_Map_Number": "3694-32-4466",
+    "County": "Williamsburg County",
+    "Ownership": "PRESSLEY MAGGIE M",
+    "last_edited_user": "GIS_ADAM",
+    "last_edited_date": 1769780813000,
+    "Acreage": 0.84818421,
+    "Centroid_Latitude": 33.59240275,
+    "Centroid_Longitude": -79.70770686,
+    "SD_Name": "Williamsburg County School District",
+    "DistrictID": 4501,
+    "GeoID": "4503780"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -80.123,
+     33.279,
+     -79.309,
+     33.909
+    ]
+   }
+  },
+  "York County": {
+   "idField": "ParcelID",
+   "source": "county",
+   "attrs": {
+    "OBJECTID": 56212,
+    "TAXMAPID": "0370000002",
+    "HOMESTEAD": "Y",
+    "AprAccNum": 78556,
+    "ParcelID": "0370000002",
+    "MailAddr1": "2390 THOMSON QUARTER ROAD",
+    "MailCity": "SHARON",
+    "MailState": "SC",
+    "MailZip": "29742",
+    "SchSpeTaxDist": "1",
+    "FireTaxDist": "BC-I",
+    "LegalDescription": "75.02 AC OF TRACT E (120.25 AC) BOUNDARY SURVEY FOR MARGARET THOMSON CARR ETAL",
+    "TransferBook": "2099",
+    "TransferPage": "79",
+    "PlatBook": "A229",
+    "PlatPage": "5",
+    "DateSold": 884131200000,
+    "SalePrice": 0,
+    "PropertyAddress": "THOMPSON QUARTERS RD",
+    "LandUse": "FUV",
+    "LandUseDesc": "FARM USE VALUE",
+    "ImprovedStatus": "Vacant",
+    "Neighborhood": "01",
+    "NeighborhoodDesc": "NBC01",
+    "Assessed_Area": 75.02,
+    "Assessed_Units": "Acres",
+    "SaleLandUse": "FUV",
+    "SaleLandUseDesc": "FARM USE VALUE",
+    "Owner1": "BLUE LAKE FARM LLC",
+    "ParentTaxID": "0370000002",
+    "AprLandVal": 437830,
+    "AprBldgVal": 0,
+    "AprMiscVal": 0,
+    "AprTotVal": 437830,
+    "TaxLandVal": 437830,
+    "TaxBldgVal": 0,
+    "TaxMiscVal": 0,
+    "TotalAgCredit": 434604,
+    "TaxTotVal": 3226,
+    "AsdLandVal": 129,
+    "AsdBldgVal": 0,
+    "AsdMiscVal": 0,
+    "AsdTotVal": 129,
+    "LotNumber": "Tr E",
+    "deededacres": 75.02,
+    "locx_num_sub": 0,
+    "GISSizeAC": 74.53,
+    "DATE_MODIFIED": 1652811539000,
+    "PreviousOwner": "RICHARD C THOMAS ETAL"
+   },
+   "measured": {
+    "hits": 8,
+    "spreadPoints": 9,
+    "edgeHits": 4,
+    "edgePoints": 4,
+    "extent": [
+     -81.492,
+     34.821,
+     -80.866,
+     35.165
+    ]
+   }
+  }
+ }
+}

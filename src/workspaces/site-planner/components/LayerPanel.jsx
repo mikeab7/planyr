@@ -957,7 +957,7 @@ export default function LayerPanel({
             <button key={c.key} title={c.title} aria-pressed={basemap.value === c.key}
               disabled={!!basemap.disabledReason} aria-disabled={!!basemap.disabledReason}
               onClick={() => !basemap.disabledReason && basemap.onChange(c.key)}
-              style={{ ...segBtn(basemap.value === c.key), cursor: basemap.disabledReason ? "not-allowed" : "pointer", borderLeft: i !== 0 ? `1px solid ${LINE}` : "none" }}>
+              style={{ ...segBtn(basemap.value === c.key), cursor: basemap.disabledReason ? "default" : "pointer", borderLeft: i !== 0 ? `1px solid ${LINE}` : "none" }}>
               {c.label}
             </button>
           ))}

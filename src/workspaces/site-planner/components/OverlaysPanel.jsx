@@ -41,7 +41,7 @@ import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { normalizeDeg, parseRotationInput, formatDeg } from "../../../shared/ui/RotationStepper.jsx";
 import { SCALE_PRESETS, feetPerInchForPreset, feetPerInchFromPair, matchScalePreset, scaleForFtPerPoint, PAGE_UNITS, REAL_UNITS } from "../../../shared/overlay/overlayScale.js";
 import { hasCrop, cropKind, cropEditBlock } from "../../../shared/overlay/overlayCrop.js";
-import { overlayBand, overlayPanelOrder, overlayOrderFlags } from "../lib/overlayOrder.js";
+import { overlayBand, overlayPanelOrder, overlayOrderFlags, canDropOverlay } from "../lib/overlayOrder.js";
 import { overlaySubline, placementPlan, formatScaleRatio, OV_KIND } from "../lib/overlayPanelModel.js";
 import { EyeIcon, EyeOffIcon, LockGlyph, UnlockGlyph, MoreIcon, iconBtn as rowIconBtn } from "./ParcelsPanel.jsx";
 
@@ -441,14 +441,21 @@ function OverlayRow({ o, on, hidden, flags, menuOpen, renaming, drag, h, isMap, 
   return (
     <div data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} data-reference-frommap={isMap ? "1" : undefined} data-overlay-row={o.id}
       style={{ position: "relative", borderBottom: "1px solid var(--planner-border)", borderLeft: `2px solid ${on ? ACCENT : "transparent"}`, opacity: drag.dragging === o.id ? 0.5 : 1 }}
-      onDragOver={(e) => { if (!drag.enabled || !drag.dragging || drag.dragging === o.id) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; const r = e.currentTarget.getBoundingClientRect(); drag.onOver(o.id, e.clientY < r.top + r.height / 2 ? "front" : "behind"); }}
+      onDragOver={(e) => {
+        if (!drag.enabled || !drag.dragging || drag.dragging === o.id) return;
+        const r = e.currentTarget.getBoundingClientRect(), side = e.clientY < r.top + r.height / 2 ? "front" : "behind";
+        e.preventDefault();
+        // a drop the order rules would refuse (another band, or beneath the pinned map capture) shows the browser's no-drop cursor, not a move
+        if (!drag.canDrop(o.id, side)) { e.dataTransfer.dropEffect = "none"; drag.onOver(null, null); return; }
+        e.dataTransfer.dropEffect = "move"; drag.onOver(o.id, side);
+      }}
       onDrop={(e) => { if (!drag.dragging) return; e.preventDefault(); e.stopPropagation(); drag.onDrop(o.id); }}>
       {indicator === "front" && <span aria-hidden="true" style={{ ...line, top: -1 }} />}
       {indicator === "behind" && <span aria-hidden="true" style={{ ...line, bottom: -1 }} />}
-      <div draggable={canDrag} data-overlay-drag-handle={canDrag ? "1" : undefined}
+      <div draggable={canDrag} data-overlay-drag-handle={canDrag ? "1" : undefined} data-cursor={canDrag ? "grab" : undefined}
         onDragStart={(e) => { if (!canDrag) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("application/x-planyr-overlay", o.id); } catch (_) {} drag.onStart(o.id); }}
         onDragEnd={drag.onEnd}
-        style={{ display: "flex", alignItems: "center", gap: SPACE.xs, padding: `${SPACE.sm}px ${SPACE.sm}px ${SPACE.sm}px ${SPACE.xs}px`, minHeight: 46, background: on ? `color-mix(in srgb, ${ACCENT} 11%, transparent)` : "transparent" }}>
+        style={{ display: "flex", alignItems: "center", gap: SPACE.xs, padding: `${SPACE.sm}px ${SPACE.sm}px ${SPACE.sm}px ${SPACE.xs}px`, minHeight: 46, cursor: canDrag ? "grab" : undefined, background: on ? `color-mix(in srgb, ${ACCENT} 11%, transparent)` : "transparent" }}>
         <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flex: "1 1 0", minWidth: 0 }}>
         <Thumb o={o} />
         {renaming ? (
@@ -522,6 +529,7 @@ export default function OverlaysPanel({
   const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
   const drag = {
     enabled: fine, dragging, over,
+    canDrop: (id, side) => canDropOverlay(local, dragging, id, side),
     onStart: setDragging, onEnd: () => { setDragging(null); setOver(null); },
     onOver: (id, side) => setOver((c) => (c && c.id === id && c.side === side ? c : { id, side })),
     onDrop: (id) => { const side = over && over.id === id ? over.side : "front"; const from = dragging; setDragging(null); setOver(null); if (from) h.onDropRow(from, id, side); },
@@ -530,7 +538,7 @@ export default function OverlaysPanel({
     <div data-testid="overlays-panel" data-fine-pointer={fine ? "1" : "0"}
       style={{ display: "flex", flexDirection: "column", minWidth: 0, outline: fileOver ? `2px dashed ${ACCENT}` : "none", outlineOffset: -2, borderRadius: RADIUS.sm }}
       onDragEnter={(e) => { if (!hasFiles(e)) return; e.preventDefault(); depth.current += 1; setFileOver(true); }}
-      onDragOver={(e) => { if (hasFiles(e)) e.preventDefault(); }}
+      onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
       onDragLeave={(e) => { if (!hasFiles(e)) return; depth.current = Math.max(0, depth.current - 1); if (depth.current === 0) setFileOver(false); }}
       onDrop={(e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth.current = 0; setFileOver(false); const fs = e.dataTransfer.files; const f = fs && fs[0]; if (f) h.onDropFile(f, fs.length); }}>
       {/* one accent: the global focus ring is the orange --accent; inside this panel it is the Site green (index.css, "Overlays panel focus") */}

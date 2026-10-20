@@ -491,6 +491,7 @@ export default function HelpReportControl({ user }) {
                 type="button"
                 onClick={submitProblem}
                 disabled={!desc.trim() || submitState === "sending"}
+                aria-busy={submitState === "sending" ? "true" : undefined}
                 style={{
                   border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)",
                   borderRadius: RADIUS.sm, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer",

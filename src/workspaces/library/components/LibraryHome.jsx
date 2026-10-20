@@ -70,7 +70,7 @@ function TypeTag({ doc }) {
 export function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin, trash, opening = false }) {
   const title = doc ? (doc.title || doc.item || "Untitled drawing") : (pin?.label || "Missing drawing");
   return (
-    <div style={{ ...cardBase, cursor: "default" }}>
+    <div style={{ ...cardBase, cursor: missing ? "default" : opening ? "progress" : "pointer" }} onClick={missing ? undefined : (e) => { if (e.target === e.currentTarget) onOpen?.(); }}>
       <button onClick={missing ? undefined : onOpen} disabled={missing} aria-busy={opening || undefined} title={missing ? undefined : "Open in Review"}
         style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: missing ? "default" : "pointer" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
@@ -98,7 +98,7 @@ export function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, 
  * selection guard falls back to "All files" if the folder is gone). */
 function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
   return (
-    <div style={{ ...cardBase, cursor: "default", padding: "7px 9px" }}>
+    <div style={{ ...cardBase, cursor: "pointer", padding: "7px 9px" }} onClick={(e) => { if (e.target === e.currentTarget) onOpen?.(); }}>
       <button onClick={onOpen} title="Open this folder in its project"
         style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📁</span>
@@ -116,7 +116,7 @@ function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
 export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, onHistory, trash, opening = false }) {
   const title = doc.title || doc.sfile || doc.item || "Untitled file";
   return (
-    <div data-testid="unfiled-row" data-review-id={doc.id} style={{ ...cardBase, cursor: "default", flexWrap: "wrap" }}>
+    <div data-testid="unfiled-row" data-review-id={doc.id} style={{ ...cardBase, cursor: opening ? "progress" : "pointer", flexWrap: "wrap" }} onClick={(e) => { if (e.target === e.currentTarget) onOpen?.(); }}>
       <button onClick={onOpen} aria-busy={opening || undefined} title="Open in Review"
         style={{ flex: "1 1 160px", minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
@@ -257,7 +257,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   useEffect(() => {
     if (!active || !pinnedFolderProjectKey) return;
     let live = true;
-    Promise.all(pinnedFolderProjectKey.split(",").map((pid) => listFolders(pid).catch(() => [])))
+    Promise.all(pinnedFolderProjectKey.split(",").map((pid) => listFolders(pid).then((r) => (r && r.ok ? r.rows : [])).catch(() => []))) // NEW-4 shape; a miss keeps the pin-time label
       .then((lists) => { if (live) setFolderNames(new Map(lists.flat().map((f) => [f.id, f]))); })
       .catch(() => { /* fallback to the pin-time label */ });
     return () => { live = false; };

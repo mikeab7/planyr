@@ -53,7 +53,7 @@ import {
   latticeCover, latticeTileAt, LATTICE_MAX_BAND, LATTICE_MIN_BAND,
 } from "./demGrid.js";
 import {
-  composeContourPaint, contourLabelText, buildContourIndex, hitContour,
+  composeContourPaint, contourLabelText, buildContourIndex, hitContour, clipContourLinesOutside, labelInsideClip,
   hoverLabelPlacement, hoverLabelSize,
   contourLineKey, contourLabelKey, diffKeyedPaint,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
@@ -397,21 +397,30 @@ function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
  * label can never outlive the geometry it names (still true — composeContourPaint keys
  * both from the SAME atomic composition) without re-building the ones that haven't
  * moved. */
-function renderContours(parts, { opacity, canvas, onComposed, labelPane = null }) {
+/* ROUND 5 (NEW-3) — while the owner-only proposed contours are on, the EXISTING lines are drawn only OUTSIDE the graded
+ * area (`gradingClip`), dashed and muted so the two families read apart; the cut itself is contours.js's
+ * clipContourLinesOutside (the SAME clipper the worker cuts the proposed lines with, so the two meet at the line). No clip
+ * ⇒ byte-for-byte the historic paint (every account that cannot see grading). */
+const CONTOUR_EXISTING_DASH = "6 5";
+const CONTOUR_EXISTING_MUTED_OPACITY = 0.8;
+function renderContours(parts, { opacity, canvas, onComposed, labelPane = null, gradingClip = null }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
   // its output into keyed Leaflet-build recipes.
-  const { lines, labels } = composeContourPaint(parts);
+  const composed = composeContourPaint(parts);
+  const lines = gradingClip ? clipContourLinesOutside(composed.lines, gradingClip) : composed.lines;
+  const labels = gradingClip ? composed.labels.filter((lab) => !labelInsideClip(lab, gradingClip)) : composed.labels;
   if (onComposed) onComposed({ lines, labels });
   const items = [];
   for (const ln of lines) {
     // Line hierarchy by WEIGHT (index heavier), never by fading (salience rule).
     items.push({
-      key: contourLineKey(ln),
+      key: gradingClip ? `${contourLineKey(ln)}|clip` : contourLineKey(ln),
       build: () => L.polyline(ln.coords, {
         renderer: canvas, color: ln.isIndex ? CONTOUR_INDEX_COL : CONTOUR_COL,
-        weight: ln.isIndex ? 2.2 : 1.1, opacity, interactive: false,
+        weight: ln.isIndex ? 2.2 : 1.1, opacity: gradingClip ? opacity * CONTOUR_EXISTING_MUTED_OPACITY : opacity, interactive: false,
+        ...(gradingClip ? { dashArray: CONTOUR_EXISTING_DASH } : null),
       }),
     });
   }
@@ -475,7 +484,9 @@ function coarseNote(cover) {
 function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = null, labelPane = null } = {}) {
   const group = L.layerGroup();
   let map = null, canvas = null, lastKey = null, opacity = cfg.opacity ?? 0.9;
-  let busy = false, pendingMove = false, lastPainted = null;
+  let busy = false, pendingMove = false, lastPainted = null, lastTs = null, lastNote = null;
+  // ROUND 5 (NEW-3) — the graded area the EXISTING lines stay out of ({ rings, holes } in lat/lng pairs, or null)
+  let gradingClip = null, gradingClipKey = "";
   // NEW-1 — the hover readout's OWN sublayer. It is a child group so the transient label
   // is cleared (and re-parented) independently of the geometry, and so a repaint can
   // never leave one stranded over lines it no longer names.
@@ -552,6 +563,14 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       scheduleMacrotask(() => drivePaint(myEpoch));
     }
   };
+  /* ROUND 5 (NEW-3) — set / clear the graded-area clip and repaint what is already on screen from the cached parts (no
+   * fetch, no worker job): the keys carry the clip, so every line is rebuilt once per clip change and never per pan. */
+  group.setGradingClip = (clip) => {
+    const key = clip && clip.rings && clip.rings.length ? `${clip.rings.length}:${clip.rings.map((r) => r.length).join(",")}:${clip.rings[0][0].join(",")}:${(clip.holes || []).length}` : "";
+    if (key === gradingClipKey) return;
+    gradingClipKey = key; gradingClip = key ? clip : null;
+    if (map && lastPainted) paint(lastPainted, lastTs, { note: lastNote });
+  };
   group.setOpacity = (o) => {
     opacity = o;
     group.eachLayer((l) => {
@@ -567,7 +586,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
   const paint = (parts, ts, opts = {}) => {
     flushPaintRunner(); // settle any still-trickling batch before diffing against `painted`
     const { items, n } = render(parts, {
-      map, opacity, canvas, labelPane,
+      map, opacity, canvas, labelPane, gradingClip,
       onComposed: (c) => { composed = c; hoverIndex = null; },
     });
     const { add, remove } = diffKeyedPaint(items, painted);
@@ -580,7 +599,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       // permanent labels follow (B1087). Cheap: hoverGroup is a single child, not the
       // whole painted set, and addLayer on an already-present layer is a no-op.
       if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
-      lastPainted = parts;
+      lastPainted = parts; lastTs = ts; lastNote = opts.note || null;
       const msg = opts.note || (n ? null : emptyMsg);
       // B802400 round 4 — `opts.partial` marks a paint of only the ALREADY-CACHED tiles in the
       // current cover while the rest are still fetching. Reporting "loaded" here is a LIE: the

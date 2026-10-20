@@ -54,12 +54,16 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
+import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
 import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
 import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
 import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
+import { iaRaw, iaMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
+import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -825,8 +829,8 @@ const COUNTIES_RAW = {
   },
   ky_jefferson: {
     state: "KY", label: "Jefferson County, KY",
-    layerUrl: "https://gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1",
-    idField: "PARCELID", // unconfirmed — gis.lojic.org is blocked from this build environment.
+    layerUrl: "/gis-proxy/gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1", // NEW-1 (Kentucky): relayed; measured 2026-10-19
+    idField: "PARCELID",
     help: "Jefferson County (Louisville) PVA parcels (LOJIC open data). Search by parcel ID or a site address.",
   },
   ms_desoto: {
@@ -989,9 +993,12 @@ const COUNTIES_RAW = {
   ...msMarisRaw(),
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
+  ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
   ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
   ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
   ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
@@ -1000,6 +1007,7 @@ const COUNTIES_RAW = {
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
   ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
   ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
+  ...kyRaw(), // NEW-1 (Kentucky) — Kentucky (ky_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -3060,9 +3068,13 @@ const COUNTIES_MAP_RAW = {
   ...laMap(),
   ...ksMap(), // NEW-1 (B2348000)
   ...moMap(),
+  ...scMap(),
+  ...paMap(),
   ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)
+  ...iaMap(),
+  ...kyMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },

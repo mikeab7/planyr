@@ -924,7 +924,10 @@ export default function FoodMap({
     if (!pinMode) return undefined;
     const onClick = (e) => onDropPin?.(e.latlng.lat, e.latlng.lng);
     map.on("click", onClick);
-    return () => map.off("click", onClick);
+    // Armed place mode owns the cursor over EVERYTHING it can be clicked on, pins included (index.css .food-pin-mode).
+    const box = map.getContainer();
+    box.classList.add("food-pin-mode");
+    return () => { map.off("click", onClick); box.classList.remove("food-pin-mode"); };
   }, [pinMode, onDropPin]);
 
   // Redraw markers whenever the data (or the zoomed-in/out threshold) changes. Individual
