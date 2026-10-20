@@ -317,7 +317,8 @@
         "localDb",
         "countyPolygons",
         "countyKeys",
-        "similarityTransform"
+        "similarityTransform",
+        "cursors"
       ]
     },
     "notesRouteJsBytes": {
