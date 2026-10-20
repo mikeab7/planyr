@@ -95,7 +95,7 @@ describe("a recorded real lot from each source reads back parcel id and (where t
 /* NEW-2 (Kentucky remaining counties, 2026-10-20) — counties that were named gaps on main until their source was found by reading
  * planner / E911 / ADD layers (not by title search) and measured. RED-PROOF: on main (2500b00 + #2450) every one of these resolves to
  * "<County> — no parcel data wired here yet"; the per-county cases above already go red for them, and this block pins WHY each is trusted. */
-const NEW2 = ["Hopkins", "Jessamine", "Spencer", "Hardin", "Bullitt", "Daviess", "Mercer", "Anderson", "Montgomery", "Rowan", "Pulaski"];
+const NEW2 = ["Allen", "Barren", "Boyd", "Bourbon", "Hopkins", "Jessamine", "Spencer", "Hardin", "Bullitt", "Daviess", "Mercer", "Anderson", "Montgomery", "Rowan", "Pulaski"];
 describe("NEW-2: counties wired from layers a title search could not find", () => {
   it.each(NEW2)("%s is wired, measured 2026-10-20, with a recorded real lot", (n) => {
     const key = "ky_" + n.toLowerCase();
@@ -106,7 +106,7 @@ describe("NEW-2: counties wired from layers a title search could not find", () =
   });
   it("owner-bearing sources read an owner back; id-only sources say nothing rather than guess", () => {
     const own = (n) => countyRecord(SAMPLES[n].attrs, { idField: COUNTIES["ky_" + n.toLowerCase()].idField, addrField: COUNTIES["ky_" + n.toLowerCase()].addrField }).owner;
-    for (const n of ["Jessamine", "Hardin", "Bullitt", "Daviess", "Mercer", "Pulaski"]) expect(own(n), n).toBeTruthy();
+    for (const n of ["Jessamine", "Hardin", "Bullitt", "Daviess", "Mercer", "Pulaski", "Allen", "Barren", "Boyd", "Bourbon"]) expect(own(n), n).toBeTruthy();
     for (const n of ["Spencer", "Anderson", "Montgomery", "Rowan", "Hopkins"]) expect(own(n), n).toBeNull();
   });
   it("Hopkins is KENTUCKY's own server (port 6443 through the relay), never the Texas layer the first pass found", () => {

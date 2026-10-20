@@ -39,6 +39,10 @@ export const KY_ROWS = [
   ["rowan","Rowan","https://services3.arcgis.com/aaZhjjkUqOHS7oRg/arcgis/rest/services/Rowan_Existing_Land_Use/FeatureServer/0","PIDN",null,null,0,38.199,-83.421,[37.985, -83.673, 38.432, -83.169]],
   ["hopkins","Hopkins","/gis-proxy/www.hopkinscountygis.com:6443/arcgis/rest/services/Parcel/MapServer/0","Parcel_ID",null,null,0,37.3036,-87.5521,[37.075, -87.89, 37.601, -87.27]],
   ["pulaski","Pulaski","https://services9.arcgis.com/2rJXfGpU7WMGx1RV/arcgis/rest/services/Parcels_10_2025/FeatureServer/0","PARCEL_ID",null,null,0,37.1156,-84.5917,[36.836, -84.956, 37.395, -84.259]],
+  ["allen","Allen","https://services2.arcgis.com/rWBXXM3V5IXrtnYJ/arcgis/rest/services/P_Z_FLOODPLAIN_MAP_WFL1/FeatureServer/3","PARCEL_ID","LOCATION",null,0,36.7532,-86.2013,[36.598, -86.456, 36.968, -85.923]],
+  ["barren","Barren","https://services9.arcgis.com/3EpidazL61WC8HDd/arcgis/rest/services/PARCELS/FeatureServer/0","PARCEL_ID","LOCATION",null,0,36.9694,-85.9397,[36.693, -86.209, 37.202, -85.713]],
+  ["boyd","Boyd","https://services5.arcgis.com/5FuqXDDWUwSxApN0/arcgis/rest/services/Field_Map_layers_6_(view)/FeatureServer/47","PARCEL_ID","property_a",null,0,38.3666,-82.6892,[38.209, -82.854, 38.537, -82.537]],
+  ["bourbon","Bourbon","https://services5.arcgis.com/bVgg5ZXLyu6x0rny/arcgis/rest/services/lead_service_line_inventory/FeatureServer/9","PARCEL_ID","prop_addre",null,0,38.2024,-84.2242,[38.033, -84.48, 38.402, -83.945]],
 ];
 export const kyRaw = () => Object.fromEntries(KY_ROWS.map(([k, n, url, id, addr, scope]) => ["ky_" + k, {
   state: "KY", label: n + " County, KY", layerUrl: url, idField: id, ...(addr ? { addrField: addr } : {}), ...(scope ? { scopeWhere: scope } : {}),
