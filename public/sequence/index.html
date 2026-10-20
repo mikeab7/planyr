@@ -5864,6 +5864,43 @@ function stepVisibleColIdx(visIdxs, curIdx, dir) {
   return visIdxs[Math.max(0, Math.min(visIdxs.length - 1, pos + (dir > 0 ? 1 : -1)))];
 }
 
+// NEW-1 (owner report 2026-10-19, B463922 lineage) — Up/Down arrow row navigation. A selection in the
+// visible list moves exactly one row; a LOST selection (its row hidden by a collapse / Focus, or deleted)
+// is re-anchored at the gap it occupied and moves one row from THERE — never to the first or last row,
+// which is where the old `findIndex === -1` fallbacks sent it (measured: fold the group holding the
+// selection, press ↓ or ↑ → row 1 and the view to the top; delete a row, press ↓ → row 1, ↑ → the last
+// row). Mirrors stepGridRow in src/workspaces/scheduler/lib/gridRowNav.js BYTE-IDENTICALLY — the unit
+// tests (test/gridRowNav.test.js) fail if the two diverge.
+function stepGridRow(flat, allTasks, selectedId, dir, lastIdx, topIdx) {
+  const NEW = "__NEW_TASK__";
+  const n = flat ? flat.length : 0;
+  if (!n) return null;                                        // nothing to move through — never invent a destination
+  const clamp = i => Math.max(0, Math.min(n - 1, i));
+  if (selectedId === NEW) return dir < 0 ? flat[n - 1].id : null;
+  const idx = selectedId == null ? -1 : flat.findIndex(t => t.id === selectedId);
+  if (idx >= 0) {
+    if (dir > 0) return idx === n - 1 ? NEW : flat[idx + 1].id;
+    return flat[Math.max(0, idx - 1)].id;
+  }
+  // The selection is LOST: hidden (its group collapsed or Focused) or gone (deleted). Re-anchor at the
+  // gap g where it sat — between flat[g] and flat[g + 1] — and move one row from there.
+  let g = null;
+  if (selectedId != null && allTasks) {
+    // Still in the schedule, just hidden: the gap is after the last VISIBLE row that comes before it in
+    // the full visual order (allTasks is stored in visual order).
+    const pos = allTasks.findIndex(t => t.id === selectedId);
+    if (pos >= 0) {
+      const before = new Set(allTasks.slice(0, pos).map(t => t.id));
+      g = -1;
+      for (let i = 0; i < n; i++) if (before.has(flat[i].id)) g = i;
+    }
+  }
+  if (g == null && Number.isInteger(lastIdx) && lastIdx >= 0) g = Math.min(lastIdx, n) - 1;  // deleted: the slot it last held
+  if (g == null) return flat[clamp(Number.isInteger(topIdx) ? topIdx : 0)].id;               // nothing known: the row at the top of the view
+  if (dir > 0) return g + 1 >= n ? NEW : flat[Math.max(0, g + 1)].id;
+  return flat[clamp(g)].id;
+}
+
 // ── Task-complete celebration ("Ring & Spark" toast) ──────
 // A small toast rises from the bottom-center when a task transitions to
 // Complete: the green dot pops in, the check draws itself, a ring pulses
@@ -8576,6 +8613,19 @@ function App() {
   // re-derive a field from `data` that was already current — never for a real user action.
   const isDerivedUpdate = useRef(false);
   const flatTasksRef = useRef([]);
+  const lastSelIdxRef = useRef(null);   // NEW-1 — see the layout effect beside flatTasks
+  // NEW-1 — the flat index of the first task row whose top is inside the grid's viewport (below the sticky
+  // header), read from the DOM at the instant of the key press. stepGridRow's last-resort anchor when a lost
+  // selection has no known position. null when no grid is mounted.
+  const viewportTopFlatIdx = (tasks) => {
+    const g = document.querySelector('[data-grid-scroll="1"]'); if (!g) return null;
+    const top = g.getBoundingClientRect().top;
+    for (const r of g.querySelectorAll("[data-task-row]")) {
+      const b = r.getBoundingClientRect();
+      if (b.top >= top + 20) { const id = r.getAttribute("data-task-row"); const i = tasks.findIndex(t => String(t.id) === id); if (i >= 0) return i; }
+    }
+    return null;
+  };
   const projIdRef    = useRef(null);
   const prevHolKey   = useRef(null);
   const skipHolRecasc = useRef(false);
@@ -9395,30 +9445,14 @@ function App() {
           // Close any open picker when navigating away
           document.dispatchEvent(new CustomEvent("planar-picker-open", {detail: "nav"}));
         }
-        if (e.key === "ArrowDown") {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          // NEW-1 — one row from where the selection IS (or, if its row is hidden / deleted, from the gap it
+          // left), via stepGridRow. The old inline fallbacks sent a lost selection to the first or last row.
           e.preventDefault();
           const tasks = flatTasksRef.current;
-          if (selectedId === "__NEW_TASK__") return; // already at "+ New task" row
-          const idx = selectedId !== null ? tasks.findIndex(t => t.id === selectedId) : -1;
-          if (idx === tasks.length - 1) {
-            setSelectedId("__NEW_TASK__"); setSelRange(null); // move to "+ New task" row
-          } else {
-            const next = tasks[Math.min(tasks.length - 1, idx + 1)];
-            if (next) { setSelectedId(next.id); setSelRange(null); }
-          }
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          const tasks = flatTasksRef.current;
-          if (selectedId === "__NEW_TASK__") {
-            const last = tasks[tasks.length - 1];
-            if (last) { setSelectedId(last.id); setSelRange(null); }
-            return;
-          }
-          const idx = selectedId !== null ? tasks.findIndex(t => t.id === selectedId) : tasks.length;
-          const prev = tasks[Math.max(0, idx - 1)];
-          if (prev) { setSelectedId(prev.id); setSelRange(null); }
+          const target = stepGridRow(tasks, activeProjectOf(dataRef.current)?.tasks || [], selectedId,
+            e.key === "ArrowDown" ? +1 : -1, lastSelIdxRef.current, viewportTopFlatIdx(tasks));
+          if (target != null) { setSelectedId(target); setSelRange(null); }
           return;
         }
         if (e.key === "ArrowRight") {
@@ -10968,8 +11002,18 @@ function App() {
     return out;
   }, [proj, data?.settings, NOW]); // settings→cfRules, NOW→overdue rollover: keep Focus in sync with the grid's display health (B717)
 
-  // Keep a ref in sync so the keydown handler can read tasks without a stale closure
-  useEffect(() => { flatTasksRef.current = flatTasks; }, [flatTasks]);
+  // Keep a ref in sync so the keydown handler can read tasks without a stale closure. NEW-1 — a LAYOUT
+  // effect, not a passive one: it lands in the same commit as the state, so a key pressed right after an
+  // edit can never read the previous (or an empty) list.
+  React.useLayoutEffect(() => { flatTasksRef.current = flatTasks; }, [flatTasks]);
+  // NEW-1 — the flat index the selection was last SEEN at. When its row is deleted (selection → null) the
+  // arrow keys re-anchor here instead of jumping to the first / last row (stepGridRow). Only ever written
+  // while the selection is actually in the list, so a hide or a delete leaves the last real position.
+  React.useLayoutEffect(() => {
+    if (selectedId == null || selectedId === "__NEW_TASK__") return;
+    const i = flatTasks.findIndex(t => t.id === selectedId);
+    if (i >= 0) lastSelIdxRef.current = i;
+  }, [selectedId, flatTasks]);
   useEffect(() => { projIdRef.current = data?.aPid ?? null; }, [data]);
   // Clear the start char whenever edit mode closes
   useEffect(() => { if (!edit) setEditStartChar(null); }, [edit]);
@@ -14052,6 +14096,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
           const isNewTaskFocused = ri === tasks.length && selectedId === "__NEW_TASK__";
           return (
             <div key={`_e${ri}`} className="drow"
+              data-new-task-row={ri===tasks.length ? (isNewTaskFocused ? "sel" : "1") : undefined}
               onClick={ri===tasks.length ? ()=>addTask() : undefined}
               style={{top:ri*ROW_H, height:ROW_H,
                 borderLeft: isNewTaskFocused ? "2px solid var(--blue)" : "2px solid transparent",
