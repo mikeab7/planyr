@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rowToImportDraft, importDraftToInsertRow } from "../src/shared/comps/lib/compDrafts.js";
+import { rowToImportDraft, importDraftToInsertRow, dismissDraftNotice } from "../src/shared/comps/lib/compDrafts.js";
 
 describe("compDrafts: row <-> model", () => {
   it("maps a DB row to the camelCase model", () => {
@@ -27,5 +27,19 @@ describe("compDrafts: row <-> model", () => {
     expect(row.user_id).toBeUndefined();
     expect(row.source_file).toBe("x.kml");
     expect(row.status).toBe("pending"); // default
+  });
+});
+
+describe("dismissDraftNotice (NEW-6) — a failed Dismiss is never silent", () => {
+  it("null on success", () => {
+    expect(dismissDraftNotice({ error: null })).toBeNull();
+    expect(dismissDraftNotice(undefined)).toBeNull();
+  });
+  it("names the store's reason — the 0-count 'Not deleted' and a network error alike", () => {
+    expect(dismissDraftNotice({ error: new Error("Not deleted") })).toBe("Couldn't dismiss that draft — Not deleted. It's still here; try again.");
+    expect(dismissDraftNotice({ error: { message: "FetchError: offline" } })).toMatch(/FetchError: offline/);
+  });
+  it("an error with no message still says something", () => {
+    expect(dismissDraftNotice({ error: {} })).toMatch(/the cloud didn't answer/);
   });
 });
