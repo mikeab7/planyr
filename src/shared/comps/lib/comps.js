@@ -420,7 +420,7 @@ function fmtRate(n) {
 // use a DIFFERENT existing convention ("Jun 1, 2027") — this app already has two date display
 // conventions, not one; this function now follows the owner's explicit instruction for comps
 // specifically (mm/dd/yy) rather than the longer form those other modules use.
-function fmtCompDate(iso) {
+function fmtCompDateShort(iso) {
   return formatDateDisplay(iso) || null;
 }
 
@@ -455,14 +455,26 @@ export function partyLabels(compType) {
   return { provider: "Owner/Developer", acquirer: "Tenant" }; // lease, and the honest default
 }
 
+/** "2,000 A · 480 V · 3-phase", omitting whichever parts are blank; null when all three are. */
+export function powerLabel(comp) {
+  const bits = [];
+  if (comp?.powerAmps != null) bits.push(`${Number(comp.powerAmps).toLocaleString()} A`);
+  if (comp?.powerVolts != null) bits.push(`${Number(comp.powerVolts).toLocaleString()} V`);
+  if (comp?.powerPhase != null) bits.push(`${comp.powerPhase}-phase`);
+  return bits.length ? bits.join(" · ") : null;
+}
+
 /** Ordered {key,label,value} rows for a comp — a field with no value is simply not in the
  * array, never rendered as an empty row or an em-dash. The list panel, the map popup and the
  * detail form all read this instead of re-deriving which fields apply per type.
  * `displayPeriod` ("annual" | "monthly", optional) is a lease Rate row's chosen display period —
  * see `leaseRateDisplayFor`'s header. Omit it to keep showing a lease's own entered rate/period
  * untouched, exactly as before a period toggle existed anywhere. */
-export function compFieldRows(comp, displayPeriod) {
+export function compFieldRows(comp, displayPeriod, opts) {
   const rows = [];
+  // NEW-1 (site-record panel V1) — the record view prints dates ISO (YYYY-MM-DD), matching the
+  // document date beside it; every other reader (KMZ balloon, list) keeps the mm/dd/yy form.
+  const fmtCompDate = opts && opts.isoDates ? (iso) => (iso ? String(iso).slice(0, 10) : null) : fmtCompDateShort;
   const push = (key, label, value) => {
     if (value != null && value !== "") rows.push({ key, label, value });
   };
@@ -498,6 +510,8 @@ export function compFieldRows(comp, displayPeriod) {
     // NEW-COMPS-CARD — building-spec facts, property attributes rather than deal economics, so
     // they sit right beside Building size.
     if (comp?.clearHeightFt != null) push("clearHeight", "Clear height", `${Number(comp.clearHeightFt).toLocaleString()} ft`);
+    push("power", "Power", powerLabel(comp));
+    if (comp?.dockDoors != null) push("dockDoors", "Dock doors", Number(comp.dockDoors).toLocaleString());
     if (comp?.yearBuilt != null) push("yearBuilt", "Year built", String(comp.yearBuilt));
     // B986096-HARDENING-7 — Price/NOI/Cap are a triangle (any two determine the third; see
     // resolveCapTriangle), so by the time a comp is saved all three are populated whenever at
@@ -514,6 +528,8 @@ export function compFieldRows(comp, displayPeriod) {
     if (comp?.leaseSizeSf != null) push("size", "Leased SF", `${Number(comp.leaseSizeSf).toLocaleString()} SF`);
     // NEW-COMPS-CARD — building-spec facts, property attributes rather than deal economics.
     if (comp?.clearHeightFt != null) push("clearHeight", "Clear height", `${Number(comp.clearHeightFt).toLocaleString()} ft`);
+    push("power", "Power", powerLabel(comp));
+    if (comp?.dockDoors != null) push("dockDoors", "Dock doors", Number(comp.dockDoors).toLocaleString());
     if (comp?.yearBuilt != null) push("yearBuilt", "Year built", String(comp.yearBuilt));
     // NEW-2 (owner chat, 2026-09-08) — "Total annual rent (face)" removed from this detail list:
     // Rate, Leased SF and Net effective already carry the deal, and a fourth money figure here
@@ -564,6 +580,53 @@ export function compFieldRows(comp, displayPeriod) {
   return rows;
 }
 
+/** NEW-1 (site-record panel V1, owner-approved 2026-10-19) — the badge word for a comp's deal type. */
+export function compBadgeLabel(compType) {
+  if (compType === "land") return "LAND";
+  if (compType === "building_sale") return "SALE";
+  return "LEASE";
+}
+
+// Which section each `compFieldRows` key belongs to, in the order the record shows them. A key the
+// model grows later and this table does not name lands in DEAL (the owner's fallback), so a new
+// field can never be silently dropped from the record.
+const RECORD_DEAL_ORDER = {
+  lease: ["rate", "term", "escalation", "freeRent", "ti", "opex", "commencement", "date", "netEffective", "opexNormalized", "dateEntered"],
+  building_sale: ["price", "psf", "capRate", "noi", "date", "dateEntered"],
+  land: ["price", "psf", "size", "date", "dateEntered"],
+};
+const RECORD_BUILDING_KEYS = ["size", "clearHeight", "yearBuilt", "parcelApn"];
+const RECORD_PARTY_KEYS = ["partyProvider", "partyAcquirer", "source"];
+
+/** NEW-1 (site-record panel V1) — the single-record view's rows, grouped Deal / Building / Parties.
+ * Reads `compFieldRows` (never a second derivation, so the list, the KMZ balloon and this view
+ * cannot disagree on a formula or a label) and only SORTS them into sections. A field with no value
+ * is not in `compFieldRows`, and a section with no rows is not returned. `opts.source` is the
+ * provenance line ("flyer.pdf · 2026-01-02") when the comp is pinned on a stored plan.
+ * Land's acreage is a DEAL fact (what was sold), a lease's / building's size is a BUILDING fact.
+ * "Date entered" (when the record was added) is the Deal section's last dated row, never a Parties
+ * row — it exists on every comp, so a Parties section holding only it would make a sparse comp look
+ * fuller than it is. */
+export function compRecordSections(comp, displayPeriod, opts) {
+  const type = isCompType(comp?.compType) ? comp.compType : "lease";
+  const all = compFieldRows(comp, displayPeriod, { isoDates: true });
+  if (opts && opts.source) all.push({ key: "source", label: "Source", value: opts.source });
+  const dealOrder = RECORD_DEAL_ORDER[type];
+  const isBuildingKey = (k) => RECORD_BUILDING_KEYS.includes(k) && !(type === "land" && k === "size");
+  const relabel = (r) => (r.key === "date" && type !== "lease" ? { ...r, label: "Close date" } : r);
+  const building = all.filter((r) => isBuildingKey(r.key));
+  const parties = RECORD_PARTY_KEYS.map((k) => all.find((r) => r.key === k)).filter(Boolean);
+  const placed = new Set([...building, ...parties].map((r) => r.key));
+  const rest = all.filter((r) => !placed.has(r.key));
+  const ranked = (r) => { const i = dealOrder.indexOf(r.key); return i < 0 ? (r.key === "notes" ? 1e6 : 1e5) : i; };
+  const deal = rest.map(relabel).map((r, i) => ({ r, i })).sort((a, b) => ranked(a.r) - ranked(b.r) || a.i - b.i).map((x) => x.r);
+  return [
+    { id: "deal", title: "Deal", rows: deal },
+    { id: "building", title: "Building", rows: building },
+    { id: "parties", title: "Parties", rows: parties },
+  ].filter((sec) => sec.rows.length > 0);
+}
+
 /** Compact one-line label for a map marker / list row. `displayPeriod` ("annual" | "monthly",
  * optional) is the chosen period a lease rate should read in — see `leaseRateDisplayFor`'s
  * header. Omit it to keep showing a lease's own entered rate/period untouched. */
@@ -612,7 +675,17 @@ export function validateComp(draft) {
   // alone (period is never defaulted/guessed, on purpose) and then threw the raw
   // `comps_lease_rate_period_check`/`comps_lease_rate_requires_period` Postgres text at the user.
   // Blocked here, before any insert, the same way a missing comp type already is.
-  if (draft?.compType === "lease" && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
+  // NEW-1 (round 3, 2026-10-19) — only when a RATE is present: no rate, nothing to pick a period for
+  // (`comps_lease_rate_requires_period` is `lease_rate is null or period is not null`).
+  const hasRate = draft?.leaseRate !== "" && draft?.leaseRate != null && Number.isFinite(Number(draft.leaseRate));
+  if (draft?.compType === "lease" && hasRate && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
+  // db/comps_power_docks.sql: integer columns, and phase is 1 or 3 — refused here in plain words
+  // instead of surfacing the raw Postgres text.
+  const blank = (v) => v === "" || v == null;
+  for (const [k, label] of [["powerAmps", "Power (amps)"], ["powerVolts", "Power (volts)"], ["dockDoors", "Dock doors"]]) {
+    if (!blank(draft?.[k]) && !(Number.isInteger(Number(draft[k])) && Number(draft[k]) >= 0)) errors.push(`${label} must be a whole number.`);
+  }
+  if (!blank(draft?.powerPhase) && ![1, 3].includes(Number(draft.powerPhase))) errors.push("Power phase must be 1 or 3.");
   return errors;
 }
 
@@ -671,6 +744,11 @@ export function rowToComp(r) {
     // has no building yet); nullable, never guessed. `db/comps_building_specs.sql`.
     clearHeightFt: r.clear_height_ft != null ? Number(r.clear_height_ft) : null,
     yearBuilt: r.year_built != null ? Number(r.year_built) : null,
+    // Electrical service + dock-high doors (`db/comps_power_docks.sql`) — same scope as the specs above.
+    powerAmps: r.power_amps != null ? Number(r.power_amps) : null,
+    powerVolts: r.power_volts != null ? Number(r.power_volts) : null,
+    powerPhase: r.power_phase != null ? Number(r.power_phase) : null,
+    dockDoors: r.dock_doors != null ? Number(r.dock_doors) : null,
     bldgNoi: r.bldg_noi != null ? Number(r.bldg_noi) : null,
     // Decimal fraction (0.0575), never a percentage number — see resolveCapTriangle's header.
     bldgCapRate: r.bldg_cap_rate != null ? Number(r.bldg_cap_rate) : null,
@@ -720,7 +798,7 @@ export function emptyDraft(anchor) {
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
-    clearHeightFt: "", yearBuilt: "",
+    clearHeightFt: "", yearBuilt: "", powerAmps: "", powerVolts: "", powerPhase: "", dockDoors: "",
     // HARDENING-11 (owner correction, 2026-09-02, amending HARDENING-10 NEW-4) — Per and Basis
     // are NOT the same kind of guess and don't get the same treatment. Per (monthly vs annual)
     // stays genuinely blank: both answers are common and a wrong guess is a silent 12x error, so
@@ -812,6 +890,7 @@ export function draftToComp(d) {
     bldgSizeSf: num(d.bldgSizeSf),
     clearHeightFt: num(d.clearHeightFt),
     yearBuilt: num(d.yearBuilt),
+    powerAmps: num(d.powerAmps), powerVolts: num(d.powerVolts), powerPhase: num(d.powerPhase), dockDoors: num(d.dockDoors),
     bldgNoi: tri ? tri.noi.value : num(d.bldgNoi),
     bldgCapRate: tri ? tri.capRate.value : num(d.bldgCapRate),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
@@ -846,6 +925,7 @@ export function compToDraft(c) {
     landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
     bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
     clearHeightFt: str(c.clearHeightFt), yearBuilt: str(c.yearBuilt),
+    powerAmps: str(c.powerAmps), powerVolts: str(c.powerVolts), powerPhase: str(c.powerPhase), dockDoors: str(c.dockDoors),
     bldgNoi: str(c.bldgNoi), bldgCapRate: str(c.bldgCapRate),
     // ⛔ NEW-1 (owner call, 2026-09-10) — was `|| "annual"`. A comp whose period is genuinely
     // unknown (a legacy row, or one saved before comps_value_constraints.sql required a period
@@ -888,6 +968,10 @@ export function compToRow(comp) {
     bldg_size_sf: comp.bldgSizeSf ?? null,
     clear_height_ft: comp.clearHeightFt ?? null,
     year_built: comp.yearBuilt ?? null,
+    power_amps: comp.powerAmps ?? null,
+    power_volts: comp.powerVolts ?? null,
+    power_phase: comp.powerPhase ?? null,
+    dock_doors: comp.dockDoors ?? null,
     bldg_noi: comp.bldgNoi ?? null,
     bldg_cap_rate: comp.bldgCapRate ?? null,
     lease_rate: comp.leaseRate ?? null,

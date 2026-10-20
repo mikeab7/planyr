@@ -513,8 +513,8 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
         onPointerUp={onHandlePointerEnd}
         onPointerCancel={onHandlePointerEnd}
         style={{
-          flex: "0 0 auto", display: "flex", justifyContent: "center", alignItems: "center",
-          height: 22, minHeight: 56, cursor: "grab", touchAction: "none",
+          flex: "0 0 auto", height: 22, minHeight: 56, cursor: "grab", touchAction: "none",
+          display: "flex", justifyContent: "center", alignItems: "flex-end", paddingBottom: 8, boxSizing: "border-box", // the bar sits at the BOTTOM of the zone (NEW-1, 2026-10-20)
         }}
       >
         <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: "var(--border-strong, var(--border-default))" }} />
