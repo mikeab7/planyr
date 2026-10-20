@@ -297,7 +297,9 @@ try {
   check("NO slope cell inside the limit; the slopes wrap it as ONE daylight ring", !!lim && lim.wedgeInside === 0 && lim.daylight === 1 && lim.slopeCells > 100);
   check("the panel's graded-area line: 'Graded area · n AC · limit auto'", !!lim && /^Graded area · \d+\.\d AC · limit auto$/.test(lim.gradedLine || ""), lim && lim.gradedLine);
   check("the mode control shows 'Around the layout' selected", lim && lim.modeAttr === "layout" && /Around the layout/.test(await page.textContent("[data-graded-area]")) && /To the boundary/.test(await page.textContent("[data-graded-area]")));
-  check("the settings gear carries shoulder, corner radius and max pavement slope", await page.evaluate(() => { document.querySelector("[data-grading-gear]").click(); const ok = !!document.querySelector('[data-testid="grading-shoulder"]') && !!document.querySelector('[data-testid="grading-corner-radius"]') && !!document.querySelector('[data-testid="grading-max-pavement-slope"]'); return ok; }));
+  await page.click("[data-grading-gear]");
+  await page.waitForSelector('[data-testid="grading-shoulder"]', { state: "attached", timeout: 10000 }).catch(() => {});
+  check("the settings gear carries shoulder, corner radius and max pavement slope", (await page.locator('[data-testid="grading-shoulder"]').count()) === 1 && (await page.locator('[data-testid="grading-corner-radius"]').count()) === 1 && (await page.locator('[data-testid="grading-max-pavement-slope"]').count()) === 1);
   await page.keyboard.press("Escape");
   const inkL = await page.evaluate(async () => {
     const m = window.__harness.model; const L = m.cutfill;
