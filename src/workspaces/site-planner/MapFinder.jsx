@@ -881,6 +881,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // lets the Comps list's own "+ Site plan" button (no comp open yet — order (a), upload-first)
   // reach SitePlansSection's upload flow the same way `commitPlacementRef`/`dropIntakeRef` do.
   const [focusedComp, setFocusedComp] = useState(null);
+  const [compsView, setCompsView] = useState("list"); // NEW-1 (site-record panel V1): CompsPanel's current view
+  const [docsSlot, setDocsSlot] = useState(null); // NEW-1: the node inside CompsPanel's scroller the Documents section portals into
   const startOverlayUploadRef = useRef(null);
   // NEW-6 (bug fix, 2026-09-27) — "+ Site plan" → "Place on map" with no project chosen used to
   // mint a tracked ("market record") site asynchronously with nothing here ever learning its id,
@@ -5185,6 +5187,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   // SitePlansSection's OverlayRow, not here) writes back into; the ref-triggered
                   // upload for the list's own "+ Site plan" button (no comp open yet).
                   onDetailCompChange={setFocusedComp}
+                  onViewChange={setCompsView}
+                  docsSlotRef={setDocsSlot}
                   repinCompAnchorRef={repinCompAnchorRef}
                   startUploadRef={startOverlayUploadRef}
                 />
@@ -5208,7 +5212,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                     onRejectFile={onRejectDroppedFile}
                     onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
                     rasterFailedIds={rasterFailedIds}
-                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
+                    showPlanTrash={compsView === "list"}
+                    docsSlot={docsSlot}
                     onZoomToOverlay={zoomToOverlay}
                     focusedProjectId={focusedComp?.projectId ?? focusedTrackedProjectId ?? null}
                     focusedCompId={focusedComp?.id ?? null}
