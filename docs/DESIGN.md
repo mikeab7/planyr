@@ -399,6 +399,41 @@ Use `SPACE`/`FONT_SIZE`/`CONTROL_H` for a new gap/margin/padding/height/font-siz
 in the app; use `PAD`/`FONT` when you're building a `controls.jsx` primitive itself or something
 that needs to match one exactly.
 
+## Cursor convention (owner-approved 2026-10-20, B2383552)
+
+Every cursor in the app follows this table. **Callers never set a disabled cursor themselves** — the
+stylesheet does (`button:disabled … { cursor: default !important }` in `src/index.css`, which beats an inline
+`cursor: "pointer"`), and the primitives in `controls.jsx` branch on `disabled` too.
+
+| Situation | Cursor |
+|---|---|
+| Idle surface / plain text | default arrow |
+| Anything clickable (button, link, row, tab, menu item, toggle, checkbox AND its native input, native select, range) | `pointer` |
+| Clickable but not draggable canvas object (a LOCKED element you can still select) | `pointer` — locked things never show `move` |
+| Draggable object that moves (element body, note box body, markup body, overlay body, floating-panel header) | `move` |
+| Pannable empty surface while select/pan is active | `grab`; `grabbing` while panning |
+| Pick-up / reorder grips (list grip, bottom-sheet grip, tab reorder) | `grab` at rest, `grabbing` while dragging |
+| Any armed draw / place / pick mode | `crosshair` over EVERYTHING it can be clicked on, existing objects included |
+| Vertex / node grips | `move` (one convention, roads included) |
+| Resize grips | directional (`ew`/`ns`/`nwse`/`nesw`), following the object's on-screen rotation; corner grips use the grip's own axes |
+| Splitters / dividers | `col-resize` / `row-resize` |
+| Rotate grips | the ONE shared `ROTATE_CURSOR` (`src/shared/ui/controls.jsx`) |
+| Text being edited | `text` |
+| Disabled control | `default` — never `pointer`, never `not-allowed` |
+| Disabled because it is working | `progress` (set `aria-busy="true"` on the button) |
+| Drop not allowed during a drag | set `dataTransfer.dropEffect = "none"`; set it explicitly wherever `dragover` is accepted |
+| Info icon with a tooltip | `help` |
+| Busy / loading overlays | `progress` |
+
+**During a drag the cursor stays the drag's cursor for the whole gesture**, even when the pointer leaves the grip.
+Use `pinDragCursor(cursor)` from `src/shared/ui/controls.jsx` (pins it at the document root, released on pointerup,
+pointercancel, Escape and window blur) or pointer capture on the element whose cursor should show. A cursor must
+never lie about what a press will do: if a drag pans, show `grab`; if it moves the object, `move`; if the press is
+ignored, the arrow.
+
+Guards: `test/cursorConventionShared.test.js` (source; red on the pre-fix tree) and
+`ui-audit/verify-cursors-shared.mjs` (reads `getComputedStyle(elementFromPoint(x, y)).cursor` at named states).
+
 ## The primitives (`src/shared/ui/controls.jsx`)
 
 Every one is **token-driven and theme-safe** — they reference CSS theme tokens only, never a raw

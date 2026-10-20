@@ -125,7 +125,7 @@ function NameRow({ entry, sheet, selRange, onGoTo, onRenameName, onRetargetName,
         ) : (
           <button
             type="button" title="Rename" onClick={() => setRenaming(true)}
-            style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", font: "inherit", fontSize: 13, fontWeight: 650, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 650, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >{entry.name}</button>
         )}
         <button type="button" title="Jump to this name's target" onClick={() => onGoTo(entry.r1 - 1, entry.c1 - 1, entry.r2 - 1, entry.c2 - 1)} style={smallBtnStyle()}>Go</button>

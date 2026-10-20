@@ -53,6 +53,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button, SegmentedControl, MenuItem, menuPanelStyle, FloatingToolbar, FloatingToolButton, FloatingToolDivider } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
+import { pinDragCursor } from "../../ui/controls.jsx";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import {
   clampCropRect, normalizeCrop, isFullCrop,
@@ -214,6 +215,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   const [handTool, setHandTool] = useState(false); // NEW-3: the on-screen Pan tool (left-drag pans)
   const [spaceDown, setSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [overClose, setOverClose] = useState(false); // pointer is on the closable first vertex → pointer cursor
   const panRef = useRef(null); // { startX, startY, startView }
   const panClickGuardRef = useRef(false); // a pan's pointer-up still fires a `click` on the click-catcher — swallow that one
 
@@ -246,9 +248,10 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       setDraft(clampCropRect(raw, imgW, imgH));
     };
     const onUp = () => { dragRef.current = null; setDragType(null); };
+    const releaseCursor = pinDragCursor(HANDLE_CURSOR[dragType] || "move"); // the resize arrow / move holds off the grip too
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    return () => { releaseCursor(); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
   }, [dragType, view.scale, imgW, imgH]);
 
   // ---- undo / redo (NEW-1 hardening, extended to both shapes + redo in NEW-4) — a snapshot is
@@ -300,9 +303,10 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       setPolyPts((pts) => pts.map((p, i) => (i === d.idx ? [nx, ny] : p)));
     };
     const onUp = () => { vertexDragRef.current = null; setDraggingVertex(null); };
+    const releaseCursor = pinDragCursor("move");
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    return () => { releaseCursor(); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
   }, [draggingVertex, view.scale, imgW, imgH]);
 
   // ---- insert a vertex on an existing edge (NEW-1) — press near an edge and it both inserts AND
@@ -609,9 +613,11 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   const rTL = toScreen(draft.x, draft.y), rBR = toScreen(draft.x + draft.w, draft.y + draft.h);
   const rx = rTL.x, ry = rTL.y, rw = rBR.x - rTL.x, rh = rBR.y - rTL.y;
 
+  // While the hand / Space pan is armed a press anywhere pans, so every grip shows grab(bing), not its resize / move arrow.
+  const panCursor = (spaceDown || handTool) ? (isPanning ? "grabbing" : "grab") : null;
   const handleEl = (type, style, cursor) => (
     <div key={type} data-testid={`crop-handle-${type}`} onPointerDown={beginDrag(type)} style={{
-      position: "absolute", cursor, touchAction: "none", pointerEvents: "auto", ...style,
+      position: "absolute", cursor: panCursor || cursor, touchAction: "none", pointerEvents: "auto", ...style,
     }} />
   );
   const polyPtsScreen = polyPts.map(([x, y]) => { const s = toScreen(x, y); return [s.x, s.y]; });
@@ -693,7 +699,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
                 onPointerDown={beginDrag("move")}
                 style={{
                   position: "absolute", left: rx, top: ry, width: rw, height: rh, pointerEvents: "auto",
-                  border: `1.5px solid ${CROP_WHITE}`, boxShadow: CROP_RECT_SHADOW, cursor: "move", touchAction: "none",
+                  border: `1.5px solid ${CROP_WHITE}`, boxShadow: CROP_RECT_SHADOW, cursor: panCursor || "move", touchAction: "none",
                 }}
               >
                 {dragType && (
@@ -755,7 +761,13 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
               {/* click-catcher — places a vertex while drawing; deselects the selected vertex once closed */}
               <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="transparent"
-                style={{ cursor: !polyClosed ? "crosshair" : "default", pointerEvents: "auto" }}
+                style={{ cursor: panCursor || (!polyClosed ? (overClose ? "pointer" : "crosshair") : "default"), pointerEvents: "auto" }}
+                onMouseMove={!polyClosed && polyPts.length >= MIN_POLY_VERTICES ? (e) => {
+                  const r = boxRef.current?.getBoundingClientRect(); if (!r) return;
+                  const first = toScreen(polyPts[0][0], polyPts[0][1]);
+                  const near = Math.hypot(e.clientX - r.left - first.x, e.clientY - r.top - first.y) <= CLOSE_HIT_PX;
+                  setOverClose((o) => (o === near ? o : near));
+                } : undefined}
                 onClick={onDrawClick} onContextMenu={onCanvasContext} />
 
               {/* edge hit-targets — insert a vertex; rendered BEFORE the vertex circles so a vertex
@@ -765,7 +777,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
                 return (
                   <line key={`edge-${i}`} x1={x} y1={y} x2={nx} y2={ny}
                     stroke="transparent" strokeWidth={EDGE_HIT}
-                    style={{ cursor: "copy", touchAction: "none", pointerEvents: "auto" }}
+                    style={{ cursor: panCursor || "copy", touchAction: "none", pointerEvents: "auto" }}
                     onPointerDown={beginEdgeInsert(i)} onContextMenu={onCanvasContext} data-testid={`crop-poly-edge-${i}`} />
                 );
               })}
@@ -779,7 +791,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
                 <circle key={i} cx={x} cy={y} r={VERTEX_R}
                   fill={selectedVertex === i ? "var(--accent)" : CROP_WHITE}
                   stroke="var(--accent)" strokeWidth={selectedVertex === i ? 2.5 : 1.5}
-                  style={{ cursor: "move", touchAction: "none", pointerEvents: "auto" }}
+                  style={{ cursor: panCursor || "move", touchAction: "none", pointerEvents: "auto" }}
                   onPointerDown={beginVertexDrag(i)} onContextMenu={onVertexContext(i)} data-testid={`crop-poly-vertex-${i}`} />
               ))}
             </svg>

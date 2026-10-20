@@ -53,7 +53,7 @@ function stripIdentity(root) {
 
 const moreBtnStyle = (open) => ({
   display: "flex", alignItems: "center", justifyContent: "center", flex: "none",
-  height: 26, width: MORE_WIDTH, padding: 0, borderRadius: RADIUS.md, cursor: "pointer",
+  height: 26, width: MORE_WIDTH, padding: 0, borderRadius: RADIUS.md, cursor: "pointer", // the More trigger is never disabled
   border: `1px solid ${open ? "var(--accent-schedule-text)" : "var(--chrome-divider)"}`,
   background: open ? "var(--hover-ghost)" : "var(--chrome-bg)", color: "var(--chrome-text)", fontFamily: "inherit",
 });
@@ -215,7 +215,7 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
                 : menuRowsOf(it).map((r, k) => (
                   <button key={r.key} type="button" role="menuitem" data-menu-item-id={k === 0 ? it.id : r.key} disabled={r.disabled}
                     onClick={() => { close(true); r.onSelect && r.onSelect(); }}
-                    style={{ ...rowStyle, ...(r.sepBefore || (k === 0 && it.sepBefore) ? { borderTop: "1px solid var(--chrome-divider)", borderRadius: RADIUS.sm, marginTop: 3, paddingTop: 9 } : null), opacity: r.disabled ? 0.5 : 1, fontWeight: r.active ? 700 : 600 }}>
+                    style={{ ...rowStyle, ...(r.sepBefore || (k === 0 && it.sepBefore) ? { borderTop: "1px solid var(--chrome-divider)", borderRadius: RADIUS.sm, marginTop: 3, paddingTop: 9 } : null), opacity: r.disabled ? 0.5 : 1, cursor: r.disabled ? "default" : "pointer", fontWeight: r.active ? 700 : 600 }}>
                     <span style={{ flex: 1, minWidth: 0 }}>{r.label}</span>
                     {Number(r.badge) > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--on-accent)", background: "var(--accent-schedule-text)", borderRadius: RADIUS.pill, padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5 }}>{r.badge}</span>}
                     {r.active && <span aria-hidden="true" style={{ color: "var(--accent-schedule-text)" }}>●</span>}
