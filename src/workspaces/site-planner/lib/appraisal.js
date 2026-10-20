@@ -284,7 +284,8 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Randolph, Union, Henderson, Mercer), `Owner1Name` (Effingham), `TSC_Owner1` / `TSC_Name1` (the tax-roll export's own prefix — Clinton, Clay, Fayette), `PrimaryName` (De Witt, Marshall, Stark,
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name)$/i;
+/* New York (2026-10-20): `primary_ow` (the shapefile-truncated PRIMARY_OWNER — Nassau, Franklin and Jefferson via the north-country parcel model, Orleans, Seneca) Fallback pass only. */
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
