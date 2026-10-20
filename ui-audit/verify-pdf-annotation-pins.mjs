@@ -16,7 +16,7 @@
  *   · KNOWN-GOOD ARM: the flattened page differs from a plan-with-nothing-on-it export (the comparison isn't vacuous);
  *   · pdf.js (a second library) reads the four back, unlocked, with appearances; the plain building's Polygon carries 4
  *     vertices, the bumped-out building's 8, its /Rect spans the bump-outs, and — with the annotations hidden — the
- *     page holds NO ink where the bump-outs are (they left the page with their building).
+ *     page holds none of the building's fill where the bump-outs are (they left the page with their building).
  * Signed in, the throwaway plan is deleted afterwards and its absence verified (CLAUDE.md entry 15).
  */
 import { chromium } from "playwright";
@@ -211,20 +211,22 @@ const pageOnly = raster(join(OUT, "editable.pdf"), "editable-page-only", ["-hide
 const bP = blurLinear(pageOnly, 2);
 check(meanAbs(bP, bA) > 0, "the editable file's page content (annotations hidden) is NOT the full flattened picture — the lifted objects are really out of the page");
 if (bumpRegions) {
-  // NO bump-out ink left in the page: inside each bump-out's rectangle the annotation-hidden page reads like the
-  // blank plan, while the flattened page (known-good arm) carries the building's ink there.
+  // NO bump-out ink left in the page. The fill colour is sampled from the FLATTENED page at each bump-out's centre
+  // (so it is whatever the building really paints, over a live aerial or a white page); the check is then the share
+  // of that colour inside the rectangle. Flattened and editable-with-annotations must read ~1, and the annotation-
+  // hidden page must read ~0. (A baseline-diff against a blank plan is NOT used: with a live aerial the blank plan
+  // frames the map differently, so the imagery differs and the diff reads imagery, not bump-out ink — measured live.)
   const pageHpt = (await (await pdfjs.getDocument({ data: new Uint8Array(out.edit), verbosity: 0 }).promise).getPage(1)).view[3];
   const k = DPI / 72, W = A.width, ch = A.channels;
-  const regionAbs = (X, Y, [rx0, ry0, rx1, ry1]) => {
-    const px0 = Math.max(0, Math.floor(rx0 * k) + 2), px1 = Math.min(W - 1, Math.ceil(rx1 * k) - 2);
-    const py0 = Math.max(0, Math.floor((pageHpt - ry1) * k) + 2), py1 = Math.min(A.height - 1, Math.ceil((pageHpt - ry0) * k) - 2);
-    let s = 0, n = 0;
-    for (let y = py0; y <= py1; y++) for (let x = px0; x <= px1; x++) { const i = (y * W + x) * ch; s += Math.abs(X[i] - Y[i]) + Math.abs(X[i + 1] - Y[i + 1]) + Math.abs(X[i + 2] - Y[i + 2]); n += 3; }
-    return n ? s / n : 0;
-  };
-  const inkFlat = bumpRegions.map((rg) => regionAbs(A.data, C.data, rg)), inkPage = bumpRegions.map((rg) => regionAbs(pageOnly.data, C.data, rg));
-  check(inkFlat.every((v) => v > 2), `known-good arm: the flattened page carries ink inside both bump-outs (${inkFlat.map((v) => v.toFixed(2)).join(", ")} vs blank)`);
-  check(inkPage.every((v, i) => v <= 0.2 * inkFlat[i]), `no bump-out ink is left in the page with the annotations hidden (${inkPage.map((v) => v.toFixed(2)).join(", ")} vs blank; bar 20% of the flattened ink)`);
+  const at = (I, x, y) => { const i = (y * W + x) * ch; return [I.data[i], I.data[i + 1], I.data[i + 2]]; };
+  const box = ([rx0, ry0, rx1, ry1]) => [Math.floor(rx0 * k) + 3, Math.floor((pageHpt - ry1) * k) + 3, Math.ceil(rx1 * k) - 3, Math.ceil((pageHpt - ry0) * k) - 3];
+  const fillShare = (I, [x0, y0, x1, y1], ref) => { let hit = 0, n = 0; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { n++; const c = at(I, x, y); if (Math.abs(c[0] - ref[0]) < 14 && Math.abs(c[1] - ref[1]) < 14 && Math.abs(c[2] - ref[2]) < 14) hit++; } return n ? hit / n : 0; };
+  const rects = bumpRegions.map(box);
+  const refs = rects.map(([x0, y0, x1, y1]) => at(A, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2)));
+  const shareFlat = rects.map((r, i) => fillShare(A, r, refs[i])), shareEdit = rects.map((r, i) => fillShare(B, r, refs[i])), sharePage = rects.map((r, i) => fillShare(pageOnly, r, refs[i]));
+  check(shareFlat.every((v) => v > 0.9), `known-good arm: the flattened page is the building's fill throughout both bump-outs (${shareFlat.map((v) => v.toFixed(2)).join(", ")})`);
+  check(shareEdit.every((v) => v > 0.9), `with the annotations shown, both bump-outs read as the building's fill (${shareEdit.map((v) => v.toFixed(2)).join(", ")})`);
+  check(sharePage.every((v) => v < 0.02), `no bump-out ink is left in the page with the annotations hidden (building-fill share ${sharePage.map((v) => v.toFixed(2)).join(", ")}; bar < 0.02)`);
 }
 console.log(`\n${pass} passed, ${fail} failed   (files in ${OUT})`);
 process.exit(ASSERT && fail ? 1 : 0);
