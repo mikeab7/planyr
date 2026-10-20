@@ -52,6 +52,7 @@ import { idRaw, idMap } from "./idParcels.js"; // NEW-1 (B2317920) — the Idaho
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -982,6 +983,7 @@ const COUNTIES_RAW = {
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
   ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
@@ -3029,6 +3031,7 @@ const COUNTIES_MAP_RAW = {
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
   ...msMarisMap(),
   ...alMap(),
+  ...orMap(), // NEW-1 (B2347696)
   ...idMap(), // NEW-1 (B2317920)
   ...gaMap(), // NEW-1 (B2316720)
   ...laMap(),
