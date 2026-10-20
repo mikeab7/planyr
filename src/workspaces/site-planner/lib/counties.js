@@ -54,6 +54,7 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
 import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
 import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
 import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
@@ -990,6 +991,7 @@ const COUNTIES_RAW = {
   ...msMarisRaw(),
   ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
   ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
@@ -3056,6 +3058,7 @@ const COUNTIES_MAP_RAW = {
   ...laMap(),
   ...ksMap(), // NEW-1 (B2348000)
   ...moMap(),
+  ...paMap(),
   ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)

@@ -85,8 +85,8 @@
 | New York (NY) | town/municipal (city/town assessors; NYS ORPTS provides oversight/certification) | measured-reachable | [NYS Tax Parcels Public — official ArcGIS Online mirror (NYS ITS Geospatial Services + Dept. of Taxation & Finance ORPTS, org account NYSGIS_GPO)](https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1) | gov | yes (200, 342ms) | 3,827,530 | esriGeometryPolygon | parcelId=`MUNI_PARCEL_ID`, owner=`PRIMARY_OWNER`, situsAddress=absent, landArea=`ACRES`, appraisedValue=`FULL_MARKET_VAL` | lat 100% · lon 101% of state | 501ms, 1000 feat. | ✅ |
 | Ohio (OH) | county (elected County Auditor) | measured-reachable | [Ohio Statewide Parcels — public view (OGRIP)](https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0) | gov | yes (200, 226ms) | 6,313,610 | esriGeometryPolygon | parcelId=`LocalParcelID`, owner=absent, situsAddress=`SitusAddressAll`, landArea=`LandArea`, appraisedValue=absent | lat 92% · lon 103% of state | ⛔ 8001ms (timed out) | ✅ |
 | Oklahoma (OK) | county | no-free-source (statewide) | none found statewide — the 2026-09-09 probe ran from an egress-limited sandbox; 16 of 77 counties are now wired county by county (see "Oklahoma counties (2026-10-19)") | — | — | — | — | — | — | — | — |
+| Pennsylvania (PA) | county (67 autonomous assessing authorities) | no-free-source (statewide with owners) — **66 of 67 counties wired county-by-county (PASDA's per-county layers + county-run servers), see "Pennsylvania counties (2026-10-19)"** | none found | — | — | — | — | — | — | — | — |
 | Oregon (OR) | county (ORMAP is the state's own cooperative cadastral base-map program) | no-free-source (statewide) — **33 of 36 counties wired county-by-county, see "Oregon counties (2026-10-19)"** | none found | — | — | — | — | — | — | — | — |
-| Pennsylvania (PA) | county (67 autonomous assessing authorities) | no-free-source | none found | — | — | — | — | — | — | — | — |
 | Rhode Island (RI) | town/municipal — RI abolished county government in 1842; 39 towns/cities each run their own independent Tax Assessor | blocked-in-sandbox | [Tax Parcels (RIGIS — the RI state GIS clearinghouse, org RIGIS_ADMIN / RIDEM Map Room)](https://risegis.ri.gov/hosting/rest/services/RIDEM/Tax_Parcels/MapServer/0) | agol | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — risegis.ri.gov) |
 | South Carolina (SC) | county (46 counties, elected/appointed Assessor) | no-free-source | none found | — | — | — | — | — | — | — | — |
 | South Dakota (SD) | county | no-free-source (statewide) — **17 of 66 counties wired county-by-county, see "South Dakota counties (2026-10-19)"** | none found | — | — | — | — | — | — | — | — |
@@ -230,7 +230,7 @@ because the link test is not sound in one direction: Rhode Island's own statewid
 - **Ohio (OH):** 6.3M parcels; owner name and appraised value are deliberately absent from this privacy-scrubbed public view (a MailAddressAll field is present as a proxy).
 - **Oklahoma (OK):** A real statewide mosaic exists (Property Records Preservation LLC for the OK Office of Geographic Information) but is explicitly published as view/WMS-only with no downloadable or queryable REST FeatureServer/MapServer found on any reachable host.
 - **Oregon (OR):** The Tax Lot layer the state's own 'Oregon Parcel Viewer' web app points to returns a real HTTP 400 'Invalid URL' — the service has been retired/unpublished, a genuine dead reference rather than a sandbox block. Every other candidate host (gis.odf.oregon.gov, ormap.net, data.oregon.gov) is blocked. Needs a fresh live search, not just a re-probe of this URL.
-- **Pennsylvania (PA):** RETRACTED, corrected 2026-09-08 from the owner's own browser (not this sandbox): PASDA's service directory carries 170 services and EXACTLY ONE parcel service, ErieCountyParcels — county-only. There is no statewide PA parcel mosaic on PASDA. This replaces the prior 'high-confidence follow-up candidate' framing, which is now a confirmed no.
+- **Pennsylvania (PA):** ⚠ **CORRECTED AGAIN 2026-10-19 — the 2026-09-08 correction below was itself wrong about PASDA:** its directory holds one MapServer per county for ~45 counties (~36 with parcels); see "Pennsylvania counties (2026-10-19)". (Original 2026-09-08 text follows, kept as history.) RETRACTED, corrected 2026-09-08 from the owner's own browser (not this sandbox): PASDA's service directory carries 170 services and EXACTLY ONE parcel service, ErieCountyParcels — county-only. There is no statewide PA parcel mosaic on PASDA. This replaces the prior 'high-confidence follow-up candidate' framing, which is now a confirmed no.
 - **Rhode Island (RI):** MEASURED LIVE FROM THE OWNER'S OWN BROWSER (2026-09-08), not this sandbox — risegis.ri.gov is a state .gov host this environment's egress allowlist blocks (the CONNECT tunnel never opens). 'Tax Parcels', polygon, 394,167 parcels, published by RIGIS_ADMIN — the state clearinghouse ITSELF, not a town and not a third-party rehost. Fields: PlatLot (RI's own parcel identifier — with no counties since 1842, each of the 39 towns keys parcels by plat + lot), Acres, E911 and E911_Type (address), TownCode, IMP_sqft, Last_UPD. NO owner, NO appraised value — the same attribute-light standing already given to Hawaii, New Hampshire and Virginia. ⛔ FOUND BY THE AGOL PASS (NEW-2): the item is discoverable on ArcGIS Online (searchable from this sandbox) even though the service it points at is not reachable from here.
 - **South Carolina (SC):** The only statewide DNR/RFA service found (SC_County_Parcel_Viewers) is a lookup TABLE of links to each county's own separate viewer, not aggregated geometry; RFA's own page describes its aggregated parcels as available only via 'secure' (non-public) REST services.
 - **South Dakota (SD):** No credible statewide aggregation found; a same-named 'SD_Parcels' service turned out to be a flood substantial-damage-assessment layer (SD = Substantial Damage), a false positive ruled out by inspecting its schema. Individual counties run independent systems.
@@ -1914,6 +1914,7 @@ Owner request 2026-10-19 ("start wiring all the remaining states into Planner").
 | Wallowa | **gap — named** | — | The county's only public layer is `Taxlots_Public` in the apgis_wallowacounty ArcGIS Online org: polygons carrying **one column, the bare lot number** (`Taxlot` = "100", "400" … not unique across maps), so it cannot answer with a parcel ID and is not wired. No county REST directory found; not in the WRD layer; ODF has no Query. |
 
 **Needs the owner (not a build).** Polk (server down), Sherman and Wallowa (no usable public layer). Stale or non-county publishers, kept because nothing fresher is public: Lake (Klamath County GIS's 2021 copy), Grant and Union (2023 / 2022, no owner), Umatilla (published by the City of Pendleton), Coos (University of Oregon's March 2024 copy of the roll), Malheur (2024). Counties with no owner column: Baker, Columbia, Deschutes, Grant, Linn, Tillamook, Union, Washington, Curry, Jefferson, Lincoln.
+
 ## Oklahoma counties (2026-10-19) — 16 of 77 wired (NEW-1)
 
 Owner request 2026-10-19: *"start wiring all the remaining states into Planner"* — this section is Oklahoma only. **Oklahoma has no free statewide parcel service:** the state's mosaic (Property Records Preservation LLC for the Office of Geographic Information) is view/WMS-only; okmaps.onenet.net answered 404 through the relay; the NSGIC portal and ArcGIS Hub list none. The 2026-09-09 probe row ("none found") was run from an egress-limited sandbox before pass 2; its statewide finding stands, its implication for the counties does not.
@@ -2060,6 +2061,89 @@ B2345888, owner request "start wiring all the remaining states into Planner". **
 | Valencia | `nm_valencia` | OSE County_Parcels_2025 layer 32 (relay, gis.ose.nm.gov) | yes | 199,659; 25/30 lattice |
 
 **Partial counties (the honest gaps).** De Baca, Guadalupe, Mora, Quay, Union: the State layer has the towns (Fort Sumner, Santa Rosa, Mora, Tucumcari, Clayton: 400–2,000 parcels in a ~2 km box at each seat) and no rural lots. Searched for a rural source: ArcGIS Online (county names × parcel/assessor/tax/lots, the Sidwell and Magnasoft orgs, NM bbox sweep), the counties' own viewers, web search (the Quay "Parcel Pilot" is point data; the only other hits were commercial sellers). Not found. Next places to look: each county assessor's own server (Tyler EagleWeb sites list parcel numbers but no geometry), RGIS (rgis.unm.edu, downloads not services), and an owner ask to the assessors. **Stopping rule:** each closes when a rural polygon layer is wired or the assessor confirms none exists. Socorro (4/30 lattice) and McKinley (16/30) look sparse because most of the land is public/tribal, not because the layer is truncated (1,122 and 1,037 parcels over 40 acres respectively).
+
+## Pennsylvania counties (2026-10-19) — 66 of 67 wired (NEW-1)
+
+Owner request 2026-10-19: *"start wiring all the remaining states into Planner"* — this section is Pennsylvania only (sibling sessions took the other states). The 2026-09-09 probe row for Pennsylvania ("no-free-source / none found") was run from an egress-limited sandbox, before pass 2 and before the relay existed, and the 2026-09-08 note below it ("PASDA's service directory carries 170 services and EXACTLY ONE parcel service, ErieCountyParcels") was **wrong** — it counted the directory's top level. Read through the relay on 2026-10-19, `mapservices.pasda.psu.edu/server/rest/services/pasda` lists **one MapServer per county for ~45 counties, ~36 of them with a parcel layer** (each the county's own layer, submitted to PASDA and refreshed monthly — Adams `202610`, Allegheny `20261012`, Lancaster `202609`…). There is still **no statewide parcel service with owners**: PASDA's statewide `PA_Parcels` mosaic (`apps.pasda.psu.edu`) is the same county layers (PIN + source + date, no owner, 36 of 67 counties), and the PA DEP `gis.dep.pa.gov/.../Parcels/PA_Parcels` layer is "a PA Parcel partial dataset for WorldView and PracticeKeeper project" (its own words) — real county polygons with owner and address for 38 counties, of unknown vintage, 502s now and then under load, `COUNTY_NAME` spelled four ways (and `Wyoming County` rows labelled `Washington`), and one county (Clarion) with no parcel id on 7 of 8 rows. It is therefore used only as the **last resort for four counties** with nothing better (Clearfield, Elk, Northumberland, Westmoreland), scoped per county, and says so in its provenance.
+
+Routes tried for every county: (1) statewide / multi-county — PASDA (per-county + statewide), PA DEP, the NSGIC parcel portal, ArcGIS Hub, regional planning commissions; (2) the two ArcGIS Online county-parcel registries (`PA_AgMaps_Admin`, `GDITAdmin`) that list one service per county; (3) the county's own server and its **viewer's own web-map / app config** (that is how Clarion's, McKean's and Huntingdon's current layers were found — the registries' URLs for those had moved or died: Beaver `gis.mbakerintl.com` "service not started", Delaware `dcgis.co.delaware.pa.us`, Clarion `gis.co.clarion.pa.us` no longer resolves, Franklin `gis.franklincountypa.gov` unreachable, McKean `gismaps.mckeancountypa.org` timing out); (4) ArcGIS Online item search by county (crawled ~3,000 Pennsylvania-area items). The sandbox reaches only `*.arcgis.com`; every other host was MEASURED through the production-shaped relay (`/gis-proxy`, on this PR's Cloudflare preview) with point queries at **5 spread points inside each county plus 4 beside its county line** (centre + 4 spread, 4 line), requiring polygons with a parcel id in the declared column and a layer extent inside Pennsylvania. Traps hit and avoided: **same-named counties in other states** (a Utah "Clearfield County" parcel service answered a Clearfield PA search; Armstrong/Beaver/Carbon/Wayne/Delaware/Jefferson all have out-of-state namesakes — every layer was checked against the Pennsylvania extent); **ArcGIS Online copies that went private** (the whole `wharcgisdeveloper` "<County> County PA Parcels" family and two consultants' copies now answer `Token Required` — not a source); **dated working copies** (Susquehanna's `Parcel_OLD`, Greene's June-2023 layer without owners — newer/owner-bearing sibling layers used instead); and a **Franklin PASDA layer that answers 502 on every query** (the county's own `fcgis.franklincountypa.gov` is wired instead).
+
+| County | Source | Parcel-id field | Owner | Address | Measured (polygons with an id at 9 points · of the 4 beside the county line) |
+|---|---|---|---|---|---|
+| Adams County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `Parcel_ID` | yes | `COMBINED_S` | 8/9 · 3/4 |
+| Beaver County | county's own server (`gis.beavercountypa.gov`) | `Parcel_ID` | yes | `Location_Street` | 8/9 · 4/4 |
+| Bedford County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `Name` | yes | — | 9/9 · 4/4 |
+| Berks County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | yes | `FULLSITEAD` | 8/9 · 3/4 |
+| Blair County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PAR_NUM` | no | — | 8/9 · 4/4 |
+| Bradford County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `ParcelJoin` | yes | — | 7/9 · 4/4 |
+| Bucks County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCEL_NUM` | yes | `ADDRESS` | 7/9 · 2/4 |
+| Butler County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | yes | — | 9/9 · 4/4 |
+| Cambria County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCELID` | no | — | 7/9 · 2/4 |
+| Cameron County | ArcGIS Online (`services5.arcgis.com`) | `PIN` | yes | — | 9/9 · 4/4 |
+| Carbon County | county's own server (`gis.carboncounty.com`) | `ParcelID` | yes | `Location` | 9/9 · 4/4 |
+| Centre County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `TAXIDNUM` | no | `LOCATION` | 9/9 · 4/4 |
+| Chester County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `UPI` | yes | `LOC_ADDRES` | 8/9 · 3/4 |
+| Clarion County | ArcGIS Online (`services1.arcgis.com`) | `Map_Number` | yes | `Situs_Address` | 8/9 · 3/4 |
+| Clearfield County | PA DEP `PA_Parcels` (partial compilation — fallback) (`gis.dep.pa.gov`) | `PARCEL_ID` | yes | `PROPERTY_ADDRESS_1` | 9/9 · 4/4 |
+| Clinton County | county's own server (`maps.clintoncountypa.gov`) | `PARCEL_ID` | yes | `ADDRESS` | 9/9 · 4/4 |
+| Columbia County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | no | — | 9/9 · 4/4 |
+| Crawford County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `CAMA_PIN` | no | — | 9/9 · 4/4 |
+| Dauphin County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PID` | yes | — | 7/9 · 2/4 |
+| Delaware County | county's own server (`gis.delcopa.gov`) | `PIN` | no | — | 7/9 · 2/4 |
+| Elk County | PA DEP `PA_Parcels` (partial compilation — fallback) (`gis.dep.pa.gov`) | `PARCEL_ID` | no | `PROPERTY_ADDRESS_1` | 7/9 · 3/4 |
+| Erie County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `TaxPin` | no | `FullStreet` | 8/9 · 4/4 |
+| Fayette County | ArcGIS Online (`services5.arcgis.com`) | `taxidnum` | yes | — | 7/9 · 3/4 |
+| Forest County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCEL` | yes | — | 9/9 · 4/4 |
+| Franklin County | county's own server (`fcgis.franklincountypa.gov`) | `Name` | yes | `FULL_SITUS_ADDR` | 8/9 · 4/4 |
+| Fulton County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | no | — | 8/9 · 3/4 |
+| Greene County | ArcGIS Online (`services7.arcgis.com`) | `Tax_ID_Num` | yes | — | 8/9 · 3/4 |
+| Huntingdon County | ArcGIS Online (`services3.arcgis.com`) | `TAXIDNUM` | yes | `Property_A` | 8/9 · 3/4 |
+| Indiana County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCEL_ID` | yes | — | 7/9 · 2/4 |
+| Jefferson County | ArcGIS Online (`services1.arcgis.com`) | `ParcelId` | yes | — | 8/9 · 3/4 |
+| Juniata County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCELID` | yes | — | 9/9 · 4/4 |
+| Lancaster County | county's own server (`arcgis.lancastercountypa.gov`) | `ACCOUNT` | yes | — | 8/9 · 3/4 |
+| Lawrence County | county's own server (`gis.leoc.net:6443`) | `TID` | yes | `SITUS` | 7/9 · 3/4 |
+| Lebanon County | ArcGIS Online (`utility.arcgis.com`) | `MAP_NUMBER` | yes | `SITUS_ADDR` | 9/9 · 4/4 |
+| Lycoming County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCEL` | no | `SITUS` | 9/9 · 4/4 |
+| McKean County | county's own server (`gis.mckeancountypa.gov`) | `pin` | no | — | 9/9 · 4/4 |
+| Mercer County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `Parcel_Id` | yes | `Situs_Desc` | 9/9 · 4/4 |
+| Mifflin County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `ACCOUNT` | no | — | 8/9 · 3/4 |
+| Monroe County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `MAPNUMBER` | no | — | 9/9 · 4/4 |
+| Montgomery County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PARCEL` | yes | — | 8/9 · 4/4 |
+| Montour County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | no | — | 9/9 · 4/4 |
+| Northumberland County | PA DEP `PA_Parcels` (partial compilation — fallback) (`gis.dep.pa.gov`) | `PARCEL_ID` | yes | `PROPERTY_ADDRESS_1` | 6/9 · 2/4 |
+| Perry County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | no | — | 8/9 · 3/4 |
+| Philadelphia County | ArcGIS Online (`services.arcgis.com`) | `parcel_id` | yes | `address` | 6/9 · 3/4 |
+| Pike County | county's own server (`gis.pikepa.org`) | `MAP_JOIN` | yes | `Situs` | 9/9 · 4/4 |
+| Potter County | county's own server (`maps.pottercountypa.net`) | `Map_Number` | yes | — | 9/9 · 4/4 |
+| Schuylkill County | county's own server (`services.co.schuylkill.pa.us`) | `PARCEL_NUMBER` | yes | — | 8/9 · 3/4 |
+| Snyder County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | no | — | 9/9 · 4/4 |
+| Somerset County | ArcGIS Online (`services7.arcgis.com`) | `MAPNUM` | yes | `LOCAT` | 9/9 · 4/4 |
+| Sullivan County | ArcGIS Online (`services.arcgis.com`) | `PARCEL_ID` | no | — | 8/9 · 4/4 |
+| Susquehanna County | ArcGIS Online (`services5.arcgis.com`) | `PIN` | yes | `SITUS_COMBINED` | 8/9 · 3/4 |
+| Tioga County | county's own server (`tiogagis.tiogacountypa.us`) | `PARCELID` | no | `LOCATION` | 9/9 · 4/4 |
+| Union County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `Name` | no | — | 9/9 · 4/4 |
+| Venango County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `ParcelNumb` | no | `Situs` | 8/9 · 3/4 |
+| Warren County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | no | — | 9/9 · 4/4 |
+| Washington County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIN` | yes | — | 9/9 · 4/4 |
+| Wayne County | ArcGIS Online (`services1.arcgis.com`) | `TAXMAPNO_1` | yes | `Address` | 9/9 · 4/4 |
+| Westmoreland County | PA DEP `PA_Parcels` (partial compilation — fallback) (`gis.dep.pa.gov`) | `PARCEL_ID` | yes | `PROPERTY_ADDRESS_1` | 8/9 · 4/4 |
+| Wyoming County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `Pin` | yes | — | 9/9 · 4/4 |
+| York County | PASDA (county-submitted layer) (`mapservices.pasda.psu.edu`) | `PIDN` | yes | `PROPADR` | 8/9 · 3/4 |
+| Allegheny County | county GIS — hand-wired 2026-09 (`pa_allegheny`) | — | — | — | unchanged |
+| Cumberland County | county GIS — hand-wired 2026-09 (`pa_cumberland`) | — | — | — | unchanged |
+| Lackawanna County | county GIS — hand-wired 2026-09 (`pa_lackawanna`) | — | — | — | unchanged |
+| Lehigh County | county GIS — hand-wired 2026-09 (`pa_lehigh`) | — | — | — | unchanged |
+| Luzerne County | county GIS — hand-wired 2026-09 (`pa_luzerne`) | — | — | — | unchanged |
+| Northampton County | county GIS — hand-wired 2026-09 (`pa_northampton`) | — | — | — | unchanged |
+
+Owner **no** means the published layer carries no owner column (geometry + parcel id, sometimes acreage only — the county's tax/owner table is not on the public layer); it is the source's fact, not a gap, and the card says so honestly. Philadelphia is one consolidated city-county (`pa_philadelphia`, the City's `PWD_PARCELS`, which carries owner and address). Susquehanna and Dauphin split the owner across two columns (last / first name); Susquehanna's new `Parcels_CAMA` layer has the whole name in `COMBINED_NAME`.
+
+### Pennsylvania gap — 1 county, with the reason and what was re-searched
+
+Reads "Armstrong County — no parcel data wired here yet." in the app. **Not closed on a null:** the county's own Mapping page states it has no public online GIS viewer (maps are viewable in the office; data is sold through a request form). Re-searched 2026-10-19/20 on every route above — PASDA (no Armstrong parcel service; the statewide `PA_Parcels` mosaic returns nothing at the county), the PA DEP layer (0 of 9 test points), both county-parcel registries (no Armstrong row), the ArcGIS Online crawl (the only Armstrong layers — `Kiski_Parcels` and a consultant's `Armstrong County Parcels` — answer `Token Required`), and the viewer-vendor catalogs. If the county ever publishes a viewer or submits to PASDA, it is a one-row addition.
+
+**Reachability caveat (for the next session).** Four registry-listed county hosts answer from a browser but not from the Cloudflare relay (`gis.norrycopa.net` Northumberland and `www.wcgis.us` Westmoreland present an invalid certificate — Cloudflare error 526; `clearfieldco.org` answers 500; `gis.blairco.org`, `gis.co.berks.pa.us` and several others time out with 522) — those counties ride PASDA or the DEP layer instead. They should be re-measured periodically; Northumberland, Westmoreland, Clearfield and Elk would then move off the fallback.
 
 ## South Dakota counties (2026-10-19)
 

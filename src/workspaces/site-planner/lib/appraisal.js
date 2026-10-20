@@ -287,6 +287,11 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
 export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name)$/i;
+/* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
+ * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
+export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
+// A bare `name` that is a parcel NUMBER with letters in it (Franklin PA's `Name` = "22-0P20.-016.-000000"): starts with a digit, no spaces, a separator, no word of 3+ letters.
+const PARCEL_NUMBER_SHAPE = (v) => /^[0-9][0-9A-Za-z.,:/-]*$/.test(v) && /[.,:/-]/.test(v) && !/[A-Za-z]{3,}/.test(v);
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
@@ -320,7 +325,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
     // A TABLE-PREFIXED `name` is a joined layer's own label (TaxParcels.Name = the lot number), never an owner.
     if (lk !== key && /^name$/i.test(lk)) continue;
     // …and a bare `name` holding only digits / dots / dashes is a parcel NUMBER (Buchanan MO's `Name` = "11-4.0-17-000-000-005.002"), never an owner.
-    if (/^name$/i.test(lk) && /^[0-9][0-9.\-\s/]*$/.test(String(attrs[key]).trim())) continue;
+    if (/^name$/i.test(lk) && (/^[0-9][0-9.\-\s/]*$/.test(String(attrs[key]).trim()) || PARCEL_NUMBER_SHAPE(String(attrs[key]).trim()))) continue;
     // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
     // NUMBER), so any real owner column outranks it whatever order the service lists them in.
     const seq = ownerSeq(lk) + (/^name(_?1)?$/i.test(lk) ? 1000 : 0);
@@ -331,6 +336,12 @@ export function ownerKey(attrs, { skip = null } = {}) {
   // publish the owner as `Taxpayer`, Ascension as `OWNERNAME_` (a shapefile-truncated trailing
   // underscore), Acadia as `OWNERS`. Strictly a FALLBACK: a layer that already has an `Owner`
   // column resolves exactly as before, so no existing source can change its answer.
+  // …Pennsylvania's spellings come first, so `COMBINED_NAME` (Susquehanna) beats the bare `LAST_NAME` column listed ahead of it.
+  for (const key of Object.keys(attrs)) {
+    if (skip && skip.has(key)) continue;
+    if (!OWNER_KEY_PA_RE.test(leafKey(key)) || isPlaceholderValue(attrs[key])) continue;
+    return key;
+  }
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
     if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key))) continue;

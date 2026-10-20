@@ -102,6 +102,11 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Pennsylvania, 2026-10-19) — the hosts the wired Pennsylvania counties sit on, each MEASURED through this relay (on the PR preview) before its county was wired: PASDA (Penn State's state data
+   * clearinghouse — one MapServer per county for ~36 counties), the PA DEP partial statewide layer (last-resort source for four counties), and the county-run ArcGIS servers. */
+  "arcgis.lancastercountypa.gov", "fcgis.franklincountypa.gov", "gis.beavercountypa.gov", "gis.carboncounty.com", "gis.delcopa.gov",
+  "gis.dep.pa.gov", "gis.leoc.net:6443", "gis.mckeancountypa.gov", "gis.pikepa.org", "maps.clintoncountypa.gov", "maps.pottercountypa.net",
+  "mapservices.pasda.psu.edu", "services.co.schuylkill.pa.us", "tiogagis.tiogacountypa.us",
   /* NEW-1 (Washington, 2026-10-19, B2349360) — the county-run ArcGIS Server hosts the wired Washington counties sit on (each MEASURED through this relay on the PR preview before it was wired). */
   "atlas.co.chelan.wa.us", // Chelan County
   "gis.cowlitzwa.gov", // Cowlitz County Assessor
