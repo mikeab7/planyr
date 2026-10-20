@@ -277,7 +277,7 @@ function LayerRow({ spec, open, onToggleOpen }) {
         {spec.dropdown && (
           <button type="button" data-testid={`layer-caret-${spec.id}`} aria-expanded={open} aria-controls={`layer-menu-${spec.id}`}
             aria-label={`Options for ${spec.label}`} onClick={onToggleOpen}
-            style={{ border: "none", background: "transparent", padding: "0 2px", cursor: "pointer", color: spec.checked ? INK : MUTED, fontFamily: "inherit", flex: "none", lineHeight: 1 }}>
+            style={{ border: "none", background: "transparent", padding: "0 2px", cursor: "pointer", color: spec.checked ? INK : MUTED, fontFamily: "inherit", fontSize: TEXT, fontWeight: 700, flex: "none" }}>
             <Caret open={open} />
           </button>
         )}
