@@ -149,6 +149,12 @@ export const ALLOWED_HOSTS = new Set([
   "www.mcgisweb.org", "gis.peoriacounty.gov", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell.com", "maps.grundyco.org", "maps.lakecountyil.gov", "adamscountyarcserver.com",
   "rockgis.rockfordil.gov", // City of Rockford (Winnebago County layer)
   "gis.cookcountyil.gov", "gis12.cookcountyil.gov", "gis.dupageco.org", "gis.willcountyillinois.com", // the three counties wired by hand since 2026-09 (re-measured here)
+  /* NEW-1 (Kansas, 2026-10-19, B2348000) — the non-arcgis.com hosts the wired Kansas counties sit on; each was MEASURED through this relay on the PR preview before its county was wired. */
+  "ww1.bucoks.com", // Butler County GIS
+  "geodataportal.net", // Eagleview's MultiPlatformParcels host — Ellis County appraiser
+  "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
+  "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
+  "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
