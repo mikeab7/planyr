@@ -42,7 +42,7 @@ export const leafKey = (key) => String(key).replace(/^.*\./, "");
 
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
 export const MAILING_KEY_RE =
-  /(mail|owner_?ad(dr)?|owner_?(city|state|zip)|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
+  /(mail|owner_?ad(dr)?|owner_?(city|state|zip)|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state)|^cama_temp_address)/i; // ^cama_temp_address: Lee County SC's CAMA join publishes the OWNER's mailing lines under it (NEW-1, 2026-10-19)
 
 /* NEW-1 (Louisiana parishes) — keys that CONTAIN the word "address" but hold something that is not
  * one, measured on real Regrid-schema parish layers: Cameron's `ADDRESS_SO` reads the literal
@@ -290,7 +290,7 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Randolph, Union, Henderson, Mercer), `Owner1Name` (Effingham), `TSC_Owner1` / `TSC_Name1` (the tax-roll export's own prefix — Clinton, Clay, Fayette), `PrimaryName` (De Witt, Marshall, Stark,
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name)$/i;
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
 /* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
  * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
 export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
@@ -632,7 +632,9 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
     owner: ownerName(attrs) || null,
     /* …and where the generic resolver caught only a FRAGMENT of the county's declared parcel number (Missouri's Henry County publishes `PARCEL_NUM` "11"
      * beside `PID` "18-2.0-04-001-004-011.000"; Cole's `PARCELNUM` is "55"), the declared column — which contains it and says more — is the account. */
-    account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); return gen && dec && dec.length > gen.length && dec.includes(gen) ? dec : (gen || dec || clean(acct)); })(),
+    /* …and where the generic resolver caught a GEOID — South Carolina RFA's statewide layer carries `GeoID` (the county/district FIPS-style code, "4500720" for every Aiken lot) beside its real tax-map number
+     * `T_Map_Number` — it is a jurisdiction code, never the account, so the county's declared parcel column wins over it. */
+    account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); const geoOnly = !!(gen && dec && Object.keys(attrs || {}).some((key) => /^geo_?id$/i.test(leafKey(key)) && clean(attrs[key]) === gen)); return gen && dec && !geoOnly && dec.length > gen.length && dec.includes(gen) ? dec : (geoOnly ? dec : (gen || dec || clean(acct))); })(),
     address: clean(situsAddress(attrs)) || streetFromParts(attrs) || declared(addrField) || clean(addr),
     deedAcres: deed,
     taxYear,
