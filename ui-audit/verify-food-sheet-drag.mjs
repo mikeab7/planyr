@@ -80,10 +80,28 @@ async function drag(page, f, x, y0, dy, { steps = 10, release = true, skipFirst 
 }
 
 const open = async (browser, phone, kind) => { const r = await openRaw(browser, phone, kind); await assertMeasurable(r.page, "verify-food-sheet-drag"); await r.page.evaluate(() => { window.__PLANYR_E2E = true; }); return r; };
+/* The sheet's stops are CONTENT-DRIVEN (bottomSheetSnap: "no empty white below the content, ever"), so a one-visit place whose
+ * panel is shorter than 60% of the viewport renders half == full as ONE stop — and the "springs back to the same stop" /
+ * "drag up goes to full" arms become vacuous. Since the 2026-10-20 panel redesign (one-line visits, no tiles) the seeded
+ * Aburi panel IS that short, so the harness adds a labelled 520px spacer to the panel content — this harness is about the
+ * drag ENGINE at distinct stops, not the panel's copy — and waits for the sheet's own ResizeObserver to re-measure. */
+async function ensureTall(page) {
+  await page.evaluate(() => {
+    const s = document.querySelector('[data-testid="food-bottom-sheet"]'); const inner = s && s.children[1] && s.children[1].firstElementChild;
+    if (!inner || inner.querySelector('[data-testid="drag-harness-spacer"]')) return;
+    const d = document.createElement("div"); d.dataset.testid = "drag-harness-spacer"; d.textContent = "verify-food-sheet-drag spacer (harness only)";
+    d.style.cssText = "height:520px;padding:16px;color:var(--text-tertiary);font-size:12px;border-top:1px dashed var(--border-default)";
+    const bar = inner.querySelector('[data-testid="food-actions-row"]'); // keep "Log a visit" the last thing in the body
+    bar ? inner.insertBefore(d, bar) : inner.appendChild(d);
+  });
+  await sleep(700);
+}
+
 async function ready(browser, phone) {
   const r = await open(browser, phone, "ios");
   await openPlace(r.page, "aburi", /aburi/i, browser.browserType().name() === "webkit");
   await sleep(LIVE ? 2500 : 600);
+  await ensureTall(r.page);
   return r;
 }
 

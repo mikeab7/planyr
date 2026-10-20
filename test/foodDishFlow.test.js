@@ -78,7 +78,7 @@ describe("dish notes (NEW-4)", () => {
   it("the row shows the note on its own truncated line and the panel shows it in full", () => {
     const d = read("components/DishesSection.jsx");
     expect(d).toMatch(/data-testid="dish-row-note"[^>]*textOverflow: "ellipsis"/);
-    expect(d).toMatch(/data-testid="dish-full-note"/);
+    expect(d).toMatch(/data-testid="dish-sheet-note"/); // NEW-2: the full note is the sheet's own text box
   });
   it("the log-a-visit dish row has a Note field; the editor already had one", () => {
     expect(read("components/VisitPanel.jsx")).toMatch(/data-testid="visit-dish-note"/);

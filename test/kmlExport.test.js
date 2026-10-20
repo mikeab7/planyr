@@ -211,11 +211,10 @@ describe("round-trip through this repo's own KML reader (kmlImport.js) — the c
     // A bare "&" in a name is exactly what makes a KML file silently unreadable in Earth — assert
     // it never reaches the document unescaped, which is what actually prevents the corruption.
     expect(kml).not.toMatch(/[^&]& /);
-    // The reader parses the placemark and its geometry cleanly either way — `parseKmlPlacemarks`
-    // deliberately only decodes entities inside <description> (kmlDescriptionToText), not <name>,
-    // so the name round-trips through this repo's own reader in its escaped form.
+    // NEW-1 (owner report 2026-10-16) — the reader now decodes entities in <name> too, so the name
+    // round-trips EXACTLY (it used to come back escaped and land in a comp title as "&amp;").
     const [placemark] = parseKmlPlacemarks(kml);
-    expect(placemark.name).toBe(`O&apos;Brien &amp; &quot;Sons&quot; tract`);
+    expect(placemark.name).toBe(`O'Brien & "Sons" tract`);
     expect(placemark.geometry).toEqual({ kind: "point", lon: -95.8, lat: 29.8 });
   });
 });

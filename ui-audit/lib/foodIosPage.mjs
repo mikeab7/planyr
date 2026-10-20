@@ -94,8 +94,10 @@ export async function cleanupLive(base = BASE) {
       // the test account owns no real visits, so "everything of this user's in food_visits" is the throwaway set.
       const { data: u } = await c.auth.getUser();
       const del = await c.from("food_visits").delete().eq("user_id", u.user.id);
+      const delPrefs = await c.from("food_place_prefs").delete().eq("user_id", u.user.id); // the price levels a run set (NEW-1, 2026-10-20)
       const left = await c.from("food_visits").select("id").eq("user_id", u.user.id);
-      return { error: del.error && String(del.error.message), left: left.data ? left.data.length : "?" };
+      const leftPrefs = await c.from("food_place_prefs").select("id").eq("user_id", u.user.id);
+      return { error: (del.error && String(del.error.message)) || (delPrefs.error && String(delPrefs.error.message)) || null, left: (left.data && leftPrefs.data) ? left.data.length + leftPrefs.data.length : "?" };
     }, LIVE_MARK);
   } finally { await s.close(); }
 }

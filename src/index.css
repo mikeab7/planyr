@@ -138,6 +138,7 @@
   --control-h-touch: 44px; /* B1215682 — the touch-target floor; see designTokens.js's CONTROL_H header */
 
   --border-default: #E1E5EB;
+  --border-hairline: #EEF1EF; /* NEW-1 site-record panel — the faint rule between rows of one section */
   --border-strong:  #CDD3DC;
   --text-primary:   #1B1E26;
   --text-secondary: #353B49;
@@ -398,6 +399,7 @@
   --surface-overlay: rgb(24, 27, 33);
   --surface-base: #0A0C0F; /* see the light-theme definition's header for why this alias exists */
   --border-default: #2A2E37;
+  --border-hairline: #20242B;
   --border-strong:  #3A3F4B;
   --text-primary:   #E8EBF0;
   --text-secondary: #CAD0DA;

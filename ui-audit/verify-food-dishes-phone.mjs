@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-/* verify-food-dishes-phone — the phone flow of logging a visit and saving dishes (B2268433 NEW-2, B2268434 NEW-3, B2268435 NEW-4, 2026-10-17):
+/* verify-food-dishes-phone — the phone flow of logging a visit and saving dishes (B2268433 NEW-2, B2268434 NEW-3, B2268435 NEW-4, 2026-10-17;
+ * re-pointed 2026-10-20 at the DISH SHEET — NEW-2 of the restaurant-panel redesign — which replaced the row's kebab + inline history):
  *  · a saved visit CLOSES the form and lands on the place page (confirmation + Edit visit), never a cleared form offering another visit;
  *  · a dish is added or RE-RATED straight from the restaurant page (name focused first, saved-dish suggestions tolerant of a typo,
  *    history kept, latest shown, no twin, a rename reaches every rating);
@@ -74,19 +75,20 @@ try {
   let db = await rows(page);
   check("3d it is in the database, dated today (rated_on), attached to the visit", db.length === 1 && db[0].name === DISH && !!db[0].rated_on, JSON.stringify(db));
 
-  // ── NEW-3 · re-rate from the page: no twin, history kept, latest shown ────────────────────────────────
+  // ── NEW-3 · re-rate from the page (through the DISH SHEET): no twin, history kept, latest shown ──────────
   await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
-  check("3e tapping the dish shows its panel", (await page.locator('[data-testid="dish-history-panel"]').count()) === 1);
+  check("3e tapping the dish opens its SHEET (back + Done, no history for a once-rated dish)", (await page.locator('[data-testid="dish-sheet"]').count()) === 1 && (await page.locator('[data-testid="dish-sheet-history"]').count()) === 0);
   await tap(page, page.locator('[data-testid="dish-rate-again-btn"]'), "Rate again");
-  check("3f Rate again starts with the score UNSET (the new score is the point)", (await page.locator('[data-testid="dish-edit-row"]').innerText()).includes("Not rated"));
-  await setSlider(page, page.locator('[data-testid="dish-edit-row"] input[type=range]').first(), 0.92);
-  await page.locator('[data-testid="dish-note-input"]').fill("ask for extra sauce");
-  await tap(page, page.locator('[data-testid="dish-save-btn"]'), "Save");
+  check("3f Rate again starts with the score UNSET (the new score is the point)", (await page.locator('[data-testid="dish-sheet"]').innerText()).includes("Not rated") && (await page.locator('[data-testid="dish-sheet-rerate-note"]').count()) === 1);
+  await setSlider(page, page.locator('[data-testid="dish-sheet"] input[type=range]').first(), 0.92);
+  await page.locator('[data-testid="dish-sheet-note"]').fill("ask for extra sauce");
+  await tap(page, page.locator('[data-testid="dish-sheet-done"]'), "Done");
   await until(async () => (await rows(page)).length >= 2); await sleep(1200);
-  check("3g still ONE dish row (no duplicate)", (await dishRowsOnScreen(page, DISH)) === 1);
+  check("3g still ONE dish row (no duplicate) and the sheet closed back to the restaurant", (await dishRowsOnScreen(page, DISH)) === 1 && (await page.locator('[data-testid="dish-sheet"]').count()) === 0);
   await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
   const hist = await page.locator('[data-testid="dish-history-entry"]').count();
-  check("3h the panel shows BOTH ratings (history kept)", hist === 2, `entries=${hist}`);
+  check("3h the sheet now shows BOTH ratings (history kept, only once there are two)", hist === 2, `entries=${hist}`);
+  await tap(page, page.locator('[data-testid="dish-sheet-back"]'), "back to the restaurant"); // the row (and its note line) is only visible once the sheet is closed
   db = await rows(page);
   check("3i two rating rows in the database, the latest higher", db.length === 2 && Number(db[1].score) > Number(db[0].score), JSON.stringify(db.map((d) => [d.score, d.rated_on])));
   await shot(page, "2-history");
@@ -94,10 +96,11 @@ try {
   // ── NEW-4 · the note: row (truncated), full on tap, edit, clear ──────────────────────────────────────
   const rowNote = await page.locator('[data-testid="dish-row-note"]').first().evaluate((e) => ({ t: e.textContent, ell: getComputedStyle(e).textOverflow, ws: getComputedStyle(e).whiteSpace }));
   check("4a the note shows on the dish row on ONE truncated line", rowNote.t === "ask for extra sauce" && rowNote.ell === "ellipsis" && rowNote.ws === "nowrap", JSON.stringify(rowNote));
-  check("4b the full note is in the panel a tap opens", (await page.locator('[data-testid="dish-full-note"]').innerText()).includes("ask for extra sauce"));
+  await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
+  check("4b the full note is in the sheet a tap opens", (await page.locator('[data-testid="dish-sheet-note"]').inputValue()) === "ask for extra sauce");
 
   // suggestions: a misspelling finds the saved dish; picking it re-rates it
-  await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "close panel");
+  await tap(page, page.locator('[data-testid="dish-sheet-back"]'), "back to the restaurant");
   await tap(page, page.locator('[data-testid="food-add-dish-btn"]'), "Add a dish");
   await page.locator('[data-testid="dish-name-input"]').pressSequentially("zz brisket tco", { delay: 25 }); await sleep(400);
   const sug = await page.locator('[data-testid="dish-suggestion"]').allInnerTexts();
@@ -112,21 +115,20 @@ try {
 
   // edit the note, then clear it
   const edit = async (note) => {
-    await tap(page, page.locator('[data-testid="dish-row-kebab"]').first(), "kebab");
-    await tap(page, page.locator('[data-testid="dish-row-edit"]'), "Edit");
-    await page.locator('[data-testid="dish-note-input"]').fill(note);
-    await tap(page, page.locator('[data-testid="dish-save-btn"]'), "Save"); await sleep(1500);
+    await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
+    await page.locator('[data-testid="dish-sheet-note"]').fill(note);
+    await tap(page, page.locator('[data-testid="dish-sheet-done"]'), "Done"); await sleep(1500);
   };
   await edit("get it spicy");
-  check("4c editing the note saves it", (await page.locator('[data-testid="dish-row-note"]').first().innerText()) === "get it spicy" && (await rows(page)).some((d) => d.note === "get it spicy"));
+  check("4c editing the note in the sheet saves it", (await page.locator('[data-testid="dish-row-note"]').first().innerText()) === "get it spicy" && (await rows(page)).some((d) => d.note === "get it spicy"));
   await edit("");
-  check("4d clearing the note saves too (nothing left on the row, null in the database)", (await page.locator('[data-testid="dish-row-note"]').count()) === 0 && (await rows(page)).filter((d) => d.note === "get it spicy").length === 0);
+  const subline = await page.locator('[data-testid="dish-row-subline"]').first().innerText().catch(() => "");
+  check("4d clearing the note saves too (null in the database) — and with 3 ratings and no note the row's grey line shows the MOVEMENT instead", (await page.locator('[data-testid="dish-row-note"]').count()) === 0 && (await rows(page)).filter((d) => d.note === "get it spicy").length === 0 && /^Was [\d.]+ · (up|down|same)/.test(subline), `subline="${subline}"`);
 
   // ── one source of truth: rename reaches every rating ─────────────────────────────────────────────────
-  await tap(page, page.locator('[data-testid="dish-row-kebab"]').first(), "kebab");
-  await tap(page, page.locator('[data-testid="dish-row-edit"]'), "Edit");
-  await page.locator('[data-testid="dish-name-input"]').fill(DISH + "s");
-  await tap(page, page.locator('[data-testid="dish-save-btn"]'), "Save"); await sleep(1800);
+  await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH }), "dish row");
+  await page.locator('[data-testid="dish-sheet-name"]').fill(DISH + "s");
+  await tap(page, page.locator('[data-testid="dish-sheet-done"]'), "Done"); await sleep(1800);
   db = await rows(page);
   check("3m a rename changes EVERY rating of the dish (history stays attached)", db.length === 3 && db.every((d) => d.name === DISH + "s") && (await dishRowsOnScreen(page, DISH + "s")) === 1, JSON.stringify(db.map((d) => d.name)));
 
@@ -176,7 +178,7 @@ try {
   await openPlace(page, "aburi", /aburi/i, true); await sleep(2500);
   check("RT everything round-trips after a cache-busted reload: one dish, 4 ratings, latest shown", (await dishRowsOnScreen(page, DISH + "s")) === 1 && (await rows(page)).length === 4);
   await tap(page, page.locator('[data-testid="dish-row"]').filter({ hasText: DISH + "s" }), "dish row");
-  check("RT its history lists all 4 ratings after the reload", (await page.locator('[data-testid="dish-history-entry"]').count()) === 4);
+  check("RT its sheet lists all 4 ratings after the reload", (await page.locator('[data-testid="dish-history-entry"]').count()) === 4);
   console.log(`(taps counted across the run: ${taps})`);
 } catch (e) {
   check("run aborted", false, String(e.stack || e).split("\n").slice(0, 3).join(" | "));

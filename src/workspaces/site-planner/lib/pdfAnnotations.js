@@ -507,6 +507,7 @@ const aligned = (it, tol = 0.5) => {
  * Build one annotation spec per descriptor.
  *
  * descriptor = { family: "markup"|"callout"|"measure"|"building", id, kind, tree, hints?, meta? }
+ *              (a building's hints.verts is the ONE outline through its corner bump-outs — lib/buildingOutline.js)
  * opts       = { M0: user→PDF matrix, frame: [x0,y0,x1,y1] PDF rect the sheet's plan window occupies,
  *                patterns: id→tree, now: ISO string, author: string }
  * Returns { annots: [...], skipped: [{id, why}], degraded: [...] }.
@@ -629,6 +630,7 @@ export function buildAnnotations(descriptors, opts) {
       base.color = outline ? rgbOf(outline.stroke) : null; base.bw = outline ? outline.sw : 0; base.dash = outline ? outline.dash || [] : [];
       base.ic = body ? rgbOf(body.fill) : null;
       base.ca = body ? body.fillA : outline ? outline.strokeA : 1;
+      if (d.hints && Array.isArray(d.hints.detachedBumpOuts) && d.hints.detachedBumpOuts.length) degraded.push(`building ${d.id}: bump-out(s) ${d.hints.detachedBumpOuts.join(", ")} do not touch the building — drawn in the appearance, outside the Polygon's vertices`);
       if (verts && verts.length >= 3) annots.push({ ...base, subtype: "Polygon", vertices: verts.flat() });
       else { annots.push({ ...base, subtype: "Stamp", subj: base.subj + " (unmapped)" }); degraded.push(`building ${d.id}: no footprint ring — written as a Stamp`); }
     } else {
