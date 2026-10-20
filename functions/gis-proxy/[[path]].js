@@ -158,6 +158,12 @@ export const ALLOWED_HOSTS = new Set([
   "www.mcgisweb.org", "gis.peoriacounty.gov", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell.com", "maps.grundyco.org", "maps.lakecountyil.gov", "adamscountyarcserver.com",
   "rockgis.rockfordil.gov", // City of Rockford (Winnebago County layer)
   "gis.cookcountyil.gov", "gis12.cookcountyil.gov", "gis.dupageco.org", "gis.willcountyillinois.com", // the three counties wired by hand since 2026-09 (re-measured here)
+  /* NEW-1 (Kansas, 2026-10-19, B2348000) — the non-arcgis.com hosts the wired Kansas counties sit on; each was MEASURED through this relay on the PR preview before its county was wired. */
+  "ww1.bucoks.com", // Butler County GIS
+  "geodataportal.net", // Eagleview's MultiPlatformParcels host — Ellis County appraiser
+  "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
+  "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
+  "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
   /* NEW-1 (Illinois round 2, 2026-10-20) — hosts named by the counties' own AGOL registrations / web maps (Madison, Tazewell, Sangamon, Macon, Rock Island, Kankakee K3, McHenry's bare host, SAGIS)
    * and the Bhamaps services2 host; each is MEASURED through this relay before a county is wired to it. */
   "gis.madisoncountyil.gov", "gisportal.co.madison.il.us", "gis.tazewell-il.gov", "gis.co.sangamon.il.us", "sangis.co.sangamon.il.us", "pub.sagis.org", "k3gis.net",
