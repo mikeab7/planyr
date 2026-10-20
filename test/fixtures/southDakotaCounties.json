@@ -1,0 +1,1312 @@
+{
+ "source": 66,
+ "counties": [
+  {
+   "state": "SD",
+   "name": "Aurora County",
+   "fips": "46003",
+   "lat": 43.60637,
+   "lng": -98.69025,
+   "bbox": [
+    -98.8105,
+    43.4975,
+    -98.3295,
+    43.933
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Beadle County",
+   "fips": "46005",
+   "lat": 44.305,
+   "lng": -98.59894,
+   "bbox": [
+    -98.705,
+    44.1955,
+    -97.8565,
+    44.6335
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Bennett County",
+   "fips": "46007",
+   "lat": 43.13981,
+   "lng": -102.00756,
+   "bbox": [
+    -102.1185,
+    42.987,
+    -101.231,
+    43.3945
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Bon Homme County",
+   "fips": "46009",
+   "lat": 42.87824,
+   "lng": -98.02143,
+   "bbox": [
+    -98.168,
+    42.767,
+    -97.635,
+    43.1715
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Brookings County",
+   "fips": "46011",
+   "lat": 44.29805,
+   "lng": -97.03087,
+   "bbox": [
+    -97.1325,
+    44.1935,
+    -96.455,
+    44.542
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Brown County",
+   "fips": "46013",
+   "lat": 45.3486,
+   "lng": -98.61898,
+   "bbox": [
+    -98.732,
+    45.2445,
+    -97.9785,
+    45.9385
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Brule County",
+   "fips": "46015",
+   "lat": 43.6731,
+   "lng": -99.3317,
+   "bbox": [
+    -99.465,
+    43.5005,
+    -98.7985,
+    43.932
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Buffalo County",
+   "fips": "46017",
+   "lat": 44.05155,
+   "lng": -99.35135,
+   "bbox": [
+    -99.5785,
+    43.9305,
+    -98.9295,
+    44.1995
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Butte County",
+   "fips": "46019",
+   "lat": 44.68624,
+   "lng": -103.9502,
+   "bbox": [
+    -104.06,
+    44.5745,
+    -102.962,
+    45.213
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Campbell County",
+   "fips": "46021",
+   "lat": 45.8047,
+   "lng": -100.2761,
+   "bbox": [
+    -100.5155,
+    45.5965,
+    -99.7175,
+    45.9435
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Charles Mix County",
+   "fips": "46023",
+   "lat": 43.38689,
+   "lng": -98.9965,
+   "bbox": [
+    -99.303,
+    42.8395,
+    -98.077,
+    43.503
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Clark County",
+   "fips": "46025",
+   "lat": 44.74103,
+   "lng": -97.87525,
+   "bbox": [
+    -97.9855,
+    44.5405,
+    -97.4955,
+    45.1575
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Clay County",
+   "fips": "46027",
+   "lat": 42.86678,
+   "lng": -97.0592,
+   "bbox": [
+    -97.166,
+    42.704,
+    -96.81,
+    43.087
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Codington County",
+   "fips": "46029",
+   "lat": 44.9069,
+   "lng": -97.39329,
+   "bbox": [
+    -97.501,
+    44.7995,
+    -96.8855,
+    45.1575
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Corson County",
+   "fips": "46031",
+   "lat": 45.58019,
+   "lng": -101.8755,
+   "bbox": [
+    -102.003,
+    45.475,
+    -100.303,
+    45.9425
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Custer County",
+   "fips": "46033",
+   "lat": 43.57972,
+   "lng": -103.95701,
+   "bbox": [
+    -104.0595,
+    43.4755,
+    -102.693,
+    43.8545
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Davison County",
+   "fips": "46035",
+   "lat": 43.6009,
+   "lng": -98.2215,
+   "bbox": [
+    -98.331,
+    43.4965,
+    -97.966,
+    43.8445
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Day County",
+   "fips": "46037",
+   "lat": 45.264,
+   "lng": -97.87195,
+   "bbox": [
+    -97.9855,
+    45.1555,
+    -97.2285,
+    45.5895
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Deuel County",
+   "fips": "46039",
+   "lat": 44.64713,
+   "lng": -96.78163,
+   "bbox": [
+    -96.8905,
+    44.5385,
+    -96.455,
+    44.973
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Dewey County",
+   "fips": "46041",
+   "lat": 45.1035,
+   "lng": -101.37935,
+   "bbox": [
+    -101.5025,
+    44.7305,
+    -100.271,
+    45.4765
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Douglas County",
+   "fips": "46043",
+   "lat": 43.39345,
+   "lng": -98.4135,
+   "bbox": [
+    -98.713,
+    43.1965,
+    -98.114,
+    43.4995
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Edmunds County",
+   "fips": "46045",
+   "lat": 45.3526,
+   "lng": -99.59212,
+   "bbox": [
+    -99.716,
+    45.247,
+    -98.725,
+    45.599
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Fall River County",
+   "fips": "46047",
+   "lat": 43.10661,
+   "lng": -103.95325,
+   "bbox": [
+    -104.059,
+    42.9985,
+    -103.0015,
+    43.479
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Faulk County",
+   "fips": "46049",
+   "lat": 44.99965,
+   "lng": -99.46838,
+   "bbox": [
+    -99.575,
+    44.8915,
+    -98.722,
+    45.252
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Grant County",
+   "fips": "46051",
+   "lat": 45.16074,
+   "lng": -96.88048,
+   "bbox": [
+    -97.229,
+    44.972,
+    -96.4545,
+    45.3315
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Gregory County",
+   "fips": "46053",
+   "lat": 43.0944,
+   "lng": -99.43035,
+   "bbox": [
+    -99.534,
+    42.992,
+    -98.4975,
+    43.504
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Haakon County",
+   "fips": "46055",
+   "lat": 44.1069,
+   "lng": -101.89213,
+   "bbox": [
+    -102.013,
+    43.9935,
+    -101.046,
+    44.7495
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Hamlin County",
+   "fips": "46057",
+   "lat": 44.6453,
+   "lng": -97.39411,
+   "bbox": [
+    -97.502,
+    44.5405,
+    -96.8855,
+    44.8025
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Hand County",
+   "fips": "46059",
+   "lat": 44.56437,
+   "lng": -99.20881,
+   "bbox": [
+    -99.316,
+    44.1995,
+    -98.7035,
+    44.8945
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Hanson County",
+   "fips": "46061",
+   "lat": 43.60125,
+   "lng": -97.86005,
+   "bbox": [
+    -97.967,
+    43.497,
+    -97.6105,
+    43.8445
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Harding County",
+   "fips": "46063",
+   "lat": 45.3208,
+   "lng": -103.9392,
+   "bbox": [
+    -104.0495,
+    45.211,
+    -102.9465,
+    45.943
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Hughes County",
+   "fips": "46065",
+   "lat": 44.43975,
+   "lng": -100.27124,
+   "bbox": [
+    -100.5925,
+    44.1075,
+    -99.604,
+    44.5505
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Hutchinson County",
+   "fips": "46067",
+   "lat": 43.27695,
+   "lng": -98.00888,
+   "bbox": [
+    -98.1165,
+    43.171,
+    -97.399,
+    43.497
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Hyde County",
+   "fips": "46069",
+   "lat": 44.56426,
+   "lng": -99.57595,
+   "bbox": [
+    -99.681,
+    44.1965,
+    -99.299,
+    44.897
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Jackson County",
+   "fips": "46071",
+   "lat": 43.49861,
+   "lng": -102.0391,
+   "bbox": [
+    -102.147,
+    43.393,
+    -101.068,
+    43.9965
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Jerauld County",
+   "fips": "46073",
+   "lat": 44.03138,
+   "lng": -98.8272,
+   "bbox": [
+    -98.9315,
+    43.9305,
+    -98.3355,
+    44.1995
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Jones County",
+   "fips": "46075",
+   "lat": 43.92542,
+   "lng": -100.96145,
+   "bbox": [
+    -101.0705,
+    43.72,
+    -100.3435,
+    44.1765
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Kingsbury County",
+   "fips": "46077",
+   "lat": 44.2982,
+   "lng": -97.74845,
+   "bbox": [
+    -97.8575,
+    44.1935,
+    -97.1305,
+    44.5425
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Lake County",
+   "fips": "46079",
+   "lat": 43.9491,
+   "lng": -97.26582,
+   "bbox": [
+    -97.3745,
+    43.8435,
+    -96.8915,
+    44.1955
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Lawrence County",
+   "fips": "46081",
+   "lat": 44.24956,
+   "lng": -103.95504,
+   "bbox": [
+    -104.061,
+    44.1455,
+    -103.4555,
+    44.608
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Lincoln County",
+   "fips": "46083",
+   "lat": 43.1895,
+   "lng": -96.81924,
+   "bbox": [
+    -96.926,
+    43.0855,
+    -96.4515,
+    43.5015
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Lyman County",
+   "fips": "46085",
+   "lat": 43.86225,
+   "lng": -100.2634,
+   "bbox": [
+    -100.372,
+    43.503,
+    -99.286,
+    44.2215
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Marshall County",
+   "fips": "46091",
+   "lat": 45.6908,
+   "lng": -97.86707,
+   "bbox": [
+    -97.9795,
+    45.5585,
+    -97.23,
+    45.9365
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "McCook County",
+   "fips": "46087",
+   "lat": 43.6011,
+   "lng": -97.50176,
+   "bbox": [
+    -97.611,
+    43.497,
+    -97.1255,
+    43.844
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "McPherson County",
+   "fips": "46089",
+   "lat": 45.7001,
+   "lng": -99.60025,
+   "bbox": [
+    -99.7245,
+    45.596,
+    -98.7305,
+    45.943
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Meade County",
+   "fips": "46093",
+   "lat": 44.37,
+   "lng": -103.46019,
+   "bbox": [
+    -103.5785,
+    44.1455,
+    -102.001,
+    45.0435
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Mellette County",
+   "fips": "46095",
+   "lat": 43.49969,
+   "lng": -101.13,
+   "bbox": [
+    -101.2315,
+    43.3945,
+    -100.2165,
+    43.862
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Miner County",
+   "fips": "46097",
+   "lat": 43.94945,
+   "lng": -97.7476,
+   "bbox": [
+    -97.8565,
+    43.844,
+    -97.3725,
+    44.1955
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Minnehaha County",
+   "fips": "46099",
+   "lat": 43.6042,
+   "lng": -97.01296,
+   "bbox": [
+    -97.131,
+    43.4995,
+    -96.4565,
+    43.8485
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Moody County",
+   "fips": "46101",
+   "lat": 43.95085,
+   "lng": -96.78312,
+   "bbox": [
+    -96.892,
+    43.8445,
+    -96.4565,
+    44.199
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Oglala Lakota County",
+   "fips": "46102",
+   "lat": 43.11469,
+   "lng": -102.89106,
+   "bbox": [
+    -103.006,
+    42.99,
+    -102.0865,
+    43.7025
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Pennington County",
+   "fips": "46103",
+   "lat": 43.95557,
+   "lng": -103.9564,
+   "bbox": [
+    -104.0595,
+    43.6855,
+    -101.9975,
+    44.5165
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Perkins County",
+   "fips": "46105",
+   "lat": 45.15325,
+   "lng": -102.8425,
+   "bbox": [
+    -102.9625,
+    45.0405,
+    -102.0025,
+    45.9425
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Potter County",
+   "fips": "46107",
+   "lat": 45.00345,
+   "lng": -100.32162,
+   "bbox": [
+    -100.4285,
+    44.8965,
+    -99.5735,
+    45.253
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Roberts County",
+   "fips": "46109",
+   "lat": 45.41345,
+   "lng": -97.1201,
+   "bbox": [
+    -97.2335,
+    45.3025,
+    -96.4775,
+    45.9365
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Sanborn County",
+   "fips": "46111",
+   "lat": 43.9502,
+   "lng": -98.22944,
+   "bbox": [
+    -98.338,
+    43.844,
+    -97.8555,
+    44.198
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Spink County",
+   "fips": "46115",
+   "lat": 44.89194,
+   "lng": -98.61598,
+   "bbox": [
+    -98.7275,
+    44.6295,
+    -97.984,
+    45.247
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Stanley County",
+   "fips": "46117",
+   "lat": 44.27949,
+   "lng": -101.0493,
+   "bbox": [
+    -101.1775,
+    44.173,
+    -99.8955,
+    44.7815
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Sully County",
+   "fips": "46119",
+   "lat": 44.6532,
+   "lng": -100.5194,
+   "bbox": [
+    -100.7305,
+    44.5485,
+    -99.675,
+    44.8975
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Todd County",
+   "fips": "46121",
+   "lat": 43.08888,
+   "lng": -101.12815,
+   "bbox": [
+    -101.2315,
+    42.987,
+    -100.198,
+    43.3945
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Tripp County",
+   "fips": "46123",
+   "lat": 43.49247,
+   "lng": -100.12885,
+   "bbox": [
+    -100.234,
+    42.991,
+    -99.533,
+    43.7625
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Turner County",
+   "fips": "46125",
+   "lat": 43.27298,
+   "lng": -97.29394,
+   "bbox": [
+    -97.4025,
+    43.086,
+    -96.92,
+    43.5015
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Union County",
+   "fips": "46127",
+   "lat": 42.80324,
+   "lng": -96.70992,
+   "bbox": [
+    -96.8125,
+    42.4885,
+    -96.4395,
+    43.088
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Walworth County",
+   "fips": "46129",
+   "lat": 45.49495,
+   "lng": -100.2564,
+   "bbox": [
+    -100.491,
+    45.251,
+    -99.709,
+    45.5995
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Yankton County",
+   "fips": "46135",
+   "lat": 42.95703,
+   "lng": -97.52962,
+   "bbox": [
+    -97.6365,
+    42.7985,
+    -97.1615,
+    43.1715
+   ]
+  },
+  {
+   "state": "SD",
+   "name": "Ziebach County",
+   "fips": "46137",
+   "lat": 44.6605,
+   "lng": -101.89494,
+   "bbox": [
+    -102.0035,
+    44.5165,
+    -101.135,
+    45.4765
+   ]
+  }
+ ],
+ "lines": [
+  {
+   "name": "Aurora County \u2014 a point near its county line",
+   "county": "Aurora County",
+   "lat": 43.60637,
+   "lng": -98.79525
+  },
+  {
+   "name": "Beadle County \u2014 a point near its county line",
+   "county": "Beadle County",
+   "lat": 44.305,
+   "lng": -98.70394
+  },
+  {
+   "name": "Bennett County \u2014 a point near its county line",
+   "county": "Bennett County",
+   "lat": 43.13981,
+   "lng": -102.11756
+  },
+  {
+   "name": "Bon Homme County \u2014 a point near its county line",
+   "county": "Bon Homme County",
+   "lat": 42.87824,
+   "lng": -98.13142
+  },
+  {
+   "name": "Brookings County \u2014 a point near its county line",
+   "county": "Brookings County",
+   "lat": 44.29805,
+   "lng": -97.13087
+  },
+  {
+   "name": "Brown County \u2014 a point near its county line",
+   "county": "Brown County",
+   "lat": 45.3486,
+   "lng": -98.72397
+  },
+  {
+   "name": "Brule County \u2014 a point near its county line",
+   "county": "Brule County",
+   "lat": 43.6731,
+   "lng": -99.4617
+  },
+  {
+   "name": "Buffalo County \u2014 a point near its county line",
+   "county": "Buffalo County",
+   "lat": 44.05155,
+   "lng": -99.46135
+  },
+  {
+   "name": "Butte County \u2014 a point near its county line",
+   "county": "Butte County",
+   "lat": 44.68624,
+   "lng": -104.0552
+  },
+  {
+   "name": "Campbell County \u2014 a point near its county line",
+   "county": "Campbell County",
+   "lat": 45.8047,
+   "lng": -100.3761
+  },
+  {
+   "name": "Charles Mix County \u2014 a point near its county line",
+   "county": "Charles Mix County",
+   "lat": 43.38689,
+   "lng": -99.1215
+  },
+  {
+   "name": "Clark County \u2014 a point near its county line",
+   "county": "Clark County",
+   "lat": 44.74103,
+   "lng": -97.98525
+  },
+  {
+   "name": "Clay County \u2014 a point near its county line",
+   "county": "Clay County",
+   "lat": 42.86678,
+   "lng": -97.1592
+  },
+  {
+   "name": "Codington County \u2014 a point near its county line",
+   "county": "Codington County",
+   "lat": 44.9069,
+   "lng": -97.49329
+  },
+  {
+   "name": "Corson County \u2014 a point near its county line",
+   "county": "Corson County",
+   "lat": 45.58019,
+   "lng": -102.0005
+  },
+  {
+   "name": "Custer County \u2014 a point near its county line",
+   "county": "Custer County",
+   "lat": 43.57972,
+   "lng": -104.05701
+  },
+  {
+   "name": "Davison County \u2014 a point near its county line",
+   "county": "Davison County",
+   "lat": 43.6009,
+   "lng": -98.3265
+  },
+  {
+   "name": "Day County \u2014 a point near its county line",
+   "county": "Day County",
+   "lat": 45.264,
+   "lng": -97.98195
+  },
+  {
+   "name": "Deuel County \u2014 a point near its county line",
+   "county": "Deuel County",
+   "lat": 44.64713,
+   "lng": -96.88662
+  },
+  {
+   "name": "Dewey County \u2014 a point near its county line",
+   "county": "Dewey County",
+   "lat": 45.1035,
+   "lng": -101.48935
+  },
+  {
+   "name": "Douglas County \u2014 a point near its county line",
+   "county": "Douglas County",
+   "lat": 43.39345,
+   "lng": -98.7085
+  },
+  {
+   "name": "Edmunds County \u2014 a point near its county line",
+   "county": "Edmunds County",
+   "lat": 45.3526,
+   "lng": -99.71212
+  },
+  {
+   "name": "Fall River County \u2014 a point near its county line",
+   "county": "Fall River County",
+   "lat": 43.10661,
+   "lng": -104.05325
+  },
+  {
+   "name": "Faulk County \u2014 a point near its county line",
+   "county": "Faulk County",
+   "lat": 44.99965,
+   "lng": -99.57337
+  },
+  {
+   "name": "Grant County \u2014 a point near its county line",
+   "county": "Grant County",
+   "lat": 45.16074,
+   "lng": -97.22547
+  },
+  {
+   "name": "Gregory County \u2014 a point near its county line",
+   "county": "Gregory County",
+   "lat": 43.0944,
+   "lng": -99.53035
+  },
+  {
+   "name": "Haakon County \u2014 a point near its county line",
+   "county": "Haakon County",
+   "lat": 44.1069,
+   "lng": -102.01212
+  },
+  {
+   "name": "Hamlin County \u2014 a point near its county line",
+   "county": "Hamlin County",
+   "lat": 44.6453,
+   "lng": -97.49911
+  },
+  {
+   "name": "Hand County \u2014 a point near its county line",
+   "county": "Hand County",
+   "lat": 44.56437,
+   "lng": -99.31381
+  },
+  {
+   "name": "Hanson County \u2014 a point near its county line",
+   "county": "Hanson County",
+   "lat": 43.60125,
+   "lng": -97.96505
+  },
+  {
+   "name": "Harding County \u2014 a point near its county line",
+   "county": "Harding County",
+   "lat": 45.3208,
+   "lng": -104.0442
+  },
+  {
+   "name": "Hughes County \u2014 a point near its county line",
+   "county": "Hughes County",
+   "lat": 44.43975,
+   "lng": -100.38624
+  },
+  {
+   "name": "Hutchinson County \u2014 a point near its county line",
+   "county": "Hutchinson County",
+   "lat": 43.27695,
+   "lng": -98.11387
+  },
+  {
+   "name": "Hyde County \u2014 a point near its county line",
+   "county": "Hyde County",
+   "lat": 44.56426,
+   "lng": -99.67595
+  },
+  {
+   "name": "Jackson County \u2014 a point near its county line",
+   "county": "Jackson County",
+   "lat": 43.49861,
+   "lng": -102.1441
+  },
+  {
+   "name": "Jerauld County \u2014 a point near its county line",
+   "county": "Jerauld County",
+   "lat": 44.03138,
+   "lng": -98.9272
+  },
+  {
+   "name": "Jones County \u2014 a point near its county line",
+   "county": "Jones County",
+   "lat": 43.92542,
+   "lng": -101.06645
+  },
+  {
+   "name": "Kingsbury County \u2014 a point near its county line",
+   "county": "Kingsbury County",
+   "lat": 44.2982,
+   "lng": -97.85345
+  },
+  {
+   "name": "Lake County \u2014 a point near its county line",
+   "county": "Lake County",
+   "lat": 43.9491,
+   "lng": -97.37082
+  },
+  {
+   "name": "Lawrence County \u2014 a point near its county line",
+   "county": "Lawrence County",
+   "lat": 44.24956,
+   "lng": -104.06004
+  },
+  {
+   "name": "Lincoln County \u2014 a point near its county line",
+   "county": "Lincoln County",
+   "lat": 43.1895,
+   "lng": -96.92424
+  },
+  {
+   "name": "Lyman County \u2014 a point near its county line",
+   "county": "Lyman County",
+   "lat": 43.86225,
+   "lng": -100.3684
+  },
+  {
+   "name": "Marshall County \u2014 a point near its county line",
+   "county": "Marshall County",
+   "lat": 45.6908,
+   "lng": -97.97707
+  },
+  {
+   "name": "McCook County \u2014 a point near its county line",
+   "county": "McCook County",
+   "lat": 43.6011,
+   "lng": -97.60676
+  },
+  {
+   "name": "McPherson County \u2014 a point near its county line",
+   "county": "McPherson County",
+   "lat": 45.7001,
+   "lng": -99.72025
+  },
+  {
+   "name": "Meade County \u2014 a point near its county line",
+   "county": "Meade County",
+   "lat": 44.37,
+   "lng": -103.56519
+  },
+  {
+   "name": "Mellette County \u2014 a point near its county line",
+   "county": "Mellette County",
+   "lat": 43.49969,
+   "lng": -101.23
+  },
+  {
+   "name": "Miner County \u2014 a point near its county line",
+   "county": "Miner County",
+   "lat": 43.94945,
+   "lng": -97.8526
+  },
+  {
+   "name": "Minnehaha County \u2014 a point near its county line",
+   "county": "Minnehaha County",
+   "lat": 43.6042,
+   "lng": -97.12296
+  },
+  {
+   "name": "Moody County \u2014 a point near its county line",
+   "county": "Moody County",
+   "lat": 43.95085,
+   "lng": -96.88812
+  },
+  {
+   "name": "Oglala Lakota County \u2014 a point near its county line",
+   "county": "Oglala Lakota County",
+   "lat": 43.11469,
+   "lng": -103.00106
+  },
+  {
+   "name": "Pennington County \u2014 a point near its county line",
+   "county": "Pennington County",
+   "lat": 43.95557,
+   "lng": -104.0564
+  },
+  {
+   "name": "Perkins County \u2014 a point near its county line",
+   "county": "Perkins County",
+   "lat": 45.15325,
+   "lng": -102.9575
+  },
+  {
+   "name": "Potter County \u2014 a point near its county line",
+   "county": "Potter County",
+   "lat": 45.00345,
+   "lng": -100.42162
+  },
+  {
+   "name": "Roberts County \u2014 a point near its county line",
+   "county": "Roberts County",
+   "lat": 45.41345,
+   "lng": -97.2251
+  },
+  {
+   "name": "Sanborn County \u2014 a point near its county line",
+   "county": "Sanborn County",
+   "lat": 43.9502,
+   "lng": -98.33444
+  },
+  {
+   "name": "Spink County \u2014 a point near its county line",
+   "county": "Spink County",
+   "lat": 44.89194,
+   "lng": -98.72097
+  },
+  {
+   "name": "Stanley County \u2014 a point near its county line",
+   "county": "Stanley County",
+   "lat": 44.27949,
+   "lng": -101.1743
+  },
+  {
+   "name": "Sully County \u2014 a point near its county line",
+   "county": "Sully County",
+   "lat": 44.6532,
+   "lng": -100.6294
+  },
+  {
+   "name": "Todd County \u2014 a point near its county line",
+   "county": "Todd County",
+   "lat": 43.08888,
+   "lng": -101.22815
+  },
+  {
+   "name": "Tripp County \u2014 a point near its county line",
+   "county": "Tripp County",
+   "lat": 43.49247,
+   "lng": -100.23385
+  },
+  {
+   "name": "Turner County \u2014 a point near its county line",
+   "county": "Turner County",
+   "lat": 43.27298,
+   "lng": -97.39894
+  },
+  {
+   "name": "Union County \u2014 a point near its county line",
+   "county": "Union County",
+   "lat": 42.80324,
+   "lng": -96.80992
+  },
+  {
+   "name": "Walworth County \u2014 a point near its county line",
+   "county": "Walworth County",
+   "lat": 45.49495,
+   "lng": -100.3614
+  },
+  {
+   "name": "Yankton County \u2014 a point near its county line",
+   "county": "Yankton County",
+   "lat": 42.95703,
+   "lng": -97.63462
+  },
+  {
+   "name": "Ziebach County \u2014 a point near its county line",
+   "county": "Ziebach County",
+   "lat": 44.6605,
+   "lng": -101.99994
+  }
+ ],
+ "gaps": [
+  "Aurora",
+  "Bennett",
+  "Bon Homme",
+  "Brookings",
+  "Brule",
+  "Buffalo",
+  "Butte",
+  "Campbell",
+  "Charles Mix",
+  "Clay",
+  "Corson",
+  "Custer",
+  "Davison",
+  "Day",
+  "Douglas",
+  "Fall River",
+  "Faulk",
+  "Gregory",
+  "Haakon",
+  "Hanson",
+  "Harding",
+  "Hughes",
+  "Hutchinson",
+  "Hyde",
+  "Jackson",
+  "Jerauld",
+  "Jones",
+  "Lake",
+  "Lincoln",
+  "Lyman",
+  "Marshall",
+  "McCook",
+  "McPherson",
+  "Meade",
+  "Mellette",
+  "Oglala Lakota",
+  "Perkins",
+  "Potter",
+  "Sanborn",
+  "Spink",
+  "Stanley",
+  "Sully",
+  "Todd",
+  "Tripp",
+  "Turner",
+  "Union",
+  "Walworth",
+  "Yankton",
+  "Ziebach"
+ ]
+}
