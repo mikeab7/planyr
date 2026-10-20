@@ -265,6 +265,8 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 // B2191xxx — `owner_?name_?\d+` is HCAD's own spelling (`owner_name_1` / `owner_name_2`); without it the
 // Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
+/* Iowa (NEW-1, 2026-10-19): the county CAMA exports spell the owner `DEEDHOLD` (Benton, Boone, Cass, Harrison, Mahaska, Osceola, Warren, Winnebago…), `DeedHolder1` (Johnson), `DEEDHLDR` (Muscatine),
+ * `Tyler_Deed_Holder` (Cerro Gordo), `PRIMARYNAME1` / `PRIMARY_NAME` (Kossuth, Franklin) and `OwnerDeed` (Linn) — none of which resolved, so those counties' parcel pages showed no Owner line. */
 /* Alabama (B2302784): `OWNER_ALL` (the Central Alabama commission's merged roll — Autauga, Montgomery), `PropertyOwner` (Madison), `FULLNAME` (Greene) and
  * `Name1` (Mobile's Revenue Commission, Shelby's DOR roll, St. Clair's `NAME_1`) are the owner column of those sources; `name_?1` is as weak as bare `name`.
  * Chester TN (CaptureCAMA, B2289169) publishes shapefile-truncated column names: owner GPDATA__OW, situs GPDATA__PR, parcel id
@@ -273,7 +275,7 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 /* Missouri (NEW-1, 2026-10-19): the Integrity GIS counties publish the owner as `DEEDHOLDER` / `DEED_HOLDER` / `DEEDNAME` (Atchison's joined layer as
  * `REALDATA_DEEDHOLDER`), Greene as `OWN1`, Holt as `owner1_name`, St. Clair as `Owner_1`, Cape Girardeau as `Main_Name`. `pcloNAME` is Tuscaloosa AL's owner — it only looked resolved
  * because the bare `Name` beside it (the parcel number) used to win; a digits-only `Name` no longer counts as an owner. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?hold(?:er)?\d*|deed_?hldr|tyler_deed_holder|primary_?name_?\d*|owner_?deed|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|owners_?nam(e)?|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name)$/i; // Oklahoma (NEW-1, 2026-10-19): Canadian `owners_name`, Creek `ownersname`, Rogers `OWNERSNAM`
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name|owner_?last)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */
@@ -285,6 +287,11 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
 export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?owner|own_full|owner_?last_?name|tax_?name)$/i;
+/* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
+ * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
+export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
+// A bare `name` that is a parcel NUMBER with letters in it (Franklin PA's `Name` = "22-0P20.-016.-000000"): starts with a digit, no spaces, a separator, no word of 3+ letters.
+const PARCEL_NUMBER_SHAPE = (v) => /^[0-9][0-9A-Za-z.,:/-]*$/.test(v) && /[.,:/-]/.test(v) && !/[A-Za-z]{3,}/.test(v);
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
@@ -318,7 +325,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
     // A TABLE-PREFIXED `name` is a joined layer's own label (TaxParcels.Name = the lot number), never an owner.
     if (lk !== key && /^name$/i.test(lk)) continue;
     // …and a bare `name` holding only digits / dots / dashes is a parcel NUMBER (Buchanan MO's `Name` = "11-4.0-17-000-000-005.002"), never an owner.
-    if (/^name$/i.test(lk) && /^[0-9][0-9.\-\s/]*$/.test(String(attrs[key]).trim())) continue;
+    if (/^name$/i.test(lk) && (/^[0-9][0-9.\-\s/]*$/.test(String(attrs[key]).trim()) || PARCEL_NUMBER_SHAPE(String(attrs[key]).trim()))) continue;
     // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
     // NUMBER), so any real owner column outranks it whatever order the service lists them in.
     const seq = ownerSeq(lk) + (/^name(_?1)?$/i.test(lk) ? 1000 : 0);
@@ -329,6 +336,12 @@ export function ownerKey(attrs, { skip = null } = {}) {
   // publish the owner as `Taxpayer`, Ascension as `OWNERNAME_` (a shapefile-truncated trailing
   // underscore), Acadia as `OWNERS`. Strictly a FALLBACK: a layer that already has an `Owner`
   // column resolves exactly as before, so no existing source can change its answer.
+  // …Pennsylvania's spellings come first, so `COMBINED_NAME` (Susquehanna) beats the bare `LAST_NAME` column listed ahead of it.
+  for (const key of Object.keys(attrs)) {
+    if (skip && skip.has(key)) continue;
+    if (!OWNER_KEY_PA_RE.test(leafKey(key)) || isPlaceholderValue(attrs[key])) continue;
+    return key;
+  }
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
     if (!OWNER_FALLBACK_RE.test(leafKey(key)) && !OWNER_KEY_ID_RE.test(leafKey(key))) continue;
