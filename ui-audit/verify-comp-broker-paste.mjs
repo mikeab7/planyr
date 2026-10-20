@@ -48,7 +48,12 @@ async function cleanup() {
     if (mine.length) await sb.from("comps").delete().in("id", mine.map((r) => r.id));
     for (const id of siteIds) {
       const { data: site } = await sb.from("sites").select("id,data").eq("id", id).maybeSingle();
-      if (site && site.data && site.data.role === "tracked" && site.id !== "e2e-fixture-site") await sb.from("sites").delete().eq("id", id);
+      // Trash, the app's own delete (storage.cloudDelete): a hard DELETE of a live site is refused by
+      // sites_block_delete_live_group, and it was failing here SILENTLY (measured 2026-10-19).
+      if (site && site.data && site.data.role === "tracked" && site.id !== "e2e-fixture-site") {
+        const { error } = await sb.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+        if (error) throw new Error(`could not trash test site ${id}: ${error.message}`);
+      }
     }
     await sb.from("comp_import_drafts").delete().eq("raw_name", kmlName);
   }, { titles: TITLES, kmlName: KML_NAME });

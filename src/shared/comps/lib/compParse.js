@@ -761,7 +761,7 @@ function emptyGeneric() {
     price: null, sizeValue: null, sizeUnit: null, rate: null, ratePeriod: null, rateBasis: null,
     ti: null, term: null, notes: null, freeRentMonths: null, escalationPct: null,
     capRate: null, noi: null, opex: null, hadRecognizedNote: false,
-    clearHeightFt: null, yearBuilt: null, anchor: null,
+    clearHeightFt: null, yearBuilt: null, anchor: null, powerAmps: null, powerVolts: null, powerPhase: null, dockDoors: null,
     commencementDate: null, commencementEstimated: false, commencementSourceLine: null,
   };
 }
@@ -775,7 +775,7 @@ function genericHasAnything(g) {
   return !!(g.compDate || g.title || g.partyProvider || g.partyAcquirer || g.price != null ||
     g.rate != null || g.sizeValue != null || g.term || g.ti != null || g.freeRentMonths != null ||
     g.escalationPct != null || g.capRate != null || g.noi != null || g.opex != null ||
-    g.commencementDate || g.hadRecognizedNote || g.clearHeightFt != null || g.yearBuilt != null || !!g.anchor);
+    g.commencementDate || g.hadRecognizedNote || g.clearHeightFt != null || g.yearBuilt != null || !!g.anchor || g.powerAmps != null || g.powerVolts != null || g.powerPhase != null || g.dockDoors != null);
 }
 
 function addNote(g, text) {
@@ -1250,9 +1250,17 @@ function genericToDraft(generic) {
     if (generic.capRate != null) d.bldgCapRate = String(generic.capRate / 100);
     if (generic.clearHeightFt != null) d.clearHeightFt = String(generic.clearHeightFt);
     if (generic.yearBuilt != null) d.yearBuilt = String(generic.yearBuilt);
+    if (generic.powerAmps != null) d.powerAmps = String(generic.powerAmps);
+    if (generic.powerVolts != null) d.powerVolts = String(generic.powerVolts);
+    if (generic.powerPhase != null) d.powerPhase = String(generic.powerPhase);
+    if (generic.dockDoors != null) d.dockDoors = String(generic.dockDoors);
   } else if (d.compType === "lease") {
     if (generic.clearHeightFt != null) d.clearHeightFt = String(generic.clearHeightFt);
     if (generic.yearBuilt != null) d.yearBuilt = String(generic.yearBuilt);
+    if (generic.powerAmps != null) d.powerAmps = String(generic.powerAmps);
+    if (generic.powerVolts != null) d.powerVolts = String(generic.powerVolts);
+    if (generic.powerPhase != null) d.powerPhase = String(generic.powerPhase);
+    if (generic.dockDoors != null) d.dockDoors = String(generic.dockDoors);
     if (generic.rate != null) d.leaseRate = String(generic.rate);
     if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
     // HARDENING-11 — `generic.rateBasis` already defaults to "nnn" by the time this runs
@@ -1288,6 +1296,8 @@ function genericToDraft(generic) {
     if (generic.term) bits.push(`Term: ${generic.term}`);
     if (generic.clearHeightFt != null) bits.push(`Clear height: ${generic.clearHeightFt} ft`);
     if (generic.yearBuilt != null) bits.push(`Year built: ${generic.yearBuilt}`);
+    if (generic.powerAmps != null) bits.push(`Power: ${generic.powerAmps} A`);
+    if (generic.dockDoors != null) bits.push(`Dock doors: ${generic.dockDoors}`);
     if (bits.length) {
       const summary = `${bits.join(", ")} — pick a Type to file these.`;
       d.notes = d.notes ? `${d.notes}; ${summary}` : summary;
@@ -1567,6 +1577,10 @@ const HEADER_RULES = [
   ["ti", ({ n }) => /(^ti\b|\bti\b|\btia\b|tenant improvement|improvement allowance|ti allowance)/.test(n)],
   ["rateBasis", ({ n }) => /^(basis|nnn gross|expense|expense type|expense basis|lease basis|rent basis|rent type|service type|services|rate basis|rate type)$/.test(n)],
   ["opex", ({ n }) => /(opex|op ex|operating exp|nnn charges|^cam$|ticam|reimbursements?|nnn expenses?|^nnns?$)/.test(n)],
+  ["powerAmps", ({ n }) => /^(power|amps?|amperage|power a|power amps?|electrical|electric service|service amps?)$/.test(n)],
+  ["powerVolts", ({ n }) => /^(volts?|voltage|power v|power volts?)$/.test(n)],
+  ["powerPhase", ({ n }) => /^(phase|power phase)$/.test(n)],
+  ["dockDoors", ({ n }) => /^(docks?|dock doors?|dock high doors?|dock high|dh doors?|dock positions?)$/.test(n)],
   ["clearHeightFt", ({ n }) => /(clear|clearance|ceiling height|eave height)/.test(n)],
   ["yearBuilt", ({ n }) => /(year built|yr built|^built$|^yob$|year blt|yr blt|construction year|^year$)/.test(n)],
   ["commencementDate", ({ n }) => /(commenc|^lcd$|^rcd$|start date|lease start|occupancy|move in)/.test(n)],
@@ -1813,6 +1827,10 @@ function assignHeaderCell(generic, flags, ctx, col, val) {
       else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
+    case "powerAmps": { const x = cellNumber(String(val).replace(/\s*a(mps?)?$/i, "")); if (x != null && x > 0) generic.powerAmps = x; else ctx.extras.push(`${col.label}: ${val}`); break; }
+    case "powerVolts": { const x = cellNumber(val); if (x != null && x > 0) generic.powerVolts = x; else ctx.extras.push(`${col.label}: ${val}`); break; }
+    case "powerPhase": { const x = cellNumber(val); if (x === 1 || x === 3) generic.powerPhase = x; else ctx.extras.push(`${col.label}: ${val}`); break; }
+    case "dockDoors": { const x = cellNumber(val); if (x != null && x >= 0) generic.dockDoors = x; else ctx.extras.push(`${col.label}: ${val}`); break; }
     case "yearBuilt": {
       const m = val.match(/\b(1[89]\d\d|20\d\d)\b/);
       if (m) { generic.yearBuilt = Number(m[1]); if (val.trim() !== m[1]) ctx.extras.push(`${col.label}: ${val}`); }

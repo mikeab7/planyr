@@ -27,16 +27,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, Field, IconButton, MenuItem, ToggleChip } from "../../ui/controls.jsx";
 import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
+import { RecordSectionHeader, RecordLink, RECORD_BODY } from "../../ui/RecordSection.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import { MAP_CHROME_Z, panelMaxHeight, SCALE_BAR_CLEARANCE_PX } from "../../../workspaces/site-planner/lib/mapChromeStack.js";
 import {
   fetchAllOverlays, insertOverlay, updateOverlay, deleteOverlay,
   fetchOverlayCompPoints, commitOverlayPlacementWithComps,
-  fetchDeletedOverlays, restoreOverlay, permanentlyDeleteOverlay,
-  countLiveOverlaysForProject,
 } from "../lib/sitePlanOverlayStore.js";
-import { countLiveCompsForProject } from "../../comps/lib/compsStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
 import { imagePointToLatLon } from "../../overlay/overlayPlacement.js";
 import { friendlySaveError, classifyOverlayWriteFailure } from "../lib/overlayErrors.js";
@@ -55,7 +53,6 @@ import {
 } from "../../overlay/overlayRaster.js";
 import { fileNewReview, loadReview, downloadFromDrive, stripFileExt } from "../../../workspaces/doc-review/lib/reviewStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
-import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteListLight.js";
 import { PALETTES } from "../../theme/palette.js";
 import { createWriteSerializer } from "../../cloud/writeSerializer.js";
 
@@ -245,7 +242,9 @@ function emptyFlow() {
   };
 }
 
-/** One overlay's RESTING card (B1310208, NEW-1, owner decision 2026-09-07: "at rest the plan card
+/** NEW-1 (site-record panel V1, 2026-10-19): this is now one DOCUMENT row of the record's Documents
+ * section (thumbnail · name · "date · p.N · Zoom to" · ⋮), not a bordered card — see the return below.
+ * The history that still holds: One overlay's RESTING card (B1310208, NEW-1, owner decision 2026-09-07: "at rest the plan card
  * shows what it IS and nothing you operate"). Thumbnail, name, date/page and status lines only —
  * every editing control (visibility, lock, opacity, rotation, share, move/resize, crop) lives in
  * the docked SitePlanAdjustPanel below; the occasional, deliberate ones (Adjust, Change page, Pin
@@ -258,7 +257,7 @@ function emptyFlow() {
  * reads even quieter: a name, a thumbnail, and one small control rather than one labelled button.
  * Module scope (MODULE-SCOPE-COMPONENTS). */
 function OverlayRow({
-  o, adjustOpen, onOpenAdjust, onRename, rasterFailed, duplicateCount, zoomBelowGate, onZoomToOverlay,
+  o, last, adjustOpen, onOpenAdjust, onRename, rasterFailed, duplicateCount, onZoomToOverlay,
   pinning, onStartPin, onStopPin, onConfirmChangePage, onDelete,
 }) {
   const [editingName, setEditingName] = useState(false);
@@ -280,45 +279,53 @@ function OverlayRow({
 
   const placed = overlayPlaced(o);
 
+  // NEW-1 (site-record panel V1, owner-approved 2026-10-19) — a DOCUMENT row of the record's
+  // Documents section: page thumbnail · filename (one line) over "date · p.N · Zoom to" · a
+  // borderless ⋮. No gray fill, no warning sentence on a healthy row. "Zoom to" is always shown —
+  // it replaces the old zoomed-out warning sentence with the action that fixes it.
+  // A row only grows a line when something is genuinely wrong with the plan (a failed image, a
+  // duplicate, an interrupted upload) — LOUD-FAILURE, never silent.
+  const problem = duplicateCount > 1
+    ? `Page ${o.page} of this document is overlaid ${duplicateCount} times — one of these may be a duplicate.`
+    : placed && rasterFailed
+      ? "Image didn't load — you may not have access, or the file is missing. Reload to try again."
+      : placed && !o.rasterKey
+        ? "This plan doesn't have an image yet — open ⋮ → Change page…"
+        : null;
+
   return (
-    <div style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 8, background: adjustOpen ? "var(--surface-raised)" : "transparent" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+    <div data-testid="comp-record-document" style={{ padding: "8px 0", borderBottom: last ? "none" : "1px solid var(--border-hairline)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {o.thumbDataUrl ? (
-          <img src={o.thumbDataUrl} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", flex: "none" }} />
+          <img src={o.thumbDataUrl} alt="" style={{ width: 32, height: 40, objectFit: "cover", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", flex: "none" }} />
         ) : (
-          <div aria-hidden="true" style={{ width: 32, height: 32, borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-raised)", flex: "none" }} />
+          <div aria-hidden="true" style={{ width: 32, height: 40, borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", flex: "none" }} />
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {editingName ? (
             <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
               onKeyDown={(e) => { if (e.key === "Enter") commitName(); if (e.key === "Escape") { setNameDraft(o.docTitle || ""); setEditingName(false); } }}
-              style={{ ...inputStyle, fontSize: FONT_SIZE.control, fontWeight: 600, padding: "3px 6px" }} />
+              style={{ ...inputStyle, fontSize: FONT_SIZE.display, fontWeight: 600, padding: "3px 6px" }} />
           ) : (
-            <button onClick={() => setEditingName(true)} title="Rename" style={{
+            <button onClick={() => setEditingName(true)} title={o.sourceFileName ? `${o.sourceFileName} — click to rename` : "Rename"} style={{
               border: "none", background: "none", padding: 0, textAlign: "left", cursor: "text", fontFamily: "inherit",
-              fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              ...RECORD_BODY, fontWeight: 600, color: "var(--text-primary)", display: "block", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>{o.docTitle || "Untitled site plan"}</button>
           )}
-          {/* NEW-9(d) (owner report, build 9c35724: "the filename is printed twice") — a fresh
-              upload seeds `docTitle` from the filename minus its extension (`stripFileExt`,
-              above), so on every UNRENAMED plan — the common case right after upload — this
-              subtitle used to repeat the exact same name a second time, with the extension put
-              back on. The filename is only worth a second line once it says something the title
-              doesn't (the owner renamed the plan to something else) — otherwise this row prints
-              the date/page only, once. */}
-          <div style={metaText} title={o.sourceFileName || undefined}>
-            {o.sourceFileName && stripFileExt(o.sourceFileName) !== (o.docTitle || "") ? `${o.sourceFileName} · ` : ""}{o.docDate || ""} · p.{o.page}
+          <div style={{ ...RECORD_BODY, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {o.docDate ? `${o.docDate} · ` : ""}p.{o.page} ·{" "}
+            <RecordLink onClick={() => onZoomToOverlay(o)} disabled={!placed} testId="comp-record-zoom-to"
+              title={placed ? "Zoom the map to this plan" : "Not placed on the map yet — open ⋮ → Adjust to place it"}>Zoom to</RecordLink>
           </div>
         </div>
-        {/* NEW-5 — the ONE control that leaves the resting card: Adjust opens the docked
-            manipulation panel; Change page / Pin comp here / Delete site plan are occasional,
-            deliberate edits that don't need their own always-visible buttons. */}
         <div style={{ position: "relative", flex: "none" }}>
-          <IconButton ref={menuAnchorRef} size={26} active={adjustOpen || menuOpen}
-            onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" title="More actions">
+          <button ref={menuAnchorRef} onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" title="More actions" style={{
+            width: 28, height: 28, border: "none", background: "none", padding: 0, cursor: "pointer", borderRadius: RADIUS.sm,
+            color: adjustOpen || menuOpen ? "var(--accent-site-text)" : "var(--text-primary)", display: "grid", placeItems: "center", lineHeight: 0,
+          }}>
             <KebabIcon />
-          </IconButton>
+          </button>
           <AnchoredMenu open={menuOpen} onClose={closeMenu} anchorRef={menuAnchorRef} placement="below-right" width={210}>
             {menuView === "list" && (
               <>
@@ -334,7 +341,7 @@ function OverlayRow({
             )}
             {menuView === "confirmChangePage" && (
               <div style={{ padding: "5px 7px" }}>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 9 }}>
+                <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 9 }}>
                   Changing the page clears this plan's position on the map.
                 </div>
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -345,7 +352,7 @@ function OverlayRow({
             )}
             {menuView === "confirmDelete" && (
               <div style={{ padding: "5px 7px" }}>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 9 }}>
+                <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 9 }}>
                   Delete “{o.docTitle || "this site plan"}”? Comps pinned to it keep their location but lose the link back.
                 </div>
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -357,44 +364,7 @@ function OverlayRow({
           </AnchoredMenu>
         </div>
       </div>
-
-      {!placed && <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4 }}>Not placed yet.</div>}
-      {/* B972512-HARDENING item 15 — no DB constraint stops the same document+page from being
-          overlaid twice (deliberately: the schema allows several distinct overlay pages off one
-          brochure, so a hard uniqueness rule would also block a legitimate reuse). Surfaced
-          instead, on every row sharing the duplicate, so it's obvious and each copy is one click
-          from Adjust's "Delete site plan…" to remove. */}
-      {duplicateCount > 1 && (
-        <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4 }}>
-          Page {o.page} of this document is overlaid {duplicateCount} times — one of these may be a duplicate.
-        </div>
-      )}
-      {placed && rasterFailed && (
-        <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4 }}>
-          Image didn't load — you may not have access, or the file is missing. Reload to try again.
-        </div>
-      )}
-      {/* B972512-HARDENING item 16 — a row that was interrupted (closed tab, lost connection)
-          between being placed and its image finishing upload has no rasterKey at all (distinct
-          from rasterFailed, which is a download failure of a key that DOES exist) — legible and
-          recoverable via the same "Change page…" control (now in Adjust) rather than an
-          unexplained blank plan. */}
-      {placed && !rasterFailed && !o.rasterKey && (
-        <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4 }}>
-          This plan doesn't have an image yet — open Adjust and try “Change page…”.
-        </div>
-      )}
-      {/* B850432/NEW-1 — a site plan is gated off the map below a real building-scale zoom (a
-          site plan is meaningless zoomed out to a metro or country view), and that gate used to
-          be completely silent — the row above reads opacity/eye-toggle state exactly as if the
-          plan were on screen, with nothing telling you it isn't. Mirrors the Layers-panel
-          zoom-gate convention (layerZoomGate.js): say so, and offer the one click that fixes it. */}
-      {placed && o.visible && zoomBelowGate && (
-        <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span>Zoomed out too far to see this on the map.</span>
-          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button>
-        </div>
-      )}
+      {problem && <div style={{ fontSize: FONT_SIZE.control, color: "var(--warn-text)", marginTop: 4 }}>{problem}</div>}
     </div>
   );
 }
@@ -659,7 +629,10 @@ export default function SitePlansSection({
   suggestPlacement, activeOverlayId, onActivateOverlay,
   onStopPinOnOverlay, pinningOverlayId,
   commitPlacementRef, dropIntakeRef, onRejectFile, onCompPositionsChanged, rasterFailedIds,
-  zoomBelowGate, onZoomToOverlay,
+  onZoomToOverlay,
+  // NEW-1 — the node inside the comps panel's scroll area the Documents section is portaled into, so the
+  // record reads (and scrolls) as ONE panel; null before it mounts, in which case it renders inline.
+  docsSlot = null,
   // NEW-7 — the map's live click state for the scale calibration + its three setters (MapFinder owns the clicks).
   calibration = null, onStartCalibration, onClearCalibration, onUndoCalibration,
   // B1167712-B1167714 (NEW-1/2/3, owner decision 2026-09-07 — "we really shouldn't even show
@@ -698,16 +671,12 @@ export default function SitePlansSection({
   // here at a time (`focusedOverlay`, below — the standalone multi-row list is gone per
   // B1167712), so "is the Adjust panel open" is a plain boolean rather than an id-keyed map.
   const [adjustOpen, setAdjustOpen] = useState(false);
-  // B972512-HARDENING item 6 — "Recently deleted": deleting a site plan is now RECOVERABLE
-  // (soft delete) rather than permanent, matching sites/doc_reviews' own trash pattern. Fetched
-  // lazily, only once the disclosure is opened — empty in the common case, costs nothing until
-  // someone actually wants it. Declared here (before this component's `if (!open) return null`
-  // below) — every hook must run unconditionally on every render.
-  const [trash, setTrash] = useState([]);
-  const [trashOpen, setTrashOpen] = useState(false);
-  const [trashLoading, setTrashLoading] = useState(false);
-  // B1134754 NEW-21 — same rule as `trash` above: declared before the `if (!open) return null`
-  // below, so this hook still runs unconditionally on every render even while the panel is closed.
+  // NEW-1 (site-record panel V1) — a site can hold several documents now ("Add" is always there), so
+  // the Adjust panel needs to know WHICH one it is for. The map-selected overlay wins (see
+  // `focusedOverlay`), else the last one whose ⋮ → Adjust was pressed, else the first.
+  const [adjustTargetId, setAdjustTargetId] = useState(null);
+  // B1134754 NEW-21 — declared before the `if (!open) return null` below, so this hook still runs
+  // unconditionally on every render even while the panel is closed.
   const [cropTarget, setCropTarget] = useState(null); // { overlay, src } while the crop tool is open
 
   // B849840/NEW-1 — arming an overlay for editing via ANY path must reveal the same controls
@@ -726,8 +695,8 @@ export default function SitePlansSection({
   // a visible open-then-instantly-close flash. `justOpenedOverlayIdRef` names the one overlay this
   // effect must not act against on the very next `focusedProjectId` change it causes.
   useEffect(() => {
-    const focused = focusedProjectId ? overlaysRef.current.find((o) => o.projectId === focusedProjectId) : null;
-    if (focused && focused.id === justOpenedOverlayIdRef.current) { justOpenedOverlayIdRef.current = null; return; }
+    const focused = focusedProjectId ? overlaysRef.current.find((o) => o.projectId === focusedProjectId && o.id === justOpenedOverlayIdRef.current) : null;
+    if (focused) { justOpenedOverlayIdRef.current = null; return; }
     setAdjustOpen(false);
   }, [focusedProjectId]);
   // NEW-1 (this item, regression from B1310209) — `open` gates whether this component's own JSX
@@ -1315,28 +1284,6 @@ export default function SitePlansSection({
   // matching this row's own confirm-dialog copy below ("Comps pinned to it keep their location
   // but lose the link back"), which used to be untrue (the delete was refused instead). See
   // comps_site_plan_overlay_delete_reverts_to_pin.sql for the full mechanism and reasoning.
-  // NEW-6 Part B — an auto-created tracked ("market record") site is otherwise permanent and
-  // invisible once its last plan (and last comp) are gone. Mirrors CompsPanel.jsx's own
-  // purgeForever tidy-up (countLiveCompsForProject + binOrphanedTrackedSite) exactly, INCLUDING
-  // where it fires: PERMANENT delete only, never ordinary soft-delete — a soft-deleted overlay is
-  // restorable for 30 days (storage.js's own comment on this same deliberate scoping), and
-  // `countLiveOverlaysForProject` already excludes it, so retiring the tracked site at soft-delete
-  // time would strand a later restore with no site to reattach to. Best-effort, never blocks or
-  // reports a failure over this: `binOrphanedTrackedSite` already refuses unless the site is still
-  // `role:"tracked"` and genuinely empty, so it's safe to call speculatively.
-  const maybeRetireTrackedSite = async (projectId) => {
-    if (!projectId) return;
-    try {
-      const [liveOverlays, liveComps] = await Promise.all([
-        countLiveOverlaysForProject(projectId),
-        countLiveCompsForProject(projectId),
-      ]);
-      if (liveOverlays === 0 && liveComps === 0) {
-        const { binOrphanedTrackedSite } = await import("../../../workspaces/site-planner/lib/storage.js");
-        await binOrphanedTrackedSite(projectId);
-      }
-    } catch (_) { /* best-effort tidy-up */ }
-  };
   const remove = async (o) => {
     const { error } = await deleteOverlay(o.id);
     if (error) { console.error("[sitePlanOverlays] delete failed:", error); setPanelError(friendlySaveError(error)); }
@@ -1344,58 +1291,21 @@ export default function SitePlansSection({
     await reload();
   };
 
-  const loadTrash = async () => {
-    setTrashLoading(true);
-    const { data } = await fetchDeletedOverlays();
-    setTrashLoading(false);
-    setTrash(data || []);
-  };
-  const toggleTrash = () => {
-    setTrashOpen((was) => { if (!was) loadTrash(); return !was; });
-  };
-  const restore = async (o) => {
-    const { error } = await restoreOverlay(o.id);
-    if (error) { console.error("[sitePlanOverlays] restore failed:", error); setPanelError(friendlySaveError(error)); }
-    await reload();
-    await loadTrash();
-  };
-  const purgeForever = async (o) => {
-    const { error } = await permanentlyDeleteOverlay(o.id);
-    if (error) { console.error("[sitePlanOverlays] permanent delete failed:", error); setPanelError(friendlySaveError(error)); }
-    // NEW-6 Part B — `o` here is a raw trash-select row (fetchDeletedOverlays doesn't run
-    // rowToOverlay), so its owning site is `project_id`, not `projectId`.
-    else if (o.project_id) await maybeRetireTrackedSite(o.project_id);
-    await loadTrash();
-  };
-
   // B1167712-B1167714 (NEW-1/2/3, owner decision 2026-09-07) — "we really shouldn't even show
   // site plans... they should just be attached to comps." There is no more standalone list.
-  // `focusedOverlay` is the ONE plan the currently-open comp's SITE owns (never a per-comp copy —
+  // `docOverlays` are the plans the currently-open comp's SITE owns (never a per-comp copy —
   // the site is the join, see the shared shared/comps/lib/compSiteMatch.js header); with a comp
   // open and no plan yet, a compact upload prompt takes its place. With nothing open (browsing
   // the comp list) and no upload/crop flow running, this renders nothing at all.
-  const focusedOverlay = focusedProjectId ? overlays.find((o) => o.projectId === focusedProjectId) || null : null;
+  const docOverlays = focusedProjectId ? overlays.filter((o) => o.projectId === focusedProjectId) : [];
+  const focusedOverlay = (activeOverlayId && docOverlays.find((o) => o.id === activeOverlayId))
+    || docOverlays.find((o) => o.id === adjustTargetId) || docOverlays[0] || null;
   const showEmbeddedCard = !!focusedProjectId && !flow;
-  // Scoped "Recently deleted" — this site's own binned plans, plus any never-resolved orphan
-  // (deleted before it ever got a location, so it has no site to be scoped to) — never a global
-  // trash list. `o.project_id` here is the raw select row (fetchDeletedOverlays doesn't run
-  // rowToOverlay), matching `o.doc_title`/`o.source_file_name` below.
-  const scopedTrash = trash.filter((o) => o.project_id === focusedProjectId || !o.project_id);
   // A plan the owner has explicitly detached (or one that was never resolved and the reload
   // sweep hasn't reached yet) has no site of its own — the ONLY way back to it once the old
-  // standalone list is gone, so the empty state below offers it directly rather than stranding
-  // it (mirrors the "Recently deleted" scoping above: reachable from wherever it's missed, never
-  // a persistent global list). Fresh every render, same precedent as CompsPanel's own
-  // `trackedSites` derivation — a handful of rows at most.
-  const orphanOverlays = overlays.filter((o) => !o.projectId && o.id !== focusedOverlay?.id);
-  const siteOptions = (() => {
-    const byGroup = new Map();
-    for (const s of loadSiteSummaries()) {
-      const g = s.groupId || s.id;
-      if (!byGroup.has(g)) byGroup.set(g, s);
-    }
-    return [...byGroup.values()];
-  })();
+  // standalone list is gone, so a record with no documents offers it directly rather than stranding
+  // it. Fresh every render, same precedent as CompsPanel's own `trackedSites` derivation.
+  const orphanOverlays = overlays.filter((o) => !o.projectId);
 
   // B1310208/B1310209 (NEW-1/NEW-2) — the ONE thing the resting card's "Adjust" button does.
   // An unplaced plan has nothing for the panel to show (no position, no rotation, nothing on the
@@ -1405,17 +1315,20 @@ export default function SitePlansSection({
   // already-placed plan just toggles the panel open/closed — opening it no longer also arms map
   // handles (that's now the panel's own explicit "Move / resize" button), so checking opacity or
   // rotation doesn't summon drag handles nobody asked for.
-  const openAdjust = async () => {
-    if (!focusedOverlay) return;
-    if (!overlayPlaced(focusedOverlay)) {
-      const placement = suggestPlacement ? suggestPlacement(focusedOverlay.imgW, focusedOverlay.imgH) : null;
+  const openAdjust = async (target) => {
+    const o = target || focusedOverlay;
+    if (!o) return;
+    setAdjustTargetId(o.id);
+    if (!overlayPlaced(o)) {
+      const placement = suggestPlacement ? suggestPlacement(o.imgW, o.imgH) : null;
       if (!placement) { setPanelError("Couldn't place this site plan — the map isn't ready yet. Try again in a moment."); return; }
-      await patchAndReload(focusedOverlay, placement);
+      await patchAndReload(o, placement);
       setAdjustOpen(true);
-      onActivateOverlay && onActivateOverlay(focusedOverlay.id);
+      onActivateOverlay && onActivateOverlay(o.id);
       return;
     }
-    setAdjustOpen((was) => !was);
+    // Pressing Adjust on a DIFFERENT document moves the open panel to it; on the same one it toggles.
+    setAdjustOpen((was) => (was && focusedOverlay && focusedOverlay.id !== o.id ? true : !was));
   };
   // Done (and re-pressing Adjust to close) also stands down any map handles / pin-drop mode this
   // plan armed — leaving the panel with no map handles left dangling behind it.
@@ -1424,6 +1337,8 @@ export default function SitePlansSection({
     if (focusedOverlay && activeOverlayId === focusedOverlay.id) onActivateOverlay && onActivateOverlay(null);
     if (focusedOverlay && pinningOverlayId === focusedOverlay.id) onStopPinOnOverlay?.();
   };
+
+  const inSlot = (node) => (docsSlot ? createPortal(node, docsSlot) : node);
 
   const errorBanner = panelError && (
     <div style={{
@@ -1435,90 +1350,48 @@ export default function SitePlansSection({
     </div>
   );
 
-  const trashBlock = (
-    <div style={{ marginTop: focusedOverlay ? 8 : 4 }}>
-      <button onClick={toggleTrash} style={{
-        border: "none", background: "none", padding: "4px 0", cursor: "pointer", fontFamily: "inherit",
-        fontSize: FONT_SIZE.label, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 4,
-      }}>
-        <span style={{ display: "inline-block", transform: trashOpen ? "none" : "rotate(-90deg)" }}>▾</span>
-        Recently deleted{trashOpen && scopedTrash.length ? ` (${scopedTrash.length})` : ""}
-      </button>
-      {trashOpen && (
-        trashLoading ? (
-          <div style={{ ...metaText, padding: "4px 0" }}>Loading…</div>
-        ) : scopedTrash.length === 0 ? (
-          <div style={{ ...metaText, padding: "4px 0" }}>Nothing here.</div>
-        ) : (
-          scopedTrash.map((o) => (
-            <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderTop: "1px solid var(--border-default)" }}>
-              <div style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={o.source_file_name || undefined}>
-                {o.doc_title || "Untitled site plan"} <span style={metaText}>· p.{o.page}</span>
-              </div>
-              <Button size="sm" variant="ghost" onClick={() => restore(o)}>Restore</Button>
-              <Button size="sm" variant="ghost" style={{ color: "var(--danger-text)" }} onClick={() => purgeForever(o)}>Delete forever</Button>
-            </div>
-          ))
-        )
-      )}
-    </div>
-  );
-
   return (
     <>
-    {showEmbeddedCard && (
-      <div style={{ borderBottom: "1px solid var(--border-default)", padding: "10px 14px" }}>
+    {showEmbeddedCard && inSlot(
+      <div data-testid="comp-record-documents" style={{ padding: "0 14px 14px" }}>
         {errorBanner}
+        {/* NEW-1 (site-record panel V1) — DOCUMENTS: the header and its "Add" sit on the same dark rule,
+            then one row per document. A record with none shows the header and "Add" only. */}
+        <RecordSectionHeader title="Documents" right={
+          <RecordLink onClick={() => startNewUpload(focusedProjectId)} testId="comp-record-add-doc">Add</RecordLink>
+        } />
         {loading ? (
-          <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>Loading…</div>
-        ) : focusedOverlay ? (
-          <>
-          {/* B1167712 (NEW-1, owner correction) — ALWAYS visible on the plan itself: which site
-              it's attached to, one dropdown to change it, and picking "No site" detaches it —
-              never a fact the owner can't see or undo. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span style={metaText}>Site</span>
-            <select value={focusedOverlay.projectId || ""} onChange={(e) => setOverlaySite(focusedOverlay, e.target.value || null)} style={{ ...inputStyle, flex: 1 }}>
-              <option value="">No site (detached)</option>
-              {siteOptions.map((s) => <option key={s.id} value={s.id}>{s.site || s.name}</option>)}
-            </select>
-          </div>
-          <OverlayRow o={focusedOverlay}
-            duplicateCount={1}
-            adjustOpen={adjustOpen}
-            onOpenAdjust={openAdjust}
-            onRename={(name) => rename(focusedOverlay, name)}
-            rasterFailed={!!rasterFailedIds?.has(focusedOverlay.id)}
-            zoomBelowGate={zoomBelowGate}
-            onZoomToOverlay={onZoomToOverlay}
-            pinning={pinningOverlayId === focusedOverlay.id}
-            // B1167713 (NEW-2) — the ONLY thing that changed about pinning: the target is always
-            // the comp already open here, never a brand-new one (this card's own "Pin comp here"; the
-            // map toolbar's "Place comp → on a
-            // site plan" menu still creates new comps, unchanged, via onPlaceComp elsewhere).
-            onStartPin={() => onStartPinExistingComp?.(focusedCompId, focusedOverlay.id)}
-            onStopPin={() => onStopPinOnOverlay?.()}
-            onConfirmChangePage={() => startChangePage(focusedOverlay)}
-            onDelete={() => { closeAdjust(); remove(focusedOverlay); }}
-          />
-          </>
+          <div style={{ ...RECORD_BODY, color: "var(--text-secondary)", padding: "8px 0" }}>Loading…</div>
         ) : (
-          <div>
-            <div style={{ fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", marginBottom: 6 }}>Site plan</div>
-            <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", marginBottom: 8 }}>
-              No plan uploaded for this site yet — drop a broker flyer or park plan on it, then drag it into position on the map.
-            </div>
-            <Button size="sm" variant="ghost" onClick={() => startNewUpload(focusedProjectId)}>+ Upload site plan</Button>
-            {/* B1167712 (NEW-1, owner correction) — the way back for a plan the owner (or the
-                matcher) hasn't attached anywhere yet, now that the standalone list is gone. */}
-            {orphanOverlays.length > 0 && (
+          <>
+            {docOverlays.map((o, i) => (
+              <OverlayRow key={o.id} o={o}
+                last={i === docOverlays.length - 1}
+                duplicateCount={1}
+                adjustOpen={adjustOpen && focusedOverlay?.id === o.id}
+                onOpenAdjust={() => openAdjust(o)}
+                onRename={(name) => rename(o, name)}
+                rasterFailed={!!rasterFailedIds?.has(o.id)}
+                onZoomToOverlay={onZoomToOverlay}
+                pinning={pinningOverlayId === o.id}
+                // B1167713 (NEW-2) — the target is always the comp already open here, never a brand-new one
+                // (the map toolbar's "Place comp → on a site plan" menu still creates new comps via onPlaceComp).
+                onStartPin={() => onStartPinExistingComp?.(focusedCompId, o.id)}
+                onStopPin={() => onStopPinOnOverlay?.()}
+                onConfirmChangePage={() => startChangePage(o)}
+                onDelete={() => { closeAdjust(); remove(o); }}
+              />
+            ))}
+            {/* B1167712 (NEW-1, owner correction) — the way back for a plan nobody has attached anywhere,
+                now that the standalone list is gone. Only offered when such a plan exists. */}
+            {docOverlays.length === 0 && orphanOverlays.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ ...metaText, marginBottom: 4 }}>
+                <div style={{ ...RECORD_BODY, color: "var(--text-secondary)", marginBottom: 4 }}>
                   {orphanOverlays.length} unattached site plan{orphanOverlays.length === 1 ? "" : "s"}:
                 </div>
                 {orphanOverlays.map((o) => (
                   <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ flex: 1, minWidth: 0, ...RECORD_BODY, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {o.docTitle || "Untitled site plan"}
                     </span>
                     <Button size="sm" variant="ghost" onClick={() => setOverlaySite(o, focusedProjectId)}>Attach here</Button>
@@ -1526,9 +1399,8 @@ export default function SitePlansSection({
                 ))}
               </div>
             )}
-          </div>
+          </>
         )}
-        {trashBlock}
       </div>
     )}
 

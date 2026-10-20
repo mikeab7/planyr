@@ -1,6 +1,9 @@
 /* AddToListControl — the place card's "Lists" control (NEW-1 / B2088288): his lists with a check on each
  * one this place is already on, plus "New list…" inline. Tapping a row adds or removes only that membership.
- * Rendered by VisitPanel through its `listsControl` slot; FoodApp owns the data. */
+ * Rendered by VisitPanel through its `listsControl` slot; FoodApp owns the data.
+ * `variant="pill"` (NEW-1, 2026-10-20 mockup): a small "+ List" pill that sits at the RIGHT of the score-pills row and opens the
+ * same list chooser under the row (the wrapper is `display: contents`, so the pill and the opened chooser are flex items of the
+ * row — the chooser takes a full line of its own). The default "row" variant is the old full-width ghost button. */
 import { useState } from "react";
 import { Button, SIZE } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -9,7 +12,7 @@ import { noAutofill } from "../lib/noAutofill.js";
 import { validateListName } from "../lib/foodLists.js";
 import { Swatch, IOS_NO_ZOOM, PANEL_SHADOW } from "./ListChips.jsx";
 
-export default function AddToListControl({ lists, onListIds, onToggle, onCreate, disabled }) {
+export default function AddToListControl({ lists, onListIds, onToggle, onCreate, disabled, variant = "row" }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
@@ -24,14 +27,27 @@ export default function AddToListControl({ lists, onListIds, onToggle, onCreate,
     setCreating(false); setDraft(""); setErr(null);
   };
 
+  const pill = variant === "pill";
   return (
-    <div data-testid="food-add-to-list" style={{ margin: "8px 16px 0", display: "flex", flexDirection: "column", gap: 6 }}>
-      <Button variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={disabled} data-testid="food-add-to-list-btn"
-        style={{ minHeight: 44, justifyContent: "flex-start", textAlign: "left" }}>
-        {names.length ? `On: ${names.join(", ")}` : "Add to a list"} {open ? "▴" : "▾"}
-      </Button>
+    <div data-testid="food-add-to-list" data-variant={variant} style={pill ? { display: "contents" } : { margin: "8px 16px 0", display: "flex", flexDirection: "column", gap: 6 }}>
+      {pill ? (
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={disabled} data-testid="food-add-to-list-btn"
+          aria-label={names.length ? `Lists: on ${names.join(", ")}` : "Add to a list"}
+          style={{
+            marginLeft: "auto", flex: "none", display: "inline-flex", alignItems: "center", gap: 4, minHeight: 28, padding: "4px 10px", margin: "8px 0 8px auto",
+            borderRadius: RADIUS.pill, border: "1px solid var(--border-default)", background: open ? "var(--chrome-muted)" : "transparent",
+            color: "var(--text-primary)", font: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
+          }}>
+          <span aria-hidden="true">{names.length ? "✓" : "+"}</span> List{names.length > 1 ? `s · ${names.length}` : ""}
+        </button>
+      ) : (
+        <Button variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={disabled} data-testid="food-add-to-list-btn"
+          style={{ minHeight: 44, justifyContent: "flex-start", textAlign: "left" }}>
+          {names.length ? `On: ${names.join(", ")}` : "Add to a list"} {open ? "▴" : "▾"}
+        </Button>
+      )}
       {open && (
-        <div role="group" aria-label="Lists" style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "2px 8px" }}>
+        <div role="group" aria-label="Lists" style={{ flex: pill ? "1 0 100%" : undefined, border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "2px 8px" }}>
           {lists.map((l) => {
             const on = onListIds.has(l.id);
             return (

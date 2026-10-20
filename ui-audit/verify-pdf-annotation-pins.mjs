@@ -5,15 +5,18 @@
  *   node ui-audit/verify-pdf-annotation-pins.mjs [--assert] [--out <dir>]                       (local, seeded plan)
  *   E2E_LOGIN_KEY=… node ui-audit/verify-pdf-annotation-pins.mjs https://planyr.io [--assert]   (signed in, throwaway plan)
  *
- * One plan: a building, a reference drawing promoted ABOVE the plan, a default rectangle, a rectangle sent BEHIND the
- * plan (under the building) and a length measurement, on a geolocated plan (so the lifted-GIS front band exists, empty).
- * Exported with "Flatten markups" OFF then ON through the real compose screen:
- *   · OFF → exactly three annotations: the default Square, the measurement's Line, the building's Polygon (/Subj Building);
+ * One plan: a building, a SECOND building with a corner bump-out at each end of its dock wall (NEW-1 of 2026-10-19:
+ * a building and its bump-outs are ONE annotation), a reference drawing promoted ABOVE the plan, a default rectangle,
+ * a rectangle sent BEHIND the plan (under the first building) and a length measurement, on a geolocated plan (so the
+ * lifted-GIS front band exists, empty). Exported with "Flatten markups" OFF then ON through the real compose screen:
+ *   · OFF → exactly four annotations: the default Square, the measurement's Line, one Polygon per building (/Subj Building);
  *           the behind-the-plan rectangle is NOT one of them (it is printed into the page);
  *   · ON  → zero annotations;
  *   · render parity (poppler) between the two within the markups' own ink weight;
  *   · KNOWN-GOOD ARM: the flattened page differs from a plan-with-nothing-on-it export (the comparison isn't vacuous);
- *   · pdf.js (a second library) reads the three back, unlocked, with appearances, the Polygon carrying 4 vertices.
+ *   · pdf.js (a second library) reads the four back, unlocked, with appearances; the plain building's Polygon carries 4
+ *     vertices, the bumped-out building's 8, its /Rect spans the bump-outs, and — with the annotations hidden — the
+ *     page holds none of the building's fill where the bump-outs are (they left the page with their building).
  * Signed in, the throwaway plan is deleted afterwards and its absence verified (CLAUDE.md entry 15).
  */
 import { chromium } from "playwright";
@@ -46,8 +49,14 @@ function plan(kind) {
   return {
     schemaVersion: 12, id, groupId: id, site: "zz PDF pins check", name: "Plan 1", updatedAt: Date.now(), status: "active", data: { status: "active" },
     origin: { lat: 29.86, lon: -95.17 }, county: "harris",
-    parcels: [{ id: "pc1", active: true, locked: false, points: [{ x: 0, y: 0 }, { x: 1200, y: 0 }, { x: 1200, y: 900 }, { x: 0, y: 900 }] }],
-    els: full ? [{ id: "bld1", type: "building", cx: 600, cy: 450, w: 900, h: 500, rot: 0, z: 1, dock: "cross", dockAxis: "x", dockSide: "bottom" }] : [],
+    parcels: [{ id: "pc1", active: true, locked: false, points: [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 900 }, { x: 0, y: 900 }] }],
+    els: full ? [
+      { id: "bld1", type: "building", cx: 600, cy: 450, w: 900, h: 500, rot: 0, z: 1, dock: "cross", dockAxis: "x", dockSide: "bottom" },
+      // the bumped-out building: 500×300, dock wall at the bottom, the default 55′×60′ bump-out at each end (dogEarGeom boxes)
+      { id: "bld2", type: "building", cx: 1600, cy: 400, w: 500, h: 300, rot: 0, z: 2, dock: "front", dockAxis: "x", dockSide: "bottom" },
+      { id: "bumpL", type: "building", cx: 1377.5, cy: 580, w: 55, h: 60, rot: 0, z: 3, attachedTo: "bld2", noFit: true, noLabel: true, dock: "none", dogEar: { side: "bottom", sign: -1, along: 55, proj: 60 } },
+      { id: "bumpR", type: "building", cx: 1822.5, cy: 580, w: 55, h: 60, rot: 0, z: 4, attachedTo: "bld2", noFit: true, noLabel: true, dock: "none", dogEar: { side: "bottom", sign: 1, along: 55, proj: 60 } },
+    ] : [],
     sheetOverlays: full ? [{ id: "ref1", name: "Promoted reference", src: PNG1, x: 1070, y: 720, imgW: 100, imgH: 100, ftPerPx: 1.7, rotation: 0, opacity: 0.8, visible: true, locked: false, aboveParcel: true, page: 1 }] : [],
     markups: full ? [
       { id: "mkDefault", kind: "rect", cx: 350, cy: 450, w: 240, h: 140, rot: 0, ...ST, z: 900001, comment: "DEFAULT" },
@@ -135,7 +144,7 @@ const out = {};
 try {
   await openPlan(page, "full");
   const feats = await page.evaluate(() => [...document.querySelectorAll('[data-testid="planner-canvas"] [data-feature]')].map((n) => n.getAttribute("data-feature")));
-  check(["el:bld1", "reference:ref1", "markup:mkDefault", "markup:mkBehind", "measure:0"].every((k) => feats.includes(k)), "the plan renders its building, promoted reference, both rectangles and the measurement");
+  check(["el:bld1", "el:bld2", "el:bumpL", "el:bumpR", "reference:ref1", "markup:mkDefault", "markup:mkBehind", "measure:0"].every((k) => feats.includes(k)), "the plan renders both buildings, the two bump-outs (their own el: nodes), promoted reference, both rectangles and the measurement");
   const orderIdx = (k) => feats.indexOf(k);
   console.log("   paint order:", feats.filter((k) => /^(el|reference|markup|measure):/.test(k)).join(" < "));
   check(orderIdx("reference:ref1") > orderIdx("markup:mkDefault") && orderIdx("reference:ref1") < orderIdx("measure:0"), "KNOWN-GOOD ARM: the reference paints AFTER the default rectangle and BEFORE the measurement (the exact shape that pinned them under the old rule)");
@@ -166,15 +175,31 @@ const dicts = edit.match(/\/Type \/Annot [^\n]*/g) || [];
 check(!/\/Annots/.test(flat), "toggle ON: zero annotations");
 const sub = dicts.map((a) => /\/Subtype \/(\w+)/.exec(a)[1]).sort();
 console.log("   toggle OFF subtypes:", JSON.stringify(sub));
-check(dicts.length === 3 && sub.join() === "Line,Polygon,Square", "toggle OFF: exactly three annotations — Square (default rectangle), Line (measurement), Polygon (building)");
+check(dicts.length === 4 && sub.join() === "Line,Polygon,Polygon,Square", "toggle OFF: exactly four annotations — Square (default rectangle), Line (measurement), one Polygon per building (the bump-outs are NOT annotations of their own)");
 check(/\(DEFAULT\)/.test(edit) && !/\(BEHIND\)/.test(edit), "the default rectangle is an annotation; the rectangle sent behind the plan is NOT");
 check(/\/Subj \(Building\)/.test(edit), "the Polygon is the building (/Subj Building)");
 check(dicts.every((a) => /\/F 4 /.test(a) && /\/AP << \/N \d+ 0 R >>/.test(a)), "every annotation is unlocked (/F 4) and has an /AP /N stream");
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const an = await (await (await pdfjs.getDocument({ data: new Uint8Array(out.edit), verbosity: 0 }).promise).getPage(1)).getAnnotations();
-const poly = an.find((a) => a.annotationType === 7);
-check(an.length === 3 && an.every((a) => (a.annotationFlags & 192) === 0 && a.hasAppearance), `pdf.js reads ${an.length} annotations back, unlocked, each with an appearance`);
-check(poly && poly.vertices && poly.vertices.length / (typeof poly.vertices[0] === "number" ? 2 : 1) === 4, `pdf.js: the building Polygon has 4 vertices (${poly && poly.vertices ? poly.vertices.length : "none"} values)`);
+const polys = an.filter((a) => a.annotationType === 7);
+const vertsOf = (a) => { const v = a.vertices || []; return typeof v[0] === "number" ? Array.from({ length: v.length / 2 }, (_, i) => ({ x: v[2 * i], y: v[2 * i + 1] })) : v.map((p) => ({ x: p.x, y: p.y })); };
+check(an.length === 4 && an.every((a) => (a.annotationFlags & 192) === 0 && a.hasAppearance), `pdf.js reads ${an.length} annotations back, unlocked, each with an appearance`);
+const plain = polys.find((a) => vertsOf(a).length === 4), bumped = polys.find((a) => vertsOf(a).length === 8);
+check(polys.length === 2 && !!plain && !!bumped, `pdf.js: two Building Polygons — one with 4 vertices, one with 8 (${polys.map((a) => vertsOf(a).length).join(", ")})`);
+let bumpRegions = null;
+if (bumped) {
+  const v = vertsOf(bumped), xs = v.map((p) => p.x), ys = v.map((p) => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const ratio = (y1 - y0) / (x1 - x0); // (300 + 60) / 500 on the plan
+  check(Math.abs(ratio - 360 / 500) < 0.01, `the 8-vertex Polygon's extent is the building PLUS its bump-outs (height/width ${ratio.toFixed(3)}, expected ${(360 / 500).toFixed(3)})`);
+  const r = bumped.rect; // [x0, y0, x1, y1]
+  check(r[0] <= x0 + 0.5 && r[1] <= y0 + 0.5 && r[2] >= x1 - 0.5 && r[3] >= y1 - 0.5, "its /Rect spans the bump-outs too");
+  // the bump-out rectangles: the two tabs below the dock face (PDF y runs up: the face is the second-lowest y)
+  const yFace = Math.min(...ys.filter((y) => y > y0 + 1));
+  const innerXs = v.filter((p) => Math.abs(p.y - y0) < 0.5).map((p) => p.x).sort((a, b) => a - b); // x0, x0+55′, x1-55′, x1
+  bumpRegions = innerXs.length === 4 ? [[x0, y0, innerXs[1], yFace], [innerXs[2], y0, x1, yFace]] : null;
+  check(!!bumpRegions, `the Polygon's far edge carries the two bump-outs' four corners (${innerXs.length} found)`);
+}
 const A = raster(join(OUT, "flat.pdf"), "flat"), B = raster(join(OUT, "editable.pdf"), "editable"), C = raster(join(OUT, "blank.pdf"), "blank");
 const meanAbs = (X, Y) => { let s = 0; for (let i = 0; i < X.length; i++) s += Math.abs(X[i] - Y[i]); return s / X.length; };
 const bA = blurLinear(A, 2), bB = blurLinear(B, 2), bC = blurLinear(C, 2);
@@ -185,5 +210,23 @@ check(ratio <= 0.15, `render parity: editable vs flattened ink difference is ${(
 const pageOnly = raster(join(OUT, "editable.pdf"), "editable-page-only", ["-hide-annotations"]);
 const bP = blurLinear(pageOnly, 2);
 check(meanAbs(bP, bA) > 0, "the editable file's page content (annotations hidden) is NOT the full flattened picture — the lifted objects are really out of the page");
+if (bumpRegions) {
+  // NO bump-out ink left in the page. The fill colour is sampled from the FLATTENED page at each bump-out's centre
+  // (so it is whatever the building really paints, over a live aerial or a white page); the check is then the share
+  // of that colour inside the rectangle. Flattened and editable-with-annotations must read ~1, and the annotation-
+  // hidden page must read ~0. (A baseline-diff against a blank plan is NOT used: with a live aerial the blank plan
+  // frames the map differently, so the imagery differs and the diff reads imagery, not bump-out ink — measured live.)
+  const pageHpt = (await (await pdfjs.getDocument({ data: new Uint8Array(out.edit), verbosity: 0 }).promise).getPage(1)).view[3];
+  const k = DPI / 72, W = A.width, ch = A.channels;
+  const at = (I, x, y) => { const i = (y * W + x) * ch; return [I.data[i], I.data[i + 1], I.data[i + 2]]; };
+  const box = ([rx0, ry0, rx1, ry1]) => [Math.floor(rx0 * k) + 3, Math.floor((pageHpt - ry1) * k) + 3, Math.ceil(rx1 * k) - 3, Math.ceil((pageHpt - ry0) * k) - 3];
+  const fillShare = (I, [x0, y0, x1, y1], ref) => { let hit = 0, n = 0; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { n++; const c = at(I, x, y); if (Math.abs(c[0] - ref[0]) < 14 && Math.abs(c[1] - ref[1]) < 14 && Math.abs(c[2] - ref[2]) < 14) hit++; } return n ? hit / n : 0; };
+  const rects = bumpRegions.map(box);
+  const refs = rects.map(([x0, y0, x1, y1]) => at(A, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2)));
+  const shareFlat = rects.map((r, i) => fillShare(A, r, refs[i])), shareEdit = rects.map((r, i) => fillShare(B, r, refs[i])), sharePage = rects.map((r, i) => fillShare(pageOnly, r, refs[i]));
+  check(shareFlat.every((v) => v > 0.9), `known-good arm: the flattened page is the building's fill throughout both bump-outs (${shareFlat.map((v) => v.toFixed(2)).join(", ")})`);
+  check(shareEdit.every((v) => v > 0.9), `with the annotations shown, both bump-outs read as the building's fill (${shareEdit.map((v) => v.toFixed(2)).join(", ")})`);
+  check(sharePage.every((v) => v < 0.02), `no bump-out ink is left in the page with the annotations hidden (building-fill share ${sharePage.map((v) => v.toFixed(2)).join(", ")}; bar < 0.02)`);
+}
 console.log(`\n${pass} passed, ${fail} failed   (files in ${OUT})`);
 process.exit(ASSERT && fail ? 1 : 0);

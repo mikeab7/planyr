@@ -479,6 +479,10 @@
       "custom_name",
       "place_id"
     ],
+    "food_place_prefs": [
+      "custom_name",
+      "place_id"
+    ],
     "food_lists": [
       "name"
     ],

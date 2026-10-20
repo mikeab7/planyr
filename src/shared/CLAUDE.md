@@ -296,6 +296,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   basis-normalization rule — never blended into one number — and the empty-field-hide render rule);
   `lib/compsStore.js` is the Supabase CRUD (`public.comps`, team-read/owner-write RLS — narrower than
   a shared site plan on purpose); `lib/compMarkerIcon.js` is the pure map-marker spec;
+  **Single-record view (B2347456, owner-approved layout V1, 2026-10-19):** `CompDetail` is a sectioned spec sheet built on `ui/RecordSection.jsx` (one body size; only the section header is smaller; hairlines, no gray fills); `lib/comps.js` `compRecordSections` only SORTS `compFieldRows` into Deal / Building / Parties (never a second derivation; unknown keys fall into Deal; ISO dates here only). Its Documents section lives in `sitePlans/components/SitePlansSection.jsx` and is PORTALED into the comps panel's scroll area (`docsSlotRef` → `docsSlot`) so the record scrolls as one panel. No Site dropdown and no "Recently deleted" in the record, and none on the comps LIST either (NEW-1, 2026-10-20) — a deleted site-plan FILE restores from the Site Planner's plan menu, under that project's "Recently deleted" (`sitePlans/lib/deletedSitePlanFiles.js`; same soft-delete bin, no retention change). Guards: repo-root `test/` **compRecordLayout**; ui-audit **verify-comp-record-layout**.
   `components/CompsPanel.jsx` is the lazy-loaded side panel, self-contained (fetches its own data,
   current user and team list). Anchored by a pin drop OR a real parcel selection — wired into the
   Site Planner's map finder by REUSING its existing parcel-select flow, not a second identify
@@ -774,6 +775,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   — never blended into one score. A save that auto-attached to a MATCHED existing site (never a
   brand-new one) surfaces which site and how (`assignNotice` in `CompDetail`) so a wrong guess is
   reassignable via the existing Site dropdown rather than a silent duplicate.
+  **Records search + filters (B2347488):** `lib/compsQuery.js` is the PURE engine (search tokens, filters, sort, chips, counts — no React, no network; search reads the address cache only and never geocodes), `lib/compsQueryPrefs.js` the per-device persistence, `components/CompsQueryBar.jsx` the presentational bar + inline filter panel. The filter state lives in `CompsPanel` above the list/detail views; the visible set rides `onVisibleCompsChange` to MapFinder's markers only (every other reader keeps ALL comps). Power / dock doors: `db/comps_power_docks.sql` (B2347489). ⛔ `compsStore.SELECT_COLS` must cover every column `compToRow` writes (B2347490 — `lease_opex` was missing and an edit wiped it); the repo-root `test/` suite **compsPowerDocks** fails otherwise.
 - **`reports/` (B842866) — the problem-report submission model behind the global help/report
   control (the app shell's own help-control component, mounted on every route).**
   `reportsStore.js` is the whole thing: `buildReportContext` (the same privacy-allowlist
