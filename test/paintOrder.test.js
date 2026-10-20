@@ -120,7 +120,10 @@ describe("the table matches what the canvas actually paints", () => {
   // so it is not part of this ladder (see paintOrder.js's own header).
   const MARKERS = [
     [0, /\{overlayBands\.below\.map\(/],
-    [1, /\{drawParcels\.map\(/],
+    // NEW-1 (Parcels in front): the parcel tree is BUILT once above the return (`parcelTierNodes`), so `drawParcels.map(` no longer
+    // marks where it paints. Its NORMAL position is the slot expression — the late twin only exists while the Parcels tool is up
+    // (mapStack.parcelsOnTop), and the export puts it back here (test/parcelsInFront.test.js).
+    [1, /\{parcelsFront \? <g \{\.\.\.\{ \[PARCEL_TIER_SLOT_ATTR\]/],
     [2, /\{drawMarkupsZ\.filter\(\(m\) => m\.behindEls\)\.map\(/],
     [3, /\{calloutBands\.below\.map\(/],
     [4, /\{measureBands\.below\.map\(/],

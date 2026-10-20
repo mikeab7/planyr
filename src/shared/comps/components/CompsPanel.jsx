@@ -20,11 +20,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Field, MenuItem } from "../../ui/controls.jsx";
 import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
+import { RecordSection, RecordLink, RECORD_BODY } from "../../ui/RecordSection.jsx";
+import { FONT_SIZE } from "../../ui/designTokens.js";
+import { RADIUS } from "../../ui/radius.js";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft, anchorCountyFlag,
-  resolveCapTriangle, sortCompsByRecency, compDateLabel, anchorTeamConflict,
+  resolveCapTriangle, sortCompsByRecency, compDateLabel, anchorTeamConflict, compRecordSections, compBadgeLabel,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
@@ -277,6 +280,20 @@ function TrashRow({ comp, overlaysById, onRestore, onPurge, compsRatePeriod, ena
   );
 }
 
+/* NEW-1 (site-record panel V1, owner-approved 2026-10-19) — the badge in the record's top row: a
+ * small filled diamond and the deal-type word, in the brand green (the list rows keep TypeChip). */
+function RecordBadge({ type }) {
+  return (
+    <span data-testid="comp-record-badge" style={{
+      display: "inline-flex", alignItems: "center", gap: 6, fontSize: FONT_SIZE.control, fontWeight: 700,
+      textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--accent-site-text)",
+    }}>
+      <span aria-hidden="true" style={{ width: 8, height: 8, background: "var(--accent-site)", transform: "rotate(45deg)" }} />
+      {compBadgeLabel(type)}
+    </span>
+  );
+}
+
 // A comp pinned on a site plan links back to its source brochure — provenance, not just a
 // number (NEW-1/B848848: "a lease comp whose brochure is one click away is worth
 // considerably more than one with a number and no provenance"). `overlay` may be null (the
@@ -289,31 +306,15 @@ function TrashRow({ comp, overlaysById, onRestore, onPurge, compsRatePeriod, ena
 // hiding it too would destroy information a person might specifically want (see the plan's messy
 // old flyer image, but keep seeing where the comps are). What "with no context" would actually
 // mean is fixed here instead: `overlaysById` is keyed from the FULL overlay list (not the
-// zoom/visibility-filtered one MapFinder draws), so this link — and the note below when the
-// plan itself is hidden — is always available, at any zoom, whether or not the plan is showing.
-function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
-  if (comp.anchor?.kind !== "site_plan" || !comp.anchor.sitePlanOverlayId) return null;
-  const overlay = overlaysById && overlaysById[comp.anchor.sitePlanOverlayId];
-  if (!overlay || !onOpenBrochure) return null;
-  return (
-    <div style={{ marginTop: 10 }}>
-      <button
-        onClick={() => onOpenBrochure(overlay)}
-        style={{ border: "none", background: "none", color: "var(--accent)", fontSize: 12, cursor: "pointer", padding: 0, textAlign: "left" }}
-      >
-        Open source brochure{overlay.docTitle ? ` — ${overlay.docTitle}` : ""} (p.{overlay.page}) ↗
-      </button>
-      {!overlay.visible && (
-        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 3 }}>
-          This plan is currently hidden on the map.
-        </div>
-      )}
-    </div>
-  );
+// zoom/visibility-filtered one MapFinder draws), so the Source row below is always available, at
+// any zoom, whether or not the plan is showing.
+// NEW-1 (V1) — it is now the SOURCE row of the Parties section ("flyer name · date"), clickable.
+function sourceOverlayOf(comp, overlaysById) {
+  if (comp?.anchor?.kind !== "site_plan" || !comp.anchor.sitePlanOverlayId) return null;
+  return (overlaysById && overlaysById[comp.anchor.sitePlanOverlayId]) || null;
 }
 
 export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice, projects, trackedSites, compsRatePeriod }) {
-  const rows = compFieldRows(comp, compsRatePeriod);
   // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
   // is, despite that being real, already-resolved information (an address, an APN, a plan name).
   const locationText = useCompLocationText(comp.anchor, overlaysById);
@@ -327,76 +328,80 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
   // another one) never carries an armed confirm forward.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   useEffect(() => { setConfirmingDelete(false); }, [comp.id]);
-  // NEW-4 (owner chat, 2026-09-08) — Edit/Delete move off the body and into a three-dot menu on
-  // the header row with the comp name, via the app's own AnchoredMenu (opaque by default since
-  // B1263075). Delete keeps the exact confirmation it already had — `confirmingDelete` still
-  // gates a plain inline "Delete this comp? Confirm/Cancel" row, just triggered from the menu now.
+  // NEW-4 (owner chat, 2026-09-08) — Edit/Delete live in a three-dot menu on the title block, via the
+  // app's own AnchoredMenu. Delete keeps the exact confirmation it already had — `confirmingDelete`
+  // still gates a plain inline "Delete this comp? Confirm/Cancel" row, just triggered from the menu.
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAnchorRef = useRef(null);
+
+  const overlay = sourceOverlayOf(comp, overlaysById);
+  const source = overlay ? `${overlay.docTitle || "Site plan"}${overlay.docDate ? ` · ${overlay.docDate}` : ""}` : null;
+  const sections = compRecordSections(comp, compsRatePeriod, { source });
+  // The record's name IS its site: the comp's title, else where it is (what the list row does too).
+  const name = comp.title || locationText || compHeadline(comp, compsRatePeriod);
+  const subLine = comp.title ? locationText : null;
+
   return (
-    <div style={{ padding: "10px 14px 14px" }}>
-      {/* Two distinct things, spaced as such (NEW-4) — a real flex gap, with wrap so a long
-          badge like "BUILDING SALE" never collides with the back link at the panel's narrow
-          width instead of overlapping it. */}
+    <div style={{ padding: "10px 14px 0" }} data-testid="comp-record">
+      {/* Top row — the way back, and the deal-type badge. */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-        <button onClick={onBack} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}>&larr; All comps</button>
-        <TypeChip type={comp.compType} />
+        <RecordLink onClick={onBack} testId="comp-record-back">&larr; All comps</RecordLink>
+        <RecordBadge type={comp.compType} />
       </div>
-      {(comp.title || canEdit) && (
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginTop: 6 }}>
-          {comp.title ? <div style={{ fontSize: 15, fontWeight: 700, minWidth: 0 }}>{comp.title}</div> : <span />}
-          {canEdit && (
-            <div style={{ position: "relative", flex: "none" }}>
-              <button ref={menuAnchorRef} onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" title="More actions" style={{
-                border: "none", background: "none", padding: "2px 3px", cursor: "pointer", color: "var(--text-secondary)",
-                borderRadius: 6, display: "grid", placeItems: "center", lineHeight: 0,
-              }}>
-                <KebabIcon />
-              </button>
-              <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuAnchorRef} placement="below-right" width={150}>
-                <MenuItem onClick={() => { setMenuOpen(false); onEdit(comp); }}>Edit</MenuItem>
-                <MenuItem onClick={() => { setMenuOpen(false); setConfirmingDelete(true); }} style={{ color: "var(--danger-text)" }}>Delete</MenuItem>
-              </AnchoredMenu>
-            </div>
-          )}
+      {/* Title block — name, the location under it, the menu on the right; capped by a 2px dark rule. */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, paddingBottom: 10, borderBottom: "2px solid var(--text-primary)" }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div data-testid="comp-record-name" style={{ ...RECORD_BODY, fontWeight: 600, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{name}</div>
+          {subLine && <div data-testid="comp-record-location" style={{ ...RECORD_BODY, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{subLine}</div>}
         </div>
-      )}
+        {canEdit && (
+          <div style={{ position: "relative", flex: "none" }}>
+            <button ref={menuAnchorRef} onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" title="More actions" style={{
+              width: 32, height: 32, boxSizing: "border-box", border: "1px solid var(--border-strong)", background: "none", padding: 0, cursor: "pointer",
+              color: "var(--text-primary)", borderRadius: RADIUS.sm, display: "grid", placeItems: "center", lineHeight: 0,
+            }}>
+              <KebabIcon />
+            </button>
+            <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuAnchorRef} placement="below-right" width={150}>
+              <MenuItem onClick={() => { setMenuOpen(false); onEdit(comp); }}>Edit</MenuItem>
+              <MenuItem onClick={() => { setMenuOpen(false); setConfirmingDelete(true); }} style={{ color: "var(--danger-text)" }}>Delete</MenuItem>
+            </AnchoredMenu>
+          </div>
+        )}
+      </div>
       {/* B1165441 (NEW-2/NEW-3) — "attach and say so": a save that just auto-matched this comp to
           an EXISTING site (never a brand-new one — that's obviously new) surfaces which site and
-          how, so a wrong guess is something the owner can see and fix via the Site field below
-          rather than a silent duplicate he never notices. */}
+          how, so a wrong guess is something the owner can see and fix via Edit rather than a
+          silent duplicate he never notices. */}
       {assignNotice && (
-        <div role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "6px 9px", fontSize: 11.5, lineHeight: 1.4, color: "var(--info-text)", background: "var(--info-bg)", borderRadius: 8 }}>
+        <div role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "6px 9px", fontSize: FONT_SIZE.control, lineHeight: 1.4, color: "var(--info-text)", background: "var(--info-bg)", borderRadius: RADIUS.md }}>
           <span style={{ flex: 1 }}>{assignNotice}</span>
           <button onClick={onDismissAssignNotice} aria-label="Dismiss" title="Dismiss"
-            style={{ flex: "none", cursor: "pointer", background: "transparent", color: "inherit", border: "none", fontSize: 12, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
+            style={{ flex: "none", cursor: "pointer", background: "transparent", color: "inherit", border: "none", fontSize: FONT_SIZE.control, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
         </div>
       )}
       {/* NEW-1 (adversarial review) — the comp is still linked to its site; the site is just in
           the bin, restorable for DELETED_RETENTION_DAYS more days. */}
       {binStatus?.deleted && (
-        <div role="status" style={{ marginTop: 8, padding: "6px 9px", fontSize: 12, lineHeight: 1.4, color: "var(--warn-text)", background: "var(--warn-bg)", borderRadius: 8 }}>
+        <div role="status" style={{ marginTop: 8, padding: "6px 9px", fontSize: FONT_SIZE.control, lineHeight: 1.4, color: "var(--warn-text)", background: "var(--warn-bg)", borderRadius: RADIUS.md }}>
           Its site, “{binStatus.name}”, is in Recently deleted — restore it from the project switcher within {DELETED_RETENTION_DAYS} days to keep this link.
         </div>
       )}
-      {/* NEW-12 (B1123424) — `tight` rows: the label sits at its own width, never wrapped, with
-          the value close beside it, rather than the default label-left/value-right row that
-          stretches a short pair ("Term" / "126 mo") to opposite ends of the panel. */}
-      <div style={{ marginTop: 10 }}>
-        {locationText && <Field label="Location" tight><span style={{ fontSize: 12.5 }}>{locationText}</span></Field>}
-        {rows.map((r) => (
-          <Field key={r.key} label={r.label} tight><span style={{ fontSize: 12.5 }}>{r.value}</span></Field>
-        ))}
-      </div>
-      <SourceBrochureLink comp={comp} overlaysById={overlaysById} onOpenBrochure={onOpenBrochure} />
+      {/* Deal / Building / Parties — a field with no value has no row, a section with no rows no header. */}
+      {sections.map((sec) => (
+        <RecordSection key={sec.id} id={sec.id} title={sec.title} rows={sec.rows}
+          renderValue={(r) => (r.key === "source" && overlay && onOpenBrochure
+            ? <RecordLink onClick={() => onOpenBrochure(overlay)} title={`Open the source brochure (p.${overlay.page})`}>{r.value}</RecordLink>
+            : r.value)} />
+      ))}
       {canEdit && confirmingDelete && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "var(--danger-text)" }}>Delete this comp?</span>
+          <span style={{ ...RECORD_BODY, color: "var(--danger-text)" }}>Delete this comp?</span>
           <Button size="sm" variant="danger" onClick={() => onDelete(comp)}>Confirm</Button>
           <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>Cancel</Button>
         </div>
       )}
-      {!canEdit && <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 10 }}>Entered by a teammate — only they can edit or remove this comp.</div>}
+      {!canEdit && <div style={{ ...RECORD_BODY, color: "var(--text-secondary)", marginTop: 10 }}>Entered by a teammate — only they can edit or remove this comp.</div>}
     </div>
   );
 }
@@ -688,7 +693,7 @@ export default function CompsPanel({
   // SitePlansSection's own header). `repinCompAnchorRef` is how MapFinder hands back a finished
   // "Pin this on the plan" click — see doRepin below. `startUploadRef` triggers the upload flow
   // for the "+ Site plan" button (no comp open yet).
-  onDetailCompChange, repinCompAnchorRef, startUploadRef,
+  onDetailCompChange, onViewChange, docsSlotRef, repinCompAnchorRef, startUploadRef,
   // NEW-1 — a Set of the comp ids the Records filter currently shows, or null when nothing narrows the list.
   // View-only: `onCompsChange` still carries every comp to every other reader.
   onVisibleCompsChange,
@@ -857,6 +862,9 @@ export default function CompsPanel({
     else if (view === "form" && draftId) onDetailCompChange({ id: draftId, projectId: draftProjectId ?? null });
     else onDetailCompChange(null);
   }, [onDetailCompChange, view, activeCompId, activeCompProjectId, draftId, draftProjectId]);
+  // NEW-1 (site-record panel V1) — which of this panel's views is showing ("list" | "detail" | "form" |
+  // "grid" | "drafts"), so the rail can list binned site plans on the comps LIST and nowhere else.
+  useEffect(() => { onViewChange?.(view); }, [onViewChange, view]);
 
   // B849233/NEW-2 — pending import drafts, fetched the same way (RLS already scopes to owner).
   const reloadDrafts = async () => {
@@ -1033,7 +1041,7 @@ export default function CompsPanel({
     setView("detail");
     setDraft(null);
     setAssignNotice(matched
-      ? (matched.failed ? matched.message : `Attached to “${matched.name}” (matched by ${matched.by === "location" ? "location" : "name"}) — reassign it below if that's wrong.`)
+      ? (matched.failed ? matched.message : `Attached to “${matched.name}” (matched by ${matched.by === "location" ? "location" : "name"}) — reassign it in Edit if that's wrong.`)
       : null);
   };
 
@@ -1327,6 +1335,11 @@ export default function CompsPanel({
             projects={projects} trackedSites={trackedSites} compsRatePeriod={compsRatePeriod}
           />
         )}
+        {/* NEW-1 (site-record panel V1) — where SitePlansSection's Documents section lands: INSIDE this
+            scroller, right under the record's own sections, so the whole record is one panel that
+            scrolls together (it used to sit outside it, below the scroll area, and clip Building and
+            Parties on a short window). `docsSlotRef` is a callback ref MapFinder turns into state. */}
+        {!loading && (view === "detail" || view === "form") && <div ref={docsSlotRef} data-testid="comp-record-docs-slot" />}
 
         {!loading && view === "form" && draft && (
           <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} trackedSites={trackedSites} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />

@@ -15,16 +15,22 @@
  *   • cards     — one per building: FFE (auto or typed), the basis in plain words, the earthwork line, the
  *                 setback flag; the focused one also carries the fixes and the level-ground alternative.
  *   • labels    — spot elevations / fall arrows on the courts and lots and the four pad-corner pills.
- *   • cutfill   — the Cut & Fill picture: the SLOPES only (never the pad, courts, rows, lots or walks).
+ *   • cutfill   — the Cut & Fill picture: the SLOPES only (never the pad, courts, rows, lots or walks); round 4 adds the
+ *                 grading limit's own dashed line and the ONE daylight ring around it.
+ *   • limit     — round 4 (B2349120): the graded area's mode, source (auto / edited), acreage, and which elements an
+ *                 edited limit grew to include. The surface (SitePlanner's gradeSurface) carries the limit itself.
+ *   • contours  — round 4 (B2349122): the proposed contours, traced in the terrain worker off the surface's own lattice.
  *   • buildable — the Level-pad limit: a dashed outline, an inside-edge hatch and one label.
  * The surface itself is NOT built here: it is SitePlanner's `gradeSurface` (the B826 engine with the
  * grading model on), passed in. Cards, picture and earthwork rows therefore cannot disagree. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildProposedSurfaceSteps } from "../lib/proposedSurface.js";
 import {
-  assemblyIds, assemblyEarthwork, describeFlag, withFfe, shiftAssembly, findFfeFix, findMoveFix, runChunked,
+  assemblyIds, cardEarthwork, scopeIds, describeFlag, withFfe, shiftAssembly, findFfeFix, findMoveFix, runChunked,
   spotElevationsFor, courtDropReadout, padCornerSpots, padCorners, ringSf,
 } from "../lib/buildingGrade.js";
+import { loadTerrain } from "../lib/terrainLazy.js";
+import { LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
 import {
   suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps,
   balanceClause, dockClause, rockClause, depthClause, floorClause, composeBasis,
@@ -32,6 +38,7 @@ import {
 import { feetToLatLngPair } from "../lib/mapLock.js";
 import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
+  ringsPathD, surfaceValuesLattice, contourLinesToFeet,
 } from "../lib/gradingPaint.js";
 
 const EMPTY = [];
@@ -45,6 +52,7 @@ const centreOf = (ring) => {
 const sumOut = (surface, ids) => {
   const o = surface && surface.grid && surface.grid.outside;
   if (!o) return 0;
+  if (surface.grid.limit) return o.count;   // ROUND 4: the slope belongs to the graded area, not to an element
   let n = 0;
   for (const id of ids) if (o.perEl && o.perEl[id]) n += o.perEl[id].count;
   return n;
@@ -187,7 +195,7 @@ export default function GradingController({ input, onModel }) {
     if (!range) return null;
     // Generator evaluators: every surface build of the search yields per lattice column (problem report 6cea9895).
     const surf = (f) => buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, id, f) });
-    function* evalNet(f) { const s = yield* surf(f); const t = s && assemblyEarthwork(s.grid, aIds); return t ? t.netCy : null; }
+    function* evalNet(f) { const s = yield* surf(f); const t = s && cardEarthwork(s.grid, aIds); return t ? t.netCy : null; }
     function* evalGrid(f) { const s = yield* surf(f); return s ? s.grid : null; }
     return runChunked(suggestFfe({ evalNet, evalGrid, range, ids: aIds, pondCy: pondShareOf(id), floorFt, rockAt: rockRef.current }), { isStale: stale });
   };
@@ -236,7 +244,7 @@ export default function GradingController({ input, onModel }) {
     const out = new Map();
     for (const b of buildings) {
       const aIds = assemblies.get(b.id);
-      const earthwork = grid ? assemblyEarthwork(grid, aIds) : null;
+      const earthwork = grid ? cardEarthwork(grid, aIds) : null;   // ROUND 4: the whole graded area under a limit
       const centre = centreOf(b.ring);
       const flag = gradeSurface && earthwork ? describeFlag(gradeSurface, aIds, { buildingCentre: centre, elements: els, slopeRatio: cfg.slopeRatio }) : null;
       out.set(b.id, { aIds, earthwork, centre, flag });
@@ -254,7 +262,7 @@ export default function GradingController({ input, onModel }) {
     const t = setTimeout(async () => {
       const gi = inRef.current.gsInputs;
       const aIds = assemblyIds(gi.els, focusId);
-      const r = await runChunked((function* () { yield; const s = yield* buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, focusId, altE) }); return s ? assemblyEarthwork(s.grid, aIds) : null; })(), { isStale: () => my !== altSeq.current });
+      const r = await runChunked((function* () { yield; const s = yield* buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, focusId, altE) }); return s ? cardEarthwork(s.grid, aIds) : null; })(), { isStale: () => my !== altSeq.current });
       if (my !== altSeq.current || !r || r.stale) return;
       setAlt({ id: focusId, E: altE, areaAc: best.areaAc, cutCy: r.cutCy, fillCy: r.fillCy, netCy: r.netCy });
     }, 300);
@@ -290,7 +298,7 @@ export default function GradingController({ input, onModel }) {
           { buildingCentre: centreOf(bPrepared.ring), offendCentroid: flag.centroid },
         ), { isStale: stale });
         if (stale() || (moveFix && moveFix.stale)) return;
-        setFixes({ id: focusId, status: "done", ffe: ffeFix || null, move: moveFix || null });
+        setFixes({ id: focusId, status: "done", ffe: ffeFix || null, move: moveFix || null, limit: flag.limit && flag.span ? { span: flag.span } : null });
       } catch (e) {
         if (!stale()) setFixes({ id: focusId, status: "failed", ffe: null, move: null, error: String((e && e.message) || e) });
       }
@@ -325,11 +333,12 @@ export default function GradingController({ input, onModel }) {
     const clauses = [];
     const e = F.earthwork;
     const info = isAuto ? (autoRef.current.get(b.id) || {}).info : null;
-    const cents = cutFillCentroids(grid, F.aIds);
+    const cents = cutFillCentroids(grid, scopeIds(grid, F.aIds));
+    const wholeArea = !!(grid && grid.limit);
     const sideOf = (c) => (c ? fourWay(c.x - F.centre.x, c.y - F.centre.y, 30) : null);
     const aliveInfo = info && Math.abs(info.ffe - ffe) < 0.05 ? info : null;
     if (isAuto && aliveInfo) {
-      clauses.push({ id: "balance", text: balanceClause({ e, cutSide: sideOf(cents.cut), fillSide: sideOf(cents.fill), pondCy: pondShareOf(b.id), pondWhole: pondTotal > 0 && buildings.length > 1 ? pondTotal : null, achieved: aliveInfo.achieved }) });
+      clauses.push({ id: "balance", text: balanceClause({ e, cutSide: sideOf(cents.cut), fillSide: sideOf(cents.fill), pondCy: pondShareOf(b.id), pondWhole: pondTotal > 0 && buildings.length > 1 ? pondTotal : null, achieved: aliveInfo.achieved, wholeArea }) });
       if (aliveInfo.floored) clauses.push({ id: "floor", text: floorClause(floorFt) });
       if (aliveInfo.rock) {
         const sd = aliveInfo.rock.at ? fourWay(aliveInfo.rock.at.x - F.centre.x, aliveInfo.rock.at.y - F.centre.y, 30) : null;
@@ -466,16 +475,48 @@ export default function GradingController({ input, onModel }) {
     if (!cfg.layers.cutfill || !grid || !grid.cells.length) return null;
     const set = new Set();
     for (const id of labelIds) { const F = facts.get(id); if (F) for (const x of F.aIds) set.add(x); }
-    const cells = selBuildingId ? grid.cells.filter((c) => set.has(c.elId)) : grid.cells;
+    // ROUND 4: under a grading limit the slopes belong to the graded area as a whole — always the whole picture
+    const cells = grid.limit ? grid.cells : selBuildingId ? grid.cells.filter((c) => set.has(c.elId)) : grid.cells;
     if (!cells.length) return null;
     const cp = cellsPixels(cells, slopeOnly);
     if (!cp) return null;
+    const dl = grid.limit && gradeSurface && Array.isArray(gradeSurface.daylight) && gradeSurface.daylight.length ? ringsPathD(gradeSurface.daylight.map((d) => d.ring)) : null;
     return {
       dataUrl: pixelsToDataUrl(cp.pixels, cp.nx, cp.ny),
       bboxFt: { x: cp.x0, y: cp.y0, w: cp.nx * cp.dx, h: cp.ny * cp.dy },
-      outlineD: cellsOutlinePath(cp),
+      outlineD: dl || cellsOutlinePath(cp),
+      // the limit itself: a thin dashed ink line (the line the slope is thrown from) — one path, every region, holes too
+      limitD: grid.limit ? ringsPathD(grid.limit.regions.flatMap((r) => [r.outer, ...r.holes])) : null,
     };
-  }, [cfg.layers.cutfill, grid, selBuildingId, facts, labelIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfg.layers.cutfill, grid, gradeSurface, selBuildingId, facts, labelIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------------- ROUND 4 (B2349122) — proposed contours, traced in the terrain worker off the surface lattice ---------------- */
+  // Never in a render: an effect ships the lattice (one value per cell) to the worker, superseded by a token; the previous
+  // contours stay published while a trace is in flight (the surface build itself already keeps its previous picture).
+  const [contoursRes, setContoursRes] = useState(null);
+  const cSeq = useRef(0);
+  const wantContours = cfg.layers.contours && !!grid && grid.cells.length > 0;
+  const contourKey = wantContours && gradeSurface ? gradeSurface.surfaceKey : "";
+  useEffect(() => {
+    if (!contourKey) { if (!wantContours) setContoursRes(null); return undefined; }
+    const my = ++cSeq.current;
+    const g = grid;
+    const t = setTimeout(async () => {
+      try {
+        const L = surfaceValuesLattice(g.cells);
+        if (!L) { if (my === cSeq.current) setContoursRes(null); return; }
+        const terrain = await loadTerrain();
+        // the existing Contour-lines rule: 1 ft, coarsening only when the range would drown the picture
+        const r = await terrain.runProposedContoursJob({ values: L.values, nx: L.nx, ny: L.ny, interval: L.interval });
+        if (my !== cSeq.current) return;
+        setContoursRes({ key: contourKey, interval: r.interval, ...contourLinesToFeet(r, L) });
+      } catch (e) {
+        if (my === cSeq.current) setContoursRes({ key: contourKey, error: String((e && e.message) || e), levels: [], labels: [] });
+      }
+    }, 80);
+    return () => { clearTimeout(t); };
+  }, [contourKey, wantContours]); // eslint-disable-line react-hooks/exhaustive-deps
+  const contours = useMemo(() => (cfg.layers.contours && contoursRes ? contoursRes : null), [cfg.layers.contours, contoursRes]);
 
   /* ---------------- actions ---------------- */
   const typeFfe = (id, v) => {
@@ -489,11 +530,19 @@ export default function GradingController({ input, onModel }) {
 
   /* ---------------- publish ---------------- */
   const buildingName = (id) => (input.buildingNames && input.buildingNames.get(id)) || "the building";
+  // ROUND 4 — the graded area line: the limit's mode, source, acreage and the elements an edited limit grew to include
+  const gl = grid && grid.limit ? grid.limit : null;
+  const limitInfo = useMemo(() => (gl ? {
+    mode: gl.mode, modeLabel: LIMIT_MODE_LABEL[gl.mode] || gl.mode, source: gl.source, areaAc: gl.areaAc, areaSf: gl.areaSf,
+    grew: (gl.grewIds || []).map((id) => (input.buildingNames && input.buildingNames.get(id)) || null).filter(Boolean),
+    grewIds: gl.grewIds || [], regions: gl.regions.length, plateaus: gl.plateaus || [], reachFt: gl.reachFt,
+    editing: !!input.limitEditing, highlight: input.limitHighlight || null, ring: gl.limitRegions && gl.limitRegions[0] ? gl.limitRegions[0].outer : null,
+  } : { mode: cfg.limitMode, modeLabel: LIMIT_MODE_LABEL[cfg.limitMode] || cfg.limitMode, source: cfg.limitRing ? "edited" : "auto", areaAc: null, grew: [], grewIds: [], regions: 0, plateaus: [], editing: !!input.limitEditing, highlight: input.limitHighlight || null, ring: null }), [gl, cfg.limitMode, cfg.limitRing, input.limitEditing, input.limitHighlight, namesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const model = useMemo(() => ({
     on: true, cfg, setback, groundBasis: input.groundBasis, demStatus: base.dem.status, demError: base.dem.error, retryDem: base.dem.retry,
     ground: { ...ground, retry: () => setGRetry((n) => n + 1) },
     bestFinish: best ? best.E : null,
-    autoFfe, buildable, cutfill, labels, cards, focusId,
+    autoFfe, buildable, cutfill, labels, cards, focusId, limit: limitInfo, contours, seams: gradeSurface && gradeSurface.grid ? gradeSurface.grid.seams || [] : [],
     rock: { status: rock.status, error: rock.error, retry: () => setRockRetry((n) => n + 1), count: rock.polys ? rock.polys.length : 0 },
     solving: solvingId,
     layerRows: [
@@ -503,11 +552,19 @@ export default function GradingController({ input, onModel }) {
           : "where a single level pad can sit without walls",
         info: `The line around the part of the parcel that can be ONE level pad with no retaining walls: inside the setback, no more than ${cfg.maxCutFillFt} ft of cut or fill, and the ${cfg.slopeRatio}:1 slope off the pad daylights before the setback line. Follows the selected building's finish elevation; with none selected, the best finish.` },
       { id: "cutfill", label: "Cut & Fill", on: cfg.layers.cutfill,
-        sub: selBuildingId ? `${buildingName(selBuildingId)}'s slopes` : "all buildings' slopes",
-        info: "The slopes outside the pavement edge: the grading run from the pavement to existing ground. Rust is cut, blue is fill, stronger colour is deeper. The dotted line is where the slopes meet existing ground; red is slope outside the setback. The pad, courts, parking and walks are not tinted." },
+        sub: gl ? `the slopes outside the grading limit (${limitInfo.modeLabel.toLowerCase()})` : selBuildingId ? `${buildingName(selBuildingId)}'s slopes` : "all buildings' slopes",
+        info: "The slopes outside the grading limit: the grading run from the limit to existing ground, around the whole graded area as one ring. Rust is cut, blue is fill, stronger colour is deeper. The thin dashed line is the limit the slope is thrown from; the dotted line is where the slopes meet existing ground; red is slope outside the setback. Nothing inside the limit is tinted." },
+      // ROUND 4 (B2349122) — the proposed contours, off the stitched surface
+      { id: "contours", label: "Proposed contours", on: cfg.layers.contours,
+        sub: contours ? (contours.error ? "couldn't trace the surface" : `${contours.interval} ft, index every ${contours.interval * 5} ft`) : "traced off the proposed surface",
+        info: "Contours of the PROPOSED surface — the pad, the pavement, the open ground inside the limit and the slopes to daylight — at the existing Contour-lines interval, bold in the contour brown with index lines labelled, clipped to the daylight line. Outside it the existing contours continue unchanged." },
     ],
-    actions: { typeFfe, resetFfe, applyMoveFix },
-  }), [cfg, setback, input.groundBasis, base.dem, ground, best, autoFfe, buildable, cutfill, labels, cards, focusId, rock, solvingId, maskE, maskSource, selBuildingId, namesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    actions: { typeFfe, resetFfe, applyMoveFix,
+      setLimitMode: (m) => inRef.current.actions.setLimitMode && inRef.current.actions.setLimitMode(m),
+      editLimit: (span) => inRef.current.actions.editLimit && inRef.current.actions.editLimit(span || null),
+      doneEditLimit: () => inRef.current.actions.doneEditLimit && inRef.current.actions.doneEditLimit(),
+      resetLimit: () => inRef.current.actions.resetLimit && inRef.current.actions.resetLimit() },
+  }), [cfg, setback, input.groundBasis, base.dem, ground, best, autoFfe, buildable, cutfill, labels, cards, focusId, rock, solvingId, maskE, maskSource, selBuildingId, namesKey, limitInfo, contours, gl, gradeSurface]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { onModel(model); }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onModel(null), []); // eslint-disable-line react-hooks/exhaustive-deps

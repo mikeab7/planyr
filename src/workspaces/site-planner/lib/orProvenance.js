@@ -1,0 +1,40 @@
+/* NEW-1 (B2347696) — verification record for the Oregon county parcel sources (build-time documentation, see countiesProvenance.js). */
+const V = "2026-10-19";
+const M = "MEASURED 2026-10-19: polygon layer; point queries at 5 spread interior points and up to 4 points just inside the county line each returned the lot with its parcel id (hit counts are in docs/STATEWIDE-PARCELS.md). ";
+const R = (publisher, publisherName, note, how) => ({
+  publisher, publisherName, verifiedOn: V,
+  verifiedNote: (how === "relay" ? "Queried through the /gis-proxy relay (the sandbox cannot reach the host; CORS unread). " : "Queried directly (host is *.arcgis.com). ") + M + note + " B2347696",
+});
+export const OREGON_VERIFICATION = {
+  or_baker: R("own", "Baker County Assessor (ArcGIS Online org Assessor_BakerCo, 'Baker County Oregon Taxlot Shapefile')", "Map-taxlot id + acreage; no owner column. 16,722 lots; edited 2026-06.", "agol"),
+  or_benton: R("own", "Benton County (gis.co.benton.or.us Public/TaxlotOwners)", "Map-taxlot id, owner (Party_Name), situs; 107,939 rows (one per account). The county's own taxlot viewer reads this service.", "relay"),
+  or_clatsop: R("own", "Clatsop County staff (ArcGIS Online, 'Taxlots March 2022' taxlot_accounts)", "Map-taxlot id, owner (OWNER_LINE), situs; edited 2024-02. The county's own server (delta.co.clatsop.or.us) publishes no queryable taxlot layer.", "agol"),
+  or_columbia: R("own", "Columbia County (gis.columbiacountymaps.com TaxlotWb)", "Map-tax id, owner, primary situs; 28,843 lots. The county's Assessor folder is token-gated; this public TaxlotWb service is the one its web maps use.", "relay"),
+  or_coos: R("own", "Coos County assessor roll as republished by University of Oregon (ArcGIS Online 'Coos County Parcels_March2024')", "Tax-lot id (TLID), owner (OWNER1), situs; edited 2025-04. The county's own org copy (CoosCounty) is the May 2019 comp-finder, older, so not used.", "agol"),
+  or_crook: R("own", "Crook County (gis.crookcountyor.gov taxlots_helion_view)", "Map-taxlot id, owner, situs, acreage; 17,596 lots. County-line points near unmapped federal land returned no lot (2 of 4).", "relay"),
+  or_curry: R("third-party", "Oregon Water Resources Department public tax-lot query (gis.wrd.state.or.us Tax_Lots_Public_Query_WGS84 layer 2, scoped county_name='Curry')", "Map-taxlot id + acreage; the state layer carries owner mailing text only (no owner-of-record name). Curry County's own RLID server publishes no queryable taxlot layer. 20,748 lots.", "relay"),
+  or_deschutes: R("own", "Deschutes County (ArcGIS Online org DeschutesCo, 'Taxlots')", "Taxlot id only (the public layer holds no owner or situs; the DIAL link is the roll); 109,504 lots; edited 2026-10.", "agol"),
+  or_douglas: R("own", "Douglas County (gis.co.douglas.or.us Parcel/Parcels)", "Tax id, owner (NAME), situs, acreage; 68,858 parcels.", "relay"),
+  or_gilliam: R("own", "Gilliam County (ArcGIS Online org of the shared eastern-Oregon county GIS org (the org that publishes Harney County's layers), 'Gilliam01_TL' layer 6 'Tax Lot Own')", "Map-taxlot id, owner (OWNERSHIP), situs; 3,171 lots; edited 2026-08.", "agol"),
+  or_grant: R("own", "Grant County (same shared org, 'Grant01' Grant County Tax Lots)", "Map-taxlot id + acreage only; no owner column; edited 2023-03.", "agol"),
+  or_harney: R("own", "Harney County (ArcGIS Online org harneycounty, '02_arcgis_online_Address_and_Tax_Lots' layer 1)", "Map-taxlot id, owner, situs; 10,974 lots; edited 2026-10.", "agol"),
+  or_hoodriver: R("own", "Hood River County (ArcGIS Online, 'Tax Lot Parcels Public')", "Map-taxlot id, owner, situs, acreage; 11,890 lots; edited 2026-10.", "agol"),
+  or_jackson: R("own", "Jackson County (jcportal.jacksoncountyor.gov Property/Taxlots2)", "Map-taxlot id, owner (FEEOWNER), site address, acreage; 103,578 lots; the county refreshes it weekly. The older Soil & Water District copy on ArcGIS Online (2021) was not used.", "relay"),
+  or_jefferson: R("third-party", "Oregon Water Resources Department public tax-lot query (scoped county_name='Jefferson')", "Map-taxlot id + acreage; no owner-of-record name. 13,636 lots. Jefferson County's own map host (maps.co.jefferson.or.us) timed out (HTTP 522) on 2026-10-19.", "relay"),
+  or_josephine: R("own", "Josephine County (ArcGIS Online, 'JoCo_Taxlots' layer 63, January 2026 roll)", "Map number, owner (NAME), situs, legal acreage; 42,029 lots.", "agol"),
+  or_klamath: R("own", "Klamath County GIS (ArcGIS Online org KCGIS, 'KC_Taxlots' layer 1)", "Map-taxlot id, owner, situs, acreage; 61,227 lots; edited 2026-09.", "agol"),
+  or_lake: R("third-party", "Lake County taxlots as hosted by Klamath County GIS (ArcGIS Online 'LakeCoTaxlots')", "Map-taxlot id, owner (OwnerLine1), mailing address; last edited 2021-07, so it ages \u2014 flagged for the owner; no fresher public Lake layer was found (the state WRD layer carries Lake with no owner name).", "agol"),
+  or_lane: R("own", "Lane County (lcmaps.lanecounty.org AT/AddressParcelSales layer 2 'Parcels')", "Map-taxlot id, owner (OWNNAME), acreage; 159,145 parcels.", "relay"),
+  or_lincoln: R("third-party", "Oregon Water Resources Department public tax-lot query (scoped county_name='Lincoln')", "Map-taxlot id + acreage; no owner-of-record name; 48,794 lots, updated 2026-06. Lincoln County's own maps host has no public REST directory.", "relay"),
+  or_linn: R("own", "Linn County (gis.co.linn.or.us AssessmentTax/pub_taxlots_web)", "PIN + acreage; the public layer carries no owner; 54,598 lots; edited 2026-10.", "relay"),
+  or_malheur: R("own", "Malheur County (ArcGIS Online, shared eastern-Oregon county GIS org (the org that publishes Harney County's layers), 'Malheur01TL')", "Map-taxlot id, owner, address; 22,444 lots; last edited 2024-07.", "agol"),
+  or_marion: R("own", "Marion County (ArcGIS Online org Marion_County, 'Parcels')", "Taxlot id, owner (OWNERNAME), situs, acreage; 115,870 parcels; edited 2026-10.", "agol"),
+  or_morrow: R("own", "Morrow County (ArcGIS Online, '2026_10_16_Assessment_Taxlot_Merge')", "Map-taxlot id, owner (OWNER1), situs, acreage; 10,257 lots; edited the day it was published.", "agol"),
+  or_tillamook: R("own", "Tillamook County (ArcGIS Online org, 'Taxlots')", "Map-taxlot id + acreage; the layer holds owner mailing address but no owner name; 31,358 lots; edited 2026-10.", "agol"),
+  or_umatilla: R("own", "Umatilla County tax lots as published by the City of Pendleton (ArcGIS Online 'Tax Lot Map')", "Map-tax id, owner (MAILING_NAME), acreage; 44,595 lots; edited 2026-06. Publisher is the city, not the county \u2014 flagged for the owner.", "agol"),
+  or_union: R("third-party", "Union County tax maps (ArcGIS Online, shared eastern-Oregon county GIS org (the org that publishes Harney County's layers), 'Union01TaxMaps')", "Map-taxlot id + acreage; no owner column; last edited 2022-09 \u2014 flagged for the owner. TRAP avoided: the county's 'Union County Parcel Viewer' app on ArcGIS Online is Union County, NEW MEXICO.", "agol"),
+  or_wasco: R("own", "Wasco County (public.co.wasco.or.us gisserver Taxlots)", "Map-taxlot id, owner (Taxpayer), acreage; 15,516 lots. Points on federal/tribal land return no lot (4 of 9 test points hit), the layer being the taxed roll.", "relay"),
+  or_washington: R("own", "Washington County (gispub.co.washington.or.us Washington_County_Taxlots)", "Taxlot id (TLNO) only; the public service carries no owner; 200,948 lots.", "relay"),
+  or_wheeler: R("own", "Wheeler County (ArcGIS Online, shared eastern-Oregon county GIS org (the org that publishes Harney County's layers), 'Wheeler01_TL')", "Map-taxlot id, owner, acreage; 2,675 lots; edited 2026-10.", "agol"),
+  or_yamhill: R("own", "Yamhill County Assessment & Taxation (ArcGIS Online, 'AT Taxlots' layer 1)", "Map-taxlot id, owner (owner1), situs, acreage; 51,339 lots; edited 2026-10.", "agol"),
+};

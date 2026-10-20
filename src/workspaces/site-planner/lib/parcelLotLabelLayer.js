@@ -70,7 +70,7 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
  * the collision pass and the draw run once all are prepared. The previous numbers stay up until the new ones are
  * drawn (no flash), and a newer relayout cancels an older job. Positions are converted with the zoom and pixel origin
  * the job STARTED with (`map.unproject`), so a pan while it runs cannot shift them. Returns { cancel }. */
-function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature }) {
+function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature, pane }) {
   const z = map.getZoom();
   if (!field || !(z >= floor)) { group.clearLayers(); return { cancel() {} }; }
   const min = map.getPixelBounds().min;
@@ -128,7 +128,7 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
           + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
           + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
       });
-      L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
+      L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500, ...(pane ? { pane } : null) }).addTo(group); // `pane`: the planner's Parcels-in-front label pane (else Leaflet's marker pane)
     }
   };
   const step = () => {
@@ -168,7 +168,7 @@ export function attachSnapshotLotNumbers(layer, { field, getFeatures, getObstacl
   return { relayout, clear: () => { if (job) job.cancel(); job = null; if (group) group.clearLayers(); }, field: () => field };
 }
 
-export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
+export function attachLotNumbers(layer, { hint, getObstacles, getInset, pane } = {}) {
   if (!layer || !hint) return { relayout() {}, field: () => null };
   const measure = bestMeasurer({ weight: 600 });
   let field = null;
@@ -220,7 +220,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
     if (!map || !group) return;
     const floor = Number(layer.options && layer.options.minZoom) || 0;
     job = paintLotNumbers({
-      map, group, field, floor, measure, getObstacles, getInset,
+      map, group, field, floor, measure, getObstacles, getInset, pane,
       forEachFeature: (cb) => layer.eachFeature((lyr) => cb(lyr.feature, lyr.bbox)),
     });
   };
