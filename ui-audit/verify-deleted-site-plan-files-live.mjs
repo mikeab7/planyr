@@ -44,8 +44,12 @@ try {
   const crumb = () => page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first();
   await crumb().click();
   await page.getByTestId("project-new").click();
-  await page.locator('[data-testid="planner-canvas"]:visible').waitFor({ timeout: 30000 });
+  // The fixture's canvas is already visible, so the canvas wait proves nothing: wait for the HASH to move to the NEW
+  // project, and refuse to go on if it never does. (Run 2 on 2026-10-20 read the id too early, renamed and then
+  // trashed the standing e2e-fixture group — repaired the same day. This guard is why it cannot happen again.)
+  await page.waitForFunction(() => { const m = location.hash.match(/project\/([^/]+)/); return !!m && !/^e2e-fixture/.test(m[1]); }, null, { timeout: 30000 });
   gid = await page.evaluate(() => (location.hash.match(/project\/([^/]+)/) || [])[1]);
+  if (!gid || /^e2e-fixture/.test(gid)) { const bad = gid; gid = null; throw new Error(`new project did not open (hash group "${bad}") — refusing to touch the fixture`); }
   await crumb().click(); await page.getByTestId(`project-row-${gid}`).hover(); await page.getByTestId(`project-kebab-${gid}`).click(); await page.getByTestId("project-rename").click();
   const input = page.getByRole("textbox", { name: /^Rename / }); await input.fill(PROJ); await input.press("Enter");
   let row = null; const t0 = Date.now();
@@ -87,7 +91,7 @@ try {
   await page.getByTestId("plan-crumb").click();
   const fileRow = page.getByTestId("deleted-site-plan-file").filter({ hasText: FILE });
   await fileRow.waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
-  record("3a the plan menu's \"Recently deleted\" lists the file as a site plan, p.3", (await fileRow.count()) === 1 && /site plan p\.3/.test(await fileRow.innerText().catch(() => "")), (await fileRow.innerText().catch(() => "")).replace(/\s+/g, " "));
+  record("3a the plan menu's \"Recently deleted\" lists the file, tagged \"site plan\" (tag stays visible, page 3 in the tooltip)", (await fileRow.count()) === 1 && /site plan/.test(await fileRow.innerText().catch(() => "")) && /page 3/.test((await fileRow.locator("span[title]").first().getAttribute("title").catch(() => "")) || ""), (await fileRow.innerText().catch(() => "")).replace(/\s+/g, " "));
   const bg = await fileRow.evaluate((el) => getComputedStyle(el).backgroundColor).catch(() => "");
   record("3b the row has no grey fill", /rgba\(0, 0, 0, 0\)|transparent/.test(bg), bg);
   await page.screenshot({ path: OUT + "deleted-site-plans-02-plan-menu.png" });
@@ -118,6 +122,7 @@ try {
   record("6b Delete forever removes the row for good", gone);
 } catch (e) {
   record("run aborted", false, String(e.message || e).slice(0, 300));
+  await page.screenshot({ path: OUT + "deleted-site-plans-abort.png" }).catch(() => {});
 } finally {
   try {
     const del = await page.evaluate(async ({ OID, RID, gid }) => {
@@ -125,7 +130,7 @@ try {
       out.overlay = (await c.from("site_plan_overlays").delete().eq("id", OID)).error?.message || null;
       out.review = (await c.from("doc_reviews").delete().eq("id", RID)).error?.message || null;
       if (gid) {
-        const rows = ((await c.from("sites").select("id,site").eq("group_id", gid)).data || []).filter((r) => /^zz-delfile-check-/.test(r.site));
+        const rows = ((await c.from("sites").select("id,site,group_id").eq("group_id", gid)).data || []).filter((r) => /^zz-delfile-check-/.test(r.site) && !/^e2e-fixture/.test(r.id) && !/^e2e-fixture/.test(r.group_id));
         if (rows.length) out.trashed = (await c.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", rows.map((r) => r.id))).error?.message || rows.length;
       }
       return out;

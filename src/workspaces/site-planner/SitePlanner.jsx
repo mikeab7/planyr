@@ -22068,7 +22068,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
                 return (
                   <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 2 }} data-testid="deleted-site-plan-file">
-                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.fileName || f.name}>{f.name} <span style={{ color: PAL.disabled }}>· site plan{f.page ? ` p.${f.page}` : ""}</span></span>
+                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${f.fileName || f.name}${f.page ? ` — page ${f.page}` : ""}`}>{f.name}</span>
+                    {/* The kind tag never shrinks: in the narrow menu the name truncates first, so a deleted FILE can never read as a deleted plan. */}
+                    <span style={{ flex: "none", fontSize: 11, color: PAL.disabled }}>site plan</span>
                     {f.deletedAt ? <span style={{ flex: "none", color: PAL.disabled, fontSize: 11 }}>{relTime(f.deletedAt)}</span> : null}
                     <button title="Restore this site plan" aria-label={`Restore site plan ${f.name}`} disabled={deletedPlansBusy === f.id} onClick={() => handleRestoreDeletedFile(f)}
                       style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
