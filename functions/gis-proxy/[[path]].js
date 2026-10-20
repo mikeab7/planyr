@@ -174,6 +174,18 @@ export const ALLOWED_HOSTS = new Set([
   "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
   "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
   "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
+  /* NEW-1 (Kentucky, 2026-10-19) — the Kentucky Division of Geographic Information publishes one PVA parcel service per county
+   * (WGS84WM_Services/Ky_PVA_<County>_Parcels_WGS84WM); LOJIC is Jefferson County's own server. The sandbox cannot reach either, so each is
+   * relayed and MEASURED through this relay before a county is wired to it. */
+  "kygisserver.ky.gov", // Kentucky DGI — county PVA parcel MapServers
+  "kygeonet.ky.gov", // Kentucky DGI — county PVA viewers (read to find a county's real service)
+  /* NEW-1 (Kentucky, 2026-10-19) — county hosts the Kentucky parcel sources sit on. The sandbox cannot reach any of them, so each is
+   * relayed and was MEASURED through this relay before a county was wired to it (docs/STATEWIDE-PARCELS.md "Kentucky counties"). */
+  "gis.lojic.org", // LOJIC — Jefferson County (Louisville) PVA parcels
+  "maps.linkgis.org", // LINK-GIS — Campbell / Kenton / Pendleton parcels
+  "arcserver.madisoncountyky.us", // Madison County KY GIS
+  "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
+  "webgis.bgky.org", // Warren County City-County Planning Commission (CCPC parcels)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

@@ -63,6 +63,7 @@ import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklah
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
 import { iaRaw, iaMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
+import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -828,8 +829,8 @@ const COUNTIES_RAW = {
   },
   ky_jefferson: {
     state: "KY", label: "Jefferson County, KY",
-    layerUrl: "https://gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1",
-    idField: "PARCELID", // unconfirmed — gis.lojic.org is blocked from this build environment.
+    layerUrl: "/gis-proxy/gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1", // NEW-1 (Kentucky): relayed; measured 2026-10-19
+    idField: "PARCELID",
     help: "Jefferson County (Louisville) PVA parcels (LOJIC open data). Search by parcel ID or a site address.",
   },
   ms_desoto: {
@@ -1006,6 +1007,7 @@ const COUNTIES_RAW = {
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
   ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
   ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
+  ...kyRaw(), // NEW-1 (Kentucky) — Kentucky (ky_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -3066,6 +3068,7 @@ const COUNTIES_MAP_RAW = {
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)
   ...iaMap(),
+  ...kyMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
