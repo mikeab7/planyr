@@ -249,9 +249,15 @@ function reportTileTiming(band, legs, error) {
   } catch (_) { /* telemetry must never throw into the fetch it measures */ }
 }
 
-const inflight = new Map(); // req.key -> Promise<artifact>
-function computeTile(req, { fetchImpl } = {}) {
-  const cur = inflight.get(req.key);
+const inflight = new Map(); // req.key (+ chosen contour interval) -> Promise<artifact>
+/* NEW-1 (Imagery & Layers) — `contourInterval` is the owner's 1/2/5/10 ft choice, handed to the worker as the
+ * FLOOR under its automatic pick. A tile traced at one interval is a different artifact from the same tile
+ * at another, so the in-flight table and the cache (below) are keyed on it; the default (1 ft) keeps the
+ * historic key byte for byte. */
+const tileJobKey = (key, ci) => (ci > 1 ? `${key}:ci${ci}` : key);
+function computeTile(req, { fetchImpl, contourInterval = 1 } = {}) {
+  const jobKey = tileJobKey(req.key, contourInterval);
+  const cur = inflight.get(jobKey);
   if (cur) return cur;
   const tStart = Date.now();
   const job = (async () => {
@@ -272,7 +278,7 @@ function computeTile(req, { fetchImpl } = {}) {
     const id = ++seq;
     const res = await new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      getWorker().postMessage({ id, req, buffer: buf }, [buf]);
+      getWorker().postMessage({ id, req, buffer: buf, opts: { contourInterval } }, [buf]);
     });
     rememberGrid(req.key, req, res.grid);
     reportTileTiming(req.band, {
@@ -281,9 +287,9 @@ function computeTile(req, { fetchImpl } = {}) {
     }, null);
     return { contours: res.contours, arrows: res.arrows };
   })();
-  const clean = () => { if (inflight.get(req.key) === job) inflight.delete(req.key); };
+  const clean = () => { if (inflight.get(jobKey) === job) inflight.delete(jobKey); };
   job.then(clean, clean);
-  inflight.set(req.key, job);
+  inflight.set(jobKey, job);
   return job;
 }
 
@@ -472,8 +478,13 @@ function coarseNote(cover) {
  * Contours are declared a LINE role, so on the planner they render in the band ABOVE the
  * site elements: the whole point of the owner's report — place a building, still see the
  * ground it sits on. Absent → Leaflet's default overlay/marker panes (the map finder). */
-function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = null, labelPane = null } = {}) {
+function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = null, labelPane = null, interval = null } = {}) {
   const group = L.layerGroup();
+  /* NEW-1 (Imagery & Layers) — `interval` is `{ get(), subscribe(cb) }`: the device's chosen contour interval. BOTH
+   * terrain layers take it (a tile is one worker job producing contours AND arrows, so sharing the key keeps
+   * "toggling both costs ONE fetch + one worker job"); only the contour render reads it. A change re-keys the
+   * tiles and repaints — the previous lines stay until the new ones diff in (no blank flash). */
+  let ci = interval ? interval.get() : 1, unsubInterval = null;
   let map = null, canvas = null, lastKey = null, opacity = cfg.opacity ?? 0.9;
   let busy = false, pendingMove = false, lastPainted = null;
   // NEW-1 — the hover readout's OWN sublayer. It is a child group so the transient label
@@ -568,7 +579,14 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     flushPaintRunner(); // settle any still-trickling batch before diffing against `painted`
     const { items, n } = render(parts, {
       map, opacity, canvas, labelPane,
-      onComposed: (c) => { composed = c; hoverIndex = null; },
+      onComposed: (c) => {
+        composed = c; hoverIndex = null;
+        // E2E-only, read-only (NEW-1, Imagery & Layers): what the contour layer last composed and at which interval — the instrument that
+        // lets a spec assert "a coarser Interval draws fewer lines" without counting canvas pixels. Inert in production.
+        if (typeof window !== "undefined" && window.__PLANYR_E2E && c && c.lines) {
+          window.__terrainStats = { interval: ci, lines: c.lines.length, index: c.lines.filter((l) => l.isIndex).length, labels: (c.labels || []).length };
+        }
+      },
     });
     const { add, remove } = diffKeyedPaint(items, painted);
     const ops = [];
@@ -619,12 +637,12 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     );
     // The key is the ground the view covers, not the view — pan inside one tile and
     // nothing recomputes; pan back across a boundary and the tiles are cache hits.
-    const key = cover.tiles.map((t) => t.key).join("|");
+    const key = cover.tiles.map((t) => t.key).join("|") + (ci > 1 ? `|ci${ci}` : "");
     if (key === lastKey && lastPainted) return;
     lastKey = key;
     const mySeq = ++paintSeq;
     const entries = cover.tiles.map((tile) => ({
-      tile, ...gisCache.swr(`terrain:${tile.key}`, () => computeTile(tile), { ttl: TERRAIN_TTL }),
+      tile, ...gisCache.swr(`terrain:${tileJobKey(tile.key, ci)}`, () => computeTile(tile, { contourInterval: ci }), { ttl: TERRAIN_TTL }),
     }));
     const coarse = cover.coarsened ? coarseNote(cover) : null;
     const cachedParts = entries.filter((e) => e.cached).map((e) => ({ tile: e.tile, data: e.cached.data }));
@@ -728,6 +746,14 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     canvas = L.canvas(pane ? { pane } : {});
     if (hover) { group.addLayer(hoverGroup); hoverGroups.add(group); }
     m.on("moveend", refresh);
+    if (interval) {
+      ci = interval.get();
+      unsubInterval = interval.subscribe((n) => {
+        if (n === ci) return;
+        ci = n; lastKey = null;
+        if (map) { if (busy) pendingMove = true; else refresh(); }
+      });
+    }
     refresh();
     return this;
   };
@@ -735,6 +761,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     paintSeq++; // invalidate every in-flight compute — nothing may paint into a removed group
     abandonPaintRunner(); // a torn-down layer must not keep chunking work into a detached group
     m.off("moveend", refresh);
+    if (unsubInterval) { unsubInterval(); unsubInterval = null; }
     hoverGroups.delete(group);
     hoverGroup.clearLayers(); hoverKey = null; composed = null; hoverIndex = null;
     painted.clear(); // this instance is done; a later onAdd starts a fresh paint from scratch

@@ -77,6 +77,8 @@ import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
+// NEW-1 (Imagery & Layers) — what the MAP draws: the saved overlays minus Hide Layers (session-only) minus rows that cannot serve where the map is looking.
+import { useDrawnOverlays } from "./lib/useDrawnOverlays.js";
 import { GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 // NEW-1 (B1892544, 2026-09-24) — the "Record info" dropdown's three row icons — see that item's
@@ -613,7 +615,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
   // (or a health dot flipping) never re-binds a Leaflet listener.
   const overlaysRef = useRef(overlays);
-  overlaysRef.current = overlays;
   const layerStatusRef = useRef(layerStatus);
   layerStatusRef.current = layerStatus;
   const [addr, setAddr] = useState("");
@@ -1226,6 +1227,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // Colorado-only account never flashes a Harris County panel before the first `moveend`.
   const [viewCounty, setViewCounty] = useState(() => { const c = landingView(sites).center; return countyForView(c[0], c[1]); });
   const [viewState, setViewState] = useState(null); // NEW-2 — the state the map centre is in (see the LayerPanel prop below)
+  /* NEW-1 (Imagery & Layers) — where the map is looking, rounded to ~3 miles so a pan only re-renders when it crosses a cell: the declared
+   * region scope (Houston-only sources) reads it. Null until the first move settles = unknown = every row shows (fail open). */
+  const [viewLoc, setViewLoc] = useState(null);
+  /* …and WHAT THE MAP DRAWS from the saved choice (Hide Layers + a layer left on where its source cannot serve are not drawn). The saved
+   * `overlays` stays what the checkboxes show; everything that paints or identifies reads `overlaysDrawn`. */
+  const overlaysDrawn = useDrawnOverlays(overlays, viewState, viewLoc);
+  overlaysRef.current = overlaysDrawn; // the once-bound raster hover handlers read the DRAWN set
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by name
   // LOCATIONS-MAP-CARD FIX — the Dashboard's "N projects' location(s) need fixing" line lands
@@ -1877,6 +1885,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // math). It has to hold when every GIS endpoint is down, which is exactly when a site
       // falls through to a default — the same reason coloradoRegions.js is network-free.
       setViewState(siteState({ lat: c.lat, lng: c.lng }));
+      setViewLoc((prev) => {
+        const lat = Math.round(c.lat * 20) / 20, lng = Math.round(c.lng * 20) / 20;
+        return prev && prev.lat === lat && prev.lng === lng ? prev : { lat, lng };
+      });
       // NEW-1 (the Texarkana/Chambers bug) — a parcel-source outage banner is a snapshot of
       // wherever the map WAS when the failing layer's request settled; nothing else ever
       // reconsiders it, so it can (and did, on the owner's own account) sit there naming a place
@@ -2198,7 +2210,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      rise above the drawing — but AREA still paints under LINE, so a floodplain fill can't
      bury the stream running through it. syncOverlayLayers creates the panes it is named. */
   useEffect(() => {
-    const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(mapRef.current, overlaysDrawn, overlayRefs.current, {
       /* NEW-1 — the map finder has NO site plan, so there is nothing for a layer to be "above":
          the lifted band collapses back onto the area band here. `overlays` is app-shared, so a
          layer the user lifted on the planner arrives with its flag set — pointing `areaFront` at
@@ -2226,7 +2238,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // periodic re-probe so stopped services self-heal when the City/County restart
     const iv = setInterval(sync, 45000);
     return () => clearInterval(iv);
-  }, [overlays, visible]); // eslint-disable-line
+  }, [overlaysDrawn, visible]); // eslint-disable-line
 
   /* NEW-1 (B2112576) — the SAME "layer hidden at this zoom" toast the project canvas shows, on the
      overview map (this is where a layer is first turned on). One shared rule + hook
@@ -2236,7 +2248,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   useLayerHiddenToast({
     enabled: !!(visible && isActive),
     zoom,
-    overlays, pushToast: pushHiddenToast, dismissByKey: dismissHiddenByKey,
+    overlays: overlaysDrawn, pushToast: pushHiddenToast, dismissByKey: dismissHiddenByKey,
     zoomTo: (target, label) => {
       const m = mapRef.current; if (!m) return;
       try { m.setZoom(label === "Zoom out" ? Math.floor(target + GATE_CLEARANCE) : Math.ceil(target - GATE_CLEARANCE)); } catch (_) {}
@@ -2306,6 +2318,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       return {
         surface: "map",
         on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
+        drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
         tracked,
         pending: tracked.filter((k) => overlayRefs.current[k] === "pending"),
         orphanCount: orphans.length,
@@ -2314,7 +2327,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     };
     window.__mapOverlayAudit = hook;
     return () => { if (window.__mapOverlayAudit === hook) window.__mapOverlayAudit = null; };
-  }, [overlays]);
+  }, [overlays, overlaysDrawn]);
 
   /* Hover identify for the RASTER-painted layers (NEW-2). The vector overlays answer a hover
      from their own features (a tooltip bound as they draw — see featureHover.js / vectorOverlay.js),
@@ -2332,7 +2345,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      nearby-range pref changes. Picker-only — never touches the map's requests. */
   useEffect(() => {
     let t;
-    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(mapRef.current), overlays, getNearbyRadiusMiles()));
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(mapRef.current), overlaysDrawn, getNearbyRadiusMiles()));
     const debounced = () => { clearTimeout(t); t = setTimeout(recompute, 250); };
     // Read each regional service's extent from its health probe (no extra request), then compute.
     prefetchExtents(ALL_LAYERS, probeService).then(recompute);
@@ -2341,7 +2354,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (map) map.on("moveend", debounced);
     const unsub = subscribeRelevance(recompute);
     return () => { clearTimeout(t); if (map) map.off("moveend", debounced); unsub(); };
-  }, [overlays]);
+  }, [overlaysDrawn]);
 
   /* keep the map sized correctly when shown after being hidden — both when the Site
      workspace flips map↔plan (`visible`) AND when the whole workspace returns from a
@@ -5262,7 +5275,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                point of it. */
             : { top: MAP_OVERLAY_TOP_PX, right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
-                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: MAP_OVERLAY_TOP_PX, bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  ? { width: "min(384px, calc(100vw - 20px))", maxHeight: panelMaxHeight({ topPx: MAP_OVERLAY_TOP_PX, bottomPx: 76 }), display: "flex", flexDirection: "column" }
                   : { width: "auto" }) }),
           ...(layersPanelOpen ? null : { minWidth: MAP_CORNER_CHIP_STYLE.minWidth }),
         }}>
@@ -5273,16 +5286,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               it all together." Same defect shape as the zoom control in B427408 — the phone path
               was built and the desktop path was left behind — and it is fixed the same way, by
               removing the branch rather than adding a second control. */}
-          {(
+          {/* NEW-1 (Imagery & Layers) — OPEN, the panel's own header row carries the ▾ + title (click collapses), the Hide Layers pill and the ⋯ menu
+              (LayerPanel's `onCollapse`); COLLAPSED, this chip is the one control that brings it back. */}
+          {!layersPanelOpen && (
             // B831776 (NEW-5) — sentence case, matching every neighbouring control in this
             // cluster (the switch, the rail tabs, the checkboxes below); this OPEN-state header
             // used to be the one holdout still in UPPERCASE + letterspacing, which is exactly
             // what read as "a section header" rather than "a sibling control."
-            <button onClick={toggleLayersPanel}
+            <button onClick={toggleLayersPanel} data-testid="finder-layers-expand"
               // NEW-1 (regression from B1310209) — while the docked Adjust panel is open this is
               // forced collapsed and refuses to reopen (see `sitePlanAdjustOpen` above); say why
               // rather than leaving a control that looks clickable and silently does nothing.
-              title={sitePlanAdjustOpen ? "Close Adjust to reopen Imagery & layers" : (layersPanelOpen ? "Collapse layers" : "Imagery & layers")}
+              title={sitePlanAdjustOpen ? "Close Adjust to reopen Imagery & Layers" : "Imagery & Layers"}
               style={layersPanelOpen ? {
                 display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
                 fontSize: 12, color: PAL.ink, fontWeight: 700, padding: "0 0 6px",
@@ -5297,7 +5312,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 ...(sitePlanAdjustOpen ? { opacity: 0.4, cursor: "default" } : null),
               }}>
               <span style={{ fontSize: 8, lineHeight: 1, transform: layersPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
-              <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; layers</span>
+              <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; Layers</span>
             </button>
           )}
           {/* B1064 tranche c — gated on `visible` too, not just `layersPanelOpen`: this component
@@ -5313,26 +5328,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               machine. The divider and the "LAYERS" heading went with it: LayerPanel renders its
               own group headers, and Base & terrain is the first of them, so the heading was
               labelling a list that already labels itself. */}
-          {/* B831778 (NEW-3) — THE LOAD-BEARING DECOUPLING, made VISIBLE: what's drawn is decided
-              HERE, by these two checkboxes, and nowhere else. Both default ON. Switching the
-              Site/Comp mode or the rail tab never touches either — see the map-layer effects'
-              own comments for the enforcement half. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 2px 8px", marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
-              <input type="checkbox" checked={showSitesLayer} onChange={(e) => toggleShowSitesLayer(e.target.checked)} data-testid="map-show-sites" />
-              <span>Sites{pursuitSites.length ? ` (${pursuitSites.length})` : ""}</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
-              <input type="checkbox" checked={showCompsLayer} onChange={(e) => toggleShowCompsLayer(e.target.checked)} data-testid="map-show-comps" />
-              <span>Comps{comps.length ? ` (${comps.length})` : ""}</span>
-            </label>
-            {/* B1372144 — map notes, the third drawn thing on this map, hidden and shown by exactly
-                the same rule as its two neighbours. */}
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
-              <input type="checkbox" checked={showNotesLayer} onChange={(e) => toggleShowNotesLayer(e.target.checked)} data-testid="map-show-notes" />
-              <span>Notes{mapNotes.length ? ` (${mapNotes.length})` : ""}</span>
-            </label>
-          </div>
+          {/* B831778 (NEW-3) — THE LOAD-BEARING DECOUPLING, now in the panel's Map Base › Your Data group (NEW-1, Imagery & Layers): what's drawn is
+              decided by these three checkboxes and nowhere else (Sites · Comps · Notes — all default ON). Switching the Site/Comp mode or the rail tab never
+              touches any of them — see the map-layer effects' own comments for the enforcement half. Hide Layers never touches them either. */}
           {/* NEW-3 — the list takes whatever height the card has left instead of a flat 260px
               (about four rows of a twenty-eight layer list). The card itself is bounded by
               panelMaxHeight above, so this can never run off the bottom of the map. */}
@@ -5363,6 +5361,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                  empty map. The view centre is the best state fact the finder has (there is no
                  site here), and an unresolved one hides nothing. */
               siteState={viewState}
+              siteLocation={viewLoc}
+              onCollapse={toggleLayersPanel}
+              /* NEW-1 (Imagery & Layers) — Sites · Comps · Notes moved INTO the panel (Map Base › Your Data) from the strip above the list.
+                 Same three state hooks and handlers, same test ids; Hide Layers never touches them. */
+              yourData={[
+                { id: "sites", label: "Sites", count: pursuitSites.length, value: showSitesLayer, onChange: toggleShowSitesLayer, testId: "map-show-sites" },
+                { id: "comps", label: "Comps", count: comps.length, value: showCompsLayer, onChange: toggleShowCompsLayer, testId: "map-show-comps" },
+                { id: "notes", label: "Notes", count: mapNotes.length, value: showNotesLayer, onChange: toggleShowNotesLayer, testId: "map-show-notes" },
+              ]}
               /* NEW-1 — the live zoom every row's gate is reported against, and the fix. On this
                  surface the map is the interactive one, so `setZoom` IS the whole action. */
               mapZoom={zoom}

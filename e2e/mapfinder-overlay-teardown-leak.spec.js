@@ -32,6 +32,7 @@
  *       MapFinder.jsx, gated by isDiagArmed/`window.__PLANYR_E2E`) reports zero orphaned layers.
  */
 import { test, expect } from "@playwright/test";
+import { openPlannerLayers, layerRow } from "./lib/layersPanel.js";
 
 // Katy / west Houston — the same real, FEMA-covered fixture point layer-point-hover-identify.spec.js uses.
 const LAT = 29.7858, LON = -95.8244;
@@ -97,34 +98,24 @@ async function openMapWithSeededSite(page) {
   await page.waitForTimeout(1200); // let the Leaflet map + initial layer probes settle
 }
 
-async function openFloodGroup(page) {
-  const groupHead = page.getByRole("button", { name: /(Show|Hide) Flood & drainage layers/ }).filter({ visible: true }).first();
-  await expect(groupHead).toBeVisible({ timeout: 10_000 });
-  if ((await groupHead.getAttribute("aria-expanded")) === "false") await groupHead.click();
-}
-
-/* The Map view's own Layers panel is titled "Imagery & layers" — a different control from the
- * planner's "Layers" button (both render the SAME shared LayerPanel component; only the
- * disclosure trigger's own label differs between the two surfaces). */
+/* The Map view's own Imagery & Layers card opens from its collapsed chip; the planner's from its own chip. Both render
+ * the SAME two-pane LayerPanel, so a row is found by id through whichever group holds it (e2e/lib/layersPanel.js). */
 async function toggleFemaOnMap(page) {
-  const btn = page.getByRole("button", { name: /Imagery.{0,3}layers/i }).filter({ visible: true }).first();
-  await expect(btn).toBeVisible({ timeout: 10_000 });
-  if ((await btn.getAttribute("title")) === "Collapse layers") { /* already open */ } else { await btn.click(); }
-  await openFloodGroup(page);
-  const cb = page.getByRole("checkbox", { name: "FEMA flood zones", exact: true }).filter({ visible: true }).first();
+  const chip = page.getByTestId("finder-layers-expand").filter({ visible: true });
+  if (await chip.count()) await chip.first().click();
+  const row = await layerRow(page, "fema", { surface: "finder" });
+  const cb = row.locator('input[type="checkbox"]').first();
   await expect(cb).toBeVisible({ timeout: 10_000 });
   await cb.click();
   return cb;
 }
 
-/* Read the planner's OWN FEMA checkbox, opening its Layers panel + the Flood group first. Used
- * only to CONFIRM the state, never to toggle it here — see the note at the call site below for
- * why opening a fresh project already turns FEMA off without any click of ours. */
+/* Read the planner's OWN FEMA checkbox, opening its Layers panel first. Used only to CONFIRM the state, never to toggle it
+ * here — see the note at the call site below for why opening a fresh project already turns FEMA off without any click. */
 async function readFemaCheckedOnPlanner(page) {
-  const btn = page.getByRole("button", { name: /^Layers/ }).filter({ visible: true }).first();
-  if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
-  await openFloodGroup(page);
-  const cb = page.getByRole("checkbox", { name: "FEMA flood zones", exact: true }).filter({ visible: true }).first();
+  await openPlannerLayers(page);
+  const row = await layerRow(page, "fema");
+  const cb = row.locator('input[type="checkbox"]').first();
   await expect(cb).toBeVisible({ timeout: 10_000 });
   return cb.isChecked();
 }
@@ -177,7 +168,7 @@ test.describe("B1933584 — a role-split layer (FEMA) turned off does not keep p
     expect(paintedOnMap, "FEMA never painted in the first place — the setup itself is broken").toBeGreaterThan(0);
 
     // The checkbox itself must read unchecked on the (now visible again) Map Layers panel.
-    const mapCb = page.getByRole("checkbox", { name: "FEMA flood zones", exact: true }).filter({ visible: true }).first();
+    const mapCb = (await layerRow(page, "fema", { surface: "finder" })).locator('input[type="checkbox"]').first();
     await expect(mapCb).not.toBeChecked();
 
     // PROOF (b) — the read-only diagnostic this item ships: no tracked-nothing orphan remains.

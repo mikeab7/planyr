@@ -372,7 +372,7 @@ export function contourLineKey(ln) {
   const c = ln && ln.coords;
   if (!c || c.length < 2) return null;
   const a = c[0], b = c[c.length - 1], m = c[c.length >> 1];
-  return `L|${ln.level}|${c.length}|${a[0]},${a[1]}|${m[0]},${m[1]}|${b[0]},${b[1]}`;
+  return `L|${ln.level}|${c.length}|${a[0]},${a[1]}|${m[0]},${m[1]}|${b[0]},${b[1]}${ln.isIndex ? "|i" : ""}`;
 }
 
 /* A label's identity: its ground anchor + level (both already round6'd by the worker).

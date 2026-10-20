@@ -35,17 +35,17 @@ export const FLOOD_TIERS = [
   },
   {
     key: "local",
-    label: "Local drainage authority",
+    label: "Drainage District",
     note: "The district that actually reviews drainage here — its channels, easements and basins. Only the governing district is listed.",
   },
   {
     key: "hydrography",
-    label: "Physical hydrography",
+    label: "Physical",
     note: "Where water physically runs. An inventory available everywhere — not a regulatory line.",
   },
   {
     key: "advisory",
-    label: "Advisory models",
+    label: "Advisory",
     note: "Study results, not adopted regulation. Never treat an advisory floodplain as an SFHA.",
   },
 ];
