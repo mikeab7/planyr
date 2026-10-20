@@ -111,6 +111,20 @@ export const ALLOWED_HOSTS = new Set([
   "gis.skagitcountywa.gov", // Skagit County Assessor
   "tconline.co.thurston.wa.us", // Thurston County
   "wcgis.whatcomcounty.us", // Whatcom County
+  /* NEW-1 (Oregon, 2026-10-19, B2347696) — the county / state hosts the wired Oregon counties sit on (found through the state's "Publicly Accessible
+   * Oregon County Parcel Data" page, each county viewer's web-map config and a REST-directory search). The build sandbox reaches none of them, so each was
+   * MEASURED through this relay on the PR preview before a county was wired to it. Hosts that were probed and NOT used (Polk's server answers a web-adaptor
+   * error, Jefferson's times out, ODF's TaxlotsDisplay has no Query) are deliberately not listed. */
+  "gis.co.benton.or.us", // Benton County
+  "gis.columbiacountymaps.com", // Columbia County
+  "gis.crookcountyor.gov", // Crook County
+  "gis.co.douglas.or.us", // Douglas County
+  "jcportal.jacksoncountyor.gov", // Jackson County
+  "lcmaps.lanecounty.org", // Lane County
+  "gis.co.linn.or.us", // Linn County
+  "gispub.co.washington.or.us", // Washington County
+  "public.co.wasco.or.us", // Wasco County
+  "gis.wrd.state.or.us", // Oregon Water Resources Department public tax-lot query (Curry, Jefferson, Lincoln)
   /* NEW-1 (Oklahoma, 2026-10-19) — county / regional hosts named by the Oklahoma parcel sweep; each is MEASURED through this relay before any county is wired to it. */
   "gis.okco14.org", "gis.clevelandcountyassessor.us", // Cleveland County assessor
   "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services
@@ -132,6 +146,15 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",
+  /* NEW-1 (Illinois, 2026-10-20) — the Illinois statewide / county / vendor hosts named by the ISGS statewide parcel service and the "Parcels - IL - <County>" ArcGIS Online
+   * index. The build sandbox reaches none of them; each is MEASURED through this relay (5+ interior points + points beside the county lines) before a county is wired to it. */
+  "maps.isgs.illinois.edu", "gis.prairie.illinois.edu", // Illinois State Geological Survey / Prairie Research Institute — statewide parcel database
+  "ags.bhamaps.com", // Bhamaps — hosts the PAT tax-map services of a dozen Illinois county assessors (Christian, Edgar, Ford, Iroquois, Jackson, Macoupin, Shelby, Vermilion, Williamson …)
+  "www.centralilmaps.com", "gis.wiu.edu", "k3gis.com", // Central Illinois maps (Logan, Woodford) / Western Illinois University (Hancock, McDonough) / Kankakee K3
+  "maps.boonecountyil.org", "www.co.coles.il.us", "maps.co.kendall.il.us", "gis.lasallecounty.org", "gis.leecountyil.com", "gis.leecountyil.gov", "www.mchenrycountygis.org",
+  "www.mcgisweb.org", "gis.peoriacounty.gov", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell.com", "maps.grundyco.org", "maps.lakecountyil.gov", "adamscountyarcserver.com",
+  "rockgis.rockfordil.gov", // City of Rockford (Winnebago County layer)
+  "gis.cookcountyil.gov", "gis12.cookcountyil.gov", "gis.dupageco.org", "gis.willcountyillinois.com", // the three counties wired by hand since 2026-09 (re-measured here)
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
