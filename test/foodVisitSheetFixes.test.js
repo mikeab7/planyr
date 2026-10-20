@@ -27,7 +27,7 @@ describe("NEW-1 — would I order it again (Yes / Maybe / No) on a dish in the v
     for (const v of ["yes", "maybe", "no"]) expect(dishes).toContain(`value: "${v}"`);
   });
   it("saved answers still display (dish list badge) and FoodApp writes the whole draft dish", () => {
-    expect(read("components/DishesSection.jsx")).toMatch(/data-testid="dish-order-again-badge"/);
+    expect(read("components/DishesSection.jsx")).toMatch(/data-dish-section=\{section\}/); // NEW-1 (2026-10-20): the answer places the dish in its section
     expect(read("FoodApp.jsx")).toMatch(/insertDish\(\{ \.\.\.d, visit_id: savedVisit\.id \}\)/);
   });
 });
@@ -37,11 +37,11 @@ describe("NEW-2 — no 'What was good' input; saved text is kept read-only", () 
     for (const f of readdirSync(join(FOOD, "components")).filter((n) => n.endsWith(".jsx"))) {
       const src = read(join("components", f));
       expect(src, f).not.toMatch(/visit-highlights-input/);
-      if (f === "VisitPanel.jsx") expect(src.slice(src.indexOf("function VisitForm("), src.indexOf("function Chip("))).not.toMatch(/What was good|what_was_good/);
+      if (f === "VisitPanel.jsx") expect(src.slice(src.indexOf("function VisitForm("), src.indexOf("/* The header"))).not.toMatch(/What was good|what_was_good/);
     }
   });
   it("the visit card still shows saved text and the list keeps its column", () => {
-    expect(read("components/VisitPanel.jsx")).toMatch(/Good \{visit\.what_was_good\}/);
+    expect(read("components/VisitPanel.jsx")).toMatch(/data-testid="visit-legacy-good"/); // read-only in the edit form (NEW-1, 2026-10-20)
     expect(read("components/VisitList.jsx")).toMatch(/v\.what_was_good/);
   });
 });

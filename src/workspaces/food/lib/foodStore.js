@@ -446,6 +446,30 @@ export async function deleteDish(id) {
   return { error };
 }
 
+/** ── Restaurant prefs: the PRICE LEVEL (NEW-1, 2026-10-20) ─────────────────────────────────────────
+ *  food_place_prefs (db/food_place_prefs.sql): one row per (user, place-or-manual-pin) carrying the owner's
+ *  OpenTable-style price level 1–4 (null = unset). Fetched in full like the wishlist; written with an upsert on
+ *  the restaurant's identity so the first tap creates the row and every later tap edits it in place. */
+export async function fetchAllPlacePrefs() {
+  if (!supabase) return { data: [], error: null };
+  const { data, error } = await supabase.from("food_place_prefs").select("*");
+  return { data: data || [], error };
+}
+
+/** `identity` is { place_id } or { custom_name, custom_lat, custom_lon }; `patch` today is { price_level }. */
+export async function upsertPlacePref(identity, patch) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { uid, error: authErr } = await signedInUserId("Sign in to set a price level");
+  if (authErr) return { data: null, error: authErr };
+  const onConflict = identity.place_id ? "user_id,place_id" : "user_id,custom_name,round(custom_lat::numeric, 4),round(custom_lon::numeric, 4)";
+  const { data, error } = await supabase
+    .from("food_place_prefs")
+    .upsert({ ...identity, ...patch, user_id: uid }, { onConflict })
+    .select()
+    .maybeSingle();
+  return { data, error };
+}
+
 /** ── Named restaurant lists (NEW-1 / B2088288) ───────────────────────────────────────────
  *  food_lists + food_list_items (db/food_lists.sql): a user-named GROUPING of places ("Lunch @ Work"),
  *  orthogonal to status — "been" is still food_visits, "want to try" is still food_wishlist, and
