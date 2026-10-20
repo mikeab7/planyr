@@ -1,0 +1,696 @@
+{
+"source": "Esri USA_Counties_Generalized_Boundaries (Census TIGER-derived), Oregon, queried 2026-10-19; points are the interior grid point nearest the area centroid; lines are points just inside a county's own line (a ring vertex pulled 12% toward its centre). `gaps` = the counties with no usable public parcel service wired (B2347696); docs/STATEWIDE-PARCELS.md 'Oregon counties (2026-10-19)' holds what was searched for each.",
+"counties": [
+{
+"state": "OR",
+"name": "Baker County",
+"fips": "41001",
+"lat": 44.66108,
+"lng": -117.65232,
+"bbox": [
+-118.5174,
+44.2464,
+-116.7872,
+45.0758
+]
+},
+{
+"state": "OR",
+"name": "Benton County",
+"fips": "41003",
+"lat": 44.49118,
+"lng": -123.44697,
+"bbox": [
+-123.8185,
+44.2704,
+-123.0755,
+44.712
+]
+},
+{
+"state": "OR",
+"name": "Clackamas County",
+"fips": "41005",
+"lat": 45.16526,
+"lng": -122.26452,
+"bbox": [
+-122.8692,
+44.8758,
+-121.6599,
+45.4548
+]
+},
+{
+"state": "OR",
+"name": "Clatsop County",
+"fips": "41007",
+"lat": 46.00216,
+"lng": -123.67872,
+"bbox": [
+-123.9965,
+45.7682,
+-123.3609,
+46.2361
+]
+},
+{
+"state": "OR",
+"name": "Columbia County",
+"fips": "41009",
+"lat": 45.94881,
+"lng": -123.06392,
+"bbox": [
+-123.3636,
+45.714,
+-122.7643,
+46.1836
+]
+},
+{
+"state": "OR",
+"name": "Coos County",
+"fips": "41011",
+"lat": 43.13879,
+"lng": -124.09673,
+"bbox": [
+-124.4853,
+42.6726,
+-123.7081,
+43.605
+]
+},
+{
+"state": "OR",
+"name": "Crook County",
+"fips": "41013",
+"lat": 44.12387,
+"lng": -120.38094,
+"bbox": [
+-121.109,
+43.6897,
+-119.6529,
+44.558
+]
+},
+{
+"state": "OR",
+"name": "Curry County",
+"fips": "41015",
+"lat": 42.4742,
+"lng": -124.1446,
+"bbox": [
+-124.5596,
+41.9929,
+-123.7296,
+42.9555
+]
+},
+{
+"state": "OR",
+"name": "Deschutes County",
+"fips": "41017",
+"lat": 43.90891,
+"lng": -121.18128,
+"bbox": [
+-122.0009,
+43.604,
+-119.8933,
+44.388
+]
+},
+{
+"state": "OR",
+"name": "Douglas County",
+"fips": "41019",
+"lat": 43.3181,
+"lng": -123.10548,
+"bbox": [
+-124.226,
+42.6959,
+-121.985,
+43.9403
+]
+},
+{
+"state": "OR",
+"name": "Gilliam County",
+"fips": "41021",
+"lat": 45.35114,
+"lng": -120.20718,
+"bbox": [
+-120.6584,
+45.0584,
+-119.756,
+45.8111
+]
+},
+{
+"state": "OR",
+"name": "Grant County",
+"fips": "41023",
+"lat": 44.47152,
+"lng": -118.94884,
+"bbox": [
+-119.6724,
+43.9539,
+-118.2252,
+44.9892
+]
+},
+{
+"state": "OR",
+"name": "Harney County",
+"fips": "41025",
+"lat": 43.01513,
+"lng": -118.86602,
+"bbox": [
+-119.9357,
+41.9889,
+-118.1853,
+44.0414
+]
+},
+{
+"state": "OR",
+"name": "Hood River County",
+"fips": "41027",
+"lat": 45.53762,
+"lng": -121.62942,
+"bbox": [
+-121.9268,
+45.2517,
+-121.4402,
+45.7196
+]
+},
+{
+"state": "OR",
+"name": "Jackson County",
+"fips": "41029",
+"lat": 42.38678,
+"lng": -122.75488,
+"bbox": [
+-123.2363,
+42.0008,
+-122.2735,
+42.9934
+]
+},
+{
+"state": "OR",
+"name": "Jefferson County",
+"fips": "41031",
+"lat": 44.60144,
+"lng": -121.11399,
+"bbox": [
+-121.8469,
+44.3834,
+-120.3811,
+44.8195
+]
+},
+{
+"state": "OR",
+"name": "Josephine County",
+"fips": "41033",
+"lat": 42.38261,
+"lng": -123.54791,
+"bbox": [
+-124.0599,
+41.9929,
+-123.2221,
+42.7723
+]
+},
+{
+"state": "OR",
+"name": "Klamath County",
+"fips": "41035",
+"lat": 42.6187,
+"lng": -121.57831,
+"bbox": [
+-122.2847,
+41.9877,
+-120.8719,
+43.6103
+]
+},
+{
+"state": "OR",
+"name": "Lake County",
+"fips": "41037",
+"lat": 42.79899,
+"lng": -120.34955,
+"bbox": [
+-121.3474,
+41.9877,
+-119.3517,
+43.6103
+]
+},
+{
+"state": "OR",
+"name": "Lane County",
+"fips": "41039",
+"lat": 43.95177,
+"lng": -122.96172,
+"bbox": [
+-124.1583,
+43.4335,
+-121.7651,
+44.2816
+]
+},
+{
+"state": "OR",
+"name": "Lincoln County",
+"fips": "41041",
+"lat": 44.6519,
+"lng": -123.85651,
+"bbox": [
+-124.1183,
+44.2664,
+-123.5947,
+45.0374
+]
+},
+{
+"state": "OR",
+"name": "Linn County",
+"fips": "41043",
+"lat": 44.4903,
+"lng": -122.52562,
+"bbox": [
+-123.2545,
+44.1894,
+-121.7967,
+44.7912
+]
+},
+{
+"state": "OR",
+"name": "Malheur County",
+"fips": "41045",
+"lat": 43.21737,
+"lng": -117.56602,
+"bbox": [
+-118.2298,
+41.9948,
+-116.9023,
+44.4399
+]
+},
+{
+"state": "OR",
+"name": "Marion County",
+"fips": "41047",
+"lat": 44.91241,
+"lng": -122.62469,
+"bbox": [
+-123.18,
+44.6782,
+-121.7521,
+45.2805
+]
+},
+{
+"state": "OR",
+"name": "Morrow County",
+"fips": "41049",
+"lat": 45.45046,
+"lng": -119.5706,
+"bbox": [
+-119.9976,
+44.9867,
+-119.1436,
+45.9143
+]
+},
+{
+"state": "OR",
+"name": "Multnomah County",
+"fips": "41051",
+"lat": 45.50868,
+"lng": -122.37181,
+"bbox": [
+-122.9295,
+45.4244,
+-121.8142,
+45.7277
+]
+},
+{
+"state": "OR",
+"name": "Polk County",
+"fips": "41053",
+"lat": 44.88967,
+"lng": -123.38014,
+"bbox": [
+-123.7243,
+44.7108,
+-123.036,
+45.0686
+]
+},
+{
+"state": "OR",
+"name": "Sherman County",
+"fips": "41055",
+"lat": 45.40577,
+"lng": -120.7014,
+"bbox": [
+-121.0381,
+45.0789,
+-120.3647,
+45.7326
+]
+},
+{
+"state": "OR",
+"name": "Tillamook County",
+"fips": "41057",
+"lat": 45.48795,
+"lng": -123.73177,
+"bbox": [
+-124.0076,
+45.0361,
+-123.2984,
+45.7755
+]
+},
+{
+"state": "OR",
+"name": "Umatilla County",
+"fips": "41059",
+"lat": 45.60687,
+"lng": -118.70744,
+"bbox": [
+-119.4429,
+44.9865,
+-117.972,
+46.0016
+]
+},
+{
+"state": "OR",
+"name": "Union County",
+"fips": "41061",
+"lat": 45.3011,
+"lng": -117.97543,
+"bbox": [
+-118.6957,
+44.9487,
+-117.2552,
+45.8549
+]
+},
+{
+"state": "OR",
+"name": "Wallowa County",
+"fips": "41063",
+"lat": 45.53683,
+"lng": -117.22655,
+"bbox": [
+-117.9827,
+45.0734,
+-116.4704,
+46.0003
+]
+},
+{
+"state": "OR",
+"name": "Wasco County",
+"fips": "41065",
+"lat": 45.16075,
+"lng": -121.09539,
+"bbox": [
+-121.8093,
+44.8178,
+-120.3815,
+45.6997
+]
+},
+{
+"state": "OR",
+"name": "Washington County",
+"fips": "41067",
+"lat": 45.54153,
+"lng": -123.11386,
+"bbox": [
+-123.4848,
+45.3118,
+-122.7429,
+45.7712
+]
+},
+{
+"state": "OR",
+"name": "Wheeler County",
+"fips": "41069",
+"lat": 44.67984,
+"lng": -120.07236,
+"bbox": [
+-120.4918,
+44.2977,
+-119.6529,
+45.062
+]
+},
+{
+"state": "OR",
+"name": "Yamhill County",
+"fips": "41071",
+"lat": 45.20865,
+"lng": -123.32619,
+"bbox": [
+-123.786,
+45.0685,
+-122.8664,
+45.4288
+]
+}
+],
+"lines": [
+{
+"name": "Baker County \u2014 a point near its county line",
+"county": "Baker County",
+"lat": 44.34883,
+"lng": -117.27279
+},
+{
+"name": "Benton County \u2014 a point near its county line",
+"county": "Benton County",
+"lat": 44.29978,
+"lng": -123.73382
+},
+{
+"name": "Clackamas County \u2014 a point near its county line",
+"county": "Clackamas County",
+"lat": 45.31479,
+"lng": -121.75952
+},
+{
+"name": "Clatsop County \u2014 a point near its county line",
+"county": "Clatsop County",
+"lat": 45.79967,
+"lng": -123.93807
+},
+{
+"name": "Columbia County \u2014 a point near its county line",
+"county": "Columbia County",
+"lat": 45.74092,
+"lng": -122.94858
+},
+{
+"name": "Coos County \u2014 a point near its county line",
+"county": "Coos County",
+"lat": 42.98133,
+"lng": -124.43473
+},
+{
+"name": "Crook County \u2014 a point near its county line",
+"county": "Crook County",
+"lat": 43.97571,
+"lng": -119.74111
+},
+{
+"name": "Curry County \u2014 a point near its county line",
+"county": "Curry County",
+"lat": 42.04872,
+"lng": -123.85983
+},
+{
+"name": "Deschutes County \u2014 a point near its county line",
+"county": "Deschutes County",
+"lat": 43.64517,
+"lng": -121.90795
+},
+{
+"name": "Douglas County \u2014 a point near its county line",
+"county": "Douglas County",
+"lat": 42.7703,
+"lng": -123.22796
+},
+{
+"name": "Gilliam County \u2014 a point near its county line",
+"county": "Gilliam County",
+"lat": 45.09625,
+"lng": -120.4581
+},
+{
+"name": "Grant County \u2014 a point near its county line",
+"county": "Grant County",
+"lat": 44.92626,
+"lng": -118.57807
+},
+{
+"name": "Harney County \u2014 a point near its county line",
+"county": "Harney County",
+"lat": 42.12423,
+"lng": -118.27864
+},
+{
+"name": "Hood River County \u2014 a point near its county line",
+"county": "Hood River County",
+"lat": 45.42095,
+"lng": -121.77957
+},
+{
+"name": "Jackson County \u2014 a point near its county line",
+"county": "Jackson County",
+"lat": 42.05214,
+"lng": -122.33728
+},
+{
+"name": "Jefferson County \u2014 a point near its county line",
+"county": "Jefferson County",
+"lat": 44.41633,
+"lng": -121.75962
+},
+{
+"name": "Josephine County \u2014 a point near its county line",
+"county": "Josephine County",
+"lat": 42.04144,
+"lng": -123.51789
+},
+{
+"name": "Klamath County \u2014 a point near its county line",
+"county": "Klamath County",
+"lat": 42.07672,
+"lng": -121.46614
+},
+{
+"name": "Lake County \u2014 a point near its county line",
+"county": "Lake County",
+"lat": 42.0849,
+"lng": -120.04027
+},
+{
+"name": "Lane County \u2014 a point near its county line",
+"county": "Lane County",
+"lat": 43.49503,
+"lng": -122.23102
+},
+{
+"name": "Lincoln County \u2014 a point near its county line",
+"county": "Lincoln County",
+"lat": 44.31341,
+"lng": -124.08866
+},
+{
+"name": "Linn County \u2014 a point near its county line",
+"county": "Linn County",
+"lat": 44.30184,
+"lng": -123.12027
+},
+{
+"name": "Malheur County \u2014 a point near its county line",
+"county": "Malheur County",
+"lat": 43.92908,
+"lng": -118.15238
+},
+{
+"name": "Marion County \u2014 a point near its county line",
+"county": "Marion County",
+"lat": 44.7563,
+"lng": -123.06073
+},
+{
+"name": "Morrow County \u2014 a point near its county line",
+"county": "Morrow County",
+"lat": 45.85384,
+"lng": -119.45623
+},
+{
+"name": "Multnomah County \u2014 a point near its county line",
+"county": "Multnomah County",
+"lat": 45.4651,
+"lng": -121.88617
+},
+{
+"name": "Polk County \u2014 a point near its county line",
+"county": "Polk County",
+"lat": 44.73403,
+"lng": -123.17965
+},
+{
+"name": "Sherman County \u2014 a point near its county line",
+"county": "Sherman County",
+"lat": 45.11734,
+"lng": -120.53228
+},
+{
+"name": "Tillamook County \u2014 a point near its county line",
+"county": "Tillamook County",
+"lat": 45.73058,
+"lng": -123.72039
+},
+{
+"name": "Umatilla County \u2014 a point near its county line",
+"county": "Umatilla County",
+"lat": 45.87507,
+"lng": -119.35451
+},
+{
+"name": "Union County \u2014 a point near its county line",
+"county": "Union County",
+"lat": 45.10056,
+"lng": -117.34618
+},
+{
+"name": "Wallowa County \u2014 a point near its county line",
+"county": "Wallowa County",
+"lat": 45.13604,
+"lng": -116.8349
+},
+{
+"name": "Wasco County \u2014 a point near its county line",
+"county": "Wasco County",
+"lat": 44.85989,
+"lng": -121.68312
+},
+{
+"name": "Washington County \u2014 a point near its county line",
+"county": "Washington County",
+"lat": 45.4401,
+"lng": -122.7858
+},
+{
+"name": "Wheeler County \u2014 a point near its county line",
+"county": "Wheeler County",
+"lat": 44.57738,
+"lng": -120.33929
+},
+{
+"name": "Yamhill County \u2014 a point near its county line",
+"county": "Yamhill County",
+"lat": 45.08738,
+"lng": -123.09962
+}
+],
+"gaps": [
+"Polk",
+"Sherman",
+"Wallowa"
+]
+}

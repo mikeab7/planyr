@@ -282,8 +282,9 @@ export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ai
  * Monroe's `parcelmaster_ownername1`, Marquette's project layer `Owner_Merg`, Mason's `ParcelMast` (the parcel-master name), Ionia's joined `Parcel_Data_OWNERNAME`. Strictly the fallback pass, like the Idaho spellings above. */
 export const OWNER_KEY_MI_RE = /^((bsaexport_)?onername\d|ownnm1|parcelmaster_ownername1|owner_merg|parcelmast|parcel_data_ownername)$/i;
 
+/* Oregon (B2347696): `FEEOWNER` (Jackson), `OWNER_LINE` (Clatsop), `OwnerLine1` (Lake) and `MAILING_NAME` (Umatilla, the assessor roll's owner of record) — fallback pass only, like the Idaho spellings. */
 /* South Dakota (B2343936): `TAXPAYER_NAME` (Grant, First District roll), `CURRENT_OW` (Lawrence's shapefile-truncated CURRENT_OWNER) and `vcPayerLas` (Brown's payer last-or-entity name — the first name sits in a sibling column) are those sources' owner column; `deedhold` (Moody) is a spelling of the deed-holder column in OWNER_KEY_RE. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|gis_owner1|taxpayer_name|current_ow|vcpayerlas)$/i;
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
