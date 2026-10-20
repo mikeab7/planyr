@@ -57,8 +57,33 @@ const OVERLAY = {
 let fail = 0;
 const check = (name, ok, extra = "") => { console.log(`  ${ok ? "✓" : "✗"} ${name}${extra ? ` — ${extra}` : ""}`); if (!ok) fail++; };
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
-const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
+const LIVE = process.env.LIVE_BASE || null;
+let browser, ctx, page, liveSession;
+const jsonOf = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+if (LIVE) {
+  // LIVE MODE — the real deployed app, signed in as the e2e test account (shared helper). Reads are the real
+  // service's, with the fixtures above APPENDED to the comps / overlays answers (read-only: nothing is written).
+  const { openSignedIn } = await import("./lib/signedInSession.mjs");
+  liveSession = await openSignedIn({ base: LIVE });
+  console.log("served build:", JSON.stringify(liveSession.build));
+  page = liveSession.page; ctx = page.context();
+  await ctx.route("**/rest/v1/comps*", async (route) => {
+    const req = route.request();
+    if (req.method() !== "GET" || req.url().includes("deleted_at=not.is.null")) return route.continue();
+    const res = await route.fetch(); const real = await res.json().catch(() => []);
+    return route.fulfill(jsonOf([...(Array.isArray(real) ? real : []), ...COMPS]));
+  });
+  await ctx.route("**/rest/v1/site_plan_overlays*", async (route) => {
+    const req = route.request();
+    if (req.method() !== "GET" || req.url().includes("deleted_at=not.is.null")) return route.continue();
+    const res = await route.fetch(); const real = await res.json().catch(() => []);
+    return route.fulfill(jsonOf([...(Array.isArray(real) ? real : []), OVERLAY]));
+  });
+  await page.setViewportSize(VIEWPORT);
+  await page.reload({ waitUntil: "load" });
+} else {
+browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
 await ctx.route("**/*.supabase.co/**", (route) => {
   const req = route.request();
   const path = new URL(req.url()).pathname;
@@ -71,9 +96,10 @@ await ctx.route("**/*.supabase.co/**", (route) => {
   if (path.startsWith("/rest/v1/")) return json([]);
   return json({});
 });
-const page = await ctx.newPage();
+  page = await ctx.newPage();
+}
 page.on("pageerror", (e) => console.log("[pageerror]", e.message));
-await page.goto(BASE, { waitUntil: "load" });
+await page.goto(LIVE || BASE, { waitUntil: "load" });
 await page.waitForTimeout(1200);
 await assertMeasurable(page, "verify-comp-record-layout");
 const tab = page.locator('[data-testid="module-tab-site-planner"]');
@@ -194,6 +220,6 @@ await page.locator('[data-testid="comp-record-back"]').click();
 await page.waitForTimeout(400);
 check("All comps returns to the list, which still has Recently deleted", /Recently deleted/.test(await page.evaluate(() => document.body.innerText)));
 
-await browser.close();
+if (liveSession) await liveSession.close(); else await browser.close();
 console.log(fail ? `\n${fail} check(s) FAILED` : "\nALL CHECKS PASSED");
 process.exit(fail ? 1 : 0);
