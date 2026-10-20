@@ -163,6 +163,9 @@ export const ALLOWED_HOSTS = new Set([
   "gis.madisoncountyil.gov", "gisportal.co.madison.il.us", "gis.tazewell-il.gov", "gis.co.sangamon.il.us", "sangis.co.sangamon.il.us", "pub.sagis.org", "k3gis.net",
   "mchenrycountygis.org", "gis.rockislandcountyil.gov", "macongis.co.macon.il.us", "services2.bhamaps.com", "gis.stclaircounty.org", "gis.cityofdanville.org",
   "gis.ci.pekin.il.us", "portal.greenvilleillinois.com", "maps.decaturil.gov", "redqueen.ci.galesburg.il.us",
+  /* NEW-1 (Illinois round 3, 2026-10-20) — Coles' new county domain, Knox's own server (named by its parcel viewer's web map), the Illinois Department of Revenue's tax-district server,
+   * the GIS Consortium, Adams County's ArcGIS server and St. Clair's second public host; MEASURED through this relay before any county is wired to one. */
+  "www.colesco.illinois.gov", "gis.knoxcountyil.gov", "gis.co.knox.il.us", "aglomaps.revenue.illinois.gov", "ags.gisconsortium.org", "www.adamscountyarcserver.com", "stclairpublicmap.co.st-clair.il.us",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
