@@ -22,7 +22,7 @@ const bld = (id, o) => ({ z: 1, id, type: "building", rot: 0, ...o });
 const SITE = {
   id: ID, groupId: ID, site: "zz Cursor check", name: "Plan 1", origin: { lat: 29.86, lon: -95.17 }, county: "harris",
   parcels: [], els: [bld("cuWide", { cx: 0, cy: 0, w: 600, h: 140 }), bld("cuLocked", { cx: 0, cy: 380, w: 420, h: 120, locked: true }), bld("cuRot", { cx: 0, cy: -380, w: 500, h: 130, rot: 30 })],
-  measures: [], markups: [], callouts: [{ id: "cuCo", text: "Locked note", box: { x: 800, y: 0 }, tip: { x: 640, y: 0 }, z: 1, locked: true }],
+  measures: [], markups: [], callouts: [{ id: "cuCo", text: "Locked note", box: { x: -150, y: 200 }, tip: { x: -150, y: 90 }, z: 1, locked: true }],
   settings: {}, underlay: null, updatedAt: Date.now(), data: { status: "active" }, status: "active",
 };
 
@@ -109,6 +109,7 @@ try {
   // armed tool owns everything
   await page.getByTestId("tool-marquee").click(); await page.waitForTimeout(250);
   const w2 = await bodyPoint("cuWide"), l2 = await bodyPoint("cuLocked"), c2 = await centre('[data-testid="callout-box-cuCo"]');
+  check("precondition: the callout is on the canvas, not under the tool rail", await page.evaluate(([x, y]) => { const n = document.elementFromPoint(x, y); return !!(n && n.closest("svg[data-cursor-mode]")); }, [c2.x, c2.y]));
   for (const [what, p] of [["a building", w2], ["a locked building", l2], ["a locked callout", c2], ["empty canvas", far]]) check(`ARMED tool: crosshair over ${what}`, note(await cursorAt(p.x, p.y)) === "crosshair");
   await page.getByTestId("tool-select").click().catch(() => {}); await page.keyboard.press("Escape");
 
