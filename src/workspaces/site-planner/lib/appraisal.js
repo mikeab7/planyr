@@ -273,14 +273,26 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
 /* Missouri (NEW-1, 2026-10-19): the Integrity GIS counties publish the owner as `DEEDHOLDER` / `DEED_HOLDER` / `DEEDNAME` (Atchison's joined layer as
  * `REALDATA_DEEDHOLDER`), Greene as `OWN1`, Holt as `owner1_name`, St. Clair as `Owner_1`, Cape Girardeau as `Main_Name`. `pcloNAME` is Tuscaloosa AL's owner — it only looked resolved
  * because the bare `Name` beside it (the parcel number) used to win; a digits-only `Name` no longer counts as an owner. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?holder|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name)$/i;
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d|gpdata__ow|owner_?all|property_?owner|full_?name|name_?1|deed_?holder|deed_?name|real_?data_deed_?holder|own1|owner\d_name|owner_\d|main_name|pclo_?name|pnam|sde_chelan_pacs_table_owner_nam|deed_?holder_?name|file_as_name|t2_owner|title_?owner(_?name)?|ownr_nm|property_o|py_owner_name)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
-export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
+export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name|owner_?last)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
 export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
+
+/* NEW-1 (Washington, 2026-10-19) — Adams, Douglas, Franklin and Mason publish the owner as a SURNAME column (`LastName` / `LAST_NAME`) with the given names in a sibling
+ * `FirstName` / `FIRST_NAME`; Skamania as `OwnerLast` + `OwnerFirst`. Showing the surname alone reads as a different, shorter owner, so when a non-blank first-name sibling
+ * of the same spelling family exists the card reads "<first> <last>" (an entity — LLC, TRUST, STATE OF WASHINGTON — has a blank first name and reads whole). Pure. */
+const FIRST_FOR_LAST = [[/^last_?name$/i, /^first_?name$/i], [/^owner_?last$/i, /^owner_?first$/i]];
+export function ownerWithFirstName(attrs, key) {
+  const v = attrs[key];
+  const pair = FIRST_FOR_LAST.find(([last]) => last.test(leafKey(key)));
+  if (!pair) return v;
+  const fk = Object.keys(attrs).find((k2) => pair[1].test(leafKey(k2)) && !isPlaceholderValue(attrs[k2]) && String(attrs[k2]).trim());
+  return fk ? `${String(attrs[fk]).trim()} ${String(v).trim()}`.replace(/\s+/g, " ") : v;
+}
 
 /**
  * The KEY holding the parcel's owner name, or null when the record does not carry one.
@@ -294,6 +306,8 @@ export function ownerKey(attrs, { skip = null } = {}) {
     const lk = leafKey(key);
     if (!OWNER_KEY_RE.test(lk)) continue;
     if (isPlaceholderValue(attrs[key])) continue;
+    // King County WA's `FULLNAME` is the STREET name of the site address (beside ADDR_SN / ADDR_FULL), never an owner.
+    if (/^full_?name$/i.test(lk) && Object.keys(attrs).some((k2) => /^addr_(sn|full|hn)$/i.test(leafKey(k2)))) continue;
     // A TABLE-PREFIXED `name` is a joined layer's own label (TaxParcels.Name = the lot number), never an owner.
     if (lk !== key && /^name$/i.test(lk)) continue;
     // …and a bare `name` holding only digits / dots / dashes is a parcel NUMBER (Buchanan MO's `Name` = "11-4.0-17-000-000-005.002"), never an owner.
@@ -430,7 +444,7 @@ export const apprRows = (attrs) => {
         : label === "Acreage"
           ? acreageKey(attrs, { skip: used })
           : Object.keys(attrs).find((key) => !used.has(key) && re.test(leafKey(key)) && !isPlaceholderValue(attrs[key]));
-    if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : attrs[k] }); }
+    if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : label === "Owner" ? ownerWithFirstName(attrs, k) : attrs[k] }); }
   }
   return rows;
 };
