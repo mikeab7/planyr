@@ -252,7 +252,7 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
-import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { makeParcelDisplayLayer, ADD_CURSOR, REMOVE_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, WALL_PIECE_TEXT, WALL_PIECE_EDGE, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackDashArray, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
@@ -546,6 +546,7 @@ import ParcelsPanel from "./components/ParcelsPanel.jsx";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 import { MAP_CORNER_PX, MAP_CORNER_GAP_PX, paneInsetFor, cornerGroupWidth, cursorChipFit } from "./lib/mapCorners.js";
+import { ROTATE_CURSOR, gripCursor, dragCursorFor, canvasRootCursor, parcelBodyCursor, pinDragCursor, unpinDragCursor, installPlannerCursorStyle, deferTask } from "./lib/plannerCursors.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
@@ -3745,6 +3746,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  /* Cursor convention (2026-10-20) — DURING A DRAG the cursor stays the drag's cursor for the whole gesture, even when the pointer
+   * leaves the grip: while `drag.current` is live (and a button is down) one root-level override shows move / the grip's own resize
+   * arrow / the rotate cursor / grabbing for a pan / crosshair for a draw. Cleared on every exit — pointerup, pointercancel, blur,
+   * a hidden tab, Escape — so it can never stick. Mode → cursor is lib/plannerCursors.js `dragCursorFor`. */
+  const pressCursorRef = useRef(null);
+  useEffect(() => {
+    installPlannerCursorStyle({ add: ADD_CURSOR, remove: REMOVE_CURSOR });
+    let down = false;
+    const sync = () => {
+      const d = drag.current;
+      const c = down && d ? dragCursorFor(d.mode, pressCursorRef.current) : null;
+      if (c) pinDragCursor(c); else unpinDragCursor();
+    };
+    const onDown = (e) => {
+      down = true;
+      try { pressCursorRef.current = e.target && e.target.nodeType === 1 ? getComputedStyle(e.target).cursor : null; } catch (_) { pressCursorRef.current = null; }
+      deferTask(sync); // after the press's own handlers have armed `drag.current`
+    };
+    const end = () => { down = false; deferTask(sync); };
+    const onKey = (e) => { if (e.key !== "Escape") return; deferTask(sync); };
+    const onVis = () => { if (document.visibilityState !== "visible") end(); };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", sync, true);
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+    window.addEventListener("blur", end);
+    window.addEventListener("keydown", onKey, true);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", sync, true);
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+      window.removeEventListener("blur", end);
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("visibilitychange", onVis);
+      unpinDragCursor();
+    };
+  }, []);
   /* ── NEW-2 — one state commit per animation FRAME on the hot pointer paths ──────────────────
    * A pointermove can fire faster than the display refreshes (120 Hz panels, and browsers deliver
    * coalesced moves at higher rates still). Every setState on that path re-runs this component's
@@ -6912,9 +6952,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.preventDefault();
     const startX = e.clientX, startW = leftWidth;
     const onMove = (ev) => setLeftWidth(snapPanelWidth(startW + (ev.clientX - startX), window.devicePixelRatio)); // B2154768/NEW-2 — paints at whole CSS px; the canvas edge moves in notches (leftFlowWidth)
-    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    // the divider keeps its resize cursor for the whole drag, even when the pointer outruns the 6px bar
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onUp); window.removeEventListener("blur", onUp); unpinDragCursor(); };
+    pinDragCursor("col-resize");
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("blur", onUp);
   };
 
   // NEW-1 (poppable panels) — a left-rail panel can pop out of the docked column into a
@@ -8943,6 +8987,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const c = callouts.find((x) => x.id === id);
     setSel({ kind: "callout", id });
+    if (c && c.locked) return; // LOCKED = select-only: the press selects (so Properties/Unlock stay reachable) but never starts a drag
     const fp = p2f(e.clientX, e.clientY);
     // Multi-leader — re-aiming a leader (part === "tip") drags ONE tip by index; the other leaders
     // and the box stay put. tips0 is a full snapshot so onMove only ever moves tipIndex.
@@ -16684,6 +16729,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // many) — the same "boundaries light up, click to add" feel as the map's Select-parcels
   // tool. A re-click on a just-added lot toggles it back off.
   const [identifyMode, setIdentifyMode] = useState(false);
+  /* Cursor convention (owner-approved 2026-10-20) — an ARMED draw / place / pick mode owns the cursor over EVERYTHING it can
+   * be clicked on, existing objects included: the canvas root carries `data-cursor-mode` and ONE stylesheet rule (lib/plannerCursors.js)
+   * turns every descendant's cursor into that mode's, so a new object type can never forget to ask. Space-held = pan. */
+  const cursorMode = spacePan ? "pan" : identifyMode ? "identify"
+    : (tool === "parcel" && parcelMode === "remove") ? "remove"
+    : (tool !== "select" || attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib || addLeaderFor || ovAlignBase || mergePick) ? "armed"
+    : null;
   /* NEW-1 — PARCELS IN FRONT. While the Parcels tool is the thing being worked (the Land panel open — docked or floating —
    * Pick county lots, Draw / Split / Combine / Edit corners) the parcel geometry is the TOP of the drawing. One boolean, one
    * pure answer (mapStack.parcelsOnTop); it moves RENDER ORDER only — nothing is stored, no layer's order or lift changes. */
@@ -18386,7 +18438,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // NEW-1 (B1264944) — click/double-click stay live even in "Edit boundary corners" (still
         // the plain Select tool underneath), so only the CURSOR changes there, matching every
         // other selectable object's own hover cursor in that mode.
-        style={labelInteractive ? { cursor: editingCorners ? "crosshair" : "pointer" } : undefined}
+        style={labelInteractive ? { cursor: editingCorners ? "crosshair" : (d.el.locked ? "pointer" : "move") } : undefined}
         onPointerDown={labelInteractive ? (e) => {
           if (e.button !== 0) return;
           e.stopPropagation();
@@ -18856,7 +18908,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <circle key={`rv${i}`} cx={m.x} cy={m.y} r={isEnd ? 6 : 5.5} data-export="skip"
                 data-testid={`road-vtx-${i}`} data-road-endpoint={isEnd ? "1" : "0"}
                 fill={selected ? SEL_BLUE : SEL_HANDLE_FILL} stroke={selected ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={1.75}
-                style={{ cursor: "grab" }} onPointerDown={(e) => startRoadVtx(e, el.id, i)}>
+                style={{ cursor: "move" }} onPointerDown={(e) => startRoadVtx(e, el.id, i)}>
                 <title>{isEnd ? "Drag to move this end" : "Drag to move · select it in the panel to set sharp / arc / smooth"}</title>
               </circle>
             );
@@ -18879,11 +18931,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />;
           })}
           <circle cx={A.x} cy={A.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.75} data-export="skip"
-            style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "a")}>
+            style={{ cursor: "move" }} onPointerDown={(e) => startRoadEnd(e, el.id, "a")}>
             <title>Drag to move this end (changes angle + length)</title>
           </circle>
           <circle cx={B.x} cy={B.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.75} data-export="skip"
-            style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "b")}>
+            style={{ cursor: "move" }} onPointerDown={(e) => startRoadEnd(e, el.id, "b")}>
             <title>Drag to move this end (changes angle + length)</title>
           </circle>
         </g>
@@ -18902,10 +18954,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             covers locked + polygon elements); here we draw only the grips + rotate handle. */}
         <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
         <circle data-handle="rotate" cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
-          style={{ cursor: "grab" }} onPointerDown={(e) => startRotate(e, el.id)} />
+          style={{ cursor: ROTATE_CURSOR }} onPointerDown={(e) => startRotate(e, el.id)} />
         {corners.map((c, i) => (
           <rect key={i} data-handle="corner" x={c.x - 5} y={c.y - 5} width={10} height={10} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
-            style={{ cursor: resizeCursor(c.x - cpx.x, c.y - cpx.y) }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
+            style={{ cursor: gripCursor(signs[i][0], signs[i][1], el.rot) }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
         ))}
         {/* side grips: drag one edge to expand/shrink that side (opposite side stays put) */}
         {[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([nx, ny], i) => {
@@ -19181,7 +19233,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <polygon points={corners.map(([sx, sy]) => { const p = at(sx * (m.w / 2 + outlineGapFt), sy * (m.h / 2 + outlineGapFt)); return `${p.x},${p.y}`; }).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
           <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
           <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
-            style={{ cursor: "grab" }} onPointerDown={(e) => startMarkupRotate(e, m.id)} />
+            style={{ cursor: ROTATE_CURSOR }} onPointerDown={(e) => startMarkupRotate(e, m.id)} />
           {edges.map(([nx, ny], i) => { const p = at(nx * m.w / 2, ny * m.h / 2); return (
             <rect key={`mke${i}`} x={p.x - 4.5} y={p.y - 4.5} width={9} height={9} rx={2}
               fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
@@ -19190,7 +19242,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {corners.map(([sx, sy], i) => { const p = at(sx * m.w / 2, sy * m.h / 2); return (
             <rect key={`mkc${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10}
               fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
-              style={{ cursor: resizeCursor(p.x - cpx.x, p.y - cpx.y) }} onPointerDown={(e) => startMarkupResize(e, m.id, sx, sy)} />
+              style={{ cursor: gripCursor(sx, sy, m.rot || 0) }} onPointerDown={(e) => startMarkupResize(e, m.id, sx, sy)} />
           ); })}
         </g>
       );
@@ -19227,7 +19279,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <>
             <line x1={top.x} y1={top.y} x2={grip.x} y2={grip.y} stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
             <circle data-easement-label-rotate={m.id} cx={grip.x} cy={grip.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
-              style={{ cursor: "grab" }} onPointerDown={(e) => startEaseLabelRotate(e, m.id)} />
+              style={{ cursor: ROTATE_CURSOR }} onPointerDown={(e) => startEaseLabelRotate(e, m.id)} />
           </>
         )}
       </g>
@@ -19355,7 +19407,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                to any element, and was interactive regardless of tool: a placement click that landed
                on it showed a "click to re-add" cursor and was swallowed instead of placing. */
             pointerEvents={tool === "select" ? "auto" : "none"}
-            style={{ cursor: (tool !== "select" || editingCorners) ? "crosshair" : (ovLoading ? "default" : "pointer") }}
+            style={{ cursor: (tool !== "select" || editingCorners) ? "crosshair" : (ovLoading ? "progress" : "pointer") }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network" || ovErr === "denied") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
@@ -19421,11 +19473,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {!o.locked && !ovCalib && !o.fromMap && (<>
             {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
               <rect key={`hsc${hi}`} data-handle="overlay-scale" x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-                style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
+                style={{ cursor: gripCursor(hi === 0 || hi === 3 ? -1 : 1, hi < 2 ? -1 : 1, o.rotation || 0) }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
             ))}
             <line x1={vcx} y1={tl.y} x2={vcx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
             <circle data-handle="overlay-rotate" cx={vcx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-              style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
+              style={{ cursor: ROTATE_CURSOR }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
           </>)}
         </g>
         {calib}
@@ -19476,11 +19528,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {!c.locked && (<>
           <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
           <circle data-handle="rotate" data-testid={`callout-handle-rotate-${c.id}`} cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
-            style={{ cursor: "grab" }} onPointerDown={(e) => startCalloutRotate(e, c.id)} />
+            style={{ cursor: ROTATE_CURSOR }} onPointerDown={(e) => startCalloutRotate(e, c.id)} />
         </>)}
         {grips.map(([lx, ly, dir], i) => { const p = at(lx, ly); return (
           <rect key={i} data-handle="callout-width" data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={p.x - 4} y={p.y - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
-            pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
+            pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: gripCursor(1, 0, rot || 0) } : undefined}
             onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined}
             onContextMenu={(e) => onCalloutContext(e, c.id, -1)} />
         ); })}
@@ -19696,6 +19748,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const onSheetHandlePointerDown = (e) => {
     if (e.button != null && e.button !== 0) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    pinDragCursor("grabbing");
     sheetDragRef.current = { startY: e.clientY, startHeight: sheetRenderH, pointerId: e.pointerId };
   };
   const onSheetHandlePointerMove = (e) => {
@@ -19709,6 +19762,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const d = sheetDragRef.current;
     if (!d || (e && e.pointerId !== d.pointerId)) return;
     sheetDragRef.current = null;
+    unpinDragCursor();
     let vh = 0; try { vh = window.innerHeight; } catch (_) {}
     const halfPx = heightForSnap("half", vh), tallPx = heightForSnap("tall", vh);
     const resolved = resolveDragSnap({ heightPx: sheetHeightPx, halfPx, tallPx, dismissBelowPx: halfPx * 0.45 });
@@ -21589,7 +21643,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
     return (
       <polygon data-testid="setback-grab" points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-        style={{ cursor: (tool === "select" && !editingCorners) ? (selParcel.locked ? "default" : "move") : "crosshair" }}
+        style={{ cursor: parcelBodyCursor({ tool, editingCorners, locked: selParcel.locked }) }}
         onPointerDown={(e) => startMoveParcel(e, selParcel.id)}
         onContextMenu={(e) => onParcelContext(e, selParcel.id)} />
     );
@@ -22715,7 +22769,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button
                           onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                           title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy ? "progress" : (!addrQuery.trim() ? "default" : "pointer") }}>
                           {addrBusy ? "…" : "Find"}
                         </button>
                       </div>
@@ -22777,7 +22831,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 <button
                                   onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                                   title="Find this address and add its parcel"
-                                  style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                                  style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy ? "progress" : (!addrQuery.trim() ? "default" : "pointer") }}>
                                   {addrBusy ? "…" : "Find"}
                                 </button>
                               </div>
@@ -23634,7 +23688,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const elbow = elbowW ? f2p(elbowW) : origin;
                       const ang = Math.atan2(tp.y - elbow.y, tp.x - elbow.x);
                       return (
-                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}
+                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} style={(tool === "select" && !editingCorners) ? { cursor: "pointer" } : undefined} onContextMenu={(e) => onCalloutContext(e, c.id, i)}
                           onPointerDown={(e) => {
                             // NEW-2 — a LEADER: single click SELECTS the callout; a double-click opens
                             // Properties (never text edit). stopPropagation so the leader click doesn't fall
@@ -23675,7 +23729,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       /* NEW-1 (B1253248) — was "default" outside Select: a plain arrow over a
                          callout while placing something new, instead of the placement crosshair.
                          Harmless functionally (startMoveCallout already checks tool==="select"). */
-                      style={{ cursor: (tool === "select" && !editingCorners) ? "move" : "crosshair" }}
+                      style={{ cursor: (tool === "select" && !editingCorners) ? (c.locked ? "pointer" : "move") : "crosshair" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
                       onDoubleClick={(e) => {
@@ -24000,7 +24054,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const chipNode = chip ? (
                   <g data-print-chip="measure" data-measure-chip={m.id || `m${i}`}
                     pointerEvents={tool === "select" ? "auto" : "none"}
-                    style={(tool === "select" && !editingCorners) ? { cursor: "move" } : undefined}
+                    style={(tool === "select" && !editingCorners) ? { cursor: m.locked ? "pointer" : "move" } : undefined}
                     onPointerDown={tool === "select" ? (e) => startMeasChip(e, i) : undefined}
                     onContextMenu={(e) => onMeasureContext(e, i)}>
                     {chip.moved && <line x1={chip.anchor.x} y1={chip.anchor.y} x2={chip.c.x} y2={chip.c.y} stroke={mcolor} strokeWidth={1} opacity={0.55} />}
@@ -24047,7 +24101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           and sized in constant screen px, so it is stripped from the sheet (NEW-1). */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} data-export="skip" cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
@@ -24110,9 +24164,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
                         transparent FILLED polygon covering the whole shape, so a chip drawn before
                         it was unreachable: every press over the chip landed on the grab layer and
@@ -24498,7 +24552,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       that sits hard against the setback line. Every other parcel keeps it here. */}
                   {pc.id !== selParcel?.id && (
                     <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                      style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : "crosshair" }}
+                      style={{ cursor: parcelBodyCursor({ tool, editingCorners, locked: pc.locked }) }}
                       onPointerDown={(e) => startMoveParcel(e, pc.id)}
                       onContextMenu={(e) => onParcelContext(e, pc.id)} />
                   )}
@@ -24550,13 +24604,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     strokeDasharray={inactive ? "8 6" : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                    style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer"
-                      // NEW-1 (B1264944) — the SECOND of the mode's two legitimate cursor variations:
-                      // over the edge where Shift-click/right-click would insert a corner (the same
-                      // spot `insHint`'s dot already marks), the cursor says "add a point" rather than
-                      // the plain corner-editing crosshair. Scoped to the parcel actually being edited
-                      // so a stray insHint from some OTHER selected editable path can't paint this cursor.
-                      : (editingCorners && insHint && sel?.kind === "parcel" && sel.id === pc.id) ? "copy" : "crosshair" }}
+                    style={{ cursor: parcelBodyCursor({ tool, parcelMode, editingCorners, locked: pc.locked, removeCursor: REMOVE_CURSOR, addCursor: ADD_CURSOR,
+                      // NEW-1 (B1264944) — over the edge where Shift-click/right-click would insert a corner (the spot `insHint`'s dot marks) the
+                      // cursor says "add a point"; scoped to the parcel actually being edited so a stray insHint from another path cannot paint it.
+                      addPoint: editingCorners && !!insHint && sel?.kind === "parcel" && sel.id === pc.id }) }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
                   {secOv && secOv.map((sec, si) => {
@@ -24610,7 +24661,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [calibrationState, mapRef]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
+    <div data-planner-ui="1" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       <AppHeader
@@ -24864,7 +24915,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                gate is never observable; what it removes is the six frames of `ppf 0.35 off (60,60)`
                the owner filmed. A blank sheet for one commit is honest; a framing the app is about
                to throw away is the bug. It cannot stay shut — see the ceiling effect. */
-            style={{ position: "relative", zIndex: 1, visibility: revealed ? undefined : "hidden", transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : editingCorners ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, visibility: revealed ? undefined : "hidden", transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: canvasRootCursor({ spacePan, panning, identifyMode, addCursor: ADD_CURSOR, armedMode: !!cursorMode, editingCorners, tool, printMode }) }}
+            data-cursor-mode={cursorMode || undefined}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline
@@ -25507,7 +25559,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* B142b: full-canvas catcher so clicking ANYWHERE outside the editor finishes the
                   text box (Bluebeam-style). Needed because the canvas pointerdown preventDefaults
                   the textarea blur, which otherwise traps you in the editor. Sits under the textarea. */}
-              {editCallout && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditCallout(); }} />}
+              {editCallout && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" style={{ cursor: "default" }} onPointerDown={(e) => { e.stopPropagation(); commitEditCallout(); }} />}
               {editCallout && (() => {
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
@@ -25563,7 +25615,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
 
               {/* Inline numeric editor — road width / per-edge setback / overlay trace length. NEVER a dialog box. */}
-              {numEdit && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitNumEdit(); }} />}
+              {numEdit && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" style={{ cursor: "default" }} onPointerDown={(e) => { e.stopPropagation(); commitNumEdit(); }} />}
               {/* NEW-1 — the FLOATING fallback, for the callers whose anchor is no chip (road
                   width, overlay trace length, element resize, aerial calibration). A setback chip
                   renders its own editor IN PLACE of itself, so this stands down for those
@@ -26280,7 +26332,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                     })()}
                     <button disabled title="Roadmap — not yet available"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.muted, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "default", border: `1px dashed ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.muted, fontWeight: 600 }}>
                       🛰 AI corridor scan — coming soon
                     </button>
                   </div>
@@ -29615,7 +29667,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const use0 = assist.detention.providedCf;
                         const applyChip = (onApply, title, disabled, disabledReason) => (
                           <button type="button" disabled={disabled} title={disabled ? disabledReason : title} onClick={disabled ? undefined : onApply}
-                            style={{ marginLeft: 8, flex: "none", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: `1px solid ${disabled ? PAL.panelLine : "var(--accent)"}`, background: disabled ? "transparent" : "var(--accent)", color: disabled ? PAL.muted : "var(--on-accent)", whiteSpace: "nowrap", opacity: disabled ? 0.6 : 1 }}>Apply</button>
+                            style={{ marginLeft: 8, flex: "none", cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: `1px solid ${disabled ? PAL.panelLine : "var(--accent)"}`, background: disabled ? "transparent" : "var(--accent)", color: disabled ? PAL.muted : "var(--on-accent)", whiteSpace: "nowrap", opacity: disabled ? 0.6 : 1 }}>Apply</button>
                         );
                         const actApply = (txt, key, warn, chip) => (
                           <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 10.5, color: warn ? "var(--warn-text)" : PAL.text, lineHeight: 1.5, marginTop: 3 }}>
@@ -30638,7 +30690,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onDragOver={(e) => { e.preventDefault(); setDeedDrag(true); }}
                 onDragLeave={() => setDeedDrag(false)}
                 onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeeds(e.dataTransfer.files); }}
-                style={{ border: `1.5px dashed ${deedDrag && fileDragOn ? PAL.accent : PAL.panelLine}`, background: deedDrag && fileDragOn ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
+                style={{ border: `1.5px dashed ${deedDrag && fileDragOn ? PAL.accent : PAL.panelLine}`, background: deedDrag && fileDragOn ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "progress" : "pointer", marginBottom: 10 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.doc / .docx), PDF, or text (.txt) — drop one or several; bearings, distances, curves, and save-and-except are read automatically.</div>
                 {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
@@ -31988,7 +32040,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       // active whenever the select tool is up; pointerEvents="all" so it's clickable even before the
       // road is selected (the wrapping dim group is pointer-transparent when unselected).
       const numHandlers = (tool === "select" && onDimNumberDown)
-        ? { style: { cursor: "text" }, pointerEvents: "all", onPointerDown: (e) => { if (e.button === 0) { e.stopPropagation(); onDimNumberDown(e, el.id); } } }
+        ? { style: { cursor: el.locked ? "pointer" : "text" }, pointerEvents: "all", onPointerDown: (e) => { if (e.button === 0) { e.stopPropagation(); onDimNumberDown(e, el.id); } } }
         : {};
       if (settings.showDims !== false && (dimVisible || dimSel)) { // B121: "Show dimensions" gates the centerline-road width callout too
         const dim = [];
@@ -32308,7 +32360,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // length editor. Active whenever the select tool is up; pointerEvents="all" so a click on the
     // number selects even before the element is selected (the dim group is pointer-transparent then).
     const numHandlers = (tool === "select" && onDimNumberDown)
-      ? { style: { cursor: "text" }, pointerEvents: "all", onPointerDown: (e) => { if (e.button === 0) { e.stopPropagation(); onDimNumberDown(e, el.id); } } }
+      ? { style: { cursor: el.locked ? "pointer" : "text" }, pointerEvents: "all", onPointerDown: (e) => { if (e.button === 0) { e.stopPropagation(); onDimNumberDown(e, el.id); } } }
       : {};
     const dim = [];
     // NEW-1: a road's width dimension anchors to the MIDPOINT of the measured span

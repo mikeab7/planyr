@@ -339,16 +339,16 @@ export function GradingPanel({ planOn = true, showOnMap = false, showContours = 
   const view = gradingPanelView(model);
   const toggles = (
     <div data-grading-switches="1" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 0 10px" }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 650 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 650 }}>
         <input type="checkbox" role="switch" data-testid="grading-plan-switch" checked={!!planOn} onChange={(e) => onPlanOn && onPlanOn(e.target.checked)} /> Grade this plan
       </label>
       {planOn && (
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <input type="checkbox" data-testid="grading-show-on-map" checked={!!showOnMap} onChange={(e) => onShowOnMap && onShowOnMap(e.target.checked)} /> Show cut and fill on the map
         </label>
       )}
       {planOn && (
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <input type="checkbox" data-testid="grading-show-contours" checked={!!showContours} onChange={(e) => onShowContours && onShowContours(e.target.checked)} /> Show proposed contours
         </label>
       )}

@@ -16,6 +16,7 @@
  * the pointer every frame, no React re-render needed) and commits ONCE via `onCommit` on
  * release (so the caller persists exactly one write per gesture, not one per pointermove).
  */
+import { ROTATE_CURSOR, gripCursor, pinDragCursor, unpinDragCursor } from "./plannerCursors.js";
 import L from "leaflet";
 import { markGestureEnd } from "./handleGestureClock.js";
 import {
@@ -61,14 +62,14 @@ export function createPlacementHandles(map) {
   const svg = svgEl("svg", { width: 1, height: 1, style: "position:absolute; left:0; top:0; overflow:visible; pointer-events:none;" });
   pane.appendChild(svg);
 
-  const moveHit = svgEl("polygon", { fill: "transparent", style: "cursor:grab; pointer-events:auto;" });
+  const moveHit = svgEl("polygon", { fill: "transparent", style: "cursor:move; pointer-events:auto;" });
   const boundary = svgEl("polygon", { fill: "none", stroke: ACCENT, "stroke-width": 1.5, "stroke-dasharray": "6 4", style: "pointer-events:none;" });
   const rotLine = svgEl("line", { stroke: ACCENT, "stroke-width": 1.5, style: "pointer-events:none;" });
   // A DIAMOND marker for rotate — the owner-cited Google Earth Pro image-overlay convention
   // (B1134753 NEW-20): a circle reads as just another grip, a diamond reads as a distinct kind
   // of grip at a glance, matching the reference model's own four-handle-shapes vocabulary.
-  const rotHandle = svgEl("polygon", { fill: ON_ACCENT, stroke: ACCENT, "stroke-width": 1.5, style: "cursor:grab; pointer-events:auto;" });
-  const cornerCursors = ["nwse-resize", "nesw-resize", "nwse-resize", "nesw-resize"]; // [tl, tr, br, bl]
+  const rotHandle = svgEl("polygon", { fill: ON_ACCENT, stroke: ACCENT, "stroke-width": 1.5, style: `cursor:${ROTATE_CURSOR}; pointer-events:auto;` });
+  const cornerCursors = ["nwse-resize", "nesw-resize", "nwse-resize", "nesw-resize"]; // [tl, tr, br, bl] — re-pointed to follow the overlay's rotation in redraw()
   const corners = cornerCursors.map((cur) => svgEl("rect", {
     width: 11, height: 11, rx: 2, fill: ON_ACCENT, stroke: ACCENT, "stroke-width": 1.5, style: `cursor:${cur}; pointer-events:auto;`,
   }));
@@ -137,7 +138,14 @@ export function createPlacementHandles(map) {
       { x: rp.x - dx * DIAMOND_R, y: rp.y - dy * DIAMOND_R },
       { x: rp.x - dy * DIAMOND_R, y: rp.y + dx * DIAMOND_R },
     ]));
-    [tl, tr, br, bl].forEach((p, i) => { corners[i].setAttribute("x", p.x - 5.5); corners[i].setAttribute("y", p.y - 5.5); });
+    // the corner arrows follow the plan's ON-SCREEN rotation (its top edge's angle), built from each grip's own axes — a fixed
+    // nwse/nesw pair pointed the wrong way on any rotated plan
+    const topAngle = (Math.atan2(tr.y - tl.y, tr.x - tl.x) * 180) / Math.PI;
+    const CORNER_SIGNS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    [tl, tr, br, bl].forEach((p, i) => {
+      corners[i].setAttribute("x", p.x - 5.5); corners[i].setAttribute("y", p.y - 5.5);
+      corners[i].style.cursor = gripCursor(CORNER_SIGNS[i][0], CORNER_SIGNS[i][1], topAngle);
+    });
     if (readoutMode === "rotate") showReadout(readoutValue, rp.x, rp.y - 22);
     else if (readoutMode === "scale") showReadout(readoutValue, tr.x, tr.y - 18);
     else hideReadout();
@@ -159,8 +167,9 @@ export function createPlacementHandles(map) {
   // `overlay0` — the placement snapshot at grab, restored verbatim if the gesture is cancelled
   // (Escape — B1134753 NEW-20: "Escape cancels the in-progress manipulation and restores the
   // previous transform"). `mode` — "rotate" | "scale" | null, which readout (if any) shows live.
-  const runGesture = (overlay0, onMoveFn, { mode = null } = {}) => {
+  const runGesture = (overlay0, onMoveFn, { mode = null, cursor = "move" } = {}) => {
     gesture = true;
+    pinDragCursor(cursor); // the gesture keeps its cursor even when the pointer outruns the grip
     readoutMode = mode;
     const wasDragging = map.dragging && map.dragging.enabled();
     const wasTouchZoom = map.touchZoom && map.touchZoom.enabled();
@@ -171,6 +180,8 @@ export function createPlacementHandles(map) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointercancel", onUp);
+      unpinDragCursor();
       gesture = false;
       cancelGesture = null;
       readoutMode = null;
@@ -197,6 +208,7 @@ export function createPlacementHandles(map) {
     cancelGesture = () => { cleanup(); };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     // Capture phase — Escape must reach this handler even if the map or another control has
     // focus mid-drag (a pointer gesture never moves DOM focus onto the handle itself).
     window.addEventListener("keydown", onKey, true);
@@ -233,7 +245,7 @@ export function createPlacementHandles(map) {
       const vf = visibleFrame(current.overlay);
       const wFt = Math.round(vf.w * next.ftPerPx), hFt = Math.round(vf.h * next.ftPerPx); // the VISIBLE extent
       readoutValue = `${wFt.toLocaleString()} × ${hFt.toLocaleString()} ft`;
-    }, { mode: "scale" });
+    }, { mode: "scale", cursor: (e.currentTarget && e.currentTarget.style && e.currentTarget.style.cursor) || "nwse-resize" });
   };
 
   const startRotate = (e) => {
@@ -251,7 +263,7 @@ export function createPlacementHandles(map) {
       current.overlay = anchorVisibleCentreGeo(overlay0, { rotationDeg: next.rotationDeg }); // spins about the visible centre
       current.onLive(current.overlay);
       readoutValue = `${next.rotationDeg.toFixed(1)}°`;
-    }, { mode: "rotate" });
+    }, { mode: "rotate", cursor: ROTATE_CURSOR });
   };
 
   moveHit.addEventListener("pointerdown", startMove);
