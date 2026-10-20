@@ -64,7 +64,7 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8 }}>
       <button
         type="button" ref={anchorRef} data-testid="model-file-menu-btn" title="Export or import this workbook"
-        aria-haspopup="true" disabled={busy} onClick={() => setOpen((o) => !o)}
+        aria-haspopup="true" disabled={busy} aria-busy={busy ? "true" : undefined} onClick={() => setOpen((o) => !o)}
         style={{ ...chromeBtnStyle, opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
       >
         <IconFile /><span>File</span><span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>

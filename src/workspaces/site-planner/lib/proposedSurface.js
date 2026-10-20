@@ -736,9 +736,15 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   // construction. Nothing outside the limit is ever graded, so the setback flag cannot fire in this mode.
   const boundary = limit.mode === "boundary";
   const bandR2 = bs ? Math.pow(apronRatio * (bandDevMax + 10), 2) : 0;   // a sample further than this constrains nothing
+  // ROUND 5 (NEW-3): the ground at the NEAREST point on the limit bounds the surface too — the sweep's samples sit every
+  // 10 ft along the line, so between two of them the band alone let the surface sit up to 2.5 ft off the ground AT the
+  // setback; with the exact nearest point (d → 0 there) the surface meets existing ground on the line, so a proposed
+  // contour of level E ends exactly where the existing contour of level E crosses it.
   const bandZ = (pt, ze) => {
     if (!bs) return ze;
     let L = -Infinity, U = Infinity;
+    const nl = nearestOnRegions(pt, limit.regions);
+    if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
     const bx = bs.x, by = bs.y, bz = bs.z;
     for (let q = 0; q < bx.length; q++) {
       const ddx = pt.x - bx[q], ddy = pt.y - by[q], d2 = ddx * ddx + ddy * ddy;
@@ -974,6 +980,70 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     wedgeFillCy: wedgeFillCf / CF_PER_CY, wedgeCutCy: wedgeCutCf / CF_PER_CY,
     apronRatio, dockBreaks: { count: 0, maxFt: 0 },
   };
+}
+
+/* ROUND 5 (NEW-1) — THE CONTOUR LATTICE: a fine, regular lattice sampled off the surface the earthwork priced — never
+ * the earthwork cells themselves (13 ft on a 100-acre site, and their void halo past the daylight line is what traced as a
+ * staircase). Every sample inside the daylight line is the PROPOSED surface (`grid.probe`: the pad exactly at the FFE, each
+ * paved plane, the stitched open ground, the slope band), every sample outside it is EXISTING ground (`existAt`), so the
+ * field is continuous across the daylight line and the traced proposed contour of level E meets the existing one of level
+ * E there by construction. A pond interior and a DEM void are NaN (the lines break there). Generator: one yield per column.
+ * Returns { values, nx, ny, x0, y0, dx, dy, cellFt, interval, lo, hi, daylight (feet rings), pads (building rings, feet) }. */
+export const CONTOUR_LATTICE_MAX_SAMPLES = 60000;
+export const CONTOUR_LATTICE_MIN_CELL_FT = 3;
+export const CONTOUR_LATTICE_MARGIN_FT = 80;
+const DAYLIGHT_FIELD_SPAN_FT = 0.5;   // |dz| over which the daylight field runs −1 → +1 about PL_FILL_EPS_FT (sub-cell crossing)
+export function contourLattice(grid, opts) { return drainSteps(contourLatticeSteps(grid, opts)); }
+export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_LATTICE_MARGIN_FT, maxSamples = CONTOUR_LATTICE_MAX_SAMPLES, minCellFt = CONTOUR_LATTICE_MIN_CELL_FT, maxLevels = 60 } = {}) {
+  if (!grid || typeof grid.probe !== "function") return null;
+  const rings = (grid.daylight || []).filter((d) => d && !d.hole && Array.isArray(d.ring) && d.ring.length >= 3).map((d) => d.ring);
+  if (!rings.length) return null;
+  const boundary = !!(grid.limit && grid.limit.mode === "boundary");
+  const [bx0, by0, bx1, by1] = bboxOfRings(rings);
+  const x0 = bx0 - marginFt, y0 = by0 - marginFt, w = bx1 - bx0 + 2 * marginFt, h = by1 - by0 + 2 * marginFt;
+  if (!(w > 0) || !(h > 0)) return null;
+  const cellFt = Math.max(minCellFt, Math.sqrt((w * h) / maxSamples));
+  const nx = Math.max(2, Math.ceil(w / cellFt)), ny = Math.max(2, Math.ceil(h / cellFt));
+  const values = new Float32Array(nx * ny).fill(NaN);
+  // THE GRADED FIELD: +1 on an element or the stitched / plateau ground, −1 on existing ground, and across a slope band
+  // (|proposed − existing| − the engine's own "at/past the daylight line" epsilon) — linear, because |dz| falls linearly
+  // across a thrown slope, so its zero crossing, traced with interpolation in the worker, IS the daylight line (where
+  // the slope meets the ground) to a fraction of a cell. In boundary mode the band is inside the limit (B2376240) and
+  // the same field says which ground inside the setback is actually graded — the deep ground the sweep left out is
+  // existing ground, never a proposed contour — while the limit's own rings (`clipRings`) are the outer edge.
+  const inside = new Float32Array(nx * ny).fill(-1);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < nx; i++) {
+    yield;
+    const x = x0 + (i + 0.5) * cellFt;
+    for (let j = 0; j < ny; j++) {
+      const pt = { x, y: y0 + (j + 0.5) * cellFt };
+      const r = grid.probe(pt);
+      const k = j * nx + i;
+      let z = NaN;
+      if (r && r.status === "value" && Number.isFinite(r.ft)) {
+        z = r.ft;
+        if (z < lo) lo = z; if (z > hi) hi = z;
+        if (!r.wedge) inside[k] = 1;
+        else {
+          const g = typeof existAt === "function" ? existAt(pt) : null;
+          // unclamped above: |dz| falls linearly across the band, so the interpolated zero crossing is the true daylight
+          inside[k] = g == null || !Number.isFinite(g) ? -1 : Math.max(-1, (Math.abs(z - g) - PL_FILL_EPS_FT) / DAYLIGHT_FIELD_SPAN_FT);
+        }
+      } else if (r && r.reason === "pond") z = NaN;
+      else if (typeof existAt === "function") { const g = existAt(pt); z = g != null && Number.isFinite(g) ? g : NaN; }
+      values[k] = z;
+    }
+  }
+  if (!(hi > lo)) return null;
+  // the existing Contour-lines rule: 1 ft, coarser only when the PROPOSED range would drown the picture
+  let interval = 1;
+  for (const step of [1, 2, 5, 10, 20, 50]) { if ((hi - lo) / step <= maxLevels) { interval = step; break; } interval = 100; }
+  const pads = (grid.owners || []).filter((g) => g && g.plane && g.plane.classId === "buildingPad" && g.el && Array.isArray(g.el.ring)).map((g) => g.el.ring);
+  // boundary mode: the clip is the limit's own rings, exactly (the setback line and the pond / buffer holes)
+  const limitRings = boundary && grid.limit && Array.isArray(grid.limit.limitRegions) ? grid.limit.limitRegions.map((r) => r.outer) : null;
+  const limitHoles = boundary && grid.limit && Array.isArray(grid.limit.limitRegions) ? grid.limit.limitRegions.flatMap((r) => r.holes) : null;
+  return { values, inside, nx, ny, x0, y0, dx: cellFt, dy: cellFt, cellFt, interval, lo, hi, boundary, pads, clipRings: limitRings, clipHoles: limitHoles };
 }
 
 /* Earthwork of the WHOLE graded area (every element, the open ground and the slope bands), CY. */

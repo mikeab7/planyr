@@ -179,7 +179,8 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // ⛔ Bumped 600 → 900 (2026-10-19, NEW-1, Pennsylvania): 60 county rows from one measured table (PASDA's per-county layers + county-run servers), 10 more sibling state sessions landing the same day.
     // ⛔ Bumped 600 → 900 (2026-10-20, NEW-1, B2349360): Washington (34), Oklahoma, South Dakota, New Mexico and the other same-day state sessions each wired a measured per-county table — real counties, not a blind expansion.
     // ⛔ Bumped 900 → 1000 (2026-10-20, NEW-2, Kentucky): 11 more measured Kentucky county rows on top of the 22 — real counties from a measured table, not a blind expansion.
-    expect(keys.length).toBeLessThan(1000);
+    // ⛔ Bumped 900 → 1200 (2026-10-20, NEW-1, South Carolina B2348800): 45 South Carolina county rows from ONE measured table (the state's RFA statewide layer scoped per county + ten county layers) took the merged tree to 914 — real counties wired from per-county measurements, not a blind expansion.
+    expect(keys.length).toBeLessThan(1200);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {

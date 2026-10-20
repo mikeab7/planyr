@@ -184,6 +184,18 @@ export function moveOverlayStep(list, id, dir) {
 /** Drag-and-drop: put `dragId` directly in front of (`side` "front") or directly behind
  *  ("behind") `overId`. A drop across bands, onto itself, or involving a pinned map capture is a
  *  no-op (same array back). */
+/** Would dropping `dragId` on `overId` (on `side`) be accepted by `dropOverlay`? The same refusals, asked up front so the drag can say
+ *  "no drop here" (dropEffect none → the browser's no-drop cursor) instead of showing a move that then does nothing. A drop that
+ *  lands where it already sits is accepted (a harmless no-op), not refused. */
+export function canDropOverlay(list, dragId, overId, side) {
+  const a = arr(list);
+  if (!dragId || !overId || dragId === overId) return false;
+  const drag = a.find((o) => o && o.id === dragId), over = a.find((o) => o && o.id === overId);
+  if (!drag || !over || isPinnedMapReference(drag) || overlayBand(drag) !== overlayBand(over)) return false;
+  if (isPinnedMapReference(over) && side !== "front") return false;
+  return true;
+}
+
 export function dropOverlay(list, dragId, overId, side) {
   const a = arr(list);
   if (!dragId || !overId || dragId === overId) return a;

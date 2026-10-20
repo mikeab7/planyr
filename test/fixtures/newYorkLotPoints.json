@@ -1,0 +1,143 @@
+{
+ "_note": "One point inside a real lot per newly wired New York county (point query 2026-10-20, resolved to the right county). For the live click harness.",
+ "points": [
+  {
+   "county": "Allegany County",
+   "lat": 42.2635,
+   "lng": -78.0427,
+   "id": "145.-1-7"
+  },
+  {
+   "county": "Cattaraugus County",
+   "lat": 42.25838,
+   "lng": -78.56907,
+   "id": "05600400030040000000"
+  },
+  {
+   "county": "Chemung County",
+   "lat": 42.1475,
+   "lng": -76.82631,
+   "id": "69.05-2-3.12"
+  },
+  {
+   "county": "Chenango County",
+   "lat": 42.50008,
+   "lng": -75.63215,
+   "id": "146.-1-4.1"
+  },
+  {
+   "county": "Clinton County",
+   "lat": 44.71525,
+   "lng": -73.69161,
+   "id": "202.-2-52"
+  },
+  {
+   "county": "Columbia County",
+   "lat": 42.1915,
+   "lng": -73.64375,
+   "id": "102889-133.-1-46.110"
+  },
+  {
+   "county": "Delaware County",
+   "lat": 42.188,
+   "lng": -75.00073,
+   "id": "254.-1-13.11"
+  },
+  {
+   "county": "Dutchess County",
+   "lat": 41.77576,
+   "lng": -73.72862,
+   "id": "6664-00-600774-0000"
+  },
+  {
+   "county": "Essex County",
+   "lat": 44.10175,
+   "lng": -73.7606,
+   "id": "83.-1-2.000"
+  },
+  {
+   "county": "Franklin County",
+   "lat": 44.67905,
+   "lng": -74.30261,
+   "id": "214.-1-5.100"
+  },
+  {
+   "county": "Fulton County",
+   "lat": 43.11085,
+   "lng": -74.4032,
+   "id": "101.1-1-15"
+  },
+  {
+   "county": "Herkimer County",
+   "lat": 43.0806,
+   "lng": -74.95425,
+   "id": "106.4-1-45.1"
+  },
+  {
+   "county": "Jefferson County",
+   "lat": 44.12088,
+   "lng": -75.8363,
+   "id": "54.00-3-5.1"
+  },
+  {
+   "county": "Madison County",
+   "lat": 42.9111,
+   "lng": -75.70913,
+   "id": "110.-2-33"
+  },
+  {
+   "county": "Monroe County",
+   "lat": 43.154,
+   "lng": -77.7412,
+   "id": "118.06-1-9"
+  },
+  {
+   "county": "Nassau County",
+   "lat": 40.62535,
+   "lng": -73.73075,
+   "id": "39302500020000000000"
+  },
+  {
+   "county": "Orleans County",
+   "lat": 43.251,
+   "lng": -78.33574,
+   "id": "70.-1-1.2"
+  },
+  {
+   "county": "Saratoga County",
+   "lat": 43.09711,
+   "lng": -73.9277,
+   "id": "149.-1-120.1"
+  },
+  {
+   "county": "Schenectady County",
+   "lat": 42.83671,
+   "lng": -74.02664,
+   "id": "28.-2-5.1"
+  },
+  {
+   "county": "Schoharie County",
+   "lat": 42.56995,
+   "lng": -74.4375,
+   "id": "115.-1-18"
+  },
+  {
+   "county": "Seneca County",
+   "lat": 42.84825,
+   "lng": -76.84686,
+   "id": "20-1-09.12"
+  },
+  {
+   "county": "Washington County",
+   "lat": 43.39291,
+   "lng": -73.43111,
+   "id": "122.-1-9"
+  },
+  {
+   "county": "Yates County",
+   "lat": 42.62051,
+   "lng": -77.01705,
+   "id": "74.03-1-2"
+  }
+ ]
+}

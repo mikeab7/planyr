@@ -5,10 +5,14 @@
  * Provider: the Gmail API as a planyr.io Google Workspace user via a service account with
  * domain-wide delegation (lib/gmailSend.js) — no third-party email service. Env (Cloudflare Pages,
  * never the repo): GMAIL_SERVICE_ACCOUNT_JSON (secret, required) · INVITE_SENDER (planyr.io mailbox
- * to send as, required) · PUBLIC_APP_URL (optional, default https://planyr.io).
+ * to authenticate as, required) · INVITE_FROM (optional From address, default no-reply@planyr.io) · PUBLIC_APP_URL (optional, default https://planyr.io).
  */
 import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
 import { sendViaGmail } from "./gmailSend.js";
+
+/* Public From address on invite mail (a Workspace alias of the INVITE_SENDER mailbox, which still
+ * authenticates the send). INVITE_FROM overrides it. */
+export const INVITE_FROM_DEFAULT = "no-reply@planyr.io";
 
 export const DEFAULT_APP_URL = "https://planyr.io";
 
@@ -85,7 +89,7 @@ export async function handleInviteEmail({ env, request, fetchImpl = fetch }) {
   }
 
   const mail = buildInviteEmail({ inviterName: c.inviter_name, teamName: c.team_name, role: c.role, email: c.email, appUrl: env.PUBLIC_APP_URL });
-  const sent = await sendViaGmail({ serviceAccountJson: env.GMAIL_SERVICE_ACCOUNT_JSON, sender: env.INVITE_SENDER, to: c.email, subject: mail.subject, html: mail.html, text: mail.text, fetchImpl });
+  const sent = await sendViaGmail({ serviceAccountJson: env.GMAIL_SERVICE_ACCOUNT_JSON, sender: env.INVITE_SENDER, fromEmail: env.INVITE_FROM || INVITE_FROM_DEFAULT, to: c.email, subject: mail.subject, html: mail.html, text: mail.text, fetchImpl });
   if (!sent.ok) {
     await release();
     return json({ ok: false, reason: "send_failed", error: sent.error }, 502);

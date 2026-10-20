@@ -45,7 +45,9 @@ export function gradingCfg(g) {
     enabled: src.enabled === true,
     // Level-pad limit, Cut & Fill (the "Show cut and fill on the map" checkbox, NEW-2) and the proposed contours
     // (round 4, B2349122): all OFF until asked for.
-    layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !!(src.layers && src.layers.cutfill), contours: !!(src.layers && src.layers.contours) },
+    layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !!(src.layers && src.layers.cutfill), contours: !!(src.layers && src.layers.contours),
+      // ROUND 5 (NEW-6): the paper background under the grading picture — ON by default while grading is on, per plan
+      paper: !(src.layers && src.layers.paper === false) },
     // ROUND 4 — the grading limit: its mode ("layout" = around the graded elements, "boundary" = the setback itself),
     // the owner's edited outline (layout mode only; null = auto), the shoulder, the corner radius, the max pavement slope.
     limitMode: LIMIT_MODES.includes(src.limitMode) ? src.limitMode : GRADING_DEFAULTS.limitMode,
@@ -168,7 +170,7 @@ export function parcelsSig(parcels, baseSetback) {
 export function useGradingBase({ enabled, origin, parcels, gradingSettings, baseSetback, extraRings = null, aisleFt = LIMIT_DEFAULTS.aisleFt }) {
   const g = gradingSettings || null;
   const cfgKey = JSON.stringify([g && g.enabled, g && g.pavementSlopePct, g && g.maxCutFillFt, g && g.slopeRatio, g && g.layers && g.layers.buildable, g && g.layers && g.layers.cutfill,
-    g && g.layers && g.layers.contours, g && g.limitMode, g && g.shoulderFt, g && g.cornerRadiusFt, g && g.maxPavementSlopePct, g && Array.isArray(g.limitRing) ? ringSig(g.limitRing) : null]);
+    g && g.layers && g.layers.contours, g && g.layers && g.layers.paper, g && g.limitMode, g && g.shoulderFt, g && g.cornerRadiusFt, g && g.maxPavementSlopePct, g && Array.isArray(g.limitRing) ? ringSig(g.limitRing) : null]);
   const cfg = useMemo(() => gradingCfg(g), [cfgKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const psig = enabled ? parcelsSig(parcels, baseSetback) : "";
   const parcelsRef = useRef(parcels); parcelsRef.current = parcels;
