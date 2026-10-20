@@ -134,6 +134,7 @@ function GalleryBody() {
       <Row title="ToggleChip — active × rest">
         <Specimen label="rest" tokens="CONTROL_RADIUS.pill"><ToggleChip>Off</ToggleChip></Specimen>
         <Specimen label="active" tokens="accent fill"><ToggleChip active>On</ToggleChip></Specimen>
+        <Specimen label="disabled (arrow cursor, never pointer)" tokens="cursor convention"><ToggleChip disabled>Off</ToggleChip></Specimen>
       </Row>
 
       <Row title="RangeFields — a Min–Max pair (either end may be blank)">
@@ -153,6 +154,7 @@ function GalleryBody() {
         <Specimen label="rest, 30px (default)" tokens="CONTROL_RADIUS.control"><IconButton>★</IconButton></Specimen>
         <Specimen label="active, 30px" tokens="accent fill"><IconButton active>★</IconButton></Specimen>
         <Specimen label="rest, 22px (size=22)" tokens="CONTROL_H.sm-scale"><IconButton size={22}>★</IconButton></Specimen>
+        <Specimen label="disabled (arrow cursor, never pointer)" tokens="cursor convention"><IconButton disabled aria-label="Disabled specimen">★</IconButton></Specimen>
       </Row>
 
       <Row title="Field — label + control row">
@@ -165,7 +167,7 @@ function GalleryBody() {
         <Specimen label={`Section (${collapsed ? "collapsed" : "open"} — click to toggle)`} tokens="CONTROL_RADIUS.panel">
           <div style={{ width: 260 }}>
             <Section title="Assumptions & method" collapsed={collapsed} accent="var(--accent)">
-              <div style={{ fontSize: 12 }} onClick={() => setCollapsed((c) => !c)}>Body content goes here.</div>
+              <div style={{ fontSize: 12, cursor: "pointer" }} onClick={() => setCollapsed((c) => !c)}>Body content goes here.</div>
             </Section>
           </div>
         </Specimen>

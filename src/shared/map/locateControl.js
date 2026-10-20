@@ -58,7 +58,7 @@ export function addLocateControl(L, map, hooks = {}) {
     btn.setAttribute("data-locate-state", state === "idle" && blocked ? "blocked" : state);
     btn.setAttribute("aria-pressed", state === "following" ? "true" : "false");
     btn.style.opacity = blocked ? "0.4" : "";
-    btn.style.cursor = blocked ? "default" : "pointer";
+    btn.style.cursor = blocked ? "default" : state === "locating" ? "progress" : "pointer";
     btn.style.animation = state === "locating" ? "locate-pulse 1s ease-in-out infinite" : "";
   };
   const setState = (event) => {

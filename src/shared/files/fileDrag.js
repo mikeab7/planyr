@@ -107,7 +107,13 @@ export function installFileDragGuard(win = typeof window !== "undefined" ? windo
   if (doc) add(doc, "visibilitychange", () => { if (doc.visibilityState !== "visible") clearFileDrag(); });
 
   // BUBBLE phase for the default action: every surface that wants the drop has already had it.
-  add(win, "dragover", (e) => { if (isFileDrag(e)) e.preventDefault(); });
+  // A dragover nobody claimed (not defaultPrevented by a surface that handles the drop) is a dead spot: show the
+  // no-drop cursor there instead of the "copy" plus the browser would otherwise paint (cursor convention).
+  add(win, "dragover", (e) => {
+    if (!isFileDrag(e)) return;
+    if (!e.defaultPrevented && e.dataTransfer) { try { e.dataTransfer.dropEffect = "none"; } catch (_) { /* read-only in some engines */ } }
+    e.preventDefault();
+  });
   add(win, "drop", (e) => { if (isFileDrag(e)) e.preventDefault(); });
 
   uninstall = () => { on.forEach((f) => f()); clearFileDrag(); uninstall = null; };
