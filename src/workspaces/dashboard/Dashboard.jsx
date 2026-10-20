@@ -79,7 +79,7 @@ import { planProjectMove } from "../../shared/projects/projectOrder.js";
 import { loadProjectOrder, saveProjectOrder } from "./lib/dashboardProjectOrderPrefs.js";
 import { buildSinceLastHereFeed } from "./lib/sinceLastHereFeed.js";
 import { spanWords } from "./lib/dashboardDates.js";
-import { pinDragCursor } from "../../shared/ui/cursors.js";
+import { pinDragCursor } from "../../shared/ui/controls.jsx";
 
 // B1426608 — cards whose content is a short text/number list (no chart, map, or
 // thumbnail grid measuring its own box) shrink to content instead of stretching to fill their

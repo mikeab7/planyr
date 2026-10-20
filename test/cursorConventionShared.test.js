@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { ROTATE_CURSOR, pinDragCursor } from "../src/shared/ui/cursors.js";
+import { ROTATE_CURSOR, pinDragCursor } from "../src/shared/ui/controls.jsx";
 
 const read = (p) => readFileSync(p, "utf8");
 const css = read("src/index.css");

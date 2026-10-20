@@ -60,7 +60,7 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { RADIUS, nestedIn } from "../../../shared/ui/radius.js";
 import ContextMenu from "./ContextMenu.jsx";
-import { pinDragCursor } from "../../../shared/ui/cursors.js";
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 // SPACE.xs/SPACE.sm/SPACE.md and FONT_SIZE.control/FONT_SIZE.display literals (4/6/8, 12/14) —
 // deliberately NOT imported from designTokens.js. Same reasoning SheetView.jsx/Ribbon.jsx already

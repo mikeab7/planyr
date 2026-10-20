@@ -417,7 +417,7 @@ stylesheet does (`button:disabled … { cursor: default !important }` in `src/in
 | Vertex / node grips | `move` (one convention, roads included) |
 | Resize grips | directional (`ew`/`ns`/`nwse`/`nesw`), following the object's on-screen rotation; corner grips use the grip's own axes |
 | Splitters / dividers | `col-resize` / `row-resize` |
-| Rotate grips | the ONE shared `ROTATE_CURSOR` (`src/shared/ui/cursors.js`) |
+| Rotate grips | the ONE shared `ROTATE_CURSOR` (`src/shared/ui/controls.jsx`) |
 | Text being edited | `text` |
 | Disabled control | `default` — never `pointer`, never `not-allowed` |
 | Disabled because it is working | `progress` (set `aria-busy="true"` on the button) |
@@ -426,7 +426,7 @@ stylesheet does (`button:disabled … { cursor: default !important }` in `src/in
 | Busy / loading overlays | `progress` |
 
 **During a drag the cursor stays the drag's cursor for the whole gesture**, even when the pointer leaves the grip.
-Use `pinDragCursor(cursor)` from `src/shared/ui/cursors.js` (pins it at the document root, released on pointerup,
+Use `pinDragCursor(cursor)` from `src/shared/ui/controls.jsx` (pins it at the document root, released on pointerup,
 pointercancel, Escape and window blur) or pointer capture on the element whose cursor should show. A cursor must
 never lie about what a press will do: if a drag pans, show `grab`; if it moves the object, `move`; if the press is
 ignored, the arrow.

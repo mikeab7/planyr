@@ -2,7 +2,7 @@ import { useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import PanelChrome from "./PanelChrome.jsx";
 import { clampToBounds, FLOAT_SIZE } from "./floatingPanel.js";
-import { pinDragCursor } from "./cursors.js";
+import { pinDragCursor } from "./controls.jsx";
 
 /**
  * FloatingPanel — a Site Planner left-rail panel detached into a draggable card over the map

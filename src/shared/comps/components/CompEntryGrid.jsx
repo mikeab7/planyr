@@ -50,7 +50,7 @@ import { resolveCountyForPoint } from "../../sitePlans/lib/overlayCompCounty.js"
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 import { MOBILE_BREAKPOINT_PX } from "../lib/compMobileLayout.js";
 import CompEntryMobileSheet from "./CompEntryMobileSheet.jsx";
-import { pinDragCursor } from "../../ui/cursors.js";
+import { pinDragCursor } from "../../ui/controls.jsx";
 
 // B1091712 — below MOBILE_BREAKPOINT_PX this whole panel renders CompEntryMobileSheet
 // instead of the table below (a transposed, one-comp-per-screen layout — see that file's own

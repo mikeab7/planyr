@@ -55,7 +55,7 @@ import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
 import ContextMenu from "./ContextMenu.jsx";
 import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
-import { pinDragCursor } from "../../../shared/ui/cursors.js";
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 // B1007281 — AutoFilter (Sort & Filter). One column header's own filter trigger + checkbox
 // popover. `allowed` is the column's current filter (a Set of DISPLAY-value strings still

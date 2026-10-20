@@ -17,7 +17,7 @@ import { isQuietEmphasized } from "../lib/pursuitsList.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { IconButton, MenuItem } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
-import { pinDragCursor } from "../../../shared/ui/cursors.js";
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 const EMPTY = { fontSize: 12, color: "var(--text-secondary)", fontStyle: "italic" };
 const dayWord = (n) => (n === 1 ? "day" : "days");

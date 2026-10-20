@@ -53,7 +53,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button, SegmentedControl, MenuItem, menuPanelStyle, FloatingToolbar, FloatingToolButton, FloatingToolDivider } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
-import { pinDragCursor } from "../../ui/cursors.js";
+import { pinDragCursor } from "../../ui/controls.jsx";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import {
   clampCropRect, normalizeCrop, isFullCrop,
