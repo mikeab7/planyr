@@ -1,0 +1,7 @@
+KBC North Lease Comps
+Lease Executed	Lease Commencement	Lease Expiration	Submarket	Property Name	Address	City	Tenant	Landlord	Leased SF	Total Building SF	Lease Transaction Type	Lease Term (months)	Free Rent (months)	Rent per SF/Month	Base Rent Increases %	TI Allowance $/SF	Clear Height Min (ft)	Year Built	Load Type	x	y
+Jun-26	Aug-26	Jan-37	North Fwy/Tomball Pkwy	Example Logistics Park Bldg 2	1200 Example Pkwy	Houston	Acme Widgets LLC	Sample Industrial REIT	100,043	412,500	New Lease	126	6	$0.665	3.75%	$10.00	32'	2026	Front Load	-95.442043	29.927004
+Mar-26	May-26	Apr-31	North Hardy Toll Rd	4400 Sample Rd	4400 Sample Rd	Houston	Fictional Freight Co	Placeholder Partners	52,800	52,800	Renewal	60	6 mo $0.37 NNN	$0.645	4.00%	-	28'	2008	Rear Load	-95.381200	29.958100
+Jan-26	Apr-26	Jul-33	Northwest Near	Demo Commerce Center	880 Demo Blvd	Houston	Test Pallet Supply	Imaginary Capital	210,000	500,000	Expansion	87	9 (2 mo gross/ 7 mo net)	$0.595	3.50%	$4.50	36'	2024	Cross Dock	-95.512300	29.901700
+Nov-25	Feb-26	Jan-31	North Fwy/Tomball Pkwy	Mock Distribution Ctr	77 Mock Ln	Spring	Widget Holdings	Sample Industrial REIT	24,400	180,000	New Lease	59	4 (2 mo gross/ 2 mo base)	$0.575	3.25%	$2.00	24'	1999	Front Load	-95.430000	30.050000
+Oct-25	Dec-25	Nov-30	North Hardy Toll Rd	Example Gateway	19000 Example Hwy	Humble	Placeholder Foods	Fake Fund IV	60,500	60,500	New Lease	60	-	$0.535	3.50%	-	30'	2015	Rear Load	-95.300000	29.990000

@@ -107,7 +107,7 @@ function monthsFromTermText(text) {
 
 export const TYPE_OPTIONS = [
   { value: "land", label: "Land" },
-  { value: "building_sale", label: "Bldg sale" },
+  { value: "building_sale", label: "Bldg Sale" },
   { value: "lease", label: "Lease" },
 ];
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];
@@ -302,6 +302,10 @@ export const SHEET_COLUMNS = [
   // and year built are physical characteristics of the improvement, not the deal's location, and
   // grouping them with the street address read as if they were the same kind of fact.
   simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerAmps", label: "Power (A)", fullLabel: "Power (amps)", group: "BUILDING", width: 64, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerVolts", label: "Volts", fullLabel: "Power (volts)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerPhase", label: "Phase", fullLabel: "Power (phase: 1 or 3)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "dockDoors", label: "Docks", fullLabel: "Dock doors", group: "BUILDING", width: 50, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
   simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
 
   // DEAL — facts about the transaction: when, how long.
