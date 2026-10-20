@@ -54,6 +54,7 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
 import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
 import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
@@ -991,6 +992,7 @@ const COUNTIES_RAW = {
   ...okRaw(), // NEW-1 (Oklahoma)
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
   ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
   ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
   ...sdRaw(), // NEW-1 (B2343936) — South Dakota counties (sd_beadle … sd_roberts)
@@ -3052,6 +3054,7 @@ const COUNTIES_MAP_RAW = {
   ...laMap(),
   ...ksMap(), // NEW-1 (B2348000)
   ...moMap(),
+  ...ilMap(),
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
