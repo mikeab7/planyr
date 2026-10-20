@@ -102,6 +102,20 @@ export const ALLOWED_HOSTS = new Set([
   "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
   "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
   "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
+  /* NEW-1 (Oregon, 2026-10-19, B2347696) — the county / state hosts the wired Oregon counties sit on (found through the state's "Publicly Accessible
+   * Oregon County Parcel Data" page, each county viewer's web-map config and a REST-directory search). The build sandbox reaches none of them, so each was
+   * MEASURED through this relay on the PR preview before a county was wired to it. Hosts that were probed and NOT used (Polk's server answers a web-adaptor
+   * error, Jefferson's times out, ODF's TaxlotsDisplay has no Query) are deliberately not listed. */
+  "gis.co.benton.or.us", // Benton County
+  "gis.columbiacountymaps.com", // Columbia County
+  "gis.crookcountyor.gov", // Crook County
+  "gis.co.douglas.or.us", // Douglas County
+  "jcportal.jacksoncountyor.gov", // Jackson County
+  "lcmaps.lanecounty.org", // Lane County
+  "gis.co.linn.or.us", // Linn County
+  "gispub.co.washington.or.us", // Washington County
+  "public.co.wasco.or.us", // Wasco County
+  "gis.wrd.state.or.us", // Oregon Water Resources Department public tax-lot query (Curry, Jefferson, Lincoln)
   /* NEW-1 (Oklahoma, 2026-10-19) — county / regional hosts named by the Oklahoma parcel sweep; each is MEASURED through this relay before any county is wired to it. */
   "gis.okco14.org", "gis.clevelandcountyassessor.us", // Cleveland County assessor
   "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services

@@ -54,6 +54,7 @@ import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New M
 import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
 import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
 import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
 import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
 
 export { loadCountyPolygons, countyPolygonsReady };
@@ -986,6 +987,7 @@ const COUNTIES_RAW = {
   ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
   ...okRaw(), // NEW-1 (Oklahoma)
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
   ...sdRaw(), // NEW-1 (B2343936) — South Dakota counties (sd_beadle … sd_roberts)
   ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
   ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
@@ -3035,6 +3037,7 @@ const COUNTIES_MAP_RAW = {
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
   ...msMarisMap(),
   ...alMap(),
+  ...orMap(), // NEW-1 (B2347696)
   ...sdMap(), // NEW-1 (B2343936)
   ...idMap(), // NEW-1 (B2317920)
   ...nmMap(), // NEW-1 (B2345888)

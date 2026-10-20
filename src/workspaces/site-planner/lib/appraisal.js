@@ -278,8 +278,9 @@ export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owne
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name|last_?name)$/i; // last_?name: Georgia WinGAP rolls (Thomas, Atkinson, Brooks, Irwin, Pierce, Ben Hill, Houston, Stewart, Talbot) put the whole owner in LASTNAME (B2316720)
 /* New Mexico (B2345888): `GIS_Owner1` is Otero County's owner column (the GIS vendor's CAMA export prefixes every column `GIS_`). */
 /* Idaho (B2317920): `OWNERSHIP` (Butte, Clearwater, Elmore, Owyhee), `Parcel_Owner` (Bonner) and `ML_OWNR_NM` (Idaho County's merged CAMA roll) and `PM_MAIL_NM` / `PS_MAIL_NM` (the ProVal CAMA mailing NAME — Latah, Boundary) are those sources' owner column — consulted only in the FALLBACK pass, because a bare `Ownership` is a land-use category on Louisiana's LED layer (test/louisianaParishes.test.js). */
+/* Oregon (B2347696): `FEEOWNER` (Jackson), `OWNER_LINE` (Clatsop), `OwnerLine1` (Lake) and `MAILING_NAME` (Umatilla, the assessor roll's owner of record) — fallback pass only, like the Idaho spellings. */
 /* South Dakota (B2343936): `TAXPAYER_NAME` (Grant, First District roll), `CURRENT_OW` (Lawrence's shapefile-truncated CURRENT_OWNER) and `vcPayerLas` (Brown's payer last-or-entity name — the first name sits in a sibling column) are those sources' owner column; `deedhold` (Moody) is a spelling of the deed-holder column in OWNER_KEY_RE. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|gis_owner1|taxpayer_name|current_ow|vcpayerlas)$/i;
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
