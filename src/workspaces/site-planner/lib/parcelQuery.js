@@ -84,7 +84,16 @@ export function idAttrFor(county, attrs) {
    * pinned id column has to be read from there too: without this, `ca_statewide`'s pin was inert and the card
    * showed the layer's OBJECTID row number as the parcel's account id. */
   const c = COUNTIES[county] || COUNTIES_MAP[county];
-  const field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
+  let field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
+  /* NEW-2 (Kentucky, 2026-10-21) — a layer built from a JOIN (Scott County's Georgetown-Scott Planning service) returns its
+   * columns TABLE-PREFIXED ("gscrep.DBO.Parcels_P.GIS_MapID"), so the configured `idField` ("GIS_MapID") is not a key of the
+   * attribute bag and the card showed no parcel id at all (measured live on planyr.io 2026-10-21, V1747776). When the resolved
+   * column is not an exact key, take the key whose LAST dotted segment is that column. */
+  if (field && !(field in attrs)) {
+    const want = String(field).toLowerCase();
+    const k = Object.keys(attrs).find((n) => n.replace(/^.*\./, "").toLowerCase() === want);
+    if (k) field = k;
+  }
   /* B2194740 — a layer's own ROW NUMBER (OBJECTID/FID) is never a parcel's account. The detector falls back to
    * it when no id-shaped column matches (measured on real rows: Bernalillo NM `UPC`, Macomb MI `TAX_ID`, whose
    * stored account was "1"); the county record's resolvers know more column spellings, so ask them, and store
