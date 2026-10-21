@@ -249,10 +249,17 @@ describe("NEW-3 — every element panel takes layout A's control rules", () => {
     expect(row).toMatch(/<NumInput boxed fill ariaLabel="Line weight"/);
     expect(row).not.toMatch(/unit=/);
   });
-  it("the generic element panel leads with Appearance and follows with Size & position", () => {
-    const ap = SP.indexOf('<StdSubLabel section="appearance">Appearance</StdSubLabel>\n              <PairedFieldHead left="Outline" right="Fill" />');
+  it("the generic element panel leads with Appearance, then Size & position — and a road keeps its own approved order (Appearance AFTER its sections)", () => {
+    expect(SP).toMatch(/const renderElAppearance = \(\) => \(/);
+    const top = SP.indexOf("{!roadPanel && elAppearanceOn && renderElAppearance()}");
     const sz = SP.indexOf('<StdSubLabel section="size">Size & position</StdSubLabel>\n                      <Field label="Width (ft)">');
-    expect(ap).toBeGreaterThan(-1); expect(sz).toBeGreaterThan(ap);
+    const roadLast = SP.indexOf('sectionId="road-intersection"');
+    const bottom = SP.indexOf("{roadPanel && elAppearanceOn && renderElAppearance()}");
+    expect(top).toBeGreaterThan(-1); expect(sz).toBeGreaterThan(top);
+    expect(bottom).toBeGreaterThan(roadLast); expect(roadLast).toBeGreaterThan(top);
+    // the section body itself is the single Appearance block
+    const body = SP.slice(SP.indexOf("const renderElAppearance = () => ("), SP.indexOf("const trailerStallsNode"));
+    expect(body).toMatch(/<StdSubLabel section="appearance">Appearance<\/StdSubLabel>\s*<PairedFieldHead left="Outline" right="Fill" \/>/);
   });
   it("the car-parking spec sheet's headings are Size & position and Appearance (and tagged as sections)", () => {
     expect(SP).toMatch(/specHead\("Size & position"\)/);

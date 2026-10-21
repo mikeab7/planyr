@@ -21761,6 +21761,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       right={<LineSample weight={curStyle.strokeWidth} />}
     />
   ) : null;
+  // NEW-3 — the generic element "Appearance" section's one body and its one condition (see the two call sites in the inspector).
+  const elAppearanceOn = !multiStyleable && !!selEl && !!curStyle && selEl.type !== "pond" && !bldgPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit));
+  const renderElAppearance = () => (
+    <Section title={null}>
+              <StdSubLabel section="appearance">Appearance</StdSubLabel>
+              <PairedFieldHead left="Outline" right="Fill" />
+              <PairedField label="Colour"
+                left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+              />
+              <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
+              {strokeWidthRow}
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
+                <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
+                New {(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
+              </div>
+    </Section>
+  );
   // NEW-1 — the trailer row's own stall spec + label switch, hoisted so a dock-zone trailer parking layer shows it INSIDE
   // its Size section (DockLayerPanel `size.extra`) and a free-standing trailer court still shows it where it always did.
   const trailerStallsNode = selEl && selEl.type === "trailer" ? (() => {
@@ -28082,32 +28103,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               with two cards' worth of padding between them and only two fields left on screen. Never
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
-          {/* Bluebeam-style Properties — colors for the selected element + set defaults. NEW-3 (layout "A"): APPEARANCE now leads the
-              panel, above SIZE & POSITION (dimensions · rotation · footprint), the same order as the markup / measurement panels.
-              Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6),
-              so the standalone Properties section is suppressed for them. Car parking renders its
-              own "Display" group inside the spec sheet above (B1790016 NEW-1), so it is suppressed
-              here too — same reasoning as the pond exception right above. */}
-          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !bldgPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
-            <Section title={null}>
-              <StdSubLabel section="appearance">Appearance</StdSubLabel>
-              <PairedFieldHead left="Outline" right="Fill" />
-              <PairedField label="Colour"
-                left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
-                right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
-              />
-              <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
-              {strokeWidthRow}
-              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
-                <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
-              </div>
-              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
-                New {(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
-              </div>
-            </Section>
-          )}
-
+          {/* Bluebeam-style Properties — colors for the selected element + set defaults. NEW-3 (layout "A"): APPEARANCE leads the panel, above
+              SIZE & POSITION (dimensions · rotation · footprint), the same order as the markup / measurement panels — EXCEPT on a road, whose
+              owner-approved panel (Road · Cross-section · Label · Intersection) keeps its own order, so its Appearance stays after the sections
+              (renderElAppearance is the ONE body; the two call sites differ only by `roadPanel`).
+              Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6), so the standalone section is suppressed for them.
+              Car parking renders its own "Appearance" group inside the spec sheet (B1790016 NEW-1), so it is suppressed here too. */}
+          {!roadPanel && elAppearanceOn && renderElAppearance()}
           {!multiStyleable && selEl && (
             <Section title={null}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
@@ -30422,6 +30424,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
             </Section>
           )}
+
+          {roadPanel && elAppearanceOn && renderElAppearance()}
 
           </>)}
           </div>

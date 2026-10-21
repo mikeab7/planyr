@@ -132,6 +132,13 @@ for (const theme of THEMES) {
         if (c.title) await expect(page.getByTestId("props-panel-title")).toHaveText(c.title);
         if (!c.ownLayout && c.sections.length) expect(r.sections.map((s) => s[0]), `${c.name} sections`).toEqual(c.sections);
         if (c.name === "car parking") expect(r.sections.map((s) => s[1])).toEqual(["Size & position", "Appearance"]);
+        if (c.name === "road") {
+          // the owner-approved road panel keeps its order: the Road / Cross-section / Label sections first, Appearance after them
+          expect(r.sections.map((s) => s[0])).toEqual(["appearance"]);
+          const road = await panel.getByRole("button", { name: /^Road/ }).first().boundingBox();
+          const app = await panel.locator('[data-panel-section="appearance"]').boundingBox();
+          expect(app.y, "road: Appearance sits after the Road section").toBeGreaterThan(road.y);
+        }
         expect(r.overflow, `${c.name} sideways overflow`).toBeLessThanOrEqual(1);
         for (const wr of r.weightRows) expect(wr, `${c.name} weight row`).not.toMatch(/\bpt\b/);
         expect(r.sels.length, `${c.name} pattern selects`).toBe(c.patterns);

@@ -62,7 +62,8 @@ async function drawAll() {
   // 1 · area measurement (Measure ▾ → Area): four clicks, double-click the first point to close
   await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: "Area", exact: true }).click();
-  const area = [at(0.08, 0.10), at(0.30, 0.10), at(0.30, 0.30), at(0.08, 0.30)];
+  // everything is drawn in the RIGHT half of the canvas: the docked Properties panel (up to 620 px wide) paints over the left of it
+  const area = [at(0.52, 0.08), at(0.68, 0.08), at(0.68, 0.26), at(0.52, 0.26)];
   for (const p of area) { await page.mouse.click(p.x, p.y); await sleep(80); }
   await page.mouse.dblclick(area[0].x, area[0].y);
   await sleep(500); await page.keyboard.press("Escape"); await sleep(200);
@@ -73,13 +74,13 @@ async function drawAll() {
     await page.mouse.move(a.x + 60, a.y + 40, { steps: 5 }); await page.mouse.move(c.x, c.y, { steps: 8 });
     await page.mouse.up(); await sleep(400); await page.keyboard.press("Escape"); await sleep(200);
   };
-  await drag("Building", at(0.42, 0.10), at(0.62, 0.30));
-  await drag("Parking", at(0.72, 0.10), at(0.92, 0.26));
-  await drag("Detention Pond", at(0.08, 0.50), at(0.28, 0.72));
+  await drag("Building", at(0.74, 0.08), at(0.94, 0.26));
+  await drag("Parking", at(0.52, 0.42), at(0.70, 0.54));
+  await drag("Detention Pond", at(0.76, 0.42), at(0.94, 0.62));
   // 3 · a centerline road (preset width, three clicks, Enter)
   await page.getByRole("button", { name: "Road presets" }).click();
   await page.getByRole("button", { name: /^24′$/ }).click();
-  for (const p of [at(0.42, 0.62), at(0.62, 0.62), at(0.80, 0.78)]) { await page.mouse.click(p.x, p.y); await sleep(100); }
+  for (const p of [at(0.54, 0.78), at(0.70, 0.78), at(0.86, 0.90)]) { await page.mouse.click(p.x, p.y); await sleep(100); }
   await page.keyboard.press("Enter"); await sleep(600); await page.keyboard.press("Escape");
 }
 
@@ -107,10 +108,12 @@ async function widen() {
   await sleep(600);
 }
 
-async function openOne(sel) {
+async function openOne(sel, frac) {
   await page.keyboard.press("Escape"); await sleep(200);
   const bb = await page.locator(sel).first().boundingBox();
-  const at = { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 };
+  // a bent road's bounding-box centre is not on its pavement — a road is pressed at a given fraction of the canvas instead
+  const cb = await canvas.boundingBox();
+  const at = frac ? { x: cb.x + cb.width * frac[0], y: cb.y + cb.height * frac[1] } : { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 };
   await page.mouse.click(at.x, at.y); await sleep(400);
   await page.mouse.dblclick(at.x, at.y);
   await panel.waitFor({ timeout: 10000 }); await sleep(300);
@@ -135,13 +138,13 @@ try {
     { name: "building", sel: byType("building") && `[data-el-id="${byType("building").id}"]`, present: !!byType("building") },
     { name: "car parking", sel: byType("parking") && `[data-el-id="${byType("parking").id}"]`, present: !!byType("parking") },
     { name: "detention pond", sel: byType("pond") && `[data-el-id="${byType("pond").id}"]`, present: !!byType("pond"), pond: true },
-    { name: "road", sel: byType("road") && `[data-el-id="${byType("road").id}"]`, present: !!byType("road") },
+    { name: "road", sel: byType("road") && `[data-el-id="${byType("road").id}"]`, present: !!byType("road"), frac: [0.62, 0.78] },
   ];
   for (const sj of subjects) ok(`drawn with the real tool: ${sj.name}`, sj.present);
 
   const narrow = {};
   for (const sj of subjects.filter((x) => x.present && x.sel)) {
-    const at = await openOne(sj.sel);
+    const at = await openOne(sj.sel, sj.frac);
     if (sj.pond) { const hdr = panel.getByRole("button", { name: /^Appearance/ }); if ((await hdr.getAttribute("aria-expanded")) !== "true") { await hdr.click(); await sleep(250); } }
     const r = await readPanel();
     narrow[sj.name] = r;
@@ -165,7 +168,7 @@ try {
 
   await widen();
   for (const sj of subjects.filter((x) => x.present && x.sel)) {
-    await openOne(sj.sel);
+    await openOne(sj.sel, sj.frac);
     if (sj.pond) { const hdr = panel.getByRole("button", { name: /^Appearance/ }); if ((await hdr.getAttribute("aria-expanded")) !== "true") { await hdr.click(); await sleep(250); } }
     const w = await readPanel();
     const was = narrow[sj.name];
