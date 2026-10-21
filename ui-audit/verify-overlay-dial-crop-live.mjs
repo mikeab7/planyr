@@ -59,17 +59,30 @@ const near = (a, b, tol) => Math.abs(((a - b + 540) % 360) - 180) <= tol;
 const dialPt = async (deg, r) => { const b = await T("overlay-rot-dial").boundingBox(); const cx = b.x + b.width / 2, cy = b.y + b.height / 2, a = (deg * Math.PI) / 180; return { x: cx + r * Math.sin(a), y: cy - r * Math.cos(a) }; };
 const buildNow = () => page.evaluate(async () => { try { return (await (await fetch("/version.json", { cache: "no-store" })).json()); } catch (_) { return null; } });
 
-async function open(id, name, locked) {
-  const seeded = { [id]: mkSite(id, name, locked) };
+const siteName = (locked) => `ZZ DC ${RUN.slice(-5)} ${locked ? "locked" : "unlocked"}`;
+const idOf = (locked) => `${RUN}-${locked ? "L" : "U"}`;
+// Seed BOTH throwaway plans before the planner first loads, so the plan list already holds them (same shape as the other signed-in harnesses).
+async function seedAll() {
+  const all = {}; for (const locked of [false, true]) { ALL_IDS.push(idOf(locked)); all[idOf(locked)] = mkSite(idOf(locked), siteName(locked), locked); }
   if (LOCAL) await page.goto(`${BASE}/`, { waitUntil: "load" });   // a blank page has no localStorage to seed
   await page.evaluate(([uid, all, local]) => {
     localStorage.setItem(local ? "planarfit:sites:v1" : "planarfit:sites:cloud:" + uid, JSON.stringify(all));
     localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]);
-  }, [UID, seeded, LOCAL]);
-  await page.goto(`${BASE}/#/project/${id}/site`, { waitUntil: "load" });
+  }, [UID, all, LOCAL]);
+}
+
+async function open(id, name) {
+  if (LOCAL) await page.goto(`${BASE}/#/project/${id}/site`, { waitUntil: "load" });
+  else {
+    // signed in: open the plan the way a person does — from the list (the list is still reordering as the account's plans load, so click from the page)
+    await page.goto(`${BASE}/#/site-planner`, { waitUntil: "load" });
+    await page.getByText(name, { exact: false }).filter({ visible: true }).first().evaluate((el) => el.click(), null, { timeout: 45000 });
+  }
   await page.evaluate(() => { window.__PLANYR_E2E = true; });
   await T("planner-canvas").waitFor({ timeout: 45000 });
   await sleep(2000);
+  // picking a plan from the list leaves the project switcher menu open over the panels — close it like a person would
+  for (let i = 0; i < 3 && (await page.locator(".psw-panel").count()); i++) { await page.keyboard.press("Escape"); await sleep(500); }
   await assertMeasurable(page, "verify-overlay-dial-crop-live");
   await page.locator('[data-rail-tab="references"]').first().evaluate((el) => el.click());
   await sleep(900);
@@ -141,11 +154,11 @@ async function cropArm(tag) {
 }
 
 try {
+  await seedAll();
   for (const locked of [false, true]) {
-    const id = `${RUN}-${locked ? "L" : "U"}`; ALL_IDS.push(id);
-    const tag = locked ? "locked" : "unlocked";
+    const id = idOf(locked), tag = locked ? "locked" : "unlocked";
     console.log(`\n=== ${tag.toUpperCase()} overlay ===`);
-    await open(id, `ZZ DC ${RUN.slice(-5)} ${tag}`, locked);
+    await open(id, siteName(locked));
     const v = await buildNow();
     console.log("served build:", JSON.stringify(v), "| chunks:", (await page.evaluate(() => [...document.querySelectorAll("script[src]")].map((s) => s.getAttribute("src").split("/").pop()).join(","))).slice(0, 200));
     const startOk = (await rotBox()) === 0 && (await sw().getAttribute("aria-checked")) === "false" && !(await clip());
