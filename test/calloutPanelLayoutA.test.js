@@ -11,6 +11,7 @@ import {
   calloutStyle, calloutDisplayText, calloutTextDecoration, calloutVAlignOffset, CALLOUT_VALIGNS, CALLOUT_VALIGN_DEFAULT,
 } from "../src/workspaces/site-planner/lib/calloutStyle.js";
 import { calloutLayout } from "../src/workspaces/site-planner/lib/calloutLayout.js";
+import { measureTitle } from "../src/workspaces/site-planner/lib/propsPanelTitle.js";
 import { buildAnnotations } from "../src/workspaces/site-planner/lib/pdfAnnotations.js";
 import { T, g, M0, frame } from "./fixtures/pdfAnnotationsFixture.js";
 
@@ -168,5 +169,122 @@ describe("the planner wiring (source guards)", () => {
   it("the line / polyline render honours strokeOpacity", () => {
     expect(SP).toMatch(/strokeDasharray=\{da\} fill="none" \{\.\.\.visibleStroke\} pointerEvents="none" \/>/);
     expect(SP).toMatch(/<polyline points=\{s\} fill="none" stroke=\{nStroke\} strokeWidth=\{vsw\} strokeDasharray=\{da\} \{\.\.\.visibleStroke\}/);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------------------------------------------
+ * NEW-1/NEW-2/NEW-3 (owner 2026-10-21) — layout A's shell and compact control rules extend to the measurement panel and every drawn
+ * site element's Properties panel (CLAUDE.md constraint #29, amended). The browser half is e2e/panel-layout-a-everywhere.spec.js,
+ * which measures the columns at the default panel width and again at the widest.
+ * ------------------------------------------------------------------------------------------------------------------------------ */
+describe("NEW-1 — the value columns are a fixed compact width, fixed in the shared primitives", () => {
+  const prim = (name) => { const i = SP.indexOf(`function ${name}(`); expect(i, name).toBeGreaterThan(-1); return SP.slice(i, SP.indexOf("\n}\n", i)); };
+  it("PairedField, PairedFieldHead and the dock panel's grid read ONE column template that caps each value column (never 1fr)", () => {
+    expect(SP).toMatch(/const PROP_PAIR_COLS = `\$\{PROP_GUTTER_W\}px repeat\(2, minmax\(0, \$\{PROP_VALUE_W_CSS\}\)\)`/);
+    expect(prim("PairedField")).toMatch(/gridTemplateColumns: PROP_PAIR_COLS/);
+    expect(prim("PairedFieldHead")).toMatch(/gridTemplateColumns: PROP_PAIR_COLS/);
+    expect(prim("PairedField")).not.toMatch(/1fr 1fr/);
+    expect(prim("PairedFieldHead")).not.toMatch(/1fr 1fr/);
+    const dock = SP.slice(SP.indexOf("function DockLayerPanel("), SP.indexOf("// PercentField — compact"));
+    expect(dock).toMatch(/repeat\(2, minmax\(0, \$\{PROP_VALUE_W_CSS\}\)\)/);
+    expect(dock).not.toMatch(/1fr 1fr/);
+  });
+  it("the compact width is one constant, the phone sheet raises the ceiling through the CSS variable, and a narrow panel still shrinks (minmax(0, W))", () => {
+    expect(SP).toMatch(/const PROP_VALUE_W = 92;/);
+    expect(SP).toMatch(/const PROP_VALUE_W_CSS = `var\(--prop-value-w, \$\{PROP_VALUE_W\}px\)`/);
+    expect(SP).toMatch(/\[data-bottom-sheet="properties"\] \{ --prop-value-w: \d+px; \}/);
+  });
+  it("a Field whose only child is a number / percent box / select caps its value cell; the road and dock gutters are left alone", () => {
+    const f = prim("Field");
+    expect(f).toMatch(/gutter === PROP_GUTTER_W && isCompactControl\(children\)/);
+    expect(f).toMatch(/maxWidth: PROP_VALUE_W_CSS/);
+    const c = prim("isCompactControl");
+    expect(c).toMatch(/t === NumInput \|\| t === PercentField \|\| t === "select"/);
+  });
+  it("the rotation row's number box is capped too, so it does not stretch with the panel", () => {
+    expect(prim("RotationField")).toMatch(/maxWidth: PROP_VALUE_W_CSS/);
+  });
+});
+
+describe("NEW-2 — the measurement panel is layout A", () => {
+  const start = SP.indexOf("{!multiStyleable && selMeasure && (() => {");
+  const body = SP.slice(start, SP.indexOf("{/* selected element */}", start));
+  it("has a Label input, then Appearance, then Size & position, in that order", () => {
+    expect(start).toBeGreaterThan(-1);
+    const lab = body.indexOf('<Field label="Label">'), ap = body.indexOf('section="appearance"'), sz = body.indexOf('section="size"');
+    expect(lab).toBeGreaterThan(-1); expect(ap).toBeGreaterThan(lab); expect(sz).toBeGreaterThan(ap);
+  });
+  it("area is the Outline | Fill table; the number boxes are the shared boxed ones; the pattern select is right-aligned; weight has no unit", () => {
+    expect(body).toMatch(/<PairedFieldHead left="Outline" right="Fill" \/>/);
+    expect(body).toMatch(/<NumInput boxed fill ariaLabel="Line weight"/);
+    expect(body).toMatch(/<PercentField boxed value=\{m\.fillOpacity/);
+    expect(body).toMatch(/textAlignLast: "right"/);
+    expect(body).not.toMatch(/unit="pt"/);
+    expect(body).not.toMatch(/type="range"/);
+  });
+  it("the LAYER block, the label-zoom block and the drag hint are gone — the right-click menu carries the ordering", () => {
+    for (const gone of ["<StdSubLabel>Layer</StdSubLabel>", "measure-band-toggle", 'arrangeSel("front", { kind: "measure"', "Set at current zoom", "Reset to default", "labelRevealNote(", "Drag the line to move it", "Drag any marker to move the whole set"]) expect(body, gone).not.toContain(gone);
+    const menu = SP.slice(SP.indexOf('mapMenu.kind === "measure"'), SP.indexOf('mapMenu.kind === "callout"'));
+    expect(menu).toMatch(/arrangeGroup\(\{ kind: "measure", id: m\.id \}/);          // Bring to Front · Forward · Backward · Send to Back
+    expect(menu).toMatch(/m\.behindEls \? CROSS_BAND_FRONT : CROSS_BAND_BEHIND/);   // Send behind the plan / Bring in front of the plan
+  });
+  it("a measurement's saved labelPpf still decides when its label shows, and Reset style still clears it", () => {
+    expect(SP).toMatch(/measureLabelVisible\(m, labelPpf, \{ settings, globalFloor: DIM_CALLOUT_MIN_PPF/);
+    expect(body).toMatch(/MEASURE_STD_KEYS\.map\(\(k\) => \[k, null\]\)/);
+  });
+  it("the header says which measurement it is: Area measurement", () => {
+    expect(measureTitle("area")).toBe("Area measurement");
+    expect(measureTitle("line")).toBe("Distance");
+    expect(measureTitle("polyline")).toBe("Polyline length");
+    expect(measureTitle("count")).toBe("Count");
+  });
+});
+
+describe("NEW-3 — every element panel takes layout A's control rules", () => {
+  it("the shared element opacity / weight cells are the boxed controls (typed % box, unit-less stepper box) in the fixed column", () => {
+    expect(SP).toMatch(/const strokeOpacityCell = curStyle \? <PercentField boxed /);
+    expect(SP).toMatch(/const fillOpacityCell = curStyle \? <PercentField boxed /);
+    const i = SP.indexOf("const strokeWidthRow = curStyle");
+    const row = SP.slice(i, SP.indexOf("const trailerStallsNode", i));
+    expect(row).toMatch(/<NumInput boxed fill ariaLabel="Line weight"/);
+    expect(row).not.toMatch(/unit=/);
+  });
+  it("the generic element panel leads with Appearance, then Size & position — and a road keeps its own approved order (Appearance AFTER its sections)", () => {
+    expect(SP).toMatch(/const renderElAppearance = \(\) => \(/);
+    const top = SP.indexOf("{!roadPanel && elAppearanceOn && renderElAppearance()}");
+    const sz = SP.indexOf('<StdSubLabel section="size">Size & position</StdSubLabel>\n                      <Field label="Width (ft)">');
+    const roadLast = SP.indexOf('sectionId="road-intersection"');
+    const bottom = SP.indexOf("{roadPanel && elAppearanceOn && renderElAppearance()}");
+    expect(top).toBeGreaterThan(-1); expect(sz).toBeGreaterThan(top);
+    expect(bottom).toBeGreaterThan(roadLast); expect(roadLast).toBeGreaterThan(top);
+    // the section body itself is the single Appearance block
+    const body = SP.slice(SP.indexOf("const renderElAppearance = () => ("), SP.indexOf("const trailerStallsNode"));
+    expect(body).toMatch(/<StdSubLabel section="appearance">Appearance<\/StdSubLabel>\s*<PairedFieldHead left="Outline" right="Fill" \/>/);
+  });
+  it("the car-parking spec sheet's headings are Size & position and Appearance (and tagged as sections)", () => {
+    expect(SP).toMatch(/specHead\("Size & position"\)/);
+    expect(SP).toMatch(/specHead\("Appearance", \[/);
+    expect(SP).toMatch(/data-panel-section=\{label === "Appearance" \? "appearance" : label === "Size & position" \? "size" : undefined\}/);
+  });
+  it("the easement and deed panels use Appearance / Size & position, a typed % box (never a slider) and right-aligned pattern selects", () => {
+    const e0 = SP.indexOf('kind === "easement" && (() => {');
+    const easement = SP.slice(e0, SP.indexOf("NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {", e0));
+    expect(easement).toMatch(/section="appearance"/); expect(easement).toMatch(/section="size"/);
+    expect(easement).toMatch(/<PercentField boxed /); expect(easement).toMatch(/textAlignLast: "right"/);
+    expect(easement).not.toMatch(/Drag a centerline dot to reshape \(the strip|Drag a boundary dot to reshape;/);
+    const d0 = SP.indexOf("remaining non-neutral kind (a deed encumbrance)");
+    const deed = SP.slice(d0, SP.indexOf("{/* NEW-1 (layout \"A\", owner-approved 2026-10-20) — the Properties panel for text boxes", d0) > 0 ? SP.indexOf("{/* NEW-1 (layout \"A\", owner-approved 2026-10-20) — the Properties panel for text boxes", d0) : d0 + 12000);
+    expect(deed).toMatch(/section="appearance"/); expect(deed).toMatch(/section="size"/);
+    expect(deed).toMatch(/<PercentField boxed /); expect(deed).not.toMatch(/type="range"/);
+    expect(deed).not.toMatch(/Move the deed as one piece/);
+  });
+  it("the parcel page's opacity boxes are the boxed percent field", () => {
+    const i = SP.indexOf('data-testid="parcel-style"');
+    const sec = SP.slice(i, SP.indexOf("const secs = pageSections", i));
+    expect((sec.match(/<PercentField boxed /g) || []).length).toBe(3);
+    expect(sec).toMatch(/>Appearance<\/div>/);
+  });
+  it("no panel restates how to drag or reshape", () => {
+    for (const gone of ["Drag the body to move. Drag a <b>dot</b>", "Drag a centerline dot to reshape (the strip re-offsets)", "Move the deed as one piece"]) expect(SP, gone).not.toContain(gone);
   });
 });

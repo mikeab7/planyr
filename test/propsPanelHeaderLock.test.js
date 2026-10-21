@@ -20,7 +20,7 @@ describe("NEW-1 — one title, the thing's own type name", () => {
     expect(propsPanelTitle({ markup: { kind: "rect" } })).toBe("Rect");
     expect(propsPanelTitle({ markup: { kind: "easement" } })).toBe("Easement");
     expect(propsPanelTitle({ measureMode: "line" })).toBe("Distance");
-    expect(propsPanelTitle({ measureMode: "area" })).toBe("Area");
+    expect(propsPanelTitle({ measureMode: "area" })).toBe("Area measurement");
     expect(propsPanelTitle({ callout: { noLeader: true } })).toBe("Text box");
     expect(propsPanelTitle({ callout: { noLeader: false } })).toBe("Callout");
     expect(propsPanelTitle({ elementLabel: "Building" })).toBe("Building");

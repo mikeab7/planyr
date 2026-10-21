@@ -6,6 +6,7 @@
  * silent spinner" trap). These assert the CALL SITES exist, so removing the wiring goes red.
  */
 import { describe, it, expect } from "vitest";
+import { MEASURE_STD_KEYS } from "../src/workspaces/site-planner/lib/measureStyle.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -232,24 +233,28 @@ describe("NEW-1: measurement styling (continued)", () => {
   });
 });
 
-describe("NEW-2: the label reveal zoom is per-measurement, captured by click", () => {
+describe("NEW-2: the label reveal zoom — a stored per-measurement value still decides; the capture control lives in Standards (B2403057)", () => {
   it("the render gates on measureLabelVisible, not the bare global floor", () => {
     // NEW-1 amends this call with `sheet: labelFrame.sheet` — an export lifts the gate entirely
     // (test/measureSheet.test.js owns that half). The canvas gate itself is unchanged.
     expect(SP).toMatch(/measureLabelVisible\(m, labelPpf, \{ settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel, sheet: labelFrame\.sheet \}\)/);
   });
-  it("both controls CAPTURE the live zoom — no raw zoom number is ever typed", () => {
-    expect(SP).toMatch(/onClick=\{\(\) => setSelMeasure\(\{ labelPpf: view\.ppf \}\)\}>Set at current zoom</);
+  it("Standards → Measurements CAPTURES the live zoom — no raw zoom number is ever typed", () => {
     expect(SP).toMatch(/onClick=\{\(\) => draftMeasureStd\(\{ labelPpf: view\.ppf \}\)\}>Set at current zoom</);
     expect(SP).not.toMatch(/label="Show label from \(ppf\)"/);
   });
-  it("both controls offer a Reset to default", () => {
-    expect((SP.match(/>Reset to default</g) || []).length).toBe(2);
-    expect(SP).toMatch(/setSelMeasure\(\{ labelPpf: null \}\)/);
+  it("owner 2026-10-21 (\"that label identification stuff just makes no sense\"): the measurement Properties panel carries NO label-zoom controls — only the Standards one remains", () => {
+    expect((SP.match(/>Set at current zoom</g) || []).length).toBe(1);
+    expect((SP.match(/>Reset to default</g) || []).length).toBe(1);
+    expect(SP).not.toMatch(/setSelMeasure\(\{ labelPpf: view\.ppf \}\)/);
     expect(SP).toMatch(/draftMeasureStd\(\{ labelPpf: null \}\)/);
   });
-  it("the readout is the plain-English band helper", () => {
-    expect(SP).toMatch(/labelRevealNote\(m, settings, DIM_CALLOUT_MIN_PPF\)/);
+  it("…but a measurement's SAVED labelPpf is still honoured by the resolver and cleared by Reset style (nothing stripped)", () => {
+    expect(SP).toMatch(/MEASURE_STD_KEYS\.map\(\(k\) => \[k, null\]\)/);
+    expect(MEASURE_STD_KEYS).toContain("labelPpf");
+  });
+  it("the Standards readout is the plain-English band helper", () => {
+    expect(SP).toMatch(/labelRevealNote\(\{\}, \{ measureStyle: \{ labelPpf: measureStdValueUI\("labelPpf"\) \} \}, DIM_CALLOUT_MIN_PPF\)/);
   });
 });
 
