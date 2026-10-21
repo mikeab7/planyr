@@ -674,6 +674,18 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-10-16",
     verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: ChesterTN/ChesterCapture MapServer layer 7 'Parcels_12' (the layer behind the Assessor's public AGOL web map f214fb11968a4539bf128561ea61ecd6), Map/Query/Data, 10,333 parcels, maxRecordCount 2000, token-free. Henderson point (35.4398,-88.6414) → 012033M I 01500 / CITY OF HENDERSON / CROOK AVENUE 111 / 0.394 ac; rural Silerton Rd → 36.30 ac. Columns are shapefile truncations (L15Parce_2 id, GPDATA__OW owner, GPDATA__PR situs, L15Parce_4 GIS acres).",
   },
+  tn_davidson: {
+    publisher: "own",
+    publisherName: "Metro Nashville & Davidson County — Planning Department / Assessor of Property (Nashville Open Data, AGOL org HdTo6HJqh92wn4D8)",
+    verifiedOn: "2026-10-21",
+    verifiedNote: "VERIFIED LIVE from this sandbox: Parcels_view FeatureServer layer 0 (item fa26cd9326c446179be059e00449cb1f, owner 'Nashville', accessInformation 'Nashville Planning Department / Assessor of Property'), 287,729 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Extract, maxRecordCount 2000, token-free. Point 36.137653,-86.755160 → STANPAR 10508026600 / AKZO NOBEL COATINGS INC / 20 CULVERT ST / 9.52 ac; address search 'PropAddr LIKE 20 CULVERT%' returns the same lot. The Comptroller's statewide layer holds 0 Davidson rows (county id 19 is absent from its 86 counties). Outline floor 17: the downtown 512-px cell at zoom 16 holds 2,238 lots (cap 2,000); the busiest zoom-17 cell measured 1,222.",
+  },
+  tn_rutherford: {
+    publisher: "own",
+    publisherName: "Rutherford County, TN GIS (AGOL org 36I6IHIdr660pAyH, 'Rutherford County GIS')",
+    verifiedOn: "2026-10-21",
+    verifiedNote: "VERIFIED LIVE from this sandbox: ParcelsCAMA1 FeatureServer layer 0 ('New parcel layer with up to date CAMA data 10/21/2026'), 123,298 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Extract, maxRecordCount 2000, token-free, COUNTY = 075. ParcelID 156-027.00-000 → RHODES DEVELOPMENT COMPANY, 8.75 deeded ac, CITY CHRISTIANA; ParcelID 156-002.01-000 → RHODES DEVELOPMENT COMPANY, 37.00 ac. A second copy, 'Parcel Data' layer 1 (org A5C0MR9xfkxVRwat, published by the City of Murfreesboro GIS manager, 123,256 lots), carries the identical schema and was NOT used — the county's own org is the primary. Outline floor 16: the busiest zoom-16 cell (Murfreesboro) holds 597 lots.",
+  },
   mo_platte: {
     publisher: "third-party",
     publisherName: "City of Parkville (republishes Platte County tax parcels)",

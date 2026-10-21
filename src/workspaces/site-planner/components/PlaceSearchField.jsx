@@ -191,6 +191,7 @@ export default function PlaceSearchField({
               }}
             >
               {row.kind === "result" && <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.hit.label}</span>}
+              {row.kind === "parcelId" && <span style={{ flex: 1 }}>Find parcel ID <strong>{row.text}</strong> · Tennessee</span>}
               {row.kind === "raw" && <span style={{ flex: 1, color: "var(--chrome-muted)" }}>Press ⏎ to search &ldquo;{row.text}&rdquo;</span>}
               {row.kind === "searchAnyway" && <span style={{ flex: 1 }}>Search anyway</span>}
               {row.kind === "dropPin" && <span style={{ flex: 1 }}>{dropPinLabel}</span>}

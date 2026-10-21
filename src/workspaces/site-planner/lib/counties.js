@@ -2224,6 +2224,30 @@ const COUNTIES_RAW = {
     idField: "L15Parce_2", addrField: "GPDATA__PR",
     help: "Chester County Assessor of Property parcels (CaptureCAMA) — covers Henderson, Enville, Jacks Creek and the rest of the county. Search by parcel ID or a site address.",
   },
+  /* NEW-1 (TN non-state counties, 2026-10-21) — DAVIDSON COUNTY, TN (Nashville), on Metro Nashville's own Parcels layer: the Metro Planning Department + Assessor
+   * of Property's `Parcels_view` FeatureServer, published by Nashville Open Data (AGOL org HdTo6HJqh92wn4D8, item fa26cd93…; `accessInformation` "Nashville Planning
+   * Department / Assessor of Property"). The Comptroller's statewide layer holds ZERO Davidson rows (Davidson assesses on its own system), so before this row a
+   * Nashville click was routed to that empty composite and read "No parcel at this point". Token-free, Query + Extract, maxRecordCount 2000, 287,729 lots, WKID 2274.
+   * MEASURED 2026-10-21 from the build sandbox: 20 CULVERT ST → STANPAR 10508026600, AKZO NOBEL COATINGS INC, 9.52 ac. Id column is STANPAR (the 11-digit assessor
+   * parcel number); the owner column is `Owner`, address `PropAddr`. Pinned: plain detection would pick `ParID` (an internal row number). Densest 512-px cell at zoom 16
+   * (downtown) is 2,238 lots — over the 2,000 cap — so the outline floor is 17 (busiest cell there 1,222). */
+  tn_davidson: {
+    state: "TN", label: "Davidson County, TN (Nashville)",
+    layerUrl: "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Parcels_view/FeatureServer/0",
+    idField: "STANPAR", pinIdField: true, addrField: "PropAddr", pinAddrField: true, displayMinZoom: 17,
+    help: "Metro Nashville parcels (Planning Department / Assessor of Property) — covers all of Davidson County. Search by parcel number (STANPAR) or a site address.",
+  },
+  /* NEW-1/NEW-2 (TN non-state counties, 2026-10-21) — RUTHERFORD COUNTY, TN, on Rutherford County GIS's own `ParcelsCAMA1` FeatureServer (AGOL org 36I6IHIdr660pAyH,
+   * portal name "Rutherford County GIS"; "parcel layer with up to date CAMA data", edited 2026-10-21). Rutherford is one of the nine counties the Comptroller's
+   * statewide layer leaves out. Token-free, Query + Extract, maxRecordCount 2000, 123,298 lots, WKID 2274, COUNTY = 075. MEASURED 2026-10-21: ParcelID 156-027.00-000 →
+   * RHODES DEVELOPMENT COMPANY, 8.75 deeded ac (Christiana); ParcelID 156-002.01-000 → RHODES DEVELOPMENT COMPANY, 37.00 ac. `ParcelID` is the Tennessee control-map id
+   * (control map [+ letter] - group - parcel . special-interest), the format an owner types. Pinned over GISLINK / CAMAACCT / PropertyID, which the detector also likes. */
+  tn_rutherford: {
+    state: "TN", label: "Rutherford County, TN",
+    layerUrl: "https://services.arcgis.com/36I6IHIdr660pAyH/arcgis/rest/services/ParcelsCAMA1/FeatureServer/0",
+    idField: "ParcelID", pinIdField: true, addrField: "STREETADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control",
+    help: "Rutherford County GIS parcels (CAMA-linked) — covers Murfreesboro, Smyrna, La Vergne, Eagleville, Christiana and the rest of the county. Search by parcel ID (e.g. 156-027.00-000) or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -2973,11 +2997,13 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://risegis.ri.gov/hosting/rest/services/RIDEM/Tax_Parcels/MapServer/0",
   },
   tn_statewide: {
-    // Covers 86 of 95 counties (9 use non-state assessment systems and are excluded).
-    // NEW-1: MEASURED 2026-10-15 — 0 features at 7 interior points in Shelby and in Chester (7/7 in the other 16
-    // Memphis-radius TN counties). Declared so neither is routed here: Shelby has its own Assessor source (tn_shelby);
-    // Chester reports "no parcel data" instead of a silent empty layer.
-    excludedCounties: ["Shelby", "Chester"],
+    /* NEW-1 (TN non-state counties, 2026-10-21) — THE NINE. The Comptroller's layer says "86 of 95 counties; 9 use non-state assessment systems", and
+     * a per-county count over the layer itself (outStatistics by COUNTY_ID, 2026-10-21) names them: county ids 12 Chester, 19 Davidson, 33 Hamilton, 41 Hickman,
+     * 47 Knox, 63 Montgomery, 75 Rutherford, 79 Shelby, 94 Williamson — each ABSENT from the 86 counties the layer holds (not low, absent). A composite is never
+     * routed a county it excludes, so a Nashville click used to go to this empty layer and read "No parcel at this point" — the 2026-10-21 report. Four have
+     * their own source (tn_shelby, tn_chester, tn_davidson, tn_rutherford); Williamson, Hamilton, Knox, Montgomery and Hickman are named gaps that say so
+     * (docs/STATEWIDE-PARCELS.md, "Tennessee non-state counties"). Pinned by the repo-root test tnNonStateCounties against a committed copy of that count. */
+    excludedCounties: ["Chester", "Davidson", "Hamilton", "Hickman", "Knox", "Montgomery", "Rutherford", "Shelby", "Williamson"],
     state: "TN", center: [35.9, -86.4], zoom: 7, mapServer: null, statewide: true,
     layerUrl: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
   },
@@ -3290,6 +3316,16 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [35.42, -88.64], zoom: 11,
     bbox: [35.27, -88.88, 35.58, -88.42],
     mapServer: null, layerUrl: COUNTIES.tn_chester.layerUrl,
+  },
+  tn_davidson: {
+    state: "TN", center: [36.17, -86.78], zoom: 11,
+    bbox: [35.94, -87.08, 36.43, -86.49], displayMinZoom: 17,
+    mapServer: null, layerUrl: COUNTIES.tn_davidson.layerUrl,
+  },
+  tn_rutherford: {
+    state: "TN", center: [35.84, -86.42], zoom: 10,
+    bbox: [35.60, -86.72, 36.12, -86.12], displayMinZoom: 16,
+    mapServer: null, layerUrl: COUNTIES.tn_rutherford.layerUrl,
   },
 };
 

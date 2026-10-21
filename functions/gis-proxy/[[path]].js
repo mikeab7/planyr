@@ -31,6 +31,10 @@ export const ALLOWED_HOSTS = new Set([
   "maps.memphistn.gov", // City of Memphis GIS — hosts the Shelby County Assessor parcel basemap
   "gis.shelbycountytn.gov", // Shelby County TN government GIS (Assessor_Parcel)
   "scgis.shelbycountytn.gov", // Shelby County TN GIS server — the Assessor of Property's CERTParcel service (NEW-1, Memphis radius ×2)
+  /* NEW-1 (TN non-state counties, 2026-10-21) — the two Tennessee hosts the remaining non-state counties (Hamilton, Knox, …) may sit on. The build sandbox reaches neither, so each is
+   * relayed and MEASURED through here before any county is wired to it (B2408834); nothing is wired to them yet. */
+  "geoviewer.cot.tn.gov", // TN Comptroller's GeoViewer — NonImpact_Parcels MapServer (a layer per non-state county, if it answers)
+  "kgis.org", // KGIS (Knoxville-Knox County-KUB GIS) — Geocortex/ArcGIS server behind the public KGIS Maps viewer
   "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
