@@ -6,14 +6,14 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-20",
-        "approvedCommit": "3a229f66b",
-        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
+        "approvedAt": "2026-10-21",
+        "approvedCommit": "a28969a22",
+        "note": "B2391216 (x2): Road Names / City Names rows in the Imagery & Layers card now carry the standard status dot (an 8x8 region at the card's right edge on map-landing desktop, both themes); nothing else on any surface changed. Phone map-landing identical. [CI-authored by run 39614027716 on a28969a220ed34179c42617ebd247938fe76bdcc]"
       },
       "dark": {
-        "approvedAt": "2026-10-20",
-        "approvedCommit": "3a229f66b",
-        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
+        "approvedAt": "2026-10-21",
+        "approvedCommit": "a28969a22",
+        "note": "B2391216 (x2): Road Names / City Names rows in the Imagery & Layers card now carry the standard status dot (an 8x8 region at the card's right edge on map-landing desktop, both themes); nothing else on any surface changed. Phone map-landing identical. [CI-authored by run 39614027716 on a28969a220ed34179c42617ebd247938fe76bdcc]"
       },
       "light--phone": {
         "approvedAt": "2026-10-20",
