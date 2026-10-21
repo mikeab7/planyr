@@ -60,23 +60,36 @@ alter table public.project_folders enable row level security;
 -- they are unaffected.
 -- search_path pinned (NEW-F8 advisor hardening): a trigger without a fixed search_path can be
 -- redirected by a role-mutable path; pg_catalog is all this body needs.
+-- B2404337 (NEW-2, 2026-10-21): the guard fires on INSERT too. It was BEFORE UPDATE only, and the
+-- INSERT policy checks just `auth.uid() = user_id`, so a client could INSERT a row in its own project
+-- carrying someone else's drive_folder_id + trashed=true and have the next `/api/folders sync` trash
+-- that Drive folder with the service account's credentials. Every legitimate drive_* write already
+-- goes through folder_set_drive_meta() (measured: the live path), so a client INSERT never needs one.
+-- `drive_trashed` is `not null default false`, so "carries a drive_* value" means it is TRUE there.
+-- (Also shipped as its own idempotent migration: project_folders_insert_guard.sql.)
 create or replace function public.project_folders_guard_drive_cols()
 returns trigger language plpgsql set search_path = pg_catalog as $$
 begin
-  if current_user = 'authenticated' and (
-       new.drive_folder_id is distinct from old.drive_folder_id
-    or new.drive_parent_id is distinct from old.drive_parent_id
-    or new.drive_name      is distinct from old.drive_name
-    or new.drive_trashed   is distinct from old.drive_trashed
-  ) then
-    raise exception 'drive_* columns are server-managed (use folder_set_drive_meta)';
+  if current_user = 'authenticated' then
+    if tg_op = 'INSERT' then
+      if new.drive_folder_id is not null
+         or new.drive_parent_id is not null
+         or new.drive_name is not null
+         or new.drive_trashed then
+        raise exception 'drive_* columns are server-managed (use folder_set_drive_meta)';
+      end if;
+    elsif new.drive_folder_id is distinct from old.drive_folder_id
+       or new.drive_parent_id is distinct from old.drive_parent_id
+       or new.drive_name      is distinct from old.drive_name
+       or new.drive_trashed   is distinct from old.drive_trashed then
+      raise exception 'drive_* columns are server-managed (use folder_set_drive_meta)';
+    end if;
   end if;
   return new;
 end $$;
 
-drop trigger if exists project_folders_guard_drive on public.project_folders;
-create trigger project_folders_guard_drive
-  before update on public.project_folders
+create or replace trigger project_folders_guard_drive
+  before insert or update on public.project_folders
   for each row execute function public.project_folders_guard_drive_cols();
 
 -- Server-only writeback for the mirror bookkeeping. SECURITY DEFINER so it bypasses the guard
