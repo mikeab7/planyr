@@ -336,10 +336,14 @@ try {
     // any contour vertex inside the pad? (the pad is flat: no line may cross it)
     let onPad = 0, total = 0;
     for (const l of lv) for (const mm of l.d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)) { total++; const x = +mm[1], y = +mm[2]; if (x > x0 + 5 && x < x0 + 515 && y > y0 + 5 && y < y0 + 295) onPad++; }
-    return { interval: m.contours.interval, levels: lv.length, index: idx.length, labels: m.contours.labels.length, onPad, total, layerPaths: document.querySelectorAll('[data-layer="contours"] path').length, labelsDom: document.querySelectorAll("[data-contour-label]").length, rowSub: (document.querySelector('[data-layer="contours"]') || {}).getAttribute?.("data-contour-interval") };
+    const g = document.querySelector('[data-layer="contours"]');
+    return { interval: m.contours.interval, levels: lv.length, index: idx.length, labels: m.contours.labels.length, onPad, total, layerPaths: document.querySelectorAll('[data-layer="contours"] path').length, labelsDom: document.querySelectorAll("[data-contour-label]").length, rowSub: g && g.getAttribute("data-contour-interval"),
+      drawn: g ? +g.getAttribute("data-contour-levels-drawn") : -1, indexOnly: g ? g.getAttribute("data-contour-index-only") === "1" : null, ppf: window.__harness.ppf };
   });
   check("proposed contours: 1 ft interval, many levels, index levels every 5 ft with labels", ct.interval === 1 && ct.levels > 10 && ct.index >= 2 && ct.index * 4 < ct.levels + ct.index && ct.labels > 0, JSON.stringify(ct));
-  check("contours are drawn on the map (one path per level) with index labels", ct.layerPaths === ct.levels && ct.labelsDom > 0, JSON.stringify(ct));
+  // ROUND 6 (NEW-1): what is DRAWN follows the zoom — this page opens with the parcel filling the map (ppf < 1), so only the
+  // index levels are drawn (one path each), thin; every traced level is still in the model
+  check("contours are drawn on the map, one path per DRAWN level — index levels only at this parcel-filling zoom — with index labels", ct.layerPaths === ct.drawn && ct.indexOnly === true && ct.drawn === ct.index && ct.labelsDom > 0, JSON.stringify(ct));
   check("open ground inside: no proposed contour crosses the flat pad", ct.onPad === 0, `${ct.onPad} of ${ct.total} vertices on the pad`);
   await page.screenshot({ path: "/tmp/grading-r4-contours.png" });
   await page.click('[data-testid="grading-show-contours"]');
@@ -347,18 +351,20 @@ try {
   check("checkbox off: the contours go", true);
   await page.close();
 
-  // ================= 9. ROUND 4 — 'Grade to the boundary': the plateau IS the Level-ground sweep's mask at the FFE =================
+  // ================= 9. ROUND 4 / ROUND 6 — 'Grade to the boundary': the limit IS the setback; the open ground inside follows the pavement =================
   page = await open("?buildable=0&mode=boundary");
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(2000);
   await page.waitForFunction(() => { const s = window.__harness.gradeSurface; return s && s.grid.limit && s.grid.limit.mode === "boundary" && window.__harness.model && window.__harness.model.ground.status === "ready"; }, null, { timeout: 90000 });
   const bnd = await page.evaluate(() => {
     const s = window.__harness.gradeSurface, L = s.grid.limit, m = window.__harness.model;
-    return { mode: L.mode, plateaus: L.plateaus, areaAc: L.areaAc, slopeCells: s.grid.cells.filter((c) => c.wedge).length, infill: s.grid.cells.filter((c) => c.cls === "infill").length,
-      flatInfill: s.grid.cells.filter((c) => c.cls === "infill" && L.plateaus.some((p) => Math.abs(c.propFt - p.ffe) < 1e-6)).length,
+    const ffe = m.autoFfe.get("b1"); const infillCells = s.grid.cells.filter((c) => c.cls === "infill");
+    return { mode: L.mode, plateaus: L.plateaus, areaAc: L.areaAc, slopeCells: s.grid.cells.filter((c) => c.wedge).length, infill: infillCells.length,
+      flatInfill: infillCells.filter((c) => Math.abs(c.propFt - ffe) < 1e-6).length, aboveFfe: infillCells.filter((c) => c.propFt > ffe + 1e-6).length,
       gradedLine: (document.querySelector("[data-graded-area-line]") || {}).textContent, modeAttr: (document.querySelector("[data-graded-area]") || {}).getAttribute?.("data-limit-mode"),
       editBtn: !!document.querySelector('[data-limit-action="edit"]'), ffe: m.autoFfe.get("b1") };
   });
-  check("boundary mode: the limit is the setback, one plateau at the building's FFE, the open ground inside flat at it", bnd.mode === "boundary" && bnd.plateaus.length === 1 && bnd.flatInfill > 0 && bnd.flatInfill === bnd.infill, JSON.stringify({ ...bnd, plateaus: bnd.plateaus.length }));
+  // ROUND 6 (NEW-3): no plateau — the open ground inside the setback follows the pavement's fall, never flat at the FFE and never above it
+  check("boundary mode: the limit is the setback, NO plateau, the open ground inside follows the pavement (not flat at the FFE, never above it)", bnd.mode === "boundary" && bnd.plateaus.length === 0 && bnd.infill > 0 && bnd.flatInfill * 10 < bnd.infill && bnd.aboveFfe === 0, JSON.stringify({ ...bnd, plateaus: bnd.plateaus.length }));
   check("the graded-area line reads the setback and the acreage grew past the layout's", /^Graded area · \d+\.\d AC · the setback$/.test(bnd.gradedLine || "") && bnd.areaAc > lim.areaAc, `${bnd.gradedLine} vs ${lim.areaAc.toFixed(1)}`);
   check("no Edit outline in boundary mode; mode control shows 'To the boundary'", !bnd.editBtn && bnd.modeAttr === "boundary");
   // B2376240 (owner live check 2026-10-20): the limit IS the setback and the slope is thrown INWARD from it — no graded cell
@@ -375,24 +381,20 @@ try {
   });
   check("B2376240: boundary mode grades nothing outside the setback and the setback flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.flag === 0 && bndOut.clear >= 1 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
   check("B2376240: the daylight line in boundary mode IS the setback (one ring per limit ring)", bndOut.daylight === bndOut.limitRings && bndOut.daylightIsLimit, JSON.stringify({ daylight: bndOut.daylight, limitRings: bndOut.limitRings, daylightIsLimit: bndOut.daylightIsLimit }));
-  // the plateau vs the Level-ground sweep's own mask at that finish (the harness runs the worker's mask job at the FFE)
-  const cmp = await page.evaluate(async (E) => {
-    const { buildableMaskJob } = await import("/src/workspaces/site-planner/lib/buildableClient.js");
-    const h = window.__harness; const s = h.gradeSurface; const L = s.grid.limit;
-    const base = h.model.setback; const m = h.model;
-    const r = await buildableMaskJob({ origin: window.__origin, parcelRings: base.parcelRings, setbackRings: base.rings, holes: base.holes, s: m.cfg.slopeRatio, D: m.cfg.maxCutFillFt, E, dem: window.__dem });
-    let agree = 0, dis = 0;
-    for (const c of s.grid.cells) {
-      if (c.cls !== "infill" && !c.wedge) continue;
-      const i = Math.floor((c.x - r.x0) / r.cell), j = Math.floor((c.y - r.y0) / r.cell);
-      if (i < 0 || j < 0 || i >= r.nx || j >= r.ny) continue;
-      const inMask = !!r.mask[j * r.nx + i];
-      const plateau = c.cls === "infill" && Math.abs(c.propFt - E) < 1e-6;
-      if (inMask === plateau) agree++; else dis++;
+  // ROUND 6 (NEW-2): nothing inside the setback is left ungraded — every probe inside the limit (off the pond) answers a value
+  const cover = await page.evaluate(async () => {
+    const { pointInRing } = await import("/src/workspaces/site-planner/lib/pondGeom.js");
+    const s = window.__harness.gradeSurface; const L = s.grid.limit; const r = L.limitRegions[0];
+    const xs = r.outer.map((p) => p.x), ys = r.outer.map((p) => p.y);
+    let n = 0, value = 0, pond = 0, other = 0;
+    for (let i = 0; i < 40; i++) for (let j = 0; j < 40; j++) {
+      const p = { x: Math.min(...xs) + (i + 0.5) / 40 * (Math.max(...xs) - Math.min(...xs)), y: Math.min(...ys) + (j + 0.5) / 40 * (Math.max(...ys) - Math.min(...ys)) };
+      if (!pointInRing(p, r.outer) || r.holes.some((h) => pointInRing(p, h))) continue;
+      n++; const a = s.grid.probe(p); if (a.status === "value") value++; else if (a.reason === "pond") pond++; else other++;
     }
-    return { agree, dis, maskAc: r.areaAc, plateauSf: L.plateaus[0].areaSf, E };
-  }, Math.round(bnd.ffe * 10) / 10);
-  check("the plateau matches the Level-ground sweep's mask at that finish within one cell (≥ 98% of cells agree)", cmp.agree > 500 && cmp.dis / (cmp.agree + cmp.dis) < 0.02, JSON.stringify(cmp));
+    return { n, value, pond, other };
+  });
+  check("ROUND 6: every point inside the setback is graded ground (the probe answers a value everywhere off the pond)", cover.n > 300 && cover.other === 0 && cover.value > cover.n * 0.95, JSON.stringify(cover));
   // switch back to 'Around the layout' from the control: the picture and the acreage change
   await page.click('[data-testid="grading-limit-mode"] button:first-child');
   await page.waitForFunction(() => { const s = window.__harness.gradeSurface; return s && s.grid.limit && s.grid.limit.mode === "layout"; }, null, { timeout: 60000 });

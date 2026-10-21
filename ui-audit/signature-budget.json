@@ -81,6 +81,17 @@
       ],
       "count": 1,
       "reason": "AppHeader.jsx's wordmark/logo button (title \"Dashboard: all projects\") paints no border and no background (background:transparent, border:none) — it is a hit-target around the BrandMark, not a visible chip. Nothing renders for the eye to compare against another shape, so it is not the kind of drift this budget exists to bound. Giving it a real chip's chrome (a border/fill it has never had) to make its signature merge would ADD visible clutter around the logo — the opposite of the ask — so it stays a documented, permanent exception rather than a value change."
+    },
+    {
+      "id": "B2391216-imagery-layers-two-pane",
+      "date": "2026-10-20",
+      "surfaces": [
+        "Map landing page (no project selected)",
+        "Map landing page (decide bar)",
+        "Map landing page (selecting parcels)"
+      ],
+      "count": 8,
+      "reason": "NEW-1 (owner-approved 'Imagery & Layers' mockup, round 3, 2026-10-20) replaced the Map finder's collapsed Layers chip with an OPEN two-pane card, so the crawl now measures the controls that card is made of for the first time on this surface: the layer-row checkbox, the row's ▾ caret, the group-list tab (unselected and selected — two signatures by construction, the selected one differs by its fill), the 'Collapse Imagery & Layers' title button, the 'Hide Layers' pill, the ⋯ more-options icon button, the Satellite-source select and the on-but-dormant status dot (the old chip's two shapes are gone, net +8 against the pre-change crawl of 20/24/20). Every one is built from existing tokens and primitives (FONT_SIZE.control, RADIUS, ToggleChip, IconButton, the shared field style); none is a bespoke off-scale value. A code fix cannot remove them without dropping a control the owner's mockup specifies by name or forcing the panel's wrapping group names into a fixed-height tab, which would clip them (the owner's 'names wrap' requirement)."
     }
   ],
   "writtenAt": "2026-09-02",

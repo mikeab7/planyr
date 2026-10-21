@@ -176,6 +176,7 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // (57 new rows on top of 24) — real counties, one source, not a blind expansion.
     // ⛔ Bumped 400 → 600 (2026-10-19, NEW-1, B2317680): Missouri's 71 county rows (one table, measured per county) took it from ~360 to 431 —
     // real counties wired from per-county measurements, not a blind expansion. 16 sibling state sessions are adding rows the same day.
+    // ⛔ Bumped 900 → 1200 (2026-10-20, NEW-1, Michigan): 52 Michigan rows from one measured table took it past 900 (921); a bigger step so the next sibling state does not collide on this line.
     // ⛔ Bumped 600 → 900 (2026-10-19, NEW-1, Pennsylvania): 60 county rows from one measured table (PASDA's per-county layers + county-run servers), 10 more sibling state sessions landing the same day.
     // ⛔ Bumped 600 → 900 (2026-10-20, NEW-1, B2349360): Washington (34), Oklahoma, South Dakota, New Mexico and the other same-day state sessions each wired a measured per-county table — real counties, not a blind expansion.
     // ⛔ Kentucky NEW-2 (2026-10-20): 15 more measured Kentucky county rows on top of the 22 — real counties from a measured table, not a blind expansion (ceiling now 1200, set by the South Carolina session below).
@@ -562,11 +563,12 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
  * Nevada, Ohio and every other statewide-only state offline to fix Michigan. */
 describe("B1597232 — an unsourced county is an ANSWER (no candidates), not a licence to ask its neighbour", () => {
   it("a state whose only county source is elsewhere returns NOTHING, not that source", () => {
-    // Michigan wires exactly two sources — Oakland County and the City of Detroit — and Wayne
-    // County is neither. Both Wayne paths (no bbox match; inside Oakland's padded bbox) are pinned
-    // at their exact measured points in test/cityScopes.test.js.
-    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual([]); // Taylor
-    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual([]); // Livonia
+    // Michigan wired only Oakland and Detroit when this was written (Wayne was the gap); since 2026-10-20 (NEW-1) Wayne has its own
+    // source, so the same rule is pinned on a county that is STILL unwired: Alcona (BS&A-only) must not be handed any neighbour's source.
+    // Both former Wayne paths (no bbox match; inside Oakland's padded bbox) now return Wayne ALONE — pinned in test/cityScopes.test.js.
+    expect(candidateCountiesForPoint(44.6852, -83.6154)).toEqual([]); // Alcona
+    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual(["mi_wayne"]); // Taylor
+    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual(["mi_wayne"]); // Livonia
   });
 
   it("the same rule, a different state: an unwired Louisiana parish never reaches the two wired ones", () => {

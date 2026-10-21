@@ -22,6 +22,7 @@
  * surfaces and the one a site is actually worked on.
  */
 import { test, expect } from "@playwright/test";
+import { openPlannerLayers, setLayer } from "./lib/layersPanel.js";
 
 // Katy / west Houston — real transmission-and-substation country.
 const LAT = 29.7858, LON = -95.8244;
@@ -151,17 +152,15 @@ async function openPlanner(page, site = SITE) {
   await page.waitForTimeout(900); // fit-on-load + first view commit settle
 }
 
-/* Turn a Layers-panel row on by its VISIBLE checkbox. Both hosts stay mounted (the shell hides the
- * inactive one with display:none to keep its map alive), so the DOM holds two copies of this panel
- * — target the visible one by role, never `.first()` on a text node. The "Layers" button is a real
- * disclosure TOGGLE (`setLayersOpen(o => !o)`), so calling this twice to turn on two rows in one
- * test must not blindly re-click it — that would CLOSE the panel it just opened. */
+/* Turn a Layers-panel row on through its own checkbox. Both hosts stay mounted (the shell hides the inactive one with
+ * display:none to keep its map alive), so every locator is scoped to the PLANNER panel by `data-surface`. NEW-1 (Imagery &
+ * Layers): the panel is two panes, so the helper finds the group that holds the row (by its registry / merge-group id) and
+ * opens the card through its own chip only when it is collapsed. */
+const ROW_IDS = { electric: "electric", wetlands: "wetlands", fema: "fema" };
 async function toggleLayer(page, name) {
-  const btn = page.getByRole("button", { name: /Layers/ }).first();
-  if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
-  const row = page.getByRole("checkbox", { name }).filter({ visible: true }).first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.click();
+  const key = Object.keys(ROW_IDS).find((k) => new RegExp(k, "i").test(String(name)));
+  await openPlannerLayers(page);
+  await setLayer(page, ROW_IDS[key], true);
 }
 
 // Feet → viewport client px, off the canvas transform seam the planner publishes.

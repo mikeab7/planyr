@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-12",
-        "approvedCommit": "a05d7896f",
-        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
+        "approvedAt": "2026-10-20",
+        "approvedCommit": "3a229f66b",
+        "note": "B2391216 polish: every Layers row reserves the swatch slot so names align across panes (finder card + planner chip shift slightly), grading rows Title-Cased, reveal line removed. [CI-authored by run 39509733555 on 3a229f66b7e27073f6333d6cec953f535e08eeb3]"
       }
     }
   }

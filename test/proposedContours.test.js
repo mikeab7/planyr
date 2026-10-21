@@ -7,8 +7,8 @@ import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet, feetToLatLngPair } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { sampleAtLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { buildProposedSurface, contourLattice, PL_FILL_EPS_FT } from "../src/workspaces/site-planner/lib/proposedSurface.js";
-import { contourLinesToFeet, ringsToLatticePx, placeContourLabels } from "../src/workspaces/site-planner/lib/gradingPaint.js";
-import { buildProposedContours, buildContours, traceDaylight } from "../src/workspaces/site-planner/lib/contourTrace.js";
+import { contourLinesToFeet, ringsToLatticePx, placeContourLabels, planContourDraw, contourMultiple, CONTOUR_DRAW } from "../src/workspaces/site-planner/lib/gradingPaint.js";
+import { buildProposedContours, buildContours, traceDaylight, pieceSpacingCells } from "../src/workspaces/site-planner/lib/contourTrace.js";
 import { clipPolyline, chaikin, expandRing, pointInRings, longestCellEdgeRun, selfIntersects, polylineLength, pointAlong } from "../src/workspaces/site-planner/lib/polylineClip.js";
 import { clipContourLinesOutside, labelInsideClip } from "../src/workspaces/site-planner/lib/contours.js";
 import { gradingCfg, gradingSetback, gradingPack, hostIdMap } from "../src/workspaces/site-planner/lib/gradingBase.js";
@@ -186,7 +186,7 @@ describe("NEW-3 — proposed ties into existing at the daylight line", () => {
     expect(errs[Math.floor(errs.length * 0.9)]).toBeLessThanOrEqual(1.0);
     expect(outsideVerts).toBe(0);                                                          // nothing proposed outside the line
   });
-  it("boundary: the limit IS the outer clip; nothing proposed outside the setback; the deep ground the engine leaves ungraded is a hole (existing ground shows there)", () => {
+  it("boundary: the limit IS the outer clip; nothing proposed outside the setback; and (ROUND 6) nothing inside it is left ungraded — the field has no hole", () => {
     const { c, L, s } = chehaw("boundary");
     expect(L.clipRings.length).toBeGreaterThanOrEqual(1);
     const limitPx = ringsToLatticePx(L.clipRings, L);
@@ -194,7 +194,12 @@ describe("NEW-3 — proposed ties into existing at the daylight line", () => {
     const edgeDist = (p) => Math.min(...limitPx.map((r) => { let best = Infinity; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1]; const l2 = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)); best = Math.min(best, Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t)); } return best; }));
     for (const lv of c.levels) for (const ln of lv.lines) for (const p of ln) { total++; if (!pointInRings(p, limitPx) && edgeDist(p) > 0.01) out++; }
     expect(total).toBeGreaterThan(500); expect(out).toBe(0);
-    expect(c.daylight.holes.length).toBeGreaterThanOrEqual(1);
+    expect(c.daylight.holes.length).toBe(0);
+    // every lattice sample inside the limit is graded ground (the inside field is +1 there), so no existing contour can show inside
+    let insideSamples = 0, graded = 0;
+    for (let j = 0; j < L.ny; j++) for (let i = 0; i < L.nx; i++) { const p = [i + 0.5, j + 0.5]; if (!pointInRings(p, limitPx)) continue; insideSamples++; if (L.inside[j * L.nx + i] > 0) graded++; }
+    expect(insideSamples).toBeGreaterThan(1000);
+    expect(graded / insideSamples).toBeGreaterThan(0.995);
     expect(s.grid.limit.mode).toBe("boundary");
   });
   it("the existing layer is cut OUTSIDE the same rings, labels inside it dropped (contours.js, the main-thread half)", () => {
@@ -204,5 +209,66 @@ describe("NEW-3 — proposed ties into existing at the daylight line", () => {
     expect(cut.map((l) => [l.level, l.coords])).toEqual([[100, [[-5, 5], [0, 5]]], [100, [[10, 5], [15, 5]]]]);
     expect(clipContourLinesOutside(lines, null)).toBe(lines);
     expect(labelInsideClip({ ll: [5, 5] }, clip)).toBe(true); expect(labelInsideClip({ ll: [12, 5] }, clip)).toBe(false);
+  });
+});
+
+/* ROUND 6 (NEW-1) — DENSITY AND WEIGHT BY ZOOM: the traced set stays at the full interval; what is DRAWN follows the zoom
+ * scalar, and a band whose lines would touch on screen drops to the next coarser interval. */
+describe("ROUND 6 — density and weight by zoom (planContourDraw)", () => {
+  // a plane falling 2% in x on a 1 ft lattice: 1 ft contours every 50 cells
+  const w = 120, h = 40;
+  const values = new Float32Array(w * h), mask = new Uint8Array(w * h).fill(1);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) values[j * w + i] = 100 + 0.02 * i;
+  const grid = { values, mask, width: w, height: h };
+  it("pieceSpacingCells reads interval / |∇z| off the lattice (50 cells for 1 ft on a 2% plane; 4 ft lattice → 200 ft)", () => {
+    const piece = [[50.5, 2], [50.5, 38]];
+    expect(pieceSpacingCells(grid, piece, 1)).toBeCloseTo(50, 1);
+    expect(pieceSpacingCells(grid, piece, 2)).toBeCloseTo(100, 1);
+    const flat = { values: new Float32Array(w * h).fill(7), mask, width: w, height: h };
+    expect(pieceSpacingCells(flat, piece, 1)).toBe(Infinity);
+    const c = buildProposedContours(grid, { interval: 1, smoothPasses: 0, labelMinCells: 1 });
+    expect(c.levels.length).toBeGreaterThan(1);
+    for (const lv of c.levels) { expect(lv.spacing.length).toBe(lv.lines.length); for (const sp of lv.spacing) expect(sp).toBeCloseTo(50, 1); }
+    const feet = contourLinesToFeet(c, { x0: 0, y0: 0, dx: 4, dy: 4, nx: w, ny: h });
+    for (const lv of feet.levels) { expect(lv.pieces.length).toBe(lv.d.split("M").length - 1); for (const pc of lv.pieces) expect(pc.spacingFt).toBeCloseTo(200, 0); }
+    for (const lb of feet.labels) expect(lb.spacingFt).toBeCloseTo(200, 0);
+  });
+  it("contourMultiple: the parcel filling the map (ppf < 1) draws index lines only; a band whose pitch is under 4 px drops to the next coarser multiple", () => {
+    expect(CONTOUR_DRAW.minPitchPx).toBe(4); expect(CONTOUR_DRAW.indexOnlyBelowPpf).toBe(1.0);
+    expect(contourMultiple(50, 0.6)).toBe(5);                 // parcel zoom: every 5th, however wide the band
+    expect(contourMultiple(50, 2.0)).toBe(1);                 // building zoom, 50 ft spacing → 100 px pitch: every level
+    expect(contourMultiple(1.5, 2.0)).toBe(2);                // 1.5 ft spacing at 2 px/ft = 3 px → 2 ft (6 px)
+    expect(contourMultiple(0.5, 2.0)).toBe(5);                // a 2:1 bank at 2 px/ft: 1 px pitch → 5 ft (5 px)
+    expect(contourMultiple(0.1, 2.0)).toBe(20);               // a near-wall: 20 ft
+    expect(contourMultiple(Infinity, 2.0)).toBe(1);           // flat ground: nothing to thin
+    expect(contourMultiple(0.5, 0.6)).toBe(20);               // parcel zoom AND steep: coarser still (0.5 × 5 × 0.6 = 1.5 px < 4)
+  });
+  it("planContourDraw: index only + thin at parcel zoom; every level at building zoom (hairline / heavier index); a steep piece thinned; labels only on drawn pieces", () => {
+    const pc = (d, spacingFt) => ({ d, spacingFt, lenFt: 100 });
+    const contours = { interval: 1, levels: [
+      { level: 100, isIndex: true, d: "M0 0L1 1", pieces: [pc("M0 0L1 1", 50)] },
+      { level: 101, isIndex: false, d: "M0 1L1 2", pieces: [pc("M0 1L1 2", 50), pc("M5 5L6 6", 0.5)] },
+      { level: 102, isIndex: false, d: "M0 2L1 3M7 7L8 8", pieces: [pc("M0 2L1 3", 50), pc("M7 7L8 8", 0.5)] },
+      { level: 105, isIndex: true, d: "M0 5L1 6", pieces: [pc("M0 5L1 6", 50), pc("M9 9L10 10", 0.5)] },
+    ], labels: [
+      { pt: { x: 0, y: 0 }, level: 100, text: "100", angle: 0, lenFt: 100, spacingFt: 50 },
+      { pt: { x: 5, y: 5 }, level: 101, text: "101", angle: 0, lenFt: 100, spacingFt: 0.5 },
+      { pt: { x: 0, y: 1 }, level: 101, text: "101", angle: 0, lenFt: 100, spacingFt: 50 },
+      { pt: { x: 9, y: 9 }, level: 105, text: "105", angle: 0, lenFt: 100, spacingFt: 0.5 },
+    ] };
+    const site = planContourDraw(contours, 0.6);
+    expect(site.indexOnly).toBe(true);
+    expect(site.levels.map((l) => l.level)).toEqual([100, 105]);
+    expect(site.levels.every((l) => l.weight === CONTOUR_DRAW.thinPx)).toBe(true);
+    expect(site.levels[1].d).toBe("M0 5L1 6");                            // at parcel zoom a 0.5 ft spacing × 5 × 0.6 = 1.5 px → the steep piece drops to 20 ft, and 105 is not a multiple of 20
+    expect(site.labels.map((l) => l.level)).toEqual([100]);              // the 105 label rode the steep piece, so it goes with it
+    const bldg = planContourDraw(contours, 2.0);
+    expect(bldg.indexOnly).toBe(false);
+    expect(bldg.levels.map((l) => [l.level, l.weight])).toEqual([[100, CONTOUR_DRAW.indexPx], [101, CONTOUR_DRAW.hairPx], [102, CONTOUR_DRAW.hairPx], [105, CONTOUR_DRAW.indexPx]]);
+    expect(bldg.levels[1].d).toBe("M0 1L1 2");                            // the steep piece at 101 (0.5 ft → 1 px pitch) is thinned to 5 ft: not drawn at 101
+    expect(bldg.levels[2].d).toBe("M0 2L1 3");                            // …nor at 102
+    expect(bldg.levels[3].d).toBe("M0 5L1 6M9 9L10 10");                  // …but drawn at 105
+    expect(bldg.labels.map((l) => [l.level, l.pt.x])).toEqual([[100, 0], [101, 0], [105, 9]]);   // the steep 101 label goes with its piece
+    expect(planContourDraw(null, 2).levels).toEqual([]);
   });
 });

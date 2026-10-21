@@ -13,6 +13,7 @@
  *   5. the on/off + opacity survive a reload (device-level pref, lib/roadNamesPref.js)
  * FOREGROUND-OR-VOID: a hidden tab suspends rAF, so the geometry reads are refused unless visible. */
 import { test, expect } from "@playwright/test";
+import { panelSel, openPlannerLayers, layerRow, setLayer, openRowMenu } from "./lib/layersPanel.js";
 import { installFakeVectorSource, HOUSTON } from "../ui-audit/lib/fakeVectorTiles.mjs"; // synthetic OpenMapTiles source: the sandbox cannot reach openfreemap, and a failed source would swap in the raster fallback and remove the GL layer
 
 const SITE = {
@@ -86,8 +87,8 @@ test.describe("planner road names (NEW-1)", () => {
     }
 
     // toggle OFF → pane gone; ON → back
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const row = page.getByLabel(/Road names/i).first();
+    await openPlannerLayers(page);
+    const row = (await layerRow(page, "road_names")).getByRole("checkbox", { name: "Road Names" }); // NEW-1: Map Base › Labels › Road Names
     await row.waitFor({ state: "visible", timeout: 10000 });
     await row.uncheck();
     await page.waitForFunction((n) => { const m = window.__geoMap; return !(m.getPane(n) && m.getPane(n).querySelector("canvas")); }, PANE);
@@ -100,16 +101,17 @@ test.describe("planner road names (NEW-1)", () => {
     await open(page);
     const has = () => page.evaluate((n) => { const p = window.__geoMap.getPane(n); return !!(p && p.querySelector("canvas")); }, PANE);
     await page.waitForFunction((n) => { const p = window.__geoMap.getPane(n); return !!(p && p.querySelector("canvas")); }, PANE, { timeout: 25000 });
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const slider = page.getByLabel("Road names opacity");
+    await openPlannerLayers(page);
+    const slider = (await openRowMenu(page, "road_names")).getByLabel("Road Names opacity"); // NEW-1: Opacity lives in the row's ▾ dropdown
     await slider.waitFor({ state: "visible", timeout: 10000 });
     await slider.fill("0.4");
     await expect.poll(async () => (await paneState(page)).op).toBe("0.4");
 
     // aerial Off → no labels (the row and slider leave with it)
-    await page.getByRole("group", { name: "Aerial basemap source" }).getByRole("button", { name: /^Off$/ }).click();
+    const source = page.locator(panelSel("planner")).getByTestId("basemap-source"); // NEW-1: a standard dropdown (Off / Esri / USGS)
+    await source.selectOption("off");
     await expect.poll(has).toBe(false);
-    await page.getByRole("group", { name: "Aerial basemap source" }).getByRole("button", { name: /^Aerial$/ }).click();
+    await source.selectOption("esri");
     await expect.poll(has, { timeout: 20000 }).toBe(true);
     expect((await paneState(page)).op).toBe("0.4");
 
@@ -121,8 +123,8 @@ test.describe("planner road names (NEW-1)", () => {
     expect((await paneState(page)).op).toBe("0.4");
 
     // off, reload → stays off
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    await page.getByLabel(/Road names/i).first().uncheck();
+    await openPlannerLayers(page);
+    await setLayer(page, "road_names", false);
     await expect.poll(has).toBe(false);
     await page.reload({ waitUntil: "load" });
     await page.getByText("Road Names Guard", { exact: false }).first().click().catch(() => {});

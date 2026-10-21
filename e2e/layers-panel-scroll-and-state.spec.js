@@ -1,4 +1,10 @@
-/* NEW-1 / NEW-2 — the Layers panel scrolls, and an out-of-state source is DEMOTED, never dropped.
+/* NEW-1 / NEW-2 — the Layers panel scrolls, and a source that cannot serve the site is NOT OFFERED.
+ *
+ * ⛔ REWRITTEN 2026-10-20 (NEW-1, Imagery & Layers redesign). The scroll half is the same promise on the two-pane panel (the card is
+ * bounded by the room it has; a long group scrolls; the last row of a group is reachable). The out-of-state half CHANGED BY OWNER
+ * DECISION: a row whose source cannot serve the site is no longer demoted behind a "not available in <state>" line — it is not
+ * rendered at all (owner 2026-10-11, "A row whose source cannot serve this site's location is NOT RENDERED AT ALL"). The tests below
+ * assert the new rule; the old "demoted, never hidden" assertions are retired with the reveal list they described.
  *
  * The owner's report, both on the panel:
  *   • "It does not scroll… obviously horrible, because then I cannot get to everything."
@@ -16,6 +22,7 @@
  * golden-master harness deliberately checks NUMBERS, not pixels, and is structurally blind to it.
  */
 import { test, expect } from "@playwright/test";
+import { panelSel, openPlannerLayers, groupKeys, selectGroup } from "./lib/layersPanel.js";
 
 const mkSite = (id, name, lat, lon, county) => ({
   schemaVersion: 12, id, groupId: id, site: name, name,
@@ -31,7 +38,7 @@ const mkSite = (id, name, lat, lon, county) => ({
 const TX_SITE = mkSite("lp-scroll-tx", "LP Scroll TX", 29.735, -94.977, "harris");
 const CO_SITE = mkSite("lp-scroll-co", "LP Scroll CO", 40.19, -104.72, "co_weld");
 
-const PANEL = '[data-testid="layer-panel"][data-surface="planner"]';
+const PANEL = panelSel("planner");
 
 async function openLayers(page, site) {
   // Logged out, no external GIS: images are aborted so the run is hermetic and Claude-verifiable
@@ -43,61 +50,71 @@ async function openLayers(page, site) {
   await page.getByText(site.name, { exact: false }).first().click();
   await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 25000 });
   await page.waitForTimeout(1000);
-  // BOTH hosts stay mounted (the finder's copy is hidden), so target the visible control and
-  // assert against the planner SURFACE, never against page text.
-  await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first().click();
+  // BOTH hosts stay mounted (the finder's copy is hidden), so assert against the planner SURFACE, never against page text.
+  await openPlannerLayers(page);
   await expect(page.locator(PANEL)).toBeVisible({ timeout: 20000 });
   await page.waitForTimeout(500);
 }
 
+/* The rows of EVERY group, one group at a time (the panel shows one). */
+async function allRowLabels(page) {
+  const panel = page.locator(PANEL);
+  const out = [];
+  for (const key of await groupKeys(panel)) {
+    await selectGroup(panel, key);
+    out.push(...await panel.locator('[data-testid^="layer-row-"]:not([data-testid$="-menu"]) label span[title]').allInnerTexts());
+  }
+  return out.map((t) => t.replace(/\s+/g, " ").trim());
+}
+
 test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable", () => {
-  // It failed at EVERY realistic height, not only short ones: the card resolved to its full
-  // content height regardless of the room it was given, so the overflow scaled with the viewport
-  // instead of the shortfall. All four are asserted so a fix that only works when there is plenty
-  // of room cannot pass.
+  // It failed at EVERY realistic height, not only short ones: the card resolved to its full content height regardless of the room it
+  // was given, so the overflow scaled with the viewport instead of the shortfall. The card must be BOUNDED at every height; where a
+  // long group (Flood & Drainage, with a dropdown open) genuinely exceeds the room it must scroll — asserted at the shortest heights,
+  // so a fix that only works when there is plenty of room cannot pass.
   for (const height of [1000, 800, 700, 600]) {
-    test(`the list overflows and scrolls at ${height}px tall`, async ({ page }) => {
+    test(`the card is bounded by the room it has, and a long group scrolls, at ${height}px tall`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height });
       await openLayers(page, TX_SITE);
+      const panel = page.locator(PANEL);
+      await selectGroup(panel, "flood");
+      await panel.getByTestId("layer-caret-fema").click(); // an open dropdown makes the longest group longer still
 
       const m = await page.evaluate((sel) => {
         const root = document.querySelector(sel);
         const scroller = root.parentElement;   // the declared overflowY:auto box
         scroller.scrollTop = 999999;
         return {
-          clientH: scroller.clientHeight,
-          scrollH: scroller.scrollHeight,
-          scrolledTo: scroller.scrollTop,
+          clientH: scroller.clientHeight, scrollH: scroller.scrollHeight, scrolledTo: scroller.scrollTop,
           overflowY: getComputedStyle(scroller).overflowY,
-          rows: root.querySelectorAll('input[type="checkbox"]').length,
+          rows: root.querySelectorAll('[data-testid^="layer-row-"]:not([data-testid$="-menu"])').length,
         };
       }, PANEL);
 
       // The scroll box must be BOUNDED by the room available, not grown to its content.
       expect(m.overflowY).toBe("auto");
-      expect(m.rows).toBeGreaterThan(10);                 // enough rows to overflow at all
-      expect(m.clientH).toBeLessThan(height);             // it is not taller than the window
-      expect(m.scrollH).toBeGreaterThan(m.clientH + 1);   // it genuinely overflows…
-      expect(m.scrolledTo).toBeGreaterThan(1);            // …and scrolling actually moves it
+      expect(m.rows).toBeGreaterThan(5);
+      expect(m.clientH).toBeLessThan(height);
+      if (height <= 700) {
+        expect(m.scrollH).toBeGreaterThan(m.clientH + 1);   // it genuinely overflows…
+        expect(m.scrolledTo).toBeGreaterThan(1);            // …and scrolling actually moves it
+      }
     });
   }
 
-  test("the LAST row is reachable and takes a press, at the shortest height", async ({ page }) => {
+  test("the LAST row of a long group is reachable and takes a press, at the shortest height", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 600 });
     await openLayers(page, TX_SITE);
+    const panel = page.locator(PANEL);
+    await selectGroup(panel, "flood");
+    await panel.getByTestId("layer-caret-fema").click();
 
-    /* ⛔ THE GESTURE MUST BE A REAL WHEEL, NOT `scrollIntoView`. Written the easy way this test
-     * PASSED ON THE BUG: `scrollIntoView` walks up and scrolls whatever ancestor will move,
-     * including one the user has no way to reach, so it proved only that the row exists in the
-     * DOM. The owner's sentence is "I cannot get to everything" — the thing under test is the
-     * gesture he actually has. A real wheel also exercises the app-specific hazard: this canvas
-     * binds a non-passive wheel handler that `preventDefault`s to zoom the map, so if the panel
-     * were not exempt from it, CSS could be perfect and the list would still refuse to move. */
-    /* ⛔ Hover the SCROLLER's visible centre, not the panel ROOT's box centre. The root is the
-     * list's full content height (taller than the box that shows it), so its own centre sits
-     * BELOW the scrollport — off the bottom of a short viewport entirely — and the wheel then
-     * lands on the map instead of the list. That mistake made this test fail intermittently
-     * against a perfectly good fix, which is its own small lesson: aim at the box that scrolls. */
+    /* ⛔ THE GESTURE MUST BE A REAL WHEEL, NOT `scrollIntoView`. Written the easy way this test PASSED ON THE BUG: `scrollIntoView` walks
+     * up and scrolls whatever ancestor will move, including one the user has no way to reach. The owner's sentence is "I cannot get to
+     * everything" — the thing under test is the gesture he actually has. A real wheel also exercises the app-specific hazard: this
+     * canvas binds a non-passive wheel handler that `preventDefault`s to zoom the map, so if the panel were not exempt from it, CSS
+     * could be perfect and the list would still refuse to move.
+     * ⛔ Hover the SCROLLER's visible centre, not the panel ROOT's box centre (the root is the list's full content height). */
     const pt = await page.evaluate((sel) => {
       const r = document.querySelector(sel).parentElement.getBoundingClientRect();
       return { x: r.left + r.width / 2, y: (Math.max(0, r.top) + Math.min(window.innerHeight, r.bottom)) / 2 };
@@ -108,37 +125,31 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
 
     const res = await page.evaluate((sel) => {
       const root = document.querySelector(sel);
-      const boxes = root.querySelectorAll('input[type="checkbox"]');
+      const boxes = [...root.querySelectorAll('[data-testid^="layer-row-"]:not([data-testid$="-menu"]) input[type="checkbox"]')];
       const last = boxes[boxes.length - 1];
       const b = last.getBoundingClientRect();
       const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-      return {
-        scrolled: root.parentElement.scrollTop,
-        inViewport: b.top >= 0 && b.bottom <= window.innerHeight,
-        ownsItsCentre: top === last,
-      };
+      return { scrolled: root.parentElement.scrollTop, inViewport: b.top >= 0 && b.bottom <= window.innerHeight, ownsItsCentre: top === last };
     }, PANEL);
     expect(res.scrolled).toBeGreaterThan(1);   // the wheel moved the LIST, not the map
-    // …and the last row is now inside the window AND the topmost thing at its own centre
-    // (CHROME-NEVER-EATS-A-PRESS, applied to the panel).
+    // …and the last row is now inside the window AND the topmost thing at its own centre (CHROME-NEVER-EATS-A-PRESS, applied to the panel).
     expect(res.inViewport).toBe(true);
     expect(res.ownsItsCentre).toBe(true);
 
     // And it is genuinely operable, not merely visible.
-    const last = page.locator(`${PANEL} input[type="checkbox"]`).last();
+    const last = page.locator(`${PANEL} [data-testid^="layer-row-"]:not([data-testid$="-menu"]) input[type="checkbox"]`).last();
     const before = await last.isChecked();
     await last.click();
     expect(await last.isChecked()).toBe(!before);
   });
 
   test("the fix adds no invisible click-eating strip down the right of the map", async ({ page }) => {
-    // The height fix works by making the card row's height DEFINITE. A full-height row that still
-    // claimed pointer events would swallow every press beside the collapsed cards — so the row is
-    // transparent to the pointer and each card claims its own presses back. Worst case is both
-    // cards collapsed, which is what this drives.
+    // The height fix works by making the card row's height DEFINITE. A full-height row that still claimed pointer events would swallow
+    // every press beside the collapsed cards — so the row is transparent to the pointer and each card claims its own presses back.
+    // Worst case is both cards collapsed, which is what this drives.
     await page.setViewportSize({ width: 1280, height: 800 });
     await openLayers(page, TX_SITE);
-    await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first().click();
+    await page.getByTestId("layers-collapse").click();
     await page.waitForTimeout(300);
 
     const r = await page.evaluate(() => {
@@ -152,52 +163,38 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
   });
 });
 
-test.describe("NEW-2 — an out-of-state source is DEMOTED into the list, never hidden", () => {
-  test("Colorado demotes the Texas Railroad Commission rows, and they stay READABLE", async ({ page }) => {
+test.describe("NEW-2 — a source that cannot serve the site is NOT OFFERED (it is not demoted, and nothing says 'not available in…')", () => {
+  const TX_ONLY = ["Oil & Gas Wells", "Pipelines", "Leaking Petroleum Tanks", "Road Ownership", "Active Surface Faults", "Storm Sewer", "Channels & ROW"];
+
+  test("Colorado shows none of the Texas Railroad Commission / TxDOT / Houston rows, and no 'not available' reveal exists", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openLayers(page, CO_SITE);
-
-    const before = await page.locator(PANEL).innerText();
-    // Not offered as an ordinary toggle…
-    expect(before).not.toContain("Oil & gas wells");
-    expect(before).not.toContain("Pipeline easement corridor");
-    // …but the panel SAYS SO, per group, rather than going quiet.
-    expect(before).toMatch(/not available in Colorado/);
-
-    // ⛔ The load-bearing half: the user can still SEE that the RRC exists, is real, and does not
-    // apply here. Absence of data must never wear the costume of an answer.
-    for (const b of await page.locator(`${PANEL} button`, { hasText: /not available in/ }).all()) await b.click();
-    const after = await page.locator(PANEL).innerText();
-    expect(after).toContain("Oil & gas wells");
-    expect(after).toContain("Pipelines");
-    expect(after).toMatch(/Texas-only/);
-    expect(after).toMatch(/no Colorado equivalent is wired yet/);
-
-    // Demoted rows are inert, not clickable toggles that would produce an empty map.
-    const wells = page.locator(`${PANEL} input[aria-label*="Oil & gas wells"]`).first();
-    await expect(wells).toBeDisabled();
-    await expect(wells).not.toBeChecked();
+    const labels = await allRowLabels(page);
+    for (const t of TX_ONLY) expect(labels.some((l) => l.startsWith(t)), `a Texas-only row (${t}) is offered on a Colorado site`).toBe(false);
+    // ⛔ The old reveal list is retired by owner decision (2026-10-11) — no row, no line, no hint of "not available in Colorado".
+    expect(await page.locator(PANEL).innerText()).not.toMatch(/not available in/i);
+    // …and Colorado's OWN sources are there.
+    expect(labels).toContain("Counties & Cities");
+    expect(labels.some((l) => /Drainageways & Basins/.test(l))).toBe(true);
   });
 
   test("a MERGED row survives while only its Texas members are out of state", async ({ page }) => {
-    // "Water & sewer" bundles the Texas CCN / MUD / City-of-Houston mains WITH Colorado's water &
-    // sanitation districts. Reading the slot's state off its first member would demote the whole
-    // row and silently remove the one source a Colorado site needs — the exact failure this item
-    // exists to stop, arriving through the fix for it.
+    // "Water & Sewer" bundles the Texas CCN / MUD / City-of-Houston mains WITH Colorado's water & sanitation districts. Reading the slot's
+    // state off its first member would remove the whole row and silently drop the one source a Colorado site needs — the exact failure
+    // the state gate exists to stop, arriving through the fix for it.
     await page.setViewportSize({ width: 1280, height: 900 });
     await openLayers(page, CO_SITE);
-    const txt = await page.locator(PANEL).innerText();
-    expect(txt).toContain("Water & sewer");
-    expect(txt).toContain("Fire hydrants");
+    const labels = await allRowLabels(page);
+    expect(labels).toContain("Water & Sewer");
+    expect(labels).toContain("Fire Hydrants");
   });
 
   test("Texas is unchanged — the RRC rows are ordinary toggles there", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openLayers(page, TX_SITE);
-    const txt = await page.locator(PANEL).innerText();
-    expect(txt).toContain("Oil & gas wells");
-    expect(txt).toContain("Pipelines");
-    expect(txt).not.toMatch(/Oil & gas wells[\s\S]{0,80}Texas-only/);
-    await expect(page.locator(`${PANEL} input[aria-label*="Oil & gas wells"]`)).toHaveCount(0); // not a demoted row
+    const labels = await allRowLabels(page);
+    expect(labels).toContain("Oil & Gas Wells");
+    expect(labels).toContain("Pipelines");
+    expect(await page.locator(PANEL).innerText()).not.toMatch(/Texas-only/);
   });
 });

@@ -123,7 +123,7 @@ self.onmessage = (e) => {
     const c = buildContours({
       values: maskedSmooth(values, mask, width, height, sigmaC),
       mask, width, height,
-    }, { clip });
+    }, { clip, minInterval: opts.contourInterval > 0 ? opts.contourInterval : null });
     const contours = {
       interval: c.interval,
       levels: c.levels.map((l) => ({
