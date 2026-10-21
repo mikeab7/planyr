@@ -85,6 +85,8 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
 import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack, PLANNER_BASEMAP_CHOICES } from "../../shared/basemaps/basemaps.js";
 import { loadRoadNamesPref, saveRoadNamesPref } from "./lib/roadNamesPref.js";
+import { loadCityNamesPref, saveCityNamesPref } from "./lib/cityNamesPref.js";
+import { attachPlaceNames } from "./lib/placeNamesGate.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, mapBoxInset, mapBoxCenterX, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
@@ -745,6 +747,12 @@ const ICON_PATHS = {
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
   deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
+  // B2391216 ×2 — the Utility Evidence rail section (same 16-box stroke style as every glyph above).
+  evTrace: <><path d="M3 2.5v11M13 2.5v11M1.6 5h2.8M11.6 5h2.8" /><path d="M3 6.6Q8 11 13 6.6" /></>,
+  evElec: <path d="M9.2 1.8 4.4 8.8h3.4L6.8 14.2l4.8-7H8.2z" />,
+  evWater: <path d="M8 2c2.7 3.1 4.1 5.1 4.1 7.1a4.1 4.1 0 0 1-8.2 0C3.9 7.1 5.3 5.1 8 2Z" />,
+  evMain: <><circle cx="3.4" cy="11.4" r="1.6" /><circle cx="8" cy="4.8" r="1.6" /><circle cx="12.6" cy="11.4" r="1.6" /><path d="M4.4 10 7.1 6.2M8.9 6.2 11.6 10" /></>,
+  evXsec: <><path d="M1.5 3.8h3.6l1.5 7h2.8l1.5-7h3.6" /><path d="M1.5 13.4h13" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg className="rbtn-icon" width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -3129,6 +3137,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [roadsOn, origin]);
   useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { saveRoadNamesPref(roadNamesPref); }, [roadNamesPref]);
+
+  /* City names over the aerial (B2391216 ×2) — Map Base › Labels carries City Names beside Road Names, as the map
+   * finder's card does. ONE implementation: the shared `attachPlaceNames` canvas layer (shared/basemaps placeNames,
+   * the same one the finder mounts), in its own pane INSIDE this Leaflet map — above the aerial, below the plan SVG,
+   * so every element, markup and overlay paints over it. `siteStack` is the same zoom gate the finder reads (names
+   * live in zooms 3..13 and are gone once site work owns the screen), so `citiesOn` is a boolean off the COMMITTED
+   * zoom and a pan re-renders nothing here. Device pref like road names; screen-only like the aerial (PDF-PARITY:
+   * the sheet carries neither live label layer). */
+  const [cityNamesPref, setCityNamesPref] = useState(loadCityNamesPref);
+  const citiesOn = !!wantBasemapSrc(basemapOn, showAerial, basemapSrc) && cityNamesPref.on && geoZoom != null
+    && siteStack(geoZoom, { cityNames: true }).includes("cityNames");
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map || !citiesOn) return undefined;
+    let cancelled = false, ctrl = null;
+    attachPlaceNames(map).then((c) => { if (cancelled) { if (c) c.destroy(); return; } ctrl = c; });
+    return () => { cancelled = true; if (ctrl) ctrl.destroy(); };
+  }, [citiesOn, origin]);
+  useEffect(() => { saveCityNamesPref(cityNamesPref); }, [cityNamesPref]);
 
   /* Re-sync the basemap size when the planner is (re-)shown (keep-alive show/hide) or the origin
      first lands. A resize WHILE the planner is shown (a docked panel opening/closing shrinks the
@@ -20636,13 +20663,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   const setRule = (key, patch) => setEaseRules(patchEasementRule(key, patch));
+  // B2391216 ×2 — the per-jurisdiction rules editor lives in the Easement tool's ▾ menu (it left the layers card).
+  // Every path that wants the rules opens THIS: the menu AND its Easement rules disclosure.
+  const openEaseRules = () => { setRulesOpen(true); setEaseMenu(true); };
   const startWaterRoute = () => {
     // ⛔ B877440 — `jurKey` is null when no easement criteria are on file (no auto-detect match,
     // no manual pick). Never fabricate a width off `easeRules.generic`'s Houston-style placeholder
     // — the tool declines and points at the Easement rules panel, where the user can either pick a
     // jurisdiction by hand (still fully functional) or file a request.
     const rule = easeRules[jurKey];
-    if (!rule) { setRulesOpen(true); flashWarn("No easement width on file for this jurisdiction — pick one under Easement rules, or request criteria.", 6000); return; }
+    if (!rule) { openEaseRules(); flashWarn("No easement width on file for this jurisdiction — pick one in the Easement ▾ menu (Easement rules), or request criteria.", 6000); return; }
     startRoute("water", { width: rule.waterWidth || 15, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
   };
 
@@ -26253,8 +26283,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               would lay an invisible click-eating strip down the right edge of the map wherever the
               cards aren't — worst with both cards collapsed. The strip is now transparent to the
               pointer and each card claims its own presses back. */}
-          <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
-          <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
+          {/* B2391216 ×2 — ON A PHONE the View chip and the layers card can no longer sit SIDE BY SIDE: the pair was 471px wide in a 390px
+              screen, so the card's left edge ran 28px off the screen (under the Panels tab) and the View chip was entirely off it. On
+              narrow they stack — the chip above, the card below it, right-aligned inside the two edge tabs' columns. Desktop is untouched. */}
+          <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0, ...(narrow ? { flexDirection: "column", alignItems: "flex-end" } : null) }}>
+          <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0, ...(narrow ? { flex: "none" } : null) }}>
             {/* NEW-1 — counts come from the MODEL (`els`, `parcels`, …), never from the draw sets:
                 a hidden group must still report how much it is hiding, or the menu becomes a mirror
                 of the canvas and can no longer say what to turn back on. */}
@@ -26277,7 +26310,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               actually exists, and the flex column is what lets the scroll box — not the card —
               take the overflow. */}
           {(
-            <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? "min(384px, calc(100vw - 20px))" : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
+            <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? (narrow ? `min(384px, calc(100vw - ${TOP_RIGHT_ROW_NARROW_RIGHT_PX + TOOLS_TAB_WIDTH_PX + 8}px))` : "min(384px, calc(100vw - 20px))") : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
               {/* ⛔ TOOLBAR PASS (B727504) — the old "❖" glyph is a tofu box on fonts that lack it,
                   indistinguishable from a shape tool, a stop button, or a crop. Replaced with the
                   two-offset-sheets mark Google Maps / Photoshop / Figma all use for "layers", so it
@@ -26333,6 +26366,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       value: roadNamesPref.on, onChange: (on) => setRoadNamesPref((p) => ({ ...p, on })),
                       opacity: roadNamesPref.opacity, onOpacityChange: (opacity) => setRoadNamesPref((p) => ({ ...p, opacity })),
                     } : null}
+                    cityNames={origin ? { value: cityNamesPref.on, onChange: (on) => setCityNamesPref({ on }) } : null}
                     gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once this plan has a location."}
                     onSetLocation={origin ? null : () => setSetLocOpen(true)}
                     /* NEW-1 — the LIVE zoom every row's gate is reported against, and the fix.
@@ -26350,95 +26384,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
                     }) : null} />
                   </LazyPanel>
-                  {/* utility-evidence drawing tools (map-dependent — a located site only).
-                      Active states ride the theme tokens (accent + on-accent), never raw
-                      hexes — the B341/B508 chrome-region rule (B696 sweep). */}
-                  {origin && (
-                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
-                    <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
-                    <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : SURF_RAISED, color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
-                      {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
-                    </button>
-                    <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : SURF_RAISED, color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
-                      ⚡ Route electric service
-                    </button>
-                    <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : SURF_RAISED, color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
-                      🚰 Route water service
-                    </button>
-                    <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: SURF_RAISED, color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
-                      {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
-                    </button>
-                    <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
-                      title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : SURF_RAISED, color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
-                      {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
-                    </button>
-                    {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
-                    <button onClick={() => setRulesOpen((o) => !o)} style={{ display: "flex", width: "100%", alignItems: "center", gap: 6, padding: "5px 2px", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                      Easement rules <span style={{ flex: 1 }} /> <span>{rulesOpen ? "▾" : "▸"}</span>
-                    </button>
-                    {rulesOpen && (() => {
-                      // ⛔ B877440/B877441 — `jurKey` is null when nothing was auto-detected and the
-                      // user hasn't picked one: no fabricated 20 ft off `easeRules.generic`. The
-                      // select still lets a user OVERRIDE by hand (a deliberate choice, honored
-                      // exactly as before); absent that, the only affordance is "Request criteria".
-                      const rule = jurKey ? easeRules[jurKey] : null;
-                      const countyRaw = restored?.county || null;
-                      const countyLabel = countyRaw ? String(countyRaw).replace(/\b\w/g, (c) => c.toUpperCase()) + (/county$/i.test(countyRaw) ? "" : " County") : null;
-                      return (
-                        <div style={{ background: "var(--planner-raised)", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
-                          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                            <span style={{ fontSize: 11, color: PAL.muted }}>Jurisdiction</span>
-                            <select value={jurKey || ""} onChange={(e) => setJurKey(e.target.value || null)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
-                              {!jurKey && <option value="">No criteria on file — pick one</option>}
-                              {Object.entries(easeRules).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
-                            </select>
-                          </div>
-                          {rule ? (
-                            <>
-                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
-                                <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                                <span style={{ flex: 1 }} />
-                                <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
-                                  <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
-                                </label>
-                              </div>
-                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: 5 }}>{rule.note}</div>
-                            </>
-                          ) : (() => {
-                            const rk = countyRaw ? `${countyRaw}:easement` : null;
-                            const status = rk ? (critReqStatus[rk] || (wasRequested(countyRaw, "easement") ? { done: true, at: wasRequested(countyRaw, "easement") } : null)) : null;
-                            return (
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4 }}>
-                                No easement criteria on file{countyLabel ? ` for ${countyLabel}` : ""}. Pick a jurisdiction above, or:
-                                <div style={{ marginTop: 5 }}>
-                                  {!countyRaw ? <span style={{ color: PAL.muted }}>Locate the site to name a county.</span>
-                                    : status && status.done ? <span style={{ fontWeight: 600 }}>Requested ✓ {new Date(status.at).toLocaleDateString()}</span>
-                                    : status && status.error ? (
-                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                        <span style={{ color: "var(--danger-text)" }}>{status.error}</span>
-                                        <ActionLink onClick={() => onRequestCriteria({ countyKey: countyRaw, countyLabel, family: "easement" })}>Try again →</ActionLink>
-                                      </span>
-                                    ) : <ActionLink disabled={!!(status && status.busy)} onClick={() => onRequestCriteria({ countyKey: countyRaw, countyLabel, family: "easement" })}>{status && status.busy ? "Sending…" : "Request criteria for this county →"}</ActionLink>}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      );
-                    })()}
-                    <button disabled title="Roadmap — not yet available"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "default", border: `1px dashed ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.muted, fontWeight: 600 }}>
-                      🛰 AI corridor scan — coming soon
-                    </button>
-                  </div>
-                  )}
-                  <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 6 }}>Layers sit beneath your drawing and stay locked to the plan as you pan and zoom.</div>
                 </div>
               )}
             </div>
@@ -27134,6 +27079,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                 {easeMode === "parceledge" ? "Click a parcel's edges to select a contiguous run, then Enter." : easeMode === "boundary" ? "Click points; click the first dot (or double-click) to close." : "Click a centerline; double-click / Enter to finish."}
               </div>
+              {/* Per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) — moved here from the layers card. */}
+              {origin && (
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 2 }}>
+                  <button type="button" data-testid="easement-rules-toggle" aria-expanded={rulesOpen} onClick={() => setRulesOpen((o) => !o)}
+                    style={{ display: "flex", width: "100%", alignItems: "center", gap: 6, padding: "6px 8px", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                    Easement rules <span style={{ flex: 1 }} /> <span aria-hidden="true">{rulesOpen ? "▾" : "▸"}</span>
+                  </button>
+                  {rulesOpen && (() => {
+                    // ⛔ B877440/B877441 — `jurKey` is null when nothing was auto-detected and the
+                    // user hasn't picked one: no fabricated 20 ft off `easeRules.generic`. The
+                    // select still lets a user OVERRIDE by hand (a deliberate choice, honored
+                    // exactly as before); absent that, the only affordance is "Request criteria".
+                    const rule = jurKey ? easeRules[jurKey] : null;
+                    const countyRaw = restored?.county || null;
+                    const countyLabel = countyRaw ? String(countyRaw).replace(/\b\w/g, (c) => c.toUpperCase()) + (/county$/i.test(countyRaw) ? "" : " County") : null;
+                    return (
+                      <div data-testid="easement-rules" style={{ background: "var(--planner-raised)", borderRadius: 8, padding: "7px 9px", margin: "0 6px 4px" }}>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontSize: 11, color: PAL.muted }}>Jurisdiction</span>
+                          <select value={jurKey || ""} onChange={(e) => setJurKey(e.target.value || null)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
+                            {!jurKey && <option value="">No criteria on file — pick one</option>}
+                            {Object.entries(easeRules).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
+                          </select>
+                        </div>
+                        {rule ? (
+                          <>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
+                              <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                              <span style={{ flex: 1 }} />
+                              <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
+                                <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
+                              </label>
+                            </div>
+                            <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: 5 }}>{rule.note}</div>
+                          </>
+                        ) : (() => {
+                          const rk = countyRaw ? `${countyRaw}:easement` : null;
+                          const status = rk ? (critReqStatus[rk] || (wasRequested(countyRaw, "easement") ? { done: true, at: wasRequested(countyRaw, "easement") } : null)) : null;
+                          return (
+                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4 }}>
+                              No easement criteria on file{countyLabel ? ` for ${countyLabel}` : ""}. Pick a jurisdiction above, or:
+                              <div style={{ marginTop: 5 }}>
+                                {!countyRaw ? <span style={{ color: PAL.muted }}>Locate the site to name a county.</span>
+                                  : status && status.done ? <span style={{ fontWeight: 600 }}>Requested ✓ {new Date(status.at).toLocaleDateString()}</span>
+                                  : status && status.error ? (
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                      <span style={{ color: "var(--danger-text)" }}>{status.error}</span>
+                                      <ActionLink onClick={() => onRequestCriteria({ countyKey: countyRaw, countyLabel, family: "easement" })}>Try again →</ActionLink>
+                                    </span>
+                                  ) : <ActionLink disabled={!!(status && status.busy)} onClick={() => onRequestCriteria({ countyKey: countyRaw, countyLabel, family: "easement" })}>{status && status.busy ? "Sending…" : "Request criteria for this county →"}</ActionLink>}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                              </div>
+                            );
+                          })()}
+                </div>
+              )}
             </AnchoredMenu>
           </div>
 
@@ -27149,6 +27154,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           })}
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span className="rbtn-hint" style={railHint(tool === "callout")}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span className="rbtn-hint" style={railHint(tool === "text")}>T</span></button>
+
+          {/* B2391216 ×2 — Utility Evidence: the five street-imagery / utility drawing tools that used to ride under the
+              layers card (they are DRAWING tools, not layers). Same handlers, same active states, same row style as every
+              other tool here; located plans only (they read the aerial and the GIS around the site). */}
+          {origin && (<>
+            {railHdr("Utility Evidence")}
+            <button className={`rbtn${traceMode ? " on" : ""}`} style={rbtn(traceMode)} data-testid="rail-ev-trace" aria-pressed={traceMode}
+              onClick={() => { setTracePts([]); setTraceMode((m) => !m); }}
+              title="Click along a visible pole line on the aerial; double-click or Enter to finish (Esc to cancel)">
+              <ToolIcon id="evTrace" /> {traceMode ? "Tracing…" : "Trace overhead electric"}
+            </button>
+            <button className={`rbtn${routeMode?.util === "elec" ? " on" : ""}`} style={rbtn(routeMode?.util === "elec")} data-testid="rail-ev-route-elec" aria-pressed={routeMode?.util === "elec"}
+              onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)">
+              <ToolIcon id="evElec" /> Route electric service
+            </button>
+            <button className={`rbtn${routeMode?.util === "water" ? " on" : ""}`} style={rbtn(routeMode?.util === "water")} data-testid="rail-ev-route-water" aria-pressed={routeMode?.util === "water"}
+              onClick={startWaterRoute} title="Route water service from a main to a building; the easement width comes from the jurisdiction rule in the Easement ▾ menu">
+              <ToolIcon id="evWater" /> Route water service
+            </button>
+            <button className="rbtn" style={{ ...rbtn(false), opacity: evidenceBusy ? 0.6 : 1 }} data-testid="rail-ev-infer-main" disabled={evidenceBusy}
+              onClick={inferWaterMain} title="Connect the fire hydrants in view into a screening-only water main">
+              <ToolIcon id="evMain" /> {evidenceBusy ? "Inferring…" : "Infer water main"}
+            </button>
+            <button className={`rbtn${xsecMode ? " on" : ""}`} style={rbtn(xsecMode)} data-testid="rail-ev-xsec" aria-pressed={xsecMode}
+              onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
+              title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert (Esc to cancel)">
+              <ToolIcon id="evXsec" /> Cross-section (ditch)
+            </button>
+          </>)}
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (

@@ -52,6 +52,7 @@ import {
 // NEW-3 — the baked-tile vintage stamp. Decision + wording are pure (floodTiles.js); the fetch is one cached call per session.
 import { floodTilesEnabled, resolveFloodSource, floodVintageStamp } from "../../../shared/gis/floodTiles.js";
 import { loadFloodManifest } from "../lib/floodManifest.js";
+import { placeNamesVisible } from "../lib/placeNamesGate.js";
 import { PinIcon } from "./icons.jsx";
 import {
   PANEL_GROUPS, groupEntriesFor, availableEntries, dropdownPlan, rowSwatch, rampGradient, legendFor,
@@ -621,7 +622,8 @@ export default function LayerPanel({
   const roadNamesSpec = placeNames && {
     id: "road_names", label: "Road Names", value: null, swatch: null, dim: false, dormant: placeNamesDormant, state: placeNamesDormant ? "dormant-zoom" : (placeNames.value ? "drawing" : "off"),
     checked: !!placeNames.value, onCheck: writeOn(placeNames.onChange),
-    dot: { meta: null, loading: false, dormant: placeNamesDormant, hidden: false, title: placeNamesDormant ? "On — not showing at this zoom" : "" },
+    // The same anatomy as every other row: a LIVE dot while the labels are drawing (green), hollow while the zoom gate holds them back.
+    dot: { meta: placeNames.value && !placeNamesDormant ? STATUS.loaded : null, loading: false, dormant: placeNamesDormant, hidden: false, title: placeNamesDormant ? "On — not showing at this zoom" : (placeNames.value ? STATUS.loaded.label : "") },
     dropdown: (() => {
       const hasOpacity = typeof placeNames.opacity === "number" && typeof placeNames.onOpacityChange === "function";
       const plan = dropdownPlan({ on: !!placeNames.value, zoomGated: placeNamesDormant, canLift: false, hasStatus: false, settings: [], hasLegend: false, hasRamp: false, hasInfo: true }).filter((p) => p !== "opacity" || hasOpacity);
@@ -632,10 +634,12 @@ export default function LayerPanel({
       };
     })(),
   };
+  // City names live in zooms 3..13 (`placeNamesVisible`); the row reads hollow outside that band, like any zoom-gated row.
+  const cityNamesDormant = !!cityNames && !!cityNames.value && typeof mapZoom === "number" && !placeNamesVisible(mapZoom);
   const cityNamesSpec = cityNames && {
-    id: "city_names", label: "City Names", value: null, swatch: null, dim: false, dormant: false, state: cityNames.value ? "drawing" : "off",
+    id: "city_names", label: "City Names", value: null, swatch: null, dim: false, dormant: cityNamesDormant, state: cityNamesDormant ? "dormant-zoom" : (cityNames.value ? "drawing" : "off"),
     checked: !!cityNames.value, onCheck: writeOn(cityNames.onChange),
-    dot: { meta: null, loading: false, dormant: false, hidden: false, title: "" },
+    dot: { meta: cityNames.value && !cityNamesDormant ? STATUS.loaded : null, loading: false, dormant: cityNamesDormant, hidden: false, title: cityNamesDormant ? "On — not showing at this zoom" : (cityNames.value ? STATUS.loaded.label : "") },
     dropdown: { plan: ["info"], status: null, info: cityNamesInfo },
   };
 
