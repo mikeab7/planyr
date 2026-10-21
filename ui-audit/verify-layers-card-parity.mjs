@@ -109,27 +109,6 @@ try {
       check(`planner · ${tag}: the card carries only the panel (no Evidence tools / Easement rules / AI corridor scan / footer)`, !/Evidence tools|Easement rules|AI corridor scan|Layers sit beneath/i.test(text));
       const road = await rowAnatomy(pp, "road_names"), city = await rowAnatomy(pp, "city_names");
       check(`planner · ${tag}: Map Base lists Road Names AND City Names`, !!road && !!city);
-      if (size === "desktop" && theme === "light") {
-        // The things that left the card still WORK, from their new homes (V1829776 steps 3–4).
-        check("rail: a Utility Evidence heading", (await page.locator(".rail-hdr", { hasText: "Utility Evidence" }).count()) === 1);
-        for (const id of ["rail-ev-trace", "rail-ev-route-elec", "rail-ev-route-water", "rail-ev-infer-main", "rail-ev-xsec"]) check(`rail: ${id} is there`, (await page.getByTestId(id).count()) === 1);
-        const trace = page.getByTestId("rail-ev-trace");
-        await trace.click();
-        check("rail: Trace overhead electric arms", (await trace.getAttribute("aria-pressed")) === "true");
-        await trace.click();
-        check("rail: …and disarms", (await trace.getAttribute("aria-pressed")) === "false");
-        await page.getByRole("button", { name: "Easement options" }).click();
-        await page.getByTestId("easement-rules-toggle").click();
-        check("Easement ▾ → Easement rules opens the jurisdiction editor", (await page.getByTestId("easement-rules").count()) === 1);
-        await page.keyboard.press("Escape");
-        await page.getByTestId("rail-ev-route-water").click();
-        await page.waitForTimeout(600);
-        const flashed = await page.getByText(/pick one in the Easement ▾ menu/).count();
-        const armed = (await page.getByTestId("rail-ev-route-water").getAttribute("aria-pressed")) === "true";
-        check("Route water service: with no criteria it names the Easement ▾ menu and opens the rules there; with criteria it arms", (flashed === 1 && (await page.getByTestId("easement-rules").count()) === 1) || armed, `flash=${flashed} armed=${armed}`);
-        await page.keyboard.press("Escape");
-        await page.mouse.click(5, 300);
-      }
       shots[`planner-${tag}`] = { buf: await pCard.screenshot(), road, city };
       writeFileSync(`${OUT}planner-${tag}.png`, shots[`planner-${tag}`].buf);
       // ── finder ──
@@ -155,6 +134,32 @@ try {
       const clipped = await pCard.evaluate((c) => { const sc = c.querySelector('[data-testid="layer-panel"]'); return sc ? sc.scrollWidth - sc.clientWidth : 0; });
       check(`planner · ${tag}: nothing clipped sideways`, clipped <= 1, `${clipped}px`);
     }
+  }
+  // ── the things that left the card still WORK from their new homes (V1829776 steps 3–4) — last, so the panels they open cannot sit over a screenshot ──
+  await page.setViewportSize(SIZES.desktop);
+  await page.goto(`${base}/#/project/${ID}/site`, { waitUntil: "load" });
+  await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
+  await page.waitForTimeout(1800);
+  {
+    // The things that left the card still WORK, from their new homes (V1829776 steps 3–4).
+    check("rail: a Utility Evidence heading", (await page.locator(".rail-hdr", { hasText: "Utility Evidence" }).count()) === 1);
+    for (const id of ["rail-ev-trace", "rail-ev-route-elec", "rail-ev-route-water", "rail-ev-infer-main", "rail-ev-xsec"]) check(`rail: ${id} is there`, (await page.getByTestId(id).count()) === 1);
+    const trace = page.getByTestId("rail-ev-trace");
+    await trace.click();
+    check("rail: Trace overhead electric arms", (await trace.getAttribute("aria-pressed")) === "true");
+    await trace.click();
+    check("rail: …and disarms", (await trace.getAttribute("aria-pressed")) === "false");
+    await page.getByRole("button", { name: "Easement options" }).click();
+    await page.getByTestId("easement-rules-toggle").click();
+    check("Easement ▾ → Easement rules opens the jurisdiction editor", (await page.getByTestId("easement-rules").count()) === 1);
+    await page.keyboard.press("Escape");
+    await page.getByTestId("rail-ev-route-water").click();
+    await page.waitForTimeout(600);
+    const flashed = await page.getByText(/pick one in the Easement ▾ menu/).count();
+    const armed = (await page.getByTestId("rail-ev-route-water").getAttribute("aria-pressed")) === "true";
+    check("Route water service: with no criteria it names the Easement ▾ menu and opens the rules there; with criteria it arms", (flashed === 1 && (await page.getByTestId("easement-rules").count()) === 1) || armed, `flash=${flashed} armed=${armed}`);
+    await page.keyboard.press("Escape");
+    await page.mouse.click(5, 300);
   }
 } finally {
   if (live) {
