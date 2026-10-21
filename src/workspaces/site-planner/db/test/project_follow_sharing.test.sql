@@ -124,6 +124,9 @@ begin
     select (select count(*) from storage.objects where name in (k1, rk1)) + (select count(*) from public.site_plan_overlays where id = r1) + (select count(*) from public.comps where id = c1) into n;
     if n = 0 then passed := passed+1; rep := rep||'PASS 20 after unshare the teammate loses file, raster, row and comp'||E'\n'; else failed := failed+1; rep := rep||'FAIL 20 still visible after unshare ('||n||')'||E'\n'; end if;
     execute 'reset role';
+    -- (2026-10-21, B2404336 session: `reset role` does not reset request.jwt.claims, which still named M
+    -- here, so guard_team_share refused the owner's re-share. Re-assert O before it.)
+    perform set_config('request.jwt.claims', json_build_object('sub', o, 'role', 'authenticated')::text, true);
     perform set_config('planyr.share_intent', '1', true);
     update public.sites set team_id = t where id = 'b2244017p1';
     perform set_config('planyr.share_intent', '0', true);
