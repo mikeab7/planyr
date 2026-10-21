@@ -44,16 +44,17 @@ describe("the Overlays panel exposes a non-destructive, reversible crop editor",
   it("commits through setOverlayCrop (lock check + undo history + persistence via patchOverlay)", () => {
     expect(src).toMatch(/onCommit=\{\(crop\) => \{ if \(setOverlayCrop\(o\.id, crop\)\) setOvCropId\(null\); \}\}/);
   });
-  it('offers a "Reset" action that restores the full image (crop: null, not a re-import)', () => {
-    expect(panel).toContain('data-testid="overlay-crop-reset"');
-    expect(src).toMatch(/onResetCrop: \(id\) => setOverlayCrop\(id, null\)/);
+  it("has ONE reset — clearing the shape in the editor (Reset to full page → Done → crop: null); the panel's Reset button is gone (NEW-2, 2026-10-21)", () => {
+    expect(panel).not.toContain('data-testid="overlay-crop-reset"');
+    expect(src).not.toMatch(/onResetCrop/);
+    expect(src).toMatch(/onCropSwitch: setOverlayCropOn/);
   });
   it("is available for BOTH sheet (PDF) and plain image overlays — not gated on a PDF-only field", () => {
     expect(panel).toContain('data-testid="overlay-crop-open"');
     const crop = panel.slice(panel.indexOf("function CropSection"), panel.indexOf("function AppearanceSection"));
     expect(crop).not.toMatch(/o\.sheet/);
   });
-  it("there is exactly ONE crop entry point in the panel, and it gates on the ONE lock predicate", () => {
+  it("there is exactly ONE Adjust button in the panel (the picture opens the same editor), and it gates on the ONE lock predicate", () => {
     expect((panel.match(/data-testid="overlay-crop-open"/g) || []).length).toBe(1);
     expect(panel).toMatch(/const why = cropEditBlock\(o\)/);
     expect(src).toMatch(/onCrop: \(id\) => \{ setSelOverlay\(id\); setOvCropId\(id\); \}/);

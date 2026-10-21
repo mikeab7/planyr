@@ -13,6 +13,7 @@
  * know it has, or the run is VOID and prints no score.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -60,7 +61,7 @@ async function scenario(label, { crop = null, viewport = { width: 1440, height: 
     // the Overlays panel keeps Crop… inside the expanded row (Crop section), not on the collapsed row
     if (!(await page.locator('[data-testid="overlay-crop-ovW"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="overlay-crop-ovW"] [data-testid="overlay-crop-open"]').click();
+    await openCropEditor(page, "ovW");
     await page.waitForTimeout(700);
   };
   S.imgBox = () => S.dlg.locator("img").first().boundingBox();
@@ -188,7 +189,7 @@ try {
   const S = await scenario("NEW-4: OVERLAYS row, 1600×465 window", { viewport: { width: 1600, height: 465 } });
   check("[known-good arm] the overlay row exists and is collapsed (no Opacity control, no Crop section showing)", (await S.page.locator('[data-testid="reference-row-ovW"]').count()) === 1 && (await S.page.locator('[data-testid="overlay-opacity-pct"]').count()) === 0 && (await S.page.locator('[data-testid="overlay-crop-ovW"]').count()) === 0);
   await S.page.locator("button", { hasText: ov.name }).first().click(); await S.page.waitForTimeout(400);
-  const btn = S.page.locator('[data-testid="overlay-crop-ovW"] [data-testid="overlay-crop-open"]');
+  const btn = S.page.locator('[data-testid="overlay-crop-ovW"] [data-testid^="overlay-crop-switch-"]');
   await btn.scrollIntoViewIfNeeded(); await S.page.waitForTimeout(200);
   const vis = await btn.evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: innerHeight, w: r.width, h: r.height }; });
   check("after expanding the row, Crop… is fully inside the short window (reachable in one scroll of the panel)", vis.top >= 0 && vis.bottom <= vis.vh && vis.w > 0, JSON.stringify(vis));

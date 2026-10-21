@@ -64,7 +64,8 @@ describe("the open row's sections", () => {
     expect(h).toContain('data-testid="overlay-scale-ratio"');
     for (const k of ["set", "trace", "match"]) expect(h).toContain(`data-testid="overlay-scale-${k}"`);
     expect(text(h)).toMatch(/Set scale\|Trace a length\|Match 2 points/);
-    expect(h).toContain('data-testid="overlay-rot-minus"'); expect(h).toContain('data-testid="overlay-rot-plus"');
+    expect(h).toContain('data-testid="overlay-rot-minus"'); expect(h).toContain('data-testid="overlay-rot-plus"');   // the ▼ / ▲ beside the number box
+    expect(h).toContain('data-testid="overlay-rot-dial"');
     expect(h).toContain('data-testid="overlay-rot-ccw90"'); expect(h).toContain('data-testid="overlay-rot-cw90"');
     expect(h).not.toMatch(/North/);
     expect(h).toContain("Knock out white paper");
@@ -85,8 +86,9 @@ describe("the open row's sections", () => {
   });
   it("unscaled does NOT dim or disable Crop or Appearance", () => {
     const h = render([img({ unscaled: true })], "img1");
-    expect(h).toContain('data-testid="overlay-crop-open"');
-    expect(h).not.toMatch(/data-testid="overlay-crop-open"[^>]*disabled/);
+    expect(h).toContain('data-testid="overlay-crop-switch-img1"');
+    expect(h).not.toMatch(/data-testid="overlay-crop-switch-img1"[^>]*disabled/);
+    expect(h).not.toMatch(/aria-label="Crop"[^>]*disabled/);
     expect(h).toContain('data-testid="overlay-opacity-pct"');
     expect(h).not.toMatch(/data-testid="overlay-opacity-pct"[^>]*disabled/);
   });
@@ -100,16 +102,19 @@ describe("the open row's sections", () => {
   });
   it("map capture: no placement, no crop, no scale/amber/calibrate; opacity only; own load-error banner", () => {
     const h = render([map()], "map1", { loadErr: { map1: "remote" } });
-    for (const t of ["overlay-placement", "overlay-crop-open", "overlay-scale-trace", "overlay-rotation", "This overlay is not scaled"]) expect(h).not.toContain(t);
+    for (const t of ["overlay-placement", "overlay-crop-open", "overlay-crop-switch", "overlay-scale-trace", "overlay-rotation", "This overlay is not scaled"]) expect(h).not.toContain(t);
     expect(h).toContain('data-testid="overlay-opacity-pct"');
     expect(h).not.toContain("Behind the plan");
     expect(h).toContain("Aerial image didn&#x27;t load");
   });
-  it("crop line: Not cropped / Rectangle / Polygon · N points, one control (Edit + Reset)", () => {
-    expect(text(render([img()], "img1"))).toContain("Not cropped");
-    expect(text(render([img({ crop: { x: 0, y: 0, w: 10, h: 10 } })], "img1"))).toContain("Rectangle");
-    expect(text(render([img({ crop: { kind: "poly", pts: [[0, 0], [9, 0], [9, 9], [0, 9]] } })], "img1"))).toContain("Polygon · 4 points");
-    expect((render([img()], "img1").match(/overlay-crop-open"/g) || []).length).toBe(1);
+  it("crop is a switch in the heading: off = the heading alone; on = picture + Adjust (one Adjust control, no Reset, no shape text)", () => {
+    const off = render([img()], "img1");
+    expect(off).toContain('data-testid="overlay-crop-switch-img1"');
+    expect((off.match(/overlay-crop-open"/g) || []).length).toBe(0);
+    const on = render([img({ crop: { x: 0, y: 0, w: 10, h: 10 } })], "img1");
+    expect((on.match(/overlay-crop-open"/g) || []).length).toBe(1);
+    expect(on).toContain('aria-label="Adjust the crop"');
+    for (const h of [off, on]) expect(text(h)).not.toMatch(/Not cropped|Rectangle|Polygon ·|Reset/);
   });
   it("multi-page PDF shows the page stepper; single-page does not", () => {
     expect(render([pdf({ pageCount: 4 })], "pdf1")).toContain('data-testid="overlay-page"');

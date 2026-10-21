@@ -16,6 +16,7 @@
  * and the OVERLAYS row still expanded (NEW-6b); edge grips share one footprint (NEW-6a).
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -68,8 +69,8 @@ const stored = () => page.evaluate(() => {
 const waitStored = async (pred, ms = 4000) => { const t = Date.now(); let s; while (Date.now() - t < ms) { s = await stored(); if (pred(s)) return s; await page.waitForTimeout(150); } return s; };
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
 const openCrop = async () => {
-  if (!(await page.locator('[data-testid="overlay-crop-open"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
-  await page.locator('[data-testid="overlay-crop-open"]').click();
+  if (!(await page.locator('[data-testid^="overlay-crop-switch-"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
+  await openCropEditor(page);
   await page.waitForTimeout(600);
 };
 const imgBox = () => dlg.locator("img").first().boundingBox();
@@ -276,7 +277,7 @@ await page.goto("about:blank");
 await openPlan(cb);
 const s5 = await stored();
 check("after a hard reload (cache-busted URL) the rectangle crop is still saved", !!s5 && s5.kind === "rect", JSON.stringify(s5));
-check("NEW-6b: …and the OVERLAYS row is STILL expanded (Crop… reachable with no extra click)", (await page.locator('[data-testid="overlay-crop-open"]').count()) === 1);
+check("NEW-6b: …and the OVERLAYS row is STILL expanded (Crop… reachable with no extra click)", (await page.locator('[data-testid^="overlay-crop-switch-"]').count()) === 1);
 await page.screenshot({ path: OUT + "crop-walk-3-after-reload.png" });
 await openCrop();
 check("reopening after the reload shows the saved rectangle (Reset enabled)", await dlg.locator('[data-testid="crop-reset"]').isEnabled());

@@ -88,9 +88,9 @@ for (let round = 1; round <= ROUNDS; round++) {
   knownIds.add(handle);
   const id = handle.replace("reference-open-", "");
   // a freshly placed row may already be expanded — a second click would COLLAPSE it
-  if (!(await page.locator('[data-testid="overlay-crop-open"]').count())) await page.locator(`[data-testid="${handle}"]`).click();
+  if (!(await page.locator('[data-testid^="overlay-crop-switch-"]').count())) await page.locator(`[data-testid="${handle}"]`).click();
   const t0 = Date.now();
-  await page.locator('[data-testid="overlay-crop-open"]').click({ timeout: 30000 });
+  await page.locator('[data-testid^="overlay-crop-switch-"]').first().click({ timeout: 30000 });   // NEW-2: an uncropped overlay opens the editor from the Crop switch
   await dlg().waitFor({ state: "visible", timeout: 15000 });
   const openMs = Date.now() - t0;
   console.log(`  opened ${openMs} ms after the row appeared; long tasks so far (ms): ${JSON.stringify(await page.evaluate(() => window.__longTasks))}`);

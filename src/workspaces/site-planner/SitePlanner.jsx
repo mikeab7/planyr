@@ -404,7 +404,7 @@ import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
 import { scaledPatch } from "./lib/overlayPanelModel.js";
-import { hasCrop, cropClipShapeScreen, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
+import { hasCrop, cropClipShapeScreen, cropEditBlock, normalizeCropShape, recropForRaster, withCropOff } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
@@ -10862,8 +10862,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (why) { flashWarn(`⚠ ${why}.`, 4500); return false; }
     const next = crop ? normalizeCropShape(crop, o.imgW, o.imgH) : null;
     if (crop && !next) { flashWarn("⚠ That crop leaves too little of the sheet — nothing was changed.", 5000); return false; }
+    if (!next && !o.crop) return true;   // nothing was cropped and nothing is now — no empty undo frame
     patchOverlay(id, { crop: next }, hist);
     return true;
+  };
+  // NEW-2 (2026-10-21) — the panel's Crop SWITCH. Off keeps the shape (`crop.off`, the shared engine) so on brings
+  // the very same shape back; it is the one crop write, so it is one undo frame and refused/locked like any other.
+  const setOverlayCropOn = (id, on) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || !o.crop) return false;
+    return setOverlayCrop(id, withCropOff(o.crop, !on));
   };
   /* ------------ NEW-1 — overlays flow between sibling plans of one site (lib/siblingOverlays.js) ------------
    * Foreign rows are computed at read time from a READ-ONLY fetch of the sibling rows; nothing here ever
@@ -22718,7 +22726,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onCalibCancel: () => setOvCalib(null),
     onCalibApply: applyOvAlign,
     onCrop: (id) => { setSelOverlay(id); setOvCropId(id); },
-    onResetCrop: (id) => setOverlayCrop(id, null),
+    onCropSwitch: setOverlayCropOn,
     onZoomTo: zoomToOverlay,
     onSizeToView: sizeOverlayToView,
     onCopy: copyOverlay,
