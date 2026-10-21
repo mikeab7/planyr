@@ -5,6 +5,8 @@
  * only inside the combobox component itself. `PlaceSearchField.jsx` is a thin wrapper over these.
  */
 
+import { looksLikeTnParcelId } from "./tnParcelId.js";
+
 /** Build the list of rows to render below the field, given the current fetch status. `status` is
  * one of 'idle' | 'loading' | 'ready' | 'nomatch' | 'unavailable' (see PlaceSearchField.jsx).
  * `results` is the (possibly empty) suggestion array; `text` is the raw typed string.
@@ -17,15 +19,18 @@
  * shown alongside it, so there is exactly one honest next step, not two overlapping ones. */
 export function buildPlaceRows(status, results, text) {
   const t = (text || "").trim();
+  /* NEW-2 (TN, 2026-10-21) — text that reads as a Tennessee parcel id leads with its own row: the geocoder has nothing useful to say about a
+   * number, and a no-match note ("No matches for 156-027.00-000") would be false — the id search is exactly what Enter runs. */
+  const idRow = t && looksLikeTnParcelId(t) ? [{ kind: "parcelId", text: t }] : [];
   if (status === "nomatch") {
     return {
-      rows: [{ kind: "searchAnyway", text: t }, { kind: "dropPin" }],
-      noMatchNote: `No matches for "${t}".`,
+      rows: [...idRow, { kind: "searchAnyway", text: t }, { kind: "dropPin" }],
+      noMatchNote: idRow.length ? null : `No matches for "${t}".`,
     };
   }
   const rows = (results || []).map((hit) => ({ kind: "result", hit }));
   if (t) rows.push({ kind: "raw", text: t });
-  return { rows, noMatchNote: null };
+  return { rows: [...idRow, ...rows], noMatchNote: null };
 }
 
 /** (a) ENTER MUST ALWAYS WORK, including before any suggestion has arrived (a slow network must
@@ -45,7 +50,7 @@ export function resolvePlaceEnter(rows, activeIndex, text) {
 
 function rowToAction(row) {
   if (row.kind === "result") return { type: "result", hit: row.hit };
-  if (row.kind === "raw" || row.kind === "searchAnyway") return { type: "raw", text: row.text };
+  if (row.kind === "raw" || row.kind === "searchAnyway" || row.kind === "parcelId") return { type: "raw", text: row.text };
   if (row.kind === "dropPin") return { type: "dropPin" };
   return null;
 }

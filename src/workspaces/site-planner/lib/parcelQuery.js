@@ -12,6 +12,7 @@ import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
 import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
 import { isPlaceholderValue, countyRecord } from "./appraisal.js";
+import { normalizeIdFor } from "./tnParcelId.js";
 
 // A field name gets interpolated into the where-clause and may come from a live (or a
 // user-pasted) layer's metadata, so it must be a plain identifier — reject anything
@@ -125,6 +126,9 @@ async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere
  * Returns { feats, layerUrl, idField, addrField, backup, backupCounty }. A config
  * error (no id field, bad field name) is rethrown as-is — it isn't an outage. */
 export async function lookupParcels({ county, lookupUrl, mode, value }) {
+  /* NEW-2 (TN, 2026-10-21) — an id typed with spaces / dots / dashes in any mix is rebuilt into the form the county stores it in, so
+   * "156 027.00 000" finds `156-027.00-000`. Only a county that declares an `idNormalizer` is touched, and only an id search. */
+  if (mode === "id" && COUNTIES[county]?.idNormalizer) value = normalizeIdFor(COUNTIES[county].idNormalizer, value);
   try {
     const r = await queryOneLayer(lookupUrl, {
       mode, value,

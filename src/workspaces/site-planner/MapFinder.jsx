@@ -99,6 +99,7 @@ import { STATUSES, STATUS_META, statusOf, roleOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, situsAddress, siteNameFromParcel, tidyAddressLabel } from "./lib/appraisal.js";
 import { idAttrFor } from "./lib/parcelQuery.js";
+import { looksLikeTnParcelId } from "./lib/tnParcelId.js";
 /* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
  * lot — an inherently async moment, so there is nothing on screen for its chunk to hold up and
  * no layout to reserve (the card is absolutely positioned over the map, which is also why the
@@ -3614,11 +3615,37 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
   };
 
+  /* NEW-1 (TN, 2026-10-21) — the lot a geocoded ADDRESS names, as a point inside it, or null. Only counties whose layer declares a situs column are asked,
+   * each through the one id/address query; a failure or a timeout is simply "no snap" (the caller then says what it always said). */
+  const snapToAddressLot = async (latlng, label, candidates) => {
+    try {
+      const [{ houseAndStreet, pickAddressSnap }, { interiorPointOf }, { lookupParcels }] = await Promise.all([
+        import("./lib/addressSnap.js"), import("./lib/parcelIdSearch.js"), import("./lib/parcelQuery.js"),
+      ]);
+      const want = houseAndStreet(label);
+      if (!want) return null;
+      const keys = candidates.filter((c) => !c.statewide && COUNTIES[c.county] && COUNTIES[c.county].addrField);
+      for (const c of keys) {
+        const r = await Promise.race([
+          lookupParcels({ county: c.county, lookupUrl: COUNTIES[c.county].layerUrl || "", mode: "address", value: `${want.house} ${want.street}` }),
+          new Promise((res) => setTimeout(() => res(null), 6000)),
+        ]).catch(() => null);
+        if (!r || !r.feats || !r.feats.length) continue;
+        const pick = pickAddressSnap(r.feats, label, latlng, {
+          addrOf: (f) => situsAddress(f.attributes || {}),
+          centreOf: (f) => interiorPointOf(f),
+        });
+        if (pick) return interiorPointOf(pick);
+      }
+    } catch (_) { /* a snap that cannot run is no snap */ }
+    return null;
+  };
+
   /* NEW-2 (B233): identify + select the parcel at a geocoded point and surface its
      info card. Reuses the SAME identify/select pipeline as a click. Distinguishes
      "couldn't reach the parcel service" (unavailable) from "no parcel at this point"
      (none) — they mean different things and must read differently. */
-  const selectParcelAt = async (latlng, label, tok) => {
+  const selectParcelAt = async (latlng, label, tok, noSnap = false) => {
     // B545: when called from a search, `tok` is that search's generation; a newer search makes
     // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
     const live = () => tok == null || tok === addrTokRef.current;
@@ -3672,6 +3699,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
         if (gap) { setParcelInfo({ status: "no-source", label, note: gap }); return; }
       }
+      /* NEW-1 (TN, 2026-10-21) — a healthy server answered and the geocoded point is in the road: before the "no parcel" card, ask the county's own
+       * layer for the lot the ADDRESS names (house number + street, within a short walk of the point). Narrow by design — see lib/addressSnap.js. */
+      if (res.responded > 0 && label && !noSnap) {
+        const snapped = await snapToAddressLot(latlng, label, candidates);
+        if (!live()) return;
+        if (snapped) { await selectParcelAt(snapped, label, tok, true); return; }
+      }
       setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
     }
     const hit = res.hits[0];
@@ -3700,6 +3734,20 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
     setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null); setLocateFar(false);
     try {
+      /* NEW-2 (TN, 2026-10-21) — text that reads as a Tennessee parcel ID ("156-027.00-000", "156 027.00 000", an 11-digit Metro Nashville
+       * number) is looked up on the counties' own layers and lands on THAT lot, selected. A miss is a plain sentence naming where it looked
+       * (never a silent no-op, never a geocoder guess at a number); an address or place never reaches this branch (`looksLikeTnParcelId`). */
+      if (looksLikeTnParcelId(q)) {
+        const { resolveParcelId, parcelIdMessage } = await import("./lib/parcelIdSearch.js");
+        const r = await resolveParcelId(q);
+        if (tok !== addrTokRef.current) return;
+        if (r.status === "found") {
+          mapRef.current.flyTo([r.point.lat, r.point.lng], 18, { duration: 0.75 });
+          await selectParcelAt(r.point, r.label, tok);
+          return;
+        }
+        if (r.status === "notfound" || r.status === "unavailable") { setErr(parcelIdMessage(r, q)); return; }
+      }
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
       if (tok !== addrTokRef.current) return; // a newer search started — drop this stale result
