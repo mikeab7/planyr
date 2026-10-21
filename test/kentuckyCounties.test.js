@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { COUNTIES, COUNTIES_MAP, countyIdentity, noParcelSourceNote } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 import { countyRecord } from "../src/workspaces/site-planner/lib/appraisal.js";
+import { idAttrFor } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { KY_ROWS } from "../src/workspaces/site-planner/lib/kyParcels.js";
 import { COUNTY_VERIFICATION } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
@@ -121,4 +122,12 @@ describe("NEW-2: counties wired from layers a title search could not find", () =
   it("the probe-only vendor hosts never ship in the relay allow-list", () => {
     for (const h of ["gis.equatorstudios.com", "qpublic.schneidercorp.com", "opengisdata.ky.gov"]) expect(ALLOWED_HOSTS.has(h), h).toBe(false);
   });
+});
+
+/* V1747776 live finding (2026-10-21): Scott County's service is a JOIN, so planyr.io's identify returned TABLE-PREFIXED columns and the card
+ * showed NO parcel id (`idAttrFor` → null) although `countyRecord` read the same bag fine. RED on main before the suffix match in idAttrFor. */
+describe("a table-prefixed identify bag still yields the parcel id the card shows (Scott)", () => {
+  const LIVE = { "gscrep.DBO.Parcels_P.OBJECTID": 661, "gscrep.DBO.Parcels_P.GIS_MapID": "133-10-007.000", "gscrep.DBO.Parcels_P.Acres": 51.35, "gscrep.DBO.Parcels_P.FacilityID": "661", "gscrep.DBO.PVAOwnership.MapNumber": "133-10-007.000", "gscrep.DBO.PVAOwnership.Name1": "BRAGG SHANE & RITA" };
+  it("idAttrFor reads the prefixed GIS_MapID", () => { expect(idAttrFor("ky_scott", LIVE)).toBe("133-10-007.000"); });
+  it("an un-prefixed bag is unchanged", () => { expect(idAttrFor("ky_scott", { GIS_MapID: "133-10-007.000", OBJECTID: 1 })).toBe("133-10-007.000"); });
 });
