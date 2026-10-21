@@ -9,6 +9,9 @@ import { NUM_FONT, TABULAR_NUMS } from "../theme/typography.js";
  * only its chrome changes). The input gets `NUMBOX_INPUT_STYLE` (borderless, right-aligned, tabular); the
  * frame draws the one outline, the focus ring (`:focus-within`, index.css) and the invalid state.
  *
+ * `upGlyph` / `downGlyph` let a host with a stricter type spec (the Overlays panel: exactly two text sizes) draw the arrows as
+ * SVG instead of the default 10px text glyphs.
+ *
  * ▲▼ use onMouseDown preventDefault so a click steps the committed value rather than first blurring (and
  * committing) a half-typed draft. `data-num-stepper` is the same marker the phone sheet's touch rules
  * already target. Module scope; theme tokens only. */
@@ -18,9 +21,9 @@ export const NUMBOX_INPUT_STYLE = {
   fontSize: FONT_SIZE.control, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS,
 };
 
-export default function NumberBox({ children, unit, onUp, onDown, upLabel = "Increase", downLabel = "Decrease", upTitle, downTitle, disabled = false, width = 76, style, testid }) {
-  const stepBtn = (label, title, onClick, glyph) => (
-    <button type="button" disabled={disabled} aria-label={label} title={title}
+export default function NumberBox({ children, unit, onUp, onDown, upLabel = "Increase", downLabel = "Decrease", upTitle, downTitle, upTestid, downTestid, upGlyph, downGlyph, disabled = false, width = 76, style, testid }) {
+  const stepBtn = (label, title, onClick, glyph, tid) => (
+    <button type="button" disabled={disabled} aria-label={label} title={title} data-testid={tid}
       onMouseDown={(e) => e.preventDefault()} onClick={onClick}
       style={{ flex: "1 1 0", minHeight: 0, width: "100%", padding: 0, display: "grid", placeItems: "center", border: "none", background: "transparent",
         color: "var(--text-secondary)", fontSize: FONT_SIZE.micro, lineHeight: 1, fontFamily: "inherit", cursor: disabled ? "default" : "pointer" }}>{glyph}</button>
@@ -33,8 +36,8 @@ export default function NumberBox({ children, unit, onUp, onDown, upLabel = "Inc
       {unit ? <span aria-hidden="true" style={{ flex: "none", alignSelf: "center", paddingRight: 4, fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{unit}</span> : null}
       {onUp && onDown ? (
         <span data-num-stepper="1" style={{ flex: "none", display: "flex", flexDirection: "column", width: 16, borderLeft: "1px solid var(--border-default)" }}>
-          {stepBtn(upLabel, upTitle || "Increase", onUp, "▲")}
-          {stepBtn(downLabel, downTitle || "Decrease", onDown, "▼")}
+          {stepBtn(upLabel, upTitle || "Increase", onUp, upGlyph || "▲", upTestid)}
+          {stepBtn(downLabel, downTitle || "Decrease", onDown, downGlyph || "▼", downTestid)}
         </span>
       ) : null}
     </span>

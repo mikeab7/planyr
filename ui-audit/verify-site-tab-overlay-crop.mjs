@@ -21,6 +21,7 @@
  *      corner — if this arm fails the run is VOID, the probe is wrong, not the app.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { mkdirSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -59,7 +60,7 @@ const openPlan = async () => {
   await page.locator('button[title^="Zoom to fit"]').first().click(); // the panel narrows the canvas — frame the sheet in what's left
   await page.waitForTimeout(700);
 };
-const expandRow = async (name) => { if (await page.locator('[data-testid="overlay-crop-open"]').count()) return; await page.locator('[data-testid^="reference-open-"]', { hasText: name }).first().click(); await page.waitForTimeout(400); };
+const expandRow = async (name) => { if (await page.locator('[data-testid^="overlay-crop-switch-"]').count()) return; await page.locator('[data-testid^="reference-open-"]', { hasText: name }).first().click(); await page.waitForTimeout(400); };
 const stored = (id) => page.evaluate((id) => {
   const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
   const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === id);
@@ -119,7 +120,7 @@ await expandRow("sheet-A.png");
 }
 
 /* ---- 1. Crop… is on the panel ------------------------------------------------------------------ */
-const cropBtn = page.locator('[data-testid="overlay-crop-open"]');
+const cropBtn = page.locator('[data-testid^="overlay-crop-switch-"]');   // NEW-2: an uncropped overlay opens the editor from the Crop switch
 check("Crop… button is on the OVERLAYS panel row", (await cropBtn.count()) === 1 && (await cropBtn.isEnabled()));
 await page.screenshot({ path: OUT + "site-crop-panel.png" });
 
@@ -209,13 +210,13 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
   await waitStored("ovA", (s) => s && s.locked);
   await page.waitForTimeout(300);
   check("locked: Crop… stays ENABLED", await page.locator('[data-testid="overlay-crop-open"]').isEnabled());
-  check("locked: Reset crop stays ENABLED", await page.locator('[data-testid="overlay-crop-reset"]').isEnabled());
+  check("locked: the Crop switch stays ENABLED", await page.locator('[data-testid^="overlay-crop-switch-"]').first().isEnabled());
   // Reset crop on the locked overlay clears the polygon crop
-  await page.locator('[data-testid="overlay-crop-reset"]').click();
+  await clearCrop(page);
   const sLR = await waitStored("ovA", (s) => s && !s.crop);
   check("locked: Reset crop clears the crop on the locked overlay", !!(sLR && sLR.locked && !sLR.crop) && !(await clipInfo("ovA")).hasClip, JSON.stringify(sLR));
   // Crop… opens, and a trim field edit is written to the locked overlay
-  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+  await openCropEditor(page); await page.waitForTimeout(500);
   const ld = page.locator('[data-testid="overlay-crop-dialog"]');
   check("locked: Crop… opens the crop tool", (await ld.count()) === 1);
   await dragEdgeIn(ld, "l", 90, 0);
@@ -229,7 +230,7 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
   await page.locator('[data-testid="reference-row-ovA"] [data-testid="reference-lock-ovA"]').click();
   await waitStored("ovA", (s) => s && !s.locked);
   // redraw the triangle through the tool (rect-cropped overlay -> Polygon starts an empty open draw)
-  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+  await openCropEditor(page); await page.waitForTimeout(500);
   const rd = page.locator('[data-testid="overlay-crop-dialog"]');
   await rd.locator("button", { hasText: "Polygon" }).click(); await page.waitForTimeout(200);
   const rb = await rd.locator("img").first().boundingBox();
@@ -272,13 +273,13 @@ await openPlan();
   const c = await clipInfo("ovA");
   check("after a reload the polygon crop is still applied", c.shape === "poly" && c.ref === "url(#ov-crop-ovA)", JSON.stringify(c));
   await expandRow("sheet-A.png");
-  check("the Crop section reads Polygon · N points, with Edit (NEW-1: ONE crop control; trim fields live in the dialog)",
-    (await page.locator('[data-testid="overlay-crop-open"]').textContent()).includes("Edit") && /Polygon · \d+ points/.test(await page.locator('[data-testid="overlay-crop-shape"]').innerText()));
+  check("the Crop switch is ON with the picture + Adjust (NEW-2: ONE crop control; trim fields live in the dialog)",
+    (await page.locator('[data-testid="overlay-crop-open"]').textContent()).includes("Adjust") && (await cropState(page)) === "on");
 }
 
 /* ---- 8. Rect mode + Reset crop ---------------------------------------------------------------- */
 {
-  await page.locator('[data-testid="overlay-crop-open"]').click();
+  await openCropEditor(page);
   await page.waitForTimeout(500);
   const d = page.locator('[data-testid="overlay-crop-dialog"]');
   const pts = await d.locator("circle").count();
@@ -289,13 +290,13 @@ await openPlan();
   const sR = await waitStored("ovA", (s) => s && (s.crop === null || (s.crop && s.crop.kind !== "poly")));
   check("Rectangle → Reset to full page → Done commits no crop — full sheet (polygon cleared too)", sR && sR.crop === null, JSON.stringify(sR && sR.crop));
   // A real rect by dragging an edge grip, then Reset crop.
-  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+  await openCropEditor(page); await page.waitForTimeout(500);
   await dragEdgeIn(page.locator('[data-testid="overlay-crop-dialog"]'), "l", 120, 0);
   await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Done" }).click(); await page.waitForTimeout(400);
   const sT = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "rect");
   check("an edge-grip drag writes a kind-stamped rect crop", !!(sT && sT.crop && sT.crop.kind === "rect" && sT.crop.x > 0), JSON.stringify(sT && sT.crop));
   check("…drawn as a rect <clipPath>", (await clipInfo("ovA")).shape === "rect");
-  await page.locator('[data-testid="overlay-crop-reset"]').click();
+  await clearCrop(page);
   const s0 = await waitStored("ovA", (s) => s && !s.crop);
   check("Reset crop returns the full sheet (crop cleared, no clipPath)", !!(s0 && !s0.crop) && !(await clipInfo("ovA")).hasClip);
 }
@@ -319,7 +320,7 @@ await openPlan();
     const rows = page.locator('[data-testid^="reference-open-"]', { hasText: dx.name });
     if (!(await page.locator(`[data-testid="overlay-crop-${dx.id}"]`).count())) await rows.first().click();
     await page.waitForTimeout(400);
-    const btn = page.locator(`[data-testid="overlay-crop-${dx.id}"] [data-testid="overlay-crop-open"]`);
+    const btn = page.locator(`[data-testid="overlay-crop-${dx.id}"] [data-testid^="overlay-crop-switch-"]`);
     check("DXF overlay offers Crop…, enabled", (await btn.count()) === 1 && (await btn.isEnabled()));
     await btn.click(); await page.waitForTimeout(500);
     const d = page.locator('[data-testid="overlay-crop-dialog"]');
@@ -364,7 +365,7 @@ await openPlan();
     if (!(await page.locator(`[data-testid="overlay-crop-${pd.id}"]`).count())) await page.locator('[data-testid^="reference-open-"]', { hasText: pd.name }).first().click();
     await page.waitForTimeout(400);
     const row = page.locator(`[data-testid="reference-row-${pd.id}"]`);
-    await row.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+    await openCropEditor(row); await page.waitForTimeout(500);
     await dragEdgeIn(page.locator('[data-testid="overlay-crop-dialog"]'), "b", 0, -40);
     await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Done" }).click();
     const cropOf = () => page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop || null, ko: o.knockout, srcLen: (o.src || "").length } : null; }, pd.id);

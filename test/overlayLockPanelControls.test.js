@@ -15,7 +15,7 @@ const render = (overlays, selId) => renderToStaticMarkup(createElement(OverlaysP
 /* the opening tag of the element carrying a data-testid */
 const tag = (html, id) => { const i = html.indexOf(`data-testid="${id}"`); expect(i, id).toBeGreaterThan(-1); return html.slice(html.lastIndexOf("<", i), html.indexOf(">", i) + 1); };
 
-const IDS = ["overlay-rotation", "overlay-rot-minus", "overlay-rot-plus", "overlay-rot-ccw90", "overlay-rot-cw90", "overlay-scale-set", "overlay-scale-trace", "overlay-scale-match"];
+const IDS = ["overlay-rotation", "overlay-rot-dial", "overlay-rot-minus", "overlay-rot-plus", "overlay-rot-ccw90", "overlay-rot-cw90", "overlay-scale-set", "overlay-scale-trace", "overlay-scale-match"];
 
 describe("a LOCKED overlay's panel controls all work", () => {
   const locked = render([pdf({ locked: true })], "pdf1");

@@ -7,6 +7,7 @@ Map/Comps: the `site_plan_overlays` table + Leaflet). **Math, never storage, is 
 - `overlayCrop.js` — crop geometry: `{kind:'rect',x,y,w,h}` | `{kind:'poly',pts}` in IMAGE PIXELS; a
   missing `kind` reads as rect (migrate on read, never rewrite a row); absent crop = full image.
   `clipPathValueForCrop` (Leaflet/CSS) and `cropClipShapeScreen` (SVG) project it at render time only.
+- **The crop SWITCH (NEW-2, 2026-10-21): `crop.off === true` keeps the shape and makes every consumer draw the whole sheet.** One gate — `activeCrop(o)` / `hasCrop(o)` (never test `o.crop` truthiness for "is the sheet clipped"); `cropClipShapeScreen`, `clipPathValueForCrop` and `effectiveCropRect` (so the handles / frame fit) all honour it, `normalizeCropShape` carries it, `withCropOff(crop, off)` flips it (ON drops the key), `hasSavedCrop` is "a shape exists, on or off", `cropOutlinePath` draws the panel picture's dashed outline. Additive: an old record has no key and behaves as before; both DB CHECKs allow the extra key, so there is no storage change. Guard: repo-root `test/` **overlayCropOff**.
 - `overlayPlacement.js` — placement math. GEO half (`overlayCornersFromPlacement`, `imagePointToLatLon`,
   `latLonToImagePoint`, `scalePlacement`, `rotatePlacement`) and CANVAS half (`imagePointToWorld`,
   `scaleOverlayAbout`, `applySimilarityToOverlay`, `alignOverlaySimilarity`) share `rotateOffset` and

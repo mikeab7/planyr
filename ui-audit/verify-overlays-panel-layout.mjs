@@ -58,17 +58,21 @@ const overlays = [
   { ...base, id: "pdf1", name: LONG, sheet: { std: true, label: "ARCH D (24×36)" }, detectedScale: 40, pageCount: 3, page: 2, storageKey: "x/pdf1.pdf", src: svg("#c8a06e") },
   { ...base, id: "img1", name: "Aerial.png", unscaled: true, src: svg("#69c"), imgW: 800, imgH: 600, ftPerPx: 1 },
   { ...base, id: "dxf1", name: "Civil.dxf", kind: "dxf", unitsAssumed: true, unitsLabel: "feet", src: svg("#999") },
+  // NEW-2 (2026-10-21): a polygon-cropped image — the Crop switch ON with its picture + Adjust
+  { ...base, id: "crop1", name: "Cropped.png", src: svg("#9a6"), imgW: 800, imgH: 600, ftPerPx: 1, crop: { kind: "poly", pts: [[120, 90], [700, 140], [640, 520], [160, 470]] } },
 ];
 const VARIANTS = [
-  { id: "pdf1", label: "PDF (multi-page, scaled)", must: ["overlay-scale-ratio", "overlay-scale-set", "overlay-scale-trace", "overlay-scale-match", "overlay-page", "overlay-rotation", "overlay-rot-minus", "overlay-rot-plus", "overlay-rot-ccw90", "overlay-rot-cw90", "overlay-crop-open", "overlay-crop-reset", "overlay-opacity-pct", "reference-below-pdf1", "reference-above-pdf1"], text: ["Knock out white paper"] },
-  { id: "img1", label: "Image (not scaled)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-rotation", "overlay-crop-open", "overlay-opacity-pct"], mustNot: ["overlay-scale-set", "overlay-scale-ratio"] },
-  { id: "dxf1", label: "DXF (units assumed)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-crop-open"], mustNot: ["overlay-scale-set", "overlay-scale-ratio"] },
-  { id: "map1", label: "Map capture", must: ["overlay-opacity-pct"], mustNot: ["overlay-placement", "overlay-crop-open", "overlay-scale-trace", "overlay-rot-plus"] },
+  { id: "pdf1", label: "PDF (multi-page, scaled)", must: ["overlay-scale-ratio", "overlay-scale-set", "overlay-scale-trace", "overlay-scale-match", "overlay-page", "overlay-rotation", "overlay-rot-minus", "overlay-rot-plus", "overlay-rot-ccw90", "overlay-rot-cw90", "overlay-rot-dial", "overlay-crop-switch-pdf1", "overlay-opacity-pct", "reference-below-pdf1", "reference-above-pdf1"], text: ["Knock out white paper"] },
+  { id: "img1", label: "Image (not scaled)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-rotation", "overlay-rot-dial", "overlay-crop-switch-img1", "overlay-opacity-pct"], mustNot: ["overlay-scale-set", "overlay-scale-ratio", "overlay-crop-open", "overlay-crop-reset"] },
+  { id: "crop1", label: "Image (crop ON: picture + Adjust)", must: ["overlay-rot-dial", "overlay-crop-switch-crop1", "overlay-crop-picture-crop1", "overlay-crop-outline", "overlay-crop-open", "overlay-opacity-pct"], mustNot: ["overlay-crop-reset", "overlay-crop-shape"] },
+  { id: "dxf1", label: "DXF (units assumed)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-crop-switch-dxf1"], mustNot: ["overlay-scale-set", "overlay-scale-ratio"] },
+  { id: "map1", label: "Map capture", must: ["overlay-opacity-pct"], mustNot: ["overlay-placement", "overlay-crop-switch-map1", "overlay-crop-open", "overlay-scale-trace", "overlay-rot-plus", "overlay-rot-dial"] },
 ];
 const site = { id: "S", groupId: "S", site: "Scaleyard", name: "Plan 1", origin: { lat: 29.7836, lon: -95.8244 }, county: "harris",
   parcels: [{ id: "pc1", locked: false, points: [{ x: -500, y: -500 }, { x: 500, y: -500 }, { x: 500, y: 500 }, { x: -500, y: 500 }] }],
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, sheetOverlays: overlays, parcelDrawings: [], updatedAt: Date.now() };
-const seedFor = (w, sel) => `(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ S: site })}));localStorage.setItem('planarfit:currentSite:v1','S');localStorage.setItem('planarfit:leftWidth','${w}');sessionStorage.setItem('planyr:selOverlay:S','${sel}');}catch(e){}})();`;
+// the pinned map capture is only a ROW on a plan with no map origin (visibleReferenceRows, B2217648) — that variant seeds one
+const seedFor = (w, sel) => `(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ S: sel === "map1" ? { ...site, origin: null } : site })}));localStorage.setItem('planarfit:currentSite:v1','S');localStorage.setItem('planarfit:leftWidth','${w}');sessionStorage.setItem('planyr:selOverlay:S','${sel}');}catch(e){}})();`;
 
 /* Runs in the page. Returns plain facts; the verdicts are made outside. */
 const measure = (floating) => {
@@ -131,6 +135,23 @@ const measure = (floating) => {
     facts.scaleLayout = g.getAttribute("data-layout");
     facts.groupW = Math.round(g.getBoundingClientRect().width);
   }
+  // NEW-1: the rotation top line is ONE line (label · dial · number box on one centre line), and the quarter-turn
+  // buttons are one row of two equal buttons or one full-width column of two — never anything else.
+  const row = root.querySelector('[data-testid="overlay-rotation-row"]');
+  if (row) {
+    const top = row.firstElementChild;
+    const kids = top ? Array.from(top.children).map((c) => { const q = c.getBoundingClientRect(); return { cy: Math.round((q.top + q.height / 2) * 10) / 10, top: q.top, bottom: q.bottom, left: q.left, right: q.right }; }) : [];
+    facts.rotTop = kids;
+    const qg = root.querySelector('[data-testid="overlay-quarter-group"]');
+    if (qg) {
+      const bs = Array.from(qg.children).map((b) => { const q = b.getBoundingClientRect(); return { w: +q.width.toFixed(1), h: +q.height.toFixed(1), top: Math.round(q.top), fw: getComputedStyle(b).fontWeight, fs: getComputedStyle(b).fontSize, clip: b.scrollWidth > b.clientWidth + 1 }; });
+      facts.quarterBtns = bs; facts.quarterGroupW = Math.round(qg.getBoundingClientRect().width); facts.quarterLayout = qg.getAttribute("data-layout");
+    }
+    const dial = root.querySelector('[data-testid="overlay-rot-dial"]'), box = root.querySelector('[data-testid="overlay-rot-box"]');
+    if (dial && box) { const a = dial.getBoundingClientRect(), b = box.getBoundingClientRect(); facts.dialBox = { dial: [Math.round(a.width), Math.round(a.height)], box: [Math.round(b.width), Math.round(b.height)], gap: Math.round(b.left - a.right) }; }
+  }
+  const pic = root.querySelector('[data-testid^="overlay-crop-picture-"]');
+  if (pic) { const q = pic.getBoundingClientRect(), a = root.querySelector('[data-testid="overlay-crop-open"]').getBoundingClientRect(); facts.cropBody = { picW: Math.round(q.width), picH: Math.round(q.height), adjW: Math.round(a.width), sameLine: Math.abs(q.top - a.top) < 4 }; }
   facts.testids = Array.from(root.querySelectorAll("[data-testid]")).map((n) => n.getAttribute("data-testid"));
   facts.text = root.innerText;
   return facts;
@@ -138,9 +159,10 @@ const measure = (floating) => {
 
 const BREAK_CSS = `
   [data-testid="overlay-scale-group"]{grid-template-columns:repeat(3,160px)!important}
-  [data-testid="overlay-rotation-row"]{flex-wrap:nowrap!important}
+  [data-testid="overlay-quarter-group"]{grid-template-columns:repeat(2,230px)!important}
+  [data-testid="overlay-rot-box"]{width:260px!important}
   [data-testid="overlay-opacity-pct"]{width:300px!important}
-  [data-testid="overlay-crop-shape"]{font-size:14px!important}
+  [data-testid^="overlay-crop-picture-"]{width:400px!important;flex:none!important}
   [data-testid="overlay-scale-trace"]{white-space:nowrap!important;overflow:hidden!important;width:46px!important}
   [data-testid="overlay-row-name"]{font-weight:700!important}
   [data-testid="overlay-scale-match"]{color:var(--accent)!important}`;
@@ -223,6 +245,17 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
       const oneCol = counts.length === n && counts.every((c) => c === 1) && m.scaleBtns.every((b) => Math.abs(b.w - m.groupW) <= 1);
       log(oneRow || oneCol, `${tag}: scale group is ${oneRow ? "one row" : oneCol ? "one full-width column" : "NEITHER (" + counts.join("+") + ")"} — never ${n === 3 ? "2 + 1" : "a split"}`);
     }
+    if (m.rotTop && m.rotTop.length) {
+      const cys = m.rotTop.map((k) => k.cy);
+      log(m.rotTop.length === 3 && Math.max(...cys) - Math.min(...cys) <= 2, `${tag}: Rotation label · dial · number box sit on ONE line (${m.rotTop.length} items, centre-line spread ${(Math.max(...cys) - Math.min(...cys)).toFixed(1)})`);
+      log(m.dialBox && m.dialBox.dial[0] === m.dialBox.dial[1] && m.dialBox.dial[0] >= 28 && m.dialBox.gap >= 0, `${tag}: the dial is a round ${m.dialBox ? m.dialBox.dial.join("×") : "?"} target, number box ${m.dialBox ? m.dialBox.box.join("×") : "?"}`);
+    }
+    if (m.quarterBtns && m.quarterBtns.length === 2) {
+      const [a, b] = m.quarterBtns, oneRow = a.top === b.top && Math.abs(a.w - b.w) <= 1, oneCol = a.top !== b.top && Math.abs(a.w - m.quarterGroupW) <= 1 && Math.abs(b.w - m.quarterGroupW) <= 1;
+      log(oneRow || oneCol, `${tag}: the two 90° buttons are ${oneRow ? "one row of two equal buttons" : oneCol ? "stacked full-width" : "NEITHER (" + a.w + " / " + b.w + ")"}`);
+      log(!a.clip && !b.clip && a.fs === b.fs && a.fw === b.fw, `${tag}: neither 90° label is clipped or wrapped`);
+    }
+    if (m.cropBody) log(m.cropBody.picW >= 80 && m.cropBody.picH >= 80 && m.cropBody.sameLine, `${tag}: crop picture ${m.cropBody.picW}×${m.cropBody.picH} beside Adjust (${m.cropBody.adjW} wide)`);
     if (!/^(Width|ft wide)/m.test(m.text)) log(!/\bWidth\b/.test(m.text), `${tag}: no Width box and no sheet-width readout`);
     if (surface === "docked 620" && v.id === "pdf1") {
       // the known-good arm: this reading is clean on ANY build, or the instrument is void

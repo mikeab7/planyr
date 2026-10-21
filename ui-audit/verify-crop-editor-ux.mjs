@@ -9,6 +9,7 @@
  *   KNOWN-GOOD ARM: a point inside the modal's own toolbar reports the modal as topmost; if the arm fails the run is VOID.
  * Usage: BASE_URL=http://localhost:4174/ node ui-audit/verify-crop-editor-ux.mjs */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -44,7 +45,7 @@ await page.waitForTimeout(400);
 const stored = () => page.evaluate(() => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === "ovA"); return o ? { crop: o.crop ?? null, locked: !!o.locked } : null; });
 const waitStored = async (pred, ms = 4000) => { const t = Date.now(); let s; while (Date.now() - t < ms) { s = await stored(); if (pred(s)) return s; await page.waitForTimeout(150); } return s; };
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
-const openCrop = async () => { await page.locator('[data-testid="overlay-crop-open"]').click(); await dlg.waitFor({ timeout: 4000 }); await page.waitForTimeout(500); };
+const openCrop = async () => { await openCropEditor(page); await dlg.waitFor({ timeout: 4000 }); await page.waitForTimeout(500); };
 const done = async () => { await dlg.locator('[data-testid="crop-done"]').click(); await dlg.waitFor({ state: "detached", timeout: 4000 }); await page.waitForTimeout(300); };
 
 /* ---- layout + layering (NEW-1, NEW-3) ------------------------------------------------------------ */
@@ -188,7 +189,7 @@ check("Reset from Polygon mode also removes the rectangle (one reset removes wha
 await page.locator('[data-testid="reference-row-ovA"] [data-testid="reference-lock-ovA"]').click();
 await waitStored((s) => s && s.locked);
 await page.waitForTimeout(300);
-check("NEW-6 on a LOCKED overlay Crop… is enabled", await page.locator('[data-testid="overlay-crop-open"]').isEnabled());
+check("NEW-6 on a LOCKED overlay Crop… is enabled", await page.locator('[data-testid^="overlay-crop-switch-"]').first().isEnabled());
 await openCrop();
 { const h = await dlg.locator('[data-testid="crop-handle-br"]').boundingBox();
   await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2); await page.mouse.down(); await page.mouse.move(h.x - 120, h.y - 80, { steps: 6 }); await page.mouse.up();

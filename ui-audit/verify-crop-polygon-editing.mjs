@@ -33,6 +33,7 @@
  *      fails the run is VOID.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -123,7 +124,7 @@ const storedCrop = () => page.evaluate((id) => {
 
 if (!(await page.locator(`[data-testid="overlay-crop-${ov.id}"]`).count())) await page.locator("button", { hasText: ov.name }).first().click();
 await page.waitForTimeout(400);
-await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+await openCropEditor(page, ov.id);
 await page.waitForTimeout(500);
 const d = page.locator('[data-testid="overlay-crop-dialog"]');
 check("Crop… opens the tool on the real sheet", (await d.count()) === 1);
@@ -155,7 +156,7 @@ const zoomPct = () => d.locator('[data-testid="crop-zoom-100"]').textContent();
 const restartTrace = async () => {
   await d.locator("button", { hasText: "Cancel" }).click();
   await page.waitForTimeout(300);
-  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await openCropEditor(page, ov.id);
   await page.waitForTimeout(500);
   await d.getByRole("button", { name: "Polygon", exact: true }).click();
   await page.waitForTimeout(150);
@@ -377,7 +378,7 @@ check("Done commits the real 6-vertex L-shape (kind:'poly', 6 vertices, close to
   JSON.stringify(committed));
 
 /* ---- convert to rectangle and back — neither shape destroyed ------------------------------------ */
-await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+await openCropEditor(page, ov.id);
 await page.waitForTimeout(500);
 await d.locator("button", { hasText: "Rectangle" }).click();
 await d.locator("button", { hasText: "Polygon" }).click();
@@ -397,7 +398,7 @@ check("the poly crop survives a Rectangle<->Polygon round trip unchanged", !!(af
   // unconditionally wrote crop:null, destroying the polygon. The rect draft defaults to the full
   // image (a no-op crop), so committing it with nothing drawn is correctly a no-op too: the
   // original polygon is left in place rather than replaced with nothing.
-  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await openCropEditor(page, ov.id);
   await page.waitForTimeout(500);
   await d.locator("button", { hasText: "Rectangle" }).click();
   await page.waitForTimeout(150);
@@ -412,7 +413,7 @@ check("the poly crop survives a Rectangle<->Polygon round trip unchanged", !!(af
 {
   // Case B (the saved crop is null now, so the 6-vertex polygon is gone by design): actually DRAW a real rect (drag the full-page draft smaller) and save it — proves the
   // polygon survives as a DORMANT field across a genuine rect commit, not just a no-op one.
-  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await openCropEditor(page, ov.id);
   await page.waitForTimeout(500);
   await d.locator("button", { hasText: "Rectangle" }).click();
   await page.waitForTimeout(150);
@@ -432,7 +433,7 @@ check("the poly crop survives a Rectangle<->Polygon round trip unchanged", !!(af
   check("…and stores NO polygon next to it (only the active mode's shape is saved): no `pts` key on a rect crop",
     !!(afterRealRectSave && !("pts" in afterRealRectSave) && ["x", "y", "w", "h"].every((k) => typeof afterRealRectSave[k] === "number")), JSON.stringify(afterRealRectSave));
 
-  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await openCropEditor(page, ov.id);
   await page.waitForTimeout(500);
   await d.locator("button", { hasText: "Polygon", exact: true }).click();
   await page.waitForTimeout(150);
@@ -446,14 +447,14 @@ check("the poly crop survives a Rectangle<->Polygon round trip unchanged", !!(af
 }
 
 /* ---- reset to the full sheet --------------------------------------------------------------------- */
-await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-reset"]`).click();
+await clearCrop(page, ov.id);
 await page.waitForTimeout(300);
 const afterReset = await storedCrop();
 check("Reset returns the full, uncropped sheet", afterReset === null);
 
 /* ---- NEW-4 (2026-09-22 live test) — with the overlay genuinely uncropped, Polygon mode must open
  * ready to draw (not a closed full-frame quad whose interior swallows the first several clicks). -- */
-await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+await openCropEditor(page, ov.id);
 await page.waitForTimeout(500);
 await d.locator("button", { hasText: "Polygon", exact: true }).click();
 await page.waitForTimeout(150);
@@ -504,7 +505,7 @@ check("Polygon mode's own 'Reset to full page' saves crop null, exactly like Rec
   if (ov2) {
     if (!(await p2.locator(`[data-testid="overlay-crop-${ov2.id}"]`).count())) await p2.locator("button", { hasText: ov2.name }).first().click();
     await p2.waitForTimeout(400);
-    await p2.locator(`[data-testid="overlay-crop-${ov2.id}"] [data-testid="overlay-crop-open"]`).click();
+    await openCropEditor(p2, ov2.id);
     await p2.waitForTimeout(500);
     const d2 = p2.locator('[data-testid="overlay-crop-dialog"]');
     const doneBtn = d2.locator("button", { hasText: "Done" });

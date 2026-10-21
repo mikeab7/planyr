@@ -10,6 +10,7 @@
  * Logged out, local fixture, no external GIS. Modes: BASE_URL (default the local preview).
  */
 import { chromium } from "@playwright/test";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 import { existsSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
@@ -106,7 +107,7 @@ exp = [f2(0.1, 0.625), f2(0.3, 0.625), f2(0.3, 0.875), f2(0.1, 0.875)];
 check("poly crop: the grips hug the polygon's BOUNDING BOX", g.sc.length === 4 && g.sc.every((p, i) => near(p.x, exp[i].x) && near(p.y, exp[i].y)), JSON.stringify({ got: g.sc, exp }));
 
 /* 5. Reset crop → full image (on the unrotated polygon-cropped overlay, so the image box is axis-aligned) */
-await page.locator('[data-testid="overlay-crop-reset"]').click(); await page.waitForTimeout(600);
+await clearCrop(page); await page.waitForTimeout(600);
 g = await geo("ovP");
 check("Reset crop: the grips return to the full image", g.sc.length === 4 && near(g.sc[0].x, g.img.x, 3) && near(g.sc[0].y, g.img.y, 3) && near(g.sc[2].x, g.img.x + g.img.w, 3) && near(g.sc[2].y, g.img.y + g.img.h, 3), JSON.stringify({ img: g.img, tl: g.sc[0], br: g.sc[2] }));
 

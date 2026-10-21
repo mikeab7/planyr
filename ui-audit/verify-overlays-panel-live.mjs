@@ -1,3 +1,4 @@
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 /* verify-overlays-panel-live — V1573328 (B2158080): the redesigned OVERLAYS panel, signed in as the throwaway test
  * account on a real deploy.
  *   E2E_LOGIN_KEY=… node ui-audit/verify-overlays-panel-live.mjs [https://planyr.io] [--expect-sha <merge sha>]
@@ -120,8 +121,8 @@ try {
   check("each rotation undoes in ONE step", u1 === "91" && u2 === "1" && u3 === "0", `${u1} → ${u2} → ${u3}`);
 
   // ---- 5. crop: ONE control, Edit + Reset, trim fields inside the dialog ----------------------------------------------
-  check("ONE crop control (Edit + Reset) and a shape line", (await page.locator('[data-testid="overlay-crop-open"]').count()) === 1 && (await page.locator('[data-testid="overlay-crop-shape"]').innerText()) === "Not cropped");
-  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(800);
+  check("ONE crop control: an OFF switch and nothing else (NEW-2)", (await page.locator('[data-testid^="overlay-crop-switch-"]').count()) === 1 && (await cropState(page)) === "off" && (await page.locator('[data-testid="overlay-crop-open"]').count()) === 0);
+  await openCropEditor(page); await page.waitForTimeout(800);
   const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
   const trim = dlg.locator('input[aria-label="Crop Left edge"]');
   check("the four trim-by-feet fields are inside the Crop dialog", (await dlg.locator('input[aria-label^="Crop "]').count()) === 4);
@@ -129,9 +130,9 @@ try {
   const cropStored = (await stored()).find((o) => o.id === pdfId);
   check("a trim field writes a rectangle crop", !!(cropStored && cropStored.crop && (cropStored.crop.kind === "rect" || cropStored.crop.kind === undefined) && cropStored.crop.x > 0), JSON.stringify(cropStored && cropStored.crop));
   await dlg.locator("button", { hasText: "Cancel" }).click(); await page.waitForTimeout(400);
-  check("the Crop section now says Rectangle", (await page.locator('[data-testid="overlay-crop-shape"]').innerText()) === "Rectangle");
-  await page.locator('[data-testid="overlay-crop-reset"]').click(); await page.waitForTimeout(500);
-  check("Reset returns the whole sheet", (await page.locator('[data-testid="overlay-crop-shape"]').innerText()) === "Not cropped");
+  check("the Crop switch is now ON, with the picture + Adjust", (await cropState(page)) === "on" && (await page.locator('[data-testid="overlay-crop-open"]').count()) === 1);
+  await clearCrop(page); await page.waitForTimeout(500);
+  check("clearing the shape in the editor returns the whole sheet (switch OFF)", (await cropState(page)) === "off");
 
   // ---- 6. Draws / drag / Move up-down / reload keeps the order --------------------------------------------------------
   await page.locator(`[data-testid="reference-above-${pdfId}"]`).click(); await page.waitForTimeout(400);

@@ -20,8 +20,14 @@
  *
  * WIDTH: the panel is resizable 240–620 and also floats. Nothing here reads window width. The scale
  * group measures ITS OWN box (ResizeObserver) and is either one row of three equal buttons (all three
- * labels fit unwrapped) or one column of three — never 2 + 1. The rotation row is flex-wrap, so the
- * two 90° buttons drop below only when the panel is genuinely too narrow.
+ * labels fit unwrapped) or one column of three — never 2 + 1. The two quarter-turn buttons under the
+ * rotation row use the same measurement: one row of two equal buttons, or one full-width column of two.
+ *
+ * ROTATION (NEW-1, 2026-10-21): label · round DIAL (drag the needle; Shift snaps 15°; one undo step per drag)
+ * · number box with ▲▼ (+1° / −1°) on the top line; "Turn 90° counterclockwise" / "Turn 90° clockwise" under it.
+ * CROP (NEW-2, 2026-10-21): a switch in the section heading. Off = the heading alone; on = a picture of the
+ * sheet with the area outside the crop dimmed, the kept area dashed in the Site green, and Adjust. Switching
+ * off keeps the shape (`crop.off`, shared engine) so switching on brings the same shape back.
  *
  * DRAG: rows reorder by HTML5 drag on a fine pointer only. On touch dragging is OFF (the precedent
  * is NotesTree.jsx) and ⋯ → Move up / Move down is the touch and keyboard path. A row drag is a
@@ -40,7 +46,9 @@ import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { normalizeDeg, parseRotationInput, formatDeg } from "../../../shared/ui/RotationStepper.jsx";
 import { SCALE_PRESETS, feetPerInchForPreset, feetPerInchFromPair, matchScalePreset, scaleForFtPerPoint, PAGE_UNITS, REAL_UNITS } from "../../../shared/overlay/overlayScale.js";
-import { hasCrop, cropKind, cropEditBlock } from "../../../shared/overlay/overlayCrop.js";
+import { hasCrop, hasSavedCrop, cropEditBlock, cropOutlinePath } from "../../../shared/overlay/overlayCrop.js";
+import NumberBox from "../../../shared/ui/NumberBox.jsx";
+import { DIAL_TICKS, dialAngleFromPoint, dialDragAngle, dialKeyAngle, needleEnd, stepRotation, createDialDrag } from "../lib/rotationDial.js";
 import { overlayBand, overlayPanelOrder, overlayOrderFlags, canDropOverlay } from "../lib/overlayOrder.js";
 import { overlaySubline, placementPlan, formatScaleRatio, OV_KIND } from "../lib/overlayPanelModel.js";
 import { EyeIcon, EyeOffIcon, LockGlyph, UnlockGlyph, MoreIcon, iconBtn as rowIconBtn } from "./ParcelsPanel.jsx";
@@ -66,8 +74,6 @@ function Ico({ children, size = 14 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" style={{ flex: "none", display: "block" }}>{children}</svg>;
 }
 const SheetIcon = () => <Ico size={16}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></Ico>;
-const RectIcon = () => <Ico><rect x="4" y="6" width="16" height="12" rx="1" strokeDasharray="3 2" /></Ico>;
-const PolyIcon = () => <Ico><path d="M5 17l3-11 9 3 2 8z" strokeDasharray="3 2" /></Ico>;
 const RotL = () => <Ico><path d="M4 12a8 8 0 1 0 3-6.2" /><path d="M4 4v4h4" /></Ico>;
 const RotR = () => <Ico><path d="M20 12a8 8 0 1 1-3-6.2" /><path d="M20 4v4h-4" /></Ico>;
 
@@ -87,40 +93,159 @@ function Thumb({ o }) {
   );
 }
 
-/* [− value° +] — 1° per press, the value typeable (commit on Enter / blur, Esc reverts). */
-function DegStepper({ value, disabled, reason, onCommit, onStep }) {
+/* The ONE "row or column" decision for a group of equal buttons: a row while every label fits unwrapped in an
+ * equal share of THIS box's own width, otherwise a column of full-width buttons — never a partial row. It is a
+ * measurement (ResizeObserver on the group's own box + each button's natural content width), not a CSS guess.
+ * Used by the scale group and by the quarter-turn buttons so the two can never decide differently. */
+function useRowOrStack(ref, key) {
+  const [stacked, setStacked] = useState(false);
+  const GAP = SPACE.sm, PAD_X = 10, BORDER = 2;
+  useIsoLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return undefined;
+    const measure = () => {
+      const kids = Array.from(box.querySelectorAll("button"));
+      if (!kids.length) return;
+      let need = 0;
+      kids.forEach((b) => {
+        if (!b.firstChild) return;
+        const r = document.createRange(); r.selectNodeContents(b);
+        need = Math.max(need, r.getBoundingClientRect().width);
+      });
+      need += 2 * PAD_X + BORDER;
+      const cell = (box.clientWidth - GAP * (kids.length - 1)) / kids.length;
+      setStacked(cell < need - 0.5);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(box);
+    const fonts = document.fonts && document.fonts.ready;
+    if (fonts) fonts.then(measure).catch(() => {});
+    return () => { if (ro) ro.disconnect(); };
+  }, [key]);
+  return { stacked, GAP, PAD_X };
+}
+
+// the spinner arrows are drawn, not typeset: this panel allows exactly two text sizes and a glyph would be a third
+const Chevron = ({ up }) => <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true" focusable="false" style={{ display: "block" }}><path d={up ? "M1 4.2 4 1l3 3.2" : "M1 .8 4 4l3-3.2"} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+
+const DIAL_PX = 32;
+const DIAL_C = DIAL_PX / 2;
+
+/* The rotation DIAL: a circle with four tick dots (0/90/180/270) and a needle in the Site green at the current
+ * rotation (0° = up, clockwise positive). Press anywhere on it and drag to set the rotation live; the drag is ONE
+ * undo step (rotationDial.createDialDrag). Shift snaps to 15°. Focusable slider: ←/↓ −1°, →/↑ +1°, Shift ±15°. */
+function RotationDial({ value, disabled, reason, drag, onKey }) {
+  const ref = useRef(null);
+  const deg = Number.isFinite(value) ? value : 0;
+  const tip = needleEnd(deg, DIAL_C, 10.5);
+  const angleAt = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    return dialDragAngle(dialAngleFromPoint(r.left + r.width / 2, r.top + r.height / 2, e.clientX, e.clientY), { shift: e.shiftKey });
+  };
+  const end = (e) => {
+    try { if (ref.current && ref.current.hasPointerCapture(e.pointerId)) ref.current.releasePointerCapture(e.pointerId); } catch (_) {}
+    drag.up();
+  };
+  return (
+    <span ref={ref} role="slider" tabIndex={disabled ? -1 : 0} aria-label="Rotation dial" aria-valuemin={0} aria-valuemax={360} aria-valuenow={Math.round(deg * 10) / 10}
+      aria-valuetext={`${formatDeg(deg)}°`} aria-disabled={disabled || undefined} title={disabled ? reason : undefined} data-testid="overlay-rot-dial"
+      style={{ flex: "none", width: DIAL_PX, height: DIAL_PX, borderRadius: RADIUS.pill, cursor: disabled ? "default" : "pointer", touchAction: "none", opacity: disabled ? 0.55 : 1, lineHeight: 0 }}
+      onPointerDown={(e) => {
+        if (disabled || e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        try { ref.current.setPointerCapture(e.pointerId); } catch (_) {}
+        try { ref.current.focus({ preventScroll: true }); } catch (_) {}
+        drag.down(angleAt(e));
+      }}
+      onPointerMove={(e) => { if (drag.active) drag.move(angleAt(e)); }}
+      onPointerUp={end} onPointerCancel={end}
+      onKeyDown={(e) => { if (!disabled) onKey(e); }}>
+      <svg width={DIAL_PX} height={DIAL_PX} viewBox={`0 0 ${DIAL_PX} ${DIAL_PX}`} aria-hidden="true" focusable="false" style={{ display: "block", pointerEvents: "none" }}>
+        <circle cx={DIAL_C} cy={DIAL_C} r={DIAL_C - 1} style={{ fill: "var(--surface-raised)", stroke: "var(--border-default)" }} strokeWidth="1" />
+        {DIAL_TICKS.map((t) => { const p = needleEnd(t, DIAL_C, 12.5); return <circle key={t} cx={p.x} cy={p.y} r="1.2" style={{ fill: "var(--text-secondary)" }} />; })}
+        <line data-testid="overlay-rot-needle" x1={DIAL_C} y1={DIAL_C} x2={tip.x} y2={tip.y} strokeWidth="2" strokeLinecap="round" style={{ stroke: ACCENT }} />
+        <circle cx={DIAL_C} cy={DIAL_C} r="2.2" style={{ fill: ACCENT }} />
+      </svg>
+    </span>
+  );
+}
+
+/* The typed rotation: [ value° ▲▼ ] — typed value commits on Enter / blur (Esc reverts, ArrowUp/Down step 1°);
+ * the ▲ turns the sheet +1° (clockwise), the ▼ −1°. */
+function DegBox({ value, disabled, reason, onCommit, onStep }) {
   const committed = Number.isFinite(value) ? value : 0;
   const [draft, setDraft] = useState(formatDeg(committed));
   const editing = useRef(false);
+  const cancelled = useRef(false);   // Esc → the blur that follows must not commit the half-typed draft it still closes over
   useEffect(() => { if (!editing.current) setDraft(formatDeg(committed)); }, [committed]);
   const commit = () => {
     editing.current = false;
+    if (cancelled.current) { cancelled.current = false; setDraft(formatDeg(committed)); return; }
     const p = parseRotationInput(draft);
     if (p == null) { setDraft(formatDeg(committed)); return; }
     if (p !== normalizeDeg(committed)) onCommit(p);
     setDraft(formatDeg(p));
   };
   const step = (d) => { editing.current = false; onStep(d); };
-  const stepBtn = { ...rowIconBtn, width: H, height: "100%", borderRadius: 0, color: "var(--text-primary)", fontSize: C, fontWeight: 400 };
   return (
-    <span role="group" aria-label="Rotation" title={disabled ? reason : undefined} style={{ display: "inline-flex", alignItems: "stretch", boxSizing: "border-box", height: H, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-raised)", overflow: "hidden", opacity: disabled ? 0.55 : 1 }}>
-      <button type="button" style={{ ...stepBtn, borderRight: LINE }} disabled={disabled} aria-label="Rotate 1 degree anticlockwise" data-testid="overlay-rot-minus" onClick={() => step(-1)}>−</button>
-      <span style={{ display: "inline-flex", alignItems: "center", paddingRight: SPACE.md }}>
+    <NumberBox width={92} disabled={disabled} testid="overlay-rot-box" style={{ border: LINE }}
+      onUp={() => step(1)} onDown={() => step(-1)} upLabel="Increase rotation 1 degree" downLabel="Decrease rotation 1 degree"
+      upTitle={disabled ? reason : undefined} downTitle={disabled ? reason : undefined} upTestid="overlay-rot-plus" downTestid="overlay-rot-minus" upGlyph={<Chevron up />} downGlyph={<Chevron />}>
+      <span role="group" aria-label="Rotation" title={disabled ? reason : undefined} style={{ display: "inline-flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, paddingRight: SPACE.xs }}>
         <input value={draft} disabled={disabled} inputMode="decimal" aria-label="Rotation in degrees" data-testid="overlay-rotation"
-          style={{ ...inputStyle, border: "none", background: "transparent", height: "100%", width: 52, padding: "0 1px 0 0", textAlign: "right", outline: "none" }}
+          style={{ ...inputStyle, border: "none", background: "transparent", height: "100%", width: "100%", padding: "0 1px 0 0", textAlign: "right", outline: "none" }}
           onFocus={() => { editing.current = true; }}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
-            else if (e.key === "Escape") { editing.current = false; setDraft(formatDeg(committed)); e.currentTarget.blur(); }
+            else if (e.key === "Escape") { editing.current = false; cancelled.current = true; setDraft(formatDeg(committed)); e.currentTarget.blur(); }
             else if (e.key === "ArrowUp") { e.preventDefault(); step(1); }
             else if (e.key === "ArrowDown") { e.preventDefault(); step(-1); }
           }} />
         <span aria-hidden="true" style={{ ...valueStyle, fontFamily: NUM_FONT }}>°</span>
       </span>
-      <button type="button" style={{ ...stepBtn, borderLeft: LINE }} disabled={disabled} aria-label="Rotate 1 degree clockwise" data-testid="overlay-rot-plus" onClick={() => step(1)}>+</button>
-    </span>
+    </NumberBox>
+  );
+}
+
+/* Rotation, as one block: label · dial · number box on the top line; the two quarter-turn buttons under it,
+ * spelled out, equal width — side by side while both fit, stacked full-width when the panel is narrow.
+ * Every control writes through the panel's one patch handler and works on a LOCKED overlay (B2262864). */
+function RotationRow({ o, h }) {
+  const oRef = useRef(o); oRef.current = o;
+  const hRef = useRef(h); hRef.current = h;
+  const rot = Number.isFinite(o.rotation) ? o.rotation : 0;
+  const drag = useMemo(() => createDialDrag({
+    getRotation: () => oRef.current.rotation || 0,
+    pushHistory: () => hRef.current.pushHistory(),
+    patch: (deg, hist) => hRef.current.onPatch(oRef.current.id, { rotation: deg }, hist),
+  }), []);
+  const turn = (d) => h.onPatch(o.id, { rotation: stepRotation(rot, d) });
+  const boxRef = useRef(null);
+  const { stacked, GAP, PAD_X } = useRowOrStack(boxRef, o.id);
+  const quarter = (testid, label, delta, icon) => (
+    <Button variant="ghost" size="md" style={{ ...btnCompact, width: "100%", padding: `0 ${PAD_X}px` }} data-testid={testid} onClick={() => turn(delta)}>{icon}{label}</Button>
+  );
+  return (
+    <div data-testid="overlay-rotation-row" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
+      <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
+        <span style={{ ...valueStyle, color: "var(--text-secondary)", flex: "none" }}>Rotation</span>
+        <RotationDial value={rot} drag={drag}
+          onKey={(e) => {
+            const next = dialKeyAngle(rot, e.key, e.shiftKey);
+            if (next == null) return;
+            e.preventDefault(); e.stopPropagation();
+            h.onPatch(o.id, { rotation: next }, !e.repeat);   // a held key is ONE undo step
+          }} />
+        <DegBox value={rot} onCommit={(deg) => h.onPatch(o.id, { rotation: deg })} onStep={turn} />
+      </div>
+      <div ref={boxRef} data-testid="overlay-quarter-group" data-layout={stacked ? "stack" : "row"} style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : "1fr 1fr", gap: GAP }}>
+        {quarter("overlay-rot-ccw90", "Turn 90° counterclockwise", -90, <RotL />)}
+        {quarter("overlay-rot-cw90", "Turn 90° clockwise", 90, <RotR />)}
+      </div>
+    </div>
   );
 }
 
@@ -134,32 +259,7 @@ function ScaleGroup({ buttons, active, disabled, onPick, why }) {
     match: { label: "Match 2 points", title: "Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" },
   };
   const ref = useRef(null);
-  const [stacked, setStacked] = useState(false);
-  const GAP = SPACE.sm, PAD_X = 10, BORDER = 2;
-  useIsoLayoutEffect(() => {
-    const box = ref.current;
-    if (!box) return undefined;
-    const measure = () => {
-      const kids = Array.from(box.querySelectorAll("button"));
-      if (!kids.length) return;
-      let need = 0;
-      kids.forEach((b) => {
-        const t = b.firstChild;
-        if (!t) return;
-        const r = document.createRange(); r.selectNodeContents(t);
-        need = Math.max(need, r.getBoundingClientRect().width);
-      });
-      need += 2 * PAD_X + BORDER;
-      const cell = (box.clientWidth - GAP * (kids.length - 1)) / kids.length;
-      setStacked(cell < need - 0.5);
-    };
-    measure();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    if (ro) ro.observe(box);
-    const fonts = document.fonts && document.fonts.ready;
-    if (fonts) fonts.then(measure).catch(() => {});
-    return () => { if (ro) ro.disconnect(); };
-  }, [buttons.join(",")]);
+  const { stacked, GAP, PAD_X } = useRowOrStack(ref, buttons.join(","));
   return (
     <div ref={ref} data-testid="overlay-scale-group" data-layout={stacked ? "stack" : "row"} style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : `repeat(${buttons.length}, 1fr)`, gap: GAP }}>
       {buttons.map((k) => (
@@ -282,39 +382,64 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
           {!h.pageReady(o) && <span style={subStyle}>re-add to change page</span>}
         </div>
       )}
-      {plan.rotate && (
-        <div data-testid="overlay-rotation-row" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: `${SPACE.xs}px ${SPACE.md}px` }}>
-          <span style={{ ...valueStyle, color: "var(--text-secondary)" }}>Rotation</span>
-          <DegStepper value={o.rotation || 0}
-            onCommit={(deg) => h.onPatch(o.id, { rotation: deg })} onStep={(d) => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
-          <span style={{ display: "inline-flex", gap: SPACE.sm }}>
-            <Button variant="ghost" size="md" style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees anticlockwise" title="Rotate 90° anticlockwise" data-testid="overlay-rot-ccw90"
-              onClick={() => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) - 90) })}><RotL />90°</Button>
-            <Button variant="ghost" size="md" style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees clockwise" title="Rotate 90° clockwise" data-testid="overlay-rot-cw90"
-              onClick={() => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) + 90) })}><RotR />90°</Button>
-          </span>
-        </div>
-      )}
+      {plan.rotate && <RotationRow o={o} h={h} />}
     </section>
+  );
+}
+
+/* The Crop on/off switch — a real `role="switch"`: Site green when on, neutral grey when off. */
+function CropSwitch({ id, on, disabled, why, onToggle }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label="Crop" disabled={disabled} title={why || undefined} data-testid={`overlay-crop-switch-${id}`}
+      onClick={onToggle}
+      style={{ flex: "none", position: "relative", width: 32, height: 18, padding: 0, border: "none", borderRadius: RADIUS.pill, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.55 : 1,
+        background: on ? ACCENT : "var(--border-strong)", transition: "background 120ms" }}>
+      <span aria-hidden="true" style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 14, height: 14, borderRadius: RADIUS.pill, background: on ? "var(--on-accent-site)" : "var(--surface-raised)", transition: "left 120ms" }} />
+    </button>
+  );
+}
+
+/* A picture of the sheet with the cropped-away area dimmed and the kept area outlined (dashed, Site green),
+ * drawn from the STORED crop in the sheet's own image pixels — so it is always the real shape, rect or polygon. */
+function CropPicture({ o, onOpen, why }) {
+  const d = cropOutlinePath(o);
+  const W = o.imgW, Hh = o.imgH;
+  return (
+    <button type="button" aria-label="Adjust the crop" disabled={!!why} title={why || undefined} data-testid={`overlay-crop-picture-${o.id}`} onClick={onOpen}
+      style={{ flex: "1 1 0", minWidth: 0, height: 112, padding: SPACE.xs, boxSizing: "border-box", display: "grid", placeItems: "center", border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-page)", cursor: why ? "default" : "pointer", overflow: "hidden" }}>
+      <svg viewBox={`0 0 ${W} ${Hh}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false" style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }}>
+        {o.kind === "dxf" || !o.src ? null : <image href={o.src} x="0" y="0" width={W} height={Hh} preserveAspectRatio="none" />}
+        <rect x="0" y="0" width={W} height={Hh} fill="none" strokeWidth="1" vectorEffect="non-scaling-stroke" style={{ stroke: "var(--border-strong)" }} />
+        {d && <path data-testid="overlay-crop-dim" d={`M0 0H${W}V${Hh}H0Z${d}`} fillRule="evenodd" fill="black" fillOpacity="0.55" />}
+        {d && <path data-testid="overlay-crop-outline" d={d} fill="none" strokeWidth="1.5" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" style={{ stroke: ACCENT }} />}
+      </svg>
+    </button>
   );
 }
 
 function CropSection({ o, h }) {
   const why = cropEditBlock(o);
-  const kind = hasCrop(o) ? cropKind(o.crop) : null;
-  const text = kind === "poly" ? `Polygon · ${(o.crop.pts || []).length} points` : kind === "rect" ? "Rectangle" : "Not cropped";
+  const on = hasCrop(o);
+  // OFF → the crop is hidden but its shape is kept; ON with a kept shape brings the same shape back;
+  // ON with no shape yet opens the editor (closing it without a crop leaves the switch off — `on` is derived).
+  const toggle = () => {
+    if (why) return;
+    if (on) h.onCropSwitch(o.id, false);
+    else if (hasSavedCrop(o)) h.onCropSwitch(o.id, true);
+    else h.onCrop(o.id);
+  };
   return (
-    <section data-testid={`overlay-crop-${o.id}`} aria-label="Crop" style={{ display: "flex", flexDirection: "column", gap: SPACE.xs }}>
-      <SectionLabel>Crop</SectionLabel>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm, flex: "1 1 110px", minWidth: 0, color: kind ? "var(--text-primary)" : "var(--text-secondary)" }}>
-          {kind === "poly" ? <PolyIcon /> : <RectIcon />}<span data-testid="overlay-crop-shape" style={valueStyle}>{text}</span>
-        </span>
-        <span style={{ display: "inline-flex", gap: SPACE.sm, flex: "none" }}>
-          <Button variant="ghost" size="md" disabled={!!why} title={why || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"} style={btnCompact} data-testid="overlay-crop-open" onClick={() => h.onCrop(o.id)}>Edit</Button>
-          <Button variant="ghost" size="md" disabled={!!why || !kind} title={why || "Show the whole sheet again"} style={btnCompact} data-testid="overlay-crop-reset" onClick={() => h.onResetCrop(o.id)}>Reset</Button>
-        </span>
+    <section data-testid={`overlay-crop-${o.id}`} aria-label="Crop" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: SPACE.sm, minHeight: 20 }}>
+        <span style={labelStyle}>Crop</span>
+        <CropSwitch id={o.id} on={on} disabled={!!why} why={why} onToggle={toggle} />
       </div>
+      {on && (
+        <div data-testid="overlay-crop-body" style={{ display: "flex", alignItems: "flex-start", gap: SPACE.sm }}>
+          <CropPicture o={o} why={why} onOpen={() => h.onCrop(o.id)} />
+          <Button variant="ghost" size="md" disabled={!!why} title={why || undefined} style={btnCompact} data-testid="overlay-crop-open" onClick={() => h.onCrop(o.id)}>Adjust</Button>
+        </div>
+      )}
     </section>
   );
 }

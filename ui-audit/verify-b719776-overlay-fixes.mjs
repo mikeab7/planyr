@@ -7,6 +7,7 @@
  * Storage round-trip and stays a live-verify item (Blocker: auth) — see VERIFICATION.md.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -156,7 +157,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   }
 
   // Reset crop clears it entirely.
-  await page.locator('[data-testid="overlay-crop-reset"]').first().click();
+  await clearCrop(page);
   await page.waitForTimeout(300);
   const afterReset = await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
