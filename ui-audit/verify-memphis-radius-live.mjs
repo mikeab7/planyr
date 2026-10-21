@@ -25,11 +25,17 @@ const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : n
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const ONLY = flag("--only");
 const STATES = flag("--states") ? new Set(flag("--states").split(",")) : null;
-const OUT = flag("--out") || (args.includes("--az-all") ? "arizona-live.json" : args.includes("--al-all") ? "alabama-live.json" : "memphis-radius-live.json");
+const OUT = flag("--out") || (args.includes("--ky-first") ? "kentucky-first-live.json" : args.includes("--ky-new") ? "kentucky-new-live.json" : args.includes("--az-all") ? "arizona-live.json" : args.includes("--al-all") ? "alabama-live.json" : "memphis-radius-live.json");
 const MS_ALL = args.includes("--ms-all"); // NEW-1 Mississippi: all 82 MS counties + 20 near-county-line points, + the Texas controls
 const AZ_ALL = args.includes("--az-all"); // NEW-1 (B2365360) Arizona: a verified real lot in each of the 13 newly wired counties + Phoenix (Maricopa) and Casa Grande (Pinal) + the Texas controls — test/fixtures/arizonaLotPoints.json
 const AL_ALL = args.includes("--al-all"); // NEW-1 (B2302784) Alabama: all 67 AL counties (35 lots + 32 named gaps) + county-line / AL-MS state-line points, + the Texas controls
 
+const KY_FIRST = args.includes("--ky-first"); // NEW-1 (B2317248 / V1747776): the 22 counties wired 2026-10-19 (same arms as --ky-new, different county list)
+const KY_NEW = args.includes("--ky-new") || KY_FIRST; // NEW-2 (B2317249 / V1822976) Kentucky: the 15 counties wired 2026-10-20 + 4 just-inside-the-county-line points + a named gap (Pike) + the Texas controls
+const KYFX = KY_NEW ? JSON.parse(readFileSync(new URL("../test/fixtures/kentuckyCounties.json", import.meta.url), "utf8")) : null;
+const KY_NEW_COUNTIES = KY_FIRST ? ["Boone", "Breathitt", "Campbell", "Fayette", "Franklin", "Henderson", "Henry", "Jefferson", "Kenton", "Madison", "McCracken", "Meade", "Oldham", "Pendleton", "Scott", "Shelby", "Simpson", "Todd", "Trimble", "Warren", "Webster", "Woodford"] : ["Allen", "Anderson", "Barren", "Bourbon", "Boyd", "Bullitt", "Daviess", "Hardin", "Hopkins", "Jessamine", "Mercer", "Montgomery", "Pulaski", "Rowan", "Spencer"];
+/* Four points ~300 m inside a county line (measured by the lead session with the same polygon test as the wiring), tried through the same DOFF offsets. */
+const KY_EDGE = KY_FIRST ? [] : [["Allen", 36.6544, -86.4119], ["Hopkins", 37.1543, -87.6818], ["Hardin", 37.4503, -86.0563], ["Bullitt", 37.8193, -85.7461]];
 const FX = JSON.parse(readFileSync(new URL("../test/fixtures/memphisRadiusCounties.json", import.meta.url), "utf8"));
 // The honest gaps (no public source wired) — must SAY so; everything else must select a lot. Kept in step with test/memphisRadius.test.js.
 const NO_SOURCE = new Set((process.env.MEMPHIS_NO_SOURCE || "KY:Fulton County,MO:Butler County,MO:Dunklin County,MO:New Madrid County,MO:Pemiscot County,MO:Ripley County").split(",").filter(Boolean));
@@ -37,7 +43,15 @@ const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
 const MSFX = MS_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/mississippiCounties.json", import.meta.url), "utf8")) : null;
 const AZFX = AZ_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/arizonaLotPoints.json", import.meta.url), "utf8")) : null;
 const ALFX = AL_ALL ? JSON.parse(readFileSync(new URL("../test/fixtures/alabamaCounties.json", import.meta.url), "utf8")) : null;
-const ARMS_ALL = AZ_ALL ? [
+const ARMS_ALL = KY_NEW ? [
+  { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
+  { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
+  { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
+  { name: "TX Waller (Brookshire)", state: "TX", lat: 29.786, lng: -95.951, expect: "lot", control: true },
+  ...KYFX.counties.filter((c) => KY_NEW_COUNTIES.includes(c.name.replace(/ County$/, ""))).map((c) => ({ name: `KY ${c.name}`, state: "KY", lat: c.lat, lng: c.lng, expect: "lot", county: c.name })),
+  ...KY_EDGE.map(([c, la, ln]) => ({ name: `KY ${c} County — just inside the county line`, state: "KY", lat: la, lng: ln, expect: "lot", county: `${c} County` })),
+  { name: "KY Pike — a named gap", state: "KY", lat: KYFX.counties.find((c) => c.name === "Pike County").lat, lng: KYFX.counties.find((c) => c.name === "Pike County").lng, expect: "gap", county: "Pike County" },
+] : AZ_ALL ? [
   { name: "TX Harris (Katy)", state: "TX", lat: 29.786, lng: -95.825, expect: "lot", control: true },
   { name: "TX Fort Bend (Sugar Land)", state: "TX", lat: 29.5944, lng: -95.6143, expect: "lot", control: true },
   { name: "TX Chambers (Anahuac)", state: "TX", lat: 29.7691, lng: -94.6783, expect: "lot", control: true },
@@ -106,8 +120,8 @@ const sleep = (ms) => page.waitForTimeout(ms);
 const waitFor = async (fn, ms = 10000) => { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await fn(); if (v) return v; await sleep(250); } return v; };
 
 const OWNER_KEY = /^(owner|ownername|own_name|ownname|owner1|ownernme1|own1|ownersname|name|gpdata__ow|owner_all|propertyowner|fullname|name1|name_1|pconame|pcloname)$/i; // AL (B2302784): OWNER_ALL (CARPDC), PropertyOwner (Madison), FULLNAME (Greene), Name1/NAME_1 (Mobile/Shelby/St. Clair), pcloNAME (Tuscaloosa) // gpdata__ow = Chester TN (CaptureCAMA) owner
-const ownerOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => OWNER_KEY.test(x) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
-const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id|l15parce_2|apn_2017|parcelid_gislink|parcelnumber|parcel_number|pclnum|key_|parcelid_long)$/i; // + Alabama (B2302784) // l15parce_2 = Chester TN (CaptureCAMA) parcel id
+const ownerOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => OWNER_KEY.test(x.split(".").pop()) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; }; // last dotted segment: join-prefixed bags (Scott KY "gscrep.DBO.PVAOwnership.Name1")
+const ID_KEY = /^(parno|parcelid|parcel_id|ownparcelid|parcelnum|parcel_num|parid|pin|gispin|geo_id|account|acct|acct_num|hcad_num|prop_id|propertyid|quickrefid|parcelnumb|parcel|camapin|apn|parcelno|parcel_no|gis_pin|tax_id|l15parce_2|apn_2017|parcelid_gislink|parcelnumber|parcel_number|pclnum|key_|parcelid_long|pidn|pvanum|pva_parcel|gis_mapid)$/i; // + Kentucky (NEW-2): PIDN (Boone, Campbell, Kenton, Henderson, Simpson…), PVANUM (Fayette), PVA_PARCEL (Warren), GIS_MapID (Scott) // + Alabama (B2302784) // l15parce_2 = Chester TN (CaptureCAMA) parcel id
 const idOf = (a) => { if (!a) return null; const k = Object.keys(a).find((x) => ID_KEY.test(x.split(".").pop()) && String(a[x] ?? "").trim()); return k ? String(a[k]).trim() : null; };
 // Geodesic-enough polygon area (spherical excess) of the returned rings, in acres — what the app received.
 function ringsAcres(g, sr) {

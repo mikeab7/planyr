@@ -204,6 +204,10 @@ export const ALLOWED_HOSTS = new Set([
   "arcserver.madisoncountyky.us", // Madison County KY GIS
   "gis.gscplanning.com", // Georgetown-Scott County Planning Commission
   "webgis.bgky.org", // Warren County City-County Planning Commission (CCPC parcels)
+  /* NEW-2 (Kentucky remaining counties, 2026-10-20) — the one non-arcgis.com host the newly wired counties sit on. MEASURED through this relay before
+   * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
+   * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
+  "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
