@@ -1,1 +1,810 @@
-{"source": "Kentucky Energy and Environment Cabinet 'Kentucky County Polygons' (AGOL services.arcgis.com/TosFUe3nXUAksqSj), queried 2026-10-19; points are representative interior points. `gaps` = the counties with no usable public parcel service wired (docs/STATEWIDE-PARCELS.md 'Kentucky counties (2026-10-19)').", "counties": [{"state": "KY", "name": "Adair County", "lat": 37.1176, "lng": -85.3018}, {"state": "KY", "name": "Allen County", "lat": 36.7832, "lng": -86.2154}, {"state": "KY", "name": "Anderson County", "lat": 38.0055, "lng": -84.9781}, {"state": "KY", "name": "Ballard County", "lat": 37.0709, "lng": -89.0185}, {"state": "KY", "name": "Barren County", "lat": 36.97, "lng": -85.9498}, {"state": "KY", "name": "Bath County", "lat": 38.1476, "lng": -83.7755}, {"state": "KY", "name": "Bell County", "lat": 36.7675, "lng": -83.6443}, {"state": "KY", "name": "Boone County", "lat": 38.9644, "lng": -84.721}, {"state": "KY", "name": "Bourbon County", "lat": 38.2194, "lng": -84.2242}, {"state": "KY", "name": "Boyd County", "lat": 38.3693, "lng": -82.6976}, {"state": "KY", "name": "Boyle County", "lat": 37.6244, "lng": -84.8607}, {"state": "KY", "name": "Bracken County", "lat": 38.7023, "lng": -84.0789}, {"state": "KY", "name": "Breathitt County", "lat": 37.5156, "lng": -83.3354}, {"state": "KY", "name": "Breckinridge County", "lat": 37.8174, "lng": -86.4226}, {"state": "KY", "name": "Bullitt County", "lat": 37.9601, "lng": -85.715}, {"state": "KY", "name": "Butler County", "lat": 37.1976, "lng": -86.6579}, {"state": "KY", "name": "Caldwell County", "lat": 37.1659, "lng": -87.8709}, {"state": "KY", "name": "Calloway County", "lat": 36.6167, "lng": -88.2689}, {"state": "KY", "name": "Campbell County", "lat": 38.9643, "lng": -84.3661}, {"state": "KY", "name": "Carlisle County", "lat": 36.8648, "lng": -88.9712}, {"state": "KY", "name": "Carroll County", "lat": 38.6709, "lng": -85.1111}, {"state": "KY", "name": "Carter County", "lat": 38.3366, "lng": -83.0089}, {"state": "KY", "name": "Casey County", "lat": 37.3268, "lng": -84.9337}, {"state": "KY", "name": "Christian County", "lat": 36.8978, "lng": -87.4801}, {"state": "KY", "name": "Clark County", "lat": 37.9709, "lng": -84.1559}, {"state": "KY", "name": "Clay County", "lat": 37.1483, "lng": -83.7483}, {"state": "KY", "name": "Clinton County", "lat": 36.7501, "lng": -85.1259}, {"state": "KY", "name": "Crittenden County", "lat": 37.3363, "lng": -88.0859}, {"state": "KY", "name": "Cumberland County", "lat": 36.7784, "lng": -85.4078}, {"state": "KY", "name": "Daviess County", "lat": 37.7513, "lng": -87.0639}, {"state": "KY", "name": "Edmonson County", "lat": 37.1926, "lng": -86.2314}, {"state": "KY", "name": "Elliott County", "lat": 38.1318, "lng": -83.0624}, {"state": "KY", "name": "Estill County", "lat": 37.6986, "lng": -83.931}, {"state": "KY", "name": "Fayette County", "lat": 38.0289, "lng": -84.472}, {"state": "KY", "name": "Fleming County", "lat": 38.3486, "lng": -83.6784}, {"state": "KY", "name": "Floyd County", "lat": 37.5206, "lng": -82.7583}, {"state": "KY", "name": "Franklin County", "lat": 38.2506, "lng": -84.8669}, {"state": "KY", "name": "Fulton County", "lat": 36.5724, "lng": -89.0611}, {"state": "KY", "name": "Gallatin County", "lat": 38.7432, "lng": -84.8965}, {"state": "KY", "name": "Garrard County", "lat": 37.6515, "lng": -84.5496}, {"state": "KY", "name": "Grant County", "lat": 38.6726, "lng": -84.6435}, {"state": "KY", "name": "Graves County", "lat": 36.7194, "lng": -88.6521}, {"state": "KY", "name": "Grayson County", "lat": 37.472, "lng": -86.3497}, {"state": "KY", "name": "Green County", "lat": 37.29, "lng": -85.5528}, {"state": "KY", "name": "Greenup County", "lat": 38.5655, "lng": -82.9519}, {"state": "KY", "name": "Hancock County", "lat": 37.8243, "lng": -86.7571}, {"state": "KY", "name": "Hardin County", "lat": 37.6918, "lng": -85.9623}, {"state": "KY", "name": "Harlan County", "lat": 36.8433, "lng": -83.2803}, {"state": "KY", "name": "Harrison County", "lat": 38.4297, "lng": -84.3282}, {"state": "KY", "name": "Hart County", "lat": 37.2987, "lng": -85.9081}, {"state": "KY", "name": "Henderson County", "lat": 37.8063, "lng": -87.578}, {"state": "KY", "name": "Henry County", "lat": 38.468, "lng": -85.1456}, {"state": "KY", "name": "Hickman County", "lat": 36.6498, "lng": -88.9889}, {"state": "KY", "name": "Hopkins County", "lat": 37.3381, "lng": -87.5849}, {"state": "KY", "name": "Jackson County", "lat": 37.4152, "lng": -83.9959}, {"state": "KY", "name": "Jefferson County", "lat": 38.1816, "lng": -85.6586}, {"state": "KY", "name": "Jessamine County", "lat": 37.8653, "lng": -84.5723}, {"state": "KY", "name": "Johnson County", "lat": 37.8493, "lng": -82.8316}, {"state": "KY", "name": "Kenton County", "lat": 38.9421, "lng": -84.5345}, {"state": "KY", "name": "Knott County", "lat": 37.3501, "lng": -82.9384}, {"state": "KY", "name": "Knox County", "lat": 36.8723, "lng": -83.8551}, {"state": "KY", "name": "Larue County", "lat": 37.5768, "lng": -85.7124}, {"state": "KY", "name": "Laurel County", "lat": 37.1369, "lng": -84.1149}, {"state": "KY", "name": "Lawrence County", "lat": 38.0752, "lng": -82.7515}, {"state": "KY", "name": "Lee County", "lat": 37.5786, "lng": -83.7145}, {"state": "KY", "name": "Leslie County", "lat": 37.1014, "lng": -83.3524}, {"state": "KY", "name": "Letcher County", "lat": 37.1139, "lng": -82.8932}, {"state": "KY", "name": "Lewis County", "lat": 38.5215, "lng": -83.3885}, {"state": "KY", "name": "Lincoln County", "lat": 37.4511, "lng": -84.658}, {"state": "KY", "name": "Livingston County", "lat": 37.2018, "lng": -88.3277}, {"state": "KY", "name": "Logan County", "lat": 36.8591, "lng": -86.8642}, {"state": "KY", "name": "Lyon County", "lat": 37.0206, "lng": -88.0782}, {"state": "KY", "name": "Madison County", "lat": 37.7153, "lng": -84.2897}, {"state": "KY", "name": "Magoffin County", "lat": 37.6897, "lng": -83.0975}, {"state": "KY", "name": "Marion County", "lat": 37.5712, "lng": -85.2744}, {"state": "KY", "name": "Marshall County", "lat": 36.9065, "lng": -88.333}, {"state": "KY", "name": "Martin County", "lat": 37.8157, "lng": -82.526}, {"state": "KY", "name": "Mason County", "lat": 38.619, "lng": -83.8046}, {"state": "KY", "name": "McCracken County", "lat": 37.084, "lng": -88.7233}, {"state": "KY", "name": "McCreary County", "lat": 36.7776, "lng": -84.4905}, {"state": "KY", "name": "McLean County", "lat": 37.5306, "lng": -87.2114}, {"state": "KY", "name": "Meade County", "lat": 37.999, "lng": -86.2527}, {"state": "KY", "name": "Menifee County", "lat": 37.9383, "lng": -83.6112}, {"state": "KY", "name": "Mercer County", "lat": 37.8222, "lng": -84.8674}, {"state": "KY", "name": "Metcalfe County", "lat": 36.98, "lng": -85.6102}, {"state": "KY", "name": "Monroe County", "lat": 36.7295, "lng": -85.7178}, {"state": "KY", "name": "Montgomery County", "lat": 38.0561, "lng": -83.9255}, {"state": "KY", "name": "Morgan County", "lat": 37.9136, "lng": -83.2228}, {"state": "KY", "name": "Muhlenberg County", "lat": 37.2291, "lng": -87.1375}, {"state": "KY", "name": "Nelson County", "lat": 37.7567, "lng": -85.5295}, {"state": "KY", "name": "Nicholas County", "lat": 38.3288, "lng": -83.9971}, {"state": "KY", "name": "Ohio County", "lat": 37.4738, "lng": -86.8749}, {"state": "KY", "name": "Oldham County", "lat": 38.4091, "lng": -85.476}, {"state": "KY", "name": "Owen County", "lat": 38.5313, "lng": -84.8462}, {"state": "KY", "name": "Owsley County", "lat": 37.3981, "lng": -83.6849}, {"state": "KY", "name": "Pendleton County", "lat": 38.6873, "lng": -84.364}, {"state": "KY", "name": "Perry County", "lat": 37.2178, "lng": -83.1786}, {"state": "KY", "name": "Pike County", "lat": 37.4708, "lng": -82.3251}, {"state": "KY", "name": "Powell County", "lat": 37.8235, "lng": -83.797}, {"state": "KY", "name": "Pulaski County", "lat": 37.1117, "lng": -84.5966}, {"state": "KY", "name": "Robertson County", "lat": 38.5129, "lng": -84.0652}, {"state": "KY", "name": "Rockcastle County", "lat": 37.3464, "lng": -84.3152}, {"state": "KY", "name": "Rowan County", "lat": 38.2073, "lng": -83.4422}, {"state": "KY", "name": "Russell County", "lat": 37.0028, "lng": -85.0247}, {"state": "KY", "name": "Scott County", "lat": 38.3009, "lng": -84.5859}, {"state": "KY", "name": "Shelby County", "lat": 38.2011, "lng": -85.2097}, {"state": "KY", "name": "Simpson County", "lat": 36.766, "lng": -86.5707}, {"state": "KY", "name": "Spencer County", "lat": 38.0654, "lng": -85.3286}, {"state": "KY", "name": "Taylor County", "lat": 37.3376, "lng": -85.3028}, {"state": "KY", "name": "Todd County", "lat": 36.8339, "lng": -87.1799}, {"state": "KY", "name": "Trigg County", "lat": 36.8164, "lng": -87.9038}, {"state": "KY", "name": "Trimble County", "lat": 38.615, "lng": -85.3325}, {"state": "KY", "name": "Union County", "lat": 37.6876, "lng": -87.9457}, {"state": "KY", "name": "Warren County", "lat": 36.9676, "lng": -86.4049}, {"state": "KY", "name": "Washington County", "lat": 37.777, "lng": -85.1826}, {"state": "KY", "name": "Wayne County", "lat": 36.8003, "lng": -84.8155}, {"state": "KY", "name": "Webster County", "lat": 37.5148, "lng": -87.6732}, {"state": "KY", "name": "Whitley County", "lat": 36.7804, "lng": -84.1635}, {"state": "KY", "name": "Wolfe County", "lat": 37.7403, "lng": -83.4889}, {"state": "KY", "name": "Woodford County", "lat": 38.0199, "lng": -84.7445}], "gaps": ["Adair", "Ballard", "Bath", "Bell", "Boyle", "Bracken", "Breckinridge", "Butler", "Caldwell", "Calloway", "Carlisle", "Carroll", "Carter", "Casey", "Christian", "Clark", "Clay", "Clinton", "Crittenden", "Cumberland", "Edmonson", "Elliott", "Estill", "Fleming", "Floyd", "Fulton", "Gallatin", "Garrard", "Grant", "Graves", "Grayson", "Green", "Greenup", "Hancock", "Harlan", "Harrison", "Hart", "Hickman", "Jackson", "Johnson", "Knott", "Knox", "Larue", "Laurel", "Lawrence", "Lee", "Leslie", "Letcher", "Lewis", "Lincoln", "Livingston", "Logan", "Lyon", "Magoffin", "Marion", "Marshall", "Martin", "Mason", "McCreary", "McLean", "Menifee", "Metcalfe", "Monroe", "Morgan", "Muhlenberg", "Nelson", "Nicholas", "Ohio", "Owen", "Owsley", "Perry", "Pike", "Powell", "Robertson", "Rockcastle", "Russell", "Taylor", "Trigg", "Union", "Washington", "Wayne", "Whitley", "Wolfe"]}
+{
+ "source": "Kentucky Energy and Environment Cabinet 'Kentucky County Polygons' (AGOL services.arcgis.com/TosFUe3nXUAksqSj), queried 2026-10-19; points are representative interior points. `gaps` = the counties with no usable public parcel service wired (docs/STATEWIDE-PARCELS.md 'Kentucky counties (2026-10-19)').",
+ "counties": [
+  {
+   "state": "KY",
+   "name": "Adair County",
+   "lat": 37.1176,
+   "lng": -85.3018
+  },
+  {
+   "state": "KY",
+   "name": "Allen County",
+   "lat": 36.7832,
+   "lng": -86.2154
+  },
+  {
+   "state": "KY",
+   "name": "Anderson County",
+   "lat": 38.0055,
+   "lng": -84.9781
+  },
+  {
+   "state": "KY",
+   "name": "Ballard County",
+   "lat": 37.0709,
+   "lng": -89.0185
+  },
+  {
+   "state": "KY",
+   "name": "Barren County",
+   "lat": 36.97,
+   "lng": -85.9498
+  },
+  {
+   "state": "KY",
+   "name": "Bath County",
+   "lat": 38.1476,
+   "lng": -83.7755
+  },
+  {
+   "state": "KY",
+   "name": "Bell County",
+   "lat": 36.7675,
+   "lng": -83.6443
+  },
+  {
+   "state": "KY",
+   "name": "Boone County",
+   "lat": 38.9644,
+   "lng": -84.721
+  },
+  {
+   "state": "KY",
+   "name": "Bourbon County",
+   "lat": 38.2194,
+   "lng": -84.2242
+  },
+  {
+   "state": "KY",
+   "name": "Boyd County",
+   "lat": 38.3693,
+   "lng": -82.6976
+  },
+  {
+   "state": "KY",
+   "name": "Boyle County",
+   "lat": 37.6244,
+   "lng": -84.8607
+  },
+  {
+   "state": "KY",
+   "name": "Bracken County",
+   "lat": 38.7023,
+   "lng": -84.0789
+  },
+  {
+   "state": "KY",
+   "name": "Breathitt County",
+   "lat": 37.5156,
+   "lng": -83.3354
+  },
+  {
+   "state": "KY",
+   "name": "Breckinridge County",
+   "lat": 37.8174,
+   "lng": -86.4226
+  },
+  {
+   "state": "KY",
+   "name": "Bullitt County",
+   "lat": 37.9601,
+   "lng": -85.715
+  },
+  {
+   "state": "KY",
+   "name": "Butler County",
+   "lat": 37.1976,
+   "lng": -86.6579
+  },
+  {
+   "state": "KY",
+   "name": "Caldwell County",
+   "lat": 37.1659,
+   "lng": -87.8709
+  },
+  {
+   "state": "KY",
+   "name": "Calloway County",
+   "lat": 36.6167,
+   "lng": -88.2689
+  },
+  {
+   "state": "KY",
+   "name": "Campbell County",
+   "lat": 38.9643,
+   "lng": -84.3661
+  },
+  {
+   "state": "KY",
+   "name": "Carlisle County",
+   "lat": 36.8648,
+   "lng": -88.9712
+  },
+  {
+   "state": "KY",
+   "name": "Carroll County",
+   "lat": 38.6709,
+   "lng": -85.1111
+  },
+  {
+   "state": "KY",
+   "name": "Carter County",
+   "lat": 38.3366,
+   "lng": -83.0089
+  },
+  {
+   "state": "KY",
+   "name": "Casey County",
+   "lat": 37.3268,
+   "lng": -84.9337
+  },
+  {
+   "state": "KY",
+   "name": "Christian County",
+   "lat": 36.8978,
+   "lng": -87.4801
+  },
+  {
+   "state": "KY",
+   "name": "Clark County",
+   "lat": 37.9709,
+   "lng": -84.1559
+  },
+  {
+   "state": "KY",
+   "name": "Clay County",
+   "lat": 37.1483,
+   "lng": -83.7483
+  },
+  {
+   "state": "KY",
+   "name": "Clinton County",
+   "lat": 36.7501,
+   "lng": -85.1259
+  },
+  {
+   "state": "KY",
+   "name": "Crittenden County",
+   "lat": 37.3363,
+   "lng": -88.0859
+  },
+  {
+   "state": "KY",
+   "name": "Cumberland County",
+   "lat": 36.7784,
+   "lng": -85.4078
+  },
+  {
+   "state": "KY",
+   "name": "Daviess County",
+   "lat": 37.7513,
+   "lng": -87.0639
+  },
+  {
+   "state": "KY",
+   "name": "Edmonson County",
+   "lat": 37.1926,
+   "lng": -86.2314
+  },
+  {
+   "state": "KY",
+   "name": "Elliott County",
+   "lat": 38.1318,
+   "lng": -83.0624
+  },
+  {
+   "state": "KY",
+   "name": "Estill County",
+   "lat": 37.6986,
+   "lng": -83.931
+  },
+  {
+   "state": "KY",
+   "name": "Fayette County",
+   "lat": 38.0289,
+   "lng": -84.472
+  },
+  {
+   "state": "KY",
+   "name": "Fleming County",
+   "lat": 38.3486,
+   "lng": -83.6784
+  },
+  {
+   "state": "KY",
+   "name": "Floyd County",
+   "lat": 37.5206,
+   "lng": -82.7583
+  },
+  {
+   "state": "KY",
+   "name": "Franklin County",
+   "lat": 38.2506,
+   "lng": -84.8669
+  },
+  {
+   "state": "KY",
+   "name": "Fulton County",
+   "lat": 36.5724,
+   "lng": -89.0611
+  },
+  {
+   "state": "KY",
+   "name": "Gallatin County",
+   "lat": 38.7432,
+   "lng": -84.8965
+  },
+  {
+   "state": "KY",
+   "name": "Garrard County",
+   "lat": 37.6515,
+   "lng": -84.5496
+  },
+  {
+   "state": "KY",
+   "name": "Grant County",
+   "lat": 38.6726,
+   "lng": -84.6435
+  },
+  {
+   "state": "KY",
+   "name": "Graves County",
+   "lat": 36.7194,
+   "lng": -88.6521
+  },
+  {
+   "state": "KY",
+   "name": "Grayson County",
+   "lat": 37.472,
+   "lng": -86.3497
+  },
+  {
+   "state": "KY",
+   "name": "Green County",
+   "lat": 37.29,
+   "lng": -85.5528
+  },
+  {
+   "state": "KY",
+   "name": "Greenup County",
+   "lat": 38.5655,
+   "lng": -82.9519
+  },
+  {
+   "state": "KY",
+   "name": "Hancock County",
+   "lat": 37.8243,
+   "lng": -86.7571
+  },
+  {
+   "state": "KY",
+   "name": "Hardin County",
+   "lat": 37.6918,
+   "lng": -85.9623
+  },
+  {
+   "state": "KY",
+   "name": "Harlan County",
+   "lat": 36.8433,
+   "lng": -83.2803
+  },
+  {
+   "state": "KY",
+   "name": "Harrison County",
+   "lat": 38.4297,
+   "lng": -84.3282
+  },
+  {
+   "state": "KY",
+   "name": "Hart County",
+   "lat": 37.2987,
+   "lng": -85.9081
+  },
+  {
+   "state": "KY",
+   "name": "Henderson County",
+   "lat": 37.8063,
+   "lng": -87.578
+  },
+  {
+   "state": "KY",
+   "name": "Henry County",
+   "lat": 38.468,
+   "lng": -85.1456
+  },
+  {
+   "state": "KY",
+   "name": "Hickman County",
+   "lat": 36.6498,
+   "lng": -88.9889
+  },
+  {
+   "state": "KY",
+   "name": "Hopkins County",
+   "lat": 37.3381,
+   "lng": -87.5849
+  },
+  {
+   "state": "KY",
+   "name": "Jackson County",
+   "lat": 37.4152,
+   "lng": -83.9959
+  },
+  {
+   "state": "KY",
+   "name": "Jefferson County",
+   "lat": 38.1816,
+   "lng": -85.6586
+  },
+  {
+   "state": "KY",
+   "name": "Jessamine County",
+   "lat": 37.8653,
+   "lng": -84.5723
+  },
+  {
+   "state": "KY",
+   "name": "Johnson County",
+   "lat": 37.8493,
+   "lng": -82.8316
+  },
+  {
+   "state": "KY",
+   "name": "Kenton County",
+   "lat": 38.9421,
+   "lng": -84.5345
+  },
+  {
+   "state": "KY",
+   "name": "Knott County",
+   "lat": 37.3501,
+   "lng": -82.9384
+  },
+  {
+   "state": "KY",
+   "name": "Knox County",
+   "lat": 36.8723,
+   "lng": -83.8551
+  },
+  {
+   "state": "KY",
+   "name": "Larue County",
+   "lat": 37.5768,
+   "lng": -85.7124
+  },
+  {
+   "state": "KY",
+   "name": "Laurel County",
+   "lat": 37.1369,
+   "lng": -84.1149
+  },
+  {
+   "state": "KY",
+   "name": "Lawrence County",
+   "lat": 38.0752,
+   "lng": -82.7515
+  },
+  {
+   "state": "KY",
+   "name": "Lee County",
+   "lat": 37.5786,
+   "lng": -83.7145
+  },
+  {
+   "state": "KY",
+   "name": "Leslie County",
+   "lat": 37.1014,
+   "lng": -83.3524
+  },
+  {
+   "state": "KY",
+   "name": "Letcher County",
+   "lat": 37.1139,
+   "lng": -82.8932
+  },
+  {
+   "state": "KY",
+   "name": "Lewis County",
+   "lat": 38.5215,
+   "lng": -83.3885
+  },
+  {
+   "state": "KY",
+   "name": "Lincoln County",
+   "lat": 37.4511,
+   "lng": -84.658
+  },
+  {
+   "state": "KY",
+   "name": "Livingston County",
+   "lat": 37.2018,
+   "lng": -88.3277
+  },
+  {
+   "state": "KY",
+   "name": "Logan County",
+   "lat": 36.8591,
+   "lng": -86.8642
+  },
+  {
+   "state": "KY",
+   "name": "Lyon County",
+   "lat": 37.0206,
+   "lng": -88.0782
+  },
+  {
+   "state": "KY",
+   "name": "Madison County",
+   "lat": 37.7153,
+   "lng": -84.2897
+  },
+  {
+   "state": "KY",
+   "name": "Magoffin County",
+   "lat": 37.6897,
+   "lng": -83.0975
+  },
+  {
+   "state": "KY",
+   "name": "Marion County",
+   "lat": 37.5712,
+   "lng": -85.2744
+  },
+  {
+   "state": "KY",
+   "name": "Marshall County",
+   "lat": 36.9065,
+   "lng": -88.333
+  },
+  {
+   "state": "KY",
+   "name": "Martin County",
+   "lat": 37.8157,
+   "lng": -82.526
+  },
+  {
+   "state": "KY",
+   "name": "Mason County",
+   "lat": 38.619,
+   "lng": -83.8046
+  },
+  {
+   "state": "KY",
+   "name": "McCracken County",
+   "lat": 37.084,
+   "lng": -88.7233
+  },
+  {
+   "state": "KY",
+   "name": "McCreary County",
+   "lat": 36.7776,
+   "lng": -84.4905
+  },
+  {
+   "state": "KY",
+   "name": "McLean County",
+   "lat": 37.5306,
+   "lng": -87.2114
+  },
+  {
+   "state": "KY",
+   "name": "Meade County",
+   "lat": 37.999,
+   "lng": -86.2527
+  },
+  {
+   "state": "KY",
+   "name": "Menifee County",
+   "lat": 37.9383,
+   "lng": -83.6112
+  },
+  {
+   "state": "KY",
+   "name": "Mercer County",
+   "lat": 37.8222,
+   "lng": -84.8674
+  },
+  {
+   "state": "KY",
+   "name": "Metcalfe County",
+   "lat": 36.98,
+   "lng": -85.6102
+  },
+  {
+   "state": "KY",
+   "name": "Monroe County",
+   "lat": 36.7295,
+   "lng": -85.7178
+  },
+  {
+   "state": "KY",
+   "name": "Montgomery County",
+   "lat": 38.0561,
+   "lng": -83.9255
+  },
+  {
+   "state": "KY",
+   "name": "Morgan County",
+   "lat": 37.9136,
+   "lng": -83.2228
+  },
+  {
+   "state": "KY",
+   "name": "Muhlenberg County",
+   "lat": 37.2291,
+   "lng": -87.1375
+  },
+  {
+   "state": "KY",
+   "name": "Nelson County",
+   "lat": 37.7567,
+   "lng": -85.5295
+  },
+  {
+   "state": "KY",
+   "name": "Nicholas County",
+   "lat": 38.3288,
+   "lng": -83.9971
+  },
+  {
+   "state": "KY",
+   "name": "Ohio County",
+   "lat": 37.4738,
+   "lng": -86.8749
+  },
+  {
+   "state": "KY",
+   "name": "Oldham County",
+   "lat": 38.4091,
+   "lng": -85.476
+  },
+  {
+   "state": "KY",
+   "name": "Owen County",
+   "lat": 38.5313,
+   "lng": -84.8462
+  },
+  {
+   "state": "KY",
+   "name": "Owsley County",
+   "lat": 37.3981,
+   "lng": -83.6849
+  },
+  {
+   "state": "KY",
+   "name": "Pendleton County",
+   "lat": 38.6873,
+   "lng": -84.364
+  },
+  {
+   "state": "KY",
+   "name": "Perry County",
+   "lat": 37.2178,
+   "lng": -83.1786
+  },
+  {
+   "state": "KY",
+   "name": "Pike County",
+   "lat": 37.4708,
+   "lng": -82.3251
+  },
+  {
+   "state": "KY",
+   "name": "Powell County",
+   "lat": 37.8235,
+   "lng": -83.797
+  },
+  {
+   "state": "KY",
+   "name": "Pulaski County",
+   "lat": 37.1117,
+   "lng": -84.5966
+  },
+  {
+   "state": "KY",
+   "name": "Robertson County",
+   "lat": 38.5129,
+   "lng": -84.0652
+  },
+  {
+   "state": "KY",
+   "name": "Rockcastle County",
+   "lat": 37.3464,
+   "lng": -84.3152
+  },
+  {
+   "state": "KY",
+   "name": "Rowan County",
+   "lat": 38.2073,
+   "lng": -83.4422
+  },
+  {
+   "state": "KY",
+   "name": "Russell County",
+   "lat": 37.0028,
+   "lng": -85.0247
+  },
+  {
+   "state": "KY",
+   "name": "Scott County",
+   "lat": 38.3009,
+   "lng": -84.5859
+  },
+  {
+   "state": "KY",
+   "name": "Shelby County",
+   "lat": 38.2011,
+   "lng": -85.2097
+  },
+  {
+   "state": "KY",
+   "name": "Simpson County",
+   "lat": 36.766,
+   "lng": -86.5707
+  },
+  {
+   "state": "KY",
+   "name": "Spencer County",
+   "lat": 38.0654,
+   "lng": -85.3286
+  },
+  {
+   "state": "KY",
+   "name": "Taylor County",
+   "lat": 37.3376,
+   "lng": -85.3028
+  },
+  {
+   "state": "KY",
+   "name": "Todd County",
+   "lat": 36.8339,
+   "lng": -87.1799
+  },
+  {
+   "state": "KY",
+   "name": "Trigg County",
+   "lat": 36.8164,
+   "lng": -87.9038
+  },
+  {
+   "state": "KY",
+   "name": "Trimble County",
+   "lat": 38.615,
+   "lng": -85.3325
+  },
+  {
+   "state": "KY",
+   "name": "Union County",
+   "lat": 37.6876,
+   "lng": -87.9457
+  },
+  {
+   "state": "KY",
+   "name": "Warren County",
+   "lat": 36.9676,
+   "lng": -86.4049
+  },
+  {
+   "state": "KY",
+   "name": "Washington County",
+   "lat": 37.777,
+   "lng": -85.1826
+  },
+  {
+   "state": "KY",
+   "name": "Wayne County",
+   "lat": 36.8003,
+   "lng": -84.8155
+  },
+  {
+   "state": "KY",
+   "name": "Webster County",
+   "lat": 37.5148,
+   "lng": -87.6732
+  },
+  {
+   "state": "KY",
+   "name": "Whitley County",
+   "lat": 36.7804,
+   "lng": -84.1635
+  },
+  {
+   "state": "KY",
+   "name": "Wolfe County",
+   "lat": 37.7403,
+   "lng": -83.4889
+  },
+  {
+   "state": "KY",
+   "name": "Woodford County",
+   "lat": 38.0199,
+   "lng": -84.7445
+  }
+ ],
+ "gaps": [
+  "Adair",
+  "Ballard",
+  "Bath",
+  "Bell",
+  "Boyle",
+  "Bracken",
+  "Breckinridge",
+  "Butler",
+  "Caldwell",
+  "Calloway",
+  "Carlisle",
+  "Carroll",
+  "Carter",
+  "Casey",
+  "Christian",
+  "Clark",
+  "Clay",
+  "Clinton",
+  "Crittenden",
+  "Cumberland",
+  "Edmonson",
+  "Elliott",
+  "Estill",
+  "Fleming",
+  "Floyd",
+  "Fulton",
+  "Gallatin",
+  "Garrard",
+  "Grant",
+  "Graves",
+  "Grayson",
+  "Green",
+  "Greenup",
+  "Hancock",
+  "Harlan",
+  "Harrison",
+  "Hart",
+  "Hickman",
+  "Jackson",
+  "Johnson",
+  "Knott",
+  "Knox",
+  "Larue",
+  "Laurel",
+  "Lawrence",
+  "Lee",
+  "Leslie",
+  "Letcher",
+  "Lewis",
+  "Lincoln",
+  "Livingston",
+  "Logan",
+  "Lyon",
+  "Magoffin",
+  "Marion",
+  "Marshall",
+  "Martin",
+  "Mason",
+  "McCreary",
+  "McLean",
+  "Menifee",
+  "Metcalfe",
+  "Monroe",
+  "Morgan",
+  "Muhlenberg",
+  "Nelson",
+  "Nicholas",
+  "Ohio",
+  "Owen",
+  "Owsley",
+  "Perry",
+  "Pike",
+  "Powell",
+  "Robertson",
+  "Rockcastle",
+  "Russell",
+  "Taylor",
+  "Trigg",
+  "Union",
+  "Washington",
+  "Wayne",
+  "Whitley",
+  "Wolfe"
+ ]
+}
