@@ -118,8 +118,9 @@ for (const theme of ["light", "dark"]) {
           expect(m.sbStyle.width).toBe("thin");
           expect(m.sbStyle.color).not.toMatch(/^auto$/);
 
-          // 5 — headings: Tools · Site elements · Markup; the rule runs to the right edge; above > below
-          expect(m.heads.map((h) => h.text.toLowerCase())).toEqual(["tools", "site elements", "markup"]);
+          // 5 — headings: Tools · Site elements · Markup · Utility Evidence (a located plan — B2391216 ×2 moved the five evidence tools
+          //     here from the layers card); the rule runs to the right edge; above > below
+          expect(m.heads.map((h) => h.text.toLowerCase())).toEqual(["tools", "site elements", "markup", "utility evidence"]);
           const model = headingInkGaps();
           m.heads.forEach((h, i) => {
             expect(h.ruleRight).toBeCloseTo(m.railRight - RAIL.padR, 0);

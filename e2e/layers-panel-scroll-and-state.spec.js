@@ -72,7 +72,7 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
   // was given, so the overflow scaled with the viewport instead of the shortfall. The card must be BOUNDED at every height; where a
   // long group (Flood & Drainage, with a dropdown open) genuinely exceeds the room it must scroll — asserted at the shortest heights,
   // so a fix that only works when there is plenty of room cannot pass.
-  for (const height of [1000, 800, 700, 600]) {
+  for (const height of [1000, 800, 600, 460, 400]) {
     test(`the card is bounded by the room it has, and a long group scrolls, at ${height}px tall`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height });
       await openLayers(page, TX_SITE);
@@ -95,7 +95,9 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
       expect(m.overflowY).toBe("auto");
       expect(m.rows).toBeGreaterThan(5);
       expect(m.clientH).toBeLessThan(height);
-      if (height <= 700) {
+      // B2391216 ×2: the extra sections under the panes are gone, so the card now sizes to its content (the longest group, FEMA's
+      // dropdown open, is ~380px) — it only overflows where the room really is shorter than that.
+      if (height <= 460) {
         expect(m.scrollH).toBeGreaterThan(m.clientH + 1);   // it genuinely overflows…
         expect(m.scrolledTo).toBeGreaterThan(1);            // …and scrolling actually moves it
       }
@@ -103,7 +105,7 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
   }
 
   test("the LAST row of a long group is reachable and takes a press, at the shortest height", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 600 });
+    await page.setViewportSize({ width: 1280, height: 400 });
     await openLayers(page, TX_SITE);
     const panel = page.locator(PANEL);
     await selectGroup(panel, "flood");
