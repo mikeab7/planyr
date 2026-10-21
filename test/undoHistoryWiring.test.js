@@ -17,7 +17,7 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
     // once (blur/Enter); the guarantee this test protects — never un-undoable, never two frames per
     // edit — now comes from an explicit pushHistory() in the same onCommit, not from sliderHistory.
     // Parcels rework: the Style grid's Fill opacity cell (also sets the fill colour the first time it rises above 0).
-    expect(src).toMatch(/<PercentField value=\{fillOpacity\}|<PercentField value=\{fillOp\} onCommit=\{\(v\) => \{ pushHistory\(\); setSelParcel\(\{ fillOpacity: v/);
+    expect(src).toMatch(/<PercentField value=\{fillOpacity\}|<PercentField (boxed )?value=\{fillOp\} onCommit=\{\(v\) => \{ pushHistory\(\); setSelParcel\(\{ fillOpacity: v/);
     // and is NOT back on a bare, un-undoable commit (setSelParcel never pushes on its own)
     expect(src).not.toMatch(/onCommit=\{\(v\) => setSelParcel\(\{ fillOpacity: v \}\)\}/);
   });
