@@ -96,10 +96,11 @@ test.describe("measurement drag / properties / label LOD (logged out)", () => {
     const midX = Math.round((x1 + x2) / 2);
 
     await page.mouse.dblclick(midX, y);
-    // The docked Properties inspector appears, headed "Measurement".
+    // The docked Properties inspector appears, headed with the measurement's own name ("Distance" — propsPanelTitle). (It used to match
+    // the word "Measurement" by accident, inside the label-zoom sentence the panel no longer carries — layout A, B2403057.)
     const panel = page.getByTestId("property-panel");
     await expect(panel).toBeVisible();
-    await expect(panel.getByText("Measurement", { exact: false }).first()).toBeVisible();
+    await expect(page.getByTestId("props-panel-title")).toHaveText("Distance");
 
     // Type a label; it persists onto the measure model.
     const label = panel.getByPlaceholder("e.g. Front setback");
@@ -148,7 +149,7 @@ test.describe("measurement drag / properties / label LOD (logged out)", () => {
 
       const panel = page.getByTestId("property-panel");
       await expect(panel).toBeVisible();
-      await expect(panel.getByText("Measurement", { exact: false }).first()).toBeVisible();
+      await expect(page.getByTestId("props-panel-title")).toHaveText(mode === "Area" ? "Area measurement" : "Distance");
       // …and the double-click did not also drag the chip off its anchor.
       expect((await measures(page))[0]?.labelOffset ?? null).toBeNull();
       expect(errors, errors.join("\n")).toEqual([]);

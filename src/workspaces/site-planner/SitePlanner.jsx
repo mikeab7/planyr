@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense, useSyncExternalStore } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, Children, lazy, Suspense, useSyncExternalStore } from "react";
 import { useFileDragActive } from "../../shared/files/fileDrag.js";
 import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
@@ -21748,16 +21748,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const radiusReviewOn = roadRadiusReviewOn();
   // NEW-8 — the two outline props the Appearance rows edit (outline opacity, outline width), shared by
   // the building's Appearance, the pond's, the parking Display group and the generic Properties section.
-  const strokeOpacityCell = curStyle ? <PercentField value={curStyle.strokeOpacity} min={0} onCommit={(v) => { pushHistory(); setSelEl({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" /> : null;
-  const fillOpacityCell = curStyle ? <PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" /> : null;
-  // "Line weight" (NEW-5) — never a unit: the stacked ▲▼ NumInput, then a short live line whose thickness tracks it.
+  // NEW-3 (layout "A") — the same boxed controls the markup panel uses: opacity is a typed % box (value · % · ▲▼) and the weight a
+  // unit-less stepper box, both filling their (fixed, compact) column so every right edge in the section lines up.
+  const strokeOpacityCell = curStyle ? <PercentField boxed value={curStyle.strokeOpacity} min={0} onCommit={(v) => { pushHistory(); setSelEl({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" /> : null;
+  const fillOpacityCell = curStyle ? <PercentField boxed value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" /> : null;
+  // "Line weight" (NEW-5) — never a unit: the stacked ▲▼ NumInput in the Outline column, and its live sample (a short line whose
+  // thickness tracks the value) in the cell beside it so the number box keeps the same right edge as the opacity boxes above.
   const strokeWidthRow = curStyle ? (
     <PairedField label="Line weight"
-      left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.md, minWidth: 0 }}>
-        <NumInput style={{ ...numInput, width: 46, minWidth: 0 }} value={curStyle.strokeWidth} min={0.5} max={12} step={0.5} coarse={2} ariaLabel="Line weight"
-          onCommit={(n) => { pushHistory(); setSelEl({ strokeWidth: Math.max(0.5, Math.min(12, n)) }); }} />
-        <LineSample weight={curStyle.strokeWidth} />
-      </span>}
+      left={<NumInput boxed fill ariaLabel="Line weight" testid="el-line-weight" value={curStyle.strokeWidth} min={0.5} max={12} step={0.5} coarse={2}
+        onCommit={(n) => { pushHistory(); setSelEl({ strokeWidth: Math.max(0.5, Math.min(12, n)) }); }} />}
+      right={<LineSample weight={curStyle.strokeWidth} />}
     />
   ) : null;
   // NEW-1 — the trailer row's own stall spec + label switch, hoisted so a dock-zone trailer parking layer shows it INSIDE
@@ -22644,7 +22645,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const themeHex = { parcel: toHex6(PAL.parcel), setback: toHex6(PAL.setback), ink: toHex6(PAL.ink) };
     const style = (
       <section data-testid="parcel-style" style={{ borderTop: BORDER_1, paddingTop: 10, marginTop: 14 }}>
-        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 8 }}>Style</div>
+        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 8 }}>Appearance</div>
         <ParcelStylePanel parcel={pc} workspace={userPrefs.parcelLook} themeHex={themeHex}
           onEditDefault={editLookDefault} onEditParcel={editLookParcel} onBeginGesture={pushHistory}
           onResetParcel={() => { pushHistory(); setSelParcel(parcelResetPatch()); }} />
@@ -22652,10 +22653,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <PairedField label="Colour" left={<span />}
           right={<span style={ROW6}><ColorField value={toHex6(pc.fill ?? PARCEL_FILL_DEFAULT)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill colour" /></span>} />
         <PairedField label="Opacity"
-          left={<PercentField value={pc.strokeOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" />}
-          right={<PercentField value={fillOp} onCommit={(v) => { pushHistory(); setSelParcel({ fillOpacity: v, fill: pc.fill ?? PARCEL_FILL_DEFAULT }); }} inputStyle={numInput} ariaLabel="Fill opacity" />} />
+          left={<PercentField boxed value={pc.strokeOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" />}
+          right={<PercentField boxed value={fillOp} onCommit={(v) => { pushHistory(); setSelParcel({ fillOpacity: v, fill: pc.fill ?? PARCEL_FILL_DEFAULT }); }} inputStyle={numInput} ariaLabel="Fill opacity" />} />
         <PairedFieldHead left="Setback line" right="" />
-        <PairedField label="Opacity" left={<PercentField value={pc.sbOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ sbOpacity: v }); }} inputStyle={numInput} ariaLabel="Setback line opacity" />} right={<span />} />
+        <PairedField label="Opacity" left={<PercentField boxed value={pc.sbOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ sbOpacity: v }); }} inputStyle={numInput} ariaLabel="Setback line opacity" />} right={<span />} />
         <button type="button" data-testid="parcel-reset-style" onClick={() => { pushHistory(); setSelParcel({ strokeOpacity: null, fill: null, fillOpacity: null, sbOpacity: null }); }}
           style={{ padding: 0, border: "none", background: "transparent", color: PAL.muted, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Reset fill & opacity</button>
       </section>
@@ -23409,7 +23410,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {measureStdValueUI("labelPpf") != null && <button style={chip} onClick={() => draftMeasureStd({ labelPpf: null })}>Reset to default</button>}
             </div>
             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 2px" }}>
-              {labelRevealNote({}, { measureStyle: { labelPpf: measureStdValueUI("labelPpf") } }, DIM_CALLOUT_MIN_PPF)} · one measurement can pin its own in its properties.
+              {labelRevealNote({}, { measureStyle: { labelPpf: measureStdValueUI("labelPpf") } }, DIM_CALLOUT_MIN_PPF)}
             </div>
           </Section>
           </div>
@@ -27319,7 +27320,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                  sheet width: the row's own inline justify-content is overridden (it is set inline,
                  so this needs the specificity bump) rather than pushing the control flush right
                  with the whole sheet's width of dead air between the two. */
-              [data-bottom-sheet="properties"] [data-field-group] { justify-content: flex-start !important; }`}</style>
+              [data-bottom-sheet="properties"] [data-field-group] { justify-content: flex-start !important; }
+              /* NEW-1 — the desktop value column is a fixed compact width; the sheet's steppers are touch-sized, so its ceiling is higher (a phone-width sheet still fits: the grid is minmax(0, W) and shrinks). */
+              [data-bottom-sheet="properties"] { --prop-value-w: 136px; }`}</style>
             <div data-testid="properties-sheet-handle" onPointerDown={onSheetHandlePointerDown} onPointerMove={onSheetHandlePointerMove} onPointerUp={endSheetHandleDrag} onPointerCancel={endSheetHandleDrag}
               style={{ flex: "0 0 auto", display: "flex", justifyContent: "center", alignItems: "center", height: CONTROL_H.touch, cursor: "grab", touchAction: "none" }}>
               <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: RADIUS.pill, background: "var(--border-strong)" }} />
@@ -27628,7 +27631,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ))}
                   </AnchoredMenu>
                 </Field>
-                {isStrip && <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(e.width || 0)} min={1} onCommit={(n) => setSelEasement({ width: n })} /></Field>}
+                {isStrip && <Field label="Width (ft)"><NumInput boxed fill ariaLabel="Width" value={Math.round(e.width || 0)} min={1} step={1} coarse={10} onCommit={(n) => setSelEasement({ width: n })} /></Field>}
                 <Field label="Status">
                   <span style={{ display: "flex", gap: 5, width: 150 }}>
                     <button style={seg(e.status !== "proposed")} onClick={() => setSelEasement({ status: "existing" })}>Existing</button>
@@ -27644,23 +27647,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
                 </div>
-                {/* NEW-EASE-STYLE — colour / fill / hatch, editable per easement. Defaults to this
-                    easement's TYPE colour (above) until touched; "Reset" clears back to the type
-                    default rather than leaving a stale override behind. */}
-                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                  <PairedFieldHead left="Outline" right="Fill" />
-                  <PairedField label="Colour"
-                    left={<ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                    right={<ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
-                  />
-                  <PairedField label="Pattern"
-                    right={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select>}
-                  />
-                  <PairedField label="Opacity"
-                    right={<PercentField value={est.fillOpacity} max={60} onCommit={(v) => setSelEasement({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
-                  />
-                  {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
-                </div>
+                <StdSubLabel section="text">Text</StdSubLabel>
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
                     easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
                     onFocus pushes one undo frame per edit. */}
@@ -27671,13 +27658,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                 {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
-                <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} SF</b> · {(area / SQFT_PER_ACRE).toFixed(2)} AC</div>
-                {/* NEW-1/B649504 — this used to claim "Shift-click removes one", which no gesture in the
-                    app actually does (Shift-click on an edge only ADDS a point — see onCanvasVtxDownCapture);
-                    removal has only ever been right-click a dot, or select it and press Delete. Say the true
-                    thing (WRONG-CASE / LOUD-FAILURE: a hint that describes a feature that doesn't exist is
-                    the same class of lie as a false disabled-reason string). */}
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); Shift-click an edge to add a point, right-click a dot to remove one." : "Drag a boundary dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}</div>
+                {/* NEW-EASE-STYLE — colour / fill / hatch, editable per easement. Defaults to this
+                    easement's TYPE colour (above) until touched; "Reset" clears back to the type
+                    default rather than leaving a stale override behind. */}
+                <div>
+                  <StdSubLabel section="appearance">Appearance</StdSubLabel>
+                  <PairedFieldHead left="Outline" right="Fill" />
+                  <PairedField label="Colour"
+                    left={<ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                    right={<ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
+                  />
+                  <PairedField label="Opacity"
+                    right={<PercentField boxed value={est.fillOpacity} max={60} onCommit={(v) => setSelEasement({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                  />
+                  <PairedField label="Pattern"
+                    right={<select autoComplete="off" aria-label="Fill pattern" style={{ ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select>}
+                  />
+                  {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
+                </div>
+                {/* NEW-3 (layout "A") — SIZE & POSITION: the area it covers (the strip's Width (ft) stays with the easement's attributes up top — the
+                    Map label → Type → Width → Status order is guarded by e2e easement-map-label). The instruction line that used to follow
+                    ("Drag a centerline dot to reshape … Shift-click an edge to add a point, right-click a dot to remove one") restated how to
+                    drag / reshape and is gone (PANEL-BREVITY). */}
+                <StdSubLabel section="size">Size & position</StdSubLabel>
+                <Field label="Area"><span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink }}>{fmtSf(area)} · {fmtAcres(area / SQFT_PER_ACRE)}</span></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(e.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!e.locked} size={13} />{e.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
@@ -27688,7 +27692,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* NEW-1 (layout "A", owner-approved 2026-10-20) — the neutral markups (line · polyline · rectangle · ellipse · polygon · cloud)
               share ONE three-section inspector: TEXT (text boxes / callouts only — below) · APPEARANCE · SIZE & POSITION. Closed shapes and
               the cloud use the OUTLINE | FILL table; a line / polyline is one column. Weight has no unit, pattern selects are right-aligned,
-              and every number box fills its column so the right edges line up. The easement / deed / measurement panels are untouched. */}
+              and every number box fills its column so the right edges line up. Layout A's shell (2026-10-21) now also covers the measurement, easement and
+              deed panels and every element panel (CLAUDE.md constraint #29). */}
           {!multiStyleable && selMarkup && NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {
             // NO `background` on the swatch — ColorField paints the current colour as the chip's background and spreads this on top.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
@@ -27821,34 +27826,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
               <Section title={null}>
-                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
-                <Field label="Dash">
-                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
-                    {DASH_OPTIONS}
-                  </select>
-                </Field>
-                {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
-                    model: fill / fill opacity / hatch, type default + per-element override. Not
-                    "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
-                    gets its own Fill block here rather than falling through the generic one. */}
-                {selMarkup.kind === "encumbrance" && (() => {
-                  const est = encumbranceStyle(selMarkup);
-                  return <>
-                    <Field label="Fill"><ColorField value={toHex6(est.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                    <Field label="Fill opacity">
-                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <input type="range" min={0} max={0.6} step={0.02} value={est.fillOpacity} {...sliderHistory((ev) => liveMarkup({ fillOpacity: +ev.target.value }))} />
-                        <span style={{ fontSize: 10.5, color: PAL.muted, minWidth: 28 }}>{Math.round(est.fillOpacity * 100)}%</span>
-                      </span>
-                    </Field>
-                    <Field label="Hatch">
-                      <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelMarkup({ hatch: ev.target.value })}>
-                        {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
-                      </select>
-                    </Field>
-                    {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
-                  </>;
+                {/* NEW-3 (layout "A") — the deed / title tract: APPEARANCE (Outline | Fill table — colour, opacity as a typed % box instead of the old
+                    slider, weight with no unit, right-aligned pattern selects; a deed's fill pattern is its hatch) then SIZE & POSITION (the closure
+                    read-out, Show calls, the align / promote actions and Rotation). An encumbrance shares the easement appearance model
+                    (fill / fill opacity / hatch, type default + per-element override). */}
+                {(() => {
+                  const isDeed = selMarkup.kind === "encumbrance";
+                  const est = isDeed ? encumbranceStyle(selMarkup) : null;
+                  const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
+                  return (<>
+                    <StdSubLabel section="appearance">Appearance</StdSubLabel>
+                    <PairedFieldHead left="Outline" right={isDeed ? "Fill" : ""} />
+                    <PairedField label="Colour"
+                      left={<ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                      right={isDeed ? <ColorField value={toHex6(est.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /> : undefined}
+                    />
+                    {isDeed && <PairedField label="Opacity" right={<PercentField boxed value={est.fillOpacity} max={60} onCommit={(v) => setSelMarkup({ fillOpacity: v })} ariaLabel="Fill opacity" />} />}
+                    <PairedField label="Weight" left={<NumInput boxed fill ariaLabel="Line weight" testid="markup-weight" value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} />} />
+                    <PairedField label="Pattern"
+                      left={<select autoComplete="off" aria-label="Line pattern" style={patSel} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
+                      right={isDeed ? <select autoComplete="off" aria-label="Fill pattern" style={patSel} value={est.hatch} onChange={(ev) => setSelMarkup({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select> : undefined}
+                    />
+                    {isDeed && est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
+                    <StdSubLabel section="size">Size & position</StdSubLabel>
+                  </>);
                 })()}
                 {selMarkup.kind === "encumbrance" && (() => {
                   const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
@@ -27896,19 +27897,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ? "Surveys state bearings on State Plane grid north; the parcel and aerial are true north. This spins the deed onto the county parcel to cancel that ~1–2° tilt (which fans out to tens of feet over a long line)."
                           : "No county parcel loaded to fit to — this applies the State Plane grid-north correction for this location. Load the parcel (Add parcel → Identify) for an exact fit, or nudge below."}
                       </div>
-                      <Field label="Rotate°"><RotationStepper value={dm.rotApplied || 0} disabled={!!selMarkup.locked} disabledReason="Unlock this deed to rotate it"
+                      <Field label="Rotation"><RotationField value={dm.rotApplied || 0} locked={!!selMarkup.locked} lockedReason="Unlock this deed to rotate it"
                         onCommit={(deg) => rotateDeedTo(dm.id, deg)}
                         onStep={(d) => rotateDeedTo(dm.id, normalizeDeg((dm.rotApplied || 0) + d))} /></Field>
                     </div>
                   );
                 })()}
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                  {selMarkup.locked
-                    ? "Locked — click Unlock below to move or reshape it."
-                    : selMarkup.kind === "encumbrance"
-                      ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
-                      : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
-                </div>
+                {selMarkup.locked && <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>Locked — click Unlock below to move or reshape it.</div>}
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
@@ -27998,12 +27993,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             );
           })()}
-          {/* NEW — selected measurement inspector (parity with every other element's Properties) */}
+          {/* NEW-2 (layout "A", owner 2026-10-21) — selected measurement inspector: Label, then APPEARANCE · SIZE & POSITION, the same three-section
+              shell as the markup panel. Area is the Outline | Fill table; a distance / polyline / count is one column. The old LAYER block
+              (the right-click menu carries Bring to front / Send to back / Send behind the plan — measure menu, `mapMenu.kind === "measure"`)
+              and the LABEL zoom block ("Set at current zoom", "Reset to default" — a stored `labelPpf` still decides when the label
+              shows; Standards → Measurements keeps the plan-wide default) are gone, and so is the sentence "Drag the line to move it, or a
+              square grip to reshape." (PANEL-BREVITY). Outline opacity: the measurement style has no stroke-opacity key (and the canvas, the
+              PDF annotation and the Standards defaults would all have to learn one), so the Outline cell of the Opacity row is the shared dash. */}
           {!multiStyleable && selMeasure && (() => {
             const m = selMeasure;
             const mode = measMode(m);
             const fpts = measPts(m);
-            const modeLabel = { line: "Distance", polyline: "Polyline length", area: "Area", count: "Count" }[mode] || "Measurement";
             const rows = [];
             // NEW-3 (f) — the panel reads the SAME formatters as the canvas chip, so screen,
             // panel and paper can never disagree about how a number is written.
@@ -28011,96 +28011,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             else if (mode === "area") { rows.push(["Area", `${fmtSf(polyArea(fpts))} · ${fmtAcres(polyArea(fpts) / SQFT_PER_ACRE)}`]); rows.push(["Perimeter", fmtFeet(pathLen([...fpts, fpts[0]]))]); }
             else rows.push(["Length", fmtFeet(pathLen(fpts))]);
             const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
-            // NEW-1 — the SAME style set a markup shape carries, on EVERY measure mode. `closed`
-            // is the only difference: a fill has no meaning on an open run or a count.
             // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
+            const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
             const closed = mode === "area";
             const stylable = mode !== "count";
             const uncal = calibrationState === "uncalibrated";
             const hasOverride = MEASURE_STD_KEYS.some((k) => m[k] !== undefined) || !!m.labelOffset;
+            const ms = measureStyle(m);
+            const weightBox = <NumInput boxed fill ariaLabel="Line weight" testid="measure-weight" value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />;
+            const dashSel = <select autoComplete="off" aria-label="Line pattern" style={patSel} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>{DASH_OPTIONS}</select>;
             return (
               <div>
               <Section title={null}>
                 {uncal && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
-                {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
                 <Field label="Label"><input value={m.label || ""} maxLength={80}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
                   placeholder="e.g. Front setback" style={textInput} /></Field>
-                {/* Line + fill, routed through the shared ColorField (so it inherits the recently
-                    used colours) and the shared DASH_OPTIONS list — one editing surface, not a
-                    parallel one. Every mode gets the line controls; only a closed area gets fill —
-                    and only then is there a second side to pair against (B1618656 NEW-1), so a
-                    non-closed measurement keeps its plain single-column Line/Markers group. */}
+
+                <StdSubLabel section="appearance">Appearance</StdSubLabel>
+                {/* Line + fill, routed through the shared ColorField (so it inherits the recently used colours) and the shared
+                    DASH_OPTIONS list. Every mode gets the line controls; only a closed area gets a fill — and only then is there a
+                    second side to pair against, so a non-closed measurement is one column. */}
                 {closed ? (<>
-                  <PairedFieldHead left={mode === "count" ? "Markers" : "Line"} right="Fill" />
+                  <PairedFieldHead left="Outline" right="Fill" />
                   <PairedField label="Colour"
-                    left={<ColorField value={toHex6(measureStyle(m).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />}
-                    right={<ColorField value={toHex6(measureStyle(m).fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
+                    left={<ColorField value={toHex6(ms.stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                    right={<ColorField value={toHex6(ms.fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
                   />
-                  <PairedField label="Weight"
-                    left={<NumInput style={{ ...numInput, width: "100%" }} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />}
-                  />
-                  {stylable && (
-                    <PairedField label="Pattern"
-                      left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
-                    />
-                  )}
                   <PairedField label="Opacity"
-                    right={<PercentField value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} onCommit={(v) => setSelMeasure({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                    right={<PercentField boxed value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} onCommit={(v) => setSelMeasure({ fillOpacity: v })} ariaLabel="Fill opacity" />}
                   />
+                  <PairedField label="Weight" left={weightBox} />
+                  <PairedField label="Pattern" left={dashSel} />
                 </>) : (<>
-                  <StdSubLabel>{mode === "count" ? "Markers" : "Line"}</StdSubLabel>
-                  <Field label={mode === "count" ? "Marker color" : "Line color"}>
-                    <ColorField value={toHex6(measureStyle(m).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />
-                  </Field>
-                  <Field label="Line weight">
-                    <NumInput style={numInput} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />
-                  </Field>
-                  {stylable && (
-                    <Field label="Line style">
-                      <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>
-                        {DASH_OPTIONS}
-                      </select>
-                    </Field>
-                  )}
+                  <Field label={mode === "count" ? "Markers" : "Colour"}><ColorField value={toHex6(ms.stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title={mode === "count" ? "Marker color" : "Line color"} style={swatch} /></Field>
+                  <Field label="Weight">{weightBox}</Field>
+                  {stylable && <Field label="Pattern">{dashSel}</Field>}
                 </>)}
                 {uncal && <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "2px 2px 6px" }}>Your colour is saved, but this measurement stays amber on the drawing until the sheet is calibrated — that amber means “this number isn’t real feet yet”.</div>}
-                {/* NEW-2 — when this measurement's label appears. Captured from the live view with
-                    one click (never typed as a zoom number, which means nothing to a reader) and
-                    read back as a named zoom band. */}
-                <StdSubLabel>Label</StdSubLabel>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
-                  <button style={chip} title="Zoom to where you want this label to start showing, then click this."
-                    onClick={() => setSelMeasure({ labelPpf: view.ppf })}>Set at current zoom</button>
-                  {m.labelPpf != null && <button style={chip} onClick={() => setSelMeasure({ labelPpf: null })}>Reset to default</button>}
-                </div>
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 4px" }}>
-                  {labelRevealNote(m, settings, DIM_CALLOUT_MIN_PPF)} · a selected measurement always shows its label.
-                </div>
-                {/* NEW-2 — the same layering the right-click menu offers, in the panel. Named states,
-                    not a number: a measurement is either above the plan (the default) or behind it. */}
-                {m.id && <>
-                  <StdSubLabel>Layer</StdSubLabel>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
-                    <button style={chip} data-testid="measure-band-toggle"
-                      title={m.behindEls ? "Draw this measurement over the buildings again" : "Draw this measurement under the buildings, so the plan sits on top of it"}
-                      onClick={() => setMeasureBand(m.id, !m.behindEls)}>{m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND}</button>
-                    <button style={chip} title="Move it in front of the other measurements in its band" onClick={() => arrangeSel("front", { kind: "measure", id: m.id })}>Bring to front</button>
-                    <button style={chip} title="Move it behind the other measurements in its band" onClick={() => arrangeSel("back", { kind: "measure", id: m.id })}>Send to back</button>
-                  </div>
-                </>}
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                  {m.locked
-                    ? "Locked — click Unlock below to move or reshape it."
-                    : mode === "count"
-                      ? "Drag any marker to move the whole set; drag a grip to reposition one."
-                      : "Drag the line to move it, or a square grip to reshape."}
-                </div>
+
+                <StdSubLabel section="size">Size & position</StdSubLabel>
+                {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
+                {m.locked && <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>Locked — click Unlock below to move or reshape it.</div>}
                 <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                   <button style={chip} onClick={() => toggleMeasureLock(m.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!m.locked} size={13} />{m.locked ? "Unlock" : "Lock"}</span></button>
                   {hasOverride && <button style={chip} title="Back to your Standards defaults, including where the label sits"
@@ -28125,6 +28082,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               with two cards' worth of padding between them and only two fields left on screen. Never
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
+          {/* Bluebeam-style Properties — colors for the selected element + set defaults. NEW-3 (layout "A"): APPEARANCE now leads the
+              panel, above SIZE & POSITION (dimensions · rotation · footprint), the same order as the markup / measurement panels.
+              Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6),
+              so the standalone Properties section is suppressed for them. Car parking renders its
+              own "Display" group inside the spec sheet above (B1790016 NEW-1), so it is suppressed
+              here too — same reasoning as the pond exception right above. */}
+          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !bldgPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
+            <Section title={null}>
+              <StdSubLabel section="appearance">Appearance</StdSubLabel>
+              <PairedFieldHead left="Outline" right="Fill" />
+              <PairedField label="Colour"
+                left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+              />
+              <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
+              {strokeWidthRow}
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
+                <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
+                New {(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
+              </div>
+            </Section>
+          )}
+
           {!multiStyleable && selEl && (
             <Section title={null}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
@@ -28157,7 +28140,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const UNIT_W = 24;
                     const specNum = { ...numInput, width: 56, textAlign: "right" };
                     const specHead = (label, actions) => (
-                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, margin: "16px 0 7px", paddingBottom: 4, borderBottom: `1px solid ${PAL.panelLine}` }}>
+                      <div data-panel-section={label === "Appearance" ? "appearance" : label === "Size & position" ? "size" : undefined} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, margin: "16px 0 7px", paddingBottom: 4, borderBottom: `1px solid ${PAL.panelLine}` }}>
                         <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.ink }}>{label}</span>
                         {actions && <span style={{ display: "flex", gap: 10 }}>{actions}</span>}
                       </div>
@@ -28192,7 +28175,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                         </div>
 
-                        {specHead("Geometry")}
+                        {specHead("Size & position")}
                         {specRow("Width", <NumInput style={specNum} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} />, "ft")}
                         {specRow("Depth", <NumInput style={specNum} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} />, "ft")}
                         {specRow("Rotation", <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
@@ -28250,7 +28233,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {specRow("Pad elev.", <span style={ROW6}>
                                 <NumInput allowClear style={specNum} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
                                 {selEl.padElevFt != null && <button style={chipSm} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
-                              </span>, "ft NAVD88")}
+                              </span>, "ft", "Feet above sea level (NAVD88)")}
                               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: -2, marginBottom: 8 }}>Feeds the floodplain-mitigation fill screen; blank = the plan's pad FFE.</div>
                               {specRow("Grading slope", <span style={ROW6}>
                                 <NumInput allowClear style={specNum} value={g.slopePct ?? ""} min={0}
@@ -28266,7 +28249,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         })()}
 
                         {curStyle && (<>
-                          {specHead("Display", [
+                          {specHead("Appearance", [
                             specAction("Set as default", setStyleDefault, `Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`),
                             specAction("Reset", clearElStyle, "Revert this element to the type default"),
                           ])}
@@ -28721,13 +28704,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     );
                   })() : (
                     <>
-                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <StdSubLabel section="size">Size & position</StdSubLabel>
+                      <Field label="Width (ft)"><NumInput boxed fill ariaLabel="Width" value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
                       {/* B1818256 — reverts B1805808: the owner types Depth by number regularly (truck
                           apron/backup depth to a design standard like a WB-67 turning template) and
                           essentially never types Width by number, the opposite of B1805808's guess.
                           Depth is an ordinary editable NumInput again, matching Width, for both the
                           freestanding Paving/Drive element and the auto-generated split-parking aisle. */}
-                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput boxed fill ariaLabel={selEl.type === "pond" ? "Length" : "Depth"} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
@@ -28735,7 +28719,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       (was rendering as an orphaned second "Rotation (°)" row below Pin/Delete). */}
                   {!isDockLayerEl(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && selEl.type !== "parking" && (
                   <Field label="Rotation (°)">
-                    <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
+                    <RotationField value={selEl.rot || 0} locked={!!selEl.locked} lockedReason="Unlock this element to rotate it"
                       onCommit={(deg) => rotateSelTo(deg)}
                       onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} />
                   </Field>
@@ -28772,7 +28756,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                 </>
               ) : selEl.type === "pond" ? null : (
-                <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
+                <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points.</div>
               )}
               {/* B1614128 — a hand-click-drawn (freehand) building never satisfied the
                   `!selEl.points || selEl.footEdit` gate above (it has points but no dock frame), so
@@ -30436,30 +30420,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
               })()}
-            </Section>
-          )}
-
-          {/* Bluebeam-style Properties — colors for the selected element + set defaults.
-              Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6),
-              so the standalone Properties section is suppressed for them. Car parking renders its
-              own "Display" group inside the spec sheet above (B1790016 NEW-1), so it is suppressed
-              here too — same reasoning as the pond exception right above. */}
-          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !bldgPanel && !isDockLayerEl(selEl) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
-            <Section title="Properties">
-              <PairedFieldHead left="Outline" right="Fill" />
-              <PairedField label="Colour"
-                left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
-                right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
-              />
-              <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
-              {strokeWidthRow}
-              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
-                <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
-              </div>
-              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
-                New {(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
-              </div>
             </Section>
           )}
 
@@ -32650,6 +32610,14 @@ function Section({ title, children, collapsed, accent }) {
  * rejected — the owner's mockup calls for one shared left edge across the whole panel, paired rows
  * included, so the width has to be a single constant every row in every panel reads. */
 const PROP_GUTTER_W = 64;
+/* NEW-1 (owner 2026-10-21, Goose Creek area measurement) — the value column is a FIXED, compact width: sized for a number
+ * box with its stepper (or a swatch), and it does NOT grow with the panel. Widening the docked panel leaves empty space on the
+ * right; it never stretches a number box away from its ▲▼ or a pattern select across the panel. The grid uses
+ * `minmax(0, W)` so a narrow panel still shrinks the columns instead of overflowing. The phone bottom sheet raises the
+ * ceiling through the CSS variable (its steppers are touch-sized), so a phone-width sheet still fits. */
+const PROP_VALUE_W = 92;
+const PROP_VALUE_W_CSS = `var(--prop-value-w, ${PROP_VALUE_W}px)`;
+const PROP_PAIR_COLS = `${PROP_GUTTER_W}px repeat(2, minmax(0, ${PROP_VALUE_W_CSS}))`;
 // The road panel's wider label column (redesign NEW-1): "Right-of-way" / "Repeat every" / "Background" must
 // never wrap, and the road panel's rows are single-line by contract. Other panels keep PROP_GUTTER_W.
 const ROAD_GUTTER_W = 92;
@@ -32686,11 +32654,21 @@ function PropDash() {
  * user, and pressing any of them means "I am editing this number" — so Delete and Backspace
  * belong to the number, not to the plan, until the user touches the drawing again. Two of the
  * seven measured ways the owner's building could be destroyed were presses on those steppers. */
+/* NEW-1 — a Field whose ONLY child is a numeric box / percent box / native select is a "compact control" row: its value cell
+ * is capped at the same fixed width as a PairedField column, so the two row kinds line up and neither grows with the panel.
+ * Only the default-gutter Field is capped — the road and dock panels (their own gutters) already size their boxes explicitly. */
+function isCompactControl(children) {
+  const kids = Children.toArray(children);
+  if (kids.length !== 1) return false;
+  const t = kids[0] && kids[0].type;
+  return t === NumInput || t === PercentField || t === "select";
+}
 function Field({ label, children, title, gutter = PROP_GUTTER_W, oneLine = false }) {
+  const compact = gutter === PROP_GUTTER_W && isCompactControl(children);
   return (
     <div data-field-group="1" data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${gutter}px 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
       <PropLabel title={title} oneLine={oneLine}>{label}</PropLabel>
-      <div style={{ minWidth: 0 }}>{children}</div>
+      <div data-field-value={compact ? "compact" : "1"} style={{ minWidth: 0, ...(compact ? { maxWidth: PROP_VALUE_W_CSS } : null) }}>{children}</div>
     </div>
   );
 }
@@ -32699,7 +32677,7 @@ function Field({ label, children, title, gutter = PROP_GUTTER_W, oneLine = false
 // column names, in that order; either may be omitted for a property only the other side has.
 function PairedField({ label, title, left, right }) {
   return (
-    <div data-field-group="1" data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
+    <div data-field-group="1" data-row-align="1" data-paired-grid="1" style={{ display: "grid", gridTemplateColumns: PROP_PAIR_COLS, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
       <PropLabel title={title}>{label}</PropLabel>
       {/* NEW-2 — `data-paired-cell="1"` marks a HALF-width value column, as opposed to a Field
           row's full-width one. It exists only so the phone bottom-sheet's stepper touch-target CSS
@@ -32722,7 +32700,7 @@ function PairedField({ label, title, left, right }) {
 function PairedFieldHead({ left, right }) {
   const head = { fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)" };
   return (
-    <div data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, columnGap: PROP_GRID_GAP, margin: "10px 0 7px" }}>
+    <div data-row-align="1" data-paired-grid="1" style={{ display: "grid", gridTemplateColumns: PROP_PAIR_COLS, columnGap: PROP_GRID_GAP, margin: "10px 0 7px" }}>
       <span />
       <span style={head}>{left}</span>
       <span style={head}>{right}</span>
@@ -32764,7 +32742,7 @@ function DockLayerPanel({ kind, size, grade, style, pinned, onPin, removal, onRe
     </Field>
   );
   const colHead = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
-  const grid = { display: "grid", gridTemplateColumns: `${DOCK_GUTTER_W}px 1fr 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md };
+  const grid = { display: "grid", gridTemplateColumns: `${DOCK_GUTTER_W}px repeat(2, minmax(0, ${PROP_VALUE_W_CSS}))`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md };
   return (
     <div data-testid="dock-layer-panel" data-dock-kind={kind}>
       <DockHead>Size</DockHead>
@@ -32974,7 +32952,7 @@ function RotationField({ value, locked, lockedReason, onCommit, onStep }) {
   return (
     <div data-testid="rotation-field" style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
       <AngleGlyph deg={deg} />
-      <RotationStepper boxed boxWidth="100%" style={{ flex: "1 1 0", minWidth: 0 }} data-testid="rotation-input" value={deg} disabled={locked} disabledReason={lockedReason} onCommit={onCommit} onStep={onStep} />
+      <RotationStepper boxed boxWidth="100%" style={{ flex: "1 1 0", minWidth: 0, maxWidth: PROP_VALUE_W_CSS }} data-testid="rotation-input" value={deg} disabled={locked} disabledReason={lockedReason} onCommit={onCommit} onStep={onStep} />
       <button type="button" data-testid="rotation-quarter-left" style={icoBtn} disabled={locked} title={locked ? lockedReason : "Quarter turn left"} aria-label="Quarter turn left" onClick={() => onStep(-90)}>↺</button>
       <button type="button" data-testid="rotation-quarter-right" style={icoBtn} disabled={locked} title={locked ? lockedReason : "Quarter turn right"} aria-label="Quarter turn right" onClick={() => onStep(90)}>↻</button>
       {tilted && <button type="button" data-testid="rotation-level" style={{ ...icoBtn, width: "auto", padding: "0 8px", fontSize: FONT_SIZE.label, fontWeight: 600 }} disabled={locked} title={locked ? lockedReason : "Set the angle back to 0°"} onClick={() => onCommit(0)}>Level</button>}
