@@ -49,11 +49,10 @@ const canvas = T("planner-canvas");
 const panel = T("property-panel");
 await page.addInitScript(() => { window.__PLANYR_E2E = true; });
 
-const site = () => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-  const id = localStorage.getItem("planarfit:currentSite:v1");
-  return m[id] || Object.values(m)[0] || {};
-});
+const site = () => page.evaluate(([uid, id]) => {
+  const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}");
+  return m[id] || {};
+}, [UID, SITE_ID]);
 const bust = Date.now();
 
 async function drawAll() {
@@ -121,16 +120,32 @@ async function openOne(sel, frac) {
 }
 
 try {
-  await page.goto(BASE + "/?cb=" + bust + "#/site-planner", { waitUntil: "load" });
-  await sleep(2500);
-  await T("map-toolbar-draw").click();
-  await canvas.waitFor({ timeout: 25000 });
-  await sleep(1500);
+  // a blank throwaway plan (no parcels, no elements), seeded BEFORE the planner loads so the plan list already holds it, then opened the
+  // way a person does — from the list (the same shape as the other signed-in harnesses)
+  const RUN = "zz-la-" + Math.random().toString(36).slice(2, 7);
+  const NAME = `ZZ LayoutA ${RUN.slice(-5)}`;
+  SITE_ID = RUN;
+  const seed = { id: RUN, groupId: RUN, site: NAME, name: "Plan 1", origin: { lat: 29.76, lon: -95.37 }, county: "harris", status: "active", schemaVersion: 12, updatedAt: Date.now(),
+    parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 900, y: 0 }, { x: 900, y: 700 }, { x: 0, y: 700 }], active: true, z: 0 }],
+    els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], sheetOverlays: [] };
+  if (LOCAL) await page.goto(`${BASE}/`, { waitUntil: "load" });
+  await page.evaluate(([uid, all, local]) => {
+    localStorage.setItem(local ? "planarfit:sites:v1" : "planarfit:sites:cloud:" + uid, JSON.stringify(all));
+    localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]);
+  }, [UID, { [RUN]: seed }, LOCAL]);
+  if (LOCAL) await page.goto(`${BASE}/#/project/${RUN}/site`, { waitUntil: "load" });
+  else {
+    await page.goto(`${BASE}/?cb=${bust}#/site-planner`, { waitUntil: "load" });
+    await page.getByText(NAME, { exact: false }).filter({ visible: true }).first().evaluate((el) => el.click(), null, { timeout: 45000 });
+  }
+  await canvas.waitFor({ timeout: 45000 });
+  await sleep(2000);
+  // picking a plan from the list leaves the project switcher menu open over the panels — close it like a person would
+  for (let i = 0; i < 3 && (await page.locator(".psw-panel").count()); i++) { await page.keyboard.press("Escape"); await sleep(500); }
   await assertMeasurable(page, "verify-panel-layout-a-live");
   await drawAll();
   await sleep(1200);
   const s0 = await site();
-  SITE_ID = await page.evaluate(() => localStorage.getItem("planarfit:currentSite:v1"));
   console.log("throwaway site id:", SITE_ID);
   const byType = (t) => (s0.els || []).find((e) => e.type === t && !e.dogEar);
   const subjects = [
