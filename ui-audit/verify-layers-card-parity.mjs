@@ -95,6 +95,7 @@ try {
       await page.setViewportSize(vp);
       // ── planner ──
       await page.goto(`${base}/#/project/${ID}/site`, { waitUntil: "load" });
+      if (live) await page.reload({ waitUntil: "load" }); // a hash-only change from the map leaves the map as the active workspace
       await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
       await page.waitForTimeout(1800);
       await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
@@ -109,10 +110,19 @@ try {
       check(`planner · ${tag}: the card carries only the panel (no Evidence tools / Easement rules / AI corridor scan / footer)`, !/Evidence tools|Easement rules|AI corridor scan|Layers sit beneath/i.test(text));
       const road = await rowAnatomy(pp, "road_names"), city = await rowAnatomy(pp, "city_names");
       check(`planner · ${tag}: Map Base lists Road Names AND City Names`, !!road && !!city);
+      const clip = await pCard.evaluate((c) => {
+        const sc = c.querySelector('[data-testid="layer-panel"]'); if (!sc) return { over: 0, who: [] };
+        const r = sc.getBoundingClientRect();
+        const who = [...sc.querySelectorAll("*")].filter((e) => e.getBoundingClientRect().right > r.right + 1).slice(0, 4).map((e) => `${e.tagName.toLowerCase()}[${e.getAttribute("data-testid") || e.className || ""}] right+${Math.round(e.getBoundingClientRect().right - r.right)} "${(e.textContent || "").trim().slice(0, 30)}"`);
+        // VISIBLE clipping is what the card's own overflow:hidden box cuts off; the panel-level scrollWidth is reported beside it as a note.
+        return { over: c.scrollWidth - c.clientWidth, panelOver: sc.scrollWidth - sc.clientWidth, who };
+      });
+      check(`planner · ${tag}: nothing clipped sideways (the card cuts off nothing)`, clip.over <= 1, `card ${clip.over}px · panel box ${clip.panelOver}px ${clip.who.join(" | ")}`);
       shots[`planner-${tag}`] = { buf: await pCard.screenshot(), road, city };
       writeFileSync(`${OUT}planner-${tag}.png`, shots[`planner-${tag}`].buf);
       // ── finder ──
       await page.goto(`${base}/#/site-planner`, { waitUntil: "load" });
+      if (live) await page.reload({ waitUntil: "load" }); // a hash change from the project route leaves the planner as the active workspace
       await page.waitForTimeout(2200);
       await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
       const fchip = page.getByTestId("finder-layers-expand").filter({ visible: true });
@@ -131,13 +141,12 @@ try {
         check(`${tag}: ${nm} row — same anatomy on both surfaces`, a.parts === b.parts, `planner "${a.parts}" · finder "${b.parts}"`);
         check(`${tag}: ${nm} row — the standard ▾ button, same row height`, a.caret === "▾" && a.h === b.h, `caret "${a.caret}", ${a.h} vs ${b.h}`);
       }
-      const clipped = await pCard.evaluate((c) => { const sc = c.querySelector('[data-testid="layer-panel"]'); return sc ? sc.scrollWidth - sc.clientWidth : 0; });
-      check(`planner · ${tag}: nothing clipped sideways`, clipped <= 1, `${clipped}px`);
     }
   }
   // ── the things that left the card still WORK from their new homes (V1829776 steps 3–4) — last, so the panels they open cannot sit over a screenshot ──
   await page.setViewportSize(SIZES.desktop);
   await page.goto(`${base}/#/project/${ID}/site`, { waitUntil: "load" });
+  if (live) await page.reload({ waitUntil: "load" });
   await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
   await page.waitForTimeout(1800);
   {
