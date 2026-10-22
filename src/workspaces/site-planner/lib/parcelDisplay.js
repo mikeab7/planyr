@@ -42,6 +42,7 @@ import { routeQueryThroughWorker } from "./parcelQueryTransport.js";
 import { ensureFeatureIds } from "./parcelQueryWire.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
+import { wideLayerNow } from "./parcelAreaFieldsLazy.js";
 import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers, outlineFieldsFor } from "./parcelDisplayZoom.js";
 
 export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
@@ -186,7 +187,7 @@ export function makeParcelLayer(url, opts) {
    * `lotNumberField`/`idField` for this URL) names the attribute; `labels:false` opts out;
    * `getObstacles` hands the label engine the screen boxes a number must clear (the Site planner's
    * parcel chips). None of these are esri-leaflet options, so they are split off before the spread. */
-  const { lotNumberHint, labels, getObstacles, getInset, pane, labelPane, ...layerOpts } = opts || {};
+  const { lotNumberHint, labels, getObstacles, getInset, pane, labelPane, wide, snapshotCounty, ...layerOpts } = opts || {};
   const lotHint = labels === false ? null : (lotNumberHint !== undefined ? lotNumberHint : lotNumberFieldForUrl(url));
   /* B1976336 — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave` only removes when
    * `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse) just before calling it, so
@@ -208,8 +209,31 @@ export function makeParcelLayer(url, opts) {
     style: () => PARCEL_OUTLINE_STYLE,
     ...layerOpts,
   });
+  /* NEW-1 (wide view) — ONE metadata read per layer, shared by everything that asks for the field list (the id/lot-number gates below and
+   * the wide-view tile query), instead of one each. A failed read is not remembered. */
+  if (typeof layer.metadata === "function") {
+    const baseMetadata = layer.metadata;
+    let metaCache = null, metaWait = null;
+    layer.metadata = function (cb, ctx) {
+      if (metaCache) { cb.call(ctx, null, metaCache); return this; }
+      if (metaWait) { metaWait.push([cb, ctx]); return this; }
+      metaWait = [[cb, ctx]];
+      baseMetadata.call(this, (err, m) => {
+        const w = metaWait; metaWait = null;
+        if (!err && m) metaCache = m;
+        w.forEach(([c, x]) => c.call(x, err, m));
+      });
+      return this;
+    };
+    layer.on("remove", () => { metaCache = null; });
+  }
   if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset, pane: labelPane });
   else holdForIdField(layer); // NEW-1 — a source with no lot number still needs its real id field name (MARIS: FID)
+  /* NEW-1 (Select parcels, wide view) — from two zoom steps out of today's cutoff, the larger lots only, fetched by fixed tiles through the
+   * gis-cache relay. Off unless the host asks (`wide: true` — the Map's Select parcels) AND the source has a verified size column
+   * (parcelAreaFields.js); anything else keeps today's cutoff exactly. See parcelWideLayer.js. */
+  const wideMod = wide ? wideLayerNow() : null; // loaded by MapFinder (wideViewReady) before the first display is built; null = no wide stage
+  if (wideMod) layer._wide = wideMod.attachWideOutlines(layer, { url, GhostClass: ParcelGhost, TilesClass: ParcelTiles, IndexClass: ParcelIndex, lotHint, getObstacles, getInset, pane, labelPane, snapshotCounty });
   // NEW-1 — children are ghosts (no per-lot Path, no per-settle projection); see ParcelGhost above.
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
     ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })

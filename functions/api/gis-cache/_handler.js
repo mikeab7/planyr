@@ -10,7 +10,7 @@
  * background; FAIL OPEN (302 to the real upstream) on missing creds / agency error / any
  * unexpected failure, so a layer never breaks.
  */
-import { parseUpstream, cacheKey, freshness } from "../../../src/shared/gis/gisProxyCore.js";
+import { parseUpstream, cacheKey, cacheKeyStrong, isQueryUrl, freshness } from "../../../src/shared/gis/gisProxyCore.js";
 
 const ALLOWED_HOST_RE = /(^|\.)planyr\.io$|(^|\.)planyr\.pages\.dev$/i;
 
@@ -56,6 +56,18 @@ export function originOk(origin, selfHost) {
   return host === selfHost || ALLOWED_HOST_RE.test(host);
 }
 
+/* NEW-1 (Select parcels, wide view) — an ArcGIS /query that FAILS usually still answers HTTP 200, with a body of `{"error":{…}}`. The imagery path
+ * never met that (a picture is a picture), but a parcel-tile query does, and storing it would serve the same refusal to every user for the
+ * next 24 hours. A /query body that opens with an `error` member is passed through to the one caller but never stored or used to replace a
+ * good copy. Reads only the first bytes. Pure. */
+export function isStorableBody(upstreamUrl, bytes) {
+  let isQuery = false;
+  try { isQuery = /\/query$/i.test(new URL(upstreamUrl).pathname); } catch (_) { return true; }
+  if (!isQuery) return true;
+  const head = new TextDecoder().decode(bytes.subarray(0, 48)).replace(/^\uFEFF/, "").trimStart();
+  return !/^\{\s*"error"/.test(head);
+}
+
 export async function handleGisCache({
   client, segs, search = "", origin = null, selfHost = "",
   fetchImpl = fetch, now = () => Date.now(), folderIdFor, defer = () => {},
@@ -84,7 +96,7 @@ export async function handleGisCache({
 
   const upstream = parseUpstream(segs, sp.toString());
   if (!upstream) return json({ error: "Unsupported GIS request." }, 400);
-  const key = `${cacheKey(upstream.url)}.bin`;
+  const key = `${(isQueryUrl(upstream.url) ? cacheKeyStrong : cacheKey)(upstream.url)}.bin`;
 
   if (noStore) {
     let res;
@@ -120,7 +132,7 @@ export async function handleGisCache({
     if (!res || !res.ok) return redirectTo(upstream.url);
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";
-    defer(store(client, folderId, key, buf, ct));
+    if (isStorableBody(upstream.url, buf)) defer(store(client, folderId, key, buf, ct, { dedupe: !isQueryUrl(upstream.url) }));
     return bytesResponse(buf, ct);
   } catch (_) {
     return metaMode ? json({ cached: false }) : redirectTo(upstream.url);
@@ -130,9 +142,14 @@ export async function handleGisCache({
 // Create a fresh copy then drop older same-name copies (no gap for concurrent readers).
 // Hard client.del is DELIBERATE here (NEW-F2): this is a regenerable public GIS cache, not
 // user data — trashing stale copies would just hold Drive quota for 30 days of junk.
-export async function store(client, folderId, name, bytes, contentType) {
+export async function store(client, folderId, name, bytes, contentType, { dedupe = true } = {}) {
   try {
     const created = await client.create({ bytes, contentType, name, parentFolderId: folderId });
+    /* NEW-1 (parcel tiles): the dedupe lists the folder (one page of up to 1,000 files, ~200 KB) after EVERY store. Imagery is a few hundred files; a
+     * parcel-tile cache is tens of thousands, so the list would both miss most duplicates (it is one page) and cost a 200 KB read per tile. A /query
+     * tile is stored once per cold tile and read newest-first (`findFile` orders by modifiedTime), so an occasional duplicate from two first-ever
+     * requests landing together is harmless — it is simply not worth the list. */
+    if (!dedupe) return;
     const dupes = (await client.list({ parentFolderId: folderId }).catch(() => [])) || [];
     for (const f of dupes) if (f.name === name && f.id !== (created && created.id)) await client.del(f.id).catch(() => {});
   } catch (_) { /* best-effort — a failed store just means the next view re-fetches */ }
@@ -144,6 +161,7 @@ export async function refresh(client, folderId, upstreamUrl, name, oldId, fetchI
     if (!res || !res.ok) return; // agency still down → keep the copy we already serve
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";
+    if (!isStorableBody(upstreamUrl, buf)) return; // keep the good copy we already serve
     const created = await client.create({ bytes: buf, contentType: ct, name, parentFolderId: folderId });
     if (oldId && created && created.id !== oldId) await client.del(oldId).catch(() => {});
   } catch (_) { /* best-effort background refresh */ }
