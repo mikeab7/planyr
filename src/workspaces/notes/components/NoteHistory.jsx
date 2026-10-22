@@ -121,6 +121,7 @@ export default function NoteHistory({ open, versions = [], busy = false, onResto
               type="button"
               data-testid={`note-history-restore-${i}`}
               disabled={busy}
+              aria-busy={busy ? "true" : undefined}   // disabled because it is WORKING → the progress cursor (index.css)
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onRestore?.(v)}
               style={{

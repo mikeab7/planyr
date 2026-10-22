@@ -331,7 +331,7 @@ function Wrapper({ wrapper, childList, images }) {
     case "toggle":
       return (
         <details open style={{ margin: "4px 0" }}>
-          <summary style={{ fontSize: 12, fontWeight: 700, cursor: "default", color: "var(--text-primary)" }}>{wrapper.title || "Section"}</summary>
+          <summary style={{ fontSize: 12, fontWeight: 700, cursor: "pointer", color: "var(--text-primary)" }}>{wrapper.title || "Section"}</summary>
           <div style={{ paddingLeft: 10 }}>{kids}</div>
         </details>
       );
