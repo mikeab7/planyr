@@ -34,6 +34,10 @@ import ScheduleOwnerList from "./components/ScheduleOwnerList.jsx";
 import ScheduleCrumb from "./components/ScheduleCrumb.jsx";
 import AgendaView from "./components/AgendaView.jsx";
 import ScheduleLoadState from "./components/ScheduleLoadState.jsx";
+import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
+import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
+import { RADIUS } from "../../shared/ui/radius.js";
+import { DELETE_VERIFY_MS, deleteStillPresent, deleteFailureMessage } from "./lib/scheduleDeleteVerify.js";
 
 export default function Scheduler({
   shellModule, onShellSwitch, authControl, accountActive = false,
@@ -69,6 +73,15 @@ export default function Scheduler({
 } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const pendingDeleteRef = useRef(null);          // B2429233 — { id, name, timer } of the delete being verified
+  const [deleteNotice, setDeleteNotice] = useState(null);
+  useEffect(() => {
+    const cur = pendingDeleteRef.current;
+    if (cur && !deleteStillPresent(projects, cur.id)) { clearTimeout(cur.timer); pendingDeleteRef.current = null; }
+  }, [projects]);
+  useEffect(() => () => { const cur = pendingDeleteRef.current; if (cur && cur.timer) clearTimeout(cur.timer); }, []);
   const [activeId, setActiveId] = useState(null);  // its active project id (aPid)
   const [section, setSection] = useState("projects"); // "projects" | "reports" (Dashboard)
   // B224 — the iframe loads the heavy standalone Gantt app; show the "assembling
@@ -706,7 +719,24 @@ export default function Scheduler({
   // needed — post it to the embedded app exactly as the breadcrumb already does for the one
   // schedule it can reach.
   const renameSchedule = (id, name) => post({ type: "planar:nav-rename", id, name });
-  const deleteSchedule = (id) => post({ type: "planar:nav-delete", id });
+  // B2429233 — a delete verifies its own result: the embedded app's next nav-state either no longer
+  // lists the schedule (done) or still does after DELETE_VERIFY_MS (say so — never a silent no-op).
+  const deleteSchedule = (id) => {
+    const sch = projects.find((p) => p && p.id === id);
+    const prev = pendingDeleteRef.current;
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    setDeleteNotice(null);
+    pendingDeleteRef.current = {
+      id, name: sch ? sch.name : "",
+      timer: setTimeout(() => {
+        const cur = pendingDeleteRef.current;
+        if (!cur || cur.id !== id) return;
+        pendingDeleteRef.current = null;
+        if (deleteStillPresent(projectsRef.current, id)) setDeleteNotice(deleteFailureMessage(cur.name));
+      }, DELETE_VERIFY_MS),
+    };
+    post({ type: "planar:nav-delete", id });
+  };
 
   // Pressing Dashboard is a USER action that has to move BOTH halves (B1050). Posting to the iframe
   // alone left the outer route pointing at the project, so the route-derived resolution panel stayed
@@ -1106,6 +1136,21 @@ export default function Scheduler({
           />
         )}
       </div>
+      {deleteNotice && (
+        <FloatingNotice testId="schedule-delete-failed">
+          <div role="alert" style={{
+            display: "flex", alignItems: "center", gap: SPACE.md, padding: `${SPACE.sm}px ${SPACE.md}px`, borderRadius: RADIUS.md,
+            background: "var(--bg)", color: "var(--text-primary)",
+            border: "1px solid var(--danger)", fontSize: FONT_SIZE.control, lineHeight: 1.4,
+          }}>
+            <span style={{ flex: 1 }}>{deleteNotice}</span>
+            <button type="button" onClick={() => setDeleteNotice(null)} aria-label="Dismiss"
+              style={{ cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, background: "none", color: "var(--text-primary)", border: "none", padding: `${SPACE.xxs}px ${SPACE.xs}px` }}>
+              Dismiss
+            </button>
+          </div>
+        </FloatingNotice>
+      )}
     </div>
   );
 }
