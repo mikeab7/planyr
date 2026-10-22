@@ -31,7 +31,7 @@ const M2_PER_AC = 4046.8564224;
 let browser = null, closeSigned = null, page;
 if (LIVE) {
   const { openSignedIn } = await import("./lib/signedInSession.mjs");
-  const s = await openSignedIn({ base: BASE, initScripts: ["window.__PLANYR_E2E = true;"] });
+  const s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, undefined]] });
   closeSigned = s.close; page = s.page; console.log("signed in:", s.proof, "build:", s.build);
 } else {
   browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
