@@ -129,11 +129,21 @@ try {
     await verb.click();
     planId = await waitFor(async () => { const m = (page.url().match(/#\/project\/([^/]+)/) || [])[1]; return m || null; }, 45000);
   }
+  /* The plan row is written lazily (owner constraint 5), and a signed-in plan keeps its elements — parcels included — as `site_elements` ROWS once the
+   * planner has opened it (`data.elementsInRows`), with `data.parcels` only the pre-migration copy. Count whichever home holds them, polling until one does. */
+  const readPlan = (id) => page.evaluate(async (pid) => {
+    const q = await window.pfSupabase.from("sites").select("id,site,data").eq("id", pid).maybeSingle();
+    const rowsQ = await window.pfSupabase.from("site_elements").select("kind,id,deleted_at").eq("site_id", pid);
+    const rowParcels = (rowsQ.data || []).filter((r) => r.kind === "parcel" && !r.deleted_at).length;
+    const d = q.data && q.data.data;
+    return q.data ? { id: q.data.id, site: q.data.site, inData: d && Array.isArray(d.parcels) ? d.parcels.length : 0, inRows: rowParcels, elementsInRows: !!(d && d.elementsInRows) } : null;
+  }, id);
   let plan = null;
-  if (planId) plan = await waitFor(async () => page.evaluate(async (id) => { const q = await window.pfSupabase.from("sites").select("id,site,data").eq("id", id).maybeSingle(); return q.data || null; }, planId), 30000);
-  const pc = plan && plan.data && Array.isArray(plan.data.parcels) ? plan.data.parcels.length : null;
+  if (planId) plan = await waitFor(async () => { const r = await readPlan(planId); return r && (r.inData || r.inRows) >= 1 ? r : null; }, 60000);
+  if (!plan && planId) plan = await readPlan(planId);
+  const pc = plan ? Math.max(plan.inData, plan.inRows) : null;
   if (ANON) console.log("  [skip] 4b Plan this site — needs a signed-in session");
-  else await record({ name: "4b Plan this site → one site from the two lots", pass: !!(plan && pc === 2), detail: plan ? `plan ${planId} · "${plan.site}" · ${pc} parcels` : `no plan created (verb seen: ${verbSeen}, id: ${planId})` });
+  else await record({ name: "4b Plan this site → one site from the two lots", pass: !!(plan && pc === 2), detail: plan ? `plan ${planId} · "${plan.site}" · ${pc} parcels (data ${plan.inData}, rows ${plan.inRows}, elementsInRows ${plan.elementsInRows})` : `no plan created (verb seen: ${verbSeen}, id: ${planId})` });
 
   /* 5 ─ an id that does not exist */
   await freshMap();
@@ -178,7 +188,7 @@ try {
   if (planId) {
     const left = await cleanupLive(page, { planId }).catch((e) => ({ error: String(e) }));
     console.log("cleanup of the throwaway plan:", JSON.stringify(left));
-    rows.push({ name: "cleanup", pass: !!left && !left.error && (!left.errors || !left.errors.length) && left.site === 0, detail: JSON.stringify(left) });
+    rows.push({ name: "cleanup", pass: !!left && !left.error && (!left.errors || !left.errors.length) && left.left && left.left.site === 0, detail: JSON.stringify(left) });
   }
   await s.close();
 }
