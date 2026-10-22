@@ -86,6 +86,18 @@ export function cacheKey(upstreamUrl) {
   return `gis_${h.toString(16).padStart(8, "0")}`;
 }
 
+/* NEW-1 (Select parcels, wide view) — the cache key for a PARCEL TILE /query. The 32-bit key above is collision-safe for the few hundred
+ * imagery URLs it was built for, but a tile cache holds one entry per (source × zoom bucket × tile × size cutoff) — tens of thousands —
+ * and a collision there would serve ANOTHER tile's lots into this one's place, silently. So a /query URL gets two independent 32-bit
+ * hashes (64 bits; birthday risk at 100k keys is ~3e-10) plus the URL length. The imagery key is unchanged so no existing copy is orphaned. Pure. */
+export function cacheKeyStrong(upstreamUrl) {
+  const s = String(upstreamUrl);
+  let h2 = 5381;
+  for (let i = s.length - 1; i >= 0; i--) h2 = (((h2 << 5) + h2) ^ s.charCodeAt(i)) >>> 0; // djb2/xor, read backwards: independent of the FNV pass
+  return `${cacheKey(s)}_${h2.toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+}
+export const isQueryUrl = (u) => { try { return /\/query$/i.test(new URL(u).pathname); } catch (_) { return false; } };
+
 /* Decide whether a stored copy is due for a background refresh, and its age. `tsMs` is the
  * copy's stored time (ms epoch); a non-number means "no copy". Pure. */
 export function freshness(tsMs, nowMs, ttlMs = DEFAULT_TTL_MS) {

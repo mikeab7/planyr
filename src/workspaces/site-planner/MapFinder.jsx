@@ -4,7 +4,9 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { wideSupportedForUrl, outlineHoldForView } from "./lib/parcelWideRequest.js";
+import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
@@ -2858,6 +2860,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * own comment above) without flickering on every ordinary pan. */
   const SLOW_DISPLAY_NOTICE_MS = 2500;
   const [slowDisplayKeys, setSlowDisplayKeys] = useState(() => new Set());
+  /* NEW-1 (wide view) — the cutoff and wide-view eligibility of each parcel source the view needs (`outlineHoldForView` turns them into
+   * "everything draws" / "only the larger lots" / "nothing yet"), and whether any source's wide tiles are backing off from a busy county server. */
+  const [outlineSources, setOutlineSources] = useState([]);
+  const [wideBusy, setWideBusy] = useState(false);
+  const wideBusyRef = useRef({});
   const [outlineFloor, setOutlineFloor] = useState(PARCEL_MINZOOM); // NEW-2 — the zoom the outlines in THIS view start at (a dense statewide source declares a higher one)
   /* NEW-1 — the ONE gate every parcel outage / "slow" banner passes (see lib/parcelOutageGate.js): Select parcels is on,
    * the reporting layer is still a live display, and it is inside the zoom range it can draw in. A layer's hang / slow
@@ -2976,7 +2983,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // also backs the instant click highlight while close-in. What you SEE stays == what you
     // can SELECT (the B137 rule) in every regime: the click path (queryAtPoint) always
     // identifies via a live point query, never against what happened to be drawn.
-    const fl = makeParcelDisplayLayer(url, { getObstacles: lotNumberObstacles });
+    const fl = makeParcelDisplayLayer(url, { getObstacles: lotNumberObstacles, wide: true, snapshotCounty: CLIENT_SNAPSHOT_COUNTIES.includes(key) ? key : undefined });
+    // NEW-1 (wide view) — a source whose wide-view tiles are backing off from a busy county server says so (the bottom hint), instead of a silently blank patch
+    fl.on("widestate", (st) => { wideBusyRef.current[key] = !!(st && st.busy); setWideBusy(Object.values(wideBusyRef.current).some(Boolean)); });
     // B1427664 — NEW-3: `fl.addTo(map)` is deferred to the END of this function, after every
     // listener below is wired. `onAdd` (fired synchronously inside `addTo`) is what actually
     // KICKS OFF this layer's first request — a vector FeatureLayer's own metadata fetch fires
@@ -3140,6 +3149,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       ensureSnapshot(c).catch(() => {});
     });
     setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
+    setOutlineSources([...want].filter((k) => COUNTIES_MAP[k] && !COUNTIES_MAP[k].statewide).map((k) => ({ floor: Math.max(PARCEL_MINZOOM, displayMinZoomOf(k)), wide: wideSupportedForUrl(layerUrlsRef.current[k] || COUNTIES_MAP[k].layerUrl) })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
     // A statewide BACKUP draws only the counties whose own live source failed, never the whole view (V1475200 follow-up).
     const base = displaySourcesForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() });
@@ -3173,7 +3183,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         seen.add(fl);
         let held = 0, drawn = 0;
         try { if (typeof fl.eachFeature === "function") fl.eachFeature((l) => { held++; if (typeof l.isDrawn === "function" ? l.isDrawn() : (mapRef.current && mapRef.current.hasLayer(l))) drawn++; }); } catch (_) {}
-        layers.push({ key, url: displaySrcRef.current[key] && displaySrcRef.current[key].url, held, drawn });
+        layers.push({ key, url: displaySrcRef.current[key] && displaySrcRef.current[key].url, held, drawn, wide: fl._wide ? { ...fl._wide.info(), ...(fl._wide.stats() || {}) } : null }); // NEW-1 (wide view): the larger-lots stage's own state — stage, lots held, requests made/aborted/retried
       });
       return { sources: layers.map((l) => l.key), layers, held: layers.reduce((n, l) => n + l.held, 0), drawn: layers.reduce((n, l) => n + l.drawn, 0) };
     };
@@ -3210,6 +3220,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     });
     displaysRef.current = {};
     displaySrcRef.current = {};
+    wideBusyRef.current = {}; setWideBusy(false);
     retractSourceNotice(); // NEW-1 — the tool is off; a parcel-source banner must not outlive it
     sourceNoticeDismissedRef.current = false; // NEW-1 (amendment) — the session ended; a later outage is a new occasion
     // B1427664 — every layer is gone, so nothing is "still loading" until select mode reopens
@@ -3295,10 +3306,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       /* B2092656 — turning Select parcels on ran React's commit AND the whole display sync (two county-polygon
        * sweeps, layer construction) in ONE task: 43–85 ms measured, 283 ms on Michael's Chrome. The sync is
        * its own task now (next tick) so the toggle's commit paints first; nothing reads the displays between. */
-      let t = setTimeout(() => syncDisplaysToView(true), 0);
+      let t = null, off = false;
+      // NEW-1 (wide view) — the verified size-column table is its own small chunk, read only now; a layer built before it arrived would never get a wide stage.
+      wideViewReady().then(() => { if (!off) t = setTimeout(() => syncDisplaysToView(true), 0); });
       const onViewMoved = () => { clearTimeout(t); t = setTimeout(syncDisplaysToView, 200); };
       map.on("moveend", onViewMoved);
-      return () => { clearTimeout(t); map.off("moveend", onViewMoved); };
+      return () => { off = true; clearTimeout(t); map.off("moveend", onViewMoved); };
     } else {
       clearDisplays();
     }
@@ -5583,8 +5596,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   the statewide layer, which is never pulled on a hiccup and so never times out on
                   its own). Says so plainly instead of leaving a blank map that reads as "no data
                   here" while a click already works. */}
-              {zoom != null && zoom < outlineFloor
+              {(outlineSources.length ? outlineHoldForView(zoom, outlineSources) === "far" : zoom != null && zoom < outlineFloor)
                 ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
+                : outlineSources.length && outlineHoldForView(zoom, outlineSources) === "held"
+                ? (wideBusy
+                  ? "The parcel server is busy — showing the lots already loaded. Click any lot to add it (＋)."
+                  : "Showing larger lots. Zoom in for small lots and labels. Click any lot to add it (＋).")
                 : slowDisplayKeys.size > 0
                 ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."
                 : "Click a lot on the map to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}

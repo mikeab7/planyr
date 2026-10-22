@@ -70,7 +70,7 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
  * the collision pass and the draw run once all are prepared. The previous numbers stay up until the new ones are
  * drawn (no flash), and a newer relayout cancels an older job. Positions are converted with the zoom and pixel origin
  * the job STARTED with (`map.unproject`), so a pan while it runs cannot shift them. Returns { cancel }. */
-function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature, pane }) {
+export function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature, pane }) {
   const z = map.getZoom();
   if (!field || !(z >= floor)) { group.clearLayers(); return { cancel() {} }; }
   const min = map.getPixelBounds().min;
