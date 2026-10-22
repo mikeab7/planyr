@@ -79,6 +79,10 @@ async function runScene(label, page, frame, off = { x: 0, y: 0 }) {
   check("native range → pointer", await armAt("#arm-range"), "pointer");
   await frame.evaluate(() => { document.getElementById("cur-arms").style.display = "none"; });
 
+  // The interactive scenes reach for rows several places down; a fixture with fewer rows (the test account's) is reported, never crashed on or scored.
+  const rowCount = await frame.evaluate(() => document.querySelectorAll("[data-task-row]").length);
+  if (rowCount < 10) { console.log(`NOT-OBSERVED  ${label}: interactive scenes need 10+ rows, this schedule renders ${rowCount} — covered by the standalone scene against the same served bytes`); return; }
+
   // ── idle ──
   const nameCell = await centre('[data-task-row] [data-col-key="name"]', 3);
   check("idle: a grid cell rests on the arrow", await cursorAt(nameCell.x, nameCell.y), "default");

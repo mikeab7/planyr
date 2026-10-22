@@ -22,7 +22,7 @@ import { chromium } from "playwright";
 import { existsSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
-import { pressAt } from "./lib/pressFeature.mjs";
+import { clientOf, blocksOn } from "./lib/pressFeature.mjs";
 
 const BASE = (process.argv[2] || process.env.BASE_URL || "http://localhost:4181").replace(/\/$/, "");
 const EXEC = process.env.PW_CHROME || ["/opt/pw-browsers/chromium-1194/chrome-linux/chrome", "/opt/pw-browsers/chromium/chrome-linux/chrome"].find(existsSync);
@@ -122,19 +122,41 @@ const enterBox = async (nth) => { await clickBox(nth); await pacedWait(page, 900
 
 /* ── fixture ─────────────────────────────────────────────────────────────────────────────────── */
 const cleanup = [];
+let createdRowId = null;
+/* A real DOUBLE-click, then the committing keystrokes — on the live signed-in build a single press on an EMPTY page does not arm the caret (the
+ * placeholder says "Double-click anywhere to start a note"), so pressAt's single press cannot make the first box there. Found by driving it. */
+async function dblPlace(docX, docY, text) {
+  const c = await clientOf(page, docX, docY);
+  if (!c) throw new Error("dblPlace: there is no note body on this page");
+  await page.mouse.dblclick(c.x, c.y);
+  await pacedWait(page, 300);
+  await page.keyboard.type(text);
+  const deadline = Date.now() + 4000;
+  for (;;) {
+    const hit = (await blocksOn(page)).find((b) => b.text.includes(text));
+    if (hit) return hit;
+    if (Date.now() > deadline) throw new Error(`dblPlace: no box holding "${text}" after a real double-click at (${docX}, ${docY})`);
+    await pacedWait(page, 80);
+  }
+}
 async function openFixture() {
   if (SIGNED_IN) {
     await page.goto(`${BASE}/#/notes`, { waitUntil: "load" });
     await pacedWait(page, 2500);
     await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 30000 });
+    const rowIds = () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="notes-row-pg_"]')].map((e) => e.getAttribute("data-testid")));
+    const rowsBefore = new Set(await rowIds());
     await page.click('[data-testid="notes-new-page"]');
     await page.waitForSelector('[data-testid="note-body"]', { timeout: 30000 });
     await pacedWait(page, 800);
-    await pressAt(page, 40, 20, { type: "one" });
+    const fresh = (await rowIds()).filter((x) => !rowsBefore.has(x));
+    if (fresh.length !== 1) throw new Error(`openFixture: expected exactly one new page row, saw ${fresh.length} — refusing to continue (cleanup needs a certain id)`);
+    createdRowId = fresh[0];
+    await dblPlace(40, 20, "one");
     await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
-    await pressAt(page, 40, 90, { type: "two" });
+    await dblPlace(40, 90, "two");
     await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
-    await pressAt(page, 300, 20, { type: "three" });
+    await dblPlace(300, 20, "three");
     await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
     await pacedWait(page, 500);
     return;
@@ -173,16 +195,36 @@ async function fresh() {
 
 async function removeFixture() {
   if (!SIGNED_IN) return;
-  // Throwaway page: bin it from the row's context menu, then purge it from the Bin so nothing is left on the account.
+  var step = "start";
+  // Throwaway page on a SHARED test account: bin exactly the row this run created (by id), then purge exactly the one new Bin entry. Anything
+  // uncertain is reported as a FAILED cleanup, never "closest match" — the account holds other sessions' pages.
   try {
+    if (!createdRowId) { note("cleanup", "no page was created — nothing to remove"); return; }
+    const binIds = () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="notes-bin-tr_"]')].map((e) => e.getAttribute("data-testid")).filter((x) => !/preview|peek|restore|purge|project|viewing/.test(x)));
+    const showBin = async () => { step = "open the Bin"; await page.locator('[data-testid="notes-view-bin"]').click({ timeout: 8000 }); await pacedWait(page, 1000); };
     await page.evaluate(() => { document.activeElement?.blur?.(); });
-    const row = page.locator('[data-testid^="notes-row"], [role="treeitem"]').filter({ hasText: /Untitled|New page|Page/ }).first();
-    await row.click({ button: "right" });
-    await page.getByRole("menuitem", { name: /Delete/ }).first().click();
+    step = "right-click the page row";
+    await page.locator(`[data-testid="${createdRowId}"]`).click({ button: "right", timeout: 8000 });
+    await pacedWait(page, 300);
+    step = "choose Delete";
+    await page.getByRole("menuitem", { name: /Delete/ }).first().click({ timeout: 8000 });
+    await pacedWait(page, 400);
+    step = "confirm the delete";
     await page.getByText("✓").first().click({ timeout: 4000 }).catch(() => {});
-    await pacedWait(page, 800);
-    note("cleanup", "page binned (purge from Bin below if a Bin view is reachable)");
-  } catch (e) { note("cleanup", `FAILED to bin the throwaway page — ${String(e).slice(0, 120)}`); }
+    await pacedWait(page, 900);
+    await showBin();
+    // The Bin lists what other sessions left on this shared account too; a page binned just now is the only entry with the full 30 days left.
+    const texts = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-testid^="notes-bin-tr_"]')].map((e) => [e.getAttribute("data-testid"), e.innerText])));
+    const fresh = (await binIds()).filter((x) => /\b30 days left/.test(texts[x] || ""));
+    if (fresh.length !== 1) { check("cleanup: the throwaway page is binned AND purged", `${fresh.length} new Bin entries (expected 1) — purge by hand: ${createdRowId}`, "purged"); return; }
+    step = "purge from the Bin";
+    await page.locator(`[data-testid="notes-bin-purge-${fresh[0].replace("notes-bin-", "")}"]`).click({ timeout: 8000 });
+    await pacedWait(page, 500);
+    await page.getByText("✓").first().click({ timeout: 3000 }).catch(() => {});
+    await pacedWait(page, 900);
+    const left = await binIds();
+    check("cleanup: the throwaway page is binned AND purged", left.includes(fresh[0]) ? `${fresh[0]} still in the Bin` : "purged", "purged");
+  } catch (e) { check("cleanup: the throwaway page is binned AND purged", `failed — ${createdRowId} left on the account`, "purged"); note("cleanup", `FAILED to remove the throwaway page ${createdRowId} at step "${typeof step === "undefined" ? "?" : step}" — ${String(e).slice(0, 140)}`); }
 }
 
 try {
