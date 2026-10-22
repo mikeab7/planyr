@@ -209,5 +209,8 @@ describe("NEW-3 · Set scale: Preset | Custom", () => {
     expect(h).toContain('data-testid="overlay-scale-custom-input"'); expect(h).toContain('value="37.5"');
     expect((h.match(/<input/g) || []).length).toBe(1); expect(h).not.toContain("<select");
     expect(h).not.toContain('data-testid="overlay-scale-preset"');
+    // sized for a scale value: a short fixed-width box that does not stretch (the closing ' stays beside it), and no warning on a valid value
+    const input = h.slice(h.indexOf('<input'), h.indexOf('>', h.indexOf('<input')));
+    expect(input).toMatch(/width:\s*\d+px/); expect(input).not.toMatch(/flex:\s*1/); expect(input).not.toContain("aria-invalid");
   });
 });
