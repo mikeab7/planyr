@@ -161,7 +161,7 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
 export async function lookupParcelsWhere({ county, lookupUrl, where }) {
   const layerUrl = await resolveLayerUrl(lookupUrl);
   try {
-    const feats = await queryFeatures(layerUrl, { where, count: 20, outSR: 4326 });
+    const feats = await queryFeatures(layerUrl, { where, count: 50, outSR: 4326 });
     recordSourceResult(county, true);
     return { feats, layerUrl };
   } catch (err) {

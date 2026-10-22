@@ -13,6 +13,7 @@ import { buildPlaceRows, resolvePlaceEnter } from "../src/workspaces/site-planne
 import { situsAddress } from "../src/workspaces/site-planner/lib/appraisal.js";
 
 const REC = JSON.parse(readFileSync(new URL("./fixtures/tnNonStateParcels.json", import.meta.url), "utf8"));
+const NONE = async () => ({ feats: [] }); // the new link/Shelby/statewide sources: nothing there unless a test says otherwise (no network in a unit test)
 const R27 = REC.rutherford.find((f) => f.attributes.ParcelID === "156-027.00-000");
 const R02 = REC.rutherford.find((f) => f.attributes.ParcelID === "156-002.01-000");
 
@@ -45,7 +46,7 @@ describe("reading a Tennessee control-map id however it is typed", () => {
   it("a lettered map typed without its group letter becomes a wildcard form that still finds it", () => {
     expect(parseControlMapId("046E 001.00 000").prefix).toBe("046E%001.00-000");
   });
-  it.each(["20 Culvert St, Nashville, TN", "1600 Pennsylvania Ave", "Murfreesboro, TN", "Epps Mill Rd", "I-24 exit 89", "37210", "156", "", null, "156-027", "12 34 56", "123-456-789", "1234567890", "123456789012"])(
+  it.each(["20 Culvert St, Nashville, TN", "1600 Pennsylvania Ave", "Murfreesboro, TN", "Epps Mill Rd", "I-24 exit 89", "37210", "156", "", null, "12 34 56", "123-456-789", "1234567890", "123456789012"])(
     "%j is NOT an id — it goes to the geocoder as before", (t) => {
       expect(parseControlMapId(t)).toBeNull();
       expect(looksLikeTnParcelId(t)).toBe(false);
@@ -60,10 +61,12 @@ describe("Davidson's 11-digit assessor number", () => {
   });
   it("an 11-digit number is a valid control-map id AND a valid Davidson number — BOTH counties are asked, never a guess", () => {
     const plan = tnParcelIdPlan("10508026600");
-    expect(plan.map((p) => p.county).sort()).toEqual(["tn_davidson", "tn_rutherford"]);
+    expect(plan.map((p) => p.county)).toEqual(expect.arrayContaining(["tn_davidson", "tn_rutherford"]));
+    expect(plan.length, "…and the CAMA-family sources and Shelby, which read the same eleven characters their own way").toBeGreaterThan(2);
   });
-  it("a dotted control-map id with a letter-free form is asked of Rutherford; only digits-only forms reach Davidson", () => {
-    expect(tnParcelIdPlan("046E-A-001.00-000").map((p) => p.county)).toEqual(["tn_rutherford"]);
+  it("a dotted control-map id is never read as a Davidson number — only digits-only (and Metro's lettered condo numbers) reach Davidson", () => {
+    expect(tnParcelIdPlan("046E-A-001.00-000").map((p) => p.county)).not.toContain("tn_davidson");
+    expect(tnParcelIdPlan("046E-A-001.00-000").map((p) => p.county)).toContain("tn_rutherford");
   });
 });
 
@@ -82,7 +85,7 @@ describe("resolveParcelId — typed id → the lot (recorded answers, injected l
     return { feats: rows };
   };
   it("156-027.00-000 → that lot, Rhodes Development, with a point INSIDE its outline", async () => {
-    const r = await resolveParcelId("156-027.00-000", { lookup: lookupFrom({ tn_rutherford: REC.rutherford }) });
+    const r = await resolveParcelId("156-027.00-000", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: REC.rutherford }) });
     expect(r.status).toBe("found");
     expect(r.county).toBe("tn_rutherford");
     expect(r.feature.attributes.Owner1).toMatch(/RHODES DEVELOPMENT/);
@@ -91,39 +94,39 @@ describe("resolveParcelId — typed id → the lot (recorded answers, injected l
     expect(inside(r.point, R02), "and not inside the neighbouring Rhodes lot").toBe(false);
   });
   it("156-002.01-000 → the 37-acre lot, point inside it", async () => {
-    const r = await resolveParcelId("156 002.01 000", { lookup: lookupFrom({ tn_rutherford: REC.rutherford }) });
+    const r = await resolveParcelId("156 002.01 000", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: REC.rutherford }) });
     expect(r.status).toBe("found");
     expect(r.feature.attributes.CALCACRES).toBeCloseTo(37.0, 0);
     expect(inside(r.point, R02)).toBe(true);
   });
   it("both ids resolve independently to two different lots (selecting both is then two searches → one selection set)", async () => {
     const lk = lookupFrom({ tn_rutherford: REC.rutherford });
-    const [a, b] = await Promise.all([resolveParcelId("156-027.00-000", { lookup: lk }), resolveParcelId("156-002.01-000", { lookup: lk })]);
+    const [a, b] = await Promise.all([resolveParcelId("156-027.00-000", { retryMs: 0, lookupWhere: NONE, lookup: lk }), resolveParcelId("156-002.01-000", { retryMs: 0, lookupWhere: NONE, lookup: lk })]);
     expect(a.feature.attributes.ParcelID).not.toBe(b.feature.attributes.ParcelID);
     expect(a.point).not.toEqual(b.point);
   });
   it("an id that does not exist is `notfound`, names every county it asked, and says what to do — never a silent no-op", async () => {
-    const r = await resolveParcelId("156-999.00-000", { lookup: lookupFrom({ tn_rutherford: REC.rutherford }) });
+    const r = await resolveParcelId("156-999.00-000", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: REC.rutherford }) });
     expect(r.status).toBe("notfound");
-    expect(r.tried).toEqual(["Rutherford", "Davidson"]); // an 11-digit dashed id is also a valid Metro number — both are asked
+    expect(r.tried).toEqual(expect.arrayContaining(["Rutherford", "Davidson", "Tennessee"])); // an 11-digit dashed id also reads as a Metro number and as the state's control map — all are asked
     const msg = parcelIdMessage(r, "156-999.00-000");
-    expect(msg).toMatch(/No Tennessee parcel with ID "156-999\.00-000" in Rutherford and Davidson counties/);
+    expect(msg).toMatch(/No Tennessee parcel with ID "156-999\.00-000" in any Tennessee county's parcel layer/);
     expect(msg).toMatch(/address/);
   });
   it("a county that did not ANSWER is `unavailable` — 'couldn't check', never 'does not exist'", async () => {
-    const r = await resolveParcelId("156-999.00-000", { lookup: lookupFrom({ tn_rutherford: new Error("timeout") }) });
+    const r = await resolveParcelId("156-999.00-000", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: new Error("timeout") }) });
     expect(r.status).toBe("unavailable");
     expect(parcelIdMessage(r, "156-999.00-000")).toMatch(/Couldn't reach the Rutherford County parcel server/);
   });
   it("one county down and another empty is still `unavailable` (the id may live in the one that did not answer)", async () => {
-    const r = await resolveParcelId("10508026600", { lookup: lookupFrom({ tn_rutherford: new Error("x"), tn_davidson: [] }) });
+    const r = await resolveParcelId("10508026600", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: new Error("x"), tn_davidson: [] }) });
     expect(r.status).toBe("unavailable");
-    expect(r.failed).toEqual(["Rutherford"]);
+    expect(r.failed).toEqual(["Rutherford"]); // the other sources answered (empty) — only Rutherford is named
   });
   it("an 11-digit Metro number finds the Davidson lot (Davidson answers, Rutherford is empty)", async () => {
     const d = REC.davidsonCulvert[0];
     const lk = async ({ county }) => (county === "tn_davidson" ? { feats: [d] } : { feats: [] });
-    const r = await resolveParcelId("10508026600", { lookup: lk });
+    const r = await resolveParcelId("10508026600", { retryMs: 0, lookupWhere: NONE, lookup: lk });
     expect(r.status).toBe("found");
     expect(r.county).toBe("tn_davidson");
     expect(inside(r.point, d)).toBe(true);
@@ -133,7 +136,7 @@ describe("resolveParcelId — typed id → the lot (recorded answers, injected l
   });
   it("a record with no polygon is `notfound` with a reason, never a point at 0,0", async () => {
     const noGeom = { attributes: { ParcelID: "156-027.00-000", Owner1: "X" }, geometry: null };
-    const r = await resolveParcelId("156-027.00-000", { lookup: async () => ({ feats: [noGeom] }) });
+    const r = await resolveParcelId("156-027.00-000", { retryMs: 0, lookupWhere: NONE, lookup: async () => ({ feats: [noGeom] }) });
     expect(r.status).toBe("notfound");
     expect(r.reason).toBe("no-geometry");
   });

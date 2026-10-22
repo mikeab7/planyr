@@ -3369,7 +3369,7 @@ const COUNTIES_MAP_RAW = {
   },
   tn_shelby: {
     state: "TN", center: [35.18, -89.89], zoom: 10,
-    bbox: [34.98, -90.33, 35.43, -89.62],
+    bbox: [34.98, -90.33, 35.43, -89.62], displayMinZoom: 17, // NEW-1 (95-county sweep) — see COUNTIES.tn_shelby: 18 zoom-16 cells exceed the 1,000-lot cap
     mapServer: null, layerUrl: COUNTIES.tn_shelby.layerUrl,
   },
   tn_chester: {
@@ -3394,7 +3394,7 @@ const COUNTIES_MAP_RAW = {
   },
   tn_hamilton: {
     state: "TN", center: [35.19, -85.20], zoom: 10,
-    bbox: [34.95, -85.50, 35.50, -84.90],
+    bbox: [34.95, -85.50, 35.50, -84.90], displayMinZoom: 17, // NEW-1 (95-county sweep) — see COUNTIES.tn_hamilton: one zoom-16 cell holds 1,066 lots against the 1,000 cap
     mapServer: null, layerUrl: COUNTIES.tn_hamilton.layerUrl,
   },
   tn_montgomery: {

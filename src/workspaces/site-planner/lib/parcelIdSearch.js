@@ -62,13 +62,15 @@ export async function resolveParcelId(text, { lookup = lookupParcels, lookupWher
     if (r.status === "rejected") { if (!failed.includes(p.name)) failed.push(p.name); return; }
     const feats = (r.value && r.value.feats) || [];
     if (p.kind === "link") {
-      const scored = feats.map((f) => ({ f, sc: linkMatch(storedLinkOf(p, f.attributes || {}), p.form) })).filter((x) => x.sc > 0);
+      /* the id exactly as the card shows it (spaces and punctuation aside) is the strongest reading — it tells apart the condo units of one parcel, which share their link */
+      const shown = (f) => String(idAttrFor(p.county, f.attributes || {}) || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const scored = feats.map((f) => ({ f, sc: shown(f) && shown(f) === p.typed ? 3 : linkMatch(storedLinkOf(p, f.attributes || {}), p.form) })).filter((x) => x.sc > 0);
       if (!scored.length) return;
       const best = Math.max(...scored.map((x) => x.sc));
       const top = scored.filter((x) => x.sc === best);
       const perCounty = new Map();
       top.forEach((x) => { const c = nameOf(p, x.f); perCounty.set(c, (perCounty.get(c) || 0) + 1); });
-      top.forEach((x) => { const c = nameOf(p, x.f); found.push({ p, feature: x.f, ambiguous: perCounty.get(c) > 1 || best < 2, exact: best === 2 && perCounty.get(c) === 1, countyName: c }); });
+      top.forEach((x) => { const c = nameOf(p, x.f); found.push({ p, feature: x.f, ambiguous: perCounty.get(c) > 1 || best < 2, exact: best >= 2 && perCounty.get(c) === 1, countyName: c }); });
       return;
     }
     if (p.kind === "paid") {

@@ -281,6 +281,7 @@ export async function checkA(app, county, route, pt) {
 
 /* ---------- Check B — the outlines ---------- */
 const TILE = 512;
+const OUTLINE_HANG_MS = 8000; // parcelOutlineSet.OUTLINE_LOAD_TIMEOUT_MS — a cell slower than this is the 'slow server' banner
 /** Degrees spanned by `px` CSS px at web-mercator zoom z, at latitude lat: [dLng, dLat]. */
 function pxDeg(z, lat, px) {
   const dLng = (360 * px) / (256 * 2 ** z);
@@ -348,7 +349,7 @@ export async function checkB(app, county, route, pt, a) {
   const c0 = Math.floor((view.west + 180) / cellDeg), c1 = Math.floor((view.east + 180) / cellDeg);
   const r0 = Math.floor((view.south + 90) / cellDegLat), r1 = Math.floor((view.north + 90) / cellDegLat);
   const held = new Map();
-  let exceeded = 0, idless = 0, cells = 0, errors = 0, maxCell = 0, ms = 0;
+  let exceeded = 0, idless = 0, cells = 0, errors = 0, maxCell = 0, ms = 0, maxCellMs = 0;
   for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) {
     const bounds = { west: c * cellDeg - 180, east: (c + 1) * cellDeg - 180, south: r * cellDegLat - 90, north: (r + 1) * cellDegLat - 90 };
     cells++;
@@ -356,13 +357,14 @@ export async function checkB(app, county, route, pt, a) {
       const t0 = Date.now();
       const q = await queryCell(app, cfg, route, county, bounds);
       ms += Date.now() - t0;
+      maxCellMs = Math.max(maxCellMs, Date.now() - t0);
       const { feats, exceeded: ex } = keyLots(app, q);
       if (ex) exceeded++;
       maxCell = Math.max(maxCell, feats.length);
       for (const f of feats) { if (f.id == null) idless++; held.set(f.id == null ? "undefined" : `id:${f.id}`, f); }
     } catch (e) { errors++; out.error = e.message; }
   }
-  out.cells = cells; out.errors = errors; out.exceededCells = exceeded; out.held = held.size; out.idlessFeatures = idless; out.maxCell = maxCell; out.ms = ms;
+  out.cells = cells; out.errors = errors; out.exceededCells = exceeded; out.held = held.size; out.idlessFeatures = idless; out.maxCell = maxCell; out.ms = ms; out.maxCellMs = maxCellMs;
   /* is the clicked lot among the held ones? (point-in-polygon on the held geometry, GeoJSON or Esri) */
   const inRing = (ring) => { let ins = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if (((yi > pt.lat) !== (yj > pt.lat)) && (pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi) + xi)) ins = !ins; } return ins; };
   let clickedHeld = false;
@@ -379,6 +381,7 @@ export async function checkB(app, county, route, pt, a) {
   else if (idless) problems.push(`${idless} feature(s) with no feature id (held ${held.size})`);
   if (exceeded) problems.push(`${exceeded}/${cells} cell(s) hit the server's record cap — outlines truncated`);
   if (!clickedHeld) problems.push("the clicked lot is not among the lots held");
+  if (maxCellMs > OUTLINE_HANG_MS) problems.push(`slow: one cell took ${(maxCellMs / 1000).toFixed(1)} s, past the outline layer's ${OUTLINE_HANG_MS / 1000} s hang-guard (the app would pull the layer and show its slow-server notice)`);
   out.pass = problems.length === 0;
   out.reason = out.pass ? `${held.size} lots held over ${cells} cell(s) at zoom ${z}` : problems.join("; ");
   return out;
