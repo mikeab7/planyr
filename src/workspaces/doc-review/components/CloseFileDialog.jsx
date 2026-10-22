@@ -22,9 +22,9 @@ export default function CloseFileDialog({ name = "this file", verb = "closing", 
           “{name}” has changes that haven’t been saved to the Library.
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: SPACE.md, justifyContent: "flex-end" }}>
-          <Button variant="ghost" disabled={busy} onClick={onCancel} data-testid="close-file-cancel">Cancel</Button>
-          <Button variant="ghost" disabled={busy} onClick={onDiscard} data-testid="close-file-discard">Discard</Button>
-          <Button variant="primary" disabled={busy} onClick={onSave} data-testid="close-file-save">{busy ? "Saving…" : "Save"}</Button>
+          <Button variant="ghost" disabled={busy} aria-busy={busy ? "true" : undefined} onClick={onCancel} data-testid="close-file-cancel">Cancel</Button>
+          <Button variant="ghost" disabled={busy} aria-busy={busy ? "true" : undefined} onClick={onDiscard} data-testid="close-file-discard">Discard</Button>
+          <Button variant="primary" disabled={busy} aria-busy={busy ? "true" : undefined} onClick={onSave} data-testid="close-file-save">{busy ? "Saving…" : "Save"}</Button>
         </div>
       </div>
     </div>

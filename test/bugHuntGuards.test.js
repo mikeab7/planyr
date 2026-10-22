@@ -674,7 +674,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   it("B579: the Stitcher detail popup releases pointer capture on pointercancel (no stuck grab)", () => {
     const src = read("../src/workspaces/doc-review/Stitcher.jsx");
     // onPointerCancel must release capture, matching onPointerUp — not just clear drag state
-    expect(src).toMatch(/onPointerCancel=\{\(e\) => \{ detailDrag\.current = null; try \{ e\.currentTarget\.releasePointerCapture\(e\.pointerId\)/);
+    expect(src).toMatch(/onPointerCancel=\{\(e\) => \{ detailDrag\.current = null; (?:setDetailDragging\(false\); )?try \{ e\.currentTarget\.releasePointerCapture\(e\.pointerId\)/);
   });
 
   it("B579: reviewStore deleteReview clears the local mirror only after a successful cloud delete", () => {

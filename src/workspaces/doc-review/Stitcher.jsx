@@ -37,6 +37,7 @@ import { storedProjectName } from "../../shared/names/names.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { fileDropEffect } from "./lib/reviewCursor.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -89,6 +90,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [steerDismissed, setSteerDismissed] = useState(false); // B630/NEW-1: dismissed the "reference set (not to scale)" steer
   const [metaScanning, setMetaScanning] = useState(false); // B631: a post-load not-to-scale re-scan is in flight — hold the align nag until we've read the sheets
   const drag = useRef(null);
+  // NEW-4 — the pan's cursor is STATE (a ref read at render time showed grabbing late and left it stuck after release).
+  const [panning, setPanning] = useState(false);
+  const [detailDragging, setDetailDragging] = useState(false);
   const dedupeResaveRef = useRef(false); // B633/NEW-4: a load collapsed duplicate sheets → re-persist the cleaned array once
   // Two-finger pinch runs on NATIVE touch events (mirrors the Site Planner's B555 fix and the
   // Markup canvas's own pinch — iOS Safari's multi-touch POINTER events are unreliable, firing a
@@ -485,7 +489,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (isNewPinch) pinchTelemetryRef.current = { t: performance.now(), fingers: e.touches.length };
     else if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
     // Tear down any single-finger gesture the 1st finger had already started, so the pinch begins clean.
-    if (drag.current) { try { svgRef.current.releasePointerCapture(drag.current.pointerId); } catch (_) {} drag.current = null; }
+    if (drag.current) { try { svgRef.current.releasePointerCapture(drag.current.pointerId); } catch (_) {} drag.current = null; setPanning(false); }
     setDraft(null);
   };
   const onTouchMovePinch = (e) => {
@@ -591,7 +595,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       }
       return;
     }
-    if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY, pointerId: e.pointerId }; svgRef.current.setPointerCapture(e.pointerId); return; } // B551: remember pointerId so a blur/visibility abort can release the capture
+    if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY, pointerId: e.pointerId }; setPanning(true); svgRef.current.setPointerCapture(e.pointerId); return; } // B551: remember pointerId so a blur/visibility abort can release the capture
     // B313 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
     // isn't set, so the reading would be silently wrong). Calibrate is exempt — it SETS scale.
     if ((tool === "distance" || tool === "area") && blockedOverUnaligned([w])) return;
@@ -614,7 +618,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const d = drag.current;
     if (d) setView((v) => panTo(v, d, e.clientX, e.clientY));
   };
-  const onUp = (e) => { if (e.pointerType === "touch" && touchCountRef.current >= 2) return; if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
+  const onUp = (e) => { if (e.pointerType === "touch" && touchCountRef.current >= 2) return; if (drag.current) { drag.current = null; setPanning(false); try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
   // NEW-1 — recover from a pan whose gesture was interrupted (browser pointercancel, window
   // blur, tab hidden, or a devtools/remote-debugger attaching) rather than ending with a
   // normal pointer-up, so the stitcher canvas can never be left stuck mid-pan with pointer-
@@ -637,7 +641,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       pinchTelemetryRef.current = null;
     }
     if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
-    drag.current = null;
+    drag.current = null; setPanning(false);
     // Also drop any in-flight native-touch pinch so a blur/visibility loss or a real pointercancel
     // mid-gesture can't strand it (same class as B555 on the Site Planner canvas).
     touchCountRef.current = 0; pinchRef.current = null; pinchNextRef.current = null;
@@ -984,7 +988,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } catch (_) { setDetailPopup({ ref, screen, status: "missing", title: `Detail ${ref.detail} · Sheet ${ref.sheetRaw || ref.sheet}` }); }
   };
   // Free a popup image we rendered ourselves (not one borrowed from a placed sheet) on close/replace.
-  const closeDetail = () => { setDetailPopup((d) => { if (d && d.ownHref && d.href && d.href.startsWith("blob:")) { try { URL.revokeObjectURL(d.href); } catch (_) {} } return null; }); };
+  const closeDetail = () => { detailDrag.current = null; setDetailDragging(false); setDetailPopup((d) => { if (d && d.ownHref && d.href && d.href.startsWith("blob:")) { try { URL.revokeObjectURL(d.href); } catch (_) {} } return null; }); };
   const detailDrag = useRef(null);
   // Initialise the popup's view once the image is ready: center+zoom on the named detail if the
   // target sheet labels it, else fit the whole sheet. The user can then pan/zoom inside the cloud.
@@ -1047,7 +1051,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
-      onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
+      onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = fileDropEffect(e.dataTransfer.types); } catch (_) {} }} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
       {/* toolbar */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid var(--chrome-divider)", flexWrap: "wrap" }}>
         {!chromed && <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={onReview}>‹ Exit Stitch</button>}
@@ -1116,7 +1120,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
         {/* world canvas */}
         <div style={{ flex: 1, minWidth: 0, position: "relative", background: "var(--canvas-mat)" }}>
-          <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", cursor: align ? "crosshair" : tool === "pan" ? "grab" : "crosshair", touchAction: "none" }}
+          <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", cursor: align ? "crosshair" : tool === "pan" ? (panning ? "grabbing" : "grab") : "crosshair", touchAction: "none" }}
             onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={(e) => onTouchEndPinch(e, true)}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId, "pointercancel")} onDoubleClick={finishArea}
             onWheel={onWheel} onMouseDown={(e) => e.preventDefault()}>
@@ -1327,12 +1331,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                 {detail.status === "loading" && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: PAL.muted, fontSize: 12 }}>Pulling up the detail…</div>}
                 {detail.status === "missing" && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center", padding: 16, color: PAL.muted, fontSize: 12, lineHeight: 1.5 }}>Sheet {detail.ref.sheetRaw || detail.ref.sheet} isn’t in this set yet.<br />Open or drop it, then click the callout again.</div>}
                 {detail.status === "ready" && detail.href && (
-                  <div style={{ position: "absolute", inset: 0, cursor: detailDrag.current ? "grabbing" : "grab", touchAction: "none" }}
+                  <div style={{ position: "absolute", inset: 0, cursor: detailDragging ? "grabbing" : "grab", touchAction: "none" }}
                     onWheel={detailWheel}
-                    onPointerDown={(e) => { detailDrag.current = { sx: e.clientX, sy: e.clientY, tx: detail.view?.tx || 0, ty: detail.view?.ty || 0 }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }}
+                    onPointerDown={(e) => { detailDrag.current = { sx: e.clientX, sy: e.clientY, tx: detail.view?.tx || 0, ty: detail.view?.ty || 0 }; setDetailDragging(true); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }}
                     onPointerMove={(e) => { const dd = detailDrag.current; if (!dd) return; setDetailPopup((d) => (d && d.view ? { ...d, view: { ...d.view, tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy) } } : d)); }}
-                    onPointerUp={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} }}
-                    onPointerCancel={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} /* B579: release capture on interrupt (blur/tab-hide/OS gesture) too — else the popup keeps pointer capture, swallowing all events with a stuck grab cursor until closed/reopened; same class as B551 on the main canvas */ }}>
+                    onPointerUp={(e) => { detailDrag.current = null; setDetailDragging(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} }}
+                    onPointerCancel={(e) => { detailDrag.current = null; setDetailDragging(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} /* B579: release capture on interrupt (blur/tab-hide/OS gesture) too — else the popup keeps pointer capture, swallowing all events with a stuck grab cursor until closed/reopened; same class as B551 on the main canvas */ }}>
                     {detail.view && <img src={detail.href} alt={detail.title} draggable={false}
                       style={{ position: "absolute", left: 0, top: 0, width: detail.baseW, height: detail.baseH, transformOrigin: "0 0", transform: `translate(${detail.view.tx}px, ${detail.view.ty}px) scale(${detail.view.scale})`, imageRendering: "auto", userSelect: "none" }} />}
                     {detail.view && detail.anchor && (() => {
