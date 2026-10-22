@@ -24,12 +24,21 @@ try {
   check("signed in as the test account (known-good arm)", s.proof.email === "e2e@planyr.test", s.proof.email);
 
   const rowsLoc = () => page.locator('[data-testid="schedule-owner-row"]:visible');
+  // The test account's fixture project: its "no schedule here" panel lists every schedule (org-owned
+  // ones included) with the per-row menu, which is the surface the delete is driven from.
+  const ROUTE = `${base}/#/project/e2e-fixture-site/schedule`;
   const openList = async () => {
-    await page.goto(`${base}/#/schedule`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="schedule-crumb"]:visible, [data-schedule-empty], iframe', { timeout: 40000 });
-    await page.waitForTimeout(4000);
+    await page.goto(ROUTE, { waitUntil: "domcontentloaded" });
+    // "loaded" must be PROVEN (known-good): the embedded app has reported its list — either rows are
+    // listed, or its own "No schedules yet" state is up. An empty read taken before that is void.
+    await page.waitForFunction(() => {
+      if (document.querySelector('[data-testid="schedule-crumb"]') || document.querySelectorAll('[data-testid="schedule-owner-row"]').length) return true;
+      const f = document.querySelector("iframe");
+      try { return !!(f && f.contentDocument && f.contentDocument.querySelector("[data-schedule-empty]")); } catch { return false; }
+    }, null, { timeout: 60000 });
+    await page.waitForTimeout(2500);
     const crumb = page.locator('[data-testid="schedule-crumb"]:visible');
-    if (await crumb.count()) { await crumb.first().click(); await page.waitForTimeout(500); }
+    if (!(await rowsLoc().count()) && await crumb.count()) { await crumb.first().click(); await page.waitForTimeout(800); }
   };
   const names = async () => (await rowsLoc().allInnerTexts()).map((t) => t.split("\n")[0].trim());
 
