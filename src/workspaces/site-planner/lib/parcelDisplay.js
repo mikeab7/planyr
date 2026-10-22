@@ -33,6 +33,7 @@
  * that. */
 import * as EL from "esri-leaflet";
 import L from "leaflet";
+import { holdNewZoomLevels } from "../../../shared/map/steadyZoomLevels.js";
 import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, snapshotLotNumberField } from "./counties.js";
 import { attachLotNumbers, attachSnapshotLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, snapshotFeaturesInView, onSnapshotChange } from "./parcelSnapshot.js";
@@ -88,6 +89,9 @@ const ParcelTiles = L.GridLayer.extend({
     this._dirty = null;
     this._flushTimer = null;
     this._pool = []; // canvases from tiles Leaflet dropped — a zoom settle reuses them instead of allocating ~dozens
+    /* B2426464 ×2 — our canvases are painted the moment a level is built, so Leaflet's mid-zoom level started its zoom frames late
+     * and slid off the imagery (measured up to 27 px). The new zoom's level is kept out of sight until the zoom lands. */
+    holdNewZoomLevels(this);
   },
   createTile(coords) {
     const tile = this._pool.pop() || L.DomUtil.create("canvas", "leaflet-tile");

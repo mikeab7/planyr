@@ -19,7 +19,7 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, releaseOver
 import { isDiagArmed } from "./lib/diagArm.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
-import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { boundTileCache, capTileCache, armBlankTileHeal, throttleTilePruning } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP, IMAGERY_GRADE, densityTileOptions, siteStack } from "../../shared/basemaps/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
@@ -164,6 +164,7 @@ import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from ".
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
+import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -1797,7 +1798,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // Mercator for the whole world). At z8 the view spans a few counties, so there was no way to
     // pull back and see another state at all — you could only jump by picking a site.
     // z3 puts the continent on screen, which is what a two-state product needs.
-    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21, ...FREE_ZOOM_OPTIONS }).setView(cfg.center, cfg.zoom);
+    /* B2426464 ×2 — fadeAnimation:false: a tile level revealed while its tiles are still fading in is not drawn, so the NEXT zoom
+       (the next wheel notch) started its frames late and slid off the imagery; see shared/map/steadyZoomLevels.js. */
+    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21, fadeAnimation: false, ...FREE_ZOOM_OPTIONS }).setView(cfg.center, cfg.zoom);
     const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1 — pinch lands where the fingers stop; a wheel notch stays one level
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__mapFinderMap = map;
     // "Locate me" (NEW — mobile pinch/locate/telemetry lap): a 3rd button stacked directly below
@@ -2073,12 +2076,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B220)
     // NEW-1 (B2018608): the density rule (detectRetina + ceiling-1) is ONE shared function now, and the
     // on-screen aerial carries the tone grade class (exports stitch their own canvas — never graded).
-    const layer = withTileRetry(L.tileLayer(bm.tiles, {
+    // B2426464 ×2 — the new zoom's imagery level waits out of sight until the zoom lands (a cached tile level otherwise slides; shared/map/steadyZoomLevels.js)
+    const layer = holdNewZoomLevels(withTileRetry(L.tileLayer(bm.tiles, {
       maxZoom: 21, attribution: bm.attr, // NOT graded: the Site map keeps its own look (the grade is Hybrid-only)
      
       ...densityTileOptions(bm.maxNative, window.devicePixelRatio || 1),
-    }));
+    })));
     layer.setZIndex(1);
+    throttleTilePruning(layer); // B854832's coalescing: with fadeAnimation off every loaded tile prunes, once per tile otherwise
     layer.addTo(map);
     // Seam fix (NEW-1): dark gap colour behind the aerial — added only once a REAL tile has painted, so an
     // empty/blocked map keeps the ordinary light backdrop it always had.
