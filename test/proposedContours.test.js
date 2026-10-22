@@ -7,9 +7,10 @@ import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet, feetToLatLngPair } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { sampleAtLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { buildProposedSurface, contourLattice, PL_FILL_EPS_FT } from "../src/workspaces/site-planner/lib/proposedSurface.js";
-import { contourLinesToFeet, ringsToLatticePx, placeContourLabels, planContourDraw, contourMultiple, CONTOUR_DRAW } from "../src/workspaces/site-planner/lib/gradingPaint.js";
-import { buildProposedContours, buildContours, traceDaylight, pieceSpacingCells } from "../src/workspaces/site-planner/lib/contourTrace.js";
-import { clipPolyline, chaikin, expandRing, pointInRings, longestCellEdgeRun, selfIntersects, polylineLength, pointAlong } from "../src/workspaces/site-planner/lib/polylineClip.js";
+import { contourLinesToFeet, ringsToLatticePx, placeContourLabels, planContourDraw, contourMultiple, CONTOUR_DRAW, bandField, bandRingsToFeet, cellsPixels, cellsOutlinePath, cellPaint, BAND_TINT } from "../src/workspaces/site-planner/lib/gradingPaint.js";
+import { buildProposedContours, buildContours, traceDaylight, pieceSpacingCells, traceBandOutline } from "../src/workspaces/site-planner/lib/contourTrace.js";
+import { bandRegions, pointInRegions, unionRings } from "../src/workspaces/site-planner/lib/gradingLimit.js";
+import { clipPolyline, chaikin, expandRing, pointInRings, longestCellEdgeRun, longestCornerRun, selfIntersects, polylineLength, pointAlong } from "../src/workspaces/site-planner/lib/polylineClip.js";
 import { clipContourLinesOutside, labelInsideClip } from "../src/workspaces/site-planner/lib/contours.js";
 import { gradingCfg, gradingSetback, gradingPack, hostIdMap } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { pointInRing } from "../src/workspaces/site-planner/lib/pondGeom.js";
@@ -270,5 +271,75 @@ describe("ROUND 6 — density and weight by zoom (planContourDraw)", () => {
     expect(bldg.levels[3].d).toBe("M0 5L1 6M9 9L10 10");                  // …but drawn at 105
     expect(bldg.labels.map((l) => [l.level, l.pt.x])).toEqual([[100, 0], [101, 0], [105, 9]]);   // the steep 101 label goes with its piece
     expect(planContourDraw(null, 2).levels).toEqual([]);
+  });
+});
+
+/* ROUND 7 (NEW-1/NEW-2) — the slope band's outline is traced and smoothed like the contours, and the hatch is a tint. */
+describe("ROUND 7 — the band outline (daylight line, inner edge) is a smooth closed line, not a cell staircase", () => {
+  const ringPx = (ring, F) => ring.map((p) => [(p.x - F.x0) / F.dx, (p.y - F.y0) / F.dy]);
+  const GRID = { x0: 0, y0: 0, dx: 1, dy: 1, eps: 2e-3 };   // the clipper grid rounds to a hundredth of a foot
+  for (const mode of ["layout", "boundary"]) {
+    const { s, existAt } = chehaw(mode);
+    const F = bandField(s.grid, { pointInRegions });
+    const t = traceBandOutline(F.values.slice(), F.nx, F.ny);
+    const traced = bandRingsToFeet(t, F);
+    const limitRegions = mode === "boundary" ? s.grid.limit.limitRegions : s.grid.limit.regions;
+    const shapes = bandRegions({ traced, limitRegions, mode });
+    it(`${mode}: every traced ring is closed, never crosses itself, and has no run of more than two vertices on cell edges`, () => {
+      expect(t.rings.length).toBeGreaterThanOrEqual(1);
+      for (const r of [...t.rings, ...t.holes]) {
+        expect(r.length).toBeGreaterThan(8);
+        expect(r[0]).toEqual(r[r.length - 1]);
+        expect(selfIntersects(r)).toBe(false);
+        expect(longestCellEdgeRun(r, GRID)).toBeLessThanOrEqual(2);
+        expect(longestCornerRun(r, GRID)).toBeLessThanOrEqual(2);
+      }
+      for (const r of shapes.daylight) {
+        expect(longestCellEdgeRun(ringPx(r, F), GRID)).toBeLessThanOrEqual(2);
+        expect(longestCornerRun(ringPx(r, F), GRID)).toBeLessThanOrEqual(2);
+      }
+    });
+    it(`${mode}: known-bad arm — the old cell-edge outline IS a staircase on the same metric (so the check above can see one)`, () => {
+      const sq = s.grid.cells.filter((c) => c.wedge).map((c) => rect(c.x - c.wFt / 2, c.y - c.hFt / 2, c.wFt, c.hFt));
+      const staircase = unionRings(sq);                                        // the old per-cell outline, as rings
+      expect(staircase.length).toBeGreaterThanOrEqual(1);
+      const worst = Math.max(...staircase.map((r) => longestCornerRun(ringPx(r.outer, F), GRID)));
+      expect(worst).toBeGreaterThan(10);
+    });
+    it(`${mode}: the band covers the slope cells and stays off the open ground / the pad`, () => {
+      const wedge = s.grid.cells.filter((c) => c.wedge && !c.out);
+      expect(wedge.length).toBeGreaterThan(100);
+      const inBand = wedge.filter((c) => pointInRegions(c, shapes.band)).length;
+      expect(inBand / wedge.length).toBeGreaterThan(0.9);
+      const pad = s.grid.cells.filter((c) => c.cls === "buildingPad");
+      expect(pad.length).toBeGreaterThan(100);
+      expect(pad.filter((c) => pointInRegions(c, shapes.band)).length).toBe(0);
+    });
+    if (mode === "layout") {
+      it("layout: the traced daylight line agrees with the contours' own daylight line (where the slope meets existing ground, round 5) to within one earthwork cell", () => {
+        const { feet } = chehaw("layout");
+        const cell = s.grid.cells[0].wFt;
+        const segDist = (p, r) => { let b = Infinity; for (let i = 0; i < r.length; i++) { const a = r[i], c = r[(i + 1) % r.length]; const dx = c.x - a.x, dy = c.y - a.y, l2 = dx * dx + dy * dy || 1; const tt = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)); b = Math.min(b, Math.hypot(p.x - a.x - dx * tt, p.y - a.y - dy * tt)); } return b; };
+        const ds = [];
+        for (const r of shapes.daylight) for (const p of r) ds.push(Math.min(...feet.daylight.rings.map((q) => segDist(p, q))));
+        ds.sort((a, b) => a - b);
+        expect(ds.length).toBeGreaterThan(50);
+        expect(ds[ds.length >> 1]).toBeLessThanOrEqual(0.5 * cell);
+        expect(ds[ds.length - 1]).toBeLessThanOrEqual(1.25 * cell);
+      });
+    } else {
+      it("boundary: the daylight line IS the setback (B2376240) and the inner edge closes round the open ground", () => {
+        expect(shapes.daylight.length).toBe(limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0));
+        expect(shapes.inner.length).toBeGreaterThanOrEqual(1);
+        for (const r of shapes.inner) expect(selfIntersects(r.map((p) => [p.x, p.y]))).toBe(false);
+      });
+    }
+  }
+  it("NEW-2: the hatch is a tint — never more than a quarter opacity at full depth; outside the setback stays a stronger alert", () => {
+    expect(BAND_TINT.max).toBeLessThanOrEqual(0.25);
+    expect(cellPaint({ dzFt: 30 }).a).toBeCloseTo(BAND_TINT.max, 6);
+    expect(cellPaint({ dzFt: -0.3 }).a).toBeLessThan(BAND_TINT.max);
+    expect(cellPaint({ dzFt: 5, out: true }).a).toBeGreaterThan(BAND_TINT.max);
+    expect(cellPaint({ dzFt: 0.01 })).toBeNull();
   });
 });

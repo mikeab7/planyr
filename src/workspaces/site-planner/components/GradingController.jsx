@@ -30,7 +30,7 @@ import {
   spotElevationsFor, courtDropReadout, padCornerSpots, padCorners, ringSf,
 } from "../lib/buildingGrade.js";
 import { loadTerrain } from "../lib/terrainLazy.js";
-import { LIMIT_MODE_LABEL, unionRings, bufferRings } from "../lib/gradingLimit.js";
+import { LIMIT_MODE_LABEL, unionRings, bufferRings, bandRegions, pointInRegions } from "../lib/gradingLimit.js";
 import {
   suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps,
   balanceClause, dockClause, rockClause, depthClause, floorClause, composeBasis,
@@ -38,10 +38,13 @@ import {
 import { feetToLatLngPair } from "../lib/mapLock.js";
 import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
-  ringsPathD, contourLinesToFeet, ringsToLatticePx, GRADING_PAPER_RGB, GRADING_PAPER_OPACITY,
+  ringsPathD, contourLinesToFeet, ringsToLatticePx, GRADING_PAPER_RGB, GRADING_PAPER_OPACITY, bandField, bandRingsToFeet,
 } from "../lib/gradingPaint.js";
 
 const EMPTY = [];
+// ROUND 7: the contours' own daylight line is usable as the band's outer edge only when it was traced off the SAME surface
+const contoursResKeyOf = (bandRes, contoursRes) => (bandRes && contoursRes && !contoursRes.error && contoursRes.key === bandRes.key
+  && contoursRes.daylight && Array.isArray(contoursRes.daylight.rings) && contoursRes.daylight.rings.length ? contoursRes.key : "");
 export const PAPER_MARGIN_FT = 60;   // ROUND 5 (NEW-6): how far past the daylight line the paper reaches
 const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
 const fmtE = (v) => f1(v).replace(/\.0$/, "");
@@ -471,26 +474,6 @@ export default function GradingController({ input, onModel }) {
     };
   }, [maskRes, cfg.layers.buildable, accent]);
 
-  /* ---------------- Cut & Fill picture: the SLOPES of the focused assembly (all buildings when none selected) ---------------- */
-  const cutfill = useMemo(() => {
-    if (!cfg.layers.cutfill || !grid || !grid.cells.length) return null;
-    const set = new Set();
-    for (const id of labelIds) { const F = facts.get(id); if (F) for (const x of F.aIds) set.add(x); }
-    // ROUND 4: under a grading limit the slopes belong to the graded area as a whole — always the whole picture
-    const cells = grid.limit ? grid.cells : selBuildingId ? grid.cells.filter((c) => set.has(c.elId)) : grid.cells;
-    if (!cells.length) return null;
-    const cp = cellsPixels(cells, slopeOnly);
-    if (!cp) return null;
-    const dl = grid.limit && gradeSurface && Array.isArray(gradeSurface.daylight) && gradeSurface.daylight.length ? ringsPathD(gradeSurface.daylight.map((d) => d.ring)) : null;
-    return {
-      dataUrl: pixelsToDataUrl(cp.pixels, cp.nx, cp.ny),
-      bboxFt: { x: cp.x0, y: cp.y0, w: cp.nx * cp.dx, h: cp.ny * cp.dy },
-      outlineD: dl || cellsOutlinePath(cp),
-      // the limit itself: a thin dashed ink line (the line the slope is thrown from) — one path, every region, holes too
-      limitD: grid.limit ? ringsPathD(grid.limit.regions.flatMap((r) => [r.outer, ...r.holes])) : null,
-    };
-  }, [cfg.layers.cutfill, grid, gradeSurface, selBuildingId, facts, labelIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
-
   /* ---------------- ROUND 4 (B2349122) / ROUND 5 — proposed contours, traced in the terrain worker ---------------- */
   // Never in a render: an effect SAMPLES the contour lattice off the finished surface (proposedSurface.contourLatticeSteps —
   // chunked, the pad exactly at the FFE, existing ground past the daylight line), ships it to the worker with the daylight
@@ -536,6 +519,81 @@ export default function GradingController({ input, onModel }) {
     return () => { clearTimeout(t); };
   }, [contourKey, wantContours]); // eslint-disable-line react-hooks/exhaustive-deps
   const contours = useMemo(() => (cfg.layers.contours && contoursRes ? contoursRes : null), [cfg.layers.contours, contoursRes]);
+
+  /* ---------------- ROUND 7 (NEW-1) — the slope band's OUTLINE, traced like a contour ---------------- */
+  // The band's edges (the daylight line where |cut/fill| → 0, and in boundary mode the toe / top of slope inside the limit)
+  // used to be the cell lattice's own edges — a staircase. Now an effect builds the band field off the finished surface
+  // (gradingPaint.bandField: + inside the band, − past the daylight line, linear in the depth so its zero IS where the slope
+  // meets the ground), the terrain worker traces its zero with the contours' interpolated marching squares + Chaikin
+  // (contourTrace.traceBandOutline), and gradingLimit.bandRegions composes the closed band polygon with the limit. In layout
+  // mode, while the proposed contours are traced, their own daylight line (the finer lattice the contours are clipped to) is
+  // the band's outer edge, so the hatch and the contours end on ONE line. Never in a render; superseded by a token; the
+  // previous outline stays published while a trace is in flight.
+  const [bandRes, setBandRes] = useState(null);
+  const [bandShapes, setBandShapes] = useState(null);
+  const bSeq = useRef(0);
+  const bandKey = cfg.layers.cutfill && grid && grid.limit && grid.cells.length > 0 && gradeSurface ? gradeSurface.surfaceKey : "";
+  useEffect(() => {
+    if (!bandKey) { if (!cfg.layers.cutfill) { setBandRes(null); setBandShapes(null); } return undefined; }
+    const my = ++bSeq.current;
+    const g = grid;
+    const t = setTimeout(async () => {
+      try {
+        const F = bandField(g, { pointInRegions });
+        if (!F) { if (my === bSeq.current) setBandRes(null); return; }
+        const terrain = await loadTerrain();
+        if (my !== bSeq.current) return;
+        const r = await terrain.runBandOutlineJob({ values: F.values, nx: F.nx, ny: F.ny });
+        if (my !== bSeq.current) return;
+        setBandRes({ key: bandKey, mode: F.mode, traced: bandRingsToFeet(r, F), limit: g.limit });
+      } catch (e) {
+        if (my === bSeq.current) setBandRes({ key: bandKey, error: String((e && e.message) || e) });
+      }
+    }, 60);
+    return () => { clearTimeout(t); };
+  }, [bandKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const contourDaylightKey = contoursResKeyOf(bandRes, contoursRes);
+  useEffect(() => {
+    if (!bandRes || !bandRes.traced || !bandRes.limit) { if (!bandRes) setBandShapes(null); return; }
+    const gl0 = bandRes.limit, mode = gl0.mode === "boundary" ? "boundary" : "layout";
+    const fromContours = mode === "layout" && !!contourDaylightKey;
+    const traced = fromContours ? contoursRes.daylight : bandRes.traced;
+    try {
+      const sh = bandRegions({ traced, limitRegions: mode === "boundary" ? gl0.limitRegions || gl0.regions : gl0.regions, mode });
+      setBandShapes({ key: bandRes.key, mode, source: fromContours ? "contours" : "band", ...sh });
+    } catch (e) {
+      setBandShapes({ key: bandRes.key, mode, error: String((e && e.message) || e), band: [], daylight: [], inner: [] });
+    }
+  }, [bandRes, contourDaylightKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------------- Cut & Fill picture: the SLOPES of the focused assembly (all buildings when none selected) ---------------- */
+  const cutfill = useMemo(() => {
+    if (!cfg.layers.cutfill || !grid || !grid.cells.length) return null;
+    const set = new Set();
+    for (const id of labelIds) { const F = facts.get(id); if (F) for (const x of F.aIds) set.add(x); }
+    // ROUND 4: under a grading limit the slopes belong to the graded area as a whole — always the whole picture
+    const cells = grid.limit ? grid.cells : selBuildingId ? grid.cells.filter((c) => set.has(c.elId)) : grid.cells;
+    if (!cells.length) return null;
+    // ROUND 7: the tint reaches past the last painted cell (two rings of dilation) and is CLIPPED to the traced band polygon,
+    // so its edge is the smooth outline, never the lattice; without a limit (legacy) the old per-cell picture stands
+    const cp = cellsPixels(cells, slopeOnly, grid.limit ? { dilate: 2 } : undefined);
+    if (!cp) return null;
+    const limitD = grid.limit ? ringsPathD(grid.limit.regions.flatMap((r) => [r.outer, ...r.holes])) : null;
+    const base = { dataUrl: pixelsToDataUrl(cp.pixels, cp.nx, cp.ny), bboxFt: { x: cp.x0, y: cp.y0, w: cp.nx * cp.dx, h: cp.ny * cp.dy }, limitD };
+    if (!grid.limit) return { ...base, outlineD: cellsOutlinePath(cp), clipD: null, daylightD: null, innerD: null, bandReady: true };
+    const sh = bandShapes && !bandShapes.error ? bandShapes : null;
+    return {
+      ...base,
+      outlineD: null,
+      // the band polygon (evenodd: outers and holes) — the tint paints only inside it; nothing until the first trace lands
+      clipD: sh ? ringsPathD(sh.band.flatMap((r) => [r.outer, ...r.holes])) : null,
+      daylightD: sh && sh.daylight.length ? ringsPathD(sh.daylight) : null,      // one thin solid contour-brown line on top
+      innerD: sh && sh.inner.length ? ringsPathD(sh.inner) : null,               // boundary mode: the toe / top of slope
+      daylightRings: sh ? sh.daylight : [], innerRings: sh ? sh.inner : [], bandMode: sh ? sh.mode : null, bandSource: sh ? sh.source : null, bandStale: !!(sh && gradeSurface && sh.key !== gradeSurface.surfaceKey),
+      bandReady: !!sh,
+    };
+  }, [cfg.layers.cutfill, grid, gradeSurface, selBuildingId, facts, labelIds.join(","), bandShapes]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   /* ---------------- ROUND 5 (NEW-6) — the paper background: the parcel, out to the daylight line plus a margin ---------------- */
   // One feet-space path (the active parcel rings ∪ the daylight rings pushed out by the margin) the planner paints at the very

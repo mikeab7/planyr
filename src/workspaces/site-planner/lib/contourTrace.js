@@ -300,6 +300,28 @@ export function traceDaylight(inside, width, height) {
   for (const poly of polys) for (const polygon of poly.coordinates) polygon.forEach((ring, i) => { if (ring.length >= 4) (i === 0 ? rings : holes).push(ring); });
   return { rings, holes };
 }
+/* ROUND 7 (NEW-1) — THE SLOPE BAND'S OUTLINE, traced like a contour. `values` is the band field
+ * (gradingPaint.bandField: > 0 in the band and on its "core" side, < 0 past it, extrapolated one cell so the zero
+ * crossing lands where the thrown slope really meets the ground); the 0 iso is traced with the same interpolated
+ * marching squares the contours use, every ring Chaikin-smoothed (closed rings stay closed) and lightly simplified, and
+ * a ring enclosing less than `minAreaCells` is dropped as noise. Returns { rings, holes } in LATTICE PIXELS (the value
+ * at index i sits at i + 0.5, as for the contours). Pure; the worker's `band-outline` job is its runtime caller. */
+export function traceBandOutline(values, width, height, { smoothPasses = 2, minAreaCells = 1.5 } = {}) {
+  const rings = [], holes = [];
+  const polys = d3contours().size([width, height]).thresholds([0])(values);
+  const area = (r) => { let a = 0; for (let i = 0; i < r.length - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return Math.abs(a) / 2; };
+  for (const poly of polys) for (const polygon of poly.coordinates) polygon.forEach((ring, i) => {
+    if (ring.length < 4 || area(ring) < minAreaCells) return;
+    let sm = smoothPasses > 0 ? chaikin(ring, smoothPasses) : ring.map((p) => [p[0], p[1]]);
+    if (sm.length > 8) {
+      const open = douglasPeucker(sm.slice(0, -1), PROPOSED_SIMPLIFY_TOL);
+      sm = open.length >= 3 ? [...open, [open[0][0], open[0][1]]] : sm;
+    }
+    (i === 0 ? rings : holes).push(sm);
+  });
+  return { rings, holes };
+}
+
 /* ROUND 6 (NEW-1) — how far apart adjacent contours of `interval` sit along a traced piece, in lattice cells: the median over
  * samples along the piece of interval / |∇z| (central differences on the lattice, one-sided beside a void). Infinity where the
  * surface is flat. The canvas uses it to drop a band to a coarser interval where its lines would touch at the zoom drawn. */

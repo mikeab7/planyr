@@ -13,7 +13,7 @@
  *
  * Module-scope components only (MODULE-SCOPE-COMPONENTS). Colours are theme tokens; the SVG half takes its
  * hex from the planner's PAL (SVG attributes cannot use var()). */
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, SegmentedControl, IconButton } from "../../../shared/ui/controls.jsx";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
@@ -407,6 +407,7 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
  * stroke, so a pan never recomputes a thing (VIEW-INDEPENDENT-ONCE). */
 export function GradingCanvas({ model, f2p, rppf, PAL }) {
   const { buildable, cutfill, labels, cfg, contours, limit } = model;
+  const bandClipId = `grading-band-${useId().replace(/:/g, "")}`;
   // ROUND 6 (NEW-1): what is drawn at this zoom — index only with the parcel filling the map, every level with the building
   // filling it, a band thinned to a coarser interval where its lines would touch — then the labels of the pieces drawn
   const drawPlan = useMemo(() => planContourDraw(contours, rppf), [contours, rppf]);
@@ -433,10 +434,28 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
         </g>
       )}
       {cutfill && cutfill.dataUrl && (
-        <g data-layer="cutfill">
-          {img(cutfill, "cimg", false)}
-          {feetG(cutfill.outlineD, PAL.paper, 3.4, null)}
-          {feetG(cutfill.outlineD, PAL.ink, 1.6, "1.5 3.5", "round")}
+        <g data-layer="cutfill" data-band-ready={cutfill.bandReady ? "1" : "0"} data-band-source={cutfill.bandSource || ""}>
+          {cutfill.outlineD ? (
+            <>
+              {/* legacy (no grading limit): the per-cell picture and its cell outline */}
+              {img(cutfill, "cimg", false)}
+              {feetG(cutfill.outlineD, PAL.paper, 3.4, null)}
+              {feetG(cutfill.outlineD, PAL.ink, 1.6, "1.5 3.5", "round")}
+            </>
+          ) : cutfill.clipD ? (
+            /* ROUND 7 (NEW-1/NEW-2) — a light tint, smooth-scaled, CLIPPED to the traced band polygon (feet space, evenodd),
+               then the daylight line as one thin solid contour-brown line on top; the inner edge (boundary mode's toe / top
+               of slope) a thin dashed one */
+            <g transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
+              <defs>
+                <clipPath id={bandClipId} clipPathUnits="userSpaceOnUse"><path data-band-clip="1" d={cutfill.clipD} clipRule="evenodd" fillRule="evenodd" /></clipPath>
+              </defs>
+              <image data-band-tint="1" href={cutfill.dataUrl} x={cutfill.bboxFt.x} y={cutfill.bboxFt.y} width={cutfill.bboxFt.w} height={cutfill.bboxFt.h}
+                preserveAspectRatio="none" style={{ imageRendering: "auto" }} clipPath={`url(#${bandClipId})`} pointerEvents="none" />
+              {cutfill.innerD && <path data-band-inner="1" d={cutfill.innerD} fill="none" stroke={CONTOUR_PROPOSED_RGB} strokeOpacity={0.8} strokeWidth={0.9} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
+              {cutfill.daylightD && <path data-daylight-line="1" d={cutfill.daylightD} fill="none" stroke={CONTOUR_PROPOSED_RGB} strokeWidth={1.25} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+            </g>
+          ) : null}
           {/* ROUND 4 — the grading limit: the thin dashed ink line the slope is thrown from */}
           {cutfill.limitD && <g data-grading-limit="1">{feetG(cutfill.limitD, PAL.ink, 1, LIMIT_LINE_DASH)}</g>}
         </g>
