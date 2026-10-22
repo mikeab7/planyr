@@ -76,13 +76,16 @@ try {
   const nf = await waitFor(async () => { const t = await toast(); return /No Tennessee parcel with ID/.test(t) ? t : null; }, 60000);
   await record("4 a genuinely absent id → 'No Tennessee parcel', no Try again", !!nf && (await page.locator('[data-testid="map-try-again"]').count()) === 0, nf ? nf.slice(0, 90) : `toast "${(await toast()).slice(0, 90)}"`);
 
-  await freshMap();
+  await freshMap(PERRY.lat, PERRY.lng, 17); // the zoom Select parcels clicks at (same set-up as verify-tn-counties-live, whose Perry row is a recorded pass)
   await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click({ timeout: 15000 });
-  await sleep(2500);
+  const disp = await waitFor(async () => { const d = await page.evaluate(() => (window.__mapParcelDisplay ? window.__mapParcelDisplay() : null)).catch(() => null); return d && d.held >= 3 ? d : null; }, 45000);
+  if (!disp) console.log("  (outlines never reached 3 held lots — clicking anyway)");
   const pt = await page.evaluate(([a, b]) => { const m = window.__mapFinderMap, p = m.latLngToContainerPoint([a, b]), r = m.getContainer().getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y }; }, [PERRY.lat, PERRY.lng]);
   await page.mouse.click(pt.x, pt.y);
-  const h5 = await waitFor(async () => { const x = await held(); return x && x.length ? x : null; }, 70000);
+  // a click first paints the quick outline from the display layer, then replaces it with the full identified record — wait for the Perry record itself, not the first thing selected
+  const h5 = await waitFor(async () => { const x = await held(); return isPerry(x) ? x : null; }, 70000) || await held();
   const t5 = await toast();
+  if (!isPerry(h5)) { await page.screenshot({ path: OUT.replace(/\.json$/, "") + "-row5.png" }); console.log("  step5 body:", (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ").slice(-600)); }
   await record("5 Select parcels click on the Perry lot", isPerry(h5) && !/No parcel right there/.test(t5), isPerry(h5) ? "selected" : `nothing selected · toast "${t5.slice(0, 80)}"`);
 
   const lit = await page.evaluate(async () => {
