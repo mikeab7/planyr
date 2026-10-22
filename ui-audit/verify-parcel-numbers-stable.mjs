@@ -65,7 +65,7 @@ try {
   if (JSON.stringify(n0) !== JSON.stringify({ p1: "Parcel 1", p2: "Parcel 2", p3: "Parcel 3", p4: "Parcel 4" })) throw new Error("VOID: the four seeded unnamed lots do not read Parcel 1…4 before the delete: " + JSON.stringify(n0));
   ok("known-good arm: four unnamed drawn lots read Parcel 1, 2, 3, 4", true);
 
-  await T("parcel-row-more-p2").click(); await T("parcel-row-menu-delete-p2").click(); await T("parcel-row-delete-yes-p2").click(); await sleep(700);
+  await T("parcel-row-more-p2").click(); await T("parcel-row-menu-p2-delete").click(); await sleep(700);
   const n1 = await names();
   ok("after deleting Parcel 2, Parcel 3 and Parcel 4 keep their numbers", n1.p3 === "Parcel 3" && n1.p4 === "Parcel 4" && n1.p1 === "Parcel 1" && !("p2" in n1), JSON.stringify(n1));
   ok("…and no row reads Unnamed", !Object.values(n1).some((t) => /unnamed/i.test(t)));
@@ -77,7 +77,7 @@ try {
   const n3 = await names();
   ok("Undo brings Parcel 2 back as Parcel 2 (and 3, 4 are untouched)", n3.p2 === "Parcel 2" && n3.p3 === "Parcel 3" && n3.p4 === "Parcel 4", JSON.stringify(n3));
   // delete it again and prove the numbers survive a reload
-  await T("parcel-row-more-p2").click(); await T("parcel-row-menu-delete-p2").click(); await T("parcel-row-delete-yes-p2").click(); await sleep(900);
+  await T("parcel-row-more-p2").click(); await T("parcel-row-menu-p2-delete").click(); await sleep(900);
   await page.reload({ waitUntil: "load" }); await sleep(SIGNED ? 3000 : 2000);
   await openPanel();
   const n2 = await names();

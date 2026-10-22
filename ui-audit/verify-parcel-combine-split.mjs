@@ -185,7 +185,7 @@ try {
   const pa = (a) => a.reduce((s, p) => { let t = 0; for (let i = 0; i < p.points.length; i++) { const q = p.points[i], r = p.points[(i + 1) % p.points.length]; t += q.x * r.y - r.x * q.y; } return s + Math.abs(t / 2); }, 0);
   ok("(5) pieces add up to the original acreage; site total unchanged", Math.abs(pa(pieces) - 160000) < 1 && Math.abs((await siteAcres()) - a0) < 0.006, `${pa(pieces)} ft²`);
   let renameItems = 0; // Layout C: rename is a ⋯ menu item (the pencil left the name block so the source line keeps its full width)
-  for (const p of afterSplit.filter((q) => q.splitFrom)) { await page.getByTestId("parcel-row-more-" + p.id).click(); await sleep(300); renameItems += await page.getByTestId("parcel-row-pencil-" + p.id).count(); await page.keyboard.press("Escape"); await sleep(150); }
+  for (const p of afterSplit.filter((q) => q.splitFrom)) { await page.getByTestId("parcel-row-more-" + p.id).click(); await sleep(300); renameItems += await page.getByTestId("parcel-row-menu-" + p.id + "-rename").count(); await page.keyboard.press("Escape"); await sleep(150); }
   ok("(5) pieces inherit include state; 'Split' tag + a Rename item in each piece's ⋯ menu", pieces.every((p) => p.active !== false) && renameItems === 2);
   await shot("05-split");
 

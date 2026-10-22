@@ -105,10 +105,9 @@ export const dragCursorPinned = () => pinned;
 
 /** The lot's own cursor (its boundary hit-band and setback band). A lot's drag PANS the map outside Edit parcels (by design, owner
  *  rule NEW-5 of the Parcels rework), so the cursor says grab there — never move; inside Edit parcels an unlocked lot's drag moves
- *  it (move), a locked one still pans (grab), and over the edge where a click inserts a corner it says "add a point". Remove mode
- *  uses the remove (−) cursor; every other tool is an armed mode (crosshair). */
-export function parcelBodyCursor({ tool, parcelMode, editingCorners, locked, addPoint, removeCursor = "pointer", addCursor = "crosshair" }) {
-  if (tool === "parcel" && parcelMode === "remove") return removeCursor;
+ *  it (move), a locked one still pans (grab), and over the edge where a click inserts a corner it says "add a point". Every other
+ *  tool is an armed mode (crosshair). (The Parcel tool's Remove click-to-delete mode, and its cursor, were retired 2026-10-22.) */
+export function parcelBodyCursor({ tool, editingCorners, locked, addPoint, addCursor = "crosshair" }) {
   if (tool !== "select") return "crosshair";
   if (editingCorners) return addPoint ? addCursor : (locked ? "grab" : "move");
   return "grab";
@@ -127,10 +126,10 @@ export function deferTask(fn) {
  *  every inline per-object cursor beneath it (a stylesheet `!important` beats an inline non-important), so crosshair really is "over
  *  EVERYTHING it can be clicked on" and a new object type cannot forget to ask. The second block makes every disabled control inside
  *  the planner default-cursor regardless of the inline `cursor: "pointer"` its style object carries. Idempotent. */
-export function plannerCursorCss({ add = "crosshair", remove = "crosshair" } = {}) {
+export function plannerCursorCss({ add = "crosshair" } = {}) {
   const mode = (m, c) => `svg[data-cursor-mode="${m}"], svg[data-cursor-mode="${m}"] * { cursor: ${c} !important; }`;
   return [
-    mode("armed", "crosshair"), mode("identify", add), mode("remove", remove), mode("pan", "grab"),
+    mode("armed", "crosshair"), mode("identify", add), mode("pan", "grab"),
     `svg[data-cursor-mode] textarea, svg[data-cursor-mode] input { cursor: text !important; }`,
     // Map view: a surface that OWNS its cursor (select-parcels, pin drop, calibration, panning) makes every Leaflet feature under it
     // inherit that cursor, instead of Leaflet's `.leaflet-interactive { cursor: pointer }` winning on each feature. Popups and controls

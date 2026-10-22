@@ -236,7 +236,7 @@ describe("source guards on the render rules", () => {
   const src = read("src/workspaces/site-planner/SitePlanner.jsx");
   it("boundary and setback ring strokes carry NO zoom factor (screen pixels, constant across zoom)", () => {
     const outline = src.slice(src.indexOf('data-testid="parcel-outline"'), src.indexOf('data-testid="parcel-outline"') + 900);
-    expect(outline).toMatch(/strokeWidth=\{\(removeHover \|\| picked \|\| isSel\) \? Math\.max\(3, baseW\) : baseW\}/);
+    expect(outline).toMatch(/strokeWidth=\{\(picked \|\| isSel\) \? Math\.max\(3, baseW\) : baseW\}/);
     expect(outline).not.toMatch(/strokeZoom/);
     const ring = src.slice(src.indexOf('data-testid="setback-ring"'), src.indexOf('data-testid="setback-ring"') + 400);
     expect(ring).toMatch(/strokeWidth=\{sbs\.weight\}/);

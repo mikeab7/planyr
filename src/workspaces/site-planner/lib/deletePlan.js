@@ -49,6 +49,11 @@ export const DELETE_ENTRIES = [
   "menu:callout",      // canvas right-click on a callout → "Delete callout"
   "menu:markup",       // canvas right-click on a markup → "Delete markup/easement/deed"
   "menu:parcel",       // parcel right-click menu → "Delete parcel"
+  "row:menu",          // Parcels panel row ⋯ → "Delete parcel" (NEW-1, 2026-10-22: every parcel door ends in SitePlanner's deleteParcels)
+  "row:context",       // right-click on a Parcels panel row → the same menu
+  "row:key",           // Delete / Backspace on a focused Parcels panel row
+  "rail:parcel",       // right rail → Parcel tools ▾ → "Delete parcel"
+  "bar:parcel",        // the Parcels panel's checked-parcels bar → Delete
   "vtxMenu:wholeDelete", // control-point right-click menu, at the true 2-point minimum of an open path (road/easement/measurement/markup) → "Delete road/easement/measurement/markup" (NEW-1/B649504)
 ];
 
