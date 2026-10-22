@@ -3092,7 +3092,7 @@ Hosts added to the relay allow-list for the search and then removed because noth
 - **VOID rule.** Davidson and Rutherford (recorded passes) are the control arms; the CLI exits 2, not 0, if either fails. The instrument was shown to see the defects it reports: on `origin/main` (e11d8e1) the same sweep passes **1 of 95** (Knox, the honest gap) — 94 fail C, Shelby also B — and the pre-#2490 build reproduces the Rutherford "962 features, no id, held 1" collapse.
 - A first sweep of rural middle-of-county lots alone found only the known Rutherford defect; the **town lots found the real ones** (Shelby's record cap, Davidson/Williamson ids with letters) — a rural lot cannot show a cap or a lettered condo id.
 
-**Result at this branch: 95 of 95 pass A, B and C** (Knox passes as its named gap). Live on planyr.io: see the V-entries on the ledger.
+**Result at this branch: 95 of 95 pass A, B and C** (Knox passes as its named gap). **Live on planyr.io (V1853888, build `69ae6a4`, signed-in test account, 2026-10-22): all 95, both lots each, through the real Map — outlines draw, a click selects the recorded lot, the id typed into Site search lands on the same lot; Knox shows its honest sentence.** Before (build `e11d8e1`) the same harness passed every click and outline row and failed id search (Sullivan, Shelby: nothing selected). One row (Perry, id search) missed once while three shards were hitting the Comptroller layer together and passed on an isolated re-run — a latency observation on that layer, not a routing difference.
 
 **What was wrong, and fixed (NEW-2).**
 | Defect | Where | Fix |
