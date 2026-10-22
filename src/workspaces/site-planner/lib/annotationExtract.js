@@ -397,10 +397,9 @@ export function extractMarkupAnnotations(clone, ctx) {
   for (const e of ordered) {
     if (e.chip) {
       const tree = domToTree(e.node, { measureText, patterns, root: clone });
-      const text = Array.from(e.node.querySelectorAll("text")).map((t) => (t.textContent || "").trim()).filter(Boolean).join(" ");
       const pid = e.node.getAttribute("data-chip-parcel") || keyOf(e.node).id;
       e.node.parentNode.removeChild(e.node);
-      descriptors.push({ family: "parcel-label", id: pid, kind: "parcel-label", tree, meta: { subject: "Parcel label", comment: text } });
+      descriptors.push({ family: "parcel-label", id: pid, kind: "parcel-label", tree, meta: { subject: "Parcel label" } });
       continue;
     }
     const { node, fam, id, model } = e;
@@ -412,7 +411,7 @@ export function extractMarkupAnnotations(clone, ctx) {
       node.parentNode.removeChild(node);
       descriptors.push({
         family: "markup", id, kind: m.kind, tree, hints,
-        meta: { subject: m.subject || MARKUP_SITE_SUBJECT[m.kind] || null, comment: m.comment || (m.inlineLabel || m.label || m.name || ""), author: m.author || null, createdAt: m.createdAt || null, modifiedAt: m.modifiedAt || null },
+        meta: { subject: m.subject || MARKUP_SITE_SUBJECT[m.kind] || null, comment: m.comment || "", author: m.author || null, createdAt: m.createdAt || null, modifiedAt: m.modifiedAt || null },
       });
     } else if (fam === "callout") {
       const c = model;
@@ -459,7 +458,8 @@ export function extractMarkupAnnotations(clone, ctx) {
       const lines = linesOf(labelNodes);
       lifted.forEach((n) => n.parentNode && n.parentNode.removeChild(n));
       meta.lines = lines;
-      meta.comment = lines[0] || meta.subject; // Contents = its label (the name line), the rest rides the appearance
+      // no /Contents: the element's name is /Subj and the label drawn in its appearance; a /Contents here is what makes
+      // Chrome's and Edge's viewer pop a note box on hover (NEW-1, 2026-10-22)
       descriptors.push({ family: e.building ? "building" : "element", id: e.id, kind: e.building ? "building" : (el && el.type) || "element", tree: { tag: "g", a: {}, kids }, hints, meta });
     }
   }
