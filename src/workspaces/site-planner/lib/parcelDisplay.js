@@ -94,16 +94,27 @@ const ParcelTiles = L.GridLayer.extend({
   _removeTile(key) {
     const t = this._tiles[key];
     L.GridLayer.prototype._removeTile.call(this, key);
-    if (t && t.el && this._pool.length < 64) this._pool.push(t.el);
+    /* NEW-1 (2026-10-22) — a pooled canvas gives its pixels back. Each tile is 1024×1024 (4 MB at any pixel ratio ≥ 2), and up to 64 of
+     * them used to be KEPT FULL-SIZE after Leaflet dropped their tiles — up to 256 MB of backing store that no census of the live DOM
+     * could see, held for the next zoom settle to reuse. Reuse is a re-allocation (`_paint` sizes a canvas whose width differs), which
+     * is cheap next to holding them; the pool is a pool of empty shells. */
+    if (t && t.el && this._pool.length < 64) { try { t.el.width = 0; t.el.height = 0; } catch (_) { /* not a canvas */ } this._pool.push(t.el); }
   },
   _paint(tile, coords) {
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__parcelTileStats = Object.assign(window.__parcelTileStats || { paints: 0, dirty: 0, flushes: 0 }, { paints: ((window.__parcelTileStats || {}).paints || 0) + 1 }); // E2E-only counter: the settle harness asserts a no-op moveend repaints nothing
     const size = this.getTileSize();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    /* NEW-1 (2026-10-22, work-laptop report) — A TILE WITH NO LOTS IN IT HOLDS NO PIXELS. Measured on live ff7be38 at the laptop's
+     * 2.6775 pixel ratio over the Epps Mill lot (Select parcels, z18): 45 parcel tile canvases, 43 of them COMPLETELY BLANK, each a
+     * 1024×1024 backing store — 180 MB of the tab's 238.6 MB of canvas memory, on an integrated GPU, for nothing on screen. A blank
+     * tile is now left at 0×0 (a canvas with no pixels draws nothing — the picture is identical); when lots arrive `markDirty` repaints
+     * the tiles they touch and this allocates it then. The density is untouched: a tile that HAS lots is still 1024×1024. */
+    const items = this._parcelIndex.query(tileLngLatBounds(coords.x, coords.y, coords.z, size.x));
+    if (!items.length) { if (tile.width) { tile.width = 0; tile.height = 0; } return; }
     if (tile.width !== size.x * dpr) { tile.width = size.x * dpr; tile.height = size.y * dpr; }
     const ctx = tile.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x });
+    drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x, items });
   },
   /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, a few per frame. */
   markDirty(bbox) {

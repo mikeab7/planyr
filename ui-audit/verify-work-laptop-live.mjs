@@ -1,4 +1,4 @@
-/* NEW-1/NEW-2/NEW-3 (2026-10-22, work-laptop report) — ONE signed-in check on the owner's WORK-LAPTOP window (1913x641 @2.68, Chromium),
+/* NEW-1/NEW-2/NEW-3 (2026-10-22, work-laptop report) — ONE signed-in check on the owner's WORK-LAPTOP window (1913x641 @2.6775, Chromium),
  * against a deploy or a local preview. Arms:
  *   A  Help (?) → Help and → Report views stay fully on screen and Back is the topmost thing at its own centre   (NEW-2 — RED on ff7be38)
  *   B  hovering the header with a REAL mouse leaves it laid out, opaque, on top, and painted (pixels not a dark band)   (NEW-3 — positive control: never reproduced)
