@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { openLaptop, LAPTOP } from "./lib/workLaptopRig.mjs";
 import { cleanupLive } from "./lib/liveFixtures.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { swallowReportWrites } from "./lib/reportCleanup.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 
 const args = process.argv.slice(2);
@@ -30,6 +31,8 @@ mkdirSync(SHOTS, { recursive: true });
 const s = await openLaptop({ base: BASE });
 const page = s.page;
 await assertMeasurable(page, "verify-work-laptop-live");
+/* arm G presses "Something was slow just now" (NEW-4) — the UI copy is what is asserted, so report inserts are answered locally and never reach the live table (B2159505; the cleanup RPC is not deployed, so a real row could not be removed) */
+await swallowReportWrites(page.context());
 console.log(`signed in as ${s.proof.email} · window ${LAPTOP.width}x${LAPTOP.height} @${LAPTOP.deviceScaleFactor} · base ${BASE}`);
 const sleep = (ms) => page.waitForTimeout(ms);
 const stamp = () => page.evaluate(async () => { const v = await fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null); return v && v.build; });
