@@ -13,7 +13,10 @@
  * and reports, per stage, the number of tile requests and the bytes received (wire size from content-length where present, else the body length). */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
-import { geodesicAreaM2, wideStageForZoom } from "../src/workspaces/site-planner/lib/parcelWideRequest.js";
+import { geodesicAreaM2, wideStageForZoom, bucketForStage, tilesForBounds, buildWideTileQuery, wideTileRequest, areaFieldForUrl } from "../src/workspaces/site-planner/lib/parcelWideRequest.js";
+import { areaFieldsReady } from "../src/workspaces/site-planner/lib/parcelAreaFieldsLazy.js";
+await areaFieldsReady();
+const SOURCE_URL = { Davidson: "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Parcels_view/FeatureServer/0", Rutherford: "https://services.arcgis.com/36I6IHIdr660pAyH/arcgis/rest/services/ParcelsCAMA1/FeatureServer/0", Harris: "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0", Dougherty: "https://services6.arcgis.com/VKHi8CC6pMIyYUIs/arcgis/rest/services/Parcels_Public_View/FeatureServer/0" };
 
 const LIVE = process.argv.includes("--live") ? process.argv[process.argv.indexOf("--live") + 1] : null;
 const BASE = (LIVE || process.env.BASE_URL || "http://localhost:4188/").replace(/\/$/, "");
@@ -104,20 +107,36 @@ for (const c of CASES.filter((x) => !ONLY || x.name.startsWith(ONLY.slice(7)))) 
     const moved = seen.filter((s) => s.tag === tag && s.filtered).length; // nothing yet: the view only just stopped, the debounce has not fired
     const ok = await settle();
     const rs = seen.filter((s) => s.tag === tag && s.filtered && s.status === 200);
-    expect(`${stage.toUpperCase()}: tile requests were sent and answered`, ok && rs.length > 0, `${rs.length} tile answers`);
-    expect(`${stage.toUpperCase()}: every request carries the size where-clause`, rs.every((s) => /(Shape__Area|STArea\(\))\s*>=\s*\d+/.test(s.where)), [...new Set(rs.map((s) => s.where))].slice(0, 3).join(" | "));
-    expect(`${stage.toUpperCase()}: every request asks for generalised geometry`, rs.every((s) => Number(s.offset) > 0));
-    const lots = rs.reduce((a, s) => a + s.n, 0);
-    expect(`${stage.toUpperCase()}: the county sent larger lots`, lots > 0, `${lots} lots in ${rs.length} answers`);
-    /* The outlines come back GENERALISED (half a pixel at the tile's zoom — up to ~8 m at the widest), which shaves the area of a lot only a few pixels
-     * across; so the independent measure is the 2nd percentile of each answer against 0.55 × the stage's cutoff, not the single smallest outline. The
-     * where-clause itself is exact on the county's own area column (proven ±3% by the probe and by the ungeneralised sample in B2417216). */
+    const app = await page.evaluate(() => { const d = window.__mapParcelDisplay && window.__mapParcelDisplay(); const l = d && d.layers.find((x) => x.wide); return l ? l.wide : null; });
+    console.log(`  app state: ${JSON.stringify(app)}`);
+    /* A production page has a service worker that answers /api/gis-cache itself, and a request made by it is invisible to the page's network events — so the
+     * app's OWN state is asserted, and the lots are measured independently from one tile fetched through the SAME relay URL the app builds. */
+    expect(`${stage.toUpperCase()}: the layer is in the ${stage} stage, loaded tiles, holds lots, and is neither busy nor in error`, !!app && app.stage === stage && app.loaded > 0 && app.held > 0 && !app.busy && !app.error && ok, JSON.stringify(app));
+    if (rs.length) {
+      expect(`${stage.toUpperCase()}: every request carries the size where-clause`, rs.every((s) => /(Shape__Area|STArea\(\))\s*>=\s*\d+/.test(s.where)), [...new Set(rs.map((s) => s.where))].slice(0, 3).join(" | "));
+      expect(`${stage.toUpperCase()}: every request asks for generalised geometry`, rs.every((s) => Number(s.offset) > 0));
+    } else console.log("  (tile answers not observable from the page here — the service worker serves the relay; judged from the app state and the probe tile below)");
     const floorAc = minAc * 0.55;
     const small = rs.filter((s) => s.p2Ac != null && s.p2Ac < floorAc);
-    expect(`${stage.toUpperCase()}: NO house-size lot was sent (98% of every answer's lots ≥ ${floorAc.toFixed(2)} ac, i.e. 0.55 × the ${minAc} ac cutoff)`, small.length === 0, small.length ? `OFFENDER ${small[0].url.slice(0, 300)} ; ${small.map((s) => `${s.p2Ac.toFixed(3)} ac`).slice(0, 4).join(", ")}` : `lowest 2nd-percentile ${Math.min(...rs.map((s) => s.p2Ac ?? Infinity)).toFixed(3)} ac`);
+    if (rs.length) expect(`${stage.toUpperCase()}: NO house-size lot was sent (98% of every answer's lots ≥ ${floorAc.toFixed(2)} ac, i.e. 0.55 × the ${minAc} ac cutoff)`, small.length === 0, small.length ? `OFFENDER ${small[0].url.slice(0, 300)} ; ${small.map((s) => `${s.p2Ac.toFixed(3)} ac`).slice(0, 4).join(", ")}` : `lowest 2nd-percentile ${Math.min(...rs.map((s) => s.p2Ac ?? Infinity)).toFixed(3)} ac`);
+    // the probe tile: the county's own point, at this stage's bucket, through the relay (or the page's own origin on a local run), parsed here
+    const src = SOURCE_URL[key], area = areaFieldForUrl(src);
+    const tile = tilesForBounds({ west: c.lng - 0.002, east: c.lng + 0.002, south: c.lat - 0.002, north: c.lat + 0.002 }, bucketForStage(stage, c.floor))[0];
+    const { params } = buildWideTileQuery({ tile, stage, area, fields: ["OBJECTID"] });
+    const req = wideTileRequest(src, params);
+    let probe = null;
+    for (let attempt = 0; attempt < 3; attempt++) { // a cold relay tile can answer 5xx once (a 524 was seen); the app retries those, so the probe does too
+      probe = await page.evaluate(async ([u, b]) => { try { const r = await fetch(`${u}?${b}`); return { status: r.status, text: await r.text() }; } catch (e) { return { status: 0, text: "" }; } }, [req.url, req.body]);
+      if (probe.status === 200) break;
+      console.log(`  (probe attempt ${attempt + 1}: HTTP ${probe.status} — retrying)`);
+      await page.waitForTimeout(2500);
+    }
+    let pj = null; try { pj = JSON.parse(probe.text); } catch (_) { /* reported below */ }
+    const pacres = pj && pj.features ? pj.features.map((f) => geodesicAreaM2(f.geometry.rings) / M2_PER_AC).sort((a, b) => a - b) : [];
+    expect(`${stage.toUpperCase()}: a probe tile through the same URL the app uses answers with larger lots only (2nd percentile ≥ ${floorAc.toFixed(2)} ac)`, probe.status === 200 && pacres.length > 0 && pacres[Math.floor(pacres.length * 0.02)] >= floorAc, `${probe.status}, ${pacres.length} lots, 2nd percentile ${pacres.length ? pacres[Math.floor(pacres.length * 0.02)].toFixed(3) : "n/a"} ac, ${req.via}`);
     expect(`${stage.toUpperCase()}: the hint says what is held back`, /Showing larger lots\. Zoom in for small lots and labels\./.test(await tip()), JSON.stringify((await tip()).slice(0, 80)));
     const st = stats(tag);
-    console.log(`  ${stage}: ${st.n} requests · ${st.kb} KB · ${st.lots} lots · via ${[...new Set(rs.map((s) => s.via))].join("/")}`);
+    console.log(`  ${stage}: ${st.n} observed answers · ${st.kb} KB · ${st.lots} lots (app: ${app ? app.requests + " requests, " + app.held + " lots held" : "n/a"})`);
     void moved;
   }
   tag = `${key}:back`;
