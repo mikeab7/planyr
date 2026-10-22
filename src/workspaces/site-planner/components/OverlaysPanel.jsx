@@ -335,10 +335,10 @@ export function ScaleTools({ o, onApply }) {
   const [draft, setDraft] = useState(() => roundFpi(curFpi));
   const [bad, setBad] = useState(false);
   const [dirty, setDirty] = useState(false);   // an idle focus → blur must not re-commit the ROUNDED display value (it would drift the scale)
-  const commit = (raw) => {
+  const commit = async (raw) => {
     if (!dirty) { setBad(false); return; }
-    const fpi = parseTypedScale(raw);
-    setDirty(false);
+    setDirty(false);   // before the await: Enter's commit and the blur that follows must not both apply
+    const fpi = await parseTypedScale(raw);
     if (fpi == null) { setBad(true); setDraft(roundFpi(curFpi)); return; }
     setBad(false); setDraft(roundFpi(fpi));
     onApply(fpi);

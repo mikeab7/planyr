@@ -10,8 +10,6 @@
  * independent of how large we rasterized it.
  */
 
-import { parseSheetScale } from "../files/sheetScale.js";
-
 export const POINTS_PER_INCH = 72;
 // feet-per-point for a given engineer's scale (feet per inch). The one place the
 // scale↔size conversion lives, so the panel and auto-apply agree.
@@ -198,20 +196,29 @@ export function matchScalePreset(feetPerInch, eps = 1e-3) {
   return null;
 }
 
-/* The Set-scale "Custom" box: ONE text field holding `1" = [ N ]'`. A plain number (or `N'`, `N ft`) is feet per inch;
- * anything else goes through the sheet-scale reader the title-block code already trusts (`1" = 40'`, `1:480`,
- * `1/8" = 1'-0"` …) so metric/architectural people aren't stuck. Returns a positive feet-per-inch, or null for
- * blank / junk / NTS / out of a sane range — the caller reverts and flags the field, it never applies a guess. */
+/* The Set-scale "Custom" box: ONE text field holding `1" = [ N ]'`. A plain number (or `N'`, `N ft`) is feet per inch and
+ * is read synchronously here; anything else (`1" = 40'`, `1:480`, `1/8" = 1'-0"` …) goes through the sheet-scale reader the
+ * title-block code already trusts, LOADED ON DEMAND — a static import would pull that module's chunk onto the Site route's
+ * boot path (the NEW-8 allowlist), and a person typing a plain number never needs it. Returns a positive feet-per-inch, or
+ * null for blank / junk / NTS / out of a sane range — the caller reverts and flags the field, it never applies a guess. */
 export const TYPED_SCALE_MIN_FPI = 0.1, TYPED_SCALE_MAX_FPI = 2000;
-export function parseTypedScale(raw) {
+const saneTypedScale = (v) => (Number.isFinite(v) && v >= TYPED_SCALE_MIN_FPI && v <= TYPED_SCALE_MAX_FPI ? v : null);
+const PLAIN_TYPED_SCALE = /^(\d*\.?\d+)\s*(?:['’′]|ft|feet)?$/i;
+export function parsePlainTypedScale(raw) {
+  if (raw == null) return null;
+  const m = String(raw).trim().match(PLAIN_TYPED_SCALE);
+  return m ? saneTypedScale(+m[1]) : null;
+}
+export async function parseTypedScale(raw) {
   if (raw == null) return null;
   const s = String(raw).trim();
   if (!s) return null;
-  const sane = (v) => (Number.isFinite(v) && v >= TYPED_SCALE_MIN_FPI && v <= TYPED_SCALE_MAX_FPI ? v : null);
-  const plain = s.match(/^(\d*\.?\d+)\s*(?:['’′]|ft|feet)?$/i);
-  if (plain) return sane(+plain[1]);
-  const r = parseSheetScale(s);
-  return r && r.ftPerInch > 0 ? sane(r.ftPerInch) : null;
+  const plain = parsePlainTypedScale(s);
+  if (plain != null) return plain;
+  if (PLAIN_TYPED_SCALE.test(s)) return null;   // a bare number that is out of range is junk, not a sheet note
+  const { parseSheetScale: read } = await import("../files/sheetScale.js");
+  const r = read(s);
+  return r && r.ftPerInch > 0 ? saneTypedScale(r.ftPerInch) : null;
 }
 
 /* The richer STATED-scale parser (engineer / architectural / ratio / NTS) moved to
@@ -219,4 +226,4 @@ export function parseTypedScale(raw) {
  * shared layer importing back into this workspace. Re-exported here so the overlay's existing
  * callers (and test/sheetScale.test.js) keep importing `parseSheetScale` from overlayScale.js
  * unchanged, and the scale↔feet-per-point conversion (ftPerPointForScale) stays alongside it. */
-export { parseSheetScale };
+export { parseSheetScale } from "../files/sheetScale.js";
