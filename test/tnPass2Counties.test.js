@@ -116,13 +116,13 @@ describe("Hamilton County — the county's own ArcGIS Server (Live_Parcels)", ()
     expect(rec.owner).toBe("VANESSAS COTTAGE LLC");
     expect(rec.address).toBe("10406 DAYTON PIKE");
   });
-  it("rides the relay to the county's allow-listed host, pinned to TAX_MAP_NO / ADDRESS, outline floor 16", () => {
+  it("rides the relay to the county's allow-listed host, pinned to TAX_MAP_NO / ADDRESS, outline floor 17 (one zoom-16 cell holds 1,066 lots against the 1,000 cap)", () => {
     const c = COUNTIES.tn_hamilton;
     expect(c.layerUrl).toBe("/gis-proxy/mapsdev.hamiltontn.gov/hcwa03/rest/services/Live_Parcels/MapServer/0");
     expect(ALLOWED_HOSTS.has("mapsdev.hamiltontn.gov")).toBe(true);
     expect(c.idField).toBe("TAX_MAP_NO"); expect(c.pinIdField).toBe(true);
     expect(c.addrField).toBe("ADDRESS"); expect(c.pinAddrField).toBe(true);
-    expect(displayMinZoomOf("tn_hamilton")).toBe(16);
+    expect(displayMinZoomOf("tn_hamilton")).toBe(17);
   });
   it("probe hosts that were measured and not used are not on the allow-list", () => {
     expect(ALLOWED_HOSTS.has("pwgis.chattanooga.gov")).toBe(false);
