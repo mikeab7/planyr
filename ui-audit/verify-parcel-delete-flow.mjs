@@ -64,8 +64,11 @@ await page.route("**/*.jpg", (r) => r.abort());
 const T = (id) => page.getByTestId(id);
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
 const storedLocal = () => page.evaluate(([id, uid]) => { const keys = uid ? ["planarfit:sites:cloud:" + uid] : ["planarfit:sites:v1"]; for (const k of keys) { const m = JSON.parse(localStorage.getItem(k) || "{}"); if (m[id]) return m[id].parcels || []; } return []; }, [SITE_ID, UID]);
-const storedCloud = () => page.evaluate(async (id) => { const r = await window.pfSupabase.from("sites").select("data").eq("id", id).maybeSingle(); return r.data && r.data.data ? (r.data.data.parcels || []) : null; }, SITE_ID);
-const stored = async () => (SIGNED ? ((await storedCloud()) || (await storedLocal())) : storedLocal());
+/* the CLOUD copy of a plan's parcels is its live `site_elements` rows (kind 'parcel', not tombstoned) — the plan row's own `data.parcels` is slimmed to [] once elements are in rows */
+const storedCloud = () => page.evaluate(async (id) => { const r = await window.pfSupabase.from("site_elements").select("id,data").eq("site_id", id).eq("kind", "parcel").is("deleted_at", null); return r.data ? r.data.map((x) => ({ ...(x.data || {}), id: x.id })) : null; }, SITE_ID);
+const stored = storedLocal; // the app's own immediate write; the CLOUD row is polled explicitly where persistence matters (cloudSettles)
+/* signed in: poll the cloud row until it satisfies `pred` (the push is debounced) — a real round-trip assertion, not a single racing read */
+const cloudSettles = async (pred, ms = 20000) => { if (!SIGNED) return true; const t0 = Date.now(); while (Date.now() - t0 < ms) { const c = await storedCloud(); if (c && pred(c)) return true; await sleep(750); } return false; };
 const rowIds = () => page.locator('[data-testid^="parcel-table-row-"]').evaluateAll((e) => e.map((n) => n.getAttribute("data-testid").replace("parcel-table-row-", "")));
 const has = async (id) => (await rowIds()).includes(id);
 const toasts = () => page.getByTestId("sync-toast");
@@ -97,12 +100,14 @@ const settledEdgePoint = async (id) => {
   throw new Error(`VOID: could not find a settled hit point on parcel ${id} :: ${JSON.stringify(dbg)} :: ${JSON.stringify(await Promise.all((await edgePoints(id)).map(async (at) => [at, await page.evaluate(([x, y]) => document.elementsFromPoint(x, y).slice(0, 3).map((n) => n.tagName + "." + (n.getAttribute("data-testid") || n.className || "")).join(">"), at)])))}`);
 };
 const openPlan = async () => {
-  if (SIGNED) await page.goto(`${BASE}/#/project/${SITE_ID}/site`, { waitUntil: "load" });
-  else { await page.goto(BASE + "/#/site-planner", { waitUntil: "load" }); }
-  if (!(await T("planner-canvas").isVisible().catch(() => false))) {
-    const entry = page.getByText("ZZ Parcel Delete", { exact: false }).first();
-    await entry.waitFor({ timeout: 25000 });
-    await entry.click();
+  if (SIGNED) { await page.goto(`${BASE}/#/project/${SITE_ID}/site`, { waitUntil: "load" }); await page.reload({ waitUntil: "load" }); } // the row was inserted after the app booted — a reload makes it pull
+  else {
+    await page.goto(BASE + "/#/site-planner", { waitUntil: "load" });
+    if (!(await T("planner-canvas").isVisible().catch(() => false))) {
+      const entry = page.getByText("ZZ Parcel Delete", { exact: false }).first();
+      await entry.waitFor({ timeout: 25000 });
+      await entry.click();
+    }
   }
   await T("planner-canvas").waitFor({ timeout: 45000 });
   await sleep(1500);
@@ -146,7 +151,8 @@ try {
   ok("1 …a 'Deleted KILGORE PKWY' toast carries Undo", (await toastTexts()).some((t) => /Deleted KILGORE PKWY/.test(t) && /Undo/.test(t)), JSON.stringify(await toastTexts()));
   await undoInToast(/Deleted KILGORE PKWY/);
   ok("1 …Undo brings it back (list + storage)", (await has("k1")) && (await stored()).some((p) => p.id === "k1"));
-  await T("parcel-row-more-k1").click(); await T("parcel-row-menu-k1-delete").click(); await sleep(2500);
+  await T("parcel-row-more-k1").click(); await T("parcel-row-menu-k1-delete").click(); await sleep(800);
+  ok("1 …the removal reaches the cloud row", await cloudSettles((c) => !c.some((p) => p.id === "k1")));
   await reloadPlan();
   ok("1 …delete then RELOAD: stays deleted (tombstone)", !(await has("k1")), JSON.stringify(await rowIds()));
 
@@ -196,7 +202,7 @@ try {
   ok("5 rail Parcel tools → Delete parcel deletes the selected parcel with a toast + Undo", !(await has("k6")) && (await toastTexts()).some((t) => /Deleted ELM CT/.test(t) && /Undo/.test(t)), JSON.stringify(await toastTexts()));
   await undoInToast(/Deleted ELM CT/);
   ok("5 …Undo restores it", await has("k6"));
-  await sleep(2500);
+  ok("5 …the restored parcel is in the cloud row", await cloudSettles((c) => c.some((p) => p.id === "k6")));
   await reloadPlan();
   ok("5 …delete, Undo, RELOAD: stays restored", await has("k6"));
 
