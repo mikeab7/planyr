@@ -70,17 +70,17 @@ export async function resolveParcelId(text, { lookup = lookupParcels, lookupWher
       const top = scored.filter((x) => x.sc === best);
       const perCounty = new Map();
       top.forEach((x) => { const c = nameOf(p, x.f); perCounty.set(c, (perCounty.get(c) || 0) + 1); });
-      top.forEach((x) => { const c = nameOf(p, x.f); found.push({ p, feature: x.f, ambiguous: perCounty.get(c) > 1 || best < 2, exact: best >= 2 && perCounty.get(c) === 1, countyName: c }); });
+      top.forEach((x) => { const c = nameOf(p, x.f); found.push({ p, feature: x.f, ambiguous: perCounty.get(c) > 1 || best < 2, exact: best >= 2 && perCounty.get(c) === 1, shown: best === 3 && perCounty.get(c) === 1, countyName: c }); });
       return;
     }
     if (p.kind === "paid") {
       const norm = (v) => String(v == null ? "" : v).toUpperCase().replace(/[^A-Z0-9]/g, "");
       const hit = feats.find((f) => norm((f.attributes || {}).PAID) === norm(p.canonical)) || (feats.length === 1 ? feats[0] : null);
-      if (hit) found.push({ p, feature: hit, ambiguous: false, exact: true, countyName: p.name });
+      if (hit) found.push({ p, feature: hit, ambiguous: false, exact: true, shown: true, countyName: p.name });
       return;
     }
     const pick = pickIdMatch(feats, p.canonical, (f) => idAttrFor(p.county, f.attributes || {}));
-    if (pick) found.push({ p, feature: pick, ambiguous: false, exact: true, countyName: p.name });
+    if (pick) found.push({ p, feature: pick, ambiguous: false, exact: true, shown: true, countyName: p.name });
     else if (feats.length > 1) found.push({ p, feature: feats[0], ambiguous: true, exact: false, countyName: p.name });
   });
   /* Nothing found: if any county did not ANSWER, the id may live there — say "couldn't check", never "doesn't exist". */
@@ -89,7 +89,8 @@ export async function resolveParcelId(text, { lookup = lookupParcels, lookupWher
    * and the others are named — `alsoIn` — rather than silently dropped. */
   const withPoint = found.map((f) => ({ ...f, point: interiorPointOf(f.feature) })).filter((f) => f.point);
   if (!withPoint.length) return { status: "notfound", tried, canonical, reason: "no-geometry" };
-  const tier = (f) => (f.exact ? 0 : f.ambiguous ? 2 : 1);
+  /* tier 0: the id is exactly what that lot's card SHOWS (another county's lot can share a control-map number, never the whole shown string); 1: every part equal; 2: a partial reading; 3: several lots */
+  const tier = (f) => (f.shown ? 0 : f.exact ? 1 : f.ambiguous ? 3 : 2);
   withPoint.sort((a, b) => tier(a) - tier(b) || (near ? km(a.point, near) - km(b.point, near) : 0));
   const hit = withPoint[0];
   const alsoIn = [...new Set(withPoint.filter((f) => tier(f) === tier(hit) && f.countyName !== hit.countyName).map((f) => f.countyName))];

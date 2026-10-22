@@ -6,7 +6,7 @@
  *   C  typing that id into the Site search box lands on and selects the same lot (`--search`; default ON).
  * Knox must show the honest "no parcel data wired here yet" sentence. Controls: Harris TX and Dougherty GA must still draw outlines (the run is VOID otherwise). Every row records /version.json IN THE SAME CALL
  * (merged ≠ live). Creates no plan, so nothing to clean up.
- * Run: E2E_LOGIN_KEY=… node ui-audit/verify-tn-counties-live.mjs [https://planyr.io] [--counties=Sullivan,Dyer] [--shard=1/3] [--dense] [--no-search] [--out f.json]
+ * Run: E2E_LOGIN_KEY=… node ui-audit/verify-tn-counties-live.mjs [https://planyr.io] [--counties=Sullivan,Dyer] [--shard=1/3] [--dense] [--no-search] [--anon] [--out f.json]
  * Exit 0 = every row passed; 1 = a row failed; 2 = VOID (a control failed or the map never came up). */
 import { writeFileSync, readFileSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -24,6 +24,14 @@ const FX = JSON.parse(readFileSync(new URL("../test/fixtures/tnSweepPoints.json"
 const norm = (v) => String(v == null ? "" : v).toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 let s = null;
+if (args.includes("--anon")) { // a PR preview has no e2e sign-in route; Select parcels works signed out, which is all this checks
+  const { chromium } = await import("@playwright/test");
+  const { existsSync } = await import("node:fs");
+  const browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });
+  s = { page: await ctx.newPage(), proof: { email: "(signed out)" }, build: null, close: () => browser.close() };
+}
 for (let attempt = 1; attempt <= 6 && !s; attempt++) {
   try { s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] }); }
   catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 6) throw e; console.log(`  sign-in attempt ${attempt} → ${e.message.slice(0, 80)}; retrying in 20 s`); await new Promise((r) => setTimeout(r, 20000)); }

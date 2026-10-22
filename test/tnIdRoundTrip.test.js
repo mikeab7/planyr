@@ -20,11 +20,23 @@ for (const c of FX.counties) {
   if (c.dense && c.dense.id) sites.push({ county: c.name, source: c.source, id: c.dense.id, attrs: c.dense.matchAttrs, where: c.dense.town });
 }
 /* a stand-in server: the recorded row for the source it came from, nothing from any other */
+/* …and, because a control-map number REPEATS across counties (found live: Hamilton "066  018" also reads as Chester's 012066 01800), every other source that could read the id answers with a
+ * DECOY lot built from the same map / letters / parcel — a different lot in a different county, in that source's own shape. The recorded lot must still win with the map nowhere near it. */
+const decoyFor = (site, p) => {
+  const f = p.form;
+  if (!f) return null;
+  const link = `${f.map}${(f.tag || "").padEnd(2, " ")} ${" ".repeat(0)}${f.parcel5}`.replace(/\s+/g, " ");
+  const attrs = { CMAP: `${f.map}${(f.tag || "")[0] || ""}`, GP: (f.tag || "").slice(1) || " ", PARCEL: `${f.parcel5.slice(0, 3)}.${f.parcel5.slice(3)}`, COUNTY_ID: 66, COUNTY_NAME: "Obion", PARCELID: `066 ${link} 000 2026`,
+    GISLINK: `066${f.map}${(f.tag || "").padEnd(2, " ")} ${f.parcel5}`.replace(/(\d{3})(\d{3})/, "$1$2"), gislink_1: `066${f.map}    ${f.parcel5}`, L15Parce_2: `066${f.map}    ${f.parcel5}`, ParcelID: `${f.map}-${f.parcel5.slice(0, 3)}.${f.parcel5.slice(3)}-000` };
+  return { attributes: attrs, geometry: SQ };
+};
 const server = (site) => {
   const row = { attributes: site.attrs, geometry: SQ };
+  const plan = tnParcelIdPlan(site.id);
+  const decoy = (county, where) => { const p = plan.find((q) => q.county === county && (!where || q.where === where)); const d = p && decoyFor(site, p); return d ? [d] : []; };
   return {
-    lookup: async ({ county }) => ({ feats: county === site.source ? [row] : [] }),
-    lookupWhere: async ({ county }) => ({ feats: county === site.source ? [row] : [] }),
+    lookup: async ({ county }) => ({ feats: county === site.source ? [row] : decoy(county) }),
+    lookupWhere: async ({ county, where }) => ({ feats: county === site.source ? [row] : decoy(county, where) }),
   };
 };
 
