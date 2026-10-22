@@ -116,7 +116,7 @@ describe("resolveParcelId — typed id → the lot (recorded answers, injected l
   it("a county that did not ANSWER is `unavailable` — 'couldn't check', never 'does not exist'", async () => {
     const r = await resolveParcelId("156-999.00-000", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: new Error("timeout") }) });
     expect(r.status).toBe("unavailable");
-    expect(parcelIdMessage(r, "156-999.00-000")).toMatch(/Couldn't reach the Rutherford County parcel server/);
+    expect(parcelIdMessage(r, "156-999.00-000")).toMatch(/Rutherford County parcel server didn't answer/);
   });
   it("one county down and another empty is still `unavailable` (the id may live in the one that did not answer)", async () => {
     const r = await resolveParcelId("10508026600", { retryMs: 0, lookupWhere: NONE, lookup: lookupFrom({ tn_rutherford: new Error("x"), tn_davidson: [] }) });

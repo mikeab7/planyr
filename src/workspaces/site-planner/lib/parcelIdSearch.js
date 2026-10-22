@@ -8,7 +8,9 @@
  *   { status: "none" }                                         — the text is not an id; the caller geocodes it as before
  *   { status: "found", county, name, canonical, feature, point, label, ambiguous? }
  *   { status: "notfound", tried: ["Davidson", "Rutherford"], canonical }
- *   { status: "unavailable", tried, failed: ["Rutherford"], canonical }
+ *   { status: "unavailable", tried, failed: ["Rutherford"], canonical }     — a source never answered (timeout / error) after every attempt
+ *   a "found" outcome also carries `unchecked: ["Perry"]` when another source it asked never answered (so the lot may not be the only one), and
+ *   `recheckedEmpty: true` when a first all-empty answer turned into a find on the confirming re-ask (the app reports it — see resolveParcelId)
  *
  * `point` is { lat, lng } INSIDE the lot (pole of inaccessibility of its largest outer ring — never a vertex average, which can sit off a
  * strip or an L), so the shared identify-at-a-point selection that follows lands on this lot and no neighbour. Pure but for the injected
@@ -18,6 +20,7 @@ import { lookupParcels, lookupParcelsWhere, idAttrFor } from "./parcelQuery.js";
 import { outerRingsLngLat } from "./esriRings.js";
 import { polylabel } from "./polylabel.js";
 import { tnParcelIdPlan, pickIdMatch, linkMatch, parseStoredLink, storedPartsFromColumns } from "./tnParcelId.js";
+import { askUntilAnswered, ASK_BUDGETS_MS, RETRY_GAP_MS } from "./slowSource.js";
 
 /** The point inside a looked-up lot (WGS84 rings in `feature.geometry.rings`), or null when it has no usable polygon. */
 export function interiorPointOf(feature) {
@@ -36,53 +39,62 @@ const ringSpan = (r) => {
 const layerUrlOf = (key) => (COUNTIES[key] && COUNTIES[key].layerUrl) || (COUNTIES_MAP[key] && COUNTIES_MAP[key].layerUrl) || "";
 const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 const km = (a, b) => Math.hypot((a.lat - b.lat) * 111, (a.lng - b.lng) * 111 * Math.cos((a.lat * Math.PI) / 180));
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The stored parts of a returned lot for a link-kind plan item (the Comptroller layer's CMAP/GP/PARCEL columns, else the source's own link column). */
 const storedLinkOf = (p, attrs) => (p.src && p.src.statewide ? storedPartsFromColumns(attrs) : parseStoredLink(attrs && p.src && attrs[p.src.linkField]));
 
-export async function resolveParcelId(text, { lookup = lookupParcels, lookupWhere = lookupParcelsWhere, plan = tnParcelIdPlan(text), near = null, retryMs = 400 } = {}) {
+export async function resolveParcelId(text, { lookup = lookupParcels, lookupWhere = lookupParcelsWhere, plan = tnParcelIdPlan(text), near = null, retryMs = RETRY_GAP_MS, budgets = ASK_BUDGETS_MS, sleep } = {}) {
   if (!plan.length) return { status: "none" };
   const canonical = plan[0].canonical;
-  /* A source that does not answer is asked once more: the state's layer is the slowest in the app (a first, cold ask measured 5–6 s against an 8 s limit), and "couldn't check" is the
-   * wrong thing to tell someone whose id exists. The retry never turns a failure into a pass — a second failure is `unavailable`. */
-  const ask = async (p) => {
-    const run = () => (p.where
-      ? lookupWhere({ county: p.county, lookupUrl: layerUrlOf(p.county), where: p.where })
-      : lookup({ county: p.county, lookupUrl: layerUrlOf(p.county), mode: "id", value: p.value }));
-    try { return await run(); } catch (_e) { await sleep(retryMs); return run(); }
-  };
-  const settled = await Promise.allSettled(plan.map(ask));
+  /* A source that does not answer is waited for and asked again (NEW-1, 2026-10-22). The state's layer is the slowest in the app — measured 50 ms warm but 27 s, 44 s and a 504 at 59 s on a
+   * cold ask — so the old 8 s + 8 s could lose twice to a server that was merely waking up. Each attempt now gets its own, longer budget (`slowSource.ASK_BUDGETS_MS`) and the second ask
+   * is the retry. The retry never turns a failure into a pass: a source that fails every attempt is `unavailable`, which the caller words as "didn't answer", never "not found". */
+  const ask = (p) => askUntilAnswered(({ timeoutMs }) => (p.where
+    ? lookupWhere({ county: p.county, lookupUrl: layerUrlOf(p.county), where: p.where, timeoutMs })
+    : lookup({ county: p.county, lookupUrl: layerUrlOf(p.county), mode: "id", value: p.value, timeoutMs })), { budgets, retryMs, ...(sleep ? { sleep } : {}) });
   const tried = [...new Set(plan.map((p) => p.name))];
-  const failed = [];
-  const found = []; // { p, feature, ambiguous, exact, countyName }
   const nameOf = (p, feature) => (p.src && p.src.statewide ? `${titleCase((feature.attributes || {}).COUNTY_NAME) || "Tennessee"}` : p.name);
-  settled.forEach((r, i) => {
-    const p = plan[i];
-    if (r.status === "rejected") { if (!failed.includes(p.name)) failed.push(p.name); return; }
-    const feats = (r.value && r.value.feats) || [];
-    if (p.kind === "link") {
-      /* the id exactly as the card shows it (spaces and punctuation aside) is the strongest reading — it tells apart the condo units of one parcel, which share their link */
-      const shown = (f) => String(idAttrFor(p.county, f.attributes || {}) || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-      const scored = feats.map((f) => ({ f, sc: shown(f) && shown(f) === p.typed ? 3 : linkMatch(storedLinkOf(p, f.attributes || {}), p.form) })).filter((x) => x.sc > 0);
-      if (!scored.length) return;
-      const best = Math.max(...scored.map((x) => x.sc));
-      const top = scored.filter((x) => x.sc === best);
-      const perCounty = new Map();
-      top.forEach((x) => { const c = nameOf(p, x.f); perCounty.set(c, (perCounty.get(c) || 0) + 1); });
-      top.forEach((x) => { const c = nameOf(p, x.f); found.push({ p, feature: x.f, ambiguous: perCounty.get(c) > 1 || best < 2, exact: best >= 2 && perCounty.get(c) === 1, shown: best === 3 && perCounty.get(c) === 1, countyName: c }); });
-      return;
-    }
-    if (p.kind === "paid") {
-      const norm = (v) => String(v == null ? "" : v).toUpperCase().replace(/[^A-Z0-9]/g, "");
-      const hit = feats.find((f) => norm((f.attributes || {}).PAID) === norm(p.canonical)) || (feats.length === 1 ? feats[0] : null);
-      if (hit) found.push({ p, feature: hit, ambiguous: false, exact: true, shown: true, countyName: p.name });
-      return;
-    }
-    const pick = pickIdMatch(feats, p.canonical, (f) => idAttrFor(p.county, f.attributes || {}));
-    if (pick) found.push({ p, feature: pick, ambiguous: false, exact: true, shown: true, countyName: p.name });
-    else if (feats.length > 1) found.push({ p, feature: feats[0], ambiguous: true, exact: false, countyName: p.name });
-  });
+  /* Read one round of answers: which sources failed, and which lots matched. */
+  const collect = (settled) => {
+    const failed = [];
+    const found = []; // { p, feature, ambiguous, exact, countyName }
+    settled.forEach((r, i) => {
+      const p = plan[i];
+      if (r.status === "rejected") { if (!failed.includes(p.name)) failed.push(p.name); return; }
+      const feats = (r.value && r.value.feats) || [];
+      if (p.kind === "link") {
+        /* the id exactly as the card shows it (spaces and punctuation aside) is the strongest reading — it tells apart the condo units of one parcel, which share their link */
+        const shown = (f) => String(idAttrFor(p.county, f.attributes || {}) || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const scored = feats.map((f) => ({ f, sc: shown(f) && shown(f) === p.typed ? 3 : linkMatch(storedLinkOf(p, f.attributes || {}), p.form) })).filter((x) => x.sc > 0);
+        if (!scored.length) return;
+        const best = Math.max(...scored.map((x) => x.sc));
+        const top = scored.filter((x) => x.sc === best);
+        const perCounty = new Map();
+        top.forEach((x) => { const c = nameOf(p, x.f); perCounty.set(c, (perCounty.get(c) || 0) + 1); });
+        top.forEach((x) => { const c = nameOf(p, x.f); found.push({ p, feature: x.f, ambiguous: perCounty.get(c) > 1 || best < 2, exact: best >= 2 && perCounty.get(c) === 1, shown: best === 3 && perCounty.get(c) === 1, countyName: c }); });
+        return;
+      }
+      if (p.kind === "paid") {
+        const norm = (v) => String(v == null ? "" : v).toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const hit = feats.find((f) => norm((f.attributes || {}).PAID) === norm(p.canonical)) || (feats.length === 1 ? feats[0] : null);
+        if (hit) found.push({ p, feature: hit, ambiguous: false, exact: true, shown: true, countyName: p.name });
+        return;
+      }
+      const pick = pickIdMatch(feats, p.canonical, (f) => idAttrFor(p.county, f.attributes || {}));
+      if (pick) found.push({ p, feature: pick, ambiguous: false, exact: true, shown: true, countyName: p.name });
+      else if (feats.length > 1) found.push({ p, feature: feats[0], ambiguous: true, exact: false, countyName: p.name });
+    });
+    return { failed, found };
+  };
+  let { failed, found } = collect(await Promise.allSettled(plan.map(ask)));
+  /* A MISS IS CONFIRMED BEFORE IT IS REPORTED. Every source answered and none had the id: ask once more. Michael saw a first live run come back empty that passed on re-run, and the cause could not be
+   * reproduced (no empty-200 in 40+ timed asks, a 504 and 27–59 s cold asks were the only anomalies seen) — so a genuine miss costs one more round of ~50 ms asks, and a miss that flips is
+   * flagged `recheckedEmpty` for the app to report, which is how an intermittent empty answer captures itself instead of being dismissed. */
+  let recheckedEmpty = false;
+  if (!found.length && !failed.length) {
+    const again = collect(await Promise.allSettled(plan.map(ask)));
+    if (again.found.length || again.failed.length) { recheckedEmpty = again.found.length > 0; ({ failed, found } = again); }
+  }
   /* Nothing found: if any county did not ANSWER, the id may live there — say "couldn't check", never "doesn't exist". */
   if (!found.length) return { status: failed.length ? "unavailable" : "notfound", tried, canonical, ...(failed.length ? { failed } : {}) };
   /* An exact, single match beats a partial one. Several counties may hold the same control-map number (it repeats across the state), so among equals the lot nearest the map wins
@@ -97,7 +109,8 @@ export async function resolveParcelId(text, { lookup = lookupParcels, lookupWher
   const id = idAttrFor(hit.p.county, hit.feature.attributes || {}) || hit.p.canonical;
   return {
     status: "found", county: hit.p.county, name: hit.countyName, canonical: hit.p.canonical, feature: hit.feature, point: hit.point,
-    label: `Parcel ${id} · ${hit.countyName} County, TN${alsoIn.length ? ` · also in ${alsoIn.join(", ")}` : ""}`, ambiguous: hit.ambiguous, ...(alsoIn.length ? { alsoIn } : {}),
+    label: `Parcel ${id} · ${hit.countyName} County, TN${alsoIn.length ? ` · also in ${alsoIn.join(", ")}` : ""}${failed.length ? ` · couldn't check ${failed.join(", ")}` : ""}`, ambiguous: hit.ambiguous, ...(alsoIn.length ? { alsoIn } : {}),
+    ...(failed.length ? { unchecked: failed } : {}), ...(recheckedEmpty ? { recheckedEmpty: true } : {}),
   };
 }
 
@@ -107,7 +120,7 @@ export function parcelIdMessage(res, typed) {
   const names = res.tried || [];
   const where = names.length > 3 ? "any Tennessee county's parcel layer" : names.length > 1 ? `${names.join(" and ")} counties` : `${names[0] || "Tennessee"} County`;
   const nm = (n) => (n === "Tennessee" ? "Tennessee statewide" : `${n} County`);
-  if (res.status === "unavailable") return `Couldn't reach the ${(res.failed || res.tried || []).map(nm).join(" / ")} parcel server just now, so parcel ID "${t}" could not be checked. Try again in a moment.`;
+  if (res.status === "unavailable") return `The ${(res.failed || res.tried || []).map(nm).join(" / ")} parcel server didn't answer, so parcel ID "${t}" could not be checked. Try again.`;
   if (res.status === "notfound") return `No Tennessee parcel with ID "${t}" in ${where}. Check the control map, parcel and special-interest numbers — or type the site address instead.`;
   return "";
 }

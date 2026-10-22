@@ -109,13 +109,13 @@ export function idAttrFor(county, attrs) {
 
 // Run one ID/address query against a single layer; returns the matched features plus
 // the resolved layer + detected field names (so the caller can import a result).
-async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere, pinId, pinAddr }) {
-  const layerUrl = await resolveLayerUrl(rawUrl);
-  const meta = await getLayerInfo(layerUrl);
+async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere, pinId, pinAddr, timeoutMs }) {
+  const layerUrl = await resolveLayerUrl(rawUrl, { timeoutMs });
+  const meta = await getLayerInfo(layerUrl, { timeoutMs });
   const idField = resolveSearchField(meta.fields, "id", idHint, pinId);
   const addrField = resolveSearchField(meta.fields, "address", addrHint, pinAddr);
   const where = buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere });
-  const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326 }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
+  const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326, timeoutMs }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
   return { feats, layerUrl, idField, addrField };
 }
 
@@ -125,7 +125,7 @@ async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere
  * TxGIO layer scoped to that county. Records the primary's circuit-breaker health.
  * Returns { feats, layerUrl, idField, addrField, backup, backupCounty }. A config
  * error (no id field, bad field name) is rethrown as-is — it isn't an outage. */
-export async function lookupParcels({ county, lookupUrl, mode, value }) {
+export async function lookupParcels({ county, lookupUrl, mode, value, timeoutMs }) {
   /* NEW-2 (TN, 2026-10-21) — an id typed with spaces / dots / dashes in any mix is rebuilt into the form the county stores it in, so
    * "156 027.00 000" finds `156-027.00-000`. Only a county that declares an `idNormalizer` is touched, and only an id search. */
   if (mode === "id" && COUNTIES[county]?.idNormalizer) value = normalizeIdFor(COUNTIES[county].idNormalizer, value);
@@ -137,6 +137,7 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
       scopeWhere: COUNTIES[county]?.scopeWhere,
       pinId: !!COUNTIES[county]?.pinIdField,
       pinAddr: !!COUNTIES[county]?.pinAddrField,
+      timeoutMs,
     });
     recordSourceResult(county, true);
     return { ...r, backup: false, backupCounty: null };
@@ -149,7 +150,7 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
     const fb = isDefaultUrl ? statewideFallbackFor(county) : null;
     if (!fb) throw err;
     const r = await queryOneLayer(fb.layerUrl, {
-      mode, value, idHint: fb.idField, addrHint: fb.addrField, scopeWhere: fb.scopeWhere,
+      mode, value, idHint: fb.idField, addrHint: fb.addrField, scopeWhere: fb.scopeWhere, timeoutMs,
     });
     return { ...r, backup: true, backupCounty: fb.countyName };
   }
@@ -158,10 +159,10 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
 /* NEW-2 (Tennessee, all 95 counties) — a lookup whose where-clause the caller has already built from a PARSED id (tnParcelId.js `linkWhere` / Shelby's PAID), run on one layer with the
  * same health bookkeeping as `lookupParcels`. No field detection and no statewide fallback: the clause names the columns it needs, and a source that does not answer is `unavailable`
  * (a typed ParcelFetchError), never an empty list. Returns { feats, layerUrl }. */
-export async function lookupParcelsWhere({ county, lookupUrl, where }) {
-  const layerUrl = await resolveLayerUrl(lookupUrl);
+export async function lookupParcelsWhere({ county, lookupUrl, where, timeoutMs }) {
+  const layerUrl = await resolveLayerUrl(lookupUrl, { timeoutMs });
   try {
-    const feats = await queryFeatures(layerUrl, { where, count: 50, outSR: 4326 });
+    const feats = await queryFeatures(layerUrl, { where, count: 50, outSR: 4326, timeoutMs });
     recordSourceResult(county, true);
     return { feats, layerUrl };
   } catch (err) {
