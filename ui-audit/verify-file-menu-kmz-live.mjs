@@ -4,7 +4,7 @@
  * the served build (/version.json) + loaded chunk hashes, the File ▾ rows, their enabled/disabled state (and reason),
  * a real .kmz download when the plan is located, and the canvas right-click (known-good arm: Zoom to fit + Paste present).
  * Read-only on the fixture (never edits or deletes it). */
-import { openSignedIn, FIXTURE_SITE_ID } from "./lib/signedInSession.mjs";
+import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { readFile } from "node:fs/promises";
 import { inflateRawSync } from "node:zlib";
@@ -16,7 +16,20 @@ const s = await openSignedIn({ base });
 const { page } = s;
 try {
   await assertMeasurable(page, "verify-file-menu-kmz-live");
-  await page.goto(`${base}/#/project/${FIXTURE_SITE_ID}/site`, { waitUntil: "load" });
+  // Open the fixture from the Map's Sites list (the project route wants a GROUP id, not the site row id).
+  await page.goto(`${base}/#/site`, { waitUntil: "load" });
+  const row = page.locator('[title^="Open site"]').filter({ hasText: /E2E Fixture/ }).first();
+  await row.waitFor({ state: "visible", timeout: 45000 });
+  // Map view: a right-click on EMPTY map has no Planyr menu and no Google Earth rows (owner decision 2026-10-22).
+  const mapEl = page.locator(".leaflet-container").first();
+  const mb = await mapEl.boundingBox();
+  check("known-good: the Map view is on screen", !!mb && mb.width > 300);
+  await page.mouse.click(mb.x + mb.width * 0.55, mb.y + mb.height * 0.85, { button: "right" });
+  await page.waitForTimeout(600);
+  check("Map view empty-map right-click shows NO Google Earth / 3D rows", (await page.getByText(/Export to Google Earth|Export with 3D buildings/).count()) === 0);
+  check("Map view empty-map right-click shows no 'Map actions' menu", (await page.locator('[aria-label="Map actions"]').count()) === 0);
+  await page.keyboard.press("Escape");
+  await row.dblclick();
   await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
   await page.waitForTimeout(2500);
   const served = await page.evaluate(async () => ({
