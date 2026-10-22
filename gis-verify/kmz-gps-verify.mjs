@@ -2,7 +2,7 @@
  *
  * Drives the real built app headless:
  *   1. MAP VIEWER: mouse over the map → a WGS84 lat/long "you are here" chip appears (B683);
- *      right-click empty map → "Export to Google Earth (KMZ)" downloads a valid .kmz (B684).
+ *      right-click empty map → no export menu (B684's map right-click export was removed 2026-10-22, B2380112).
  *   2. SITE-PLANNER CANVAS: open the seeded site → mouse over the canvas → the GPS chip shows
  *      lat/long (B683); File ▾ → Export to Google Earth → a valid .kmz downloads (B684, moved off the right-click by B2380112).
  * Each downloaded .kmz is unzipped (its central-dir + doc.kml read) and checked to be real KML
@@ -99,20 +99,12 @@ if (pin) {
   await page.waitForTimeout(200);
 }
 
-// Right-click empty map → export menu → KMZ download.
+// Owner decision 2026-10-22 (B2380112): the empty-map right-click has NO menu and NO export any more (the planner's File ▾ is the
+// one home for the Google Earth export). Right-click empty map → none of our rows appear.
 await page.mouse.click(mapBox.x + 60, mapBox.y + mapBox.height - 60, { button: "right" });
 await page.waitForTimeout(300);
-const mapMenuVisible = await page.getByText("Export to Google Earth (KMZ)").first().isVisible().catch(() => false);
-results.push(["MAP VIEWER: right-click export menu appears", mapMenuVisible]);
-if (mapMenuVisible) {
-  try {
-    const { name, buf } = await grabDownload(() => page.getByText("Export to Google Earth (KMZ)").first().click());
-    results.push([`MAP VIEWER: KMZ downloaded (${name})`, /\.kmz$/.test(name)]);
-    const { name: inner, text } = unzipFirst(buf);
-    results.push([`MAP VIEWER: archive contains doc.kml (${inner})`, inner === "doc.kml"]);
-    checkKml(text, "MAP VIEWER", results);
-  } catch (e) { results.push([`MAP VIEWER: KMZ download — ${e.message}`, false]); }
-}
+const mapMenuVisible = await page.getByText(/Export to Google Earth|Export with 3D buildings/).first().isVisible().catch(() => false);
+results.push(["MAP VIEWER: right-click on the empty map shows NO export menu", !mapMenuVisible]);
 
 // ── 2. SITE-PLANNER CANVAS ───────────────────────────────────────────────────
 // Open the seeded site (its "Your sites" panel row → onOpenSite).

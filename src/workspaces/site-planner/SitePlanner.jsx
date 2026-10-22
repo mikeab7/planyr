@@ -18564,7 +18564,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onContextMenu={labelInteractive ? (e) => onElContext(e, d.el.id) : undefined}>
         {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is
             pointer-enabled; without its own onContextMenu a right-click on it fell THROUGH to the
-            canvas's empty-map menu (Zoom to fit / Paste / Export…) instead of the pond's element
+            canvas's empty-map menu (Zoom to fit / Paste) instead of the pond's element
             menu. Route it to the same onElContext the pond body uses so the "Detention pond" section
             (Pond settings / Sizing assistant / Set purpose ▸) appears wherever you right-click a pond. */}
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
