@@ -11,13 +11,18 @@ import { useMemo } from "react";
 import { ALL_LAYERS } from "./layers.js";
 import { drawnOverlaysOf } from "./layerPanelModel.js";
 import { useLayersHidden } from "./layerHide.js";
+import { useServiceAreas } from "./useServiceAreas.js";
 
 export function useDrawnOverlays(overlays, state, loc) {
   const hideAll = useLayersHidden();
+  const hasLoc = !!(loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)));
+  const areasReady = useServiceAreas(hasLoc); // a source scoped to a service area is judged once its geometry has loaded
   const lat = loc && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null;
   const lng = loc && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null;
+  // areasReady is a RE-EVALUATION trigger: `drawnOverlaysOf` reads the service-area geometry from module state, which is not a value React can see.
   return useMemo(
     () => drawnOverlaysOf(overlays, { hideAll, layers: ALL_LAYERS, scope: { state: state || null, loc: lat != null && lng != null ? { lat, lng } : null } }),
-    [overlays, hideAll, state, lat, lng],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overlays, hideAll, state, lat, lng, areasReady],
   );
 }

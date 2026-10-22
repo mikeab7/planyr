@@ -22,7 +22,7 @@
  * golden-master harness deliberately checks NUMBERS, not pixels, and is structurally blind to it.
  */
 import { test, expect } from "@playwright/test";
-import { panelSel, openPlannerLayers, groupKeys, selectGroup } from "./lib/layersPanel.js";
+import { panelSel, openPlannerLayers, groupKeys, selectGroup, longestGroup } from "./lib/layersPanel.js";
 
 const mkSite = (id, name, lat, lon, county) => ({
   schemaVersion: 12, id, groupId: id, site: name, name,
@@ -72,13 +72,13 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
   // was given, so the overflow scaled with the viewport instead of the shortfall. The card must be BOUNDED at every height; where a
   // long group (Flood & Drainage, with a dropdown open) genuinely exceeds the room it must scroll — asserted at the shortest heights,
   // so a fix that only works when there is plenty of room cannot pass.
-  for (const height of [1000, 800, 600, 460, 400]) {
+  for (const height of [1000, 800, 600, 460, 400, 320]) {
     test(`the card is bounded by the room it has, and a long group scrolls, at ${height}px tall`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height });
       await openLayers(page, TX_SITE);
       const panel = page.locator(PANEL);
-      await selectGroup(panel, "flood");
-      await panel.getByTestId("layer-caret-fema").click(); // an open dropdown makes the longest group longer still
+      await selectGroup(panel, await longestGroup(panel));
+      await panel.locator('[data-testid^="layer-caret-"]').first().click(); // an open dropdown makes the longest group longer still
 
       const m = await page.evaluate((sel) => {
         const root = document.querySelector(sel);
@@ -95,9 +95,10 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
       expect(m.overflowY).toBe("auto");
       expect(m.rows).toBeGreaterThan(5);
       expect(m.clientH).toBeLessThan(height);
-      // B2391216 ×2: the extra sections under the panes are gone, so the card now sizes to its content (the longest group, FEMA's
-      // dropdown open, is ~380px) — it only overflows where the room really is shorter than that.
-      if (height <= 460) {
+      // B2391216 ×2: the extra sections under the panes are gone, so the card now sizes to its content (the longest group at this site,
+      // one dropdown open, is ~260px — B2436066 took the Houston-only rows out of a Harris site outside Houston, so no group is longer) —
+      // it only overflows where the room really is shorter than that.
+      if (height <= 320) {
         expect(m.scrollH).toBeGreaterThan(m.clientH + 1);   // it genuinely overflows…
         expect(m.scrolledTo).toBeGreaterThan(1);            // …and scrolling actually moves it
       }
@@ -105,11 +106,11 @@ test.describe("NEW-1 — the Layers panel scrolls, and the last row is reachable
   }
 
   test("the LAST row of a long group is reachable and takes a press, at the shortest height", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 400 });
+    await page.setViewportSize({ width: 1280, height: 320 });
     await openLayers(page, TX_SITE);
     const panel = page.locator(PANEL);
-    await selectGroup(panel, "flood");
-    await panel.getByTestId("layer-caret-fema").click();
+    await selectGroup(panel, await longestGroup(panel));
+    await panel.locator('[data-testid^="layer-caret-"]').first().click();
 
     /* ⛔ THE GESTURE MUST BE A REAL WHEEL, NOT `scrollIntoView`. Written the easy way this test PASSED ON THE BUG: `scrollIntoView` walks
      * up and scrolls whatever ancestor will move, including one the user has no way to reach. The owner's sentence is "I cannot get to

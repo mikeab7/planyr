@@ -278,8 +278,11 @@ export function boundsFromLeaflet(map) {
 // persisted, like the existing planarfit:* UI prefs. localStorage is guarded so the
 // module imports cleanly in the node test environment.
 // ---------------------------------------------------------------------------
-export const RELEVANCE_MODES = ["all", "dim", "hide"];
-export const DEFAULT_RELEVANCE = "dim";
+/* NEW-2 — two modes only: "all" = Show (a row with no data near the view renders like every other row) and "hide" (it is not
+ * rendered). The old "dim" mode faded a real layer toward the background, which the text-hierarchy rule forbids; a STORED "dim"
+ * (the old default) is read as Show by `normalizeMode`, so nobody's saved preference is left naming a mode that no longer exists. */
+export const RELEVANCE_MODES = ["all", "hide"];
+export const DEFAULT_RELEVANCE = "all";
 export const DEFAULT_RADIUS_MI = 2.5;
 const RADIUS_MIN = 0.5, RADIUS_MAX = 25;
 const PREF_KEY = "planarfit:relevance:v1";

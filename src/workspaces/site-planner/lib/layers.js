@@ -369,7 +369,7 @@ export const STATEWIDE = {
     // Public-data screening PHASE 3 — Houston-area active surface growth-fault traces. The Site
     // Analysis "Active surface faults" card drives this overlay (mapLayer: "faults"). FeatureServer
     // line layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
-    kind: "esriFeature", label: "Active Surface Faults", regions: ["houston"],
+    kind: "esriFeature", label: "Active Surface Faults", regions: ["houston_metro"],
     source: "USGS SIM 2874, via University of Houston GIS",
     url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.85,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Surface fault trace", hoverSource: "USGS SIM 2874",
@@ -818,7 +818,7 @@ export const JURISDICTIONS = {
  * data exists, and the coverage/Relevance system (never AHJ-exclusive) handles dimming. */
 export const AHJ_LAYERS = {
   hcfcd_row: {
-    kind: "dynamic", label: "Channels & ROW", swatch: "#1d4ed8", regions: ["houston"],
+    kind: "dynamic", label: "Channels & ROW", swatch: "#1d4ed8", regions: ["harris"],
     source: "Harris County Flood Control District (HCFCD)",
     url: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/ROW_FC/MapServer",
     layers: [0], // NEW-4 — pinned (see the jur_mud note): never let an agency render its own label sublayers over the plan
@@ -910,7 +910,7 @@ export const AHJ_LAYERS = {
    * second), so at 15 s the panel would have gone amber on EVERY first visit for a source
    * that is perfectly healthy — a false alarm is as dishonest as a false all-clear. */
   bkdd_drainage: {
-    kind: "dynamic", label: "Watersheds & BFE", swatch: "#2563eb", regions: ["houston"],
+    kind: "dynamic", label: "Watersheds & BFE", swatch: "#2563eb", regions: ["bkdd"],
     source: "Brookshire–Katy Drainage District (via Quiddity)",
     url: GIS_SOURCES.bkddStreams.serviceUrl, // …/Drainage_Information/MapServer
     // 108 Major Streams · 121 All Streams (TNRIS) · 116 Sub-Watersheds (DMP) ·
@@ -930,7 +930,7 @@ export const AHJ_LAYERS = {
     // VECTOR (not raster) on purpose: a district drainage easement is a hard
     // buildable-area constraint, so its width + recorded exhibit have to be clickable —
     // a band on the map that can't tell you it's 70 ft wide is half the answer.
-    kind: "vector", label: "Drainage Easements", regions: ["houston"],
+    kind: "vector", label: "Drainage Easements", regions: ["bkdd"],
     source: "Brookshire–Katy Drainage District (via Quiddity)",
     url: GIS_SOURCES.bkddEasements.serviceUrl + "/" + GIS_SOURCES.bkddEasements.layerId,
     color: "#b45309", weight: 2,
@@ -951,7 +951,7 @@ export const AHJ_LAYERS = {
     stallMs: 25000,
   },
   bkdd_dmp: {
-    kind: "dynamic", label: "Master Plan Floodplains", swatch: "#7c3aed", regions: ["houston"],
+    kind: "dynamic", label: "Master Plan Floodplains", swatch: "#7c3aed", regions: ["bkdd"],
     source: "Brookshire–Katy Drainage District (via Quiddity) — Drainage Master Plan",
     url: GIS_SOURCES.bkddDmpFloodplain.serviceUrl, // …/Drainage_Master_Plan/MapServer
     // 19 100-yr Atlas-14 · 20 Harvey · 17 10-yr · 5 Conveyance Channel ·

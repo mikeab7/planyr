@@ -30,7 +30,7 @@ describe("2 · no reveal line for sources that cannot serve the site", () => {
   });
   it("the scoping itself is untouched — floodRowRelevance still decides which rows are on or off", () => {
     expect(floodGroup).toMatch(/export function floodRowRelevance/);
-    expect(panel).toMatch(/floodScope\.tiers\.map/);
+    expect(panel).toMatch(/floodScope\.tiers\b/); // the tiers are still what the Flood & Drainage pane lists
   });
 });
 
