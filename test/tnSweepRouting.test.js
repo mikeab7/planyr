@@ -53,7 +53,7 @@ describe("every county routes to its one source at both recorded lots", () => {
   });
   it("Knox says so honestly (not the road card, not a silent empty)", () => {
     const k = FX.counties.find((c) => c.name === "Knox");
-    expect(noParcelSourceNote(countyIdentity(k.lat, k.lng))).toBe("Knox County — no parcel data wired here yet.");
+    expect(noParcelSourceNote(countyIdentity(k.lat, k.lng))).toBe("Knox County has a parcel map, but it isn't open to the public, so Planyr can't show lots here yet.");
   });
   it("the fixture's own source labels agree with the routing it replays", () => {
     for (const c of FX.counties) expect(c.source, c.name).toBe(expected(c.name)[0] || "(none)");

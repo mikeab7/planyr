@@ -2,6 +2,7 @@ import { useState } from "react";
 import { parcelCardRows } from "../lib/appraisal.js";
 import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import ParcelRequestLink from "./ParcelRequestLink.jsx";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
  * finder's search pill after a "Go". FOUR distinct states: found (the parcel's key
@@ -14,7 +15,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
  * on `unavailable`: "the county parcel service couldn't be reached for this area right
  * now… give it a moment." Both halves were false — nothing was unreachable, and waiting
  * changes nothing — and it is the wording the owner met when searching two Wayne County, MI
- * addresses. This state names the county and says the gap is a gap, from `noParcelSourceNote`'s
+ * addresses. This state names the county and says why it has no data, from `parcelGapNotice`'s
  * own sentence (passed in as `info.note`) so the words cannot drift from the verdict that
  * produced them. It deliberately does NOT offer "start the plan here anyway": per NEW-4's rule,
  * that fallback belongs to an OUTAGE (where the source that would have answered is down), and
@@ -183,6 +184,8 @@ export default function ParcelInfoCard({
            way forward is the aerial trace — never the outage fallback, and never "try again". */
         <div data-testid="parcel-card-no-source" style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>
           {info.note} You can still trace the lot from the <b>Aerial</b> underlay.
+          {/* NEW-1 (2026-10-22) — the reason is in `info.note`; the way to ask for the county rides with it. */}
+          <ParcelRequestLink href={info.request} testId="parcel-card-gap-request" />
         </div>
       ) : (
         /* NEW-4 — an outage used to end here, with the owner left on a map that would not give

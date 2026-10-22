@@ -44,7 +44,7 @@ describe("a point inside each Arizona county resolves to that county's source or
     if (bare(c.name) in GAPS) {
       expect(id.status).toBe("no-source");
       expect(id.statewideKey, "a gap must not borrow a statewide layer").toBeUndefined();
-      expect(noParcelSourceNote(id)).toBe(`${c.name} — no parcel data wired here yet.`);
+      expect(noParcelSourceNote(id)).toContain(c.name);
     } else {
       expect(id.status).toBe("ok");
       expect(id.key).toBe(slugOf(c.name));

@@ -529,7 +529,7 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
     const id = countyIdentity(30.6996, -91.4368);
     expect(id.status).toBe("no-source");
     expect(id.name).toBe("Pointe Coupee Parish");
-    expect(noParcelSourceNote(id)).toBe("Pointe Coupee Parish — no parcel data wired here yet.");
+    expect(noParcelSourceNote(id)).toBe("Pointe Coupee Parish has a parcel map, but it isn't open to the public, so Planyr can't show lots here yet."); // locked: Atlas behind a private proxy (NEW-1, 2026-10-22)
   });
 
   it("Orleans and East Baton Rouge never query each other — the parishes are ~80 miles apart", () => {
