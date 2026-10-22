@@ -5,6 +5,8 @@
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-outline-before-after.mjs <beforeBase> <afterBase> [--out f.json] [--shots dir]
  * Writes before.png / after.png (clipped round the lot) + diff.png (outline pixels that differ, red) and exits 0 iff the masks are identical. */
 import { writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openLaptop, LAPTOP } from "./lib/workLaptopRig.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -14,7 +16,7 @@ const args = process.argv.slice(2);
 const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const [BEFORE, AFTER] = args.filter((a) => /^https?:/.test(a));
 if (!BEFORE || !AFTER) { console.error("usage: verify-outline-before-after.mjs <beforeBase> <afterBase>"); process.exit(2); }
-const OUT = flag("--out") || "outline-before-after.json", SHOTS = flag("--shots") || "ui-audit/screenshots/work-laptop";
+const OUT = flag("--out") || "outline-before-after.json", SHOTS = flag("--shots") || join(tmpdir(), "work-laptop-shots"); // full-resolution PNGs at this pixel ratio are ~10 MB each: never default into the repo
 mkdirSync(SHOTS, { recursive: true });
 
 /* encode an RGBA buffer as a PNG with node's zlib only (the repo's decoder is read-only) */
