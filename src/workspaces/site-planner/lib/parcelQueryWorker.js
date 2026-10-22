@@ -5,7 +5,7 @@
  * out: { id, type: "part", features } × n  ·  { id, type: "done", error, meta }
  *      (`meta` = the answer's top-level keys minus `features`, e.g. exceededTransferLimit; `error` uses esri-leaflet's
  *       own shapes, so the layer's requesterror / hang-guard / retry handling reads it unchanged) */
-import { readEsriBody, esriResponseToFeatures, LOTS_PER_MESSAGE } from "./parcelQueryWire.js";
+import { readEsriBody, esriResponseToFeatures, ensureFeatureIds, LOTS_PER_MESSAGE } from "./parcelQueryWire.js";
 
 self.onmessage = async (e) => {
   const { id, url, body, post, timeout, geojson } = e.data || {};
@@ -24,7 +24,7 @@ self.onmessage = async (e) => {
   } finally { if (timer) clearTimeout(timer); }
   const { error, response } = readEsriBody(text);
   if (error) { self.postMessage({ id, type: "done", error, meta: null }); return; }
-  const features = geojson ? (response.features || []) : esriResponseToFeatures(response);
+  const features = geojson ? ensureFeatureIds(response.features || []) : esriResponseToFeatures(response);
   const meta = {};
   for (const k in response) if (k !== "features" && k !== "results") meta[k] = response[k];
   for (let i = 0; i < features.length; i += LOTS_PER_MESSAGE) self.postMessage({ id, type: "part", features: features.slice(i, i + LOTS_PER_MESSAGE) });
