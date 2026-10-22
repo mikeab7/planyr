@@ -279,14 +279,14 @@ describe("every delete entry point in SitePlanner.jsx is wired to the contract",
     expect(src).toMatch(/reportClientEvent\("delete-attempt"/);
     expect(src).toMatch(/reportClientEvent\("delete-outcome"/);
     // The two sibling delete paths that don't go through deleteSel are instrumented too.
-    for (const fn of ["const deleteMarkupById", "const deleteParcelById"]) {
+    for (const fn of ["const deleteMarkupById", "const deleteParcels"]) { // NEW-1 (2026-10-22): deleteParcels replaced deleteParcelById — the one parcel delete
       const f = src.slice(src.indexOf(fn));
       expect(f.slice(0, f.indexOf("\n  };")), fn).toMatch(/reportClientEvent\("delete-outcome"/);
     }
   });
 
   it("leaves no delete path that returns without saying anything", () => {
-    for (const fn of ["const deleteMarkupById", "const deleteParcelById"]) {
+    for (const fn of ["const deleteMarkupById", "const deleteParcels"]) {
       const f = src.slice(src.indexOf(fn));
       const body = f.slice(0, f.indexOf("\n  };"));
       // Any early `return;` in these must be preceded by a user-facing flashWarn.

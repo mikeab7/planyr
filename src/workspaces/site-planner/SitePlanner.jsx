@@ -257,7 +257,7 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
-import { makeParcelDisplayLayer, ADD_CURSOR, REMOVE_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, WALL_PIECE_TEXT, WALL_PIECE_EDGE, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackDashArray, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
@@ -548,6 +548,9 @@ import { jurisdictionSourceName, GA_JURISDICTION_SOURCE_NAME } from "./lib/georg
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
+import ParcelContextMenu from "./components/ParcelContextMenu.jsx";
+import { planParcelDelete } from "./lib/parcelDelete.js";
+import { isRenameable } from "./lib/parcelMenu.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 import { MAP_CORNER_PX, MAP_CORNER_GAP_PX, paneInsetFor, cornerGroupWidth, cursorChipFit } from "./lib/mapCorners.js";
@@ -2274,11 +2277,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [splitPath, setSplitPath] = useState([]);    // vertices of a split cut polyline
   const [splitTarget, setSplitTarget] = useState(null); // Parcels panel: the parcel a Split was aimed at (null = the bare map tool)
   const [parcelOpen, setParcelOpen] = useState(null);   // { id, n } — asks the Parcels table to open that parcel's detail card
-  // B598 — the Parcel tool now stays active (so several lots draw in a row) with an explicit
-  // banner: a Draw/Remove sub-mode + a Done exit. "add" = click to drop boundary points (the
-  // original behaviour); "remove" = click an existing parcel to delete it. Reset to "add" on
-  // every tool switch (selectTool), so re-entering the Parcel tool always starts in Draw.
-  const [parcelMode, setParcelMode] = useState("add"); // 'add' | 'remove'
+  // B598 — the Parcel tool stays active (so several lots draw in a row) with an explicit banner and a Done exit. It only DRAWS now:
+  // the old Remove click-to-delete sub-mode is retired (NEW-1, 2026-10-22) — every parcel delete is `deleteParcels`, from the
+  // parcel's menu / the Delete key / the checked bar, with an Undo toast.
   // NEW-1 — boundary editing had NO entry point: it existed only as prose inside the Select tool's
   // hint string, so a user who never hovered that tooltip never learned the app could reshape a
   // boundary at all. This flag is not a new tool and changes no gesture — dragging a corner, adding
@@ -2288,6 +2289,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Parcels rework — which parcel's own PAGE the Land panel shows (null = the list), and which
   // boundary SECTION of it is selected for editing (a key from lib/boundarySections.js).
   const [parcelPageId, setParcelPageId] = useState(null);
+  const parcelPageRef = useRef(null); parcelPageRef.current = parcelPageId; // live read for deleteParcels (the Delete key's listener can hold a stale render)
   const [selSectionKey, setSelSectionKey] = useState(null);
   // NEW-1 (B1264944) — RECURRENCE of the B1253248 placement-cursor fix: "Edit boundary corners"
   // arms the plain Select tool (see startBoundaryEdit above) rather than a distinct mode, so every
@@ -3809,7 +3811,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * a hidden tab, Escape — so it can never stick. Mode → cursor is lib/plannerCursors.js `dragCursorFor`. */
   const pressCursorRef = useRef(null);
   useEffect(() => {
-    installPlannerCursorStyle({ add: ADD_CURSOR, remove: REMOVE_CURSOR });
+    installPlannerCursorStyle({ add: ADD_CURSOR });
     let down = false;
     const sync = () => {
       const d = drag.current;
@@ -7416,7 +7418,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -7475,8 +7477,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("delete-outcome", `${entry} → no-op (${plan.outcome})`, { entry, result: "no-op", reason: plan.outcome, stale: plan.stale.slice(0, 20) });
       return plan;
     }
-    pushHistory("delete");
     const { els: elIds, markups: mkIds, measures: measIds, measureIdx, callouts: coIds, parcels: pcIds } = plan.remove;
+    // NEW-1 (2026-10-22) — a selection of ONLY parcels is the one parcel delete (same toast + Undo + event as every other door).
+    if (pcIds.length && !elIds.length && !mkIds.length && !measIds.length && !measureIdx.length && !coIds.length) return deleteParcels(pcIds, entry === "unknown" ? "menu:parcel" : entry);
+    pushHistory("delete");
     // B556/TOMBSTONE-DELETES — tombstone exactly what the filters remove, bonded children included,
     // so a cloud / cross-tab union merge can't resurrect half an assembly.
     if (elIds.length) { const s = new Set(elIds); setEls((a) => a.filter((e) => !s.has(e.id))); }
@@ -7492,6 +7496,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // return, so the key stayed dead until an unrelated click happened to reset it.
     setSel(null); setMulti([]); setDrillId(null); setSelVtx(null);
     tombstone(plan.tombstones);
+    if (pcIds.length) pushToast({ text: `Deleted ${plan.count} items`, action: { label: "Undo", onClick: undo } }); // a mixed selection that included parcels still offers Undo
     reportClientEvent("delete-outcome", `${entry} → removed ${plan.label}`, {
       entry, result: "removed", n: plan.count, removed: plan.tombstones.length, locked: plan.lockedCount,
       ids: plan.tombstones.slice(0, 20),
@@ -8352,11 +8357,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (tool === "parcel") {
-      if (parcelMode === "remove") { // B598: click a parcel (interior OR boundary — both bubble here) to delete it; stay in the tool to remove more
-        const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points)); // topmost (last-drawn) wins
-        if (hit) removeParcelById(hit.id);
-        return;
-      }
       const sp = snapPt(fp);
       if (draftPoly && draftPoly.length >= 3 && dist(f2p(sp), f2p(draftPoly[0])) < 12) { closePoly(); return; }
       setDraftPoly((d) => (d ? [...d, sp] : [sp]));
@@ -8589,19 +8589,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return plan;
   };
   const mergeParcels = () => combineParcelsAction(combineSel);
-  // Remove ONE parcel by id (B598) — used by the Parcel tool's Remove mode AND the panel-row ✕.
-  // Mirrors deleteSel's parcel branch exactly: pushHistory (so it's undoable) + filter it out +
-  // tombstone so the deletion sticks across reload / cross-tab / cross-device merge and never trips
-  // the thin-clobber guard (B556/B596). Also drops it from the current selection / merge pick.
-  const removeParcelById = (id) => {
-    if (!parcels.some((p) => p.id === id)) return;
-    pushHistory();
-    setParcels((a) => a.filter((p) => p.id !== id));
-    tombstone(id);
-    setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : s));
-    setSel((cur) => (cur && cur.kind === "parcel" && cur.id === id ? null : cur));
-  };
-
   /* ---- NEW-1: the right rail's Parcel tools menu, wired ------------------------------------
    * One handler per row id in `lib/parcelActions.js`. Each one is a thin arm-the-existing-path
    * call — nothing here is a second implementation of an action that already exists elsewhere,
@@ -8624,9 +8611,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
   const exitBoundaryEdit = () => setBoundaryEdit(false);
-  // Remove mode is the Parcel tool's own sub-mode; selectTool always resets it to "add" (B598),
-  // so the order here matters — set the mode AFTER the tool switch.
-  const startRemoveParcels = () => { selectTool("parcel"); setParcelMode("remove"); setDraftPoly(null); };
   // The cross-links that close the two-sided "Parcel" split: the right rail owns ACTIONS, the left
   // Land panel owns ATTRIBUTES (setbacks included), and each is one click from the other.
   const openLandPanel = (opts = {}) => {
@@ -12716,32 +12700,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // B420: a parcel is grabbed by its BOUNDARY edge (or setback line), never its empty interior —
   // so both the boundary hit-stroke and the setback hit-stroke share this right-click handler for
-  // the same pc.id (opens the parcel menu + arms it for merge), matching the old fill behaviour.
+  // the same pc.id. NEW-1 (2026-10-22): a right-click SELECTS the parcel and opens the menu — nothing else. It used to also
+  // add the parcel to the merge set (`combineSel`), which silently ticked its checkbox in the list.
   const onParcelContext = (e, id) => {
     if (tool !== "select") return;
     e.preventDefault(); e.stopPropagation();
-    setCombineSel((s) => (s.includes(id) ? s : [...s, id]));
     setSel({ kind: "parcel", id });
     setParcelMenu({ x: e.clientX, y: e.clientY, id });
   };
-  // Delete a parcel with a tombstone (B556/B612 — a delete without one resurrects on a cloud/tab merge).
-  const deleteParcelById = (id) => {
-    // NEW-1 — the same no-silent-no-op contract as deleteSel: this used to filter on a dead id and
-    // return having removed nothing, tombstoned nothing, and said nothing.
-    if (!parcels.some((p) => p.id === id)) {
-      setParcelMenu(null);
-      flashWarn("⚠ That's already gone — nothing left to delete.", 5000);
-      reportClientEvent("delete-outcome", "menu:parcel → no-op (stale)", { entry: "menu:parcel", result: "no-op", reason: "stale", id });
-      return;
+  /* ⛔ THE ONE PARCEL DELETE (NEW-1, 2026-10-22). Every door — the panel row's ⋯, a right-click on a panel row, a right-click on
+   * the map, the Delete key, the rail's Parcel tools row, the checked bar and the parcel's own page — ends HERE; there is no second
+   * implementation (test/parcelDeleteOnePath.test.js fails if one grows back). `lib/parcelDelete.planParcelDelete` decides (which
+   * ids are real, the toast words, the loud "already gone" message); this applies it: ONE history step for however many parcels,
+   * a tombstone for each (a reload / cross-tab merge must not resurrect them — TOMBSTONE-DELETES), every selection / check / page /
+   * split state that named one cleared, and a "Deleted …" toast carrying Undo. No "are you sure": Undo is the net. A LOCKED parcel
+   * deletes like any other (lock = "protect the boundary from edits" only). `entry` names the door for telemetry
+   * (deletePlan.DELETE_ENTRIES / parcelDelete.PARCEL_DELETE_ENTRIES). */
+  const deleteParcels = (ids, entry = "menu:parcel") => {
+    const live = stateRef.current.parcels || parcels;
+    const plan = planParcelDelete(live, ids, { nameOf: (id) => (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel" });
+    setParcelMenu(null);
+    if (!plan.ok) { // LOUD-FAILURE — a delete that removes nothing says so (the old stale case did, the old Remove click did not)
+      flashWarn(plan.message, 5000);
+      reportClientEvent("delete-outcome", `${entry} → no-op (${plan.code})`, { entry, result: "no-op", reason: plan.code, stale: plan.stale.slice(0, 20) });
+      return plan;
     }
-    const delName = (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel";
-    pushHistory();
-    setParcels((a) => a.filter((p) => p.id !== id));
-    setCombineSel((s) => s.filter((x) => x !== id));
-    if (sel?.kind === "parcel" && sel.id === id) { setSel(null); setMulti([]); setDrillId(null); }
-    tombstone(id);
-    pushToast({ text: `Deleted ${delName}`, action: { label: "Undo", onClick: undo } }); // B2194741
-    reportClientEvent("delete-outcome", "menu:parcel → removed parcel", { entry: "menu:parcel", result: "removed", n: 1, ids: [id] });
+    const gone = new Set(plan.ids);
+    pushHistory("delete");
+    setParcels((a) => a.filter((p) => !gone.has(p.id)));
+    setCombineSel((c) => c.filter((x) => !gone.has(x)));
+    setMulti((m) => m.filter((x) => !(x.kind === "parcel" && gone.has(x.id))));
+    const curSel = selRef.current;
+    if (curSel?.kind === "parcel" && gone.has(curSel.id)) { setSel(null); setDrillId(null); setSelVtx(null); }
+    if (parcelPageRef.current && gone.has(parcelPageRef.current)) { setParcelPageId(null); setSelSectionKey(null); } // its Properties page must not outlive it
+    if (splitTarget && gone.has(splitTarget)) cancelPanelSplit();
+    tombstone(plan.ids);
+    pushToast({ text: plan.toast, action: { label: "Undo", onClick: undo } });
+    reportClientEvent("delete-outcome", `${entry} → removed ${plan.ids.length === 1 ? "parcel" : `${plan.ids.length} parcels`}`, { entry, result: "removed", n: plan.ids.length, locked: plan.lockedCount, ids: plan.ids.slice(0, 20), stale: plan.stale.length });
+    return plan;
   };
   /* ------------ dedicated canvas right-click menu (B627) ------------
    * A right-click anywhere on the map opens OUR menu, never the browser's. On a markup
@@ -13422,7 +13418,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushToast({ text: `${pc.locked ? "Unlocked" : "Locked"} ${nm}`, action: { label: "Undo", onClick: undo } });
     },
     onToggleAllLock: toggleAllParcelsLock,
-    onZoom: (id) => zoomToElements([{ kind: "parcel", id }]), onRemove: removeParcelById,
+    onZoom: (id) => zoomToElements([{ kind: "parcel", id }]),
     onSplit: startPanelSplit, onCancelSplit: cancelPanelSplit, onCombine: combineParcelsAction, onLockMany: lockParcelsMany,
     onRename: (id, v) => setParcelField(id, "label", v),
     onRestoreCombined: restoreCombinedOriginals, onRestoreSplit: restoreSplitOriginal,
@@ -13431,13 +13427,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onOpenPage: (id) => { openParcelPage(id); },
     onBack: () => { setParcelPageId(null); setSelSectionKey(null); },
     onEditParcels: () => { setParcelPageId(null); startBoundaryEdit(); },
-    onDelete: (id) => { setParcelPageId(null); setSel({ kind: "parcel", id }); deleteParcelById(id); },
+    onDelete: (id, entry) => { deleteParcels([id], entry || "panel:parcel"); },
+    onDeleteMany: (ids, entry) => { deleteParcels(ids, entry || "bar:parcel"); },
+    onToggleChip: (id) => { const pc = parcels.find((p) => p.id === id); if (pc) setParcelChipHidden(id, !pc.chipHidden); },
+    onResetChip: (id) => resetParcelChipOffset(id),
     onField: setParcelField,
     combinePreview: (ids) => planCombine(parcels, ids, { unionRings: mergeParcelRings, newId: () => "preview" }),
   };
   const parcelPanelH = useMemo(() => {
     const o = {};
-    for (const k of ["onSelectRow", "onPickRow", "onToggleInclude", "onToggleLock", "onToggleAllLock", "onZoom", "onRemove", "onSplit", "onCancelSplit", "onCombine", "onLockMany", "onRename", "onRestoreCombined", "onRestoreSplit", "acresOf", "onOpenPage", "onBack", "onEditParcels", "onDelete", "onField", "combinePreview"]) o[k] = (...a) => parcelActsRef.current[k](...a);
+    for (const k of ["onSelectRow", "onPickRow", "onToggleInclude", "onToggleLock", "onToggleAllLock", "onZoom", "onSplit", "onCancelSplit", "onCombine", "onLockMany", "onRename", "onRestoreCombined", "onRestoreSplit", "acresOf", "onOpenPage", "onBack", "onEditParcels", "onDelete", "onDeleteMany", "onToggleChip", "onResetChip", "onField", "combinePreview"]) o[k] = (...a) => parcelActsRef.current[k](...a);
     return o;
   }, []);
   /* Parcels rework (NEW-3) — the boundary SECTIONS of the parcel whose page is open. Only computed while
@@ -16837,7 +16836,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * be clicked on, existing objects included: the canvas root carries `data-cursor-mode` and ONE stylesheet rule (lib/plannerCursors.js)
    * turns every descendant's cursor into that mode's, so a new object type can never forget to ask. Space-held = pan. */
   const cursorMode = spacePan ? "pan" : identifyMode ? "identify"
-    : (tool === "parcel" && parcelMode === "remove") ? "remove"
     : (tool !== "select" || attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib || addLeaderFor || ovAlignBase || mergePick) ? "armed"
     : null;
   /* NEW-1 — PARCELS IN FRONT. While the Parcels tool is the thing being worked (the Land panel open — docked or floating —
@@ -20158,7 +20156,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // working Select rather than a dead mode, never a mode with no rail affordance.
     if (id === "pan") id = "select";
     setTool(id);
-    setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
     setMkFreehand(null);
@@ -21767,12 +21764,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
   const setSelCallout = (patch) => { pushHistory(); setCallout(selCallout.id, patch); };
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
-  // B598 — in the Parcel tool's Remove mode, highlight the lot under the cursor (danger hue) so it's
-  // unmistakable WHICH parcel a click deletes; topmost (last-drawn) wins, matching the click hit-test.
-  const parcelRemoveHoverId = (tool === "parcel" && parcelMode === "remove" && cursor)
-    ? ([...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(cursor, pc.points))?.id ?? null)
-    : null;
-
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
   const dockPanelOn = !multiStyleable && !!selEl && isDockLayerEl(selEl);
@@ -24716,7 +24707,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (supersededParcelIds.has(pc.id)) return null;
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
-                const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 const lkB = lookOf(pc).boundary; // NEW-2: parcel override → workspace default → built-in
@@ -24731,7 +24721,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // line is already carrying a state colour of its own (remove-hover / multi-pick),
                 // where the colour IS the message, and on an inactive parcel, which is deliberately
                 // faint context.
-                const cased = !removeHover && !picked && !inactive;
+                const cased = !picked && !inactive;
                 const pcFillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0); // Fill is an option with its own opacity; 0 = no fill
                 // Parcels rework — while this parcel's page is open, its boundary SECTIONS answer a press (selecting
                 // the section for editing) and the selected one is drawn heavier. Off in Edit parcels, where the
@@ -24744,12 +24734,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       strokeDasharray={dashArray(lkB.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
                   )}
                   <polygon data-testid="parcel-outline" points={ring}
-                    fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
-                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : lkB.color} strokeWidth={(removeHover || picked || isSel) ? Math.max(3, baseW) : baseW}
+                    fill={picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
+                    stroke={picked ? "#2563eb" : lkB.color} strokeWidth={(picked || isSel) ? Math.max(3, baseW) : baseW}
                     strokeDasharray={inactive ? "8 6" : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                    style={{ cursor: parcelBodyCursor({ tool, parcelMode, editingCorners, locked: pc.locked, removeCursor: REMOVE_CURSOR, addCursor: ADD_CURSOR,
+                    style={{ cursor: parcelBodyCursor({ tool, editingCorners, locked: pc.locked, addCursor: ADD_CURSOR,
                       // NEW-1 (B1264944) — over the edge where Shift-click/right-click would insert a corner (the spot `insHint`'s dot marks) the
                       // cursor says "add a point"; scoped to the parcel actually being edited so a stray insHint from another path cannot paint it.
                       addPoint: editingCorners && !!insHint && sel?.kind === "parcel" && sel.id === pc.id }) }}
@@ -26751,29 +26741,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* Parcel tool banner (B598) — the owner couldn't tell how to EXIT the parcel tool, and
-              wanted to remove parcels from it too. So the tool now shows a persistent banner with a
-              Draw/Remove sub-mode switch and an explicit Done exit. Same zIndex/stopPropagation guard
+          {/* Parcel tool banner (B598) — the owner couldn't tell how to EXIT the parcel tool, so the tool shows a persistent
+              banner with an explicit Done exit. It only DRAWS: the Draw / Remove switch is retired (NEW-1, 2026-10-22 — deleting a
+              parcel is the parcel's menu / the Delete key / the checked bar, each with Undo). Same zIndex/stopPropagation guard
               as the merge banner so its buttons clear the transparent SVG canvas and stay clickable. */}
           {tool === "parcel" && (
             <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
               style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 8px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              {/* Draw / Remove mode pill */}
-              <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.13)", borderRadius: 99, padding: 2 }}>
-                <button className="dbtn" onClick={() => setParcelMode("add")} aria-pressed={parcelMode === "add"}
-                  style={{ padding: "4px 12px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "add" ? "#fff" : "transparent", color: parcelMode === "add" ? "#19160f" : "#fff" }}>✏️ Draw</button>
-                <button className="dbtn" onClick={() => { setDraftPoly(null); setParcelMode("remove"); }} aria-pressed={parcelMode === "remove"}
-                  style={{ padding: "4px 12px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "remove" ? "#fff" : "transparent", color: parcelMode === "remove" ? "#19160f" : "#fff" }}>✕ Remove</button>
-              </div>
               <span style={{ color: "rgba(255,255,255,0.92)" }}>
-                {parcelMode === "remove"
-                  ? (parcels.length ? "Click a parcel to delete it" : "No parcels to remove")
-                  : (draftPoly && draftPoly.length >= 1 ? `${draftPoly.length} point${draftPoly.length > 1 ? "s" : ""} — click the first dot or double-click to close` : "Click on the plan to drop boundary points")}
+                {draftPoly && draftPoly.length >= 1 ? `${draftPoly.length} point${draftPoly.length > 1 ? "s" : ""} — click the first dot or double-click to close` : "Click on the plan to drop boundary points"}
               </span>
-              {parcelMode === "add" && draftPoly && draftPoly.length >= 3 && (
+              {draftPoly && draftPoly.length >= 3 && (
                 <button className="dbtn" style={{ ...btn(true), padding: "5px 12px" }} onClick={closePoly}>Finish ⏎</button>
               )}
-              {parcelMode === "add" && draftPoly && draftPoly.length >= 1 && (
+              {draftPoly && draftPoly.length >= 1 && (
                 <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => removeLastVertex()}>Undo point</button>
               )}
               <button className="dbtn" style={{ ...chip, padding: "5px 13px" }} title="Finish working with parcels and go back to Select (Esc)" onClick={() => selectTool("select")}>Done</button>
@@ -26911,7 +26892,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   hasOrigin: !!origin,
                   selected: selPc ? { locked: !!selPc.locked, active: selPc.active, chipHidden: !!selPc.chipHidden, labelOffset: selPc.labelOffset || null, name: selRow?.name || parcelLabel(selPc.id), acres: selRow ? selRow.acres : null, color: selPc.stroke || PAL.parcel } : null,
                   canDelete: !!pcm,
-                  tool, parcelMode, mergePick, boundaryEdit,
+                  tool, mergePick, boundaryEdit,
                 });
                 // id → what it does. Every entry arms an EXISTING path; nothing here is a second
                 // implementation of an action that already lives somewhere else. The three SWITCH
@@ -26929,7 +26910,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   active: () => { if (selPc) toggleParcelActive(selPc.id); },
                   chip: () => { if (selPc) setParcelChipHidden(selPc.id, !selPc.chipHidden); },
                   chipReset: () => { if (selPc) resetParcelChipOffset(selPc.id); setToolMenu(false); },
-                  deleteSelected: () => { if (pcm) removeParcelById(pcm.id); setToolMenu(false); },
+                  deleteSelected: () => { if (pcm) deleteParcels([pcm.id], "rail:parcel"); setToolMenu(false); },
                 };
                 return <ParcelToolsMenu groups={groups} run={run} menuItem={menuItem} disabledRow={disabledRow} />;
               })()}
@@ -31039,35 +31020,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </ContextMenu>
       )}
 
-      {parcelMenu && (
-        <ContextMenu x={parcelMenu.x} y={parcelMenu.y} onClose={() => setParcelMenu(null)} width={196} zIndex={1998} className="menu" panelStyle={menuPanel}>
-          <button style={{ ...menuItem(false), fontWeight: 650 }} data-testid="parcel-menu-properties" onClick={() => { const id = parcelMenu.id; setParcelMenu(null); if (id) openParcelPage(id); }}>Properties</button>
-          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-          <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
-          <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
-          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-          {/* NEW-4 — the acreage badge's own controls, on BOTH menus (the badge's right-click and
-              the parcel's) so they are findable either way. Hiding a badge is a LABEL change: the
-              lot stays in the plan and in the yield math. */}
-          {(() => {
-            const pc = parcels.find((p) => p.id === parcelMenu.id);
-            if (!pc) return null;
-            return (
-              <>
-                <button style={menuItem(false)} onClick={() => { setParcelChipHidden(pc.id, !pc.chipHidden); setParcelMenu(null); }}>
-                  {pc.chipHidden ? "Show acreage label" : "Hide acreage label"}
-                </button>
-                {!pc.chipHidden && pc.labelOffset && (
-                  <button style={menuItem(false)} onClick={() => { resetParcelChipOffset(pc.id); setParcelMenu(null); }}>Reset label position</button>
-                )}
-                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-              </>
-            );
-          })()}
-          <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { if (parcelMenu.id) deleteParcelById(parcelMenu.id); setParcelMenu(null); }}>Delete parcel</button>
-          <div style={{ fontSize: 10.5, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.4, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Shift-click parcels to add more, then Merge.</div>
-        </ContextMenu>
-      )}
+      {parcelMenu && (() => {
+        /* NEW-1 (2026-10-22) — the SAME menu as the panel row's ⋯ and a right-click on a row (lib/parcelMenu.js, one component). */
+        const pc = parcels.find((p) => p.id === parcelMenu.id);
+        if (!pc) return null;
+        const row = parcelRows.find((r) => r.id === pc.id);
+        const id = pc.id;
+        const pick = (what) => {
+          setParcelMenu(null);
+          if (what === "properties" || what === "rename") openParcelPage(id);
+          else if (what === "zoom") zoomToElements([{ kind: "parcel", id }]);
+          else if (what === "lock") parcelActsRef.current.onToggleLock(id);
+          else if (what === "chip") setParcelChipHidden(id, !pc.chipHidden);
+          else if (what === "chipReset") resetParcelChipOffset(id);
+          else if (what === "merge") mergeParcels();
+          else if (what === "clearSel") setCombineSel([]);
+          else if (what === "uncombine") restoreCombinedOriginals(id);
+          else if (what === "delete") deleteParcels([id], "menu:parcel");
+        };
+        return <ParcelContextMenu x={parcelMenu.x} y={parcelMenu.y} pc={pc} renameable={isRenameable(row)} mergeCount={combineSel.length} onPick={pick} onClose={() => setParcelMenu(null)} testId="parcel-menu" />;
+      })()}
 
       {mapMenu && (() => {
         const MW = 214;

@@ -146,18 +146,19 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await expect(row(page, "address")).toBeVisible();
   });
 
-  test("Draw runs from the menu, and the Parcel tool's own banner still removes by clicking", async ({ page }) => {
+  test("Draw runs from the menu, and the Parcel tool's banner only DRAWS — the Remove click-to-delete mode is retired", async ({ page }) => {
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
     expect((await readModel(page)).total).toBe(1);
 
-    // Click-to-delete is no longer a menu row; it stays reachable from the Parcel tool's banner.
+    // NEW-1 (2026-10-22): deleting is the parcel's menu / the Delete key / the checked bar — each with an Undo toast. No Remove pill.
     const at = await outlinePoint(page, 0, "centre");
     await pick(page, "draw");
-    await page.getByRole("button", { name: /Remove$/ }).first().click();
-    await expect(page.getByText(/click a parcel to delete it/i)).toBeVisible();
-    await page.mouse.click(...at);                   // inside the parcel
-    await expect.poll(() => readModel(page).then((m) => m.total)).toBe(0);
+    await expect(page.getByText(/drop boundary points/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Remove$/ })).toHaveCount(0);
+    await expect(page.getByText(/click a parcel to delete it/i)).toHaveCount(0);
+    await page.mouse.click(...at);                   // a click inside the parcel in Draw mode drops a boundary point; it never deletes
+    expect((await readModel(page)).total).toBe(1);
     await page.keyboard.press("Escape");
   });
 
@@ -267,12 +268,15 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await expect(row(page, "draw")).toBeVisible(); // still open after three toggles
   });
 
-  test("Delete parcel (the red bottom row) deletes the selected parcel", async ({ page }) => {
+  test("Delete parcel (the red bottom row) deletes the selected parcel at once, with an Undo toast that brings it back", async ({ page }) => {
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
     await selectParcel(page);
     await pick(page, "deleteSelected");
     await expect.poll(() => readModel(page).then((m) => m.total)).toBe(0);
+    await expect(page.getByText(/^Deleted /)).toBeVisible();
+    await page.getByRole("button", { name: "Undo" }).first().click();
+    await expect.poll(() => readModel(page).then((m) => m.total)).toBe(1);
   });
 
   test("setbacks are one step from the right rail, and the Land panel points back", async ({ page }) => {

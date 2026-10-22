@@ -78,7 +78,9 @@ describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)"
     const slotAt = src.indexOf("width: slotW"), lockAt = src.indexOf("parcel-row-lock-"), nameCellAt = src.indexOf("paddingLeft: row.depth");
     expect(lockAt).toBeGreaterThan(slotAt);
     expect(slotAt).toBeGreaterThan(nameCellAt);
-    expect(src).toMatch(/item\("Rename"/);
+    const menu = readFileSync("src/workspaces/site-planner/lib/parcelMenu.js", "utf8");
+    expect(menu).toMatch(/id: "rename", label: "Rename"/);   // rename lives in the ONE parcel menu (lib/parcelMenu.js), above Zoom to
+    expect(src).toMatch(/<ParcelContextMenu /);
     // the overlap marker is an icon in the slot — never a pill/text in the name block (it would add a line and push the name)
     const ovAt = src.indexOf("parcel-row-overlap-");
     expect(ovAt).toBeGreaterThan(slotAt);
@@ -106,7 +108,7 @@ describe("parcel list — a real table (owner 2026-10-16)", () => {
     expect(src).toMatch(/anyOverlap && seat\("parcels-col-overlap"/);
     expect(src).toMatch(/>Acres</);
   });
-  it("every row shows its padlock (closed / open) and its eye (open / struck) all the time; only ⋯ waits for hover", () => {
+  it("every row shows its padlock (closed / open), its eye (open / struck) AND its ⋯ all the time — none waits for hover (NEW-1, 2026-10-22)", () => {
     const row = src.slice(src.indexOf("function ParcelRow"), src.indexOf("function ColumnHeader"));
     expect(row).toMatch(/row\.locked \? <LockGlyph size=\{13\} \/> : <UnlockGlyph size=\{13\} \/>/);
     expect(row).toMatch(/row\.included \? <EyeIcon \/> : <EyeOffIcon \/>/);
@@ -114,7 +116,11 @@ describe("parcel list — a real table (owner 2026-10-16)", () => {
     expect(lockBtn).not.toMatch(/land-row-hover/);
     const eyeBtn = row.slice(row.indexOf("parcel-row-eye-"), row.indexOf("<RowMenu"));
     expect(eyeBtn).not.toMatch(/land-row-hover/);
-    expect(src.match(/land-row-hover/g)).toHaveLength(1);        // ⋯ only
+    expect(src).not.toMatch(/land-row-hover/);                    // the hover-only class is gone — ⋯ has its own seat like the lock and the eye
+    const menu = src.slice(src.indexOf("function RowMenu"), src.indexOf("function ParcelRow"));
+    const moreBtn = menu.slice(menu.indexOf("parcel-row-more-") - 300, menu.indexOf("<MoreIcon"));
+    expect(menu).toMatch(/parcel-row-more-/);
+    expect(moreBtn).not.toMatch(/opacity|className/);
   });
   it("the summary figure is the same weight as the words around it", () => {
     const at = src.indexOf('data-testid="parcels-site-acres"');

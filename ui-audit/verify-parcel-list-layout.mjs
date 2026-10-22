@@ -277,13 +277,11 @@ try {
     if (width >= 320) ok(`${tag}: no summary line wraps at ${width} (${m.summaryLines.map((s) => s.lines).join("+")} lines)`, m.summaryLines.length >= 1 && m.summaryLines.every((s) => s.lines === 1), m.summaryLines.map((s) => `${s.id}: "${s.text}" ×${s.lines}`).join(" | "));
     if (SHOTS) await T("parcels-panel").screenshot({ path: `${SHOTS}/${tag.replace(/\//g, "-")}.png` });
   }
-  // ⋯ reveal contract on the Silvestri-shaped plan: hidden at rest, shown on hover. (The padlock and the eye are NOT hover-only any more — the table shows them on every row, asserted above.)
+  // ⋯ contract on the Silvestri-shaped plan: ALL THREE icons are shown on every row at rest (NEW-1, 2026-10-22: the ⋯ is no longer hover-only).
   await openFixture(FIX[1], "light", 320);
   const op = (id) => T(id).evaluate((e) => Number(getComputedStyle(e).opacity));
   await page.mouse.move(5, 5); await sleep(300);
-  ok("at rest the ⋯ of a row is hidden, while its eye and padlock are shown", (await op("parcel-row-more-e1")) < 0.1 && (await op("parcel-row-eye-e1")) > 0.9 && (await op("parcel-row-lock-e1")) > 0.9);
-  await T("parcel-table-row-e1").hover(); await sleep(350);
-  ok("hovering a row shows its ⋯", (await op("parcel-row-more-e1")) > 0.9);
+  ok("at rest a row shows its ⋯, its eye and its padlock (none waits for hover)", (await op("parcel-row-more-e1")) > 0.9 && (await op("parcel-row-eye-e1")) > 0.9 && (await op("parcel-row-lock-e1")) > 0.9);
   // each is a working control: the padlock locks / unlocks, the eye leaves a lot out / back in
   await T("parcel-row-lock-e1").click(); await sleep(250);
   ok("clicking the open padlock closes it (the row reads locked)", (await T("parcel-row-lock-e1").getAttribute("data-locked")) === "1");
