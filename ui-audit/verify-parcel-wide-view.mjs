@@ -155,7 +155,7 @@ const allInTiles = asked.reduce((n, q) => n + expectedIn(q.env, 0).total, 0);
 expect("…well under half of ALL the lots in those tiles (the house lots were never downloaded)", heldMid < allInTiles * 0.6, `${heldMid} drawn of ${allInTiles} lot-in-tile entries in the asked tiles`);
 expect("the county was never sent the house lots: no tile answer holds more lots than the mock has ≥ 0.2 ac there", asked.every((q) => q.lots <= expectedIn(q.env, 8712).total), "");
 expect("the stage is reported as mid", d && d.wide && d.wide.stage === "mid", JSON.stringify(d && d.wide && d.wide.stage));
-expect("the bottom hint says what is held back", /Showing larger lots\. Zoom in for small lots and labels\./.test(await tip()), JSON.stringify((await tip()).slice(0, 90)));
+expect("the bottom hint says what is held back", /Large lots only\. Zoom in for all\./.test(await tip()), JSON.stringify((await tip()).slice(0, 90)));
 const labelTexts = () => page.evaluate(() => [...document.querySelectorAll("[data-lot-no]")].map((e) => e.getAttribute("data-lot-no")));
 await waitFor(async () => (await labelTexts()).length > 0, 5000);
 const midLabels = await labelTexts();
@@ -179,7 +179,7 @@ const wideAsked = tiles.filter((q) => q.env);
 const sumWide = wideAsked.filter((q) => q.where === "Shape__Area >= 21780").reduce((n, q) => n + expectedIn(q.env, 21780).total, 0);
 expect("the wide stage draws only the big lots (no house lots, no mid lots)", heldWide > 0 && heldWide <= sumWide + 5, `${heldWide} held ≤ ${sumWide} big lots in the asked tiles`);
 expect("the stage is reported as wide", d && d.wide && d.wide.stage === "wide");
-expect("the hint says what is held back", /Showing larger lots/.test(await tip()));
+expect("the hint says what is held back", /Large lots only/.test(await tip()));
 expect("no labels at the wide stage", (await labelTexts()).length === 0, `${(await labelTexts()).length}`);
 expect("the selected lot is STILL outlined at the widest stage", (await selOutline()) >= 1);
 

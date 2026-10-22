@@ -115,7 +115,7 @@ for (const c of CASES.filter((x) => !ONLY || x.name.startsWith(ONLY.slice(7)))) 
     const floorAc = minAc * 0.55;
     const small = rs.filter((s) => s.p2Ac != null && s.p2Ac < floorAc);
     expect(`${stage.toUpperCase()}: NO house-size lot was sent (98% of every answer's lots ≥ ${floorAc.toFixed(2)} ac, i.e. 0.55 × the ${minAc} ac cutoff)`, small.length === 0, small.length ? `OFFENDER ${small[0].url.slice(0, 300)} ; ${small.map((s) => `${s.p2Ac.toFixed(3)} ac`).slice(0, 4).join(", ")}` : `lowest 2nd-percentile ${Math.min(...rs.map((s) => s.p2Ac ?? Infinity)).toFixed(3)} ac`);
-    expect(`${stage.toUpperCase()}: the hint says what is held back`, /Showing larger lots\. Zoom in for small lots and labels\./.test(await tip()), JSON.stringify((await tip()).slice(0, 80)));
+    expect(`${stage.toUpperCase()}: the hint says what is held back`, /Large lots only\. Zoom in for all\./.test(await tip()), JSON.stringify((await tip()).slice(0, 80)));
     const st = stats(tag);
     console.log(`  ${stage}: ${st.n} requests · ${st.kb} KB · ${st.lots} lots · via ${[...new Set(rs.map((s) => s.via))].join("/")}`);
     void moved;
