@@ -4,7 +4,7 @@
  *   1. MAP VIEWER: mouse over the map → a WGS84 lat/long "you are here" chip appears (B683);
  *      right-click empty map → "Export to Google Earth (KMZ)" downloads a valid .kmz (B684).
  *   2. SITE-PLANNER CANVAS: open the seeded site → mouse over the canvas → the GPS chip shows
- *      lat/long (B683); right-click empty canvas → export → a valid .kmz downloads (B684).
+ *      lat/long (B683); File ▾ → Export to Google Earth → a valid .kmz downloads (B684, moved off the right-click by B2380112).
  * Each downloaded .kmz is unzipped (its central-dir + doc.kml read) and checked to be real KML
  * with lon,lat-ordered coordinates near the seeded site (−95.8°, 29.79°) — the #1 KML gotcha.
  *
@@ -137,19 +137,22 @@ if (canvas) {
   });
   results.push([`CANVAS: GPS readout shows lat/long ("${canvasReadout || "—"}")`, !!canvasReadout]);
 
-  // Right-click empty canvas → Map menu → export.
+  // Owner decision 2026-10-22 (B2380112): the planner's export lives under File ▾ ONLY — the canvas right-click has none.
   await page.mouse.click(canvas.x + canvas.width - 80, canvas.y + 80, { button: "right" });
   await page.waitForTimeout(300);
-  const canvasMenu = await page.getByText("Export to Google Earth (KMZ)").first().isVisible().catch(() => false);
-  results.push(["CANVAS: right-click export menu appears", canvasMenu]);
-  if (canvasMenu) {
-    try {
-      const { name, buf } = await grabDownload(() => page.getByText("Export to Google Earth (KMZ)").first().click());
-      results.push([`CANVAS: KMZ downloaded (${name})`, /\.kmz$/.test(name)]);
-      const { text } = unzipFirst(buf);
-      checkKml(text, "CANVAS", results);
-    } catch (e) { results.push([`CANVAS: KMZ download — ${e.message}`, false]); }
-  }
+  const rcMenu = await page.locator('[role="menu"]').filter({ hasText: /Zoom to fit/ }).first().isVisible().catch(() => false);
+  const rcExport = await page.getByText("Export to Google Earth (KMZ)").first().isVisible().catch(() => false);
+  results.push(["CANVAS: right-click menu opens and has NO export row", rcMenu && !rcExport]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /^File/ }).first().click();
+  const fileRow = page.getByTestId("file-export-kmz");
+  results.push(["CANVAS: File ▾ shows the export row", await fileRow.isVisible().catch(() => false)]);
+  try {
+    const { name, buf } = await grabDownload(() => fileRow.click());
+    results.push([`CANVAS: KMZ downloaded from File ▾ (${name})`, /\.kmz$/.test(name)]);
+    const { text } = unzipFirst(buf);
+    checkKml(text, "CANVAS", results);
+  } catch (e) { results.push([`CANVAS: KMZ download — ${e.message}`, false]); }
 } else {
   results.push(["CANVAS: opened the planner", false]);
 }

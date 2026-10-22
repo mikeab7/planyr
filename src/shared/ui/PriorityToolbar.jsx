@@ -213,7 +213,7 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
               {menuItems.map((it) => (it.renderMenu
                 ? <div key={it.id} data-menu-item-id={it.id} role="none">{it.renderMenu({ close })}</div>
                 : menuRowsOf(it).map((r, k) => (
-                  <button key={r.key} type="button" role="menuitem" data-menu-item-id={k === 0 ? it.id : r.key} disabled={r.disabled}
+                  <button key={r.key} type="button" role="menuitem" data-menu-item-id={k === 0 ? it.id : r.key} disabled={r.disabled} title={r.title}
                     onClick={() => { close(true); r.onSelect && r.onSelect(); }}
                     style={{ ...rowStyle, ...(r.sepBefore || (k === 0 && it.sepBefore) ? { borderTop: "1px solid var(--chrome-divider)", borderRadius: RADIUS.sm, marginTop: 3, paddingTop: 9 } : null), opacity: r.disabled ? 0.5 : 1, cursor: r.disabled ? "default" : "pointer", fontWeight: r.active ? 700 : 600 }}>
                     <span style={{ flex: 1, minWidth: 0 }}>{r.label}</span>

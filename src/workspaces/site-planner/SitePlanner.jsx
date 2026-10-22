@@ -17627,6 +17627,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { createExportSheet } = await loadExportSheet();
     return fn(createExportSheet(exportCtx()));
   };
+  const KMZ_NEEDS_ORIGIN = "Place this plan on the map first";
   const exportKmz = (extrude = false) => withExportSheet((x) => x.exportKmz(extrude));
   const exportPNG = () => withExportSheet((x) => x.exportPNG());
   // ⛔ B1783056 — `includeMetricsBand`/`pageOverride` used to be silently DROPPED here: this
@@ -22505,6 +22506,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         menuRows: [
           { id: "export-png", label: "File · Export PNG", onSelect: exportPNG },
           { id: "export-pdf", label: "File · Download PDF / pick frame…", onSelect: enterPrintMode },
+          // NEW-1 — the SAME exportKmz the canvas right-click calls; greyed WITH its reason when the plan has no map origin.
+          { id: "export-kmz", label: "File · Export to Google Earth (KMZ)", onSelect: () => exportKmz(false), disabled: !origin, title: origin ? undefined : KMZ_NEEDS_ORIGIN },
+          { id: "export-kmz-3d", label: "File · Export with 3D buildings", onSelect: () => exportKmz(true), disabled: !origin, title: origin ? undefined : KMZ_NEEDS_ORIGIN },
         ],
         render: ({ measuring }) => (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -22529,7 +22533,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     and several ui-audit harnesses match this button by that exact visible name). The
                     caret stays plain text, not aria-hidden, for the same reason. */}
                 <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
-                  title="File — export a PNG or print a PDF"
+                  title="File — export a PNG, print a PDF, or send the site to Google Earth"
                   style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
                     // ⛔ B1807200 AMENDMENT — resting border/background now match dGhost's own new box
                     // (var(--border-default)/var(--surface-raised)) instead of hardcoding PAL.chromeLine
@@ -22548,6 +22552,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <AnchoredMenu open={!measuring && exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
                   <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
                   <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
+                  {/* NEW-1 — Google Earth export lives HERE and only here in the planner (owner decision 2026-10-22: removed from the canvas
+                      right-click). The one exportKmz. Disabled + reason when the plan is not on the map (LOUD-FAILURE). */}
+                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+                  <button style={{ ...menuItem(false), ...(origin ? null : { opacity: 0.5, cursor: "default" }) }} disabled={!origin} data-testid="file-export-kmz"
+                    title={origin ? "Download this site as a Google Earth file" : KMZ_NEEDS_ORIGIN}
+                    onClick={() => { setExportMenu(false); exportKmz(false); }}>Export to Google Earth (KMZ)</button>
+                  <button style={{ ...menuItem(false), ...(origin ? null : { opacity: 0.5, cursor: "default" }) }} disabled={!origin} data-testid="file-export-kmz-3d"
+                    title={origin ? "Building massing lifted to real height in Earth's 3D view" : KMZ_NEEDS_ORIGIN}
+                    onClick={() => { setExportMenu(false); exportKmz(true); }}>Export with 3D buildings</button>
                 </AnchoredMenu>
               </div>
             </div>
@@ -31213,9 +31226,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           body = <>
             {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
             {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); close(); } })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: "Export to Google Earth (KMZ)", dis: !origin, title: origin ? "Download this site as a Google Earth file" : "Place this plan on the map first", on: () => { exportKmz(false); close(); } })}
-            {row({ text: "Export with 3D buildings", dis: !origin, title: origin ? "Building massing lifted to real height in Earth's 3D view" : "Place this plan on the map first", on: () => { exportKmz(true); close(); } })}
+            {/* Google Earth (KMZ) export is NOT here — owner decision 2026-10-22 (NEW-1): File ▾ is its ONE home in the planner. */}
           </>;
         }
         return (

@@ -30,11 +30,11 @@ test.describe("context menu stays fully in-viewport near the bottom-right corner
     const clickY = Math.round(box.y + box.height - 10);
     await page.mouse.click(clickX, clickY, { button: "right" });
 
-    // The dedicated canvas menu opens (its unique "Export to Google Earth" row confirms it).
-    await expect(page.getByText(/Export to Google Earth/i)).toBeVisible();
+    // The dedicated canvas menu opens (its unique "Zoom to fit" row confirms it).
+    const menu = page.locator('[role="menu"]').filter({ hasText: /Zoom to fit/i }).first();
+    await expect(menu).toBeVisible();
 
     // Measure the ACTUAL rendered menu box and assert it is entirely inside the viewport.
-    const menu = page.locator('[role="menu"]').filter({ hasText: /Export to Google Earth/i }).first();
     const rect = await menu.boundingBox();
     const vw = page.viewportSize().width;
     const vh = page.viewportSize().height;
