@@ -131,10 +131,16 @@ test.describe("NEW-1 (B2288560 amendment) · the parcel-source banner: bottom ce
 
   test("OTHER BANNERS UNTOUCHED — a non-parcel message in the same `err` slot keeps the bottom-left stack and gets no ✕", async ({ page }) => {
     await openMap(page);
-    // Right-click the empty map → "Export to Google Earth (KMZ)" with nothing saved raises a plain setErr.
-    await page.mouse.click(640, 400, { button: "right" });
-    await page.getByText("Export to Google Earth (KMZ)").click();
-    await expect(page.locator(STATUS)).toContainText(/Nothing to export yet/, { timeout: 10_000 });
+    // An address search that finds nothing raises a plain setErr (it used to be the empty-map right-click → Google Earth export,
+    // removed 2026-10-22, B2380112). Both geocoders are stubbed to answer "no match" so the message does not depend on the network.
+    await page.route(/geocode\.arcgis\.com|nominatim\.openstreetmap\.org/, (route) => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: route.request().url().includes("nominatim") ? "[]" : JSON.stringify({ candidates: [], suggestions: [] }),
+    }));
+    const box = page.getByPlaceholder(/Type an address/);
+    await box.fill("zzzz nowhere lane 00000");
+    await box.press("Enter");
+    await expect(page.locator(STATUS)).toContainText(/Couldn't find that address/, { timeout: 10_000 });
     expect(await page.locator(STATUS).textContent()).not.toMatch(OUTAGE);
     expect(await count(page, DISMISS), "an unrelated message grew the parcel ✕").toBe(0);
     expect(await count(page, NOTICE), "an unrelated message was floated as a parcel notice").toBe(0);

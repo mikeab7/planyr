@@ -79,7 +79,7 @@ describe("NEW-1 — a drawing markup in its default band stays editable", () => 
     const r = extractMarkupAnnotations(clone, { markups: markups({ id: "e1", kind: "easement", name: "Pipeline esmt" }, { id: "m1" }), f2p });
     expect(keysOf(r)).toEqual(["markup:e1", "markup:m1"]);
     const a = buildAnnotations(r.descriptors, { M0, frame }).annots[0];
-    expect(a.subtype).toBe("Polygon"); expect(a.subj).toBe("Easement"); expect(a.contents).toBe("Pipeline esmt");
+    expect(a.subtype).toBe("Polygon"); expect(a.subj).toBe("Easement"); expect(a.contents).toBe("");   // NEW-1 (2026-10-22): the name is the label in /AP — a /Contents pops a note box in Chrome
     expect(clone.querySelector("[data-feature]")).toBe(null);
   });
   it("(d) the full fixture still yields one annotation per markup", () => {
@@ -101,7 +101,7 @@ describe("NEW-2 — buildings lift as native Polygon annotations", () => {
     const b = built.annots[0];
     expect(b.vertices).toHaveLength(8);
     expect(b.subj).toBe("Building");
-    expect(b.contents).toBe("Building 1");
+    expect(b.contents).toBe("");   // NEW-1 (2026-10-22): no /Contents on a site element (its name is /Subj and the drawn label)
     expect(b.nm).toBe("planyr-building-b1");
     expect(b.ap.bbox.every(Number.isFinite)).toBe(true);
   });
@@ -166,7 +166,7 @@ describe("NEW-2 — buildings lift as native Polygon annotations", () => {
     expect(keysOf(r)).toEqual(["building:b1", "parcel-label:pc1"]);
     expect(built.annots[0].ap.stream).not.toContain("24.79 AC");
     const lab = built.annots[1];
-    expect(lab.subj).toBe("Parcel label"); expect(lab.contents).toBe("24.79 AC"); expect(lab.ap.stream).toContain("(24.79 AC) Tj");
+    expect(lab.subj).toBe("Parcel label"); expect(lab.contents).toBe(""); expect(lab.ap.stream).toContain("(24.79 AC) Tj");
     const left = c.querySelectorAll("[data-feature]").map((n) => n.getAttribute("data-feature"));
     expect(left).toEqual(["parcel:pc2"]); // pc1 is its own annotation; pc2 never overlapped anything lifted
   });
@@ -290,6 +290,6 @@ describe("NEW-1 (2026-10-19) — a stacked label keeps its lines (tspans) in the
     const ap = buildAnnotations(r.descriptors, { M0, frame, patterns: r.patterns }).annots[0];
     expect((ap.ap.stream.match(/\) Tj/g) || []).length).toBe(3);
     expect(ap.ap.stream).toContain("(Building 1) Tj"); expect(ap.ap.stream).toContain("(450,000 SF) Tj");
-    expect(ap.contents).toBe("Building 1");
+    expect(ap.contents).toBe("");
   });
 });
