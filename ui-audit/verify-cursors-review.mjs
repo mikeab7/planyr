@@ -48,6 +48,22 @@ const vpCursor = () => page.evaluate(() => {
 });
 const cursorOf = (sel) => page.evaluate((s) => { const el = document.querySelector(s); if (!el) return "MISSING"; el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) || el; return getComputedStyle(h).cursor; }, sel);
 
+// Like cursorOf, but PROVES the point resolves to the target (or something inside it): if something else paints over it — the app header at a
+// wide window (B2426787) — that cover is hidden for the read, and a point that still is not the target is reported as COVERED, never read.
+const cursorOfClear = (sel) => page.evaluate((s) => {
+  const el = document.querySelector(s); if (!el) return "MISSING"; el.scrollIntoView({ block: "center" });
+  const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const hidden = []; let out = "COVERED";
+  for (let i = 0; i < 14; i++) {
+    const h = document.elementFromPoint(x, y);
+    if (!h) { out = "NOHIT"; break; }
+    if (el.contains(h)) { out = getComputedStyle(h).cursor; break; }
+    const cover = h.closest("header, nav, [role=banner]") || h;   // the whole chrome region that paints over it, not one leaf at a time
+    hidden.push([cover, cover.style.visibility]); cover.style.visibility = "hidden";
+  }
+  for (const [c, v] of hidden) c.style.visibility = v;   // always put it back — later sections click the toolbar behind it
+  return out;
+}, sel);
 const A = { x: 760, y: 380 }, B = { x: 910, y: 490 };     // rect 1: NW → SE
 const C = { x: 1100, y: 380 }, D = { x: 1000, y: 470 };   // rect 2 drawn NE → SW (index order ≠ position order)
 const L1 = { x: 700, y: 620 }, L2 = { x: 900, y: 660 };   // a line
@@ -264,8 +280,8 @@ try {
   // button under test is what the point resolves to, and say so rather than silently measuring the header's button instead.
   await page.evaluate(() => { const h = document.querySelector("header[data-menu-scope]"); if (h) h.style.visibility = "hidden"; });
   const cv = await page.locator('[data-cmp="compare-view"] canvas').boundingBox();
-  check("Compare · page-step ‹ disabled on page 1", await cursorOf('[data-cmp="page-a-prev"]'), "default");
-  check("Compare · page-step › enabled", await cursorOf('[data-cmp="page-a-next"]'), "pointer");
+  check("Compare · page-step ‹ disabled on page 1", await cursorOfClear('[data-cmp="page-a-prev"]'), "default");
+  check("Compare · page-step › enabled", await cursorOfClear('[data-cmp="page-a-next"]'), "pointer");
   if (cv) {
     const cx = cv.x + Math.min(cv.width, 600) / 2, cy = cv.y + Math.min(cv.height, 400) / 2;
     await page.mouse.move(cx, cy); await page.waitForTimeout(80);
