@@ -21,10 +21,11 @@
  * WIDTH: the panel is resizable 240–620 and also floats. Nothing here reads window width. The scale
  * group measures ITS OWN box (ResizeObserver) and is either one row of three equal buttons (all three
  * labels fit unwrapped) or one column of three — never 2 + 1. The two quarter-turn buttons under the
- * rotation row use the same measurement: one row of two equal buttons, or one full-width column of two.
+ * rotation row are ALWAYS one compact row, left-aligned, sized to their own text; they shorten to
+ * "90° counterclockwise" / "90° clockwise" when the full labels would not fit, and never stack.
  *
  * ROTATION (NEW-1, 2026-10-21): label · round DIAL (drag the needle; Shift snaps 15°; one undo step per drag)
- * · number box with ▲▼ (+1° / −1°) on the top line; "Turn 90° counterclockwise" / "Turn 90° clockwise" under it.
+ * · number box with ▲▼ (+1° / −1°) on the top line; "Turn 90° counterclockwise" / "Turn 90° clockwise" under it, side by side.
  * CROP (NEW-2, 2026-10-21): a switch in the section heading. Off = the heading alone; on = a picture of the
  * sheet with the area outside the crop dimmed, the kept area dashed in the Site green, and Adjust. Switching
  * off keeps the shape (`crop.off`, shared engine) so switching on brings the same shape back.
@@ -45,12 +46,12 @@ import { CONTROL_H, FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js"
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { normalizeDeg, parseRotationInput, formatDeg } from "../../../shared/ui/RotationStepper.jsx";
-import { SCALE_PRESETS, feetPerInchForPreset, feetPerInchFromPair, matchScalePreset, scaleForFtPerPoint, PAGE_UNITS, REAL_UNITS } from "../../../shared/overlay/overlayScale.js";
+import { SCALE_PRESETS, feetPerInchForPreset, scaleForFtPerPoint, parseTypedScale } from "../../../shared/overlay/overlayScale.js";
 import { hasCrop, hasSavedCrop, cropEditBlock, cropOutlinePath } from "../../../shared/overlay/overlayCrop.js";
 import NumberBox from "../../../shared/ui/NumberBox.jsx";
 import { DIAL_TICKS, dialAngleFromPoint, dialDragAngle, dialKeyAngle, needleEnd, stepRotation, createDialDrag } from "../lib/rotationDial.js";
 import { overlayBand, overlayPanelOrder, overlayOrderFlags, canDropOverlay } from "../lib/overlayOrder.js";
-import { overlaySubline, placementPlan, formatScaleRatio, OV_KIND } from "../lib/overlayPanelModel.js";
+import { overlaySubline, placementPlan, formatScaleRatio, scaleEntryPlan, OV_KIND } from "../lib/overlayPanelModel.js";
 import { EyeIcon, EyeOffIcon, LockGlyph, UnlockGlyph, MoreIcon, iconBtn as rowIconBtn } from "./ParcelsPanel.jsx";
 
 const LINE = "1px solid var(--border-default)";
@@ -96,7 +97,7 @@ function Thumb({ o }) {
 /* The ONE "row or column" decision for a group of equal buttons: a row while every label fits unwrapped in an
  * equal share of THIS box's own width, otherwise a column of full-width buttons — never a partial row. It is a
  * measurement (ResizeObserver on the group's own box + each button's natural content width), not a CSS guess.
- * Used by the scale group and by the quarter-turn buttons so the two can never decide differently. */
+ * Used by the scale group. */
 function useRowOrStack(ref, key) {
   const [stacked, setStacked] = useState(false);
   const GAP = SPACE.sm, PAD_X = 10, BORDER = 2;
@@ -210,8 +211,52 @@ function DegBox({ value, disabled, reason, onCommit, onStep }) {
   );
 }
 
+/* The two quarter-turn buttons: ONE compact row, left-aligned, each as wide as its own text — never stacked. The label
+ * steps down only as far as the panel's width forces it: "Turn 90° …" (full) → "90° …" (short) → "90° …" with no icon and
+ * tighter padding (compact) → the two turn arrows alone (icons — only where even the compact words would be cut off by the
+ * panel edge: the narrowest panel and a phone). The full words stay in aria-label and title at every step. The decision is a measurement
+ * (ResizeObserver on the row's box + hidden copies of both label sets), not a CSS guess. */
+const QUARTERS = [
+  { testid: "overlay-rot-ccw90", full: "Turn 90° counterclockwise", short: "90° counterclockwise", delta: -90, Icon: RotL },
+  { testid: "overlay-rot-cw90", full: "Turn 90° clockwise", short: "90° clockwise", delta: 90, Icon: RotR },
+];
+const QUARTER_LEVELS = ["full", "short", "compact", "icons"];
+function QuarterTurns({ onTurn, keyId }) {
+  const boxRef = useRef(null);
+  const [level, setLevel] = useState("full");
+  const GAP = SPACE.sm, BORDER = 2, ICON = 14;
+  const padFor = (l) => (l === "full" || l === "short" ? 10 : 8);
+  useIsoLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box) return undefined;
+    const measure = () => {
+      const width = (kind) => Array.from(box.querySelectorAll(`[data-quarter-probe="${kind}"]`)).map((p) => p.getBoundingClientRect().width);
+      const need = (l) => (l === "icons" ? QUARTERS.length * (ICON + 2 * padFor(l) + BORDER) : width(l === "full" ? "full" : "short").reduce((n, w) => n + w + (l === "compact" ? 0 : ICON + SPACE.xs) + 2 * padFor(l) + BORDER, 0)) + GAP;
+      setLevel(QUARTER_LEVELS.find((l) => box.clientWidth >= need(l) - 0.5) || "icons");
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(box);
+    const fonts = document.fonts && document.fonts.ready;
+    if (fonts) fonts.then(measure).catch(() => {});
+    return () => { if (ro) ro.disconnect(); };
+  }, [keyId]);
+  return (
+    <div ref={boxRef} data-testid="overlay-quarter-group" data-label={level}
+      style={{ position: "relative", display: "flex", flexWrap: "nowrap", justifyContent: "flex-start", gap: GAP, minWidth: 0 }}>
+      {QUARTERS.map(({ testid, full, short: sh, delta, Icon }) => (
+        <Button key={testid} variant="ghost" size="md" style={{ ...btnCompact, flex: "none", padding: `0 ${padFor(level)}px` }} data-testid={testid}
+          aria-label={full} title={full} onClick={() => onTurn(delta)}>{(level === "full" || level === "short" || level === "icons") && <Icon />}{level === "full" ? full : level === "icons" ? null : sh}</Button>
+      ))}
+      {["full", "short"].flatMap((kind) => QUARTERS.map(({ testid, full, short: sh }) => (
+        <span key={`${kind}-${testid}`} aria-hidden="true" data-quarter-probe={kind} style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", whiteSpace: "nowrap", fontSize: C, fontWeight: 400, left: 0, top: 0 }}>{kind === "full" ? full : sh}</span>
+      )))}
+    </div>
+  );
+}
+
 /* Rotation, as one block: label · dial · number box on the top line; the two quarter-turn buttons under it,
- * spelled out, equal width — side by side while both fit, stacked full-width when the panel is narrow.
+ * spelled out, side by side in one compact row (shortened, never stacked, when the panel is narrow).
  * Every control writes through the panel's one patch handler and works on a LOCKED overlay (B2262864). */
 function RotationRow({ o, h }) {
   const oRef = useRef(o); oRef.current = o;
@@ -223,11 +268,6 @@ function RotationRow({ o, h }) {
     patch: (deg, hist) => hRef.current.onPatch(oRef.current.id, { rotation: deg }, hist),
   }), []);
   const turn = (d) => h.onPatch(o.id, { rotation: stepRotation(rot, d) });
-  const boxRef = useRef(null);
-  const { stacked, GAP, PAD_X } = useRowOrStack(boxRef, o.id);
-  const quarter = (testid, label, delta, icon) => (
-    <Button variant="ghost" size="md" style={{ ...btnCompact, width: "100%", padding: `0 ${PAD_X}px` }} data-testid={testid} onClick={() => turn(delta)}>{icon}{label}</Button>
-  );
   return (
     <div data-testid="overlay-rotation-row" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
       <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
@@ -241,10 +281,7 @@ function RotationRow({ o, h }) {
           }} />
         <DegBox value={rot} onCommit={(deg) => h.onPatch(o.id, { rotation: deg })} onStep={turn} />
       </div>
-      <div ref={boxRef} data-testid="overlay-quarter-group" data-layout={stacked ? "stack" : "row"} style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : "1fr 1fr", gap: GAP }}>
-        {quarter("overlay-rot-ccw90", "Turn 90° counterclockwise", -90, <RotL />)}
-        {quarter("overlay-rot-cw90", "Turn 90° clockwise", 90, <RotR />)}
-      </div>
+      <QuarterTurns onTurn={turn} keyId={o.id} />
     </div>
   );
 }
@@ -270,52 +307,67 @@ function ScaleGroup({ buttons, active, disabled, onPick, why }) {
   );
 }
 
-/* 'Set scale' — presets, a custom page = real entry (metric too), and the sheet's own scale note
- * as the suggestion. Local draft state; commits through onApply(feetPerInch). */
-function ScaleTools({ o, onApply }) {
-  const curFpi = scaleForFtPerPoint(o.ftPerPx);
-  const matched = matchScalePreset(curFpi);
-  const detected = o.detectedScale > 0 ? o.detectedScale : null;
-  const [mode, setMode] = useState(null);      // null → follow the current size; "custom"
-  const [page, setPage] = useState("1");
-  const [pageUnit, setPageUnit] = useState("in");
-  const [real, setReal] = useState(String(detected && o.unscaled ? detected : Math.round(curFpi * 100) / 100));
-  const [realUnit, setRealUnit] = useState("ft");
-  const [dirty, setDirty] = useState({ page: false, real: false });   // a unit change only commits a distance the person actually typed
-  const selVal = mode === "custom" ? "custom" : (matched ? matched.id : (detected && Math.abs(detected - curFpi) < 1e-6 ? "sheet" : "custom"));
-  const commit = (next = {}) => {
-    const fpi = feetPerInchFromPair({ pageVal: next.page ?? page, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? real, realUnit: next.realUnit ?? realUnit });
-    if (fpi) onApply(fpi);
+/* 'Set scale' — a two-segment switch: PRESET (a dropdown of standard scales, "Read from the sheet" first when there is
+ * one; no "Custom…" entry) | CUSTOM (ONE text box, `1" = [ 40 ] '`; a plain number is feet per inch, and anything
+ * `parseTypedScale` reads — `1:480`, `1/8" = 1'-0"` — works too). Local draft state; commits through onApply(feetPerInch).
+ * Which segment opens first: Preset when the current scale matches a preset or the overlay has none yet; Custom,
+ * pre-filled, when the scale came from Trace / Match / typing and matches no preset. */
+const roundFpi = (v) => String(Math.round(v * 100) / 100);
+function ScaleModeSwitch({ mode, onMode }) {
+  const seg = (key, label) => {
+    const on = mode === key;
+    return (
+      <button key={key} type="button" aria-pressed={on} data-testid={`overlay-scale-mode-${key}`} onClick={() => onMode(key)}
+        style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", height: "100%", padding: "0 10px", borderRadius: RADIUS.sm,
+          background: on ? "var(--text-primary)" : "transparent", color: on ? "var(--surface-raised)" : "var(--text-primary)" }}>{label}</button>
+    );
+  };
+  return (
+    <div role="group" aria-label="Scale entry" style={{ display: "inline-flex", alignSelf: "flex-start", boxSizing: "border-box", height: H, padding: 1, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-raised)" }}>
+      {seg("preset", "Preset")}{seg("custom", "Custom")}
+    </div>
+  );
+}
+
+export function ScaleTools({ o, onApply }) {
+  const { mode: firstMode, selected: selVal, curFpi, detected } = scaleEntryPlan(o);
+  const [mode, setMode] = useState(firstMode);
+  const [draft, setDraft] = useState(() => roundFpi(curFpi));
+  const [bad, setBad] = useState(false);
+  const [dirty, setDirty] = useState(false);   // an idle focus → blur must not re-commit the ROUNDED display value (it would drift the scale)
+  const commit = async (raw) => {
+    if (!dirty) { setBad(false); return; }
+    setDirty(false);   // before the await: Enter's commit and the blur that follows must not both apply
+    const fpi = await parseTypedScale(raw);
+    if (fpi == null) { setBad(true); setDraft(roundFpi(curFpi)); return; }
+    setBad(false); setDraft(roundFpi(fpi));
+    onApply(fpi);
   };
   return (
     <div data-testid="overlay-scale-tools" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
-      <select data-testid="overlay-scale-preset" aria-label="Scale" style={{ ...inputStyle, fontFamily: "inherit", width: "100%" }} value={selVal}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "custom") { setMode("custom"); return; }
-          setMode(null);
-          if (v === "sheet" && detected) { onApply(detected); return; }
-          const p = SCALE_PRESETS.find((x) => x.id === v);
-          if (p) onApply(feetPerInchForPreset(p));
-        }}>
-        {detected && <optgroup label="Read from the sheet"><option value="sheet">{formatScaleRatio(detected)} (suggested)</option></optgroup>}
-        <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-        <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-        <option value="custom">Custom…</option>
-      </select>
-      {selVal === "custom" && (
-        <div data-testid="overlay-scale-custom" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.xs }}>
-          <input style={{ ...inputStyle, width: 46 }} value={page} aria-label="Distance on the page" placeholder="1 or 1/2" onChange={(e) => { setPage(e.target.value); setDirty((d) => ({ ...d, page: true })); }}
-            onBlur={(e) => commit({ page: e.currentTarget.value })} onKeyDown={(e) => { if (e.key === "Enter") commit({ page: e.currentTarget.value }); }} />
-          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={pageUnit} aria-label="Page unit" onChange={(e) => { setPageUnit(e.target.value); if (dirty.page || dirty.real) commit({ pageUnit: e.target.value }); }}>
-            {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-          <span style={valueStyle}>=</span>
-          <input style={{ ...inputStyle, width: 76 }} value={real} aria-label="Real-world distance" placeholder="real" onChange={(e) => { setReal(e.target.value); setDirty((d) => ({ ...d, real: true })); }}
-            onBlur={(e) => commit({ real: e.currentTarget.value })} onKeyDown={(e) => { if (e.key === "Enter") commit({ real: e.currentTarget.value }); }} />
-          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={realUnit} aria-label="Real-world unit" onChange={(e) => { setRealUnit(e.target.value); if (dirty.page || dirty.real) commit({ realUnit: e.target.value }); }}>
-            {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
+      <ScaleModeSwitch mode={mode} onMode={(m) => { setMode(m); setBad(false); setDirty(false); if (m === "custom") setDraft(roundFpi(curFpi)); }} />
+      {mode === "preset" ? (
+        <select data-testid="overlay-scale-preset" aria-label="Scale" style={{ ...inputStyle, fontFamily: "inherit", width: "100%" }} value={selVal}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "sheet" && detected) { onApply(detected); return; }
+            const p = SCALE_PRESETS.find((x) => x.id === v);
+            if (p) onApply(feetPerInchForPreset(p));
+          }}>
+          {!selVal && <option value="" disabled>Choose a scale</option>}
+          {detected && <optgroup label="Read from the sheet"><option value="sheet">{formatScaleRatio(detected)} (suggested)</option></optgroup>}
+          <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+          <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+        </select>
+      ) : (
+        <div data-testid="overlay-scale-custom" style={{ display: "flex", alignItems: "center", gap: SPACE.xs, minWidth: 0 }}>
+          <span style={{ ...valueStyle, flex: "none" }}>1" =</span>
+          <input data-testid="overlay-scale-custom-input" aria-label="Feet per inch" aria-invalid={bad || undefined} inputMode="decimal" value={draft}
+            style={{ ...inputStyle, flex: "1 1 60px", width: 0, minWidth: 0, ...(bad ? { borderColor: WARN, color: WARN } : null) }}
+            onChange={(e) => { setDraft(e.target.value); setBad(false); setDirty(true); }}
+            onBlur={(e) => commit(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") commit(e.currentTarget.value); else if (e.key === "Escape") { setDraft(roundFpi(curFpi)); setBad(false); setDirty(false); } }} />
+          <span style={{ ...valueStyle, flex: "none" }}>'</span>
         </div>
       )}
     </div>
@@ -364,7 +416,6 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
         )}
         {group}
       </>)}
-      {o.sheet && !o.sheet.std && plan.kind === OV_KIND.PDF && <div role="note" style={{ ...subStyle, color: WARN }}>Non-standard sheet ({o.sheet.label}) — it may have been shrunk; a scale assumes true plot size.</div>}
       {tool === "set" && plan.scaleButtons.includes("set") && <ScaleTools key={o.id} o={o} onApply={(fpi) => h.onApplyScale(o.id, fpi)} />}
       {mine && (
         <div role="status" data-testid="overlay-calib-status" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>

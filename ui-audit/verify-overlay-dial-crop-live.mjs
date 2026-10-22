@@ -1,4 +1,5 @@
-/* verify-overlay-dial-crop-live — NEW-1 (rotation dial) + NEW-2 (crop switch) on the Site tab OVERLAYS panel, driven as the
+/* verify-overlay-dial-crop-live — NEW-1 (rotation dial) + NEW-2 (crop switch) on the Site tab OVERLAYS panel, plus (2026-10-22) the 90° row,
+ * the removed non-standard-sheet note and the Set-scale Preset | Custom switch (B2382048–B2382050), driven as the
  * signed-in test account on a real deploy (owner decision 2026-10-04: a session's own live signed-in check counts).
  *
  * Seeds a THROWAWAY plan through the app's own local-cache path (never one of Michael's plans; constraint 7/15 — it is
@@ -8,6 +9,8 @@
  *      ONE Ctrl+Z; ▲/▼ ±1°, typing sets an exact value (Esc reverts), both "Turn 90°" buttons, arrow keys on the dial
  *   2. the crop switch: off = heading only; ON with no shape opens the editor, cancelling leaves it off; draw a polygon →
  *      switch off (whole sheet — no clip on canvas OR in the export sheet; shape kept) → on (the SAME polygon back)
+ *   3. (2026-10-22) the two 90° buttons on ONE row, left-aligned; no "Non-standard sheet" note on a non-standard PDF-kind sheet;
+ *      Set scale → Preset applies a standard scale (no Custom entry in the dropdown) → Custom is ONE box: 50, 1" = 45', 1:480, 1/8" = 1'-0" apply, junk reverts
  * KNOWN-GOOD ARM: the run is VOID (exit 2) unless the untouched panel shows rotation 0, the switch off and no clip — an instrument
  * that cannot see the starting state cannot vouch for the changes.
  * The served build is read from /version.json IN THE SAME CALL as the assertions (CLAUDE.md: a live measurement is only valid if
@@ -31,7 +34,7 @@ const SKETCH = "data:image/svg+xml;utf8," + encodeURIComponent(
 const mkSite = (id, name, locked) => ({
   id, groupId: id, site: name, name: "Plan 1", origin: { lat: 29.76, lon: -95.37 }, county: "harris", status: "active", schemaVersion: 12, updatedAt: Date.now(),
   parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 900, y: 0 }, { x: 900, y: 700 }, { x: 0, y: 700 }], active: true, z: 0 }],
-  sheetOverlays: [{ id: "ov1", name: "Fixture sheet.png", src: SKETCH, x: 100, y: 100, imgW: W, imgH: H, ftPerPx: 0.5, rotation: 0, opacity: 0.85, locked, visible: true }],
+  sheetOverlays: [{ id: "ov1", name: "Fixture sheet.png", src: SKETCH, x: 100, y: 100, imgW: W, imgH: H, ftPerPx: 40 / 72, rotation: 0, opacity: 0.85, locked, visible: true, sheet: { std: false, label: "9.1×14.2 in" } }],
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [],
 });
 
@@ -127,6 +130,29 @@ async function dialArm(tag) {
   ok(`[${tag}] the dial's own keys: → +1°, Shift+← −15° (314 → 300)`, (await rotBox()) === 300);
 }
 
+
+const ratioText = async () => (await T("overlay-scale-ratio").innerText()).replace(/\s+/g, " ").trim();
+async function turnsAndScaleArm(tag) {
+  const [a, b, g] = await Promise.all([T("overlay-rot-ccw90").boundingBox(), T("overlay-rot-cw90").boundingBox(), T("overlay-quarter-group").boundingBox()]);
+  ok(`[${tag}] the two 90° buttons sit side by side on ONE row, left-aligned`, Math.abs(a.y - b.y) < 1 && b.x > a.x + a.width - 1 && a.x - g.x < 2, `ccw ${Math.round(a.x)},${Math.round(a.y)} cw ${Math.round(b.x)},${Math.round(b.y)}`);
+  ok(`[${tag}] no "Non-standard sheet" note (the sheet is non-standard)`, !/non-standard sheet/i.test(await page.evaluate(() => document.body.innerText)) && (await T("overlay-scale-ratio").count()) === 1);
+  await T("overlay-scale-set").click();
+  ok(`[${tag}] Set scale opens on Preset (1" = 40' is a standard scale)`, (await T("overlay-scale-mode-preset").getAttribute("aria-pressed")) === "true" && (await T("overlay-scale-preset").inputValue()) === "eng-40");
+  ok(`[${tag}] the Preset dropdown has no Custom entry`, (await T("overlay-scale-preset").locator('option[value="custom"]').count()) === 0);
+  await T("overlay-scale-preset").selectOption("eng-60"); await sleep(500);
+  ok(`[${tag}] picking 1" = 60' applies it at once`, /60/.test(await ratioText()), await ratioText());
+  await T("overlay-scale-mode-custom").click();
+  const box = T("overlay-scale-custom-input");
+  ok(`[${tag}] Custom is ONE box (no unit dropdowns), pre-filled with the current feet per inch`, (await T("overlay-scale-custom").locator("input").count()) === 1 && (await T("overlay-scale-custom").locator("select").count()) === 0 && (await box.inputValue()) === "60");
+  for (const [typed, want] of [["50", "50"], ["1\" = 45'", "45"], ["1:480", "40"], ["1/8\" = 1'-0\"", "8"]]) {
+    await box.fill(typed); await box.press("Enter"); await sleep(450);
+    ok(`[${tag}] typing ${typed} applies 1" = ${want}'`, new RegExp(`\\b${want}\\b`).test(await ratioText()), await ratioText());
+  }
+  await box.fill("banana"); await box.press("Enter"); await sleep(300);
+  ok(`[${tag}] junk reverts and shows the field in the warning colour`, (await box.inputValue()) === "8" && (await box.getAttribute("aria-invalid")) === "true");
+  await T("overlay-scale-set").click(); await sleep(200);   // close the tools; leave the sheet at a standard scale for the arms that follow
+}
+
 async function cropArm(tag) {
   ok(`[${tag}] crop starts OFF: the heading and the switch only`, (await sw().getAttribute("aria-checked")) === "false" && (await T("overlay-crop-open").count()) === 0 && (await T("overlay-crop-reset").count()) === 0);
   ok(`[${tag}] the switch is enabled (a locked overlay can still be cropped)`, await sw().isEnabled());
@@ -165,6 +191,7 @@ try {
     if (!startOk) { console.log("VOID — the instrument cannot see the starting state"); await browser.close(); process.exit(2); }
     ok(`[${tag}] known-good arm: rotation 0 · crop off · no clip`, startOk);
     await dialArm(tag);
+    await turnsAndScaleArm(tag);
     await cropArm(tag);
   }
   ok("no page errors", errors.length === 0, errors.join(" | ").slice(0, 300));
