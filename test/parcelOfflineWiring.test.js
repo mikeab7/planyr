@@ -206,10 +206,11 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
 describe("NEW-4 — an outage offers the way forward instead of dead-ending", () => {
   /* Mutation: delete `failUnavailable` / the toast button → red. */
   it("a source OUTAGE carries the fallback; 'no parcel right there' deliberately does not", () => {
-    expect(finder).toMatch(/if \(res\.responded === 0\) failUnavailable\(/);
+    // NEW-2 (2026-10-22) — an outage is any asked source that never answered (`errors > 0`), not only "nobody answered": a neighbour's empty answer must not turn a timeout into "no parcel".
+    expect(finder).toMatch(/if \(silentCount\) failUnavailable\(/);
     expect(finder).toContain('data-testid="map-start-blank-here"');
     // The non-outage branch must NOT offer it — that is the distinction being guarded.
-    const branch = finder.slice(finder.indexOf("if (res.responded === 0) failUnavailable("), finder.indexOf("if (res.responded === 0) failUnavailable(") + 600);
+    const branch = finder.slice(finder.indexOf("if (silentCount) failUnavailable("), finder.indexOf("if (silentCount) failUnavailable(") + 700);
     expect(branch).toMatch(/else setErr\(gap/);
     expect(branch.includes("else failUnavailable(")).toBe(false);
   });

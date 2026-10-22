@@ -20,18 +20,19 @@
  * network. Result is `identifyParcelEager`'s shape plus `queried` (every candidate asked, all rounds), `via`
  * ("primary" | "retry" | "neighbour" | "skipped" | null) and `silent` (county keys that never answered in any round). */
 import { identifyParcelEager } from "./arcgis.js";
+import { CLICK_RETRY_BUDGET_MS } from "./slowSource.js";
 
 const sameSource = (a, b) => a.county === b.county || (a.url && b.url && a.url === b.url);
 
-export async function identifyWithLineFallback({ primary = [], neighbours = null, skipped = null, lng, lat, identify = identifyParcelEager, onSettled, retryErrored = true } = {}) {
+export async function identifyWithLineFallback({ primary = [], neighbours = null, skipped = null, lng, lat, identify = identifyParcelEager, onSettled, retryErrored = true, retryTimeoutMs = CLICK_RETRY_BUDGET_MS } = {}) {
   const queried = [];
   const answered = new Set(); // county keys that answered OK in some round
   const silent = new Set();   // county keys that have not (yet) answered OK
   let last = null;
-  const round = async (list, via) => {
+  const round = async (list, via, extra = {}) => {
     if (!list.length) return null;
     list.forEach((c) => { if (!queried.some((q) => sameSource(q, c))) queried.push(c); });
-    const res = await identify(list, lng, lat, { onSettled });
+    const res = await identify(list, lng, lat, { onSettled, ...extra });
     (res.sources || []).forEach((s, i) => {
       const key = s.county || (list[i] && list[i].county);
       if (s.ok) { answered.add(key); silent.delete(key); } else if (!answered.has(key)) silent.add(key);
@@ -54,7 +55,9 @@ export async function identifyWithLineFallback({ primary = [], neighbours = null
 
   if (retryErrored && last) {
     const again = primary.filter((c, i) => last.sources && last.sources[i] && !last.sources[i].ok);
-    hit = await round(again, "retry");
+    /* NEW-2 (2026-10-22) — the retry round WAITS LONGER than the quick first round: a source that missed the app's 8 s is usually waking up (the Comptroller layer's cold ask has taken 27 s),
+     * and a click whose only crime was reaching it early used to read as an outage. The first round keeps 8 s so a dead host still cannot stall the click. */
+    hit = await round(again, "retry", { timeoutMs: retryTimeoutMs });
     if (hit) return finish(hit);
   }
 

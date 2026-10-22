@@ -112,6 +112,7 @@ import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { setMapCursor, installPlannerCursorStyle } from "./lib/plannerCursors.js";
 import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js";
+import { watchSlow, stillLookingMessage } from "./lib/slowSource.js"; // NEW-1 (2026-10-22) — one "still looking" + retry rule for a slow parcel server
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line // NEW-1 — one rule for "may a parcel banner be raised right now"
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
@@ -700,8 +701,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // the camera. "Far" reuses the SAME 50-mile market radius `landingView` already uses to decide
   // whether two sites are the same market (CLUSTER_RADIUS_MI) — no new distance policy to keep in sync.
   const [locateFar, setLocateFar] = useState(false);
-  const failUnavailable = (msg, at) => {
+  /* NEW-1/NEW-2 (2026-10-22) — a lookup whose server never answered is not an answer. The message that says so carries a "Try again" that re-runs the SAME lookup
+   * (`{message, run}`; shown only while that exact message is up, so a later error never inherits a stale button), and while a lookup runs long `lookupNote`
+   * says it is still going — a slow server must never read as "not found" or as nothing happening. */
+  const [errRetry, setErrRetry] = useState(null);
+  const [lookupNote, setLookupNote] = useState("");
+  const failUnavailable = (msg, at, retry = null) => {
     setErr(msg);
+    setErrRetry(retry ? { message: msg, run: retry } : null);
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
     setFallbackOffer(c ? { at: { lat: c.lat, lon: c.lon != null ? c.lon : c.lng } } : null);
   };
@@ -3529,6 +3536,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
 
     setBusy(true);
+    const stopSlow = watchSlow(() => setLookupNote(stillLookingMessage(null)));
     try {
       // Eager identify: take the first source that returns a lot (≈2-3s via the
       // statewide layer) instead of stalling on a hung county server's full 8s timeout.
@@ -3588,8 +3596,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         // NEW-1 (Memphis line band) — when the county itself has no source, only a NEIGHBOUR was asked: its silence is not
         // this county's outage, so the county's own gap sentence stands.
         if (gap && candidates.length === 0) { ack?.empty("No lot here"); setErr(`${gap} You can still trace the lot from the Aerial underlay.`); return; }
-        ack?.empty(res.responded === 0 ? "Couldn't reach the county server" : "No lot here");
-        if (res.responded === 0) failUnavailable(`${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.`, latlng);
+        /* NEW-2 (2026-10-22) — "No lot here" is only ever said when EVERY server asked answered. One that never did (timed out, errored) may be the one holding the lot, so its silence is
+         * reported as silence, with a Try again — never as an empty point, whether or not a neighbour across a line did answer. */
+        const silentCount = res.responded === 0 || res.errors > 0;
+        ack?.empty(silentCount ? "Couldn't reach the county server" : "No lot here");
+        if (silentCount) failUnavailable(`${silentServerPhrase(res.silent)} didn't answer, so this point couldn't be checked. Try again, or start the plan here and draw the boundary yourself.`, latlng, () => handleClick(latlng));
         else setErr(gap
           ? `${gap} You can still trace the lot from the Aerial underlay.`
           : "No parcel right there — zoom in and click directly on a lot.");
@@ -3621,8 +3632,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
-      failUnavailable(humanizeError(e), latlng); // NEW-4 — a thrown lookup is an outage too
+      failUnavailable(humanizeError(e), latlng, () => handleClick(latlng)); // NEW-4 — a thrown lookup is an outage too
     } finally {
+      stopSlow(); setLookupNote("");
       setBusy(false);
       ack?.done(); // no-op when a "no lot here" tag already took over the ring
     }
@@ -3686,7 +3698,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })), // feed the circuit breaker
       });
     } catch (_) {
-      if (live()) setParcelInfo({ status: "unavailable", label }); return;
+      if (live()) setParcelInfo({ status: "unavailable", label, at: latlng }); return;
     }
     if (!live()) return; // a newer search superseded this one — don't add a stale parcel or info
     if (!res.hits.length) {
@@ -3719,7 +3731,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         if (!live()) return;
         if (snapped) { await selectParcelAt(snapped, label, tok, true); return; }
       }
-      setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
+      setParcelInfo({ status: res.responded === 0 || res.errors > 0 ? "unavailable" : "none", label, at: latlng }); return;
     }
     const hit = res.hits[0];
     // See handleClick (B630): a statewide answer flags a "backup" only when the real CAD
@@ -3746,6 +3758,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (text != null && text !== addr) setAddr(text);
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
     setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null); setLocateFar(false);
+    let stopSlow = () => {}; // NEW-1 (2026-10-22) — the "still looking" watch spans the id lookup AND the lot selection that follows it (same slow server)
     try {
       /* NEW-2 (TN, 2026-10-21) — text that reads as a Tennessee parcel ID ("156-027.00-000", "156 027.00 000", an 11-digit Metro Nashville
        * number) is looked up on the counties' own layers and lands on THAT lot, selected. A miss is a plain sentence naming where it looked
@@ -3753,14 +3766,23 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       if (looksLikeTnParcelId(q)) {
         const { resolveParcelId, parcelIdMessage } = await import("./lib/parcelIdSearch.js");
         const mc = mapRef.current ? mapRef.current.getCenter() : null; // an id repeated across counties lands on the one nearest the map
+        stopSlow = watchSlow(() => { if (tok === addrTokRef.current) setLookupNote(stillLookingMessage("Tennessee")); });
         const r = await resolveParcelId(q, { near: mc ? { lat: mc.lat, lng: mc.lng } : null });
         if (tok !== addrTokRef.current) return;
+        /* An empty first answer that the confirming re-ask turned into a find is the intermittent "came back empty, worked on retry" Michael saw (V1853888) — it cannot be reproduced on demand,
+         * so the app reports it the moment it happens (public.client_errors, kind parcel-id-empty-then-found) instead of the report being dismissed as unreproducible. */
+        if (r.recheckedEmpty) reportClientEvent("parcel-id-empty-then-found", `parcel ID search came back empty on the first ask and found the lot on the re-ask (${r.county})`, { county: r.county, typed: q });
         if (r.status === "found") {
           mapRef.current.flyTo([r.point.lat, r.point.lng], 18, { duration: 0.75 });
           await selectParcelAt(r.point, r.label, tok);
           return;
         }
-        if (r.status === "notfound" || r.status === "unavailable") { setErr(parcelIdMessage(r, q)); return; }
+        if (r.status === "notfound" || r.status === "unavailable") {
+          const msg = parcelIdMessage(r, q);
+          setErr(msg);
+          setErrRetry(r.status === "unavailable" ? { message: msg, run: () => goAddress(q) } : null); // a server that never answered gets a Try again; a real "not found" does not
+          return;
+        }
       }
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
@@ -3772,7 +3794,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     } catch (_) {
       if (tok === addrTokRef.current) failUnavailable("Address search is unavailable right now — pan/zoom the map to your site, or start the plan where the map is looking and draw the boundary.");
     } finally {
-      if (tok === addrTokRef.current) setBusy(false);
+      stopSlow();
+      if (tok === addrTokRef.current) { setLookupNote(""); setBusy(false); }
     }
   };
 
@@ -3799,6 +3822,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const c = mapRef.current && mapRef.current.getCenter();
     if (!c) return;
     markDecidePin({ lat: c.lat, lng: c.lng });
+  };
+
+  /* NEW-2 (2026-10-22) — "Try again" on the parcel card: the same lookup for the same point, with the loading treatment and the still-looking line. */
+  const retryLotAt = async (at, label) => {
+    setBusy(true); setParcelInfo(null);
+    const stopSlow = watchSlow(() => setLookupNote(stillLookingMessage(null)));
+    try { await selectParcelAt(at, label, null, true); } finally { stopSlow(); setLookupNote(""); setBusy(false); }
   };
 
   const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
@@ -4504,7 +4534,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * raised, matched by its exact message so an address-search failure sharing `err` is left where it was)? Those float
    * bottom-centre with a ✕; every other `err` stays in the bottom-left stack. A banner that carries an action button
    * (`fallbackOffer`) or shares the slot with the locate offer keeps the stack, which owns those buttons. */
-  const sourceNoticeFloats = !!err && !fallbackOffer && !locateFar
+  const retryShown = !!err && !!errRetry && errRetry.message === err; // NEW-1/NEW-2 — the "Try again" belongs to exactly the message it was raised with
+  const sourceNoticeFloats = !!err && !fallbackOffer && !locateFar && !retryShown
     && !!sourceNoticeRef.current && sourceNoticeRef.current.message === err;
 
   return (
@@ -5003,6 +5034,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             compAccent={COMP_ACCENT}
             // NEW-4 — the unavailable state offers the fallback instead of dead-ending.
             onStartBlank={parcelInfo.status === "unavailable" ? () => { const m = mapRef.current; startBlankHere(m ? m.getCenter() : null); setParcelInfo(null); } : null}
+            onRetry={parcelInfo.status === "unavailable" && parcelInfo.at ? () => retryLotAt(parcelInfo.at, parcelInfo.label) : null}
           />
           </Suspense></PanelErrorBoundary>
         )}
@@ -5478,8 +5510,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         {/* error toast — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
             from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
         {((err && !sourceNoticeFloats) || locateFar) && (
-          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
+          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar || retryShown) ? "auto" : "none" }}>
             {err}
+            {retryShown && (
+              <button onClick={() => { const run = errRetry.run; setErrRetry(null); setErr(""); setFallbackOffer(null); run(); }} data-testid="map-try-again"
+                style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Try again
+              </button>
+            )}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
                 "no parcel right there" is an answer, not an outage, and gets no button. */}
             {fallbackOffer && (
@@ -5496,6 +5534,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 ◂ Back to your sites
               </button>
             )}
+          </div>
+        )}
+        {/* NEW-1/NEW-2 (2026-10-22) — a lookup that has run long says it is still going (the loading treatment alone read as "nothing happening" for the 20+ seconds a cold state server can take). */}
+        {busy && !err && lookupNote && (
+          <div role="status" data-testid="map-lookup-slow" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+            {lookupNote}
           </div>
         )}
         {/* NEW-2 — share/unshare confirmation (same slot as the error toast, mutually
