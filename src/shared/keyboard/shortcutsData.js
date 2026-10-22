@@ -134,6 +134,12 @@ const MAP_FINDER_ITEMS = [
     evidence: [{ file: "src/workspaces/site-planner/MapFinder.jsx", pattern: 'e.key === "Escape") setStatusMenu(null)' }],
   }),
   item({
+    id: "site.map-remove-lot", label: "Remove a lot you added with Select parcels",
+    keysText: "Hover it, then click",
+    note: "The cursor turns to a minus over a lot you have added.",
+    evidence: [{ file: "src/workspaces/site-planner/MapFinder.jsx", pattern: "inside ? REMOVE_CURSOR : ADD_CURSOR" }],
+  }),
+  item({
     id: "site.map-reorder", label: "Reorder a group's row in the Sites list",
     combo: ["arrowup"],
     note: "↑ or ↓.",

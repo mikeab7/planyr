@@ -165,4 +165,21 @@ test.describe("NEW-1 — File ▾ carries the Google Earth export", () => {
       return last && last.textContent.trim() === "" && getComputedStyle(last).borderTopWidth !== "0px";
     }), "no empty divider at the bottom of the menu").toBe(false);
   });
+
+  test("the Map view's empty-map right-click has no export menu either (owner decision 2026-10-22); comp/site menus are untouched", async ({ page }) => {
+    await armPlannerHooks(page);
+    await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (route) => route.abort());
+    await page.goto("/#/site");
+    await expect(page.getByTestId("map-toolbar-draw")).toBeVisible({ timeout: 30000 });
+    await page.waitForTimeout(1500);
+    const map = page.locator(".leaflet-container").first();
+    const box = await map.boundingBox();
+    // Known-good arm: the map is really there and takes a right-click without throwing.
+    expect(box && box.width > 300).toBe(true);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+    await page.waitForTimeout(500);
+    await expect(page.getByText(/Export to Google Earth/i)).toHaveCount(0);
+    await expect(page.getByText(/Export with 3D buildings/i)).toHaveCount(0);
+    await expect(page.locator('[aria-label="Map actions"]')).toHaveCount(0);
+  });
 });
