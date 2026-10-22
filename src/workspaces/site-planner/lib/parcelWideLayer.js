@@ -26,6 +26,7 @@ import { outlineFieldsFor } from "./parcelDisplayZoom.js";
 import { resolveLotNumberField } from "./parcelLotNumbers.js";
 import { paintLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, snapshotFeaturesInView } from "./parcelSnapshot.js";
+import { CARRY_MS, carryReady, ghostShouldDetach } from "./parcelHandoff.js";
 
 const HANDOFF_MS = 1500; // the wide lines stay under the close stage's first draw for at most this long
 const LABEL_DEBOUNCE_MS = 120;
@@ -38,6 +39,12 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
 
   let map = null, engine = null, tilesLayer = null, index = null, group = null, labelJob = null, labelTimer = null, handoff = null;
   let stage = "far";
+  /* HAND-OFF (parcelHandoff.js): what was drawn stays drawn until its replacement is. `carryKeys` = attached tiles of the PREVIOUS wide/mid stage,
+   * `carriedGhosts` = the close stage's lots when the view left its range; both go once the current view's tiles are drawn, or after CARRY_MS. */
+  let wantNow = null; // tile keys the current wide/mid view needs (null while the view is in another stage)
+  const carryKeys = new Set();
+  const carriedGhosts = new Set();
+  let carryTimer = null;
   let relayBroken = false;
   let meta = null, metaWait = null, fields = null, lotField = null;
   let reported = false;
@@ -131,10 +138,10 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
     pumpRaf = null;
     if (!map) return;
     queue.drain(INGEST_BUDGET_MS);
-    if (queue.pending) pumpRaf = L.Util.requestAnimFrame(pump); else scheduleLabels();
+    if (queue.pending) pumpRaf = L.Util.requestAnimFrame(pump); else { checkCarry(); scheduleLabels(); }
   };
   const kick = () => {
-    if (typeof document !== "undefined" && document.hidden) { queue.drain(Infinity); scheduleLabels(); return; }
+    if (typeof document !== "undefined" && document.hidden) { queue.drain(Infinity); checkCarry(); scheduleLabels(); return; }
     if (pumpRaf == null) pumpRaf = L.Util.requestAnimFrame(pump);
   };
   const attachTile = (key, features) => {
@@ -159,10 +166,30 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
     if (engine && (stage === "wide" || stage === "mid")) for (const [key, e] of engine.loaded) if (e.tile.stage === stage) want.set(key, e);
     for (const key of [...attachedFeatures.keys()]) {
       const e = want.get(key);
+      if (!e && carryKeys.has(key)) continue; // the previous stage's lines, held until this stage is drawn
       if (!e || attachedFeatures.get(key) !== e.features) detachTile(key);
     }
     for (const [key, e] of want) if (!attachedFeatures.has(key)) attachTile(key, e.features);
   };
+
+  /* ── hand-off between stages ─────────────────────────────────────────────────────────────────── */
+  const releaseCarry = () => {
+    if (carryTimer) { clearTimeout(carryTimer); carryTimer = null; }
+    const had = carryKeys.size || carriedGhosts.size;
+    carryKeys.clear();
+    for (const g of carriedGhosts) {
+      const id = g.feature && g.feature.id;
+      const held = !!(layer._layers && id != null && layer._layers[id] === g);
+      if (ghostShouldDetach({ heldByLayer: held, visibleZoom: !!(layer._visibleZoom && layer._visibleZoom()) })) g.detach();
+    }
+    carriedGhosts.clear();
+    if (had) syncDrawn();
+  };
+  const startCarryTimer = () => { if (carryTimer) clearTimeout(carryTimer); carryTimer = setTimeout(releaseCarry, CARRY_MS); };
+  function checkCarry() {
+    if (!carryKeys.size && !carriedGhosts.size) return;
+    if (carryReady({ wantNow, hasLoaded: (k) => !!(engine && engine.loaded.has(k)), hasAttached: (k) => attachedFeatures.has(k), ingestPending: queue.pending })) releaseCarry();
+  }
 
   /* ── labels (mid stage only: parcel IDs on the larger lots) ──────────────────────────────────── */
   const acresOf = (g) => (g._acres !== undefined ? g._acres : (g._acres = geoJsonAcres(g.feature.geometry)));
@@ -187,11 +214,21 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
     tilesLayer._busy = () => queue.pending > 0;
     tilesLayer.addTo(map);
   };
+  /* The close layer fires `load` when its lots are queued-in; its tile canvases repaint a frame or more later (budgeted), so letting go of the wide lines ON `load`
+   * left one blank frame. Let go two animation frames after it. */
+  let soonRaf = null;
+  const releaseSoon = () => {
+    layer.off("load", releaseSoon);
+    if (soonRaf != null) return;
+    soonRaf = L.Util.requestAnimFrame(() => { soonRaf = L.Util.requestAnimFrame(() => { soonRaf = null; releaseWide(); }); });
+  };
   const releaseWide = () => {
     if (handoff) { clearTimeout(handoff); handoff = null; }
-    layer.off("load", releaseWide);
+    if (soonRaf != null) { L.Util.cancelAnimFrame(soonRaf); soonRaf = null; }
+    layer.off("load", releaseSoon);
     for (const key of [...attachedFeatures.keys()]) detachTile(key);
     queue.clear();
+    releaseCarry();
     if (tilesLayer) { try { tilesLayer.remove(); } catch (_) { /* detached */ } tilesLayer = null; index = null; }
     clearLabels();
   };
@@ -202,20 +239,29 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
     const prev = stage;
     stage = next;
     if (next === "wide" || next === "mid") {
-      if (handoff) { clearTimeout(handoff); handoff = null; layer.off("load", releaseWide); }
+      if (handoff) { clearTimeout(handoff); handoff = null; layer.off("load", releaseSoon); }
+      if (soonRaf != null) { L.Util.cancelAnimFrame(soonRaf); soonRaf = null; } // back in the wide/mid view before the hand-off finished: nothing to let go of
       ensureTilesLayer();
       const b = map.getBounds();
       const bucket = bucketForStage(next, floor);
       const tiles = tilesForBounds({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }, bucket).map((t) => ({ ...t, stage: next, key: `${next}:${t.key}` }));
+      wantNow = tiles.map((t) => t.key);
+      if (next !== prev && (prev === "wide" || prev === "mid")) {
+        // the other stage's lines stay under this one until its tiles are drawn — a stage change must never blank the map for the length of a county round trip
+        for (const key of attachedFeatures.keys()) if (!key.startsWith(`${next}:`)) carryKeys.add(key);
+        if (carryKeys.size) startCarryTimer();
+      }
       syncDrawn();
       engine.setView({ tiles });
       if (next !== prev) scheduleLabels();
       setInfo({ stage: next });
+      checkCarry();
     } else {
       engine.setView(null);
+      wantNow = null;
       if (next === "close") {
         // keep the larger-lot lines under the close stage until it has drawn (or briefly), then let go — no blank flash at the cutoff
-        if ((prev === "wide" || prev === "mid") && !handoff) { layer.on("load", releaseWide); handoff = setTimeout(releaseWide, HANDOFF_MS); }
+        if ((prev === "wide" || prev === "mid" || carriedGhosts.size) && !handoff) { layer.on("load", releaseSoon); handoff = setTimeout(releaseWide, HANDOFF_MS); }
       } else releaseWide();
       clearLabels();
       setInfo({ stage: next, busy: false, error: null, loading: 0 });
@@ -259,6 +305,15 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
 
   return {
     floor, wideFloor: wideFloorFor(floor), area,
+    /** The close stage lost its range (a zoom out): these lots stay drawn until the wide/mid stage has drawn its own, or CARRY_MS. */
+    carry(ghosts) {
+      if (!map || !engine || !ghosts || !ghosts.length) return false;
+      for (const g of ghosts) carriedGhosts.add(g);
+      startCarryTimer();
+      checkCarry();
+      return true;
+    },
+    carrying: () => carryKeys.size + carriedGhosts.size,
     info: () => info,
     stats: () => (engine ? { ...engine.stats, loaded: engine.loaded.size, held: byId.size } : null),
   };
