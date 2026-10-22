@@ -160,6 +160,8 @@ describe("lot-number relayout pre-filter (B2092656 ×2: a ~300 ms setTimeout tas
 describe("turning Select parcels on does not run the display sync inside React's commit", () => {
   it("syncDisplaysToView is its own timer task on entering select mode", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
-    expect(src).toMatch(/let t = setTimeout\(\(\) => syncDisplaysToView\(true\), 0\);/);
+    // NEW-1 (wide view): the timer now starts once the lazily loaded size-column chunk has arrived (`wideViewReady().then(…)`); it is still a timer of its own, and the sync is never called bare.
+    expect(src).toMatch(/t = setTimeout\(\(\) => syncDisplaysToView\(true\), 0\);/);
+    expect(src).not.toMatch(/[^=(] syncDisplaysToView\(true\);/);
   });
 });
