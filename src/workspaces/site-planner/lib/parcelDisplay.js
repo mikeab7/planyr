@@ -39,6 +39,7 @@ import { getSnapshot, snapshotFeaturesInView, onSnapshotChange } from "./parcelS
 import { pruneToLiveCells } from "./parcelPrune.js";
 import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.js";
 import { routeQueryThroughWorker } from "./parcelQueryTransport.js";
+import { ensureFeatureIds } from "./parcelFeatureIds.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
 import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers, outlineFieldsFor } from "./parcelDisplayZoom.js";
@@ -278,6 +279,7 @@ export function makeParcelLayer(url, opts) {
   const baseAddFeatures = layer._addFeatures;
   if (typeof baseAddFeatures === "function") {
     layer._addFeatures = function (features, coords) {
+      ensureFeatureIds(features, this.service && this.service.options && this.service.options.idAttribute); // a server that answers GeoJSON with no top-level `id` collapsed every lot onto ONE key — see parcelFeatureIds.ensureFeatureIds
       if (!Array.isArray(this._currentSnapshot) || !this._cache || this.options.timeField) return baseAddFeatures.call(this, features, coords);
       let key;
       if (coords) { key = this._cacheKey(coords); this._cache[key] = this._cache[key] || []; }
