@@ -98,7 +98,10 @@ describe("Cut & Fill painting", () => {
     expect(cellPaint({ dzFt: -3 }).rgb).toEqual(CUT_RGB);
     expect(cellPaint({ dzFt: 3 }).rgb).toEqual(FILL_RGB);
     expect(cellPaint({ dzFt: 6 }).a).toBeGreaterThan(cellPaint({ dzFt: 1 }).a);
-    expect(cellPaint({ dzFt: 0.5 }).a).toBeGreaterThanOrEqual(0.35);       // a thin shallow band still reads
+    // ROUND 7 (NEW-2, amends B2396674): the band is a light TINT under the contours — a thin shallow band still reads (≥ 0.12)
+    // and a deep one never passes a quarter opacity, so the contour family carries the picture at the 250-ft scale
+    expect(cellPaint({ dzFt: 0.5 }).a).toBeGreaterThanOrEqual(0.12);
+    expect(cellPaint({ dzFt: 40 }).a).toBeLessThanOrEqual(0.25);
     expect(cellPaint({ dzFt: 3, out: true }).rgb).toEqual(OUT_RGB);
     expect(cellPaint({ dzFt: 0.01 })).toBeNull();
     expect(cellPaint({ dzFt: null }).kind).toBe("void");

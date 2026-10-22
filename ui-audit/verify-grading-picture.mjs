@@ -19,6 +19,13 @@
  *       (a probe sample inside the ring at least half an interval off the ring's level) — no leftover loops on open ground;
  *   (h) never a fill: no brown pixel sits in a run ≥ 5 px in BOTH directions (adjacent contours never touch; a steep bank
  *       reads as distinct parallel lines), and the parcel view draws index lines only.
+ * ROUND 7 adds three (owner live pass 2026-10-22: "the daylight line and the slope bands are drawn as a cell staircase"):
+ *   (i) the daylight polygon is smooth — every ring of the drawn daylight line (and boundary mode's inner edge) is closed, never
+ *       crosses itself, and has no run of more than two vertices on the earthwork lattice's cell corners / cell edges;
+ *   (j) the hatch is clipped to the polygon — rendered ALONE, zero tint pixels more than 2 px outside the band polygon, and the
+ *       tint reaches the outline (no gaps: ≥ 97% of samples ≥ 3 px inside the band carry tint);
+ *   (k) the contours read over the tint — inside the band, contour-brown pixels outnumber tint pixels as heavy as a stroke
+ *       (alpha ≥ 0.3) at the building and corner zooms, and the tint never exceeds a quarter opacity.
  * A KNOWN-GOOD ARM runs first: the pixel probe must see the proposed contours it is about to judge (a run that cannot
  * see the ink would pass (a) vacuously), or the whole run is VOID. ROUND 6: every view must carry ink — the open ground
  * inside the limit now falls at 2%, so there is no flat plateau left to excuse an empty view.
@@ -57,6 +64,7 @@ try {
     await page.waitForSelector('[data-layer="contours"] path', { state: "attached", timeout: 120000 });
     await page.waitForSelector('[data-layer="existing-contours"] polyline', { state: "attached", timeout: 60000 });
     await page.waitForSelector('[data-layer="paper"] path', { state: "attached", timeout: 60000 });
+    await page.waitForSelector("[data-band-tint]", { state: "attached", timeout: 60000 });    // ROUND 7: the traced band has landed
     await page.waitForTimeout(1500);
   };
   /* the canvas as pixels: alpha-weighted RGB of the #canvas SVG rendered to a bitmap (the paper is part of it) */
@@ -90,6 +98,7 @@ try {
     return { brownPx: n, total, hasModel: !!m };
   }, [ringFt, insetPx, brown.toString()]);
 
+  const bandJudged = {};
   for (const mode of ["layout", "boundary"]) {
     for (const zoom of ["site", "bldg", "ne"]) {
       const tag = `${mode}-${zoom}${OWNER ? "-owner" : ""}`;
@@ -252,6 +261,70 @@ try {
       }, brown.toString());
       check(`(h) ${tag}: never a fill — brown pixels in a run ≥ 5 px both ways are under 0.5% of the ink${zoom === "site" ? "; the parcel view draws index lines only (thin)" : "; the building view draws every level"}`,
         fill.share < 0.005 && (zoom === "site" ? fill.indexOnly === "1" && fill.drawn * 4 < fill.traced + 5 : fill.indexOnly === "0" && fill.drawn > fill.traced / 2), JSON.stringify(fill));
+      // ---- ROUND 7 (i): the daylight polygon is smooth — closed, never crossing itself, no staircase on the earthwork lattice
+      const smooth = await page.evaluate(() => {
+        const m = window.__harness.model, s = window.__harness.gradeSurface; const cf = m.cutfill;
+        const cells = s.grid.cells; const dx = cells[0].wFt, dy = cells[0].hFt;
+        const x0 = Math.min(...cells.map((c) => c.x)) - dx / 2, y0 = Math.min(...cells.map((c) => c.y)) - dy / 2;
+        const runs = (ring) => {
+          let corner = 0, cRun = 0, edge = 0, eRun = 0, prev = 0;
+          for (const p of ring) {
+            const fx = Math.abs(((p.x - x0) / dx) % 1), fy = Math.abs(((p.y - y0) / dy) % 1);
+            const onX = Math.min(fx, 1 - fx) < 2e-3, onY = Math.min(fy, 1 - fy) < 2e-3;
+            cRun = onX && onY ? cRun + 1 : 0; corner = Math.max(corner, cRun);
+            const kind = onX && !onY ? 1 : onY && !onX ? 2 : onX && onY ? 3 : 0;
+            if (kind && prev && kind !== prev) eRun += 1; else eRun = kind ? 1 : 0; edge = Math.max(edge, eRun); prev = kind;
+          }
+          return { corner, edge };
+        };
+        const crosses = (r) => { const n = r.length; for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) { if (i === 0 && j === n - 1) continue; const a = r[i], b = r[(i + 1) % n], c = r[j], d = r[(j + 1) % n]; const den = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x); if (Math.abs(den) < 1e-12) continue; const t = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / den, u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / den; if (t > 1e-9 && t < 1 - 1e-9 && u > 1e-9 && u < 1 - 1e-9) return true; } return false; };
+        const rings = [...(cf.daylightRings || []), ...(cf.innerRings || [])];
+        const traced = cf.bandMode !== "boundary";             // boundary: the daylight line IS the limit (B2376240), any vertex count
+        const dl = document.querySelector("[data-daylight-line]"), inner = document.querySelector("[data-band-inner]");
+        const subpaths = (el) => (el ? (el.getAttribute("d").match(/M/g) || []).length : 0), closes = (el) => (el ? (el.getAttribute("d").match(/Z/gi) || []).length : 0);
+        const each = rings.map((r, i) => ({ n: r.length, needN: traced || i >= (cf.daylightRings || []).length ? 9 : 3, ...runs(r), crosses: crosses(r) }));
+        return { rings: (cf.daylightRings || []).length, each, drawn: subpaths(dl), closed: closes(dl), inner: subpaths(inner), innerClosed: closes(inner), source: cf.bandSource };
+      });
+      check(`(i) ${tag}: the daylight polygon is smooth — every ring closed, never crossing itself, no run of more than two vertices on cell corners / edges`,
+        smooth.rings > 0 && smooth.drawn === smooth.rings && smooth.closed === smooth.drawn && smooth.innerClosed === smooth.inner && smooth.each.every((r) => r.n >= r.needN && !r.crosses && r.corner <= 2 && r.edge <= 2),
+        `${smooth.rings} ring(s) [${smooth.each.map((r) => `${r.n}v corner ${r.corner} edge ${r.edge}${r.crosses ? " CROSSES" : ""}`).join("; ")}] · drawn ${smooth.drawn}/${smooth.closed} closed · inner ${smooth.inner} · source ${smooth.source}`);
+      // ---- ROUND 7 (j) + (k): the tint rendered ALONE, against the band polygon; then the contours against the tint
+      const tint = await page.evaluate(async (brownSrc) => {
+        const brown = new Function("return " + brownSrc)();
+        const svg = document.getElementById("canvas"), W = svg.width.baseVal.value, H = svg.height.baseVal.value;
+        const img = document.querySelector("[data-band-tint]"), g = img.parentNode, clip = document.querySelector("[data-band-clip]");
+        const M = g.getCTM();
+        const clone = g.cloneNode(true); for (const el of clone.querySelectorAll("path:not([data-band-clip])")) el.remove();
+        clone.setAttribute("transform", `matrix(${M.a} ${M.b} ${M.c} ${M.d} ${M.e} ${M.f})`);
+        const xml = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}">${new XMLSerializer().serializeToString(clone)}</svg>`;
+        const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" })); const im = new Image(); im.src = url; await im.decode();
+        const c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d"); ctx.drawImage(im, 0, 0); URL.revokeObjectURL(url);
+        const d = ctx.getImageData(0, 0, W, H).data;
+        const inv = M.inverse(), pt = svg.createSVGPoint();
+        const inBand = (x, y) => { pt.x = x; pt.y = y; return clip.isPointInFill(pt.matrixTransform(inv)); };
+        const near = (x, y, r) => { for (const [ox, oy] of [[0, 0], [-r, 0], [r, 0], [0, -r], [0, r], [-r, -r], [r, -r], [-r, r], [r, r]]) if (inBand(x + ox, y + oy)) return true; return false; };
+        // a band thinner than a pixel antialiases to a faint tint: look for it on a quarter-pixel grid before calling a pixel "outside"
+        const nearDense = (x, y, r) => { for (let oy = -r; oy <= r; oy += 0.25) for (let ox = -r; ox <= r; ox += 0.25) if (inBand(x + ox, y + oy)) return true; return false; };
+        const deep = (x, y, r) => { for (const [ox, oy] of [[0, 0], [-r, 0], [r, 0], [0, -r], [0, r]]) if (!inBand(x + ox, y + oy)) return false; return true; };
+        const { d: full } = window.__px;
+        const outSamples = [];
+        let tinted = 0, outside = 0, deepN = 0, deepTinted = 0, strong = 0, brownIn = 0, maxA = 0;
+        for (let y = 1; y < H; y += 2) for (let x = 1; x < W; x += 2) {
+          const k = (y * W + x) * 4, a = d[k + 3];
+          if (a > 0) { tinted++; maxA = Math.max(maxA, a); if (!near(x + 0.5, y + 0.5, 2) && !nearDense(x + 0.5, y + 0.5, 2)) { outside++; if (outSamples.length < 6) outSamples.push([x, y, a]); } }
+          if (deep(x + 0.5, y + 0.5, 3)) { deepN++; if (a > 0) deepTinted++; if (a >= 77) strong++; if (brown(full[k], full[k + 1], full[k + 2])) brownIn++; }
+        }
+        return { outSamples, tinted, outside, deepN, deepTinted, cover: deepTinted / Math.max(1, deepN), strong, brownIn, maxAlpha: +(maxA / 255).toFixed(3) };
+      }, brown.toString());
+      if (tint.tinted <= 200) notes.push(`  · (j)/(k) ${tag}: no slope band in this view (${tint.tinted} tint px) — judged in the other views of this mode`);
+      else {
+        bandJudged[mode] = (bandJudged[mode] || 0) + 1;
+        check(`(j) ${tag}: the hatch is clipped to the polygon — zero tint pixels outside the band (2 px margin), and the tint reaches the outline`,
+          tint.outside === 0 && tint.cover >= 0.97, JSON.stringify(tint));
+      }
+      if (tint.tinted > 200 && zoom !== "site") check(`(k) ${tag}: inside the band the contours outnumber any stroke-weight tint, and the tint stays a tint (≤ 0.25)`,
+        tint.brownIn > 50 && tint.brownIn > tint.strong && tint.maxAlpha <= 0.26, `contour px ${tint.brownIn} vs stroke-weight tint px ${tint.strong} · max tint ${tint.maxAlpha}`);
+      else notes.push(`  · (k) ${tag} (reported, the parcel view draws index lines only): contour px ${tint.brownIn} vs stroke-weight tint px ${tint.strong} · max tint ${tint.maxAlpha}`);
       // the paper: on by default — inside the paper path NOT ONE pixel is the stand-in aerial (the harness canvas's green background),
       // and the view's own ink is what remains
       const plateauView = false;
@@ -277,6 +350,7 @@ try {
       await page.close();
     }
   }
+  check("(j) known-good coverage: the clip was judged on a view carrying the band in BOTH limit modes", (bandJudged.layout || 0) > 0 && (bandJudged.boundary || 0) > 0, JSON.stringify(bandJudged));
   // the paper checkbox turns it off (one arm)
   {
     const page = await open(`?buildable=0&contours=1&zoom=bldg&mode=layout`);
