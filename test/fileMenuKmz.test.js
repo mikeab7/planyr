@@ -53,4 +53,17 @@ describe("NEW-1 — File ▾ Google Earth export", () => {
   it("the shared More menu passes a row's title through, so a disabled row says why there too", () => {
     expect(PT).toMatch(/disabled=\{r\.disabled\} title=\{r\.title\}/);
   });
+
+  it("owner decision 2026-10-22: the Map view has NO empty-map right-click menu and NO all-sites KMZ export (MapFinder)", () => {
+    const MF = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    expect(MF).not.toMatch(/exportSitesKmz/);
+    expect(MF).not.toMatch(/\bmapMenu\b|setMapMenu/);
+    expect(MF).not.toMatch(/onMapCtx/);
+    expect(MF).not.toMatch(/"Map actions"/);
+    expect(MF).not.toMatch(/import\(\s*["'][^"']*lib\/kmzExport/); // the site-plan KMZ writer is reached only from the planner's lazy export chunk
+    // Untouched neighbours (a different feature): the comp-marker menu and its site-record export.
+    expect(MF).toMatch(/exportCompSiteRecordKmz/);
+    expect(MF).toMatch(/compMenu/);
+    expect(MF).toMatch(/siteGroup\.on\("click", openSiteNow\)\.on\("contextmenu", onCtx\)/);
+  });
 });
