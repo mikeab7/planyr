@@ -155,6 +155,21 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
   }
 }
 
+/* NEW-2 (Tennessee, all 95 counties) — a lookup whose where-clause the caller has already built from a PARSED id (tnParcelId.js `linkWhere` / Shelby's PAID), run on one layer with the
+ * same health bookkeeping as `lookupParcels`. No field detection and no statewide fallback: the clause names the columns it needs, and a source that does not answer is `unavailable`
+ * (a typed ParcelFetchError), never an empty list. Returns { feats, layerUrl }. */
+export async function lookupParcelsWhere({ county, lookupUrl, where }) {
+  const layerUrl = await resolveLayerUrl(lookupUrl);
+  try {
+    const feats = await queryFeatures(layerUrl, { where, count: 20, outSR: 4326 });
+    recordSourceResult(county, true);
+    return { feats, layerUrl };
+  } catch (err) {
+    if (err && err.unavailable) recordSourceResult(county, false);
+    throw err;
+  }
+}
+
 // Is the lookup URL still the county's configured default (not a user override)?
 export function isDefaultLookupUrl(county, lookupUrl) {
   const c = COUNTIES[county];

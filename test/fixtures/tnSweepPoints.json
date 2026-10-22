@@ -1,0 +1,1237 @@
+{
+ "recordedOn": "2026-10-22",
+ "note": "Two real lots per Tennessee county — one near the middle, one in the densest named place — each picked INSIDE the county by the bundled polygons (not near the edge). Scaffolding for ui-audit/sweep-tn-counties.mjs and test/tnSweepRouting.test.js; the verdicts come from the app's routing, not from these points.",
+ "counties": [
+  {
+   "name": "Anderson",
+   "fips": "47001",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.097423,
+   "lng": -84.195173,
+   "dense": {
+    "lat": 36.196107,
+    "lng": -84.067985,
+    "town": "Norris"
+   }
+  },
+  {
+   "name": "Bedford",
+   "fips": "47003",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.519733,
+   "lng": -86.448775,
+   "dense": {
+    "lat": 35.488134,
+    "lng": -86.46437,
+    "town": "Shelbyville"
+   }
+  },
+  {
+   "name": "Benton",
+   "fips": "47005",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.088753,
+   "lng": -88.065275,
+   "dense": {
+    "lat": 36.056332,
+    "lng": -88.112304,
+    "town": "Camden"
+   }
+  },
+  {
+   "name": "Bledsoe",
+   "fips": "47007",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.568955,
+   "lng": -85.164475,
+   "dense": {
+    "lat": 35.642197,
+    "lng": -85.208206,
+    "town": "Pikeville"
+   }
+  },
+  {
+   "name": "Blount",
+   "fips": "47009",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.669966,
+   "lng": -83.922148,
+   "dense": {
+    "lat": 35.78455,
+    "lng": -83.980531,
+    "town": "Alcoa"
+   }
+  },
+  {
+   "name": "Bradley",
+   "fips": "47011",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.175323,
+   "lng": -84.852344,
+   "dense": {
+    "lat": 35.13065,
+    "lng": -84.874859,
+    "town": "Cleveland"
+   }
+  },
+  {
+   "name": "Campbell",
+   "fips": "47013",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.381469,
+   "lng": -84.134206,
+   "dense": {
+    "lat": 36.326625,
+    "lng": -84.192863,
+    "town": "Jacksboro"
+   }
+  },
+  {
+   "name": "Cannon",
+   "fips": "47015",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.816219,
+   "lng": -86.044882,
+   "dense": {
+    "lat": 35.812916,
+    "lng": -86.048805,
+    "town": "Woodbury"
+   }
+  },
+  {
+   "name": "Carroll",
+   "fips": "47017",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.97551,
+   "lng": -88.439666,
+   "dense": {
+    "lat": 36.005879,
+    "lng": -88.419845,
+    "town": "Huntingdon"
+   }
+  },
+  {
+   "name": "Carter",
+   "fips": "47019",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.299345,
+   "lng": -82.136367,
+   "dense": {
+    "lat": 36.345264,
+    "lng": -82.201124,
+    "town": "Elizabethton"
+   }
+  },
+  {
+   "name": "Cheatham",
+   "fips": "47021",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.268278,
+   "lng": -87.091183,
+   "dense": {
+    "lat": 36.377141,
+    "lng": -87.039354,
+    "town": "Pleasant View"
+   }
+  },
+  {
+   "name": "Chester",
+   "fips": "47023",
+   "source": "tn_chester",
+   "kind": "own",
+   "lat": 35.426663,
+   "lng": -88.605298,
+   "dense": {
+    "lat": 35.478345,
+    "lng": -88.500608,
+    "town": "Jacks Creek"
+   }
+  },
+  {
+   "name": "Claiborne",
+   "fips": "47025",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.463258,
+   "lng": -83.687351,
+   "dense": {
+    "lat": 36.442893,
+    "lng": -83.599763,
+    "town": "New Tazewell"
+   }
+  },
+  {
+   "name": "Clay",
+   "fips": "47027",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.519534,
+   "lng": -85.539775,
+   "dense": {
+    "lat": 36.546899,
+    "lng": -85.496685,
+    "town": "Celina"
+   }
+  },
+  {
+   "name": "Cocke",
+   "fips": "47029",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.941766,
+   "lng": -83.103643,
+   "dense": {
+    "lat": 35.954044,
+    "lng": -83.202906,
+    "town": "Newport"
+   }
+  },
+  {
+   "name": "Coffee",
+   "fips": "47031",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.503144,
+   "lng": -86.074291,
+   "dense": {
+    "lat": 35.358238,
+    "lng": -86.220907,
+    "town": "Tullahoma"
+   }
+  },
+  {
+   "name": "Crockett",
+   "fips": "47033",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.834446,
+   "lng": -89.130811,
+   "dense": {
+    "lat": 35.815042,
+    "lng": -89.226196,
+    "town": "Maury City"
+   }
+  },
+  {
+   "name": "Cumberland",
+   "fips": "47035",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.959862,
+   "lng": -84.9763,
+   "dense": {
+    "lat": 35.94422,
+    "lng": -85.016922,
+    "town": "Crossville"
+   }
+  },
+  {
+   "name": "Davidson",
+   "fips": "47037",
+   "source": "tn_davidson",
+   "kind": "own",
+   "lat": 36.186922,
+   "lng": -86.776724,
+   "dense": {
+    "lat": 36.172987,
+    "lng": -86.78033,
+    "town": "Nashville"
+   }
+  },
+  {
+   "name": "Decatur",
+   "fips": "47039",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.620915,
+   "lng": -88.102869,
+   "dense": {
+    "lat": 35.666669,
+    "lng": -88.118854,
+    "town": "Parsons"
+   }
+  },
+  {
+   "name": "DeKalb",
+   "fips": "47041",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.983896,
+   "lng": -85.843524,
+   "dense": {
+    "lat": 36.070881,
+    "lng": -86.03608,
+    "town": "Alexandria"
+   }
+  },
+  {
+   "name": "Dickson",
+   "fips": "47043",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.153982,
+   "lng": -87.346397,
+   "dense": {
+    "lat": 36.0769,
+    "lng": -87.401149,
+    "town": "Dickson"
+   }
+  },
+  {
+   "name": "Dyer",
+   "fips": "47045",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.04757,
+   "lng": -89.439392,
+   "dense": {
+    "lat": 36.044026,
+    "lng": -89.384112,
+    "town": "Dyersburg"
+   }
+  },
+  {
+   "name": "Fayette",
+   "fips": "47047",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.204292,
+   "lng": -89.416353,
+   "dense": {
+    "lat": 35.045034,
+    "lng": -89.243975,
+    "town": "La Grange"
+   }
+  },
+  {
+   "name": "Fentress",
+   "fips": "47049",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.363811,
+   "lng": -84.88071,
+   "dense": {
+    "lat": 36.4247,
+    "lng": -84.935838,
+    "town": "Jamestown"
+   }
+  },
+  {
+   "name": "Franklin",
+   "fips": "47051",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.180966,
+   "lng": -86.094656,
+   "dense": {
+    "lat": 35.186637,
+    "lng": -86.112364,
+    "town": "Winchester"
+   }
+  },
+  {
+   "name": "Gibson",
+   "fips": "47053",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.010207,
+   "lng": -88.945282,
+   "dense": {
+    "lat": 35.924634,
+    "lng": -88.769949,
+    "town": "Milan"
+   }
+  },
+  {
+   "name": "Giles",
+   "fips": "47055",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.227125,
+   "lng": -87.024251,
+   "dense": {
+    "lat": 35.209091,
+    "lng": -87.039965,
+    "town": "Pulaski"
+   }
+  },
+  {
+   "name": "Grainger",
+   "fips": "47057",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.252465,
+   "lng": -83.495268,
+   "dense": {
+    "lat": 36.325137,
+    "lng": -83.314181,
+    "town": "Bean Station"
+   }
+  },
+  {
+   "name": "Greene",
+   "fips": "47059",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.168086,
+   "lng": -82.870309,
+   "dense": {
+    "lat": 36.160881,
+    "lng": -82.832945,
+    "town": "Greeneville"
+   }
+  },
+  {
+   "name": "Grundy",
+   "fips": "47061",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.384131,
+   "lng": -85.704985,
+   "dense": {
+    "lat": 35.272303,
+    "lng": -85.735625,
+    "town": "Tracy City"
+   }
+  },
+  {
+   "name": "Hamblen",
+   "fips": "47063",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.232229,
+   "lng": -83.276217,
+   "dense": {
+    "lat": 36.195416,
+    "lng": -83.276052,
+    "town": "Morristown"
+   }
+  },
+  {
+   "name": "Hamilton",
+   "fips": "47065",
+   "source": "tn_hamilton",
+   "kind": "own",
+   "lat": 35.227234,
+   "lng": -85.19957,
+   "dense": {
+    "lat": 35.07066,
+    "lng": -85.249993,
+    "town": "Chattanooga"
+   }
+  },
+  {
+   "name": "Hancock",
+   "fips": "47067",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.493598,
+   "lng": -83.159071,
+   "dense": {
+    "lat": 36.528516,
+    "lng": -83.251114,
+    "town": "Sneedville"
+   }
+  },
+  {
+   "name": "Hardeman",
+   "fips": "47069",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.220443,
+   "lng": -88.985863,
+   "dense": {
+    "lat": 35.244919,
+    "lng": -89.001062,
+    "town": "Bolivar"
+   }
+  },
+  {
+   "name": "Hardin",
+   "fips": "47071",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.214711,
+   "lng": -88.184574,
+   "dense": {
+    "lat": 35.202354,
+    "lng": -88.201981,
+    "town": "Savannah"
+   }
+  },
+  {
+   "name": "Hawkins",
+   "fips": "47073",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.415693,
+   "lng": -82.942689,
+   "dense": {
+    "lat": 36.563138,
+    "lng": -82.652894,
+    "town": "Mount Carmel"
+   }
+  },
+  {
+   "name": "Haywood",
+   "fips": "47075",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.609508,
+   "lng": -89.289718,
+   "dense": {
+    "lat": 35.609755,
+    "lng": -89.261409,
+    "town": "Brownsville"
+   }
+  },
+  {
+   "name": "Henderson",
+   "fips": "47077",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.627206,
+   "lng": -88.390536,
+   "dense": {
+    "lat": 35.650774,
+    "lng": -88.393046,
+    "town": "Lexington"
+   }
+  },
+  {
+   "name": "Henry",
+   "fips": "47079",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.314985,
+   "lng": -88.259705,
+   "dense": {
+    "lat": 36.300966,
+    "lng": -88.30908,
+    "town": "Paris"
+   }
+  },
+  {
+   "name": "Hickman",
+   "fips": "47081",
+   "source": "tn_hickman",
+   "kind": "own",
+   "lat": 35.807098,
+   "lng": -87.469015,
+   "dense": {
+    "lat": 35.946118,
+    "lng": -87.300785,
+    "town": "Bon Aqua"
+   }
+  },
+  {
+   "name": "Houston",
+   "fips": "47083",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.278902,
+   "lng": -87.747726,
+   "dense": {
+    "lat": 36.306902,
+    "lng": -87.678622,
+    "town": "Erin"
+   }
+  },
+  {
+   "name": "Humphreys",
+   "fips": "47085",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.032704,
+   "lng": -87.771013,
+   "dense": {
+    "lat": 36.119323,
+    "lng": -87.640618,
+    "town": "Mc Ewen"
+   }
+  },
+  {
+   "name": "Jackson",
+   "fips": "47087",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.371076,
+   "lng": -85.6666,
+   "dense": {
+    "lat": 36.341958,
+    "lng": -85.635558,
+    "town": "Gainesboro"
+   }
+  },
+  {
+   "name": "Jefferson",
+   "fips": "47089",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.044388,
+   "lng": -83.466101,
+   "dense": {
+    "lat": 36.11669,
+    "lng": -83.481715,
+    "town": "Jefferson City"
+   }
+  },
+  {
+   "name": "Johnson",
+   "fips": "47091",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.439318,
+   "lng": -81.851649,
+   "dense": {
+    "lat": 36.467779,
+    "lng": -81.814339,
+    "town": "Mountain City"
+   }
+  },
+  {
+   "name": "Knox",
+   "fips": "47093",
+   "source": "(none)",
+   "kind": "none",
+   "lat": 35.99375,
+   "lng": -83.95675,
+   "dense": null
+  },
+  {
+   "name": "Lake",
+   "fips": "47095",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.339002,
+   "lng": -89.520105,
+   "dense": {
+    "lat": 36.263809,
+    "lng": -89.486098,
+    "town": "Ridgely"
+   }
+  },
+  {
+   "name": "Lauderdale",
+   "fips": "47097",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.74819,
+   "lng": -89.65128,
+   "dense": {
+    "lat": 35.753112,
+    "lng": -89.535161,
+    "town": "Ripley"
+   }
+  },
+  {
+   "name": "Lawrence",
+   "fips": "47099",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.235975,
+   "lng": -87.403825,
+   "dense": {
+    "lat": 35.038697,
+    "lng": -87.503769,
+    "town": "Saint Joseph"
+   }
+  },
+  {
+   "name": "Lewis",
+   "fips": "47101",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.533543,
+   "lng": -87.493319,
+   "dense": {
+    "lat": 35.540845,
+    "lng": -87.554921,
+    "town": "Hohenwald"
+   }
+  },
+  {
+   "name": "Lincoln",
+   "fips": "47103",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.187852,
+   "lng": -86.572443,
+   "dense": {
+    "lat": 35.153124,
+    "lng": -86.566045,
+    "town": "Fayetteville"
+   }
+  },
+  {
+   "name": "Loudon",
+   "fips": "47105",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.761001,
+   "lng": -84.354789,
+   "dense": {
+    "lat": 35.72889,
+    "lng": -84.344605,
+    "town": "Loudon"
+   }
+  },
+  {
+   "name": "Macon",
+   "fips": "47111",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.531372,
+   "lng": -86.005035,
+   "dense": {
+    "lat": 36.530153,
+    "lng": -85.846067,
+    "town": "Red Boiling Springs"
+   }
+  },
+  {
+   "name": "Madison",
+   "fips": "47113",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.616808,
+   "lng": -88.837045,
+   "dense": {
+    "lat": 35.615162,
+    "lng": -88.813928,
+    "town": "Jackson"
+   }
+  },
+  {
+   "name": "Marion",
+   "fips": "47115",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.152913,
+   "lng": -85.611126,
+   "dense": {
+    "lat": 35.240068,
+    "lng": -85.822923,
+    "town": "Monteagle"
+   }
+  },
+  {
+   "name": "Marshall",
+   "fips": "47117",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.492875,
+   "lng": -86.773299,
+   "dense": {
+    "lat": 35.460196,
+    "lng": -86.780979,
+    "town": "Lewisburg"
+   }
+  },
+  {
+   "name": "Maury",
+   "fips": "47119",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.642298,
+   "lng": -87.066538,
+   "dense": {
+    "lat": 35.61514,
+    "lng": -87.034988,
+    "town": "Columbia"
+   }
+  },
+  {
+   "name": "McMinn",
+   "fips": "47107",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.450618,
+   "lng": -84.626446,
+   "dense": {
+    "lat": 35.330999,
+    "lng": -84.527905,
+    "town": "Etowah"
+   }
+  },
+  {
+   "name": "McNairy",
+   "fips": "47109",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.1945,
+   "lng": -88.572473,
+   "dense": {
+    "lat": 35.168882,
+    "lng": -88.595364,
+    "town": "Selmer"
+   }
+  },
+  {
+   "name": "Meigs",
+   "fips": "47121",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.520767,
+   "lng": -84.822707,
+   "dense": {
+    "lat": 35.351336,
+    "lng": -84.961329,
+    "town": "Birchwood"
+   }
+  },
+  {
+   "name": "Monroe",
+   "fips": "47123",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.445766,
+   "lng": -84.232673,
+   "dense": {
+    "lat": 35.500771,
+    "lng": -84.352383,
+    "town": "Madisonville"
+   }
+  },
+  {
+   "name": "Montgomery",
+   "fips": "47125",
+   "source": "tn_montgomery",
+   "kind": "own",
+   "lat": 36.487512,
+   "lng": -87.375107,
+   "dense": {
+    "lat": 36.529976,
+    "lng": -87.359252,
+    "town": "Clarksville"
+   }
+  },
+  {
+   "name": "Moore",
+   "fips": "47127",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.275147,
+   "lng": -86.380334,
+   "dense": {
+    "lat": 35.273627,
+    "lng": -86.374225,
+    "town": "Lynchburg"
+   }
+  },
+  {
+   "name": "Morgan",
+   "fips": "47129",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.141555,
+   "lng": -84.623513,
+   "dense": {
+    "lat": 36.0288,
+    "lng": -84.421042,
+    "town": "Coalfield"
+   }
+  },
+  {
+   "name": "Obion",
+   "fips": "47131",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.351419,
+   "lng": -89.141242,
+   "dense": {
+    "lat": 36.342292,
+    "lng": -89.161113,
+    "town": "Troy"
+   }
+  },
+  {
+   "name": "Overton",
+   "fips": "47133",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.348782,
+   "lng": -85.282887,
+   "dense": {
+    "lat": 36.38886,
+    "lng": -85.321284,
+    "town": "Livingston"
+   }
+  },
+  {
+   "name": "Perry",
+   "fips": "47135",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.638702,
+   "lng": -87.847244,
+   "dense": {
+    "lat": 35.598542,
+    "lng": -87.867809,
+    "town": "Linden"
+   }
+  },
+  {
+   "name": "Pickett",
+   "fips": "47137",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.5359,
+   "lng": -85.048092,
+   "dense": {
+    "lat": 36.570299,
+    "lng": -85.145881,
+    "town": "Byrdstown"
+   }
+  },
+  {
+   "name": "Polk",
+   "fips": "47139",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.139803,
+   "lng": -84.53143,
+   "dense": {
+    "lat": 35.035656,
+    "lng": -84.382524,
+    "town": "Ducktown"
+   }
+  },
+  {
+   "name": "Putnam",
+   "fips": "47141",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.149752,
+   "lng": -85.45352,
+   "dense": {
+    "lat": 36.174477,
+    "lng": -85.495102,
+    "town": "Cookeville"
+   }
+  },
+  {
+   "name": "Rhea",
+   "fips": "47143",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.619316,
+   "lng": -84.923454,
+   "dense": {
+    "lat": 35.500402,
+    "lng": -85.012974,
+    "town": "Dayton"
+   }
+  },
+  {
+   "name": "Roane",
+   "fips": "47145",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.853121,
+   "lng": -84.525092,
+   "dense": {
+    "lat": 35.85906,
+    "lng": -84.68421,
+    "town": "Rockwood"
+   }
+  },
+  {
+   "name": "Robertson",
+   "fips": "47147",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.500776,
+   "lng": -86.825469,
+   "dense": {
+    "lat": 36.459659,
+    "lng": -86.670847,
+    "town": "White House"
+   }
+  },
+  {
+   "name": "Rutherford",
+   "fips": "47149",
+   "source": "tn_rutherford",
+   "kind": "own",
+   "lat": 35.859106,
+   "lng": -86.413634,
+   "dense": {
+    "lat": 35.846216,
+    "lng": -86.390285,
+    "town": "Murfreesboro"
+   }
+  },
+  {
+   "name": "Scott",
+   "fips": "47151",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.391874,
+   "lng": -84.5176,
+   "dense": {
+    "lat": 36.504626,
+    "lng": -84.528595,
+    "town": "Oneida"
+   }
+  },
+  {
+   "name": "Sequatchie",
+   "fips": "47153",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.364816,
+   "lng": -85.412511,
+   "dense": {
+    "lat": 35.383697,
+    "lng": -85.392907,
+    "town": "Dunlap"
+   }
+  },
+  {
+   "name": "Sevier",
+   "fips": "47155",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.803746,
+   "lng": -83.51873,
+   "dense": {
+    "lat": 35.869972,
+    "lng": -83.750074,
+    "town": "Seymour"
+   }
+  },
+  {
+   "name": "Shelby",
+   "fips": "47157",
+   "source": "tn_shelby",
+   "kind": "own",
+   "lat": 35.235636,
+   "lng": -89.968958,
+   "dense": {
+    "lat": 35.12165,
+    "lng": -90.002197,
+    "town": "Memphis"
+   }
+  },
+  {
+   "name": "Smith",
+   "fips": "47159",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.260765,
+   "lng": -85.955226,
+   "dense": {
+    "lat": 36.25623,
+    "lng": -85.970043,
+    "town": "Carthage"
+   }
+  },
+  {
+   "name": "Stewart",
+   "fips": "47161",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.50618,
+   "lng": -87.829965,
+   "dense": {
+    "lat": 36.572584,
+    "lng": -87.737363,
+    "town": "Big Rock"
+   }
+  },
+  {
+   "name": "Sullivan",
+   "fips": "47163",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.502881,
+   "lng": -82.264446,
+   "dense": {
+    "lat": 36.547782,
+    "lng": -82.561925,
+    "town": "Kingsport"
+   }
+  },
+  {
+   "name": "Sumner",
+   "fips": "47165",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.449884,
+   "lng": -86.474893,
+   "dense": {
+    "lat": 36.383488,
+    "lng": -86.451045,
+    "town": "Gallatin"
+   }
+  },
+  {
+   "name": "Tipton",
+   "fips": "47167",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.515589,
+   "lng": -89.753259,
+   "dense": {
+    "lat": 35.55995,
+    "lng": -89.650224,
+    "town": "Covington"
+   }
+  },
+  {
+   "name": "Trousdale",
+   "fips": "47169",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.399243,
+   "lng": -86.124785,
+   "dense": {
+    "lat": 36.394503,
+    "lng": -86.171332,
+    "town": "Hartsville"
+   }
+  },
+  {
+   "name": "Unicoi",
+   "fips": "47171",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.093922,
+   "lng": -82.396073,
+   "dense": {
+    "lat": 36.134094,
+    "lng": -82.415378,
+    "town": "Erwin"
+   }
+  },
+  {
+   "name": "Union",
+   "fips": "47173",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.298713,
+   "lng": -83.850906,
+   "dense": {
+    "lat": 36.233777,
+    "lng": -83.839362,
+    "town": "Maynardville"
+   }
+  },
+  {
+   "name": "Van Buren",
+   "fips": "47175",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.688128,
+   "lng": -85.43191,
+   "dense": {
+    "lat": 35.728644,
+    "lng": -85.428811,
+    "town": "Spencer"
+   }
+  },
+  {
+   "name": "Warren",
+   "fips": "47177",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.683565,
+   "lng": -85.772454,
+   "dense": {
+    "lat": 35.69696,
+    "lng": -85.792179,
+    "town": "Mc Minnville"
+   }
+  },
+  {
+   "name": "Washington",
+   "fips": "47179",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.268881,
+   "lng": -82.495315,
+   "dense": {
+    "lat": 36.313201,
+    "lng": -82.354044,
+    "town": "Johnson City"
+   }
+  },
+  {
+   "name": "Wayne",
+   "fips": "47181",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.255874,
+   "lng": -87.790287,
+   "dense": {
+    "lat": 35.322412,
+    "lng": -87.738721,
+    "town": "Waynesboro"
+   }
+  },
+  {
+   "name": "Weakley",
+   "fips": "47183",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.284579,
+   "lng": -88.73527,
+   "dense": {
+    "lat": 36.34187,
+    "lng": -88.854995,
+    "town": "Martin"
+   }
+  },
+  {
+   "name": "White",
+   "fips": "47185",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 35.94316,
+   "lng": -85.439467,
+   "dense": {
+    "lat": 35.954926,
+    "lng": -85.479053,
+    "town": "Sparta"
+   }
+  },
+  {
+   "name": "Williamson",
+   "fips": "47187",
+   "source": "tn_williamson",
+   "kind": "own",
+   "lat": 35.879096,
+   "lng": -86.911365,
+   "dense": {
+    "lat": 35.933443,
+    "lng": -86.878847,
+    "town": "Franklin"
+   }
+  },
+  {
+   "name": "Wilson",
+   "fips": "47189",
+   "source": "tn_statewide",
+   "kind": "statewide",
+   "lat": 36.153098,
+   "lng": -86.295131,
+   "dense": {
+    "lat": 36.210071,
+    "lng": -86.301835,
+    "town": "Lebanon"
+   }
+  }
+ ]
+}

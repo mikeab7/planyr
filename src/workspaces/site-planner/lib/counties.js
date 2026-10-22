@@ -2205,10 +2205,13 @@ const COUNTIES_RAW = {
    * airport-east 35.03,-89.95 → 073088  00221 LIBERTY STREET MEMPHIS PARTNERS (54.79 ac); downtown → 002021  00001 COUNTY
    * OF SHELBY; Bartlett, Millington, Lakeland, Germantown (G0231   00121C) and Collierville (C0244   00853) all answer with
    * owner + situs. It covers Germantown and Collierville WITH owners, so their owner-less city scopes were folded in. */
+  /* NEW-1 (Tennessee 95-county sweep, 2026-10-22) — OUTLINE FLOOR 17. The server's record cap is 1,000 and the outline layer draws one 512-px cell per request with no paging, so a cell holding more
+   * than 1,000 lots silently drew only the first 1,000 (`exceededTransferLimit`, nothing said). MEASURED over the whole county on the exact Leaflet cell grid: at zoom 16, 18 of 1,911 cells exceed 1,000
+   * (busiest 1,411, midtown/downtown Memphis); at zoom 17 the busiest cell holds 586. Same remedy as Davidson (`displayMinZoom`); pinned by test/tnOutlineDensity.test.js. */
   tn_shelby: {
     state: "TN", label: "Shelby County, TN",
     layerUrl: "/gis-proxy/scgis.shelbycountytn.gov/serverhigh/rest/services/Parcel/CERTParcel/MapServer/0",
-    idField: "PARCELID", addrField: "PAR_ADDR1",
+    idField: "PARCELID", addrField: "PAR_ADDR1", idNormalizer: "tn-shelby", displayMinZoom: 17,
     help: "Shelby County Assessor of Property certified parcels (county GIS) — covers Memphis, Bartlett, Germantown, Collierville, Lakeland, Arlington, Millington and the unincorporated county. Search by parcel ID or a site address.",
   },
   /* NEW-1 (Memphis radius ×3) — CHESTER COUNTY, TN (Henderson), on the Chester County ASSESSOR OF PROPERTY's own parcel layer, served by
@@ -2221,7 +2224,7 @@ const COUNTIES_RAW = {
   tn_chester: {
     state: "TN", label: "Chester County, TN",
     layerUrl: "/gis-proxy/gis.capturecama.com/arcgis/rest/services/ChesterTN/ChesterCapture/MapServer/7",
-    idField: "L15Parce_2", addrField: "GPDATA__PR",
+    idField: "L15Parce_2", addrField: "GPDATA__PR", idNormalizer: "tn-link",
     help: "Chester County Assessor of Property parcels (CaptureCAMA) — covers Henderson, Enville, Jacks Creek and the rest of the county. Search by parcel ID or a site address.",
   },
   /* NEW-1 (TN non-state counties, 2026-10-21) — DAVIDSON COUNTY, TN (Nashville), on Metro Nashville's own Parcels layer: the Metro Planning Department + Assessor
@@ -2259,7 +2262,7 @@ const COUNTIES_RAW = {
   tn_williamson: {
     state: "TN", label: "Williamson County, TN",
     layerUrl: "https://services8.arcgis.com/hkhKI6Qq7rjvBjZU/arcgis/rest/services/Parcels/FeatureServer/0",
-    idField: "PARCEL_ID", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, displayMinZoom: 16,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-link",
     help: "Williamson County government parcels (county GIS) — covers Franklin, Brentwood, Spring Hill, Nolensville, Fairview, Thompson's Station and the rest of the county. Search by a site address or the assessor's parcel ID.",
   },
   /* NEW-1 (Tennessee pass 2, B2408834, 2026-10-22) — HAMILTON COUNTY, TN (Chattanooga), on Hamilton County GIS's OWN ArcGIS Server: `Live_Parcels` MapServer layer 0 "Parcels"
@@ -2269,12 +2272,13 @@ const COUNTIES_RAW = {
    * Map/Query/Data, maxRecordCount 1000, token-free, 169,662 parcels over the whole county (extent to 35.46 N), newest recorded sale 2026-09-04 (a live roll). Soddy-Daisy
    * 10406 DAYTON PIKE → 057F B 003 VANESSAS COTTAGE LLC; Signal Mountain 410 WOOD ST → 107L J 006; Enterprise South 8001 VOLKSWAGEN DR → 130 001.18, 1,096 ac. The id is the assessor's
    * tax-map number `TAX_MAP_NO` (map · group · parcel, the form Chattanooga's viewer searches); PBA_NUM / GISLINK carry the same number with a 3-digit district prefix and are NOT pinned.
-   * Layers 0 and 1 are the same 169,662 parcels split by display scale; layer 0 is used. Outline floor 16 (a MapServer's own): the busiest zoom-16 cell (downtown) holds 884 lots
-   * against the 1,000 cap. Condo / lease overlay rows (PARCEL_TYP 5-13, 7,000 of them) overlap their parent lot, so a click there can return several features, as on Davidson. */
+   * Layers 0 and 1 are the same 169,662 parcels split by display scale; layer 0 is used. OUTLINE FLOOR 17 (2026-10-22 sweep; the first cut said 16 on "the busiest zoom-16 cell holds 884 lots"):
+   * measured over the whole county on the exact Leaflet cell grid, ONE zoom-16 cell (East Ridge / Brainerd, 35.02 N -85.28) holds 1,066 lots against the 1,000 cap and a second sits at 999,
+   * so its outlines were silently truncated; at zoom 17 the busiest cell holds 523. Pinned by test/tnOutlineDensity.test.js. Condo / lease overlay rows (PARCEL_TYP 5-13, 7,000 of them) overlap their parent lot, so a click there can return several features, as on Davidson. */
   tn_hamilton: {
     state: "TN", label: "Hamilton County, TN (Chattanooga)",
     layerUrl: "/gis-proxy/mapsdev.hamiltontn.gov/hcwa03/rest/services/Live_Parcels/MapServer/0",
-    idField: "TAX_MAP_NO", pinIdField: true, addrField: "ADDRESS", pinAddrField: true,
+    idField: "TAX_MAP_NO", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, idNormalizer: "tn-hamilton", displayMinZoom: 17,
     help: "Hamilton County GIS parcels (Assessor of Property) — covers Chattanooga, East Ridge, Red Bank, Soddy-Daisy, Signal Mountain, Collegedale and the rest of the county. Search by tax map number (e.g. 057F B 003) or a site address.",
   },
   /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — MONTGOMERY COUNTY, TN (Clarksville), on the City of Clarksville's public ArcGIS Online republication of the Montgomery County
@@ -2289,7 +2293,7 @@ const COUNTIES_RAW = {
   tn_montgomery: {
     state: "TN", label: "Montgomery County, TN (Clarksville)",
     layerUrl: "https://services6.arcgis.com/H9ihyy27OU16MQR3/arcgis/rest/services/Parcels_Test/FeatureServer/0",
-    idField: "parcelno", pinIdField: true, addrField: "propertyaddress", pinAddrField: true, displayMinZoom: 16,
+    idField: "parcelno", pinIdField: true, addrField: "propertyaddress", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-link",
     help: "Montgomery County Assessor parcels (republished by the City of Clarksville) — covers Clarksville, Fort Campbell and the rest of the county. Search by parcel number (e.g. 066F K 00100 000) or a site address.",
   },
   /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — HICKMAN COUNTY, TN (Centerville), on the Hickman County ASSESSOR's CaptureCAMA publish: `Hickman/HickmanTN05182023` MapServer
@@ -2301,7 +2305,7 @@ const COUNTIES_RAW = {
   tn_hickman: {
     state: "TN", label: "Hickman County, TN",
     layerUrl: "/gis-proxy/maps.capturecama.com/arcgis/rest/services/Hickman/HickmanTN05182023/MapServer/9",
-    idField: "PARCELID", pinIdField: true, addrField: "PROPADDR", pinAddrField: true,
+    idField: "PARCELID", pinIdField: true, addrField: "PROPADDR", pinAddrField: true, idNormalizer: "tn-link",
     help: "Hickman County Assessor parcels (CaptureCAMA, 2023 publish) — covers Centerville, Lyles, Nunnelly and the rest of the county. Search by parcel ID or a site address.",
   },
 };
