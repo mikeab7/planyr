@@ -134,7 +134,7 @@ for (const c of CASES.filter((x) => !ONLY || x.name.startsWith(ONLY.slice(7)))) 
     let pj = null; try { pj = JSON.parse(probe.text); } catch (_) { /* reported below */ }
     const pacres = pj && pj.features ? pj.features.map((f) => geodesicAreaM2(f.geometry.rings) / M2_PER_AC).sort((a, b) => a - b) : [];
     expect(`${stage.toUpperCase()}: a probe tile through the same URL the app uses answers with larger lots only (2nd percentile ≥ ${floorAc.toFixed(2)} ac)`, probe.status === 200 && pacres.length > 0 && pacres[Math.floor(pacres.length * 0.02)] >= floorAc, `${probe.status}, ${pacres.length} lots, 2nd percentile ${pacres.length ? pacres[Math.floor(pacres.length * 0.02)].toFixed(3) : "n/a"} ac, ${req.via}`);
-    expect(`${stage.toUpperCase()}: the hint says what is held back`, /Showing larger lots\. Zoom in for small lots and labels\./.test(await tip()), JSON.stringify((await tip()).slice(0, 80)));
+    expect(`${stage.toUpperCase()}: the hint says what is held back`, /Large lots only\. Zoom in for all\./.test(await tip()), JSON.stringify((await tip()).slice(0, 80)));
     const st = stats(tag);
     console.log(`  ${stage}: ${st.n} observed answers · ${st.kb} KB · ${st.lots} lots (app: ${app ? app.requests + " requests, " + app.held + " lots held" : "n/a"})`);
     void moved;

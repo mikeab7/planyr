@@ -84,7 +84,7 @@ test.describe("NEW-1 (B1462256) — a map-mode notice must not survive the flip 
 /* NEW-1 (B2041360, owner iPhone screenshot, 2026-10-03) — the SAME portal leak, one flip over.
  * Leaving the Site WORKSPACE (Dashboard, Schedule, Review, Library, Notes, Spreadsheet) keeps
  * MapFinder mounted with `visible` still true, so a select-parcels session armed on the map kept
- * painting its "Click any lot on the map…" tip over the other module. The state is deliberately
+ * painting its "select-parcels tip over the other module. The state is deliberately
  * kept (peeking at another tab must not wipe a parcel selection) — only the RENDER is gated on
  * `isActive`. Short explicit timeout for the same reason as above (the unrelated `err` timeout).
  */
@@ -100,7 +100,7 @@ test.describe("NEW-1 (B2041360) — a Site-map hint must not survive leaving the
       await page.evaluate((h) => { window.location.hash = h; }, hash);
       await expect(page.getByTestId("map-toolbar-draw"), "the Site map must no longer be on screen").toBeHidden({ timeout: 15_000 });
       await expect(tip, `the Site-map tip must not paint over ${label}`).toHaveCount(0, { timeout: 2_000 });
-      await expect(page.locator('[data-floating-notice="1"]').filter({ hasText: /Click (any|a) lot on the map/ })).toHaveCount(0);
+      await expect(page.locator('[data-floating-notice="1"] [data-testid="select-parcels-tip"]')).toHaveCount(0);
     });
   }
 });
