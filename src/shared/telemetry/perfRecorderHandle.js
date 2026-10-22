@@ -49,6 +49,13 @@ export function perfCaptureDelivery() {
   try { return _delivery ? _delivery() : null; } catch (_) { return null; }
 }
 
+/* NEW-4 (2026-10-22) — WHY the last request was refused. `requestPerfCapture` answers only true/false, and the control turned every
+ * false into "Couldn't record — try again in a moment", which was a promise the recorder could not keep when the refusal was its own
+ * rolling budget. This answers `{ reason: "budget", retryInMs }` (or null) so the wording can be honest. Null before a recorder binds. */
+let _refusal = null;
+export function bindPerfRefusal(fn) { _refusal = typeof fn === "function" ? fn : null; }
+export function perfCaptureRefusal() { try { return _refusal ? _refusal() : null; } catch (_) { return null; } }
+
 /** Is a recorder listening? Drives whether the manual control is offered at all. */
 export function perfRecorderArmed() { return !!_capture; }
 
@@ -104,4 +111,4 @@ export function noteLayerContext(overlays) {
 export function perfContext() { return { planId: _planId, planSwitches: _planSwitches, ppf: _ppf, layers: _layers }; }
 
 /** Test-only reset. */
-export function __resetPerfHandle() { _capture = null; _delivery = null; _planId = null; _planSwitches = 0; _ppf = NaN; _layers = ""; }
+export function __resetPerfHandle() { _refusal = null; _capture = null; _delivery = null; _planId = null; _planSwitches = 0; _ppf = NaN; _layers = ""; }

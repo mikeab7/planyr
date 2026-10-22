@@ -42,7 +42,7 @@
 import { reportClientEvent, SUPPRESSED_AUTOMATED } from "./clientErrors.js";
 import { readScene } from "./perfScene.js";
 import { perfEditCount } from "./perfSampling.js";
-import { bindPerfRecorder, bindPerfDelivery, perfContext } from "./perfRecorderHandle.js";
+import { bindPerfRecorder, bindPerfDelivery, bindPerfRefusal, perfContext } from "./perfRecorderHandle.js";
 import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
@@ -71,6 +71,12 @@ export const RECORDER_DEFAULTS = {
    *  counter tick, so it runs every Nth tick rather than every tick. */
   sceneEveryNTicks: 3,
   maxManual: 6,
+  /** NEW-4 (2026-10-22) — THE BUDGETS BELOW ARE PER ROLLING WINDOW, NOT PER PAGE LOAD. They were lifetime counters, so a
+   *  long-lived tab ran out for good: opening the ? panel arms a manual capture (B1231280), six openings in a session spent
+   *  all six, and from then on "Something was slow just now" answered "try again in a moment" — a recovery that never came
+   *  without a reload. The caps are unchanged (so the error channel's shared ceiling is never at risk); they now REFILL, one
+   *  slot at a time, `budgetWindowMs` after each was used. */
+  budgetWindowMs: 600_000,
   /** Total rows this page may send. `clientErrors` enforces one shared per-page ceiling across
    *  every row the app sends (SESSION_MAX 100); a recorder that could spend it would blind the
    *  error channel, which is a worse regression than any data it collects is worth. */
@@ -102,6 +108,8 @@ let _activeMs = 0;                   // cumulative interacting time
 let _lastScene = {};
 let _taskTotal = 0, _taskCount = 0, _taskMax = 0;
 let _sent = 0, _manual = 0;
+let _manualAt = [], _sentAt = [];     // NEW-4 — when each manual / any capture was taken, for the rolling budgets (pruned on use)
+let _refusal = null;                  // NEW-4 — why the last capture() was refused: { reason: "budget", retryInMs } or null
 let _lastDelivery = null;            // promise of the last capture's delivery outcome (B265536)
 let _undelivered = 0;                // captures the server never acknowledged
 let _suppressed = 0;                 // captures deliberately not sent — an automated run (B270912)
@@ -305,9 +313,16 @@ export function capture(reason) {
   try {
     if (!_installed) return false;
     const kind = reason === "manual" ? "manual" : "auto";
-    if (kind === "manual" && _manual >= _cfg.maxManual) return false;
-    if (_sent >= _cfg.maxSent) return false;
-    if (kind === "manual") _manual++;
+    const t0 = now();
+    const fresh = t0 - _cfg.budgetWindowMs;
+    _manualAt = _manualAt.filter((x) => x > fresh);
+    _sentAt = _sentAt.filter((x) => x > fresh);
+    /* A refusal says WHY and WHEN the budget refills (NEW-4) — the control must be able to tell "limit reached for now" from
+     * "no recorder", never call the first a hiccup. */
+    if (kind === "manual" && _manualAt.length >= _cfg.maxManual) { _refusal = { reason: "budget", retryInMs: Math.max(1000, _manualAt[0] + _cfg.budgetWindowMs - t0) }; return false; }
+    if (_sentAt.length >= _cfg.maxSent) { _refusal = { reason: "budget", retryInMs: Math.max(1000, _sentAt[0] + _cfg.budgetWindowMs - t0) }; return false; }
+    _refusal = null;
+    if (kind === "manual") { _manual++; _manualAt.push(t0); }
 
     const t = now();
     const since = t - _cfg.captureWindowMs;
@@ -453,7 +468,7 @@ export function capture(reason) {
     } else {
       enc = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
     }
-    _sent++;
+    _sent++; _sentAt.push(t0);
 
     /* ⛔ B265536 — THE DELIVERY IS TRACKED, NOT ASSUMED. Until this, `capture()` returned true the
      * moment the row was handed to the sink, and the sink swallowed every failure — so the manual
@@ -564,6 +579,7 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
   } catch (_) { /* ignore */ }
 
   bindPerfRecorder((reason) => capture(reason));
+  bindPerfRefusal(() => _refusal);
 
   /* Live handles for a console read and for the harness. `__benchFrame` runs the REAL hot path
    * over synthetic timestamps so its cost can be measured directly rather than inferred from a
@@ -573,6 +589,7 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
       state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, undelivered: _undelivered, suppressed: _suppressed, running: _running }),
       delivery: () => _lastDelivery,
       captures: () => _captures.slice(),
+      refusal: () => (_refusal ? { ..._refusal } : null),
       env: () => _envMarks.map((m) => m.slice()),   // NEW-1/NEW-3 — the environment marks, for a console read and for the guard
       capture: (reason) => capture(reason),
       config: () => ({ ..._cfg, trigger: { ..._trig.cfg } }),
@@ -608,7 +625,7 @@ export function __resetPerfRecorder(win) {
   _frames = _tasks = _counters = _strings = _trig = _scratch = null;
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
   _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
-  _sent = 0; _manual = 0; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0;
+  _sent = 0; _manual = 0; _manualAt = []; _sentAt = []; _refusal = null; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0;
   _lastDelivery = null; _undelivered = 0; _suppressed = 0;
   bindPerfRecorder(null);
   bindPerfDelivery(null);
