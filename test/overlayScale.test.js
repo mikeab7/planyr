@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   detectSheet, parseScaleNote, ftPerPointForScale, scaleForFtPerPoint, COMMON_SCALES, chooseOverlayScale,
-  parseDistanceInput, feetPerInchFromPair, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset,
+  parseDistanceInput, feetPerInchFromPair, parseTypedScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset,
 } from "../src/shared/overlay/overlayScale.js";
 
 const IN = 72; // points per inch
@@ -186,5 +186,23 @@ describe("overlay scale — presets (B574–B578)", () => {
     for (const p of SCALE_PRESETS) {
       expect(feetPerInchFromPair({ pageVal: p.pageIn, realVal: p.realFt })).toBeCloseTo(feetPerInchForPreset(p), 9);
     }
+  });
+});
+
+describe("Set scale — the Custom box (parseTypedScale)", () => {
+  it("a plain number is feet per inch", () => {
+    expect(parseTypedScale("40")).toBe(40);
+    expect(parseTypedScale(" 37.5 ")).toBe(37.5);
+    expect(parseTypedScale("40'")).toBe(40);
+    expect(parseTypedScale("40 ft")).toBe(40);
+  });
+  it("reads the sheet-scale forms people paste: 1\" = 40', 1:480, 1/8\" = 1'-0\"", () => {
+    expect(parseTypedScale("1\" = 40'")).toBe(40);
+    expect(parseTypedScale("1:480")).toBe(40);
+    expect(parseTypedScale("1/8\" = 1'-0\"")).toBe(8);
+    expect(parseTypedScale("1/4\"=1'-0\"")).toBe(4);
+  });
+  it("junk, blanks, zero, NTS, slopes and absurd values are null (the field reverts)", () => {
+    for (const bad of ["", "   ", null, undefined, "abc", "0", "-5", "1:4 slope", "NTS", "40 40", "99999", "0.01"]) expect(parseTypedScale(bad)).toBe(null);
   });
 });

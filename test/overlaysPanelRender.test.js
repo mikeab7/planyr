@@ -5,7 +5,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import OverlaysPanel from "../src/workspaces/site-planner/components/OverlaysPanel.jsx";
+import { scaleEntryPlan } from "../src/workspaces/site-planner/lib/overlayPanelModel.js";
+import OverlaysPanel, { ScaleTools } from "../src/workspaces/site-planner/components/OverlaysPanel.jsx";
 
 const noop = () => {};
 const handlers = new Proxy({}, { get: (_, k) => (k === "sliderHistory" ? () => ({}) : k === "pageReady" ? () => true : noop) });
@@ -154,5 +155,59 @@ describe("the look spec (owner, 2026-10-08) — source guards; the measured proo
   it("shows the opacity as plain text ('85%') in one input, with no separate % span", () => {
     const html = render([pdf()], "pdf1");
     expect(html).toMatch(/data-testid="overlay-opacity-pct"[^>]*value="100%"/);
+  });
+});
+
+describe("NEW-1 · the 90° turns: one compact row, never stacked", () => {
+  const src = readFileSync(new URL("../src/workspaces/site-planner/components/OverlaysPanel.jsx", import.meta.url), "utf8");
+  it("both buttons render with their ids, full labels in aria-label/title, no row-or-stack machinery on the group", () => {
+    const h = render([pdf()], "pdf1");
+    expect(h).toContain('data-testid="overlay-rot-ccw90"'); expect(h).toContain('data-testid="overlay-rot-cw90"');
+    expect(h).toContain('aria-label="Turn 90° counterclockwise"'); expect(h).toContain('title="Turn 90° clockwise"');
+    expect(h).toMatch(/data-testid="overlay-quarter-group"[^>]*data-label="full"/);
+    const group = src.slice(src.indexOf("const QUARTERS"), src.indexOf("/* Rotation, as one block"));
+    expect(group).not.toMatch(/useRowOrStack|stacked|gridTemplateColumns|width: "100%"/);
+    expect(group).toContain("90° counterclockwise"); expect(group).toContain("90° clockwise");
+  });
+  it("useRowOrStack is no longer used by the rotation row", () => {
+    const rot = src.slice(src.indexOf("function RotationRow"), src.indexOf("/* The equal scale buttons"));
+    expect(rot).not.toContain("useRowOrStack");
+  });
+});
+
+describe("NEW-2 · no 'Non-standard sheet' note", () => {
+  it("a non-standard PDF renders no note (the sheet data stays)", () => {
+    const h = render([pdf({ sheet: { std: false, label: "9.1×14.2 in" } })], "pdf1");
+    expect(h).not.toMatch(/Non-standard sheet/i); expect(h).not.toMatch(/may have been shrunk/);
+    expect(h).toContain('data-testid="overlay-scale-ratio"');
+  });
+});
+
+describe("NEW-3 · Set scale: Preset | Custom", () => {
+  const tools = (o) => renderToStaticMarkup(createElement(ScaleTools, { o, onApply: noop }));
+  it("which segment opens first: Preset on a preset / the sheet's own read / no scale; Custom for a traced scale", () => {
+    expect(scaleEntryPlan(pdf({ ftPerPx: 40 / 72 })).mode).toBe("preset");
+    expect(scaleEntryPlan(pdf({ ftPerPx: 40 / 72 })).selected).toBe("eng-40");
+    expect(scaleEntryPlan(pdf({ ftPerPx: 37 / 72, detectedScale: 37 })).mode).toBe("preset");
+    expect(scaleEntryPlan(pdf({ ftPerPx: 37 / 72, detectedScale: 37 })).selected).toBe("sheet");
+    expect(scaleEntryPlan(pdf({ ftPerPx: 1, unscaled: true })).mode).toBe("preset");
+    expect(scaleEntryPlan(pdf({ ftPerPx: 37 / 72 })).mode).toBe("custom");
+    expect(scaleEntryPlan(pdf({ ftPerPx: 37 / 72 })).selected).toBe("");
+  });
+  it("Preset: the dropdown has no Custom entry, 'Read from the sheet' leads, and a non-preset scale shows the placeholder", () => {
+    const h = tools(pdf({ ftPerPx: 40 / 72, detectedScale: 100 }));
+    expect(h).toContain('data-testid="overlay-scale-preset"');
+    expect(h).not.toMatch(/value="custom"/); expect(h).not.toContain("Custom…");
+    expect(h.indexOf("Read from the sheet")).toBeLessThan(h.indexOf("Engineering")); expect(h.indexOf("Engineering")).toBeLessThan(h.indexOf("Architectural"));
+    expect(h).toContain('aria-pressed="true" data-testid="overlay-scale-mode-preset"');
+    const none = tools(pdf({ ftPerPx: 1, unscaled: true }));
+    expect(none).toContain("Choose a scale");
+  });
+  it("Custom opens for a non-preset scale: ONE box prefixed 1\" = and suffixed ', pre-filled, no unit dropdowns", () => {
+    const h = tools(pdf({ ftPerPx: 37.5 / 72 }));
+    expect(h).toContain('aria-pressed="true" data-testid="overlay-scale-mode-custom"');
+    expect(h).toContain('data-testid="overlay-scale-custom-input"'); expect(h).toContain('value="37.5"');
+    expect((h.match(/<input/g) || []).length).toBe(1); expect(h).not.toContain("<select");
+    expect(h).not.toContain('data-testid="overlay-scale-preset"');
   });
 });

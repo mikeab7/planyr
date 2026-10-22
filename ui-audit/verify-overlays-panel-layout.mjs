@@ -136,7 +136,7 @@ const measure = (floating) => {
     facts.groupW = Math.round(g.getBoundingClientRect().width);
   }
   // NEW-1: the rotation top line is ONE line (label · dial · number box on one centre line), and the quarter-turn
-  // buttons are one row of two equal buttons or one full-width column of two — never anything else.
+  // buttons are ONE compact left-aligned row (2026-10-22, B2382048) — never stacked, never stretched.
   const row = root.querySelector('[data-testid="overlay-rotation-row"]');
   if (row) {
     const top = row.firstElementChild;
@@ -144,8 +144,9 @@ const measure = (floating) => {
     facts.rotTop = kids;
     const qg = root.querySelector('[data-testid="overlay-quarter-group"]');
     if (qg) {
-      const bs = Array.from(qg.children).map((b) => { const q = b.getBoundingClientRect(); return { w: +q.width.toFixed(1), h: +q.height.toFixed(1), top: Math.round(q.top), fw: getComputedStyle(b).fontWeight, fs: getComputedStyle(b).fontSize, clip: b.scrollWidth > b.clientWidth + 1 }; });
-      facts.quarterBtns = bs; facts.quarterGroupW = Math.round(qg.getBoundingClientRect().width); facts.quarterLayout = qg.getAttribute("data-layout");
+      const gq = qg.getBoundingClientRect();
+      const bs = Array.from(qg.querySelectorAll("button")).map((b) => { const q = b.getBoundingClientRect(); return { w: +q.width.toFixed(1), h: +q.height.toFixed(1), top: Math.round(q.top), left: q.left - gq.left, right: q.right - gq.right, fw: getComputedStyle(b).fontWeight, fs: getComputedStyle(b).fontSize, clip: b.scrollWidth > b.clientWidth + 1 }; });
+      facts.quarterBtns = bs; facts.quarterGroupW = Math.round(gq.width); facts.quarterLabel = qg.getAttribute("data-label");
     }
     const dial = root.querySelector('[data-testid="overlay-rot-dial"]'), box = root.querySelector('[data-testid="overlay-rot-box"]');
     if (dial && box) { const a = dial.getBoundingClientRect(), b = box.getBoundingClientRect(); facts.dialBox = { dial: [Math.round(a.width), Math.round(a.height)], box: [Math.round(b.width), Math.round(b.height)], gap: Math.round(b.left - a.right) }; }
@@ -159,7 +160,7 @@ const measure = (floating) => {
 
 const BREAK_CSS = `
   [data-testid="overlay-scale-group"]{grid-template-columns:repeat(3,160px)!important}
-  [data-testid="overlay-quarter-group"]{grid-template-columns:repeat(2,230px)!important}
+  [data-testid="overlay-quarter-group"]{flex-direction:column!important}
   [data-testid="overlay-rot-box"]{width:260px!important}
   [data-testid="overlay-opacity-pct"]{width:300px!important}
   [data-testid^="overlay-crop-picture-"]{width:400px!important;flex:none!important}
@@ -251,8 +252,11 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
       log(m.dialBox && m.dialBox.dial[0] === m.dialBox.dial[1] && m.dialBox.dial[0] >= 28 && m.dialBox.gap >= 0, `${tag}: the dial is a round ${m.dialBox ? m.dialBox.dial.join("×") : "?"} target, number box ${m.dialBox ? m.dialBox.box.join("×") : "?"}`);
     }
     if (m.quarterBtns && m.quarterBtns.length === 2) {
-      const [a, b] = m.quarterBtns, oneRow = a.top === b.top && Math.abs(a.w - b.w) <= 1, oneCol = a.top !== b.top && Math.abs(a.w - m.quarterGroupW) <= 1 && Math.abs(b.w - m.quarterGroupW) <= 1;
-      log(oneRow || oneCol, `${tag}: the two 90° buttons are ${oneRow ? "one row of two equal buttons" : oneCol ? "stacked full-width" : "NEITHER (" + a.w + " / " + b.w + ")"}`);
+      const [a, b] = m.quarterBtns, oneRow = a.top === b.top && b.left > a.left + a.w - 1, leftAligned = a.left < 2, sized = a.w < m.quarterGroupW * 0.75 || m.quarterLabel === "compact" || m.quarterLabel === "icons";
+      log(oneRow && leftAligned && sized, `${tag}: the two 90° buttons are ${oneRow ? "ONE row, " + (leftAligned ? "left-aligned" : "NOT left-aligned") + ", sized to their text (" + a.w + " / " + b.w + ", label " + m.quarterLabel + ")" : "NOT on one row (" + a.top + " / " + b.top + ")"}`);
+      // When even the compact words exceed the row the buttons stay on ONE row (never stacked) as the two turn arrows — never cut off.
+      const over = Math.round(Math.max(b.right, a.right));
+      log(over <= 1, `${tag}: the 90° row fits its box (label tier ${m.quarterLabel}${over > 1 ? ", over by " + over : ""})`);
       log(!a.clip && !b.clip && a.fs === b.fs && a.fw === b.fw, `${tag}: neither 90° label is clipped or wrapped`);
     }
     if (m.cropBody) log(m.cropBody.picW >= 80 && m.cropBody.picH >= 80 && m.cropBody.sameLine, `${tag}: crop picture ${m.cropBody.picW}×${m.cropBody.picH} beside Adjust (${m.cropBody.adjW} wide)`);
