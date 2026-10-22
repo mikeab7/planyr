@@ -125,7 +125,7 @@ export default function LinkSchedulePanel({ siteName, schedules = [], suggestedM
 
         <button
           type="button"
-          style={{ ...btnPrimary, opacity: canCreate ? 1 : 0.5, cursor: canCreate ? "pointer" : "not-allowed" }}
+          style={{ ...btnPrimary, opacity: canCreate ? 1 : 0.5, cursor: canCreate ? "pointer" : "default" }}
           onClick={canCreate ? onCreate : undefined}
           disabled={!canCreate}
         >
@@ -176,7 +176,7 @@ export default function LinkSchedulePanel({ siteName, schedules = [], suggestedM
                 const sel = others.find((s) => String(s.id) === pick);
                 if (sel) onLink(sel.id);
               }}
-              style={{ ...btnLink, opacity: pick ? 1 : 0.5, cursor: pick ? "pointer" : "not-allowed" }}
+              style={{ ...btnLink, opacity: pick ? 1 : 0.5, cursor: pick ? "pointer" : "default" }}
             >
               Link
             </button>

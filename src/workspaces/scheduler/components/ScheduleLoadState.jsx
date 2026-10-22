@@ -40,7 +40,7 @@ export default function ScheduleLoadState({ state = "loading", siteName = null, 
       role={failed ? "alert" : "status"}
       aria-live="polite"
       aria-label={siteName ? `Schedules for ${siteName}: ${headline}` : headline}
-      style={wrap}
+      style={{ ...wrap, cursor: failed ? "default" : "progress" }}
     >
       <p style={{ margin: 0, fontSize: FONT_SIZE.display, fontWeight: 600, lineHeight: 1.4 }}>{headline}</p>
       {failed && (
