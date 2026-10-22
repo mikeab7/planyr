@@ -126,15 +126,6 @@ export function attachPlaceNames(map) {
     lastTs = now;
     const size = map.getSize();
     const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(size.x * dpr) || canvas.height !== Math.round(size.y * dpr)) {
-      canvas.width = Math.round(size.x * dpr); canvas.height = Math.round(size.y * dpr);
-      canvas.style.width = `${size.x}px`; canvas.style.height = `${size.y}px`;
-      dirty = true;
-    }
-    L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.x, size.y);
-
     const f = tracker.frame(now);
     const at = f.at;
 
@@ -143,8 +134,28 @@ export function attachPlaceNames(map) {
     layerA = stepScalar(layerA, targetA, dt);
     const busy = stepFade(tracked, wanted, dt) || layerA !== targetA || f.animating;
 
+    /* NEW-1 (2026-10-22, work-laptop report) — A CANVAS THAT HAS NOTHING TO DRAW HOLDS NO PIXELS. One map-sized backing store
+     * (5122×1499 = 29 MB at the laptop's 2.6775 pixel ratio) was allocated at attach and kept while the layer was gated off (zoom
+     * 14 and up — every parcel zoom) or its map was HIDDEN behind the planner (css 0×0, still 29 MB): with the city-limits
+     * boundary canvas that was 58.6 MB of GPU-side backing on a blank screen. Sized only while there are names to ink; handed back
+     * (1×1) otherwise. Nothing is drawn in either state, so the picture is unchanged. */
+    const hiddenMap = !map.getContainer().clientWidth;
+    const inking = !hiddenMap && (layerA > 0 || busy);
+    if (!inking) {
+      if (canvas.width !== 1 || canvas.height !== 1) { canvas.width = 1; canvas.height = 1; canvas.style.width = "0px"; canvas.style.height = "0px"; }
+    } else {
+      if (canvas.width !== Math.round(size.x * dpr) || canvas.height !== Math.round(size.y * dpr)) {
+        canvas.width = Math.round(size.x * dpr); canvas.height = Math.round(size.y * dpr);
+        canvas.style.width = `${size.x}px`; canvas.style.height = `${size.y}px`;
+        dirty = true; schedule();   // a freshly (re)allocated canvas is blank: lay out and ink it again next frame
+      }
+      L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, size.x, size.y);
+    }
+
     const shownNow = [];
-    if (layerA > 0) {
+    if (inking && layerA > 0) {
       ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
       const onImagery = tone === "imagery";
       for (const [key, e] of tracked) {
@@ -187,6 +198,9 @@ export function attachPlaceNames(map) {
   };
   const onMove = () => { ensureTowns(); dirty = true; schedule(); };
   map.on("move zoom moveend zoomend resize", onMove);
+  /* NEW-1 — a keep-alive host hides its map with display:none (no Leaflet event); the container's box going to 0 releases the canvas, coming back redraws it. */
+  let ro = null;
+  try { if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(() => { dirty = true; schedule(); }); ro.observe(map.getContainer()); } } catch (_) { /* no observer: move events still drive it */ }
 
   const controller = {
     redraw: schedule,
@@ -197,6 +211,7 @@ export function attachPlaceNames(map) {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);
       map.off("move zoom moveend zoomend resize", onMove); tracker.destroy();
+      try { ro && ro.disconnect(); } catch (_) { /* ignore */ }
       setPlaceNamesShown(map, []);   // the city-limits labels take their names back
       try { canvas.remove(); } catch (_) { /* map already torn down */ }
       attached.delete(map);

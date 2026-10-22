@@ -130,7 +130,7 @@ export async function proveSignedIn(page) {
 /* engine: "chromium" (default) or "webkit". device: a Playwright descriptor name, e.g. "iPhone 15" — its viewport /
  * touch / UA / scale factor become the context options (an explicit contextOptions still wins). WebKit is
  * installed on demand (initScripts: [[fn, arg], …] run in every page before it loads): `npx playwright install webkit` (docs/PHONE-TESTING.md); a missing build is a LOUD throw. */
-export async function openSignedIn({ account = "primary", base = "https://planyr.io", viewport = { width: 1440, height: 900 }, contextOptions = {}, engine = "chromium", device = null, initScripts = [], ignoreDefaultArgs = undefined } = {}) {
+export async function openSignedIn({ account = "primary", base = "https://planyr.io", viewport = { width: 1440, height: 900 }, contextOptions = {}, engine = "chromium", device = null, initScripts = [], ignoreDefaultArgs = undefined, launchArgs = [] } = {}) {
   if (device && !devices[device]) throw new Error("signedInSession: unknown device descriptor " + device);
   if (device) { contextOptions = { ...devices[device], ...contextOptions }; viewport = undefined; }
   const key = process.env.E2E_LOGIN_KEY, email = process.env.E2E_EMAIL, pw = process.env.E2E_PASSWORD;
@@ -141,7 +141,7 @@ export async function openSignedIn({ account = "primary", base = "https://planyr
     browser = await webkit.launch(); // no ignore-cert flags, ever
   } else {
     const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
-    browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"], ...(ignoreDefaultArgs ? { ignoreDefaultArgs } : {}) }); // ignoreDefaultArgs: ["--hide-scrollbars"] lets a check SEE scrollbars // no ignore-cert flags, ever
+    browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox", ...launchArgs], ...(ignoreDefaultArgs ? { ignoreDefaultArgs } : {}) }); // ignoreDefaultArgs: ["--hide-scrollbars"] lets a check SEE scrollbars // no ignore-cert flags, ever
   }
   try {
     const context = await browser.newContext({ ...(viewport ? { viewport } : {}), ...contextOptions }); // contextOptions: e.g. a Playwright device descriptor (isMobile/hasTouch) for a phone check
