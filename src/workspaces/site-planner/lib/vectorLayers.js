@@ -26,8 +26,9 @@ import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county";
-export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county";
+export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city"
+  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
@@ -378,6 +379,164 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "California city limits (CDT State Geoportal).",
+  },
+  /* NEW-1 (New Jersey + New York) — THE NJ / NY ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.js rows (the Georgia
+   * lesson: a `kind:"vector"` row with no entry here draws NOTHING — `vectorLayerRegistered` fails the build on it). Endpoints come from the
+   * GIS_SOURCES rows the jurisdiction identify uses (B176). Counties: ONE statewide pull serves every low / mid zoom; municipal tiers use the
+   * same bbox-only tiering as the Texas / Georgia / California city rows (a statewide pull of 564 / 933 / 532 polygons is too heavy for one entry). */
+  nj_county: {
+    id: "nj_county",
+    label: "County boundaries (New Jersey)",
+    labelField: "COUNTY",
+    labelZoom: { min: 6, max: 11 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — but in New Jersey the municipality, not the county, is the zoning and site-plan authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "NJ Office of GIS (NJOGIS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyNj.serviceUrl + "/query",
+      outFields: ["COUNTY", "FIPSSTCO"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New Jersey county lines (NJOGIS).",
+  },
+  nj_city: {
+    id: "nj_city",
+    label: "Municipal limits (New Jersey)",
+    labelField: "MUN_LABEL",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — municipal boundary",
+    identifyNote: "Inside this line is in the municipality (it has jurisdiction — it zones and approves site plans). Every acre of New Jersey is in one. NOT proof of utility service. Screening only.",
+    sourceName: "NJ Office of GIS (NJOGIS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityNj.serviceUrl + "/query",
+      outFields: ["MUN_LABEL", "NAME", "MUN_TYPE", "CENSUS2020"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New Jersey municipal boundaries (NJOGIS).",
+  },
+  ny_county: {
+    id: "ny_county",
+    label: "County boundaries (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 11 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — but in New York the town, village or city, not the county, approves zoning and site plans. A boundary is not a utility service area. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyNy.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS_CODE", "NYC"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York county lines (NYS ITS Civil Boundaries).",
+  },
+  ny_city: {
+    id: "ny_city",
+    label: "City limits (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 9, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — it zones and approves site plans). New York City is one city across five counties. NOT proof of utility service. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityNy.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS_CODE"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York city limits (NYS ITS Civil Boundaries).",
+  },
+  ny_town: {
+    id: "ny_town",
+    label: "Town limits (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 9, max: 13 },
+    nameTemplate: "{name} — town limits",
+    identifyNote: "Inside this line is in the town (it has jurisdiction — it zones and approves site plans unless a village inside it does). Towns cover all land outside the 62 cities. NOT proof of utility service. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.townNy.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS_CODE", "COUNTY"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York town limits (NYS ITS Civil Boundaries).",
+  },
+  ny_village: {
+    id: "ny_village",
+    label: "Village limits (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 14 },
+    nameTemplate: "{name} — village limits",
+    identifyNote: "Inside this line is in the village (its own board approves zoning and site plans over the town that holds it). NOT proof of utility service. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.villageNy.serviceUrl + "/query",
+      outFields: ["NAME", "TOWN", "FIPS_CODE"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York village limits (NYS ITS Civil Boundaries).",
   },
   jur_etj: {
     id: "jur_etj",

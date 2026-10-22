@@ -1,3 +1,5 @@
+import { NJ_JURISDICTION_SOURCE_NAME, NY_JURISDICTION_SOURCE_NAME } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+
 /* Georgia jurisdiction facts — the pure, network-free half (NEW-1, the Colorado `countyCo` precedent).
  *
  * WHAT GEORGIA IS, for the jurisdiction stack:
@@ -71,4 +73,5 @@ export const GA_DETENTION_DETAIL =
  * "TxDOT / TxGIO / county & city ETJ publishers" — Texas publishers, and the word ETJ, on a state that has neither). */
 export const GA_JURISDICTION_SOURCE_NAME = "Georgia DCA (county + municipal boundaries)";
 export const TX_JURISDICTION_SOURCE_NAME = "TxDOT / TxGIO / county & city ETJ publishers";
-export const jurisdictionSourceName = (state) => (state === "GA" ? GA_JURISDICTION_SOURCE_NAME : TX_JURISDICTION_SOURCE_NAME);
+export const jurisdictionSourceName = (state) => (state === "GA" ? GA_JURISDICTION_SOURCE_NAME
+  : state === "NJ" ? NJ_JURISDICTION_SOURCE_NAME : state === "NY" ? NY_JURISDICTION_SOURCE_NAME : TX_JURISDICTION_SOURCE_NAME); // NEW-1 — NJ / NY name their own publishers

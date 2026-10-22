@@ -149,7 +149,9 @@ describe("NEW-5 · county identify is region-routed, and Texas gets the SAME obj
   // source configured here" identifyJurisdiction already gives an uncovered ETJ/city point — and
   // countyAtPoint answers from the nationwide offline floor instead of guessing Texas.
   it("returns no live source for a point outside both Texas and Colorado (never guesses Texas)", () => {
-    for (const [lat, lng] of [[36.1147, -115.1728], [40.7128, -74.0060], [45.5, -122.6], [NaN, NaN]]) {
+    // NEW-1 (NJ + NY): New York City (40.7128, -74.0060) used to be this test's "outside everywhere" point; it now routes to the
+    // NJ / NY county layers on purpose (test/njnyJurisdiction.test.js). Chicago takes its place — the property under test is unchanged.
+    for (const [lat, lng] of [[36.1147, -115.1728], [41.8781, -87.6298], [45.5, -122.6], [NaN, NaN]]) {
       expect(countySourcesForPoint(lat, lng), `${lat},${lng}`).toEqual([]);
     }
   });

@@ -548,6 +548,7 @@ import {
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { jurisdictionSourceName, GA_JURISDICTION_SOURCE_NAME } from "./lib/georgiaJurisdiction.js";
+import { NJNY_NOT_WIRED_FLAGS, isNjNyState } from "./lib/njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
@@ -14133,7 +14134,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
     // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
     // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
-    : siteStateId === "GA" || siteStateId === "CA" // NEW-1 (California) — same carrier, "not available in California yet"
+    : siteStateId === "GA" || siteStateId === "CA" || isNjNyState(siteStateId) // NEW-1 (California; New Jersey + New York) — same carrier, "not available in <State> yet"
     ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
@@ -14141,7 +14142,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "CA" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "CA" && !isNjNyState(siteStateId) && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -34485,14 +34486,14 @@ function DrainagePanel({
                 coMhfd && req.panelLine
                   ? req.panelLine
                   // NEW-1 (Georgia) — the named "not available in Georgia yet" state; one line, the why rides the ⓘ.
-                  : (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired")
+                  : (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired" || NJNY_NOT_WIRED_FLAGS.includes(f))
                     ? req.headline // PANEL-BREVITY: the carrier's own headline, so no new literal is added here
                     : `${coSubject} — confirm the criteria your town has adopted.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already
                 // correct — only the ⓘ fills in a moment later.
-                (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired")
+                (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired" || NJNY_NOT_WIRED_FLAGS.includes(f))
                   ? req.detail
                   : d.coDetail
                   ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`

@@ -287,6 +287,60 @@ export const SOURCE_FIXTURES = {
     { label: "City and County of San Francisco", point: [-122.4194, 37.7749], expectMinCount: 1 }, // live: San Francisco
   ],
   },
+  countyNj: {
+  fixtures: [
+    // NEW-1 (New Jersey) · live 2026-10-22 from the build sandbox: exactly 21 county polygons (NJ's full roster).
+    { label: "Newark (Essex)", point: [-74.1724, 40.7357], expectMinCount: 1 }, // live: ESSEX
+    { label: "Fort Lee (Bergen)", point: [-73.9701, 40.8509], expectMinCount: 1 }, // live: BERGEN
+    { label: "Cape May (Cape May)", point: [-74.906, 38.9351], expectMinCount: 1 }, // live: CAPE MAY
+    { label: "Phillipsburg (Warren)", point: [-75.1904, 40.6937], expectMinCount: 1 }, // live: WARREN
+  ],
+  },
+  cityNj: {
+  fixtures: [
+    // NEW-1 (New Jersey) · live 2026-10-22: exactly 564 municipal polygons; every acre of the state is in one.
+    { label: "City of Newark", point: [-74.1724, 40.7357], expectMinCount: 1 }, // live: City of Newark
+    { label: "Borough of Fort Lee", point: [-73.9701, 40.8509], expectMinCount: 1 }, // live: Borough of Fort Lee
+    { label: "City of Cape May", point: [-74.906, 38.9351], expectMinCount: 1 }, // live: City of Cape May
+    { label: "Township of Edison", point: [-74.4121, 40.5187], expectMinCount: 1 }, // live: Township of Edison
+  ],
+  },
+  countyNy: {
+  fixtures: [
+    // NEW-1 (New York) · live 2026-10-22: exactly 62 county polygons (NYS's full roster; the five NYC boroughs are five of them).
+    { label: "Brooklyn (Kings)", point: [-73.9442, 40.6782], expectMinCount: 1 }, // live: Kings
+    { label: "Pleasantville (Westchester)", point: [-73.7926, 41.1329], expectMinCount: 1 }, // live: Westchester
+    { label: "Buffalo (Erie)", point: [-78.8784, 42.8864], expectMinCount: 1 }, // live: Erie
+    { label: "Plattsburgh (Clinton)", point: [-73.4529, 44.6995], expectMinCount: 1 }, // live: Clinton
+  ],
+  },
+  cityNy: {
+  fixtures: [
+    // NEW-1 (New York) · live 2026-10-22: exactly 62 city polygons; New York City is ONE of them (all five boroughs).
+    { label: "New York City (Brooklyn)", point: [-73.9442, 40.6782], expectMinCount: 1 }, // live: New York
+    { label: "City of Buffalo", point: [-78.8784, 42.8864], expectMinCount: 1 }, // live: Buffalo
+    { label: "City of Plattsburgh", point: [-73.4529, 44.6995], expectMinCount: 1 }, // live: Plattsburgh
+    { label: "City of Saratoga Springs", point: [-73.7846, 43.0831], expectMinCount: 1 }, // live: Saratoga Springs
+  ],
+  },
+  townNy: {
+  fixtures: [
+    // NEW-1 (New York) · live 2026-10-22: 933 town polygons tile every acre outside the 62 cities.
+    { label: "Town of Mount Pleasant (Pleasantville)", point: [-73.7926, 41.1329], expectMinCount: 1 }, // live: Mount Pleasant
+    { label: "Town of Hempstead (Levittown)", point: [-73.5143, 40.7259], expectMinCount: 1 }, // live: Hempstead
+    { label: "Town of Indian Lake (Hamilton Co.)", point: [-74.2668, 43.7792], expectMinCount: 1 }, // live: Indian Lake
+    { label: "Town of Orangetown (Rockland)", point: [-74.0218, 41.0587], expectMinCount: 1 }, // live: Orangetown
+  ],
+  },
+  villageNy: {
+  fixtures: [
+    // NEW-1 (New York) · live 2026-10-22: 532 village polygons; each sits inside a town.
+    { label: "Village of Pleasantville", point: [-73.7926, 41.1329], expectMinCount: 1 }, // live: Pleasantville (Town of Mount Pleasant)
+    { label: "Village of Hempstead", point: [-73.6187, 40.7062], expectMinCount: 1 }, // live: Hempstead (Town of Hempstead)
+    { label: "Village of Saranac Lake", point: [-74.1313, 44.3295], expectMinCount: 1 }, // live: Saranac Lake (a village straddling THREE towns: Harrietstown, North Elba, St Armand)
+    { label: "Village of Lake Placid", point: [-73.9798, 44.2795], expectMinCount: 1 }, // live: Lake Placid (Town of North Elba)
+  ],
+  },
   city: {
   fixtures: [
     { label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 },
@@ -1105,6 +1159,36 @@ export const SOURCE_DOCS = {
     "have NO ETJ: outside a city's limits the county governs. San Francisco is the one consolidated city-county. Spheres of influence " +
     "(LAFCO) are planning boundaries, not jurisdiction, and are deliberately not carried. A boundary means the city HAS JURISDICTION — " +
     "never proof it serves or will connect utilities.",
+  },
+  countyNj: {
+  notes:
+    "The New Jersey counterpart of `county` / `countyCa`. NJOGIS County Boundaries of NJ (hosted 3857; 21 counties). A point in NO polygon " +
+    "is not in New Jersey (the routing outline also holds PA / DE / NY slivers across the rivers) — point-in-polygon decides, never the outline.",
+  },
+  cityNj: {
+  notes:
+    "The New Jersey counterpart of `city`. NJOGIS Municipal Boundaries of NJ (hosted 3857; 564 municipalities — city, borough, township, town, " +
+    "village — tiling the WHOLE state: there is no unincorporated land and no ETJ). The municipality, not the county, is the zoning and " +
+    "site-plan authority. A boundary means the municipality HAS JURISDICTION — never proof it serves or will connect utilities.",
+  },
+  countyNy: {
+  notes:
+    "The New York counterpart of `county` / `countyCa`. NYS ITS Geospatial Services 'NYS Civil Boundaries' Counties (62, running out over water to " +
+    "the state line; the five NYC boroughs are each a county). A point in NO polygon is not in New York — point-in-polygon decides.",
+  },
+  cityNy: {
+  notes:
+    "NYS Civil Boundaries Cities (62; New York City is ONE polygon spanning its five counties). A New York city has no reach beyond its limits.",
+  },
+  townNy: {
+  notes:
+    "NYS Civil Boundaries Towns (933; includes the Town of Palm Tree). Towns tile all land outside the 62 cities; a village sits INSIDE a town and " +
+    "a few villages straddle two. Outside a village the town (or city) approves zoning and site plans. A hamlet (Levittown, Brentwood…) is " +
+    "a place name, not a government — it reads as its town.",
+  },
+  villageNy: {
+  notes:
+    "NYS Civil Boundaries Villages (532). A village's own board approves zoning and site plans for land inside it, over the town that holds it.",
   },
   isdCo: {
   notes:

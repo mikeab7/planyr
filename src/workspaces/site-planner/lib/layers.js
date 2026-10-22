@@ -1044,6 +1044,57 @@ export const AHJ_LAYERS = {
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
     role: "line", group: "jurisdiction", order: 2,
   },
+  /* NEW-1 (New Jersey + New York) — county lines and municipal limits for NJ and NY sites. Each is its OWN row reading its own registry
+   * row (live-probed 2026-10-22: NJOGIS and NYS ITS Civil Boundaries, both CORS-open), `states: ["NJ"]` / `["NY"]` so the Texas rows
+   * demote on a NJ / NY view and these demote everywhere else. Both fold into the one "Counties & Cities" row (mergeGroup). Neither
+   * state has an ETJ, so there is deliberately no ETJ row — and no "unincorporated" reading: every acre is in a municipality. New
+   * York's municipal tier is three rows (city, town, village) because they are three nested governments, not one. */
+  nj_county: {
+    kind: "vector", label: "County Boundaries (New Jersey)", mergeGroup: "counties_cities", source: "NJ Office of GIS",
+    url: GIS_SOURCES.countyNj.serviceUrl, states: ["NJ"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "New Jersey county lines (NJOGIS, all 21 counties). A has-jurisdiction boundary, not a service area; the municipality, not the county, is the zoning authority.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  nj_city: {
+    kind: "vector", label: "Municipal Limits (New Jersey)", mergeGroup: "counties_cities", source: "NJ Office of GIS",
+    url: GIS_SOURCES.cityNj.serviceUrl, states: ["NJ"],
+    minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "New Jersey municipal boundaries (NJOGIS, all 564 cities, boroughs, townships, towns and villages — they tile the whole state). NOT proof of utility service.",
+    infoCaveat: "A boundary means the municipality HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
+  ny_county: {
+    kind: "vector", label: "County Boundaries (New York)", mergeGroup: "counties_cities", source: "NYS ITS Geospatial Services",
+    url: GIS_SOURCES.countyNy.serviceUrl, states: ["NY"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "New York county lines (NYS ITS Civil Boundaries, all 62 counties; the five NYC boroughs are each a county). A has-jurisdiction boundary, not a service area; the town, village or city, not the county, approves zoning.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ny_city: {
+    kind: "vector", label: "City Limits (New York)", mergeGroup: "counties_cities", source: "NYS ITS Geospatial Services",
+    url: GIS_SOURCES.cityNy.serviceUrl, states: ["NY"],
+    minZoom: 8, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "New York's 62 cities (NYS ITS Civil Boundaries). New York City is one city spanning five counties. NOT proof of utility service.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
+  ny_town: {
+    kind: "vector", label: "Town Limits (New York)", mergeGroup: "counties_cities", source: "NYS ITS Geospatial Services",
+    url: GIS_SOURCES.townNy.serviceUrl, states: ["NY"],
+    minZoom: 8, color: "#0f766e", weight: 1.4, opacity: 0.4,
+    note: "New York's towns (NYS ITS Civil Boundaries) — they cover all land outside the 62 cities. A village inside a town may be the zoning authority instead. NOT proof of utility service.",
+    infoCaveat: "A boundary means the town HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 3,
+  },
+  ny_village: {
+    kind: "vector", label: "Village Limits (New York)", mergeGroup: "counties_cities", source: "NYS ITS Geospatial Services",
+    url: GIS_SOURCES.villageNy.serviceUrl, states: ["NY"],
+    minZoom: 9, color: "#7c3aed", weight: 1.4, opacity: 0.4,
+    note: "New York's villages (NYS ITS Civil Boundaries). A village sits inside a town (a few straddle two), and its own board approves zoning and site plans inside it. NOT proof of utility service.",
+    infoCaveat: "A boundary means the village HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 4,
+  },
   /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING LAYERS. Each reads its own `GIS_SOURCES` row
    * (live-verified, CORS-open, production host — see sources.js), declares `states: ["GA"]` so a Texas view lists
    * none of them and a Georgia view lists them, and carries the honest limits of its data in `note`. Georgia DOT
