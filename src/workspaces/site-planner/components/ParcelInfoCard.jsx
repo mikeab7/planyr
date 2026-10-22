@@ -81,6 +81,8 @@ export default function ParcelInfoCard({
   // NEW-4 — the fallback when the county service is unreachable: start the plan at this point
   // anyway and draw the boundary. Passed only by the map finder; absent → the card just explains.
   onStartBlank = null,
+  // NEW-2 (2026-10-22) — a server that did not answer is asked again by the person, not by a vague "give it a moment". Absent → no button.
+  onRetry = null,
   // B1149600ish/NEW-6 — the card used to offer "Plan this site" (a SITE-module action)
   // unconditionally, even while the map's own Site/Comp toggle read Comp — reproduced by the
   // owner on a real address search. `mode` decides which primary action belongs here; `onComp`
@@ -187,7 +189,13 @@ export default function ParcelInfoCard({
            him a lot and no way forward. The way forward goes in the same breath as the bad news:
            start the plan anyway, located at this address, and draw the boundary by hand. */
         <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.accent, lineHeight: 1.5 }}>
-          The map centered on the address, but the county parcel service couldn’t be reached for this area right now. Give it a moment, then click the lot or use <b>Select parcels</b>.
+          The map centered on the address, but the county parcel server didn’t answer, so the lot couldn’t be checked.
+          {onRetry && (
+            <button onClick={onRetry} data-testid="parcel-card-try-again"
+              style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              Try again
+            </button>
+          )}
           {onStartBlank && (
             <button onClick={onStartBlank} data-testid="parcel-card-start-blank"
               style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>

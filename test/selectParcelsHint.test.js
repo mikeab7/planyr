@@ -45,6 +45,16 @@ describe("selectParcelsHintFor — stage → copy", () => {
     expect(selectParcelsHintFor({ zoom: 17, outlineSources: wideSrc, outlineFloor: 16, slowLoading: true }).text).toMatch(/still loading/i);
     expect(selectParcelsHintFor({ zoom: 12, outlineSources: wideSrc, outlineFloor: 16, wideBusy: true, slowLoading: true }).key).toBe("far");
   });
+  it("a refused wide-view tile says so in one short sentence, only while a tile really was refused", () => {
+    const refused = selectParcelsHintFor({ zoom: 15, outlineSources: wideSrc, outlineFloor: 16, wideRefused: true });
+    expect(refused.text).toBe("Some lots didn't load. Zoom in to retry.");
+    expect(refused.icon).toBe("zoom-in");
+    expect(selectParcelsHintFor({ zoom: 15, outlineSources: wideSrc, outlineFloor: 16, wideRefused: false }).key).toBe("large");
+    // busy wins over refused; refused never shows at the far or all-lots stages
+    expect(selectParcelsHintFor({ zoom: 15, outlineSources: wideSrc, outlineFloor: 16, wideBusy: true, wideRefused: true }).key).toBe("busy");
+    expect(selectParcelsHintFor({ zoom: 12, outlineSources: wideSrc, outlineFloor: 16, wideRefused: true }).key).toBe("far");
+    expect(selectParcelsHintFor({ zoom: 17, outlineSources: wideSrc, outlineFloor: 16, wideRefused: true }).key).toBe("all");
+  });
   it("every line is one short sentence — no old long copy survives", () => {
     for (const h of Object.values(SELECT_PARCELS_HINT)) expect(h.text.length, h.key).toBeLessThanOrEqual(52);
   });
@@ -54,7 +64,7 @@ describe("the banner reads ONLY this module", () => {
   const src = read("src/workspaces/site-planner/MapFinder.jsx");
   it("MapFinder asks selectParcelsHintFor and carries none of the old sentences", () => {
     expect(src).toMatch(/selectParcelsHintFor\(/);
-    for (const old of ["even before the purple outlines", "Zoom in a little to see the lines", "Add several, then Plan", "Hover an added lot and click to remove", "Showing larger lots."]) {
+    for (const old of ["even before the purple outlines", "Zoom in a little to see the lines", "Add several, then Plan", "Hover an added lot and click to remove", "Showing larger lots.", "part of this view could not be loaded"]) {
       expect(src.includes(old), old).toBe(false);
     }
   });

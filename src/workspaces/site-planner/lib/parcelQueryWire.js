@@ -98,3 +98,9 @@ export function readEsriBody(text) {
   if (response && response.error) return { error: response.error, response: null };
   return { error: null, response };
 }
+
+/* NEW-1 (Select parcels, wide view) — which failures are worth a back-off and a retry. 0 = the fetch itself failed (network / timeout), 408 / 429 =
+ * asked too much, 499 = ArcGIS "service busy", and EVERY 5xx — including Cloudflare's own 520–527 (a 524 is "the origin took too long", measured once on
+ * the live relay), which a fixed list of four codes would have read as a permanent refusal. A 4xx other than those is the county refusing the QUERY and is
+ * never retried. Pure. */
+export const isTransientEsriStatus = (code) => { const c = Number(code); return c === 0 || c === 408 || c === 429 || c === 499 || c >= 500; };
