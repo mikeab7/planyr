@@ -56,8 +56,8 @@ const onRoad = f2s(1649, 100);
 await page.mouse.click(onRoad.x, onRoad.y, { button: "right" });
 await page.waitForTimeout(500);
 const item = page.locator('[data-testid="road-branch-here"]');
-if (await item.count() === 0) { console.log("FAIL — no 'Branch a road from here' item on a road's right-click menu"); process.exit(1); }
-console.log("✓ the road's right-click menu offers 'Branch a road from here'");
+if (await item.count() === 0) { console.log("FAIL — no 'Add a T-intersection here' item on a road's right-click menu"); process.exit(1); }
+console.log("✓ the road's right-click menu offers 'Add a T-intersection here'");
 await item.click();
 await page.waitForTimeout(500);
 

@@ -37,6 +37,7 @@ import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, sna
 import { attachLotNumbers, attachSnapshotLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, snapshotFeaturesInView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
+import { pruneVerdict, PRUNE_IDLE_CAP_MS } from "./parcelHandoff.js";
 import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.js";
 import { routeQueryThroughWorker } from "./parcelQueryTransport.js";
 import { ensureFeatureIds } from "./parcelQueryWire.js";
@@ -290,12 +291,17 @@ export function makeParcelLayer(url, opts) {
   };
   layer.addLayers = function (ids) { for (let i = ids.length - 1; i >= 0; i--) { const g = this._layers[ids[i]]; if (g) g.attach(); } };
   layer.removeLayers = function (ids, permanent) {
+    /* NEW-1 (parcel outlines lag the map when zooming) — a zoom OUT past this layer's floor removed every line at `zoomend` and drew nothing until the
+     * wide/mid stage had fetched its own tiles (a county round trip). The lots this layer lets go of while the view is out of range are handed to the
+     * wide layer, which keeps them drawn until its own lines are (parcelHandoff.js). No wide stage (`_wide` null) = today's behaviour exactly. */
+    const hold = this._wide && this._map && !this._visibleZoom() ? [] : null;
     for (let i = ids.length - 1; i >= 0; i--) {
       const g = this._layers[ids[i]];
       if (!g) continue;
-      g.detach();
+      if (hold && g.isDrawn()) hold.push(g); else g.detach();
       if (permanent) delete this._layers[ids[i]];
     }
+    if (hold && hold.length && !this._wide.carry(hold)) hold.forEach((g) => g.detach());
   };
   /* NEW-1 — esri-leaflet's `_addFeatures` dedupes each arriving id with `Array.indexOf` over EVERYTHING
    * held (`_currentSnapshot`) and the cell's id list: O(held × arriving) — 225 ms across a handful of
@@ -332,13 +338,30 @@ export function makeParcelLayer(url, opts) {
   }
   let mapRef = null;
   let timer = null;
-  const prune = () => { timer = null; if (layer._map) pruneToLiveCells(layer); };
+  /* NEW-1 (parcel outlines lag the map when zooming) — the prune used to run at EVERY `zoomend`, and after a zoom every lot held belongs to a cell that
+   * "is no longer current" (the new zoom's cells have not answered yet), so it dropped them ALL and the map drew no lines until the new cells' queries
+   * came back. The lots it was about to drop are on the same ground at the same coordinates, so they are kept while answers are on the way and pruned
+   * when the layer is idle (`load`), with a cap so a request that never answers cannot pin every lot ever seen. */
+  let pruneWait = null, pruneCap = null;
+  const runPrune = () => { timer = null; if (pruneCap) { clearTimeout(pruneCap); pruneCap = null; } pruneWait = null; if (layer._map) pruneToLiveCells(layer); };
+  const prune = () => {
+    timer = null;
+    if (!layer._map) return;
+    const verdict = pruneVerdict({ visibleZoom: layer._visibleZoom(), activeRequests: layer._activeRequests, ingestPending: queue.pending });
+    if (verdict === "now") { runPrune(); return; }
+    if (pruneWait) return; // already waiting for the layer to go idle
+    pruneWait = () => { layer.off("load", pruneWait); timer = setTimeout(runPrune, 0); if (pruneCap) { clearTimeout(pruneCap); pruneCap = null; } };
+    layer.on("load", pruneWait);
+    pruneCap = setTimeout(() => { if (pruneWait) layer.off("load", pruneWait); runPrune(); }, PRUNE_IDLE_CAP_MS);
+  };
   const onMoved = () => { if (timer) clearTimeout(timer); timer = setTimeout(prune, 0); };
   layer.on("add", () => {
     mapRef = layer._map;
     if (!mapRef) return;
     mapRef.on("moveend zoomend", onMoved);
-    tiles = new ParcelTiles(index, { pane: pane || "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 }); // `pane`: the planner's Parcels-in-front host (mapStack PANE_PARCEL_PICK); everyone else keeps the overlay pane
+    // minZoom: a GridLayer drops ALL its canvases the moment the view leaves [minZoom, maxZoom], so a tile layer floored at the close stage would wipe the lines it is
+    // carrying through a zoom-out (parcelHandoff.js). Lots only enter the index inside the layer's own range, so a lower floor draws nothing extra — it just lets the carried ones stay.
+    tiles = new ParcelTiles(index, { pane: pane || "overlayPane", zIndex: 0, minZoom: layer._wide ? Math.min(layer.options.minZoom, layer._wide.wideFloor) : layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 }); // `pane`: the planner's Parcels-in-front host (mapStack PANE_PARCEL_PICK); everyone else keeps the overlay pane
     tiles._busy = () => queue.pending > 0;
     tiles.addTo(mapRef);
   });
@@ -351,6 +374,8 @@ export function makeParcelLayer(url, opts) {
     releaseLoads(); // keeps esri-leaflet's request counter honest
     mapRef = null;
     if (timer) { clearTimeout(timer); timer = null; }
+    if (pruneCap) { clearTimeout(pruneCap); pruneCap = null; }
+    if (pruneWait) { layer.off("load", pruneWait); pruneWait = null; }
   });
   return layer;
 }

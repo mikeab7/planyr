@@ -63,13 +63,13 @@ describe("NEW-1 — every site element on a real-shaped plan becomes an annotati
     expect(at).toEqual(at.slice().sort((a, b) => a - b));
   });
   it("a building's label travels in its own appearance; a parcel's acreage label never rides on a building", () => {
-    const b = built.annots.find((a) => a.family === "building" && /Building 3/.test(a.contents));
+    const b = built.annots.find((a) => a.family === "building" && /\(Building 3\) Tj/.test(a.ap.stream));
     expect(b).toBeTruthy();
     expect(b.ap.stream).toContain("(Building 3) Tj");
     for (const a of built.annots.filter((x) => x.family === "building")) expect(a.ap.stream).not.toMatch(/Parcel \d+ [\d.]+ AC/);
     const labels = built.annots.filter((a) => a.family === "parcel-label");
     expect(labels.length).toBeGreaterThan(0);
-    for (const l of labels) { expect(l.subj).toBe("Parcel label"); expect(l.contents).toMatch(/AC$/); }
+    for (const l of labels) { expect(l.subj).toBe("Parcel label"); expect(l.ap.stream).toMatch(/ AC\) Tj/); }
   });
   it("two roads joined into one paved network are ONE annotation (the joint moves with them)", () => {
     const net = r.descriptors.find((d) => d.family === "element" && (d.meta.roads || []).length > 1);

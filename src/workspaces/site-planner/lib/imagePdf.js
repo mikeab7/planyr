@@ -17,7 +17,7 @@
 // fixed: catalog -> pages -> page -> {image XObject, content stream} -> info. The image
 // is embedded with /DCTDecode, which stores the JPEG bytes verbatim (no re-encode).
 
-import { annotationDict, BASE_FONTS, DA_FONT_NAMES } from "./pdfAnnotations.js";
+import { annotationDict, viewportEntry, BASE_FONTS, DA_FONT_NAMES } from "./pdfAnnotations.js";
 
 const PT_PER_IN = 72; // PDF user-space unit = 1/72 inch
 
@@ -49,7 +49,7 @@ const pad10 = (n) => String(n).padStart(10, "0");
 // written as native, UNLOCKED PDF annotations on the page, each with an explicit appearance stream,
 // so Bluebeam / Acrobat can select, move, restyle and delete them. Empty/omitted → the file is
 // byte-for-byte what it always was.
-export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "", date = new Date(), annotations = [] } = {}) {
+export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "", date = new Date(), annotations = [], viewport = null } = {}) {
   if (!(jpeg instanceof Uint8Array) || jpeg.length === 0) throw new TypeError("jpeg must be a non-empty Uint8Array");
   if (!(pixelW > 0 && pixelH > 0)) throw new RangeError("pixelW/pixelH must be > 0");
   if (!(widthIn > 0 && heightIn > 0)) throw new RangeError("widthIn/heightIn must be > 0");
@@ -81,7 +81,7 @@ export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "",
     1: `<< /Type /Catalog /Pages 2 0 R${hasFreeText ? ` /AcroForm << /Fields [] /DA (/Helv 0 Tf 0 g) /DR << /Font << ${[...new Set(["F1", ...annots.filter((a) => a.subtype === "FreeText").map((a) => a.DA.font)])].map((k) => `/${DA_FONT_NAMES[k]} ${fontNum[k]} 0 R`).join(" ")} >> >> >>` : ""} >>`,
     2: `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
     3: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}]`
-      + ` /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R${annotsEntry} >>`,
+      + ` /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R${annotsEntry}${annots.some((a) => a.measure) ? viewportEntry(viewport) : ""} >>`,
     4: `<< /Type /XObject /Subtype /Image /Width ${pixelW} /Height ${pixelH}`
       + ` /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`,
     5: `<< /Length ${content.length} >>`,

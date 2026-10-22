@@ -79,6 +79,13 @@ def main(path):
         row["left_px"] = int((diff & old & ~new).sum())
         row["old_px"] = int((old & ~new).sum())
         row["ink_at_new"] = int((diff & new).sum())
+        # NEW-2 (2026-10-22): how much of the rebuilt shape's INTERIOR is heavy ink. A regenerated translucent fill that was
+        # painted opaque (what Bluebeam did to an area measurement) reads ~1.0; an outline + its label reads a few percent.
+        heavy = np.abs(img - page_only).max(axis=2) > 150
+        ix0, iy0 = int(nx0 + 0.25 * (nx1 - nx0)), int(ny0 + 0.25 * (ny1 - ny0))
+        ix1, iy1 = int(nx1 - 0.25 * (nx1 - nx0)), int(ny1 - 0.25 * (ny1 - ny0))
+        inner = heavy[max(0, iy0):max(1, iy1), max(0, ix0):max(1, ix1)]
+        row["solid_frac"] = float(inner.sum()) / max(1, inner.size)
         out["rows"].append(row)
     print(json.dumps(out))
 
