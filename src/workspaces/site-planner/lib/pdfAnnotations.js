@@ -582,7 +582,7 @@ function largestRing(ink) {
  * Returns { annots: [...], skipped: [{id, why}], degraded: [...] }.
  */
 export function buildAnnotations(descriptors, opts) {
-  const { M0, frame, patterns = {}, now = new Date().toISOString(), author = "Planyr", ftPerPt = null } = opts;
+  const { M0, frame, patterns = {}, now = new Date().toISOString(), author = null, ftPerPt = null } = opts;
   const annots = [], skipped = [], degraded = [];
   for (const d of descriptors) {
     const flat = flattenTree(d.tree, M0, patterns);
@@ -615,8 +615,8 @@ export function buildAnnotations(descriptors, opts) {
 
     if (d.family === "markup") {
       base.subj = base.subj || SUBJECT[d.kind] || "Markup";
-      const label = items.filter((i) => i.t === "text").map((i) => i.str).join(" ");
-      if (!base.contents && label) base.contents = label;
+      // /Contents is ONLY a comment the person typed (NEW-1, 2026-10-22): the drawn label already lives in /AP, and any
+      // /Contents makes Chrome's and Edge's viewer pop a note box on hover
       if (d.kind === "line" && main) {
         const v = pathVertices(main);
         annots.push({ ...base, subtype: "Line", L: [v[0][0], v[0][1], v[v.length - 1][0], v[v.length - 1][1]], LE: ["None", "None"] });
@@ -721,21 +721,39 @@ export function buildAnnotations(descriptors, opts) {
       const chipLines = (d.meta && d.meta.chipTexts) || [];
       void chip;
       base.subj = base.subj || MEASURE_SUBJECT[mode] || "Measurement";
-      base.contents = base.contents || chipLines.join("\n");
       /* NEW-2 (2026-10-20) — a NATIVE measurement: /IT names the measurement kind and /Measure carries the sheet's scale
          and Planyr's units (ISO 32000-1 §12.9 + the /IT values of §12.5.6.7/12.5.6.9), so a viewer that regenerates the
          appearance on a move or reshape (Bluebeam does) can compute and draw the value itself instead of losing it —
          the area label disappearing on a move was exactly that regeneration with nothing to compute from. */
       const measureDict = measureDictFor(mode, chipLines, ftPerPt);
-      if (mode === "area" && main) annots.push({ ...base, subtype: "Polygon", vertices: pathVertices(main).flat(), IT: measureDict ? "PolygonDimension" : null, measure: measureDict });
+      /* NEW-1 (2026-10-22) — /Contents is the viewer's NOTE (Chrome's and Edge's viewer pops a yellow box for any non-empty
+         one), so a measurement writes the person's own note only. The value is the drawn label in /AP and, for a viewer
+         that regenerates, /Measure. Only when there is no /Measure to compute it from (scale unknown) is the number kept
+         as the caption — the one case where /Contents is the only way to carry it. */
+      const keepValue = !measureDict && mode !== "count" && chipLines.length > 0;
+      if (keepValue) base.contents = chipLines.join("\n");
+      if (mode === "area" && main) {
+        /* NEW-2 (2026-10-22) — Bluebeam REGENERATES a measurement from its dictionary on a move and paints /IC as a SOLID
+           fill: it does not honour /CA as the fill's opacity there (Michael, Bluebeam, area measurement: translucent as
+           exported, an opaque block after the move). A dictionary that names a fill therefore cannot be trusted to stay
+           see-through, so a translucent measurement fill is written to the appearance only (what shows until the viewer
+           rebuilds) and the dictionary carries the outline: a rebuilt measurement is outline + value, never a block over
+           the plan. /CA is then the outline's opacity, not the fill's. Opaque fills (>= 0.95) are unaffected. */
+        if (measureDict && base.ic && base.ca < 0.95) {
+          base.ic = null;
+          base.ca = st.stroke ? st.strokeA : 1;
+          degraded.push(`measure ${d.id}: its translucent fill is in the appearance only (a viewer that rebuilds a measurement, like Bluebeam, paints a stored fill opaque) — after an edit there it keeps the outline and the value`);
+        }
+        annots.push({ ...base, subtype: "Polygon", vertices: pathVertices(main).flat(), IT: measureDict ? "PolygonDimension" : null, measure: measureDict });
+      }
       else if (mode === "count") { annots.push({ ...base, subtype: "Stamp" }); degraded.push(`measure ${d.id}: a count has no native subtype — written as a Stamp`); }
       else if (main) {
         const v = pathVertices(main);
-        // /Cap puts /Contents on the line as a caption, so the number survives a viewer rebuilding the appearance
+        // /Cap puts /Contents on the line as a caption — only when /Measure cannot supply the number (see keepValue)
         if (v.length === 2) {
           // The caption IS /Contents, set in WinAnsi Helvetica by the viewer (no ′ ″) — so write the AP's own stand-ins,
           // and fold a typed note in after the number rather than losing either.
-          const cap = chipLines.length > 0;
+          const cap = keepValue;
           const contents = cap ? winAnsi([chipLines.join(" "), meta.comment].filter(Boolean).join(" — ")).text : base.contents;
           annots.push({ ...base, contents, subtype: "Line", L: [v[0][0], v[0][1], v[1][0], v[1][1]], LE: ["None", "None"], cap, IT: measureDict ? "LineDimension" : null, measure: measureDict });
         } else annots.push({ ...base, subtype: "PolyLine", vertices: v.flat(), LE: ["None", "None"], IT: measureDict ? "PolyLineDimension" : null, measure: measureDict });
@@ -749,7 +767,18 @@ export function buildAnnotations(descriptors, opts) {
     a.ap = { bbox: a.rect, ...body, patternStreams: body.patterns.map((p) => ({ name: p.name, ...patternStream(p) })) };
     delete a.items;
   }
-  return { annots, skipped, degraded };
+  /* NEW-2 (2026-10-22) — the PAGE's scale. Bluebeam calibrates from a page-level viewport (ISO 32000-1 §12.9.2 /VP): without
+     one, moving or editing a measurement makes it ask the person to set a scale even though every annotation carries
+     /Measure. One viewport over the plan window, carrying the same /Measure the annotations do (feet; areas in sq ft). The
+     page writes it only when a measurement is on it and the sheet's scale is known. */
+  const viewport = ftPerPt > 0 && annots.some((a) => a.measure) ? { bbox: frame.slice(), measure: measureDictFor("area", [], ftPerPt) } : null;
+  return { annots, skipped, degraded, viewport };
+}
+
+/** The page's /VP array text for `viewport` ({bbox, measure}) — empty when there is none. */
+export function viewportEntry(viewport) {
+  if (!viewport || !viewport.measure) return "";
+  return ` /VP [<< /Type /Viewport /BBox ${arr(viewport.bbox)} /Name (Plan) /Measure ${measureDictString(viewport.measure)} >>]`;
 }
 
 function ellipseApprox(it, t) {
@@ -779,8 +808,12 @@ export const pdfTextString = textString;
  * /F 4 = Print only — never ReadOnly (64) or Locked (128): the recipient must be able to edit.
  */
 export function annotationDict(a, apRef) {
-  const f = [`/Type /Annot`, `/Subtype /${a.subtype}`, `/Rect ${arr(a.rect)}`, `/F 4`, `/NM ${textString(a.nm)}`,
-    `/T ${textString(a.title)}`, `/Contents ${textString(a.contents)}`];
+  const f = [`/Type /Annot`, `/Subtype /${a.subtype}`, `/Rect ${arr(a.rect)}`, `/F 4`, `/NM ${textString(a.nm)}`];
+  // NEW-1 (2026-10-22) — Chrome's and Edge's viewer (PDFium) raises its own yellow note box on hover for any annotation of
+  // a text-markup/shape type with a non-empty /Contents, titled by /T. A file's own /Popup annotations are ignored by it, so
+  // the only lever is to not write them: /Contents is the person's typed comment (or a callout's text), /T the author if known.
+  if (a.title) f.push(`/T ${textString(a.title)}`);
+  if (a.contents) f.push(`/Contents ${textString(a.contents)}`);
   if (a.subj) f.push(`/Subj ${textString(a.subj)}`);
   if (a.modified) f.push(`/M (${a.modified})`);
   if (a.created) f.push(`/CreationDate (${a.created})`);
