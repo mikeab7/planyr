@@ -212,7 +212,7 @@ export async function checkA(app, county, route, pt) {
   if (route.kind === "none") {
     // The honest gap: no candidate, and the exact sentence the click shows.
     out.note = counties.noParcelSourceNote(ident);
-    out.pass = !cands.length && /no parcel data wired here yet/i.test(out.note || "");
+    out.pass = !cands.length && /parcel map/i.test(out.note || "") // NEW-1 (2026-10-22) — the gap sentence says why now (parcelGaps.js);
     out.reason = out.pass ? "named gap — honest message" : `expected the named-gap message, got ${JSON.stringify(out.note)} with ${cands.length} candidate(s)`;
     out.gap = true;
     return out;

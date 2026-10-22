@@ -117,8 +117,8 @@ try {
         await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click({ timeout: 15000 });
         const p = await toContainer(c.lat, c.lng);
         await page.mouse.click(p.x, p.y);
-        const said = await waitFor(async () => /no parcel data wired here yet/i.test(await bodyText()), 20000);
-        await record({ name: `${c.name} — named gap`, pass: !!said, detail: said ? "shows 'Knox County — no parcel data wired here yet.'" : "the honest message is missing", county: c.name, check: "gap" });
+        const said = await waitFor(async () => /Knox County has a parcel map, but it isn't open to the public/i.test(await bodyText()), 20000);
+        await record({ name: `${c.name} — named gap`, pass: !!said, detail: said ? "shows 'Knox County has a parcel map, but it isn't open to the public…'" : "the honest message is missing", county: c.name, check: "gap" });
         continue;
       }
       const floor = c.source === "tn_shelby" || c.source === "tn_hamilton" || c.source === "tn_davidson" ? 17 : 16;

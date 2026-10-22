@@ -24,6 +24,16 @@
  *
  * Pure — no imports, no DOM. */
 
+/* NEW-1 (2026-10-22) — a county DISPLAY NAME → the letters-only slug every county-keyed table is built on ("Pike County" →
+ * "pike", "Ste. Genevieve" → "stegenevieve", "Orleans Parish" → "orleans"). ONE function: `countyKeyForName` (counties.js)
+ * and the parcel-gap table (site-planner/lib/parcelGaps.js) both call it, so a gap row can never be keyed differently from
+ * the wired county it would become. The designation words are the nationwide asset's ("County" | "Parish" | "Borough" |
+ * "Census Area" | "Municipality"); "city" / "and" / "of" fall away too so an independent city and "St. Louis" key alike. */
+const COUNTY_DESIGNATION_WORDS = /\b(county|parish|borough|census area|municipality)\b/g;
+export function countyNameSlug(name) {
+  return String(name == null ? "" : name).toLowerCase().replace(COUNTY_DESIGNATION_WORDS, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
+}
+
 /* Normalise a county routing key. Returns null for anything empty, so a caller can
  * distinguish "no county on this plan" from "a county we do not recognise". */
 export function normCountyKey(value) {

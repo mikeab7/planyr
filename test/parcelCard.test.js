@@ -195,6 +195,16 @@ describe("ParcelInfoCard — the no-source state (B1597232)", () => {
     expect(noSource()).toContain("Aerial");
   });
 
+  /* NEW-1 (2026-10-22) — the reason arrives in `note`; the way to ask for the county rides with it. */
+  it("carries the 'Email Michael to request it' mailto when the resolver supplied one — and none when it did not", () => {
+    const href = "mailto:michael@planyr.io?subject=Parcel%20data%20request%3A%20Pike%20County%2C%20KY&body=x";
+    const withLink = noSource({ request: href });
+    expect(withLink).toContain("parcel-card-gap-request");
+    expect(withLink).toContain("Email Michael to request it");
+    expect(withLink).toContain(`href="${href.replace(/&/g, "&amp;")}"`); // markup escapes the & between subject and body
+    expect(noSource()).not.toContain("parcel-card-gap-request");
+  });
+
   it("carries no primary action, like every other state of this card", () => {
     const html = noSource();
     expect(html).not.toContain("Plan this site");

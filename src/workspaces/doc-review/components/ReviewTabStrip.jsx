@@ -38,7 +38,7 @@ export default function ReviewTabStrip({ tabs, activeId, dirty = {}, narrow = fa
                 tabIndex={active ? 0 : -1} title={tabTitle(t, names)}
                 draggable={!narrow}
                 onDragStart={(e) => { setDragId(t.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); } catch (_) { /* some engines */ } }}
-                onDragOver={(e) => { if (dragId) { e.preventDefault(); if (overId !== t.id) setOverId(t.id); } }}
+                onDragOver={(e) => { if (dragId) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) { /* some engines */ } if (overId !== t.id) setOverId(t.id); } }}
                 onDrop={(e) => { if (!dragId) return; e.preventDefault(); e.stopPropagation(); onMove?.(dragId, t.id); setDragId(null); setOverId(null); }}
                 onDragEnd={() => { setDragId(null); setOverId(null); }}
                 onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }} // no browser autoscroll on a middle press

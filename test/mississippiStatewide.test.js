@@ -39,7 +39,7 @@ describe("Mississippi — every one of the 82 counties", () => {
     expect(id.name).toBe(c.name);
     if (NAMED_GAPS.has(c.name)) {
       expect(id.status).toBe("no-source");
-      expect(noParcelSourceNote(id)).toMatch(/no parcel data/);
+      expect(noParcelSourceNote(id)).toContain(c.name); // NEW-1 (2026-10-22) — says why, still names the county
       return;
     }
     expect(id.status, `${c.name} has no source`).toBe("ok");

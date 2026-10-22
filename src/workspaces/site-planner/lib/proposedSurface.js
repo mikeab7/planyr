@@ -855,7 +855,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
         const dz = gOk ? prop - g0 : null;
         const id = band ? `limit:${k}` : `infill:${k}`;
         const cell = band
-          ? { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: k }
+          ? { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: k, clampFt: Math.abs(prop - zo) }
           : { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, elId: id, cls: "infill", regionId: k };
         if (band) { wedgeSf += A; regionStats[k].slopeSf += A; } else { gradedSf += A; regionStats[k].areaSf += A; }
         noteOut(pt, A, dz, id, cell);

@@ -115,7 +115,7 @@ describe("the counties with no usable public source say so by name — and never
     expect(id.name).toBe(`${name} County`);
     expect(id.status).toBe("no-source");
     expect(id.statewideKey, "must not borrow a layer that holds none of it").toBeUndefined();
-    expect(noParcelSourceNote(id)).toMatch(new RegExp(`${name} County — no parcel data wired here yet`));
+    expect(noParcelSourceNote(id)).toContain(`${name} County`); // NEW-1 (2026-10-22) — names the county and says why (Knox: locked)
     expect(candidateCountiesForPoint(lat, lng)).not.toContain("tn_statewide");
   });
   it("every one of the nine is either wired to its own source or a named gap — none is left on the composite", () => {

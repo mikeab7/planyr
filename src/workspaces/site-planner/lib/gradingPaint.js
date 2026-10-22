@@ -154,12 +154,17 @@ export function maskHatchPixels(info, rgb, { bandFt = HATCH_BAND_FT, alpha = HAT
 
 /* ---- Cut & Fill cells ---- */
 /* How one surface cell paints → { rgb, a } or null (on grade). Pure. */
+/* ROUND 7 (NEW-2): the band is a TINT, never heavier than the contour family drawn inside it — at most a quarter
+ * opacity at full depth, a little lighter where the slope is shallow, so the side still reads (rust cut / blue fill)
+ * and the lines inside the band stay the dominant mark at every zoom. Outside the setback stays a stronger red: it is
+ * a genuine alert, not shading. */
+export const BAND_TINT = Object.freeze({ min: 0.12, max: 0.25, fullDepthFt: 10, out: 0.45, void: 0.15 });
 export function cellPaint(c) {
-  if (c.out) return { rgb: OUT_RGB, a: 0.9, kind: "out" };
-  if (c.dzFt == null) return { rgb: VOID_RGB, a: 0.25, kind: "void" };
+  if (c.out) return { rgb: OUT_RGB, a: BAND_TINT.out, kind: "out" };
+  if (c.dzFt == null) return { rgb: VOID_RGB, a: BAND_TINT.void, kind: "void" };
   const d = Math.abs(c.dzFt);
   if (d < EDGE_EPS_FT) return null;
-  const a = 0.35 + 0.5 * Math.min(1, d / 10);
+  const a = BAND_TINT.min + (BAND_TINT.max - BAND_TINT.min) * Math.min(1, d / BAND_TINT.fullDepthFt);
   return c.dzFt > 0 ? { rgb: FILL_RGB, a, kind: "fill" } : { rgb: CUT_RGB, a, kind: "cut" };
 }
 
@@ -178,7 +183,7 @@ export function cellsLattice(cells) {
 }
 /* `paintOnly(c)` (optional) limits which cells get INK; every cell still marks `present`, so the daylight line is
  * the outer edge of the whole graded set while only the cells the caller names are tinted. */
-export function cellsPixels(cells, paintOnly = null) {
+export function cellsPixels(cells, paintOnly = null, { dilate = 0 } = {}) {
   const L = cellsLattice(cells);
   if (!L) return null;
   const px = new Uint8ClampedArray(L.nx * L.ny * 4);
@@ -192,8 +197,93 @@ export function cellsPixels(cells, paintOnly = null) {
     if (!p) continue;
     px[k * 4] = p.rgb[0]; px[k * 4 + 1] = p.rgb[1]; px[k * 4 + 2] = p.rgb[2]; px[k * 4 + 3] = Math.round(p.a * 255);
   }
+  for (let pass = 0; pass < dilate; pass++) dilatePixels(px, L.nx, L.ny);
   return { pixels: px, present, nx: L.nx, ny: L.ny, x0: L.x0, y0: L.y0, dx: L.dx, dy: L.dy };
 }
+/* ROUND 7 (NEW-1): one ring of empty pixels takes its painted neighbour's colour, so a tint scaled smoothly and CLIPPED to
+ * the traced band outline reaches the outline everywhere (the outline runs up to a cell past the last painted cell). */
+function dilatePixels(px, nx, ny) {
+  const src = px.slice();
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = (j * nx + i) * 4;
+    if (src[k + 3]) continue;
+    let best = -1, bestA = 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
+      const q = (jj * nx + ii) * 4;
+      if (src[q + 3] > bestA) { bestA = src[q + 3]; best = q; }
+    }
+    if (best >= 0) { px[k] = src[best]; px[k + 1] = src[best + 1]; px[k + 2] = src[best + 2]; px[k + 3] = src[best + 3]; }
+  }
+}
+
+/* ROUND 7 (NEW-1) — THE BAND FIELD: one value per earthwork lattice cell whose 0 iso, traced with interpolation, is the
+ * slope band's outer outline (layout mode: the daylight line, where the thrown slope meets existing ground) or its inner
+ * one (boundary mode: the toe / top of the slope thrown in from the setback, where it meets the open ground).
+ *   band cell  → its depth: |cut or fill| (layout) or how far the slope bent the open ground, `clampFt` (boundary)
+ *   core cell  → +BAND_CORE_FT: the side the band is never traced across — inside the limit (layout) / outside it (boundary)
+ *   far cell   → the depth of its deepest band neighbour carried one cell on at the grading slope (≤ −BAND_CORE_FT), so the
+ *                interpolated crossing lands where that slope reaches zero — the true daylight, not a cell edge; a far cell
+ *                with no band neighbour is −(one cell at the grading slope)
+ * The tracer's polygon is then cut against the limit itself (gradingLimit.bandRegions), so the line the limit shares with
+ * the band is the limit's own exact ring. Pure. Returns { values, nx, ny, x0, y0, dx, dy, mode } or null. */
+export const BAND_CORE_FT = 0.05;
+export function bandField(grid, { pointInRegions = null } = {}) {
+  if (!grid || !Array.isArray(grid.cells) || !grid.cells.length) return null;
+  const L = cellsLattice(grid.cells);
+  if (!L) return null;
+  const mode = grid.limit && grid.limit.mode === "boundary" ? "boundary" : "layout";
+  const regions = grid.limit ? (mode === "boundary" ? grid.limit.limitRegions : grid.limit.regions) || [] : [];
+  const ratio = grid.apronRatio > 0 ? grid.apronRatio : 2;
+  const step = L.dx / ratio;
+  // a margin of one empty cell all round, so every traced ring closes inside the lattice
+  const nx = L.nx + 2, ny = L.ny + 2, x0 = L.x0 - L.dx, y0 = L.y0 - L.dy;
+  const kind = new Int8Array(nx * ny);          // 0 absent · 1 band · 2 core · 3 far (graded but not band)
+  const depth = new Float32Array(nx * ny);
+  for (const c of grid.cells) {
+    const { i, j } = L.at(c);
+    const k = (j + 1) * nx + (i + 1);
+    if (c.wedge) {
+      kind[k] = 1;
+      const d = mode === "boundary" ? (Number.isFinite(c.clampFt) ? c.clampFt : Math.abs(c.dzFt || 0)) : Math.abs(c.dzFt == null ? 1 : c.dzFt);
+      depth[k] = Math.max(BAND_CORE_FT * 2, d);
+    } else kind[k] = mode === "boundary" ? 3 : 2;
+  }
+  // absent cells: inside the limit regions is the core side in layout mode (a pond hole), outside them the core side in
+  // boundary mode (the setback's own margin, a pond / buffer hole); the rest of layout mode's absent cells are past the daylight
+  const inRegions = typeof pointInRegions === "function" ? pointInRegions : () => false;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i;
+    if (kind[k]) continue;
+    const pt = { x: x0 + (i + 0.5) * L.dx, y: y0 + (j + 0.5) * L.dy };
+    const inside = regions.length ? inRegions(pt, regions) : false;
+    kind[k] = mode === "boundary" ? (inside ? 3 : 2) : (inside ? 2 : 3);
+  }
+  const values = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i;
+    if (kind[k] === 1) { values[k] = depth[k]; continue; }
+    if (kind[k] === 2) { values[k] = BAND_CORE_FT; continue; }
+    let v = -step;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
+      const q = jj * nx + ii;
+      if (kind[q] !== 1) continue;
+      const e = depth[q] - step * Math.hypot(di, dj);
+      if (e > v) v = e;
+    }
+    values[k] = Math.min(-BAND_CORE_FT, v);
+  }
+  return { values, nx, ny, x0, y0, dx: L.dx, dy: L.dy, mode };
+}
+/* The worker's lattice-pixel band rings → feet (the value at index i sits at x0 + (i + 0.5)·dx, the contours' mapping). */
+export const bandRingsToFeet = (res, F) => ({
+  rings: (res.rings || []).map((r) => r.map((p) => ({ x: F.x0 + p[0] * F.dx, y: F.y0 + p[1] * F.dy }))),
+  holes: (res.holes || []).map((r) => r.map((p) => ({ x: F.x0 + p[0] * F.dx, y: F.y0 + p[1] * F.dy }))),
+});
 /* The daylight line: the OUTER edge of the graded footprint+slope set (cells present), traced on the lattice. */
 export const cellsOutlinePath = (cp) => traceEdges((i, j) => !!cp.present[j * cp.nx + i], cp.nx, cp.ny, cp.x0, cp.y0, cp.dx, cp.dy);
 

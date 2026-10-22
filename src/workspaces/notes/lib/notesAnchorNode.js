@@ -48,6 +48,10 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
 import { moveSelection } from "./notesMarquee.js";
 import { cascadeRemoveArrows } from "./notesArrows.js";
+/* The ONE shared drag-cursor pin (owner convention 2026-10-20). A drag keeps ITS cursor for the whole
+ * gesture even once the pointer has left the box — pointer capture keeps the events coming, but what the
+ * browser PAINTS is decided by whatever element is under the pointer (or the capture target's own rule). */
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 import {
   ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
   HANDLES, HANDLE_CURSOR, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, handlesFor, hasFixedHeight,
@@ -691,7 +695,7 @@ export const NoteAnchor = Node.create({
         line.setAttribute("stroke-dasharray", "5 4");
         svg.appendChild(line);
         document.body.appendChild(svg);
-        connecting = { svg, line };
+        connecting = { svg, line, release: pinDragCursor("crosshair") };
         try { connectDot.setPointerCapture(e.pointerId); } catch (_) { /* not capturable */ }
       });
       connectDot.addEventListener("pointermove", (e) => {
@@ -704,8 +708,9 @@ export const NoteAnchor = Node.create({
       });
       const endConnectDrag = (e) => {
         if (!connecting) return;
-        const { svg } = connecting;
+        const { svg, release } = connecting;
         connecting = null;
+        release();
         try { connectDot.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         svg.remove();
         clearArrowTarget();
@@ -819,6 +824,7 @@ export const NoteAnchor = Node.create({
           moved: false,
         };
         try { e.target.setPointerCapture(e.pointerId); } catch (_) { /* not capturable */ }
+        sizing.release = pinDragCursor(HANDLE_CURSOR[name]);   // the handle's own directional cursor, for the whole drag
       }
 
       function moveSize(e) {
@@ -862,6 +868,7 @@ export const NoteAnchor = Node.create({
         if (!sizing) return;
         const done = sizing;              // the gesture's record, kept past the reset below
         sizing = null;
+        done.release?.();
         try { e.target.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         const pos = typeof getPos === "function" ? getPos() : null;
         /* ⛔ A PRESS THAT NEVER MOVED IS A PRESS ON THE BOX, NOT A RESIZE (B539652) — and this is
@@ -1013,7 +1020,12 @@ export const NoteAnchor = Node.create({
          * select/enter handler, which is the whole reason this drag is deferred rather than
          * `preventDefault`ed. */
         try { dom.setPointerCapture(e.pointerId); } catch (_) { /* already captured */ }
-        if (immediate) from.moved = true;
+        /* ⛔ THE CURSOR OF A DRAG IS PINNED FOR THE WHOLE GESTURE (convention 2026-10-20). Measured: with
+         * the pointer captured on the box, a drag of a box whose caret is inside it painted the box's own
+         * TEXT cursor under the pointer, and leaving the box handed the cursor to whatever the pointer
+         * crossed (the mat's open hand). The grip is a pick-up grip → grabbing; the body (and a group)
+         * moves the object → move. The body's pin waits for the threshold, so a plain click pins nothing. */
+        if (immediate) { from.moved = true; from.release = pinDragCursor("grabbing"); }
       };
       dom.addEventListener("pointerdown", (e) => beginDrag(e, { immediate: false }));
       grip.addEventListener("pointerdown", (e) => beginDrag(e, { immediate: true }));
@@ -1028,6 +1040,7 @@ export const NoteAnchor = Node.create({
         }
         e.preventDefault();
         from.moved = true;
+        if (!from.release) from.release = pinDragCursor("move");
         const host = editor.view.dom;
         const hostRect = host.getBoundingClientRect();       // read FRESH: the page may scroll
         /* ⛔ A MOVE NEVER TOUCHES THE WIDTH (NEW-DRAG-NARROWS) — and this line used to be
@@ -1073,6 +1086,7 @@ export const NoteAnchor = Node.create({
         const dragged = from.moved;
         const at = from.at;               // kept past the reset below
         const moves = from.moves;         // …and the group's, when this was a group drag
+        from.release?.();
         from = null;
         try { dom.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         /* ⛔ A PRESS THAT NEVER MOVED WRITES NOTHING AT ALL — not a transaction, not an undo

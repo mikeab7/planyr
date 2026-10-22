@@ -64,8 +64,9 @@ function cleanPaths(rings) {
   }
   return out;
 }
-function execute(subject, clip, type) {
+function execute(subject, clip, type, strict = false) {
   const c = new ClipperLib.Clipper();
+  if (strict) c.StrictlySimple = true;
   if (subject.length) c.AddPaths(subject, ClipperLib.PolyType.ptSubject, true);
   if (clip && clip.length) c.AddPaths(clip, ClipperLib.PolyType.ptClip, true);
   const tree = new ClipperLib.PolyTree();
@@ -154,6 +155,49 @@ export function fillNarrowHoles(regions, aisleFt) {
       return inset.some((q) => q.length >= 3 && Math.abs(ClipperLib.Clipper.Area(q)) / (SCALE * SCALE) >= MIN_REGION_SF);
     }),
   }));
+}
+/* ROUND 7 (NEW-1) — the slope band as SHAPES, from the traced band outline (feet rings + holes, gradingPaint.bandField →
+ * contourTrace.traceBandOutline) and the limit:
+ *   layout   — the traced region is the limit + the band, so band = traced − limit, and the DAYLIGHT line = the outline
+ *              of traced ∪ limit (where the band is zero-width the daylight runs along the limit itself);
+ *   boundary — the traced region is the band + the ground outside the limit, so band = traced ∩ limit, the daylight line
+ *              is the limit's own rings (B2376240: it IS the setback), and the INNER edge (toe / top of slope) is the
+ *              outline of the open ground the band encloses = limit − traced.
+ * Returns { band: regions, daylight: [ring], inner: [ring] }. */
+export function bandRegions({ traced, limitRegions = [], mode = "layout" } = {}) {
+  const outerRings = (traced && traced.rings) || [], holeRings = (traced && traced.holes) || [];
+  if (!outerRings.length) return { band: [], daylight: [], inner: [] };
+  const ringsOf = (regions) => regions.flatMap((r) => [r.outer, ...r.holes]);
+  const tracedRegions = subtractRings(unionRings(outerRings), holeRings);
+  if (mode === "boundary") {
+    const limitArea = subtractRings(unionRings(limitRegions.map((r) => r.outer)), limitRegions.flatMap((r) => r.holes));
+    const band = openRegions(intersectRegions(tracedRegions, limitArea));
+    const openGround = openRegions(subtractRingsRegions(limitArea, band));
+    return { band, daylight: ringsOf(limitRegions), inner: ringsOf(openGround) };
+  }
+  const band = openRegions(subtractRingsRegions(tracedRegions, limitRegions));
+  const graded = unionRegions(tracedRegions, limitRegions);
+  return { band, daylight: ringsOf(graded), inner: [] };
+}
+/* A morphological OPENING by `d` feet (in, then back out): drops the hair-thin slivers and pinched spikes a difference of two
+ * nearly coincident outlines leaves behind, so every band / open-ground ring is a simple ring the eye reads as one shape. */
+export function openRegions(regions, d = 0.5) {
+  if (!regions.length) return regions;
+  return treeToRegions(execute(offsetPaths(offsetPaths(regionsToPaths(regions), -d, "miter"), d, "miter"), [], ClipperLib.ClipType.ctUnion, true));
+}
+/* regions ∩ regions, regions ∪ regions (holes respected on both sides). */
+export function intersectRegions(a, b) {
+  if (!a.length || !b.length) return [];
+  return treeToRegions(execute(regionsToPaths(a), regionsToPaths(b), ClipperLib.ClipType.ctIntersection, true));
+}
+export function unionRegions(a, b) {
+  if (!a.length) return b; if (!b.length) return a;
+  return treeToRegions(execute(regionsToPaths(a), regionsToPaths(b), ClipperLib.ClipType.ctUnion, true));
+}
+/* regions − regions (holes respected on both sides). */
+export function subtractRingsRegions(regions, cutRegions) {
+  if (!regions.length || !cutRegions.length) return regions;
+  return treeToRegions(execute(regionsToPaths(regions), regionsToPaths(cutRegions), ClipperLib.ClipType.ctDifference, true));
 }
 export const regionsAreaSf = (regions) => regions.reduce((a, r) => a + ringAreaSf(r.outer) - r.holes.reduce((b, h) => b + ringAreaSf(h), 0), 0);
 export function pointInRegions(pt, regions) {

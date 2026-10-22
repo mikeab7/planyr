@@ -139,7 +139,7 @@ function ringsAcres(g, sr) {
 }
 const lotFromWire = (since) => { const w = wire.filter((x) => x.t >= since && x.n > 0).pop(); return w ? { id: idOf(w.attrs), owner: ownerOf(w.attrs), acres: ringsAcres(w.geom, w.sr), layer: w.base.replace(/^https?:\/\/[^/]+/, "").replace(/\/query$/, "").slice(-90) } : null; };
 const GENERIC = /No parcel right there/i;
-const gapRe = (county) => new RegExp(`${county.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]{0,8}no parcel data wired here yet`, "i");
+const gapRe = (county) => { const c = county.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); return new RegExp(`(parcel map[^\\n]{0,40}${c}|${c}[^\\n]{0,60}(parcel map|paid subscription))`, "i"); }; // NEW-1 (2026-10-22) — a gap now says WHY (lib/parcelGaps.js) and still names the county
 
 const rows = [];
 const record = (r) => { rows.push(r); const ok = r.pass ? "PASS" : "FAIL"; console.log(`  [${ok}] ${r.flow} · ${r.name} · ${r.outcome}${r.lot ? ` · id ${JSON.stringify(r.lot.id)} · owner ${JSON.stringify(r.lot.owner)} · ${r.lot.acres != null ? r.lot.acres.toFixed(2) + " ac" : "ac ?"}` : ""}${r.message ? ` · "${r.message}"` : ""} · build ${r.build}`); };

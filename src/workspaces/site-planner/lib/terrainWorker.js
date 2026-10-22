@@ -28,7 +28,7 @@ import { decodeGrid } from "./lercGrid.js";
 // The marching-squares tracer is worker-only and is the only `d3-contour` consumer, so
 // it lives in its own module (B1095) — same reasoning as lercGrid.js above. Static here:
 // the worker is its own bundle, so it costs the page nothing.
-import { buildContours, buildProposedContours } from "./contourTrace.js";
+import { buildContours, buildProposedContours, traceBandOutline } from "./contourTrace.js";
 import { flowArrows } from "./flowField.js";
 // NEW-1 (owner-only grading layer): the buildable-ground sweep rides this same worker. Both modules
 // are pure (no DOM, no Leaflet) — buildableLattice resamples the site DEM onto the 10-ft feet lattice
@@ -98,6 +98,12 @@ self.onmessage = (e) => {
   const { id, req, buffer, opts = {} } = e.data || {};
   if (e.data && e.data.kind === "buildable") {
     try { buildableJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+    return;
+  }
+  if (e.data && e.data.kind === "band-outline") {
+    // ROUND 7 (NEW-1) — the slope band's outline, traced and smoothed like the contours (contourTrace.traceBandOutline)
+    try { const r = traceBandOutline(e.data.values, e.data.nx, e.data.ny); self.postMessage({ id, ok: true, rings: r.rings, holes: r.holes }); }
+    catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
     return;
   }
   if (e.data && e.data.kind === "contours-proposed") {

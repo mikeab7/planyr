@@ -135,6 +135,19 @@ export function longestCellEdgeRun(line, { x0 = 0, y0 = 0, dx = 1, dy = 1, eps =
   return best;
 }
 
+/* The longest run of CONSECUTIVE vertices sitting on a cell CORNER (on an x grid line AND a y grid line). A cell-edge
+   outline is nothing but such vertices — a staircase — while a traced, interpolated, smoothed line almost never lands
+   on one. Stricter than `longestCellEdgeRun` (which resets at every corner, so a pure staircase reads 1). */
+export function longestCornerRun(line, { x0 = 0, y0 = 0, dx = 1, dy = 1, eps = 1e-6 } = {}) {
+  let run = 0, best = 0;
+  for (const [x, y] of line) {
+    const fx = Math.abs(((x - x0) / dx) % 1), fy = Math.abs(((y - y0) / dy) % 1);
+    run = Math.min(fx, 1 - fx) < eps && Math.min(fy, 1 - fy) < eps ? run + 1 : 0;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
 /* Does the polyline cross itself? O(n²) on the segment pairs — contour lines are short. */
 export function selfIntersects(line) {
   const n = line.length;

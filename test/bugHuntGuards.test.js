@@ -674,7 +674,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   it("B579: the Stitcher detail popup releases pointer capture on pointercancel (no stuck grab)", () => {
     const src = read("../src/workspaces/doc-review/Stitcher.jsx");
     // onPointerCancel must release capture, matching onPointerUp — not just clear drag state
-    expect(src).toMatch(/onPointerCancel=\{\(e\) => \{ detailDrag\.current = null; try \{ e\.currentTarget\.releasePointerCapture\(e\.pointerId\)/);
+    expect(src).toMatch(/onPointerCancel=\{\(e\) => \{ detailDrag\.current = null; (?:setDetailDragging\(false\); )?try \{ e\.currentTarget\.releasePointerCapture\(e\.pointerId\)/);
   });
 
   it("B579: reviewStore deleteReview clears the local mirror only after a successful cloud delete", () => {
@@ -931,10 +931,10 @@ describe("B1597232 — MapFinder never explains an empty candidate list without 
     expect((src.match(/if \(!candidates\.length\)/g) || []).length).toBe(2);
   });
 
-  it.each([0, 1])("branch %i asks countyIdentity/noParcelSourceNote before it chooses its wording", (i) => {
+  it.each([0, 1])("branch %i asks countyIdentity/parcelGapNotice before it chooses its wording", (i) => {
     const starts = [...src.matchAll(/if \(!candidates\.length\)/g)].map((m) => m.index);
     const block = src.slice(starts[i], starts[i] + 600);
-    expect(block).toMatch(/noParcelSourceNote\(countyIdentity\(/);
+    expect(block).toMatch(/parcelGapNotice\(countyIdentity\(/);
   });
 
   it("the address-search branch has its own card state — it never reports a coverage gap as an outage", () => {

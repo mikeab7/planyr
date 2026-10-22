@@ -121,7 +121,7 @@ async function settle(maxMs = 45000) {
   return false;
 }
 const held = () => page.evaluate(() => (window.__mapSelectedParcels ? window.__mapSelectedParcels() : [])).catch(() => []);
-const NOLOT = /No parcel right there|no parcel data wired here yet/i;
+const NOLOT = /No parcel right there|parcel map, but it isn't open|paid subscription|hasn't found a public parcel map|isn't reachable from Planyr/i; // NEW-1 (2026-10-22) — a county gap says why now
 const OUTAGE = /isn't responding|Couldn't reach|still loading/i;
 
 async function resolvePoint(pt) {

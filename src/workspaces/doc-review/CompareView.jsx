@@ -67,6 +67,7 @@ export default function CompareView({ a, b, onClose }) {
   const canvasRef = useRef(null);
   const washRef = useRef(null);   // offscreen wash canvas
   const panRef = useRef(null);    // { x, y, tx, ty } during a drag
+  const [panning, setPanning] = useState(false); // NEW-4: the grabbing cursor is STATE — a ref read at render showed it late and left it stuck after release
   const runTok = useRef(0);       // supersede a stale compare (page change / unmount)
 
   // --- load both PDFs once ---
@@ -154,12 +155,14 @@ export default function CompareView({ a, b, onClose }) {
     if (e.button !== 0) return;
     const v = view; if (!v) return;
     panRef.current = { x: e.clientX, y: e.clientY, tx: v.tx, ty: v.ty };
+    setPanning(true);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} // the drag (and its cursor) outlives the canvas edge
   }, [view]);
   const onMove = useCallback((e) => {
     const p = panRef.current; if (!p) return;
     setView((v) => (v ? { ...v, tx: p.tx + (e.clientX - p.x), ty: p.ty + (e.clientY - p.y) } : v));
   }, []);
-  const endPan = useCallback(() => { panRef.current = null; }, []);
+  const endPan = useCallback(() => { panRef.current = null; setPanning(false); }, []);
 
   // --- click a change in the list → centre the view on it ---
   const jumpTo = useCallback((idx) => {
@@ -177,9 +180,9 @@ export default function CompareView({ a, b, onClose }) {
   const pageStepper = (side, num) => (
     num > 1 ? (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <button data-cmp={`page-${side}-prev`} disabled={pages[side] <= 1} onClick={() => setPages((p) => ({ ...p, [side]: Math.max(1, p[side] - 1) }))} style={stepBtn}>‹</button>
+        <button data-cmp={`page-${side}-prev`} disabled={pages[side] <= 1} onClick={() => setPages((p) => ({ ...p, [side]: Math.max(1, p[side] - 1) }))} style={stepBtn(pages[side] <= 1)}>‹</button>
         <span style={{ fontSize: 12, color: "var(--muted)" }}>p{pages[side]}/{num}</span>
-        <button data-cmp={`page-${side}-next`} disabled={pages[side] >= num} onClick={() => setPages((p) => ({ ...p, [side]: Math.min(num, p[side] + 1) }))} style={stepBtn}>›</button>
+        <button data-cmp={`page-${side}-next`} disabled={pages[side] >= num} onClick={() => setPages((p) => ({ ...p, [side]: Math.min(num, p[side] + 1) }))} style={stepBtn(pages[side] >= num)}>›</button>
       </span>
     ) : null
   );
@@ -214,8 +217,8 @@ export default function CompareView({ a, b, onClose }) {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
         <div ref={wrapRef} style={canvasWrap}
-          onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={endPan} onPointerLeave={endPan}>
-          <canvas ref={canvasRef} style={{ display: "block", cursor: panRef.current ? "grabbing" : "grab" }} />
+          onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={endPan} onPointerCancel={endPan} onLostPointerCapture={endPan}>
+          <canvas ref={canvasRef} style={{ display: "block", cursor: panning ? "grabbing" : "grab" }} />
           {status === "loading" ? <div style={busyOv} data-cmp="busy">Comparing revisions…</div> : null}
           {status === "error" ? <div style={errOv} data-cmp="error">{errMsg}</div> : null}
         </div>
@@ -257,6 +260,6 @@ const canvasWrap = { position: "relative", flex: 1, minWidth: 0, overflow: "hidd
 const listPane = { width: 240, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", background: "var(--surface-raised)" };
 const listItem = { display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", borderBottom: "1px solid var(--border-default)", cursor: "pointer", font: "inherit", fontSize: 12, color: "var(--ink)" };
 const closeBtn = { border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 };
-const stepBtn = { border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 4, width: 20, height: 20, cursor: "pointer", lineHeight: 1, padding: 0 };
-const busyOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--hover-ghost)", fontSize: 13, color: "var(--muted)" };
+const stepBtn = (disabled) => ({ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 4, width: 20, height: 20, lineHeight: 1, padding: 0, cursor: disabled ? "default" : "pointer" }); // disabled at either end of the pages → the arrow
+const busyOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--hover-ghost)", fontSize: 13, color: "var(--muted)", cursor: "progress" };
 const errOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", fontSize: 13, color: "var(--warn-text)" };
