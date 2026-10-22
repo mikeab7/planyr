@@ -19,6 +19,8 @@ import { LockGlyph as SharedLockGlyph } from "../../../shared/ui/LockToggle.jsx"
 import { isDiagArmed } from "../lib/diagArm.js";
 import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { measureListOverflow } from "../lib/parcelListOverflow.js";
+import ParcelContextMenu from "./ParcelContextMenu.jsx";
+import { isRenameable } from "../lib/parcelMenu.js";
 
 export const LINE = "1px solid var(--border-default)";
 export const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -120,42 +122,29 @@ export function rowText(row) {
   return { label: row.name, sub, muted: false };
 }
 
-/* The row's ⋯ menu (B2194741): Zoom to · Lock/Unlock · Delete. Delete is a TWO-STEP inline confirm (the same
- * arm-then-confirm shape the plan list uses) and the delete itself shows an Undo toast. Fixed-position so a scrolling
- * panel can never clip it; flips upward near the bottom edge. Module scope (MODULE-SCOPE-COMPONENTS). */
-function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm, renameable }) {
+/* The row's ⋯ menu — and a right-click anywhere on the row — open the ONE parcel menu (lib/parcelMenu.js, drawn by
+ * ParcelContextMenu.jsx; the map's right-click on a parcel opens the very same one). "Delete parcel" deletes at once and an Undo
+ * toast is the safety net: there is no arm-then-confirm step (NEW-1, 2026-10-22). The ⋯ is always visible, in its own seat like
+ * the padlock and the eye. Module scope (MODULE-SCOPE-COMPONENTS). */
+function RowMenu({ row, handlers, at, onOpenAt, onClose, renameable }) {
   const btnRef = useRef(null);
-  const [pos, setPos] = useState(null);
-  useEffect(() => {
-    if (!open) { setPos(null); return undefined; }
-    const r = btnRef.current && btnRef.current.getBoundingClientRect();
-    if (r) { const H = armed ? 96 : renameable ? 160 : 128, up = r.bottom + H > window.innerHeight - 8; setPos({ left: Math.max(8, r.right - 168), top: up ? Math.max(8, r.top - H) : r.bottom + 2 }); }
-    const off = (e) => { if (e.type === "keydown" ? e.key === "Escape" : !(e.target.closest && e.target.closest("[data-row-menu]"))) onClose(); };
-    document.addEventListener("pointerdown", off); document.addEventListener("keydown", off);
-    return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", off); };
-  }, [open, armed]); // eslint-disable-line react-hooks/exhaustive-deps
-  const item = (label, onClick, testid, danger) => (
-    <button type="button" role="menuitem" onClick={onClick} data-testid={testid}
-      style={{ display: "block", width: "100%", textAlign: "left", padding: `${SPACE.sm}px ${SPACE.lg}px`, border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, color: danger ? "var(--danger-text)" : "var(--text-primary)", cursor: "pointer" }}>{label}</button>
-  );
+  const open = !!at;
+  const pick = (id) => {
+    onClose();
+    const pid = row.id;
+    if (id === "properties" || id === "rename") handlers.onOpenPage(pid);
+    else if (id === "zoom") handlers.onZoom(pid);
+    else if (id === "lock") handlers.onToggleLock(pid);
+    else if (id === "chip") handlers.onToggleChip(pid);
+    else if (id === "chipReset") handlers.onResetChip(pid);
+    else if (id === "uncombine") handlers.onRestoreCombined(pid);
+    else if (id === "delete") handlers.onDelete(pid, "row:menu");
+  };
   return (
     <div data-row-menu="1" style={{ flex: "none" }}>
-      <button ref={btnRef} type="button" className={`land-row-hover${open ? " is-open" : ""}`} style={{ ...iconBtn, width: ICON, height: ICON }} aria-haspopup="menu" aria-expanded={open} aria-label={`More actions for ${row.name}`} title="More" data-testid={`parcel-row-more-${row.id}`} onClick={() => (open ? onClose() : onOpen())}><MoreIcon /></button>
-      {open && pos && (
-        <div role="menu" data-testid={`parcel-row-menu-${row.id}`} style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 50, width: 168, padding: SPACE.xs, border: LINE, borderRadius: RADIUS.md, background: "var(--surface-raised)", boxShadow: "var(--shadow-popover, 0 4px 14px var(--border-strong))" }}>
-          {!armed && <>
-            {renameable && item("Rename", () => { onClose(); handlers.onOpenPage(row.id); }, `parcel-row-pencil-${row.id}`)}
-            {item("Zoom to", () => { onClose(); handlers.onZoom(row.id); }, `parcel-row-menu-zoom-${row.id}`)}
-            {item(row.locked ? "Unlock" : "Lock", () => { onClose(); handlers.onToggleLock(row.id); }, `parcel-row-menu-lock-${row.id}`)}
-            {item("Delete…", onArm, `parcel-row-menu-delete-${row.id}`, true)}
-          </>}
-          {armed && <div data-testid={`parcel-row-delete-confirm-${row.id}`}>
-            <div style={{ padding: `${SPACE.sm}px ${SPACE.lg}px`, fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflowWrap: "anywhere" }}>Delete {row.name}?</div>
-            {item("Delete", () => { onClose(); handlers.onDelete(row.id); }, `parcel-row-delete-yes-${row.id}`, true)}
-            {item("Cancel", onClose, `parcel-row-delete-no-${row.id}`)}
-          </div>}
-        </div>
-      )}
+      <button ref={btnRef} type="button" style={{ ...iconBtn, width: ICON, height: ICON }} aria-haspopup="menu" aria-expanded={open} aria-label={`More actions for ${row.name}`} title="More" data-testid={`parcel-row-more-${row.id}`}
+        onClick={() => { if (open) { onClose(); return; } const r = btnRef.current && btnRef.current.getBoundingClientRect(); onOpenAt(r ? { x: r.right, y: r.bottom } : { x: 0, y: 0 }); }}><MoreIcon /></button>
+      {open && <ParcelContextMenu x={at.x} y={at.y} pc={row.pc} renameable={renameable} mergeCount={0} onPick={pick} onClose={onClose} testId={`parcel-row-menu-${row.id}`} zIndex={1998} />}
     </div>
   );
 }
@@ -166,17 +155,18 @@ const keepDigits = (text) => String(text).split(/(\d{6,})/).map((t, i) => (i % 2
 /* One row: checkbox (combine only) · name (+ source line, wraps, never cut) · acres · overlap / padlock / eye / ⋯ (all in the right-hand slot). The name
  * block opens the parcel page and uses the FULL name-block width (rename, constraint #18, is a ⋯ menu item — never an icon in the name flow).
  * The padlock (closed = locked, open = not) and the eye (open = counted, struck = left out) are ALWAYS shown, each a button with an Undo
- * toast; ⋯ shows on row hover / keyboard focus (always on touch screens). */
+ * toast; ⋯ is always shown too, and a right-click anywhere on the row opens the same menu. */
 function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, slotW, overlapNames, seatOverlap }) {
   const dim = !row.included || row.superseded;
   const { label, sub, muted } = rowText(row);
-  const [menu, setMenu] = useState(null); // null | "menu" | "confirm"
-  const renameable = row.splitFrom || row.origin.kind === "combined";
+  const [menuAt, setMenuAt] = useState(null); // null | {x, y} — where the ONE parcel menu is open (under the ⋯, or at the cursor for a right-click)
+  const renameable = isRenameable(row);
   const open = () => handlers.onRowClick(row.id, pickMode);
   const nameColor = dim || muted ? "var(--text-secondary)" : "var(--text-primary)";
   return (
     <div>
       <div className="land-parcel-row" data-testid={`parcel-table-row-${row.id}`} data-included={row.included ? "1" : "0"} data-group-kind={groupKeyOf(row)}
+        onContextMenu={(e) => { if (!e.currentTarget.contains(e.target)) return; /* a portaled menu's own right-click bubbles here through React */ e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}
         style={{ position: "relative", display: "grid", gridTemplateColumns: cols, alignItems: "start", borderBottom: LINE, borderLeft: `2px solid ${selected || picked ? "var(--accent-site)" : "transparent"}`, borderRadius: 0, background: selected || picked ? "var(--surface-selected)" : "transparent" }}>
         <label style={{ display: "flex", alignItems: "center", justifyContent: "center", height: FIRST_LINE_H, cursor: "pointer" }}>
           <input type="checkbox" checked={checked} onChange={() => handlers.onCheck(row.id)} aria-label={`Select ${label} to combine`} data-testid={`parcel-row-check-${row.id}`} style={{ width: 14, height: 14, margin: 0, cursor: "pointer" }} />
@@ -184,7 +174,7 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, s
         <div style={{ display: "flex", alignItems: "center", minWidth: 0, alignSelf: "stretch", paddingLeft: row.depth * SPACE.xl }}>
           <button type="button" onClick={open} aria-pressed={pickMode ? picked : undefined} data-testid={`parcel-row-${row.id}`}
             title={`${row.name}${sub ? ` — ${sub}` : ""}`}
-            onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); setMenu("confirm"); } }}
+            onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); handlers.onDelete(row.id, "row:key"); } }}
             style={{ flex: "1 1 auto", minWidth: 0, display: "block", padding: `${SPACE.sm}px ${SPACE.xxs}px ${SPACE.sm}px ${SPACE.xxs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
             <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{keepDigits(label)}</span>
             {sub && <span data-testid={`parcel-row-source-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.label, lineHeight: "14px", color: "var(--text-secondary)" }}>{keepDigits(sub)}</span>}
@@ -203,7 +193,7 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, s
             style={{ ...iconBtn, width: ICON, height: ICON, color: row.included ? "var(--text-primary)" : "var(--text-secondary)" }}>
             {row.included ? <EyeIcon /> : <EyeOffIcon />}
           </button>
-          <RowMenu row={row} renameable={!!renameable} handlers={handlers} open={menu !== null} armed={menu === "confirm"} onOpen={() => setMenu("menu")} onClose={() => setMenu(null)} onArm={() => setMenu("confirm")} />
+          <RowMenu row={row} renameable={!!renameable} handlers={handlers} at={menuAt} onOpenAt={setMenuAt} onClose={() => setMenuAt(null)} />
         </span>
       </div>
     </div>
@@ -328,9 +318,9 @@ export default function ParcelsPanel({
         {!shown.length && <div style={{ padding: SPACE.xl, fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>No parcels match “{filter}”.</div>}
       </div>
 
-      {/* Combining is the only thing the checkboxes are for: nothing shows with one checked. */}
+      {/* The checkboxes are for bulk actions — Combine and Delete: nothing shows with one checked. Delete removes every checked parcel in ONE step with ONE Undo toast. */}
       {checkedIds.length >= 2 && (
-        <div role="toolbar" aria-label="Combine the selected parcels" data-testid="parcels-action-bar"
+        <div role="toolbar" aria-label="Actions for the selected parcels" data-testid="parcels-action-bar"
           style={{ marginTop: SPACE.md, display: "flex", alignItems: "center", gap: SPACE.md, padding: `${SPACE.md}px ${SPACE.lg}px`, borderRadius: RADIUS.lg, background: "var(--surface-page)", border: LINE, color: "var(--text-primary)" }}>
           <div style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control }}>
             <div style={{ fontWeight: 700 }}>{checkedIds.length} selected</div>
@@ -339,6 +329,8 @@ export default function ParcelsPanel({
           <button type="button" disabled={!(preview && preview.ok)} onClick={() => { handlers.onCombine(checkedIds); setChecked(new Set()); }} data-testid="parcels-bar-combine"
             title={preview && !preview.ok ? preview.message : "Combine the selected parcels into one"}
             style={{ ...textBtn, background: "var(--accent-site)", color: "var(--on-accent-site)", borderColor: "var(--accent-site)", opacity: preview && preview.ok ? 1 : 0.5, cursor: preview && preview.ok ? "pointer" : "default" }}>Combine</button>
+          <button type="button" onClick={() => { handlers.onDeleteMany(checkedIds, "bar:parcel"); setChecked(new Set()); }} data-testid="parcels-bar-delete" title="Delete the selected parcels — Undo brings them all back"
+            style={{ ...textBtn, color: "var(--danger-text)", borderColor: "var(--danger-text)" }}>Delete</button>
           <button type="button" onClick={() => setChecked(new Set())} aria-label="Clear selection" data-testid="parcels-bar-clear" style={iconBtn}><CloseIcon /></button>
         </div>
       )}

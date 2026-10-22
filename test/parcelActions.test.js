@@ -201,7 +201,7 @@ describe("a row reads as the mode you are IN", () => {
   it("Draw mode lights Draw, not Remove", () => {
     expect(active({ ...rich, tool: "parcel", parcelMode: "add" })).toEqual(["draw"]);
   });
-  it("the Parcel tool's click-to-delete sub-mode lights nothing — it has no menu row any more", () => {
+  it("the Parcel tool's click-to-delete sub-mode is RETIRED (NEW-1, 2026-10-22) — a stale 'remove' mode lights nothing", () => {
     expect(active({ ...rich, tool: "parcel", parcelMode: "remove" })).toEqual([]);
   });
   it("the cut tool lights Split; merge pick lights Combine; boundary edit lights Edit boundary", () => {
@@ -293,20 +293,14 @@ describe("wiring: the render site reaches every row (a model nothing calls is wo
 
   it("the handlers arm the EXISTING paths rather than reimplementing them", () => {
     expect(menu).toMatch(/combine:[^\n]*startMergePick\(\)/);
-    // Click-to-delete mode is no longer a menu row, but it must stay reachable from the Parcel tool's banner.
-    expect(src).toMatch(/onClick=\{\(\) => \{ setDraftPoly\(null\); setParcelMode\("remove"\); \}\}/);
-    expect(src).toMatch(/const startRemoveParcels = /);
-    expect(menu).toMatch(/deleteSelected:[^\n]*removeParcelById/);
+    // Click-to-delete mode is RETIRED (NEW-1, 2026-10-22): no banner pill, no sub-mode, no starter — and the rail row is the one delete.
+    expect(src).not.toMatch(/setParcelMode\("remove"\)/);
+    expect(src).not.toMatch(/startRemoveParcels|removeParcelById|deleteParcelById/);
+    expect(menu).toMatch(/deleteSelected:[^\n]*deleteParcels\(/);
     expect(menu).toMatch(/boundary:[^\n]*startBoundaryEdit\(\)/);
     expect(menu).toMatch(/chip:[^\n]*setParcelChipHidden/);
     expect(menu).toMatch(/lock:[^\n]*toggleParcelLock/);
     expect(menu).toMatch(/active:[^\n]*toggleParcelActive/);
-  });
-
-  it("Remove mode sets the sub-mode AFTER the tool switch (selectTool resets it to 'add' — B598)", () => {
-    const fn = (src.match(/const startRemoveParcels = [^\n]*\n?/) || [""])[0];
-    expect(fn.indexOf("selectTool(\"parcel\")")).toBeGreaterThan(-1);
-    expect(fn.indexOf("selectTool(\"parcel\")")).toBeLessThan(fn.indexOf("setParcelMode(\"remove\")"));
   });
 
   it("a disabled row has no click handler at all (it explains itself instead)", () => {
