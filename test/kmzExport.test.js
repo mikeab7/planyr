@@ -285,12 +285,13 @@ describe("no model-built export reads a canvas display toggle", () => {
     expect(body).not.toContain("includeDockDoors");
   });
 
-  it("the one KMZ call site that still names a flag states it, and neither names a dock-door one", () => {
+  it("the one KMZ call site (the planner's File ▾ export) states its flag and names no dock-door one; the Map view has none (owner decision 2026-10-22)", () => {
     const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/exportSheet.js"), "utf8");
     const finder = readFileSync(join(ROOT, "src/workspaces/site-planner/MapFinder.jsx"), "utf8");
-    for (const [name, src] of [["exportSheet.js", planner], ["MapFinder.jsx", finder]]) {
-      expect(src, name).toContain("includeDimensions: false");
-      expect(src, name).not.toContain("includeDockDoors");
-    }
+    expect(planner).toContain("includeDimensions: false");
+    expect(planner).not.toContain("includeDockDoors");
+    // The Map view's all-sites export was removed (B2380112); it no longer builds a site-plan KMZ at all.
+    expect(finder).not.toContain("siteToFeatures");
+    expect(finder).not.toContain("includeDockDoors");
   });
 });

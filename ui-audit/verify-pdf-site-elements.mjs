@@ -168,8 +168,24 @@ check(/\/IT \/PolygonDimension \/Measure << \/Type \/Measure \/Subtype \/RL/.tes
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const an = await (await (await pdfjs.getDocument({ data: new Uint8Array(out.edit), verbosity: 0 }).promise).getPage(1)).getAnnotations();
 check(an.length === dicts.length && an.every((a) => (a.annotationFlags & (2 | 32 | 64 | 128)) === 0 && a.hasAppearance), `pdf.js reads all ${an.length} annotations back, unlocked, each with an appearance`);
-const words = an.map((a) => (a.contentsObj && a.contentsObj.str) || "");
-check(an.some((a) => a.annotationType === 7 && /Building/.test(words[an.indexOf(a)])) && words.some((w) => /Detention Pond|Detention pond/.test(w)) && an.filter((a) => a.annotationType === 7).length >= hosts + 7 + 1, `pdf.js lists the buildings, the detention pond and the roads as Polygon annotations (${an.filter((a) => a.annotationType === 7).length} Polygons)`);
+const pdfjsRow = (d) => an.find((x) => x.rect && Math.abs(x.rect[0] - d.rect[0]) < 0.01 && Math.abs(x.rect[1] - d.rect[1]) < 0.01);
+const rectOf = (d) => (/\/Rect \[([^\]]+)\]/.exec(d) || [])[1].split(/\s+/).map(Number);
+check(count("Building") >= hosts && count("Detention pond") >= 1 && an.filter((x) => x.annotationType === 7).length >= hosts + 7 + 1, `the buildings (${count("Building")}), the detention pond (${count("Detention pond")}) and the roads (${count("Road")}) are Polygon annotations, named in /Subj (${an.filter((x) => x.annotationType === 7).length} Polygons)`);
+
+// ---- NEW-1 (2026-10-22): nothing here may raise Chrome's / Edge's hover note box (PDFium: a non-empty /Contents)
+const named = dicts.filter((d) => REQUIRED_SUBJECTS.includes((/\/Subj \(([^)]*)\)/.exec(d) || [])[1]));
+check(named.length >= hosts + 8, `${named.length} site-element annotations to check (not vacuous)`);
+check(named.every((d) => !/\/Contents /.test(d)), `no site element carries /Contents — ${named.filter((d) => /\/Contents /.test(d)).length} do`);
+check(dicts.every((d) => !/\/T \(Planyr\)/.test(d)) && !/\/Subtype \/Popup/.test(edit), "no annotation is titled “Planyr” and the file has no /Popup");
+check(dicts.every((d) => /\/Subj \(/.test(d)), "every annotation keeps /Subj (Bluebeam's Markups list names it by that)");
+const elementReads = named.map((d) => { const m = [...an].find((x) => x.rect && rectOf(d).every((v, i) => Math.abs(v - x.rect[i]) < 0.01)); return m ? { c: (m.contentsObj && m.contentsObj.str) || "", t: (m.titleObj && m.titleObj.str) || "" } : null; }).filter(Boolean);
+check(elementReads.length >= hosts && elementReads.every((x) => x.c === "" && x.t === ""), `pdf.js getAnnotations: /Contents and /T are empty on every site element (${elementReads.length} read)`);
+void pdfjsRow;
+
+// ---- NEW-2 (2026-10-22): the page carries its scale; a translucent measurement fill is not stored as a fill
+check(/\/VP \[<< \/Type \/Viewport \/BBox \[[^\]]+\] \/Name \(Plan\) \/Measure << \/Type \/Measure \/Subtype \/RL \/R \(1 in = \d+ ft\)/.test(edit), "the page carries a /VP viewport over the plan window with the sheet's /Measure scale (Bluebeam asks for no scale)");
+const areaDict = dicts.find((d) => /\/Subj \(Area measurement\)/.test(d));
+check(!!areaDict && /\/IT \/PolygonDimension/.test(areaDict) && !/\/IC /.test(areaDict) && /\/CA 1 /.test(areaDict), "the translucent area measurement stores no /IC (Bluebeam would paint it solid); its outline is /CA 1");
 
 // ---- parity: Flatten OFF (page + annotations) vs ON
 const A = raster(join(OUT, "flat.pdf"), "flat"), B = raster(join(OUT, "editable.pdf"), "editable"), C = raster(join(OUT, "blank.pdf"), "blank");
@@ -195,5 +211,7 @@ check(bad((x) => x.ink_at_new > 0).length === 0, `…and paints at its new place
 check(bad((x) => x.left_px <= Math.max(4, x.old_px * 0.002)).length === 0, `…and leaves NOTHING behind (the old place renders as the page does without it)${nb((x) => x.left_px <= Math.max(4, x.old_px * 0.002))}`);
 const meas = rows.filter((x) => /Area measurement|Length measurement/.test(x.subj));
 check(meas.length === 3 && meas.every((x) => x.measure && /Dimension/.test(x.it)), `the three measurements keep /IT + /Measure through the move (${meas.map((x) => x.it).join(", ")})`);
+const areaRow = rows.find((x) => /Area measurement/.test(x.subj));
+check(!!areaRow && areaRow.solid_frac < 0.5, `moved + rebuilt, the area measurement is never a solid block over the plan (interior heavy-ink share ${areaRow ? areaRow.solid_frac.toFixed(3) : "n/a"}; an opaque fill reads ~1.0)`);
 console.log(`\n${pass} passed, ${fail} failed   (files in ${OUT})${LIVE ? "" : "\n   ⚠ local: the GIS layer is ON but the sandbox cannot reach FEMA, so it does not paint"}\n   ⚠ Bluebeam was not run — MuPDF and pdf.js are the proxy.`);
 process.exit(ASSERT && fail ? 1 : 0);

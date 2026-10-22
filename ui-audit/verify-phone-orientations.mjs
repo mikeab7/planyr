@@ -317,7 +317,7 @@ const LEAK_DESTINATIONS = [
 const HINT_WINDOW_MS = 4000;
 const TRANSPARENT_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const HINT_SEL = '[data-floating-notice="1"]';
-const hintCount = (page) => page.locator(HINT_SEL).filter({ hasText: /Click (any|a) lot on the map/ }).count();
+const hintCount = (page) => page.locator(`${HINT_SEL} [data-testid="select-parcels-tip"]`).count();
 
 async function runNoticeLeak(engine, browser) {
   console.log(`\n=== B2041360 — Site-map hint must not follow you off Site (${engine.engineName === "webkit" ? "WebKit-emulated" : "Chromium-emulated FALLBACK"}) ===`);
