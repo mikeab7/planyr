@@ -4,7 +4,9 @@
  *
  * Config comes from the URL so a verifier can open one page per case:
  *   ?surface=planner|finder  &w=372  &theme=light|dark  &state=TX|GA|CO|CA|none  &lat=29.76&lng=-95.37  &county=harris
- *   &zoom=15|none  &unlocated=1  &on=fema,contours  &relevance=all|dim|hide  &corridor=on  &corridorWidth=60  &hidden=1
+ *   &zoom=15|none  &unlocated=1  &on=fema,contours  &relevance=all|hide  &out=hcfcd_row,coh_storm (coverage verdict "out" — no data near the view)
+ *   &corridor=on  &corridorWidth=60  &hidden=1  &siteCounty=chambers (the planner's identified county — OMITTED by default, as on a plan whose
+ *   identify has not resolved; the location rule must hold without it)
  * Runs under `vite` dev, which serves /src and this file. */
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -24,6 +26,7 @@ const county = q.get("county") || "harris";
 const zoom = q.get("zoom") === "none" ? null : Number(q.get("zoom") || 17);
 const unlocated = q.get("unlocated") === "1";
 const onList = (q.get("on") || "").split(",").filter(Boolean);
+const outList = (q.get("out") || "").split(",").filter(Boolean);
 document.body.setAttribute("data-theme", q.get("theme") === "dark" ? "dark" : "light");
 if (q.get("relevance")) setRelevanceMode(q.get("relevance"));
 if (q.get("hidden") === "1") setLayersHidden(true);
@@ -52,7 +55,7 @@ function Host() {
         <button id="expand" onClick={() => setCollapsed(false)} style={{ padding: 8 }}>Imagery &amp; Layers ▸</button>
       ) : (
         <div id="scroll" style={{ padding: "8px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
-          <LayerPanel overlays={ov} setOverlays={setOv} county={county} siteCounty={state === "TX" ? county : null} layerStatus={{}} coverage={{}} surface={surface}
+          <LayerPanel overlays={ov} setOverlays={setOv} county={county} siteCounty={q.get("siteCounty") || null} layerStatus={{}} coverage={Object.fromEntries(outList.map((k) => [k, "out"]))} surface={surface}
             siteState={state} siteLocation={lat != null && lng != null ? { lat, lng } : null}
             mapZoom={zoom} onZoomTo={(z) => setLastZoom(z)} onCollapse={() => setCollapsed(true)}
             gradingRows={q.get("grading") === "1" && surface === "planner" ? { rows: [

@@ -16,6 +16,8 @@
  * decides what is SHOWN and what is DRAWN.
  */
 
+import { areaContains } from "./serviceAreas.js";
+
 /* ── Groups ─────────────────────────────────────────────────────────────────────────────────── */
 
 /* The seven panel groups, in the owner's order. `base` is special: it holds the basemap source, the
@@ -46,13 +48,15 @@ export function groupEntriesFor(layers, panelGroup) {
 
 /* ── Location ───────────────────────────────────────────────────────────────────────────────── */
 
-/* DECLARED region scopes. A registry row names the region(s) its source can serve with
- * `regions: ["houston"]`; this table says where that is. Declared, never inferred from coverage
- * (owner 2026-10-11) — coverage is a live, view-dependent guess, a region is a standing fact about
- * the source. "houston" = the Houston metro: Harris plus the counties the HCFCD / BKDD / City of
- * Houston sources reach (Waller, Fort Bend, Montgomery, Brazoria, Galveston, Chambers, Liberty). */
+/* DECLARED region scopes. A registry row names the region(s) its source can serve with `regions: [...]`; two kinds of name:
+ *   · a CIRCLE in this table — only `houston_metro`, the USGS growth-fault STUDY extent (a metro-scale study, not an agency's area);
+ *   · a real BOUNDARY in lib/serviceAreas.js (built into serviceAreaData.js): `harris` (HCFCD's channels), `houston` (the City of
+ *     Houston limits + ETJ — its water / sewer / storm / hydrant data), `bkdd` (the Brookshire–Katy Drainage District).
+ * Declared, never inferred from coverage (owner 2026-10-11) — coverage is a live, view-dependent guess, a region is a standing fact
+ * about the source. (The old 65-mile "houston" circle claimed HCFCD / BKDD / City of Houston data reached Chambers, Galveston and
+ * Brazoria; none of those sources serves them — B2436066.) */
 export const REGION_ZONES = Object.freeze({
-  houston: Object.freeze({ lat: 29.7604, lng: -95.3698, radiusMiles: 65, label: "Houston area" }),
+  houston_metro: Object.freeze({ lat: 29.7604, lng: -95.3698, radiusMiles: 65, label: "Houston metro (growth-fault study area)" }),
 });
 
 const toRad = (d) => (d * Math.PI) / 180;
@@ -66,7 +70,8 @@ export function distanceMiles(lat1, lng1, lat2, lng2) {
 /* true / false, or null when it cannot be told (no location, or an undeclared region name). */
 export function inRegion(region, loc) {
   const z = REGION_ZONES[region];
-  if (!z || !loc) return null;
+  if (!z) return areaContains(region, loc); // a real boundary (null until its geometry has loaded → fails open)
+  if (!loc) return null;
   const lat = Number(loc.lat), lng = Number(loc.lng != null ? loc.lng : loc.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return distanceMiles(lat, lng, z.lat, z.lng) <= z.radiusMiles;

@@ -239,13 +239,13 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/typeof m\.ts === "number" && lyr && lyr\._map/);             // stale-callback guard
   });
 
-  it("B557: LayerPanel group + reveal toggles announce aria-expanded", () => {
+  it("B557: LayerPanel group + row toggles announce aria-expanded", () => {
     const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
     // NEW-1 (Imagery & Layers): the collapsible groups became a two-pane tablist (selected → aria-selected) and each row's
-    // ▾ announces aria-expanded; the "no local data here" reveal keeps its own aria-expanded.
+    // ▾ announces aria-expanded. (NEW-2: the "no local data here" reveal toggle is gone — Hide leaves the row out, Show renders it.)
     expect(src).toMatch(/aria-selected=\{on\}/);
     expect(src).toMatch(/aria-expanded=\{open\}/);
-    expect(src).toMatch(/aria-expanded=\{!!revealHidden\[groupKey\]\}/);
+    expect(src).not.toMatch(/revealHidden/);
   });
 
   it("B557: ProjectBreadcrumb manage menu has role=menu + menuitem", () => {

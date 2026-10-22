@@ -201,6 +201,7 @@ try {
   // ───────────────────────── 2) location ─────────────────────────
   const rowsAcross = async (q, vw = 520) => {
     const page = await open(q, vw);
+    await page.waitForTimeout(500); // the service-area geometry arrives by a dynamic import once a location exists
     const keys = await visibleGroupKeys(page);
     const all = {}, tiers = [];
     for (const k of keys) {
@@ -219,7 +220,8 @@ try {
   ok("Georgia: the Pipelines row IS offered (the approximate EIA lines drive it) and Drainage District is absent", ga.flat.includes("Pipelines") && !ga.tiers.includes("local"), JSON.stringify({ tiers: ga.tiers, env: ga.all.env }));
   ok("Georgia: Counties & Cities is ONE row", ga.flat.filter((x) => x === "Counties & Cities").length === 1);
   const hx = await rowsAcross(`surface=planner&w=384&${HOUSTON}`);
-  ok("Harris County: Drainage District shows its rows (Channels & ROW · Watersheds & BFE · Drainage Easements · Storm Sewer)", hx.tiers.includes("local") && ["Channels & ROW", "Watersheds & BFE", "Drainage Easements", "Storm Sewer"].every((n) => hx.flat.includes(n)), JSON.stringify(hx.all.flood));
+  ok("Harris County, inside Houston: Drainage District shows the HCFCD + City of Houston rows (Channels & ROW · Storm Sewer)", hx.tiers.includes("local") && ["Channels & ROW", "Storm Sewer"].every((n) => hx.flat.includes(n)), JSON.stringify(hx.all.flood));
+  ok("…and not the Brookshire–Katy rows (downtown Houston is outside that district)", ["Watersheds & BFE", "Drainage Easements", "Master Plan Floodplains"].every((n) => !hx.flat.includes(n)), JSON.stringify(hx.all.flood));
   ok("Harris County: Texas rows present (Road Ownership · Oil & Gas Wells · Active Surface Faults) and Houston utilities fold into Water & Sewer", ["Road Ownership", "Oil & Gas Wells", "Active Surface Faults", "Water & Sewer"].every((n) => hx.flat.includes(n)), JSON.stringify(hx.all));
   ok("Group order is Map Base · Topography · Jurisdictions · Flood & Drainage · Utilities · Environmental · Access", JSON.stringify(hx.keys) === JSON.stringify(["base", "topo", "jur", "flood", "util", "env", "access"]), JSON.stringify(hx.keys));
   const co = await rowsAcross(`surface=planner&w=384&${DENVER}`);
@@ -240,6 +242,38 @@ try {
   const txKey = await keyOf(`surface=planner&w=384&${HOUSTON}`), gaKey = await keyOf(`surface=planner&w=384&${ATLANTA}`);
   ok("Counties & Cities key on a Texas site: County · City Limits · ETJ", /County/.test(txKey) && /City Limits/.test(txKey) && /ETJ/.test(txKey), txKey);
   ok("Counties & Cities key on a Georgia site: County · City Limits, and NO ETJ (ETJ is Texas-only)", /County/.test(gaKey) && /City Limits/.test(gaKey) && !/ETJ/.test(gaKey), gaKey);
+
+
+  // ── B2436066 (NEW-3): a source is listed only where it serves — and BOTH surfaces answer the same for the same point ──
+  {
+    const AREA_POINTS = {
+      grandPort: { q: "state=TX&lat=29.807276&lng=-94.877079&county=chambers", label: "Grand Port (Chambers · Baytown ETJ)" },
+      mont: { q: "state=TX&lat=29.85&lng=-94.89&county=chambers", label: "Mont Belvieu (Chambers)" },
+      baytownHarris: { q: "state=TX&lat=29.74&lng=-94.97&county=harris", label: "Baytown, Harris side (outside Houston)" },
+      katyBkdd: { q: "state=TX&lat=29.779&lng=-95.895&county=waller", label: "Katy (inside BKDD)" },
+      sugarLand: { q: "state=TX&lat=29.5994&lng=-95.6349&county=fortbend", label: "Sugar Land (Fort Bend)" },
+      texasCity: { q: "state=TX&lat=29.40&lng=-94.935&county=galveston", label: "Texas City (Galveston)" },
+    };
+    const NAMES = { hcfcd: "Channels & ROW", bkdd: ["Watersheds & BFE", "Drainage Easements", "Master Plan Floodplains"], coh: "Storm Sewer" };
+    const floodOf = async (pt, surf) => (await rowsAcross(`surface=${surf}&w=384&${AREA_POINTS[pt].q}`)).all.flood || [];
+    const expect = {
+      grandPort: { hcfcd: false, bkdd: false, coh: false },
+      mont: { hcfcd: false, bkdd: false, coh: false },
+      baytownHarris: { hcfcd: true, bkdd: false, coh: false },
+      katyBkdd: { hcfcd: false, bkdd: true, coh: false },
+      sugarLand: { hcfcd: false, bkdd: false, coh: false },
+      texasCity: { hcfcd: false, bkdd: false, coh: false },
+    };
+    for (const [pt, want] of Object.entries(expect)) {
+      const planner = await floodOf(pt, "planner"), finder = await floodOf(pt, "finder");
+      const got = { hcfcd: planner.includes(NAMES.hcfcd), bkdd: NAMES.bkdd.every((n) => planner.includes(n)), coh: planner.includes(NAMES.coh) };
+      ok(`${AREA_POINTS[pt].label}: HCFCD ${want.hcfcd ? "shows" : "absent"} · BKDD ${want.bkdd ? "shows" : "absent"} · City of Houston storm ${want.coh ? "shows" : "absent"} (planner, NO county identified)`, JSON.stringify(got) === JSON.stringify(want), JSON.stringify(planner));
+      ok(`${AREA_POINTS[pt].label}: the planner and the map finder list the SAME Flood & Drainage rows`, JSON.stringify(planner) === JSON.stringify(finder), JSON.stringify({ planner, finder }));
+    }
+    const gp = await floodOf("grandPort", "planner");
+    ok("Grand Port: Flood & Drainage is exactly FEMA Flood Zones + Streams, Canals & Ditches (what the finder shows at Mont Belvieu)", JSON.stringify(gp) === JSON.stringify(["FEMA Flood Zones", "Streams, Canals & Ditches"]), JSON.stringify(gp));
+    ok("Harris, inside Houston (known-good arm): the Houston rows ARE listed, so the empty Chambers answer is not an empty registry", ["Channels & ROW", "Storm Sewer"].every((n) => hx.all.flood.includes(n)));
+  }
 
   // ───────────────────────── 3) controls ─────────────────────────
   {
@@ -350,7 +384,9 @@ try {
     page = await open(`surface=planner&w=384&${HOUSTON}&on=fema,contours&relevance=dim`);
     await page.click('[data-testid="layers-more"]');
     const menu = await page.evaluate(() => document.querySelector('[data-testid="layers-more-menu"]')?.innerText.replace(/\s+/g, " ") || "");
-    ok("⋯ menu: Turn all layers off · Layers with no data here (Show / Dim / Hide) · the one screening line", /Turn all layers off/.test(menu) && /Layers with no data here/.test(menu) && /Show/.test(menu) && /Dim/.test(menu) && /Hide/.test(menu) && /Screening data\. Verify before relying on it\./.test(menu), menu);
+    ok("⋯ menu: Turn all layers off · Layers with no data here (Show / Hide — no Dim) · the one screening line", /Turn all layers off/.test(menu) && /Layers with no data here/.test(menu) && /Show/.test(menu) && !/Dim/.test(menu) && /Hide/.test(menu) && /Screening data\. Verify before relying on it\./.test(menu), menu);
+    const seg = await page.evaluate(() => [...document.querySelectorAll('[data-testid="layers-relevance"] button')].map((b) => `${b.textContent.trim()}:${b.getAttribute("aria-pressed")}`));
+    ok("a STORED 'dim' preference (harness sets relevance=dim) reads as Show — Show is the pressed segment", JSON.stringify(seg) === JSON.stringify(["Show:true", "Hide:false"]), JSON.stringify(seg));
     await page.click('[data-testid="layers-clear-all"]');
     ok("Turn all layers off clears every layer (same sweep as before)", (await page.evaluate(() => Object.values(window.__overlays).filter((o) => o.on).length)) === 0);
     await page.close();
@@ -440,7 +476,7 @@ try {
       const page = await open(`surface=planner&w=384&${HOUSTON}`);
       await selectGroup(page, "flood");
       const labels = await rowLabels(page);
-      ok("Harris (known-good arm): Flood & Drainage still lists its rows, incl. the HCFCD district row (Channels & ROW)", labels.length >= 6 && labels.includes("Channels & ROW"), JSON.stringify(labels));
+      ok("Harris (known-good arm): Flood & Drainage still lists its rows, incl. the HCFCD district row (Channels & ROW)", labels.length >= 4 && labels.includes("Channels & ROW") && labels.includes("Storm Sewer"), JSON.stringify(labels));
       await page.close();
     }
 
@@ -464,6 +500,72 @@ try {
       ok(`${tag}: turned ON it keeps the Interval and gains the drawing controls (known-good arm)`, /interval/.test(on) && /opacity/.test(on) && (await page.$eval('[data-testid="contour-interval"]', (e) => e.value)) === "5", on);
       await page.evaluate(() => localStorage.removeItem("planyr:contourInterval"));
       await page.close();
+    }
+  
+    // ── NEW-1 (B2436064 ×3): a hairline between the panes; the name sits one small gap after the checkbox + swatch slot ──
+    const GAP_TARGET_PX = 18; // checkbox right edge → name left edge; measured 27 before the tightening (planner card, Flood & Drainage)
+    for (const [surf, size, theme, vw, w] of [...ALIGN, ["planner", "phone-two-pane", "light", 380, 330], ["finder", "phone-two-pane", "dark", 380, 330]]) {
+      const tag = `${surf} · ${size} · ${theme}`;
+      const page = await open(`surface=${surf}&w=${w}&theme=${theme}&${HOUSTON}`, vw);
+      const two = !!(await page.$('[data-testid="layer-group-nav"]'));
+      const geo = await page.evaluate(() => {
+        const nav = document.querySelector('[data-testid="layer-group-nav"]'), pane = document.querySelector('[data-testid="layer-pane"]'), div = document.querySelector('[data-testid="layer-pane-divider"]');
+        const r = (e) => e && e.getBoundingClientRect();
+        return { nav: r(nav) && { right: r(nav).right, h: r(nav).height }, pane: r(pane) && { left: r(pane).left, h: r(pane).height }, div: r(div) && { left: r(div).left, w: r(div).width, h: r(div).height }, color: div && getComputedStyle(div).backgroundColor, line: getComputedStyle(document.body).getPropertyValue("--border-default").trim() };
+      });
+      if (two) {
+        ok(`${tag}: a divider sits between the group list and the rows`, !!geo.div && geo.div.left >= geo.nav.right - 0.5 && geo.div.left + geo.div.w <= geo.pane.left + 0.5, JSON.stringify(geo));
+        ok(`${tag}: …it is a hairline the full height of the panes`, !!geo.div && geo.div.w === 1 && geo.div.h >= Math.max(geo.nav.h, geo.pane.h) - 1, JSON.stringify(geo));
+        ok(`${tag}: …drawn in the border colour token (not a raw colour)`, !!geo.color && geo.color !== "rgba(0, 0, 0, 0)", geo.color);
+      } else {
+        ok(`${tag}: the group dropdown layout has no divider (nothing sits side by side)`, !geo.div);
+      }
+      const keys = await visibleGroupKeys(page);
+      let worst = 0, rowsMeasured = 0, bad = [];
+      for (const k of keys) {
+        await selectGroup(page, k);
+        const gaps = await page.evaluate(() => [...document.querySelectorAll('[data-testid="layer-pane"] [data-testid^="layer-row-"]')].filter((r) => !r.getAttribute("data-testid").endsWith("-menu") && r.querySelector("label span[title]")).map((row) => {
+          const cb = row.querySelector('input[type="checkbox"]').getBoundingClientRect(), nm = row.querySelector("label span[title]");
+          const rg = document.createRange(); rg.selectNodeContents(nm.firstChild);
+          return { id: row.getAttribute("data-testid"), gap: Math.round((rg.getBoundingClientRect().left - cb.right) * 10) / 10 };
+        }));
+        for (const g of gaps) { rowsMeasured++; worst = Math.max(worst, g.gap); if (g.gap > GAP_TARGET_PX + 0.5) bad.push(`${k}/${g.id} ${g.gap}`); }
+      }
+      ok(`${tag}: checkbox → name distance is at most ${GAP_TARGET_PX} on every row (worst ${worst}, ${rowsMeasured} rows)`, rowsMeasured > 8 && bad.length === 0, bad.slice(0, 3).join(" | "));
+      await page.close();
+    }
+
+    // ── NEW-2 (B2436065): no row is ever faded — a layer with no data near the view reads like every other row ──
+    {
+      const probe = (page) => page.evaluate(() => {
+        const norm = document.querySelector('[data-testid="layer-row-wetlands"]'), out = [...document.querySelectorAll('[data-testid="layer-row-txrrc_wells"],[data-testid="layer-row-env_lpst"]')];
+        const look = (row) => { const line = row.firstElementChild, nm = row.querySelector("label span[title]"), cb = row.querySelector('input[type="checkbox"]'), car = row.querySelector('[data-testid^="layer-caret-"]'); return { op: getComputedStyle(line).opacity, name: getComputedStyle(nm).color, cb: getComputedStyle(cb).opacity, car: car && getComputedStyle(car).color }; };
+        return { normal: norm && look(norm), rows: out.map((r) => ({ id: r.getAttribute("data-testid"), ...look(r) })) };
+      });
+      for (const theme of ["light", "dark"]) {
+        for (const mode of ["all", "hide"]) {
+          const page = await open(`surface=planner&w=384&theme=${theme}&relevance=${mode}&out=txrrc_wells,env_lpst&${HOUSTON}`);
+          await selectGroup(page, "env");
+          const r = await probe(page);
+          if (mode === "all") {
+            ok(`${theme} · Show: both no-data rows are listed`, r.rows.length === 2, JSON.stringify(r.rows.map((x) => x.id)));
+            ok(`${theme} · Show: no row is faded — opacity and name colour match a normal row (checkbox, name, ▾)`, r.rows.every((x) => x.op === r.normal.op && x.name === r.normal.name && x.cb === r.normal.cb) && r.normal.op === "1", JSON.stringify(r));
+          } else {
+            ok(`${theme} · Hide: the no-data rows are not rendered`, r.rows.length === 0 && !!r.normal, JSON.stringify(r));
+          }
+          await page.close();
+        }
+      }
+      // the migration: a stored "dim" preference (the old default) is read as Show — rows listed, none faded
+      const ctx = await browser.newContext({ viewport: { width: 520, height: 820 } });
+      const page = await ctx.newPage();
+      await page.addInitScript(() => { try { localStorage.setItem("planarfit:relevance:v1", JSON.stringify({ mode: "dim", radius: 2.5 })); } catch (_) {} });
+      await page.goto(`${URL}?surface=planner&w=384&out=txrrc_wells,env_lpst&${HOUSTON}`, { waitUntil: "load" });
+      await page.waitForFunction(() => window.__READY__ === true);
+      await selectGroup(page, "env");
+      const r = await probe(page);
+      ok("a stored 'dim' preference renders the no-data rows as Show (listed, opacity 1, normal colour)", r.rows.length === 2 && r.rows.every((x) => x.op === "1" && x.name === r.normal.name), JSON.stringify(r));
+      await ctx.close();
     }
   }
 
