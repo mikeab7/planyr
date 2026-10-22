@@ -5,6 +5,9 @@
  *   C  5965 Miller Ln, Christiana TN (parcel 156-031.00-000): found, selected, "Plan this site" → the plan's lot outline is COMPLETE   (NEW-1 — positive control)
  *        (all 15 distinct vertices of the source's 16-point ring in the drawn polygon, and the painted outline's pixel extent covers the path's on-screen box)
  *   D  a Texas address still selects a Harris lot (known-good control for C)
+ *   E  Select parcels over the I-24 / Epps Mill Rd interchange (z18): the Rutherford layer HOLDS AND DRAWS every lot in view — it held ONE on ff7be38,
+ *      because the county server answers GeoJSON with no feature id (B2409408 root cause)   (RED on ff7be38)
+ *   F  canvas census at this window's pixel ratio: no full-window canvas holds pixels at a parcel zoom, parcel tile canvases that are blank hold none
  * Every row records /version.json IN THE SAME CALL (merged ≠ live). The throwaway plan C creates is deleted in `finally`. Exit 0 = all passed · 1 = a row failed · 2 = VOID.
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-work-laptop-live.mjs [https://planyr.io] [--out f.json] [--shots dir] */
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -87,6 +90,27 @@ try {
   const okTx = !!(hTx && /harris/i.test(String(hTx[0].county)));
   await record({ name: "D a Texas address (1200 McKinney St, Houston) still selects a Harris lot", control: true, pass: okTx, detail: hTx ? `county ${hTx[0].county} · acct ${hTx[0].acct}` : "nothing selected" });
   if (!okTx) voided = true;
+
+  /* E — the root cause: Select parcels at Epps Mill holds every lot */
+  {
+    await freshMap();
+    await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click();
+    await page.evaluate(() => window.__mapFinderMap.setView([35.7209, -86.3218], 18, { animate: false }));
+    await waitFor(async () => { const d = await page.evaluate(() => (window.__mapParcelDisplay ? window.__mapParcelDisplay() : null)); return d && d.drawn > 0 ? d : null; }, 40000);
+    await sleep(8000);
+    const d = await page.evaluate(() => { const x = window.__mapParcelDisplay ? window.__mapParcelDisplay() : null; const l = x && x.layers && x.layers.find((q) => q.key === "tn_rutherford"); return l ? { held: l.held, drawn: l.drawn } : null; });
+    await page.screenshot({ path: `${SHOTS}/epps-mill-select-parcels.png` });
+    await record({ name: "E Select parcels over Epps Mill holds and draws every Rutherford lot in view (held 1 on ff7be38)", pass: !!d && d.held >= 20 && d.drawn === d.held, detail: d ? `held ${d.held} · drawn ${d.drawn}` : "no tn_rutherford layer" });
+    /* F — canvas census, same view */
+    const c = await page.evaluate(() => {
+      const all = [...document.querySelectorAll("canvas")]; const mb = (cs) => cs.reduce((a, x) => a + x.width * x.height * 4, 0) / 1048576;
+      const full = all.filter((x) => x.closest(".leaflet-adminboundaries-pane, .leaflet-placenames-pane"));
+      const tiles = all.filter((x) => x.classList.contains("leaflet-tile"));
+      const blankHolding = tiles.filter((t) => t.width > 0 && !(() => { const dd = t.getContext("2d").getImageData(0, 0, t.width, t.height).data; for (let i = 3; i < dd.length; i += 4 * 211) if (dd[i]) return true; return false; })()).length;
+      return { dpr: devicePixelRatio, canvases: all.length, totalMB: +mb(all).toFixed(1), fullWindowMB: +mb(full).toFixed(1), tiles: tiles.length, blankTilesHoldingPixels: blankHolding };
+    });
+    await record({ name: "F no blank canvas holds pixels at a parcel zoom (238.6 MB / 47 canvases on ff7be38)", control: false, pass: c.fullWindowMB < 1 && c.blankTilesHoldingPixels === 0, detail: JSON.stringify(c) });
+  }
 
   /* C — Miller Ln */
   await freshMap();

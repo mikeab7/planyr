@@ -303,7 +303,8 @@ export default function HelpReportControl({ user }) {
   const toggleOpen = () => {
     const opening = !open;
     setOpen(opening);
-    if (opening) { clearTimeout(closeTimerRef.current); setView("menu"); armCapture(); }
+    if (opening) { clearTimeout(closeTimerRef.current); setView("menu"); }   // NEW-4 — a reopen inside the 200 ms close timer must not be wiped by it
+    if (opening) armCapture();
   };
 
   /* The same frozen `cap`, resolved into the flat shape every submission attaches under
