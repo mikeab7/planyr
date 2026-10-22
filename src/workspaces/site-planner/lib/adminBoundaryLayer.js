@@ -135,15 +135,6 @@ export function attachAdminBoundaries(map) {
     if (destroyed) return;
     const size = map.getSize();
     const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(size.x * dpr) || canvas.height !== Math.round(size.y * dpr)) {
-      canvas.width = Math.round(size.x * dpr); canvas.height = Math.round(size.y * dpr);
-      canvas.style.width = `${size.x}px`; canvas.style.height = `${size.y}px`;
-    }
-    L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.x, size.y);
-    ctx.lineJoin = "round"; ctx.lineCap = "round";
-
     const f = tracker.frame(typeof ts === "number" ? ts : performance.now());
     const want = adminBoundaryLevels(f.zoom, ADMIN_BOUNDARY_MAX_ZOOM);
     if (want.detail && !detailRequested && groups.country) {
@@ -161,6 +152,29 @@ export function attachAdminBoundaries(map) {
     };
     const style = admin1Style(f.zoom);
     const drawn = [];
+    /* NEW-1 (2026-10-22, work-laptop report) — A CANVAS THAT HAS NOTHING TO DRAW HOLDS NO PIXELS. This canvas is one map-sized
+     * backing store (5122×1499 = 29 MB at the laptop's 2.6775 pixel ratio) allocated at attach and kept for the life of the map —
+     * while the layer is gated off (above zoom 12, i.e. at every working zoom on a parcel) it cleared a blank canvas, and the
+     * Map view kept it while HIDDEN behind the planner (css 0×0, still 29 MB). Measured on live ff7be38: two of these (this + city
+     * names) were 58.6 MB of GPU-side backing on a blank screen, on an integrated GPU that is also compositing two 5K desktops.
+     * It is now sized only while there is ink to put on it and handed back (1×1) otherwise — behaviourally inert, nothing is
+     * drawn in either state. */
+    const hiddenMap = !map.getContainer().clientWidth;
+    const hasInk = !hiddenMap && ((show.country && groups.country) || (show.admin1 && groups.admin1) || (show.admin1Detail && groups.admin1Detail));
+    if (!hasInk) {
+      if (canvas.width !== 1 || canvas.height !== 1) { canvas.width = 1; canvas.height = 1; canvas.style.width = "0px"; canvas.style.height = "0px"; }
+      pane.dataset.levels = ""; pane.dataset.detail = show.admin1Detail ? "1" : "0"; pane.__at = f.at;
+      if (f.animating) schedule();
+      return;
+    }
+    if (canvas.width !== Math.round(size.x * dpr) || canvas.height !== Math.round(size.y * dpr)) {
+      canvas.width = Math.round(size.x * dpr); canvas.height = Math.round(size.y * dpr);
+      canvas.style.width = `${size.x}px`; canvas.style.height = `${size.y}px`;
+    }
+    L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size.x, size.y);
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
     if (show.country && groups.country) { strokeGroup(groups.country, f, size.x, size.y, COUNTRY_STYLE.casing, COUNTRY_STYLE.line); drawn.push("country"); }
     if (show.admin1 && groups.admin1) { strokeGroup(groups.admin1, f, size.x, size.y, style.casing, style.line); drawn.push("admin1"); }
     if (show.admin1Detail) { strokeGroup(groups.admin1Detail, f, size.x, size.y, style.casing, style.line); drawn.push("admin1"); }
@@ -173,6 +187,10 @@ export function attachAdminBoundaries(map) {
   const schedule = () => { if (!raf && !destroyed) raf = requestAnimationFrame(draw); };
   const onMove = () => schedule();
   map.on("move zoom moveend zoomend resize", onMove);
+  /* NEW-1 — a keep-alive host hides its map with display:none, which fires none of Leaflet's events; a ResizeObserver on the
+   * container sees the box go to 0 (release) and come back (redraw). */
+  let ro = null;
+  try { if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(() => schedule()); ro.observe(map.getContainer()); } } catch (_) { /* no observer: the move events still drive it */ }
 
   const controller = {
     sync: schedule,
@@ -182,6 +200,7 @@ export function attachAdminBoundaries(map) {
       if (raf) cancelAnimationFrame(raf);
       map.off("move zoom moveend zoomend resize", onMove);
       tracker.destroy();
+      try { ro && ro.disconnect(); } catch (_) { /* ignore */ }
       try { canvas.remove(); } catch (_) { /* map already torn down */ }
       attached.delete(map);
     },

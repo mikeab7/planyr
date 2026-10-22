@@ -64,7 +64,7 @@ import PriorityToolbar, { ToolbarBudgetContext } from "./PriorityToolbar.jsx";
 import { MORE_WIDTH } from "./toolbarPlan.js";
 import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
-import { prefetchModule } from "../../app/modulePrefetch.js";
+import { prefetchModule, prefetchModuleWhenQuiet } from "../../app/modulePrefetch.js";
 import { ORG_CAPABLE_MODULES } from "../../app/route.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 import { MODULE_TAB_LABEL } from "./moduleTabLabel.js";
@@ -415,7 +415,7 @@ function ModuleTab({ m, isActive, onClick, iconOnly = false }) {
       // thing that warms a workspace — so cover the touch path too: a tap fires
       // pointerdown with no preceding mouseenter, and pointerdown lands before the
       // click commits, which is enough of a head start to hide the chunk fetch.
-      onMouseEnter={() => { setHover(true); if (!isActive) prefetchModule(m.id); }}
+      onMouseEnter={() => { setHover(true); if (!isActive) prefetchModuleWhenQuiet(m.id); }}
       onPointerDown={() => { if (!isActive) prefetchModule(m.id); }}
       onMouseLeave={() => setHover(false)}
       icon={

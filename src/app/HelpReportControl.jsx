@@ -155,7 +155,7 @@ import { cornerClearanceFromBottom } from "../shared/ui/cornerClearance.js";
 import { safeAreaInsets } from "../shared/ui/safeAreaInsets.js";
 import { activeChromeDock } from "../shared/ui/chromeDock.js";
 import { useBottomSheetHeight, useSideDockWidth } from "../shared/ui/bottomSheetTracker.js";
-import { requestPerfCapture, perfCaptureDelivery, perfRecorderArmed } from "../shared/telemetry/perfRecorderHandle.js";
+import { requestPerfCapture, perfCaptureDelivery, perfCaptureRefusal, perfRecorderArmed } from "../shared/telemetry/perfRecorderHandle.js";
 import { SUPPRESSED_AUTOMATED } from "../shared/telemetry/clientErrors.js";
 import { buildReportContext, submitReport, queuedReportCount } from "../shared/reports/reportsStore.js";
 import { openShortcutsPage } from "../shared/keyboard/shortcutsPageBus.js";
@@ -184,7 +184,17 @@ function QuestionIcon() {
   );
 }
 
+/* NEW-4 — "Couldn't record, try again in a moment" was shown for the recorder's own rolling limit too, a recovery that did not come
+ * until a reload. A refused-by-limit press now says the limit and when a slot frees. */
+export function limitLabel(refusal) {
+  const mins = Math.max(1, Math.ceil(((refusal && refusal.retryInMs) || 60000) / 60000));
+  return `Snapshot limit reached (6 per 10 min) — free again in ${mins} min`;
+}
+
 const rowStyle = { display: "flex", alignItems: "center", gap: 9 };
+// NEW-2 (2026-10-22) — the Report and Help views are taller than the menu; in a window too short for them the popover scrolls
+// inside itself, and their action row (Back / Send) sticks to the panel's bottom edge so it is always reachable.
+const STICKY_FOOT = { display: "flex", gap: 8, justifyContent: "flex-end", position: "sticky", bottom: 0, background: "var(--surface-raised)", paddingTop: 4 };
 
 export default function HelpReportControl({ user }) {
   const anchorRef = useRef(null);
@@ -273,7 +283,10 @@ export default function HelpReportControl({ user }) {
     };
   }, [fabSize, sideDockW]);
 
-  const closeAll = () => { setOpen(false); setTimeout(() => { setView("menu"); setDesc(""); setSubmitState(null); setCap(null); }, 200); };
+  /* The post-close reset is a delayed timer; a panel reopened inside its 200 ms (a double-press, Escape then ? at once) used to have
+   * the freshly armed capture wiped by it — the row then read disabled. `closeTimerRef` lets an opening cancel the pending reset. */
+  const closeTimerRef = useRef(0);
+  const closeAll = () => { setOpen(false); clearTimeout(closeTimerRef.current); closeTimerRef.current = setTimeout(() => { setView("menu"); setDesc(""); setSubmitState(null); setCap(null); }, 200); };
 
   /* NEW-1 (B1231280) — THE ONE PLACE `requestPerfCapture`/`perfCaptureDelivery` ARE CALLED. Runs
    * once, from the click that OPENS the panel (see `toggleOpen` below) — never again until the
@@ -283,12 +296,14 @@ export default function HelpReportControl({ user }) {
   const armCapture = () => {
     if (!perfRecorderArmed()) { setCap({ armed: false, taken: false, deliveryPromise: null }); return; }
     const taken = requestPerfCapture("manual");
-    setCap({ armed: true, taken, deliveryPromise: taken ? Promise.resolve(perfCaptureDelivery()) : null });
+    // NEW-4 — a refusal carries its reason: the recorder's rolling budget says when a slot frees, so the row can say so plainly.
+    setCap({ armed: true, taken, deliveryPromise: taken ? Promise.resolve(perfCaptureDelivery()) : null, refusal: taken ? null : perfCaptureRefusal() });
   };
 
   const toggleOpen = () => {
     const opening = !open;
     setOpen(opening);
+    if (opening) { clearTimeout(closeTimerRef.current); setView("menu"); }   // NEW-4 — a reopen inside the 200 ms close timer must not be wiped by it
     if (opening) armCapture();
   };
 
@@ -326,9 +341,9 @@ export default function HelpReportControl({ user }) {
       return;
     }
     if (!cap.taken) {
-      setSlowNote("fail");
-      submitReport({ category: "slow", userId: user?.id, userEmail: user?.email, context: buildReportContext({ perf: { captureArmed: true, captureTaken: false } }) });
-      setTimeout(() => setSlowNote(null), 3200);
+      setSlowNote(cap.refusal && cap.refusal.reason === "budget" ? "limit" : "fail");
+      submitReport({ category: "slow", userId: user?.id, userEmail: user?.email, context: buildReportContext({ perf: { captureArmed: true, captureTaken: false, captureRefused: cap.refusal ? cap.refusal.reason : undefined } }) });
+      setTimeout(() => setSlowNote(null), 6000);
       return;
     }
     setSlowNote("sending");
@@ -353,6 +368,8 @@ export default function HelpReportControl({ user }) {
     : slowNote === "local" ? "Recorded on this device"
     : slowNote === "undelivered" ? "Recorded, couldn't reach the server yet"
     : slowNote === "fail" ? "Couldn't record — try again in a moment"
+    // NEW-4 — the recorder's own limit (6 snapshots per 10 minutes), said as what it is: a wait that ends, not a hiccup.
+    : slowNote === "limit" ? limitLabel(cap && cap.refusal)
     : null;
 
   // B1215682/NEW-3 — hide outright rather than reposition: this control's fixed bottom-right
@@ -430,6 +447,7 @@ export default function HelpReportControl({ user }) {
                 ...rowStyle,
                 color: (slowNote === "ok" || slowNote === "local") ? "var(--accent)"
                   : (slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)"
+                  : slowNote === "limit" ? "var(--warn-text)"
                   : undefined,
               }}
               disabled={!(cap && cap.armed) || slowNote === "sending"}
@@ -485,8 +503,8 @@ export default function HelpReportControl({ user }) {
                 Nothing from your drawing (no shapes, addresses, or names) — only this screen, the app version, and your window size.
               </div>
             </details>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setView("menu")} style={{ border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
+            <div style={STICKY_FOOT}>
+              <button type="button" data-testid="report-back" onClick={() => setView("menu")} style={{ border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
               <button
                 type="button"
                 onClick={submitProblem}
@@ -520,7 +538,9 @@ export default function HelpReportControl({ user }) {
             <p style={{ margin: 0 }}>
               Press <kbd>?</kbd> anywhere in the app to see every keyboard shortcut it has.
             </p>
-            <button type="button" onClick={() => setView("menu")} style={{ alignSelf: "flex-end", border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
+            <div style={STICKY_FOOT}>
+              <button type="button" data-testid="help-back" onClick={() => setView("menu")} style={{ border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
+            </div>
           </div>
         )}
       </AnchoredMenu>

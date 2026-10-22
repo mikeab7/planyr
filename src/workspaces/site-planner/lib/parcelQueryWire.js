@@ -55,13 +55,38 @@ function idFromFeature(feature) {
   return undefined;
 }
 
+/* NEW-1 (Select parcels drew one lot in Tennessee) — the outline layer keys every held lot by `feature.id` (`layer._layers[gj.id]`).
+ * Rutherford County TN's hosted FeatureServer answers `f=geojson` with features that carry NO top-level `id` (only `properties`), so
+ * every lot in the view landed on the key `undefined`, overwrote the one before it, and the layer held ONE lot: the one drawn last.
+ * (The lookup-by-click path never reads this key, which is why clicking worked and nothing else did.) A feature with no id is given
+ * one here, in the one function every answer passes through: its OBJECTID-like property, else a stable hash of its geometry — never
+ * left undefined. A server-supplied id is never touched. Pure. */
+const idPropName = /^(OBJECTID(_\d+)?|FID|OID|ID|ROWID)$/i;
+export function geometryKey(geometry) {
+  const s = JSON.stringify(geometry && geometry.coordinates !== undefined ? geometry.coordinates : geometry || null);
+  let h1 = 5381, h2 = 52711;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = ((h1 << 5) + h1 + c) | 0; h2 = ((h2 << 5) ^ h2 ^ c) | 0; }
+  return `g${(h1 >>> 0).toString(36)}${(h2 >>> 0).toString(36)}${s.length.toString(36)}`;
+}
+export function ensureFeatureIds(features) {
+  for (let i = 0; i < features.length; i++) {
+    const f = features[i];
+    if (!f || (f.id !== undefined && f.id !== null && f.id !== "")) continue;
+    const props = f.properties || {};
+    let id;
+    for (const k in props) if (idPropName.test(k) && props[k] !== null && props[k] !== undefined && props[k] !== "") { id = props[k]; break; }
+    f.id = id !== undefined ? id : geometryKey(f.geometry);
+  }
+  return features;
+}
+
 /** esri-leaflet's `responseToFeatureCollection` (src/Util.js) without Leaflet: same id rule, same REVERSE order. */
 export function esriResponseToFeatures(response) {
   const features = (response && (response.features || response.results)) || [];
   const idField = idFromResponse(response);
   const out = [];
   for (let i = features.length - 1; i >= 0; i--) out.push(arcgisToGeoJSON(features[i], idField || idFromFeature(features[i])));
-  return out;
+  return ensureFeatureIds(out);
 }
 
 /** Turn an HTTP body into esri-leaflet's (error, response) pair, exactly as its XHR callback does. */
