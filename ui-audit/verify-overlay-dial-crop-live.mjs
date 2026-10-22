@@ -148,8 +148,18 @@ async function turnsAndScaleArm(tag) {
     await box.fill(typed); await box.press("Enter"); await sleep(450);
     ok(`[${tag}] typing ${typed} applies 1" = ${want}'`, new RegExp(`\\b${want}\\b`).test(await ratioText()), await ratioText());
   }
+  {
+    const [sec, input, tail, sw] = await Promise.all([T("overlay-placement").boundingBox(), box.boundingBox(), T("overlay-scale-custom").locator("span").last().boundingBox(), T("overlay-scale-mode-preset").boundingBox()]);
+    ok(`[${tag}] the Custom box is short (sized for a scale), not the panel's full width`, input.width < sec.width / 2 && input.width > 40, `${Math.round(input.width)} of ${Math.round(sec.width)}`);
+    ok(`[${tag}] the closing ' is fully inside the panel, right beside the box, left-aligned under Preset | Custom`, tail.x + tail.width <= sec.x + sec.width + 0.5 && tail.x - (input.x + input.width) < 16 && Math.abs(input.x - sw.x) < 80);
+  }
+  ok(`[${tag}] a valid value is never flagged`, (await box.getAttribute("aria-invalid")) === null);
   await box.fill("banana"); await box.press("Enter"); await sleep(300);
-  ok(`[${tag}] junk reverts and shows the field in the warning colour`, (await box.inputValue()) === "8" && (await box.getAttribute("aria-invalid")) === "true");
+  ok(`[${tag}] unreadable text stays in the box, flagged, and applies nothing`, (await box.inputValue()) === "banana" && (await box.getAttribute("aria-invalid")) === "true" && /\b8\b/.test(await ratioText()), await ratioText());
+  await box.fill("8"); await sleep(150);
+  ok(`[${tag}] editing the text clears the flag at once`, (await box.getAttribute("aria-invalid")) === null);
+  await box.fill("banana"); await box.press("Enter"); await sleep(200); await box.press("Escape"); await sleep(200);
+  ok(`[${tag}] Escape reverts to the applied value, unflagged`, (await box.inputValue()) === "8" && (await box.getAttribute("aria-invalid")) === null);
   await T("overlay-scale-set").click(); await sleep(200);   // close the tools; leave the sheet at a standard scale for the arms that follow
 }
 

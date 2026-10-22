@@ -335,11 +335,13 @@ export function ScaleTools({ o, onApply }) {
   const [draft, setDraft] = useState(() => roundFpi(curFpi));
   const [bad, setBad] = useState(false);
   const [dirty, setDirty] = useState(false);   // an idle focus → blur must not re-commit the ROUNDED display value (it would drift the scale)
+  // The warning colour describes the TEXT IN THE BOX and nothing else: unreadable text is kept (so it can be fixed) and flagged; a
+  // readable value is never flagged. Escape, or any edit, clears it — a valid value never wears the warning.
   const commit = async (raw) => {
-    if (!dirty) { setBad(false); return; }
+    if (!dirty) return;
     setDirty(false);   // before the await: Enter's commit and the blur that follows must not both apply
     const fpi = await parseTypedScale(raw);
-    if (fpi == null) { setBad(true); setDraft(roundFpi(curFpi)); return; }
+    if (fpi == null) { setBad(true); return; }
     setBad(false); setDraft(roundFpi(fpi));
     onApply(fpi);
   };
@@ -360,10 +362,10 @@ export function ScaleTools({ o, onApply }) {
           <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
         </select>
       ) : (
-        <div data-testid="overlay-scale-custom" style={{ display: "flex", alignItems: "center", gap: SPACE.xs, minWidth: 0 }}>
+        <div data-testid="overlay-scale-custom" style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: SPACE.xs, minWidth: 0 }}>
           <span style={{ ...valueStyle, flex: "none" }}>1" =</span>
           <input data-testid="overlay-scale-custom-input" aria-label="Feet per inch" aria-invalid={bad || undefined} inputMode="decimal" value={draft}
-            style={{ ...inputStyle, flex: "1 1 60px", width: 0, minWidth: 0, ...(bad ? { borderColor: WARN, color: WARN } : null) }}
+            style={{ ...inputStyle, flex: "none", width: 92, ...(bad ? { borderColor: WARN, color: WARN } : null) }}
             onChange={(e) => { setDraft(e.target.value); setBad(false); setDirty(true); }}
             onBlur={(e) => commit(e.currentTarget.value)}
             onKeyDown={(e) => { if (e.key === "Enter") commit(e.currentTarget.value); else if (e.key === "Escape") { setDraft(roundFpi(curFpi)); setBad(false); setDirty(false); } }} />

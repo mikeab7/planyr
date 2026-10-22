@@ -117,7 +117,7 @@ for (const locked of [false, true]) {
       await fpiNear(page, 8);
     });
 
-    test("NEW-3 · Set scale: Custom is ONE box — 40, 1\" = 40', 1:480, 1/8\" = 1'-0\" apply; junk reverts and flags the field", async ({ page }) => {
+    test("NEW-3 · Set scale: Custom is ONE box — 40, 1\" = 40', 1:480, 1/8\" = 1'-0\" apply; unreadable text stays and is flagged; Escape reverts; a valid value is never flagged", async ({ page }) => {
       await openPlan(page, { locked });
       await T(page, "overlay-scale-set").click();
       await T(page, "overlay-scale-mode-custom").click();
@@ -126,20 +126,30 @@ for (const locked of [false, true]) {
       expect(await T(page, "overlay-scale-custom").locator("input").count()).toBe(1);
       expect(await T(page, "overlay-scale-custom").locator("select").count()).toBe(0);
       expect(await box.inputValue()).toBe("40");
-      {   // the row stays inside the Placement section at every panel width (the closing ' is never pushed out of the panel)
-        const [sec, row, tail] = await Promise.all([T(page, "overlay-placement").boundingBox(), T(page, "overlay-scale-custom").boundingBox(), T(page, "overlay-scale-custom").locator("span").last().boundingBox()]);
-        console.log(`[${tag}] custom row ${JSON.stringify(row)} section ${JSON.stringify(sec)} tail ${JSON.stringify(tail)}`);
-        expect(row.x + row.width, "custom row inside the section").toBeLessThanOrEqual(sec.x + sec.width + 0.5);
+      {   // a SHORT box (sized for a scale value), the closing ' fully visible right beside it, the whole row left-aligned under Preset | Custom
+        const [sec, row, input, tail, sw] = await Promise.all([T(page, "overlay-placement").boundingBox(), T(page, "overlay-scale-custom").boundingBox(), box.boundingBox(), T(page, "overlay-scale-custom").locator("span").last().boundingBox(), T(page, "overlay-scale-mode-preset").boundingBox()]);
+        console.log(`[${tag}] custom row ${JSON.stringify(row)} input ${JSON.stringify(input)} tail ${JSON.stringify(tail)}`);
         expect(tail.x + tail.width, "closing ' inside the section").toBeLessThanOrEqual(sec.x + sec.width + 0.5);
+        expect(input.width, "a short box, not the panel's full width").toBeLessThan(sec.width / 2);
+        expect(tail.x - (input.x + input.width), "the ' sits right beside the box").toBeLessThan(16);
+        expect(Math.abs(row.x - sw.x), "left-aligned under Preset | Custom").toBeLessThan(12);
+        expect(await box.getAttribute("aria-invalid"), "a valid value is never flagged").toBeNull();
       }
       for (const [typed, want] of [["50", 50], ["1\" = 45'", 45], ["1:480", 40], ["1/8\" = 1'-0\"", 8], ["37.5", 37.5]]) {
         await box.fill(typed); await box.press("Enter");
         await fpiNear(page, want);
       }
+      await expect(box).not.toHaveAttribute("aria-invalid", /.*/);   // 37.5 applied last: valid, so no warning
       await box.fill("banana"); await box.press("Enter"); await page.waitForTimeout(250);
-      expect(await ftPerInch(page)).toBeCloseTo(37.5, 6);
-      expect(await box.inputValue()).toBe("37.5");
+      expect(await ftPerInch(page)).toBeCloseTo(37.5, 6);   // junk applies nothing
+      expect(await box.inputValue()).toBe("banana");        // ...and stays visible so it can be fixed
       expect(await box.getAttribute("aria-invalid")).toBe("true");
+      await box.fill("40"); await page.waitForTimeout(100);   // editing clears the flag at once
+      expect(await box.getAttribute("aria-invalid")).toBeNull();
+      await box.fill("banana"); await box.press("Enter"); await page.waitForTimeout(200);
+      await box.press("Escape"); await page.waitForTimeout(150);   // Escape reverts to the applied value, unflagged
+      expect(await box.inputValue()).toBe("37.5");
+      expect(await box.getAttribute("aria-invalid")).toBeNull();
       await box.fill("120"); await box.blur();   // blur applies too
       await fpiNear(page, 120);
       await box.focus(); await box.blur(); await page.waitForTimeout(250);   // an idle focus→blur never re-commits
@@ -167,6 +177,8 @@ for (const leftWidth of [240, 620]) test(`NEW-3 · the Custom row (1" = [ ] ') s
     expect(row.x + row.width).toBeLessThanOrEqual(sec.x + sec.width + 0.5);
     expect(tail.x + tail.width).toBeLessThanOrEqual(sec.x + sec.width + 0.5);
     expect(input.width, "a usable box").toBeGreaterThan(40);
+    expect(input.width, "a short box, not the full panel").toBeLessThan(sec.width / 2 + 1);
+    expect(tail.x - (input.x + input.width), "the ' sits right beside the box").toBeLessThan(16);
   }
 });
 
@@ -185,10 +197,10 @@ test.describe("panel screenshots", () => {
       await T(page, "overlay-scale-mode-custom").click();
       await page.waitForTimeout(250);
       await T(page, "overlay-placement").screenshot({ path: `${process.env.SHOTS}/scale-${name}-custom.png` });
+      await panel.screenshot({ path: `${process.env.SHOTS}/panel-${name}.png` });   // clean, valid state
       await T(page, "overlay-scale-custom-input").fill("bad"); await T(page, "overlay-scale-custom-input").press("Enter");
       await page.waitForTimeout(250);
       await T(page, "overlay-placement").screenshot({ path: `${process.env.SHOTS}/scale-${name}-custom-invalid.png` });
-      await panel.screenshot({ path: `${process.env.SHOTS}/panel-${name}.png` });
     });
   }
 });
