@@ -692,6 +692,18 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-10-22",
     verifiedNote: "VERIFIED LIVE from this sandbox: Parcels FeatureServer layer 0 ('Parcels that display on the online county map', item owner Adam.Rehn_williamsontn, public), 107,811 parcel polygons, esriGeometryPolygon, WKID 3857, Query only, maxRecordCount 2000, token-free, edited 2026-10-15, COUNTY = 094. Five points across the county (Franklin Public Square, Nolensville, Fairview, Thompson's Station, rural Bethesda) each returned PARCEL_ID + OWNER_1 + ADDRESS. Pass 1's 'only the City of Franklin and a stale upload' was a title search that never reached the county's own org. The Comptroller's statewide layer holds 0 Williamson rows (county id 94 absent). Outline floor 16: the busiest zoom-16 512-px cell holds 663 lots.",
   },
+  tn_hamilton: {
+    publisher: "own",
+    publisherName: "Hamilton County, TN GIS — Assessor tax-map parcels (mapsdev.hamiltontn.gov, hcwa03 ArcGIS Server)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: Live_Parcels MapServer layer 0 'Parcels' (ArcGIS 10.61, the 'Assessors Tax Maps' source Chattanooga's Map Viewer web map reads), Map/Query/Data, 169,662 parcel polygons over the whole county (extent to 35.46 N), maxRecordCount 1000, token-free; newest recorded SALE1DATE 2026-09-04 (a live roll). Soddy-Daisy 10406 DAYTON PIKE → TAX_MAP_NO 057F B 003 / VANESSAS COTTAGE LLC; Signal Mountain 410 WOOD ST → 107L J 006; Enterprise South 8001 VOLKSWAGEN DR → 130 001.18 (1,096 ac, INDUSTRIAL DEV BOARD CHATT CITY OF). Comptroller's layer holds 0 Hamilton rows (county id 33 absent). Outline floor 16: busiest zoom-16 cell 884 lots against the 1,000 cap. The City of Chattanooga's own pwgis.chattanooga.gov Misc/Parcels (city-limits parcels, 'Last Updated 10/16/26') and the AGOL copies (Parcels_Static: 'IT WILL NOT UPDATE'; CHattanoogaParcels 2023) were also read and are NOT used — the county service covers all of them.",
+  },
+  tn_montgomery: {
+    publisher: "third-party",
+    publisherName: "City of Clarksville (republishes the Montgomery County Assessor's parcels — AGOL org H9ihyy27OU16MQR3, item 01ea390f…)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "VERIFIED LIVE from this sandbox: Parcels_Test FeatureServer layer 0 (public, owner chelsea.cooper, created 2025-11-19), 90,720 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Sync, maxRecordCount 1000, token-free, RecordYear 2026, edited 2026-10-21; 90,719 distinct ParcelID (one row per parcel). 709 FRANKLIN ST → parcelno 066F K 00100 000 / IMMACULATE CONCEPTION CATHOLIC CHURCH / 5.40 ac; 401 TOBACCO RD → 030 00600 000 / MAYNARD FAMILY COMPANY / 97.94 ac. The county's own gis.mcgtn.org Parcels MapServer (99,853 rows, RecordYear 2027) was read through the relay and is one row PER BUILDING CARD (a 5-building lot returns 5 identical polygons), so it is not the click source; the APSU mirror is licence-restricted and last updated 2022. Outline floor 16: busiest zoom-16 cell 592 lots against the 1,000 cap.",
+  },
   tn_hickman: {
     publisher: "own",
     publisherName: "Hickman County, TN — Assessor of Property (CaptureCAMA, maps.capturecama.com)",

@@ -28,8 +28,8 @@ const TN_BY_ID = ["Anderson", "Bedford", "Benton", "Bledsoe", "Blount", "Bradley
 const present = new Set(CT.counties.map((c) => c.id));
 const NINE = TN_BY_ID.filter((_, i) => !present.has(i + 1));
 
-const HAVE_SOURCE = ["Chester", "Davidson", "Hickman", "Rutherford", "Shelby", "Williamson"];
-const NAMED_GAPS = { Hamilton: [35.045, -85.31], Knox: [35.96, -83.92], Montgomery: [36.53, -87.36] };
+const HAVE_SOURCE = ["Chester", "Davidson", "Hamilton", "Hickman", "Montgomery", "Rutherford", "Shelby", "Williamson"];
+const NAMED_GAPS = { Knox: [35.96, -83.92] };
 
 describe("the nine counties the Comptroller's layer does not hold", () => {
   it("the fixture is the real per-county count: 86 counties present, the names line up with the layer's own", () => {

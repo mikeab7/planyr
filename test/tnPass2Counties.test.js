@@ -87,6 +87,90 @@ describe("Hickman County — the assessor's CaptureCAMA publish on the maps. hos
   });
 });
 
+describe("Hamilton County — the county's own ArcGIS Server (Live_Parcels)", () => {
+  const cases = Object.entries(REC.hamilton);
+  it("four recorded lots across the county, each with an owner, a tax-map number and a situs address", () => {
+    expect(cases).toHaveLength(4);
+    for (const [, [f]] of cases) {
+      expect(String(f.attributes.OWNERNAME1).trim()).not.toBe("");
+      expect(String(f.attributes.TAX_MAP_NO).trim()).not.toBe("");
+      expect(String(f.attributes.ADDRESS).trim()).not.toBe("");
+    }
+  });
+  it.each(cases.map(([n, [f]]) => [n, f]))("%s resolves to Hamilton's own source, never the empty statewide composite", (_n, f) => {
+    const p = interiorPointOf(f);
+    const id = countyIdentity(p.lat, p.lng);
+    expect(id.status).toBe("ok");
+    expect(id.key).toBe("tn_hamilton");
+    expect(id.statewideKey).toBeUndefined();
+    const c = candidateCountiesForPoint(p.lat, p.lng);
+    expect(c).toContain("tn_hamilton");
+    expect(c, "the statewide layer holds zero Hamilton rows").not.toContain("tn_statewide");
+    expect(noParcelSourceNote(id)).toBeNull();
+    expect(statewideExcludesCounty("tn_statewide", "Hamilton County")).toBe(true);
+  });
+  it("the card reads the tax-map number, the owner and the situs from the real attributes", () => {
+    const f = REC.hamilton.soddyDaisy[0];
+    expect(idAttrFor("tn_hamilton", f.attributes)).toBe("057F B 003");
+    const rec = countyRecord(f.attributes, { idField: "TAX_MAP_NO", addrField: "ADDRESS" });
+    expect(rec.owner).toBe("VANESSAS COTTAGE LLC");
+    expect(rec.address).toBe("10406 DAYTON PIKE");
+  });
+  it("rides the relay to the county's allow-listed host, pinned to TAX_MAP_NO / ADDRESS, outline floor 16", () => {
+    const c = COUNTIES.tn_hamilton;
+    expect(c.layerUrl).toBe("/gis-proxy/mapsdev.hamiltontn.gov/hcwa03/rest/services/Live_Parcels/MapServer/0");
+    expect(ALLOWED_HOSTS.has("mapsdev.hamiltontn.gov")).toBe(true);
+    expect(c.idField).toBe("TAX_MAP_NO"); expect(c.pinIdField).toBe(true);
+    expect(c.addrField).toBe("ADDRESS"); expect(c.pinAddrField).toBe(true);
+    expect(displayMinZoomOf("tn_hamilton")).toBe(16);
+  });
+  it("probe hosts that were measured and not used are not on the allow-list", () => {
+    expect(ALLOWED_HOSTS.has("pwgis.chattanooga.gov")).toBe(false);
+    expect(ALLOWED_HOSTS.has("gis.mcgtn.org")).toBe(false);
+  });
+  it("Chattanooga's downtown and the far north of the county (Soddy-Daisy) both route here", () => {
+    for (const [lat, lng] of [[35.0456, -85.3097], [35.2587, -85.1744], [35.045, -85.31]]) expect(countyIdentity(lat, lng).key, `${lat},${lng}`).toBe("tn_hamilton");
+  });
+});
+
+describe("Montgomery County — the City of Clarksville's republication of the Assessor's parcels", () => {
+  const cases = Object.entries(REC.montgomery);
+  it("four recorded lots, one polygon each (the county server's one-row-per-building-card duplicates are why this copy is used)", () => {
+    expect(cases).toHaveLength(4);
+    for (const [, fs] of cases) expect(fs, "one row per parcel").toHaveLength(1);
+  });
+  it.each(cases.map(([n, [f]]) => [n, f]))("%s resolves to Montgomery's source, never the empty statewide composite", (_n, f) => {
+    const p = interiorPointOf(f);
+    const id = countyIdentity(p.lat, p.lng);
+    expect(id.status).toBe("ok");
+    expect(id.key).toBe("tn_montgomery");
+    expect(id.statewideKey).toBeUndefined();
+    const c = candidateCountiesForPoint(p.lat, p.lng);
+    expect(c).toContain("tn_montgomery");
+    expect(c).not.toContain("tn_statewide");
+    expect(noParcelSourceNote(id)).toBeNull();
+    expect(statewideExcludesCounty("tn_statewide", "Montgomery County")).toBe(true);
+  });
+  it("the card reads the assessor's parcel number, the owner and the situs from the real (lower-case) attributes", () => {
+    const f = REC.montgomery.riverside[0];
+    expect(idAttrFor("tn_montgomery", f.attributes)).toBe("066F K 00100 000");
+    const rec = countyRecord(f.attributes, { idField: "parcelno", addrField: "propertyaddress" });
+    expect(rec.owner).toBe("IMMACULATE CONCEPTION CATHOLIC CHURCH");
+    expect(rec.address).toBe("709 FRANKLIN ST");
+  });
+  it("is token-free AGOL (no relay), pinned to parcelno (not the numeric parcelid) and propertyaddress, floor 16 — and never the licence-restricted APSU mirror", () => {
+    const c = COUNTIES.tn_montgomery;
+    expect(c.layerUrl).toBe("https://services6.arcgis.com/H9ihyy27OU16MQR3/arcgis/rest/services/Parcels_Test/FeatureServer/0");
+    expect(c.layerUrl).not.toMatch(/apsu\.edu/);
+    expect(c.idField).toBe("parcelno"); expect(c.pinIdField).toBe(true);
+    expect(c.addrField).toBe("propertyaddress"); expect(c.pinAddrField).toBe(true);
+    expect(displayMinZoomOf("tn_montgomery")).toBe(16);
+  });
+  it("Clarksville's downtown and Fort Campbell's edge both route here", () => {
+    for (const [lat, lng] of [[36.5298, -87.3595], [36.6, -87.41], [36.53, -87.36]]) expect(countyIdentity(lat, lng).key, `${lat},${lng}`).toBe("tn_montgomery");
+  });
+});
+
 describe("what must not move", () => {
   it("Davidson, Rutherford, Shelby and Chester keep their own sources; an 86-county composite county still rides the composite", () => {
     expect(countyIdentity(36.137653, -86.75516).key).toBe("tn_davidson");

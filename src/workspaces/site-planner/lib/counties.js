@@ -2262,6 +2262,36 @@ const COUNTIES_RAW = {
     idField: "PARCEL_ID", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, displayMinZoom: 16,
     help: "Williamson County government parcels (county GIS) — covers Franklin, Brentwood, Spring Hill, Nolensville, Fairview, Thompson's Station and the rest of the county. Search by a site address or the assessor's parcel ID.",
   },
+  /* NEW-1 (Tennessee pass 2, B2408834, 2026-10-22) — HAMILTON COUNTY, TN (Chattanooga), on Hamilton County GIS's OWN ArcGIS Server: `Live_Parcels` MapServer layer 0 "Parcels"
+   * (`mapsdev.hamiltontn.gov/hcwa03`, the "Assessors Tax Maps" source Chattanooga's own Map Viewer reads). Pass 1 recorded Hamilton as a gap because the Comptroller's copy is switched
+   * off and AGOL holds only city / school-district slices; it had not looked at the county's own server, which the City's web maps name. The Comptroller's layer holds ZERO Hamilton
+   * rows (county id 33 absent). Host refused by the build sandbox, so relayed through /gis-proxy (allow-listed) and MEASURED THROUGH THE DEPLOYED RELAY 2026-10-22: ArcGIS 10.61,
+   * Map/Query/Data, maxRecordCount 1000, token-free, 169,662 parcels over the whole county (extent to 35.46 N), newest recorded sale 2026-09-04 (a live roll). Soddy-Daisy
+   * 10406 DAYTON PIKE → 057F B 003 VANESSAS COTTAGE LLC; Signal Mountain 410 WOOD ST → 107L J 006; Enterprise South 8001 VOLKSWAGEN DR → 130 001.18, 1,096 ac. The id is the assessor's
+   * tax-map number `TAX_MAP_NO` (map · group · parcel, the form Chattanooga's viewer searches); PBA_NUM / GISLINK carry the same number with a 3-digit district prefix and are NOT pinned.
+   * Layers 0 and 1 are the same 169,662 parcels split by display scale; layer 0 is used. Outline floor 16 (a MapServer's own): the busiest zoom-16 cell (downtown) holds 884 lots
+   * against the 1,000 cap. Condo / lease overlay rows (PARCEL_TYP 5-13, 7,000 of them) overlap their parent lot, so a click there can return several features, as on Davidson. */
+  tn_hamilton: {
+    state: "TN", label: "Hamilton County, TN (Chattanooga)",
+    layerUrl: "/gis-proxy/mapsdev.hamiltontn.gov/hcwa03/rest/services/Live_Parcels/MapServer/0",
+    idField: "TAX_MAP_NO", pinIdField: true, addrField: "ADDRESS", pinAddrField: true,
+    help: "Hamilton County GIS parcels (Assessor of Property) — covers Chattanooga, East Ridge, Red Bank, Soddy-Daisy, Signal Mountain, Collegedale and the rest of the county. Search by tax map number (e.g. 057F B 003) or a site address.",
+  },
+  /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — MONTGOMERY COUNTY, TN (Clarksville), on the City of Clarksville's public ArcGIS Online republication of the Montgomery County
+   * Assessor's parcel layer (`Parcels_Test`, item 01ea390f…, owner chelsea.cooper; its sibling `Parcels_num`, the 2025 roll, is the layer the City's own Finance Viewer reads). The state's
+   * Comptroller layer holds ZERO Montgomery rows (county id 63 absent). Token-free, Query + Sync, maxRecordCount 1000, WKID 2274, 90,720 parcels, RecordYear 2026, edited 2026-10-21.
+   * WHY THIS COPY AND NOT THE COUNTY'S OWN SERVER (both measured): the county's `gis.mcgtn.org/arcgis/rest/services/Parcels/MapServer/0` (99,853 rows, RecordYear 2027, edited 2026-10-10) is
+   * one row PER BUILDING CARD — a five-building church lot comes back as five identical polygons with five OBJECTIDs, which the lot-key would count as five lots — and the City's copy is one
+   * row per parcel (90,720 rows, 90,719 distinct ParcelID). Same owners and acres on every point compared. The APSU mirror (`apnsgis4.apsu.edu`, "shared solely for use by authorized clients …
+   * not to be redistributed") is NOT used: a licence refusal, and its item reads "Last Updated 10-18-22". Fields are lower-case: `parcelno` (the assessor's number, '066F K 00100 000') is
+   * the id (`parcelid` is a numeric internal key), `propertyaddress` the situs. MEASURED 2026-10-22: 709 FRANKLIN ST → 066F K 00100 000 IMMACULATE CONCEPTION CATHOLIC CHURCH 5.40 ac;
+   * 401 TOBACCO RD → 030 00600 000 MAYNARD FAMILY COMPANY 97.94 ac. Outline floor 16: the busiest zoom-16 cell (downtown) holds 592 lots against the 1,000 cap. */
+  tn_montgomery: {
+    state: "TN", label: "Montgomery County, TN (Clarksville)",
+    layerUrl: "https://services6.arcgis.com/H9ihyy27OU16MQR3/arcgis/rest/services/Parcels_Test/FeatureServer/0",
+    idField: "parcelno", pinIdField: true, addrField: "propertyaddress", pinAddrField: true, displayMinZoom: 16,
+    help: "Montgomery County Assessor parcels (republished by the City of Clarksville) — covers Clarksville, Fort Campbell and the rest of the county. Search by parcel number (e.g. 066F K 00100 000) or a site address.",
+  },
   /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — HICKMAN COUNTY, TN (Centerville), on the Hickman County ASSESSOR's CaptureCAMA publish: `Hickman/HickmanTN05182023` MapServer
    * layer 9 "Parcels" on maps.capturecama.com (the same CaptureCAMA family as Chester, on its sibling host). Pass 1 said "nothing found" — it had looked at AGOL and the Comptroller's
    * viewer index, not at CaptureCAMA's folder listing, where a `Hickman` folder sits beside `Chester`. Map/Query/Data, 18,549 parcels, maxRecordCount 1000, token-free, WKID 3857, with
@@ -3027,7 +3057,7 @@ const COUNTIES_MAP_RAW = {
      * a per-county count over the layer itself (outStatistics by COUNTY_ID, 2026-10-21) names them: county ids 12 Chester, 19 Davidson, 33 Hamilton, 41 Hickman,
      * 47 Knox, 63 Montgomery, 75 Rutherford, 79 Shelby, 94 Williamson — each ABSENT from the 86 counties the layer holds (not low, absent). A composite is never
      * routed a county it excludes, so a Nashville click used to go to this empty layer and read "No parcel at this point" — the 2026-10-21 report. Four have
-     * their own source (tn_shelby, tn_chester, tn_davidson, tn_rutherford); Williamson, Hamilton, Knox, Montgomery and Hickman are named gaps that say so
+     * their own source (tn_shelby, tn_chester, tn_davidson, tn_rutherford, and — pass 2, 2026-10-22 — tn_williamson, tn_hamilton, tn_montgomery, tn_hickman); Knox is the one named, locked gap and says so
      * (docs/STATEWIDE-PARCELS.md, "Tennessee non-state counties"). Pinned by the repo-root test tnNonStateCounties against a committed copy of that count. */
     excludedCounties: ["Chester", "Davidson", "Hamilton", "Hickman", "Knox", "Montgomery", "Rutherford", "Shelby", "Williamson"],
     state: "TN", center: [35.9, -86.4], zoom: 7, mapServer: null, statewide: true,
@@ -3357,6 +3387,16 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [35.86, -86.90], zoom: 10,
     bbox: [35.64, -87.26, 36.10, -86.55], displayMinZoom: 16,
     mapServer: null, layerUrl: COUNTIES.tn_williamson.layerUrl,
+  },
+  tn_hamilton: {
+    state: "TN", center: [35.19, -85.20], zoom: 10,
+    bbox: [34.95, -85.50, 35.50, -84.90],
+    mapServer: null, layerUrl: COUNTIES.tn_hamilton.layerUrl,
+  },
+  tn_montgomery: {
+    state: "TN", center: [36.50, -87.37], zoom: 10,
+    bbox: [36.28, -87.68, 36.68, -87.07], displayMinZoom: 16,
+    mapServer: null, layerUrl: COUNTIES.tn_montgomery.layerUrl,
   },
   tn_hickman: {
     state: "TN", center: [35.80, -87.47], zoom: 10,
