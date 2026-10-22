@@ -32,6 +32,11 @@ export const ALLOWED_HOSTS = new Set([
   "gis.shelbycountytn.gov", // Shelby County TN government GIS (Assessor_Parcel)
   "scgis.shelbycountytn.gov", // Shelby County TN GIS server — the Assessor of Property's CERTParcel service (NEW-1, Memphis radius ×2)
   "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
+  /* NEW-1/NEW-2/NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — the three hosts the Hamilton / Montgomery gaps name. The build sandbox reaches none of them, so each is relayed
+   * and MEASURED through here on production before any county is wired to it; whichever answers nothing usable is removed again in the wiring PR. */
+  "mapsdev.hamiltontn.gov", // Hamilton County TN GIS — the "Live_Assessor" tax-map service behind Chattanooga's own map viewer
+  "pwgis.chattanooga.gov", // City of Chattanooga Public Works GIS — Misc/Parcels (Hamilton County Assessor parcels inside the city)
+  "gis.mcgtn.org", // Montgomery County TN government GIS — Parcels MapServer read by the City of Clarksville's web maps
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
   /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
