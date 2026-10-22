@@ -5,7 +5,8 @@ import { validateName, announceNameNotice } from "../../shared/names/nameCore.js
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
-import { wideSupportedForUrl, outlineHoldForView } from "./lib/parcelWideRequest.js";
+import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
+import { selectParcelsHintFor } from "./lib/selectParcelsHint.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
@@ -521,6 +522,15 @@ const PinGlyph = ({ size = 12 }) => (
  * gap to the panel's RADIUS.lg=12 edge): a literal that already equals a token's pixel value still
  * drifts independently of it (docs/DESIGN.md's radius section, exception 3) — this ties it to the
  * panel it actually nests inside instead. */
+/* NEW-1 — the two glyphs of the Select-parcels bottom hint (selectParcelsHint.js names which): a magnifier with + (zoom in) and a
+ * pointer arrow (click). Tabler-style outline strokes in the current text colour. Module scope. */
+function SelectParcelsHintIcon({ kind }) {
+  const common = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, style: { flex: "none" } };
+  return kind === "zoom-in"
+    ? <svg {...common}><circle cx="10" cy="10" r="7" /><path d="M7 10h6M10 7v6M21 21l-6-6" /></svg>
+    : <svg {...common}><path d="M7.904 17.563a1.2 1.2 0 0 0 2.228 .308l2.09 -3.093l4.907 4.907a1.067 1.067 0 0 0 1.509 0l1.047 -1.047a1.067 1.067 0 0 0 0 -1.509l-4.907 -4.907l3.113 -2.09a1.2 1.2 0 0 0 -.309 -2.228l-13.582 -3.904l3.904 13.563z" /></svg>;
+}
+
 function RailTab({ label, count, active, onClick, title }) {
   return (
     <button type="button" role="tab" aria-selected={active} onClick={onClick} title={title} style={{
@@ -5642,17 +5652,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   the statewide layer, which is never pulled on a hiccup and so never times out on
                   its own). Says so plainly instead of leaving a blank map that reads as "no data
                   here" while a click already works. */}
-              {(outlineSources.length ? outlineHoldForView(zoom, outlineSources) === "far" : zoom != null && zoom < outlineFloor)
-                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : outlineSources.length && outlineHoldForView(zoom, outlineSources) === "held"
-                ? (wideBusy
-                  ? "The parcel server is busy — showing the lots already loaded. Click any lot to add it (＋)."
-                  : wideRefused
-                  ? "Showing larger lots, but part of this view could not be loaded. Click any lot to add it (＋)."
-                  : "Showing larger lots. Zoom in for small lots and labels. Click any lot to add it (＋).")
-                : slowDisplayKeys.size > 0
-                ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."
-                : "Click a lot on the map to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+              {(() => {
+                const h = selectParcelsHintFor({ zoom, outlineSources, outlineFloor, wideBusy, wideRefused, slowLoading: slowDisplayKeys.size > 0 });
+                return (
+                  <span data-hint-stage={h.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: h.strong ? 600 : 400 }}>
+                    <SelectParcelsHintIcon kind={h.icon} />
+                    <span>{h.text}</span>
+                  </span>
+                );
+              })()}
             </div>
           </FloatingNotice>
         )}
