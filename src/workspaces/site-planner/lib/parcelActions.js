@@ -67,7 +67,8 @@ export const PARCEL_GROUPS = [
  *   Land tab entirely; it and Combine live here only now)
  *   remove-by-clicking ... the Parcel tool's own banner (Draw / Remove) — NOT a menu row any more:
  *   the owner dropped "Remove parcels — click to delete" from this menu (2026-10-11); Delete parcel
- *   on a selected parcel is the menu's way to remove one. `startRemoveParcels` and the banner stay.
+ *   on a selected parcel is the menu's way to remove one. The Parcel tool's Remove click-to-delete sub-mode (and
+ *   `startRemoveParcels`) were RETIRED 2026-10-22 (NEW-1): every delete is the one `deleteParcels`, with an Undo toast.
  * That list is PROSE on purpose: it is provenance with no runtime consumer, and shipping it as
  * string data cost real bytes in the Site route's bundle for nothing. `test/parcelActions.test.js`
  * states the gesture-only set itself and asserts each member has a row.
@@ -113,7 +114,7 @@ const NEEDS_SELECTION = ["lock", "active", "chip", "chipReset", "setbacks", "del
  *   canDelete        a parcel exists to delete (defaults to `!!selected`; the render site also
  *                    passes true for a plan's only lot, which Delete has always reached unselected)
  *   tool             the live tool id
- *   parcelMode       "add" | "remove" (the Parcel tool's sub-mode)
+ *   parcelMode       always "add" now (the Remove sub-mode was retired 2026-10-22); kept so a caller may omit it
  *   mergePick        click-to-pick merge mode is armed
  *   boundaryEdit     boundary-editing mode is armed
  * @returns {Array<{id,label,rows,reason,header?}>} groups in add → edit → this parcel → delete order;

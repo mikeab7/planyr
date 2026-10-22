@@ -67,7 +67,7 @@ describe("every entry point opens the parcel's PAGE (source guards)", () => {
   it("the list row, the Parcel tools row and the right-click menu all go through it", () => {
     expect(src).toMatch(/onOpenPage: \(id\) => \{ openParcelPage\(id\); \}/);
     expect(src).toMatch(/setbacks: \(\) => \{ if \(selPc\) openParcelPage\(selPc\.id\);/);
-    expect(src).toMatch(/data-testid="parcel-menu-properties"[^\n]*openParcelPage\(id\)/);
+    expect(src).toMatch(/what === "properties"[^\n]*openParcelPage\(id\)/); // the ONE parcel menu (NEW-1, 2026-10-22): testid parcel-menu-properties is built by ParcelContextMenu
   });
   it("the Parcel tools row says what it opens", () => {
     const row = PARCEL_ACTIONS.find((a) => a.id === "setbacks");

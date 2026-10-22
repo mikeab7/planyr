@@ -1,17 +1,16 @@
 /**
- * Verify B598 — the Parcel tool's exit + in-tool remove (owner asks).
+ * Verify B598 — the Parcel tool's exit (owner ask), as amended by NEW-1 (2026-10-22).
  *
- * Owner: "on the add parcels tool … it's not intuitive how to exit it, I'd also like to be able
- * to remove parcels with that tool." So the Parcel tool now shows a persistent banner with a
- * Draw/Remove mode switch + an explicit Done exit, stays active after a draw (so several lots draw
- * in a row), and in Remove mode a click deletes the parcel under the cursor.
+ * Owner: "on the add parcels tool … it's not intuitive how to exit it." So the Parcel tool shows a persistent
+ * banner with an explicit Done exit, and stays active after a draw (so several lots draw in a row).
+ * B598 also gave it a Remove (click-to-delete) sub-mode; that mode was RETIRED 2026-10-22 — every parcel delete is
+ * now the one `deleteParcels` (parcel menu / Delete key / checked bar, each with an Undo toast), proven by
+ * ui-audit/verify-parcel-delete-flow.mjs. This harness now proves the mode is GONE.
  *
  * Checks (logged-out, headless — this is pure client UI, no auth needed):
- *   1. Entering the Parcel tool shows the banner with Draw / Remove / Done controls.
+ *   1. Entering the Parcel tool shows the banner with a Done control and NO Remove control.
  *   2. Done exits back to Select (banner gone) — the discoverable exit.
- *   3. Remove mode: clicking a parcel deletes it; the persisted model loses it AND tombstones it
- *      (so it can't be resurrected on reload/merge and never trips the thin-clobber guard).
- *   4. Re-entering the tool starts in Draw mode (never a stale Remove).
+ *   3. Clicking an existing parcel inside the tool deletes nothing (no click-to-delete).
  *
  * Run:  npm run build && npx vite preview --host  (on :4173), then
  *       node ui-audit/verify-b598-parcel-tool.mjs
@@ -79,10 +78,9 @@ async function run() {
   // 1. Banner with Draw / Remove / Done.
   const bannerControls = await page.evaluate(() => {
     const txt = (re) => [...document.querySelectorAll("button")].some((b) => re.test((b.textContent || "").trim()));
-    return { draw: txt(/Draw$/), remove: txt(/✕ Remove/), done: txt(/^Done$/) };
+    return { remove: txt(/Remove/), done: txt(/^Done$/) };
   });
-  expect("1. Parcel tool banner shows a Draw button", bannerControls.draw);
-  expect("1. Parcel tool banner shows a Remove button", bannerControls.remove);
+  expect("1. Parcel tool banner has NO Remove (click-to-delete) button", !bannerControls.remove);
   expect("1. Parcel tool banner shows a Done (exit) button", bannerControls.done);
 
   // 2. Done exits to Select — the banner disappears.
@@ -91,14 +89,7 @@ async function run() {
   const doneGone = !(await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => /^Done$/.test((b.textContent || "").trim()))));
   expect("2. Done exits the tool (banner gone)", doneGone);
 
-  // 4. Re-entering starts in Draw mode (Draw pill pressed, Remove not).
   await enterParcelTool();
-  const modeState = await page.evaluate(() => {
-    const find = (re) => [...document.querySelectorAll("button")].find((b) => re.test((b.textContent || "").trim()));
-    const draw = find(/Draw$/), rem = find(/✕ Remove/);
-    return { drawPressed: draw && draw.getAttribute("aria-pressed") === "true", removePressed: rem && rem.getAttribute("aria-pressed") === "true" };
-  });
-  expect("4. Re-entering the tool starts in Draw mode", modeState.drawPressed && !modeState.removePressed);
 
   // 5. Draw a parcel (4 clicks + Enter to close) → it's added AND the tool stays active (the
   // exit-behavior fix: previously closing auto-switched to Select). Clicks land as boundary points
@@ -114,11 +105,9 @@ async function run() {
   expect("5. the Parcel tool STAYS active after closing a parcel (banner present)",
     await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => /^Done$/.test((b.textContent || "").trim()))));
 
-  // 3. Remove mode: switch, then click a parcel interior → it deletes + tombstones.
+  // 3. Clicking an existing parcel inside the tool must NOT delete it (the Remove mode is retired).
   const before = await persisted(page);
   console.log("  before:", JSON.stringify(before));
-  await page.getByRole("button", { name: /✕ Remove/ }).click();
-  await page.waitForTimeout(250);
   // Interior point of parcel index 0 (centroid biased toward its rightmost vertex), in screen px.
   const interiorPoint = (i) => page.evaluate((idx) => {
     const svgEl = document.querySelector('svg[aria-label="Site plan canvas"]');
@@ -140,11 +129,8 @@ async function run() {
 
   const after = await persisted(page);
   console.log("  after:", JSON.stringify(after));
-  expect("3. Remove mode deleted one parcel (3 → 2)", after && before && after.parcels.length === before.parcels.length - 1);
-  expect("3. the removed parcel is tombstoned (in deletedIds)",
-    after && before && after.deletedIds.length === before.deletedIds.length + 1 &&
-    before.parcels.some((id) => !after.parcels.includes(id) && after.deletedIds.includes(id)));
-  expect("3. still in the Parcel tool after removing (banner present)",
+  expect("3. a click on an existing parcel in the Parcel tool deletes nothing (3 stays 3)", after && before && after.parcels.length === before.parcels.length);
+  expect("3. still in the Parcel tool after the click (banner present)",
     await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => /^Done$/.test((b.textContent || "").trim()))));
 
   await ctx.close();

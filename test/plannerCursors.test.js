@@ -83,13 +83,13 @@ describe("root + body rules", () => {
     expect(canvasRootCursor({ ...base, identifyMode: true })).toBe("ADD");
     expect(canvasRootCursor({ ...base, spacePan: true })).toBe("grab");
   });
-  it("a lot's body pans outside Edit parcels (grab, never move); inside Edit a free lot moves, a locked one still pans; remove has its own cursor", () => {
+  it("a lot's body pans outside Edit parcels (grab, never move); inside Edit a free lot moves, a locked one still pans; the Remove mode (and its cursor) is retired", () => {
     expect(parcelBodyCursor({ tool: "select", editingCorners: false, locked: false })).toBe("grab");
     expect(parcelBodyCursor({ tool: "select", editingCorners: false, locked: true })).toBe("grab");
     expect(parcelBodyCursor({ tool: "select", editingCorners: true, locked: false })).toBe("move");
     expect(parcelBodyCursor({ tool: "select", editingCorners: true, locked: true })).toBe("grab");
     expect(parcelBodyCursor({ tool: "select", editingCorners: true, addPoint: true, addCursor: "ADD" })).toBe("ADD");
-    expect(parcelBodyCursor({ tool: "parcel", parcelMode: "remove", removeCursor: "REMOVE" })).toBe("REMOVE");
+    expect(parcelBodyCursor({ tool: "parcel" })).toBe("crosshair"); // Draw is an armed mode like any other; "remove" no longer exists
     expect(parcelBodyCursor({ tool: "road" })).toBe("crosshair");
   });
   it("a locked thing is never move; an armed mode is crosshair; disabled is default and busy is progress", () => {
@@ -111,8 +111,8 @@ describe("the drag pin and the stylesheet", () => {
     unpinDragCursor(doc); expect(dragCursorPinned()).toBeNull(); expect(doc._nodes.size).toBe(0);
   });
   it("the stylesheet covers the armed modes, the Map's inherited cursor, hover-only layers, disabled and native controls", () => {
-    const css = plannerCursorCss({ add: "A", remove: "R" });
-    for (const frag of ['data-cursor-mode="armed"', "crosshair !important", 'data-cursor-mode="identify"', "cursor: A !important", 'data-cursor-mode="remove"', "cursor: R !important",
+    const css = plannerCursorCss({ add: "A" });
+    for (const frag of ['data-cursor-mode="armed"', "crosshair !important", 'data-cursor-mode="identify"', "cursor: A !important",
       "[data-cursor-owned]", ".pf-hover-only", "button:disabled", 'input[type="checkbox"]']) expect(css).toContain(frag);
     expect(css).toMatch(/button:disabled[^{]*\{ cursor: default !important/);
     const doc = fakeDoc(); installPlannerCursorStyle({}, doc); installPlannerCursorStyle({}, doc);
