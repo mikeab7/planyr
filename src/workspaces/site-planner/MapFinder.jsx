@@ -3739,7 +3739,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
        * (never a silent no-op, never a geocoder guess at a number); an address or place never reaches this branch (`looksLikeTnParcelId`). */
       if (looksLikeTnParcelId(q)) {
         const { resolveParcelId, parcelIdMessage } = await import("./lib/parcelIdSearch.js");
-        const r = await resolveParcelId(q);
+        const mc = mapRef.current ? mapRef.current.getCenter() : null; // an id repeated across counties lands on the one nearest the map
+        const r = await resolveParcelId(q, { near: mc ? { lat: mc.lat, lng: mc.lng } : null });
         if (tok !== addrTokRef.current) return;
         if (r.status === "found") {
           mapRef.current.flyTo([r.point.lat, r.point.lng], 18, { duration: 0.75 });

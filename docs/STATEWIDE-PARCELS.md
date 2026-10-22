@@ -3074,8 +3074,140 @@ KYTC availability shown for each (stale 1993-era attribution; it has been wrong 
 - **Montgomery** — the City of Clarksville's web maps (`Finance Viewer` c0584cce…, `CityProperties`, `Clarksville Fire Rescue Viewer`) read parcels from `gis.mcgtn.org` (county) and from the City's own org (`Parcels_num`, `Parcels_Test`). The planning commission's org (`cmcrpc`) holds zoning and subdivisions, not parcels.
 - **Hickman** (not in scope; tripped over) — CaptureCAMA's TWO hosts list different folders: `gis.capturecama.com` has only `ChesterTN` for Tennessee, `maps.capturecama.com` has `Hickman` and `MontTN` (plus Alabama / Florida / NC / Washington counties). Both are on the relay allow-list; always list BOTH.
 - **Knox** — not re-searched (out of scope, stays locked: `kgis.org`'s REST directory answers 401).
-Hosts added to the relay allow-list for the search and then removed because nothing wired to them: `pwgis.chattanooga.gov`, `gis.mcgtn.org`. Kept: `mapsdev.hamiltontn.gov`. Id search (`TN_ID_SOURCES`) was NOT extended: Williamson's, Hamilton's, Montgomery's and Hickman's ids are space-padded fixed-width strings in each county's own shape (`078    11000 00009078`, `057F B 003`, `066F K 00100 000`), not the dashed control-map form `parseControlMapId` rebuilds — typing one into a county's own ID box does a substring match on the stored text, and the Site search box reads address text for them, as it does for Shelby and Chester.
+Hosts added to the relay allow-list for the search and then removed because nothing wired to them: `pwgis.chattanooga.gov`, `gis.mcgtn.org`. Kept: `mapsdev.hamiltontn.gov`. **[AMENDED 2026-10-22 — SUPERSEDED: `TN_ID_SOURCES` now covers all 95 counties; see "Tennessee — all 95 counties swept" below.]** Id search (`TN_ID_SOURCES`) was NOT extended: Williamson's, Hamilton's, Montgomery's and Hickman's ids are space-padded fixed-width strings in each county's own shape (`078    11000 00009078`, `057F B 003`, `066F K 00100 000`), not the dashed control-map form `parseControlMapId` rebuilds — typing one into a county's own ID box does a substring match on the stored text, and the Site search box reads address text for them, as it does for Shelby and Chester.
 
-**Id search.** The Site search box used to be address-only. Text that reads as a Tennessee parcel id (`lib/tnParcelId.js`: control map [+ letter] · group · parcel · special interest; any spacing, dots, dashes or none; a leading "Parcel ID:" / "APN" / "#" is dropped) is looked up on the counties' own layers before the geocoder is asked (`lib/parcelIdSearch.js`). An 11-digit number is both a valid control-map id and a valid Metro STANPAR, so both counties are asked, never guessed between. The outcomes are typed: found (lands on the lot, selected, a point inside it), not found (a sentence naming the counties asked), couldn't check (a county did not answer — never "doesn't exist"). The in-planner per-county ID lookup normalises through the same parser for any county declaring `idNormalizer: "tn-control"`. Shelby's and Chester's id formats are county-specific and are not read yet (their address search and click path are unchanged).
+**Id search.** The Site search box used to be address-only. Text that reads as a Tennessee parcel id (`lib/tnParcelId.js`: control map [+ letter] · group · parcel · special interest; any spacing, dots, dashes or none; a leading "Parcel ID:" / "APN" / "#" is dropped) is looked up on the counties' own layers before the geocoder is asked (`lib/parcelIdSearch.js`). An 11-digit number is both a valid control-map id and a valid Metro STANPAR, so both counties are asked, never guessed between. The outcomes are typed: found (lands on the lot, selected, a point inside it), not found (a sentence naming the counties asked), couldn't check (a county did not answer — never "doesn't exist"). The in-planner per-county ID lookup normalises through the same parser for any county declaring `idNormalizer: "tn-control"`. Shelby's and Chester's id formats are county-specific and are not read yet (their address search and click path are unchanged). **[AMENDED 2026-10-22 (B2420945): read now — every county's displayed id, see the 95-county section below.]**
 
 **Address snap.** A geocoded address that lands in the road no longer dead-ends where the county layer carries a situs column: `lib/addressSnap.js` asks that county's layer for the lot whose house number AND street first word match, within 300 m of the point, exactly one match; anything else leaves the card as it was.
+
+
+## Tennessee — all 95 counties swept: click, outlines, id search (2026-10-22, B2420944–B2420946)
+
+**Why.** Michael sends real Tennessee sites to coworkers, so every county has to work — not the handful that were spot-checked. Before this pass the 86 Comptroller counties had never been exercised one by one, and parcel-id search only knew Davidson and Rutherford.
+
+**How it is measured (repeatable).** `node ui-audit/sweep-tn-counties.mjs` (engine `ui-audit/lib/tnCountySweep.mjs`) asks the app's OWN modules, at HEAD, about two real lots in each county — one near the middle and one in its densest named place, each chosen INSIDE the county by the bundled polygons (`test/fixtures/tnSweepPoints.json`):
+- **A — click.** `candidateCountiesForPoint` → `identifyWithLineFallback` → `queryAtPoint` (the exact Select-parcels click), then the card's own readers (`idAttrFor`, `countyRecord`): the expected source answers with parcel id, owner and acreage.
+- **B — outlines.** `displaySourcesForView` (which layer the outline layer draws) at `max(16, displayMinZoomOf)`, then the same 512-px-cell envelope queries esri-leaflet issues over a 1280×800 view, with the real wire form (hosted FeatureServer → `f=geojson`) and feature keying (`ensureFeatureIds`). Fails on: a failed cell, fewer than 2 distinct lots held, the clicked lot not held, a cell over the server's record cap (silent truncation), a cell slower than the outline layer's 8 s hang-guard.
+- **C — id search.** the id A returned, fed to `resolveParcelId` three ways: map over the county, county named first (`Anderson <id>`), map elsewhere (informational — a control-map number repeats across counties).
+- **VOID rule.** Davidson and Rutherford (recorded passes) are the control arms; the CLI exits 2, not 0, if either fails. The instrument was shown to see the defects it reports: on `origin/main` (e11d8e1) the same sweep passes **1 of 95** (Knox, the honest gap) — 94 fail C, Shelby also B — and the pre-#2490 build reproduces the Rutherford "962 features, no id, held 1" collapse.
+- A first sweep of rural middle-of-county lots alone found only the known Rutherford defect; the **town lots found the real ones** (Shelby's record cap, Davidson/Williamson ids with letters) — a rural lot cannot show a cap or a lettered condo id.
+
+**Result at this branch: 95 of 95 pass A, B and C** (Knox passes as its named gap). Live on planyr.io: see the V-entries on the ledger.
+
+**What was wrong, and fixed (NEW-2).**
+| Defect | Where | Fix |
+|---|---|---|
+| Parcel-id search read only Davidson (11 digits) and Rutherford (dashed). The id every other card shows — the Comptroller's `001 073    17102 000 2026`, Williamson/Hickman/Chester's padded `104    01308 00005104`, Hamilton's `066  018`, Montgomery's `090 00203 000`, Shelby's `072124 A00048` — fell through to the geocoder. 94 of 95 counties. | `lib/tnParcelId.js`, `lib/parcelIdSearch.js`, `lib/parcelQuery.js lookupParcelsWhere` | One parser for the assessor's fixed-width control-map link (map · letters · group · 5-digit parcel); per-source where-clauses (Comptroller `CMAP`/`PARCEL`, the CAMA family's link column anchored at the map, Shelby's `PAID`); every plausible source asked in parallel, never guessed between; an id that repeats across counties lands on the one nearest the map and names the others ("also in …"); a county named first (`Anderson 073 171.02`) narrows to that county; one retry of a silent source (the state layer's first, cold answer measured 5–6 s against the 8 s limit). The in-planner per-county ID box got `idNormalizer` `tn-link` / `tn-hamilton` / `tn-shelby` for Williamson, Montgomery, Hickman, Chester, Hamilton, Shelby. |
+| Metro's lettered condo numbers (`082140A11800CO`) and Williamson's condo tails (`063J D 00100C00109063J`), Rutherford's two-letter map letters (`091NB-C-008.00-000`) were not ids. | same | `davidsonLetteredId`; tail form with a letter; `parseControlMapId` accepts up to four letters. |
+| **Shelby outlines silently truncated in Memphis.** The server caps an answer at 1,000; the outline layer asks one request per 512-px cell and does not page. Measured over the whole county on the exact Leaflet cell grid (`ui-audit/scan-outline-density.mjs`): **18 of 1,911 zoom-16 cells exceed 1,000 (busiest 1,411)**; at zoom 17 the busiest holds 533. | `counties.js` `tn_shelby.displayMinZoom` | outline floor 17 (the Davidson precedent). |
+| **Hamilton outlines truncated at one cell.** Pass 2 recorded "busiest zoom-16 cell 884 of 1,000"; the exact grid has one cell at **1,066** (East Ridge / Brainerd) and one at 999. At zoom 17 the busiest holds 523. | `counties.js` `tn_hamilton.displayMinZoom` | outline floor 17. |
+| Rutherford drew ONE lot's outline. | B2416496 (#2490, merged) | not re-done; the sweep now guards it (B fails on any source whose features come back id-less and collapse). |
+
+Pinned by `test/tnSweepRouting.test.js` (the 95-county list and each county's routing at both lots, offline — a county can no longer silently drop out), `test/tnIdRoundTrip.test.js` (the real id of every county's lots, replayed through the search: 375 of 378 fail on main), `test/tnIdForms.test.js`, `test/tnOutlineDensity.test.js` (floor × measured busiest cell < record cap; fails for Shelby and Hamilton on main).
+
+**Outline density, measured (exact grid).** Busiest 512-px cell / server cap — Shelby z16 1,411 / 1,000 (z17 533) · Hamilton z16 1,066 / 1,000 (z17 523) · Hickman z16 852 / 1,000 · Montgomery z16 891 / 1,000 · Williamson z16 899 / 2,000 · Rutherford z16 1,000 / 2,000 · Chester z16 553 / 2,000 · Davidson z17 1,078 / 2,000 · Comptroller statewide: 16 city cores scanned on a 3×3 grid, max 880 / 2,000 (Jackson), and the densest named place of each of the 86 counties max 800. The statewide scan is a sample, not an exhaustive grid: its margin is 2.3×.
+
+**Field notes per source (172 statewide lots, 18 own-source lots).** Owner filled on every lot of every source. Parcel id filled on every lot. Acreage: the card shows the ring's MEASURED acreage (always), so it is never blank; the Comptroller's `DEEDAC` (the assessor's deeded acres) is carried by the layer but is 0 on most lots and is not read as the card's "Acreage" row (`acreageKey` has no `deedac` pattern) — left as is, not a defect. Situs address: filled everywhere except Rutherford's middle lot (`STREETADDRESS` blank on that record). The 9 counties the Comptroller holds as "non-state systems" are the 8 own sources + Knox.
+
+**Knox — re-checked, properly (2026-10-22). Still a named, locked gap.** The honest sentence (`Knox County — no parcel data wired here yet.`) shows on a click, not the road card (pinned in `tnSweepRouting`). What was looked at: (1) ArcGIS Online search, titles/tags/snippets for "Knox County Tennessee parcels", "Knoxville parcels", "KGIS parcels", "Knox County Property Assessor parcels", "Knoxville Knox County GIS", × Feature Service / Map Service / Web Map — 72 items, none a Knox parcel polygon layer: the City of Knoxville org's "City Parcels" is a 379-hexagon EV-analysis layer (`FinalHexOutput`, no parcel attributes); the rest are zoning, future-land-use, UTK class projects, snow routes. (2) The `KGIS Parcel Drafter` web map has no operational layers and its basemap is KGIS's cached tile service (`www.kgis.org/arcgis/rest/services/Maps_Cached/KGISBaseMap`) — a picture. (3) KGIS's own services republished through ArcGIS (`utility.arcgis.com/usrsvcs/servers/…/Knox_County_Basemap`, `KnoxBoundaries`) answer **403 GWM_0003** to an anonymous request. (4) `kgis.org`'s REST directory answers 401 (credentials; pass 2, 2026-10-21) — a key Planyr must not replay. (5) CaptureCAMA's two hosts list no Knox folder (gis: BarbourAL, BullockAL, ChesterTN, DallasAL, ElmoreAL, MaconAL, MobileAL, YakimaWA; maps: Hickman, MontTN, Chester, Shelby(AL) and Alabama/Florida/NC/Wake/Yakima counties). (6) The Comptroller's layer holds no Knox row (county id 47 absent). The remaining routes are paid (KGIS data subscription, Regrid) or credentialed. Closure condition: a token-free Knox/KGIS parcel service, or the owner's decision to licence KGIS data.
+
+### The 95-county table (A click · B outlines · C id search · both recorded lots)
+"gap" = the named "no parcel data wired here yet" state. `Lots tested` shows the parcel id the card displayed at the middle lot, then the densest named place.
+
+| County | Source | A click | B outlines | C id search | Lots tested | Note |
+|---|---|---|---|---|---|---|
+| Anderson | tn_statewide | pass | pass | pass | 001 073 17102 000 2026 · Norris: 001 031C B 00800 000 2026 |  |
+| Bedford | tn_statewide | pass | pass | pass | 002 069 05604 000 2027 · Shelbyville: 002 089A C 00101 000 2027 |  |
+| Benton | tn_statewide | pass | pass | pass | 003 072 00600 000 2027 · Camden: 003 078F G 00507 000 2027 |  |
+| Bledsoe | tn_statewide | pass | pass | pass | 004 082 00483 000 2026 · Pikeville: 004 055 01305 000 2026 |  |
+| Blount | tn_statewide | pass | pass | pass | 005 104 00100 000 2027 · Alcoa: 005 036M C 01800 000 2027 |  |
+| Bradley | tn_statewide | pass | pass | pass | 006 050B A 01400 000 2027 · Cleveland: 006 065E F 01608 000 2027 |  |
+| Campbell | tn_statewide | pass | pass | pass | 007 085O A 07200 000 2026 · Jacksboro: 007 109L A 01400 000 2026 |  |
+| Cannon | tn_statewide | pass | pass | pass | 008 047 01001 000 2026 · Woodbury: 008 046 10601 000 2026 |  |
+| Carroll | tn_statewide | pass | pass | pass | 009 084 08502 000 2026 · Huntingdon: 009 073E Q 00500 000 2026 |  |
+| Carter | tn_statewide | pass | pass | pass | 010 059 02700 000 2026 · Elizabethton: 010 041E A 01300 000 2026 |  |
+| Cheatham | tn_statewide | pass | pass | pass | 011 055 00101 000 2026 · Pleasant View: 011 020 02101 000 2026 |  |
+| Chester | tn_chester | pass | pass | pass | 012045 05501 · Jacks Creek: 012024 02301 |  |
+| Claiborne | tn_statewide | pass | pass | pass | 013 080 03200 000 2026 · New Tazewell: 013 095G C 02700 000 2026 |  |
+| Clay | tn_statewide | pass | pass | pass | 014 066 02610 000 2026 · Celina: 014 056B F 00200 000 2026 |  |
+| Cocke | tn_statewide | pass | pass | pass | 015 058 06600 000 2027 · Newport: 015 056H F 00700 000 2027 |  |
+| Coffee | tn_statewide | pass | pass | pass | 016 067 09500 000 2026 · Tullahoma: 016 124O K 01000 000 2026 |  |
+| Crockett | tn_statewide | pass | pass | pass | 017 035 02800 000 2026 · Maury City: 017 044F A 00500 000 2026 |  |
+| Cumberland | tn_statewide | pass | pass | pass | 018 101 04602 000 2026 · Crossville: 018 113D B 00900 000 2026 |  |
+| Davidson | tn_davidson | pass | pass | pass | 08202008200 · Nashville: 082140A11800CO |  |
+| Decatur | tn_statewide | pass | pass | pass | 020 057 02524 000 2026 · Parsons: 020 048 00101 000 2026 |  |
+| DeKalb | tn_statewide | pass | pass | pass | 021 055 01705 000 2026 · Alexandria: 021 022I A 01504 001 2026 |  |
+| Dickson | tn_statewide | pass | pass | pass | 022 075 02306 000 2026 · Dickson: 022 103 11902 000 2026 |  |
+| Dyer | tn_statewide | pass | pass | pass | 023 087 10410 000 2027 · Dyersburg: 023 088K J 02100 000 2027 |  |
+| Fayette | tn_statewide | pass | pass | pass | 024 098 00603 000 2027 · La Grange: 024 175F A 00701 000 2027 |  |
+| Fentress | tn_statewide | pass | pass | pass | 025 096 00300 000 2026 · Jamestown: 025 063G A 03100 000 2026 |  |
+| Franklin | tn_statewide | pass | pass | pass | 026 075D F 00500 000 2026 · Winchester: 026 065N O 00700 000 2026 |  |
+| Gibson | tn_statewide | pass | pass | pass | 027 083 05500 000 2027 · Milan: 027 123J F 01401 000 2027 |  |
+| Giles | tn_statewide | pass | pass | pass | 028 077 03200 000 2026 · Pulaski: 028 087 05200 000 2026 |  |
+| Grainger | tn_statewide | pass | pass | pass | 029 068 03504 000 2027 · Bean Station: 029 033 03505 000 2027 |  |
+| Greene | tn_statewide | pass | pass | pass | 030 098H A 00500 000 2027 · Greeneville: 030 098L A 01301 000 2027 |  |
+| Grundy | tn_statewide | pass | pass | pass | 031 054 07400 000 2026 · Tracy City: 031 094 09600 000 2026 |  |
+| Hamblen | tn_statewide | pass | pass | pass | 032 025O B 00500 000 2026 · Morristown: 032 042 00200 000 2026 |  |
+| Hamilton | tn_hamilton | pass | pass | pass | 066 018 · Chattanooga: 128P D 012 |  |
+| Hancock | tn_statewide | pass | pass | pass | 034 054 04403 000 2026 · Sneedville: 034 044 03401 000 2026 |  |
+| Hardeman | tn_statewide | pass | pass | pass | 035 090 08901 000 2026 · Bolivar: 035 080L A 00800 000 2026 |  |
+| Hardin | tn_statewide | pass | pass | pass | 036 082 12802 000 2026 · Savannah: 036 091 03600 000 2026 |  |
+| Hawkins | tn_statewide | pass | pass | pass | 037 102 02104 000 2026 · Mount Carmel: 037 022A C 00700 000 2026 |  |
+| Haywood | tn_statewide | pass | pass | pass | 038 066 01010 000 2026 · Brownsville: 038 066L B 02000 000 2026 |  |
+| Henderson | tn_statewide | pass | pass | pass | 039 091 07600 000 2026 · Lexington: 039 082I F 01100 000 2026 |  |
+| Henry | tn_statewide | pass | pass | pass | 040 094J A 00300 000 2027 · Paris: 040 106B E 02400 000 2027 |  |
+| Hickman | tn_hickman | pass | pass | pass | 096 01301 00001096 · Bon Aqua: 016 05801 00005016 |  |
+| Houston | tn_statewide | pass | pass | pass | 042 040 00911 000 2026 · Erin: 042 029 06600 000 2026 |  |
+| Humphreys | tn_statewide | pass | pass | pass | 043 084 02001 000 2027 · Mc Ewen: 043 042 06805 000 2027 |  |
+| Jackson | tn_statewide | pass | pass | pass | 044 044 06700 000 2026 · Gainesboro: 044 060 01100 000 2026 |  |
+| Jefferson | tn_statewide | pass | pass | pass | 045 057J A 17400 000 2027 · Jefferson City: 045 024 01301 000 2027 |  |
+| Johnson | tn_statewide | pass | pass | pass | 046 054 08604 000 2027 · Mountain City: 046 047 09900 000 2027 |  |
+| Knox | (none) | gap | gap | gap |  | Knox County — no parcel data wired here yet. |
+| Lake | tn_statewide | pass | pass | pass | 048 042 00102 000 2027 · Ridgely: 048 057K F 00200 000 2027 |  |
+| Lauderdale | tn_statewide | pass | pass | pass | 049 079 04500 000 2027 · Ripley: 049 076I A 00104 000 2027 |  |
+| Lawrence | tn_statewide | pass | pass | pass | 050 088 00105 000 2027 · Saint Joseph: 050 169 02700 000 2027 |  |
+| Lewis | tn_statewide | pass | pass | pass | 051 043 03000 000 2026 · Hohenwald: 051 041E C 00500 000 2026 |  |
+| Lincoln | tn_statewide | pass | pass | pass | 052 057 02012 000 2027 · Fayetteville: 052 079E C 01500 000 2027 |  |
+| Loudon | tn_statewide | pass | pass | pass | 053 032D A 02400 000 2027 · Loudon: 053 041 05200 000 2027 |  |
+| Macon | tn_statewide | pass | pass | pass | 056 050 06800 000 2027 · Red Boiling Springs: 056 046O A 00200 000 2027 |  |
+| Madison | tn_statewide | pass | pass | pass | 057 077N A 04400 000 2026 · Jackson: 057 078P E 00700 000 2026 |  |
+| Marion | tn_statewide | pass | pass | pass | 058 072 00901 000 2026 · Monteagle: 058 022L A 00800 000 2026 |  |
+| Marshall | tn_statewide | pass | pass | pass | 059 051 12300 000 2026 · Lewisburg: 059 064G B 04901 000 2026 |  |
+| Maury | tn_statewide | pass | pass | pass | 060 076 07900 000 2026 · Columbia: 060 099A J 07300 000 2026 |  |
+| McMinn | tn_statewide | pass | pass | pass | 054 056 12300 000 2026 · Etowah: 054 107O D 02500 000 2026 |  |
+| McNairy | tn_statewide | pass | pass | pass | 055 079 00300 000 2026 · Selmer: 055 089F B 01800 000 2026 |  |
+| Meigs | tn_statewide | pass | pass | pass | 061 042 00700 000 2026 · Birchwood: 061 081 00205 000 2026 |  |
+| Monroe | tn_statewide | pass | pass | pass | 062 106 02343 000 2027 · Madisonville: 062 079D A 00301 000 2027 |  |
+| Montgomery | tn_montgomery | pass | pass | pass | 090 00203 000 · Clarksville: 066G E 00600 000 |  |
+| Moore | tn_statewide | pass | pass | pass | 064 031L D 01700 000 2027 · Lynchburg: 064 031 02100 000 2027 |  |
+| Morgan | tn_statewide | pass | pass | pass | 065 085 01902 000 2026 · Coalfield: 065 142B B 00900 000 2026 |  |
+| Obion | tn_statewide | pass | pass | pass | 066 093 01800 000 2026 · Troy: 066 093G F 00400 000 2026 |  |
+| Overton | tn_statewide | pass | pass | pass | 067 064 02502 000 2027 · Livingston: 067 054B B 01100 000 2027 |  |
+| Perry | tn_statewide | pass | pass | pass | 068 066 00401 000 2026 · Linden: 068 084 00501 000 2026 |  |
+| Pickett | tn_statewide | pass | pass | pass | 069 046 02201 000 2027 · Byrdstown: 069 023L C 00300 000 2027 |  |
+| Polk | tn_statewide | pass | pass | pass | 070 058 05401 000 2026 · Ducktown: 070 115C C 00701 000 2026 |  |
+| Putnam | tn_statewide | pass | pass | pass | 071 052 05404 000 2027 · Cookeville: 071 040N E 00100 000 2027 |  |
+| Rhea | tn_statewide | pass | pass | pass | 072 047 00501 000 2027 · Dayton: 072 089E D 03000 000 2027 |  |
+| Roane | tn_statewide | pass | pass | pass | 073 068 00601 000 2026 · Rockwood: 073 054M B 03800 000 2026 |  |
+| Robertson | tn_statewide | pass | pass | pass | 074 081 12400 000 2026 · White House: 074 106 19300 000 2026 |  |
+| Rutherford | tn_rutherford | pass | pass | pass | 091A-B-015.00-000 · Murfreesboro: 091NB-C-008.00-000 |  |
+| Scott | tn_statewide | pass | pass | pass | 076 095 00308 000 2027 · Oneida: 076 051 05501 000 2027 |  |
+| Sequatchie | tn_statewide | pass | pass | pass | 077 048 03000 000 2026 · Dunlap: 077 040 05425 000 2026 |  |
+| Sevier | tn_statewide | pass | pass | pass | 078 084 11102 000 2027 · Seymour: 078 045N A 04100 000 2027 |  |
+| Shelby | tn_shelby | pass | pass | pass | 072124 A00048 · Memphis: 031053 00016 |  |
+| Smith | tn_statewide | pass | pass | pass | 080 046M B 03202 000 2026 · Carthage: 080 053C C 00400 000 2026 |  |
+| Stewart | tn_statewide | pass | pass | pass | 081 073 02000 000 2026 · Big Rock: 081 043 03101 000 2026 |  |
+| Sullivan | tn_statewide | pass | pass | pass | 082 082 03900 000 2026 · Kingsport: 082 046I F 01000 000 2026 |  |
+| Sumner | tn_statewide | pass | pass | pass | 083 092 03503 000 2026 · Gallatin: 083 126C N 02000 000 2026 |  |
+| Tipton | tn_statewide | pass | pass | pass | 084 067 00300 000 2026 · Covington: 084 041G D 00700 000 2026 |  |
+| Trousdale | tn_statewide | pass | pass | pass | 085 020 02200 000 2026 · Hartsville: 085 019O A 01200 000 2026 |  |
+| Unicoi | tn_statewide | pass | pass | pass | 086 046 00700 000 2026 · Erwin: 086 031F B 01800 000 2026 |  |
+| Union | tn_statewide | pass | pass | pass | 087 041 02800 000 2026 · Maynardville: 087 064 04207 000 2026 |  |
+| Van Buren | tn_statewide | pass | pass | pass | 088 047 00500 000 2027 · Spencer: 088 038 02600 000 2027 |  |
+| Warren | tn_statewide | pass | pass | pass | 089 068D F 01800 000 2027 · Mc Minnville: 089 059J B 08100 000 2027 |  |
+| Washington | tn_statewide | pass | pass | pass | 090 067 05800 000 2027 · Johnson City: 090 054C J 03000 000 2027 |  |
+| Wayne | tn_statewide | pass | pass | pass | 091 107 00301 000 2026 · Waynesboro: 091 077 02002 000 2026 |  |
+| Weakley | tn_statewide | pass | pass | pass | 092 101 07200 000 2026 · Martin: 092 073M C 00300 000 2026 |  |
+| White | tn_statewide | pass | pass | pass | 093 049 01900 000 2027 · Sparta: 093 041L D 00900 000 2027 |  |
+| Williamson | tn_williamson | pass | pass | pass | 104 01308 00005104 · Franklin: 063J D 00100C00109063J |  |
+| Wilson | tn_statewide | pass | pass | pass | 095 092 04205 000 2026 · Lebanon: 095 068C E 02001 000 2026 |  |
