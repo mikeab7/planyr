@@ -7,25 +7,32 @@
  *   D  a Texas address still selects a Harris lot (known-good control for C)
  *   E  Select parcels over the I-24 / Epps Mill Rd interchange (z18): the Rutherford layer HOLDS AND DRAWS every lot in view — it held ONE on ff7be38,
  *      because the county server answers GeoJSON with no feature id (B2409408 root cause)   (RED on ff7be38)
+ *   G  NEW-4: open ? seven times (Escape between) then press "Something was slow just now": the row says it is a LIMIT that frees ("Snapshot limit reached …
+ *      free again in N min"), never "try again in a moment" (that was the copy on ff7be38)
  *   F  canvas census at this window's pixel ratio: no full-window canvas holds pixels at a parcel zoom, parcel tile canvases that are blank hold none
  * Every row records /version.json IN THE SAME CALL (merged ≠ live). The throwaway plan C creates is deleted in `finally`. Exit 0 = all passed · 1 = a row failed · 2 = VOID.
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-work-laptop-live.mjs [https://planyr.io] [--out f.json] [--shots dir] */
 import { writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openLaptop, LAPTOP } from "./lib/workLaptopRig.mjs";
 import { cleanupLive } from "./lib/liveFixtures.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { swallowReportWrites } from "./lib/reportCleanup.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 
 const args = process.argv.slice(2);
 const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const OUT = flag("--out") || "work-laptop-live.json";
-const SHOTS = flag("--shots") || "ui-audit/screenshots/work-laptop";
+const SHOTS = flag("--shots") || join(tmpdir(), "work-laptop-shots"); // full-resolution PNGs at this pixel ratio are ~10 MB each: never default into the repo
 mkdirSync(SHOTS, { recursive: true });
 
 const s = await openLaptop({ base: BASE });
 const page = s.page;
 await assertMeasurable(page, "verify-work-laptop-live");
+/* arm G presses "Something was slow just now" (NEW-4) — the UI copy is what is asserted, so report inserts are answered locally and never reach the live table (B2159505; the cleanup RPC is not deployed, so a real row could not be removed) */
+await swallowReportWrites(page.context());
 console.log(`signed in as ${s.proof.email} · window ${LAPTOP.width}x${LAPTOP.height} @${LAPTOP.deviceScaleFactor} · base ${BASE}`);
 const sleep = (ms) => page.waitForTimeout(ms);
 const stamp = () => page.evaluate(async () => { const v = await fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null); return v && v.build; });
@@ -110,6 +117,19 @@ try {
       return { dpr: devicePixelRatio, canvases: all.length, totalMB: +mb(all).toFixed(1), fullWindowMB: +mb(full).toFixed(1), tiles: tiles.length, blankTilesHoldingPixels: blankHolding };
     });
     await record({ name: "F no blank canvas holds pixels at a parcel zoom (238.6 MB / 47 canvases on ff7be38)", control: false, pass: c.fullWindowMB < 1 && c.blankTilesHoldingPixels === 0, detail: JSON.stringify(c) });
+  }
+
+  /* G — NEW-4, signed in: the 7th press says it is a limit that ends */
+  {
+    await freshMap();
+    await page.waitForFunction(() => !!window.pfRec, null, { timeout: 30000 });
+    const fab = page.locator('[data-testid="help-report-fab"]');
+    for (let i = 0; i < 6; i++) { await fab.click(); await sleep(300); await page.keyboard.press("Escape"); await sleep(500); }
+    await fab.click(); await sleep(400);
+    const row = page.locator('[data-testid="report-slow"]'); await row.click(); await sleep(600);
+    const txt = (await row.innerText()).trim(); const note = await row.getAttribute("data-slow-note");
+    await page.keyboard.press("Escape");
+    await record({ name: "G the 7th \"Something was slow just now\" press says it is a limit that frees, not 'try again in a moment'", pass: /limit/i.test(txt) && /\bmin\b/i.test(txt) && !/try again in a moment/i.test(txt) && note === "limit", detail: `row reads: "${txt}" (data-slow-note=${note})` });
   }
 
   /* C — Miller Ln */

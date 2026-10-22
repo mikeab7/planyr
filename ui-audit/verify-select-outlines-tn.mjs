@@ -16,7 +16,7 @@ const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log
 let browser = null, closeSigned = null, newPage;
 if (LIVE) {
   const { openSignedIn } = await import("./lib/signedInSession.mjs");
-  const s = await openSignedIn({ base: LIVE.replace(/\/$/, ""), initScripts: ["window.__PLANYR_E2E = true;"] });
+  const s = await openSignedIn({ base: LIVE.replace(/\/$/, ""), initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
   closeSigned = s.close; console.log("signed in:", s.proof, "build:", s.build);
   const ver = await s.page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null));
   console.log("version.json:", JSON.stringify(ver));
@@ -25,13 +25,23 @@ if (LIVE) {
   browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
   newPage = async () => { const p = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage(); await p.addInitScript(() => { window.__PLANYR_E2E = true; }); return p; };
 }
+let done = 0;
 for (const [name, lat, lng, z, minLots] of CASES) {
   const page = await newPage();
+  if (LIVE && done++) await page.reload({ waitUntil: "domcontentloaded" }); // one signed-in page is reused; a reload leaves Select mode of the previous case
   await assertMeasurable(page, "verify-select-outlines-tn");
-  await page.goto(BASE.replace(/\/$/, "") + "/#/map", { waitUntil: "domcontentloaded" });
+  if (!(await page.evaluate(() => !!window.__mapFinderMap))) await page.goto(BASE.replace(/\/$/, "") + "/#/map", { waitUntil: "domcontentloaded" }); // a signed-in session already lands on the Map home
   await page.waitForFunction(() => !!window.__mapFinderMap, null, { timeout: 45000 });
-  await page.evaluate(([la, ln, zz]) => window.__mapFinderMap.setView([la, ln], zz, { animate: false }), [lat, lng, z]);
-  await page.waitForTimeout(800);
+  /* A signed-in map LANDS on the user's own sites once its cloud list arrives (landingView.js) and that move overrides a view set a moment
+   * earlier (measured: the test account's Houston sites pulled a Tennessee view back to Houston at zoom 10, mounting Houston sources and no
+   * Rutherford request). So set the view, let any landing finish, and only go on when the view STUCK. */
+  let stuck = false;
+  for (let i = 0; i < 6 && !stuck; i++) {
+    await page.evaluate(([la, ln, zz]) => window.__mapFinderMap.setView([la, ln], zz, { animate: false }), [lat, lng, z]);
+    await page.waitForTimeout(2500);
+    stuck = await page.evaluate(([la, ln, zz]) => { const m = window.__mapFinderMap, c = m.getCenter(); return Math.abs(c.lat - la) < 0.01 && Math.abs(c.lng - ln) < 0.01 && m.getZoom() === zz; }, [lat, lng, z]);
+  }
+  expect(`${name}: the view is where the case needs it`, stuck);
   const sel = page.locator('[data-testid="map-toolbar-select-parcels"]').first();
   await sel.click();
   let held = 0; const t0 = Date.now();

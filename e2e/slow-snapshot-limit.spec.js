@@ -14,6 +14,8 @@ async function closeMenu(page) { await page.keyboard.press("Escape"); await expe
 
 test.describe("Something was slow — snapshot limit", () => {
   test.beforeEach(async ({ page }) => {
+    // the press files a "slow" report; answer it locally so a run against a deploy never writes to the live problem_reports table
+    await page.route("**/rest/v1/problem_reports*", (route) => route.fulfill({ status: 201, contentType: "application/json", body: "" }));
     await page.addInitScript(() => { window.__PLANYR_PERFREC = { budgetWindowMs: 6000 }; });
     await page.goto("/?planyrDiag=1#/site");
     await page.waitForFunction(() => !!window.pfRec, null, { timeout: 30000 });
