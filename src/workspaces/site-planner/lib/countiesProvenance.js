@@ -686,6 +686,18 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-10-21",
     verifiedNote: "VERIFIED LIVE from this sandbox: ParcelsCAMA1 FeatureServer layer 0 ('New parcel layer with up to date CAMA data 10/21/2026'), 123,298 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Extract, maxRecordCount 2000, token-free, COUNTY = 075. ParcelID 156-027.00-000 → RHODES DEVELOPMENT COMPANY, 8.75 deeded ac, CITY CHRISTIANA; ParcelID 156-002.01-000 → RHODES DEVELOPMENT COMPANY, 37.00 ac. A second copy, 'Parcel Data' layer 1 (org A5C0MR9xfkxVRwat, published by the City of Murfreesboro GIS manager, 123,256 lots), carries the identical schema and was NOT used — the county's own org is the primary. Outline floor 16: the busiest zoom-16 cell (Murfreesboro) holds 597 lots.",
   },
+  tn_williamson: {
+    publisher: "own",
+    publisherName: "Williamson County, TN government GIS (AGOL org hkhKI6Qq7rjvBjZU, portal williamsontn.maps.arcgis.com)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "VERIFIED LIVE from this sandbox: Parcels FeatureServer layer 0 ('Parcels that display on the online county map', item owner Adam.Rehn_williamsontn, public), 107,811 parcel polygons, esriGeometryPolygon, WKID 3857, Query only, maxRecordCount 2000, token-free, edited 2026-10-15, COUNTY = 094. Five points across the county (Franklin Public Square, Nolensville, Fairview, Thompson's Station, rural Bethesda) each returned PARCEL_ID + OWNER_1 + ADDRESS. Pass 1's 'only the City of Franklin and a stale upload' was a title search that never reached the county's own org. The Comptroller's statewide layer holds 0 Williamson rows (county id 94 absent). Outline floor 16: the busiest zoom-16 512-px cell holds 663 lots.",
+  },
+  tn_hickman: {
+    publisher: "own",
+    publisherName: "Hickman County, TN — Assessor of Property (CaptureCAMA, maps.capturecama.com)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: Hickman/HickmanTN05182023 MapServer layer 9 'Parcels', Map/Query/Data, 18,549 parcels, maxRecordCount 1000, token-free, COUNTY_ID 41. The service is the assessor's 2023-05-18 publish, not a live feed. Centerville Public Square → PARCELID 107L B 00100 00001107L / HICKMAN COUNTY / PUBLIC SQUARE. The Comptroller's layer holds 0 Hickman rows (county id 41 absent). Outline floor 16 (the MapServer floor): the busiest zoom-16 512-px cell (Centerville) holds 334 lots; zoom 14 holds 1,002 against the 1,000 cap.",
+  },
   mo_platte: {
     publisher: "third-party",
     publisherName: "City of Parkville (republishes Platte County tax parcels)",

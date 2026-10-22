@@ -2248,6 +2248,32 @@ const COUNTIES_RAW = {
     idField: "ParcelID", pinIdField: true, addrField: "STREETADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control",
     help: "Rutherford County GIS parcels (CAMA-linked) — covers Murfreesboro, Smyrna, La Vergne, Eagleville, Christiana and the rest of the county. Search by parcel ID (e.g. 156-027.00-000) or a site address.",
   },
+  /* NEW-2 (Tennessee pass 2, B2408834, 2026-10-22) — WILLIAMSON COUNTY, TN (Franklin, Brentwood, Spring Hill), on Williamson County government's OWN ArcGIS Online
+   * org (portal williamsontn.maps.arcgis.com, services8 org hkhKI6Qq7rjvBjZU): the `Parcels` FeatureServer — "Parcels that display on the online county map" — token-free, Query
+   * only, maxRecordCount 2000, 107,811 parcels, WKID 3857, edited 2026-10-15. Pass 1 recorded Williamson as a gap because a county-name search surfaced only the City of Franklin's
+   * UGB parcels and a stale third-party upload; the county's own org is owned by a county GIS staff account whose items carry no county name in their titles. The Comptroller's
+   * statewide layer holds ZERO Williamson rows (county id 94 is absent from its 86). MEASURED 2026-10-22: Franklin Public Square → '078    11000 00009078' CITY OF FRANKLIN;
+   * Nolensville Rd 7306 → '056M A 03800 00017056M'; Fairview, Thompsons Station and rural Bethesda each answer with owner + situs. The id column is the Tennessee control-map id in
+   * the assessor's fixed-width form (map + group + parcel + special interest); PIN carries the same text. `AC` is the DEEDED acreage and is 0 on most small lots, so the card's
+   * acreage is the measured one from the ring. Outline floor 16: the busiest 512-px cell at zoom 16 (Harpeth / Legends Ridge) holds 663 lots, Franklin downtown 638. */
+  tn_williamson: {
+    state: "TN", label: "Williamson County, TN",
+    layerUrl: "https://services8.arcgis.com/hkhKI6Qq7rjvBjZU/arcgis/rest/services/Parcels/FeatureServer/0",
+    idField: "PARCEL_ID", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, displayMinZoom: 16,
+    help: "Williamson County government parcels (county GIS) — covers Franklin, Brentwood, Spring Hill, Nolensville, Fairview, Thompson's Station and the rest of the county. Search by a site address or the assessor's parcel ID.",
+  },
+  /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — HICKMAN COUNTY, TN (Centerville), on the Hickman County ASSESSOR's CaptureCAMA publish: `Hickman/HickmanTN05182023` MapServer
+   * layer 9 "Parcels" on maps.capturecama.com (the same CaptureCAMA family as Chester, on its sibling host). Pass 1 said "nothing found" — it had looked at AGOL and the Comptroller's
+   * viewer index, not at CaptureCAMA's folder listing, where a `Hickman` folder sits beside `Chester`. Map/Query/Data, 18,549 parcels, maxRecordCount 1000, token-free, WKID 3857, with
+   * owner, situs, assessor acres and appraisal fields. The service name is dated 2023-05-18, so it is the assessor's 2023 publish, not a live feed (disclosed in
+   * docs/STATEWIDE-PARCELS.md). MEASURED through the deployed relay 2026-10-22: Centerville Public Square → '107L B 00100 00001107L', HICKMAN COUNTY, PUBLIC SQUARE. The Comptroller's layer
+   * holds ZERO Hickman rows (county id 41 is absent). Outline floor 16 (a MapServer's own floor, `mapServerOutlineFloor`): the busiest 512-px cell at zoom 16 (Centerville) holds 334 lots against the 1,000 cap; zoom 14 holds 1,002. */
+  tn_hickman: {
+    state: "TN", label: "Hickman County, TN",
+    layerUrl: "/gis-proxy/maps.capturecama.com/arcgis/rest/services/Hickman/HickmanTN05182023/MapServer/9",
+    idField: "PARCELID", pinIdField: true, addrField: "PROPADDR", pinAddrField: true,
+    help: "Hickman County Assessor parcels (CaptureCAMA, 2023 publish) — covers Centerville, Lyles, Nunnelly and the rest of the county. Search by parcel ID or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -3326,6 +3352,16 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [35.84, -86.42], zoom: 10,
     bbox: [35.60, -86.72, 36.12, -86.12], displayMinZoom: 16,
     mapServer: null, layerUrl: COUNTIES.tn_rutherford.layerUrl,
+  },
+  tn_williamson: {
+    state: "TN", center: [35.86, -86.90], zoom: 10,
+    bbox: [35.64, -87.26, 36.10, -86.55], displayMinZoom: 16,
+    mapServer: null, layerUrl: COUNTIES.tn_williamson.layerUrl,
+  },
+  tn_hickman: {
+    state: "TN", center: [35.80, -87.47], zoom: 10,
+    bbox: [35.56, -87.79, 36.04, -87.16],
+    mapServer: null, layerUrl: COUNTIES.tn_hickman.layerUrl,
   },
 };
 

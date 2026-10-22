@@ -28,8 +28,8 @@ const TN_BY_ID = ["Anderson", "Bedford", "Benton", "Bledsoe", "Blount", "Bradley
 const present = new Set(CT.counties.map((c) => c.id));
 const NINE = TN_BY_ID.filter((_, i) => !present.has(i + 1));
 
-const HAVE_SOURCE = ["Chester", "Davidson", "Rutherford", "Shelby"];
-const NAMED_GAPS = { Williamson: [35.90, -86.80], Hamilton: [35.045, -85.31], Knox: [35.96, -83.92], Montgomery: [36.53, -87.36], Hickman: [35.77, -87.46] };
+const HAVE_SOURCE = ["Chester", "Davidson", "Hickman", "Rutherford", "Shelby", "Williamson"];
+const NAMED_GAPS = { Hamilton: [35.045, -85.31], Knox: [35.96, -83.92], Montgomery: [36.53, -87.36] };
 
 describe("the nine counties the Comptroller's layer does not hold", () => {
   it("the fixture is the real per-county count: 86 counties present, the names line up with the layer's own", () => {
@@ -109,7 +109,7 @@ describe("Rutherford County — Rhodes Development's two parcels", () => {
   });
 });
 
-describe("the five with no public county source say so by name — and never borrow the empty composite", () => {
+describe("the counties with no usable public source say so by name — and never borrow the empty composite", () => {
   it.each(Object.entries(NAMED_GAPS))("%s County", (name, [lat, lng]) => {
     const id = countyIdentity(lat, lng);
     expect(id.name).toBe(`${name} County`);
