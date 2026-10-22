@@ -110,6 +110,21 @@ let _gapMarks = [];                  // [tAtRestart, gapMs] — where the frame 
 let _lastFrameT = 0;                 // wall position of the last recorded frame, for gap sizing
 let _selfUs = 0;                     // measured per-frame cost of THIS recorder, µs (bench only)
 
+/* NEW-1/NEW-3 (2026-10-22, work-laptop report) — ENVIRONMENT MARKS: what happened to the PAGE around a capture, as opposed to
+ * what the app did. A 22.5 s hole appeared in a capture — no frames, and NO counter sample for 24 s — with no long task
+ * covering it, and the recorder could not say whether the tab was hidden, the timers were throttled/frozen, or the main thread
+ * was stalled by something that is not a task. The frame hole alone is NOT evidence of a stall (the frame loop is gated on
+ * input, so a quiet minute leaves one by design); the COUNTER timer is not input-gated, so its silence is. These marks make the
+ * difference readable: [t, ENV_HIDDEN|ENV_VISIBLE] visibility changes · [t, ENV_RESIZE, dpr×100, innerWidth] a window or
+ * pixel-ratio change (moving to another monitor, browser zoom) · [t, ENV_TIMER_LATE, gapMs, visibleAtFire] the counter timer
+ * firing more than three periods late (visibleAtFire 0 = a hidden tab's throttled timer; 1 = visible and still late = the page
+ * itself was not running). Bounded, written only on an event — never per frame. */
+export const ENV_HIDDEN = 1, ENV_VISIBLE = 2, ENV_RESIZE = 3, ENV_TIMER_LATE = 4;
+const ENV_MAX = 24;
+let _envMarks = [];                  // [t, code, a, b]
+let _lastEnvSize = "";               // "dpr|w|h" last recorded, so a resize storm records only real changes
+let _lastTickAt = 0;                 // when the counter timer last FIRED (visible or not)
+
 const now = () => { try { return _win.performance.now(); } catch (_) { return 0; } };
 
 /* ── the hot path ───────────────────────────────────────────────────────────────────────────
@@ -170,8 +185,47 @@ function noteActivity() {
 }
 
 /* ── periodic counters ──────────────────────────────────────────────────────────────────────── */
+function envMark(code, a, b) {
+  const t = now();
+  _envMarks.push([t, code, a || 0, b || 0]);
+  if (_envMarks.length > ENV_MAX) _envMarks.shift();
+}
+
+function envSize() {
+  try {
+    const key = `${_win.devicePixelRatio}|${_win.innerWidth}|${_win.innerHeight}`;
+    if (key === _lastEnvSize) return;
+    const first = _lastEnvSize === "";
+    _lastEnvSize = key;
+    if (!first) envMark(ENV_RESIZE, Math.round(_win.devicePixelRatio * 100), _win.innerWidth);
+  } catch (_) { /* ignore */ }
+}
+
+/* The DOM's own answer to "is the header there?" at capture time — see perfCapture's hdrH/hdrHit. Read-only, never throws. */
+function headerProbe() {
+  const out = { hdrH: 0, hdrHit: 0, hasFocus: 0 };
+  try {
+    const d = _win.document;
+    out.hasFocus = d.hasFocus() ? 1 : 0;
+    const h = Array.from(d.querySelectorAll("header")).find((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+    if (h) {
+      const r = h.getBoundingClientRect();
+      out.hdrH = Math.round(r.height);
+      const top = d.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      out.hdrHit = top && (top === h || h.contains(top)) ? 1 : 0;
+    }
+  } catch (_) { /* ignore */ }
+  return out;
+}
+
 function counterTick() {
   try {
+    const fired = now();
+    if (_lastTickAt && fired - _lastTickAt > _cfg.counterMs * 3) {
+      envMark(ENV_TIMER_LATE, fired - _lastTickAt, _win.document && _win.document.visibilityState === "visible" ? 1 : 0);
+    }
+    _lastTickAt = fired;
+    envSize();
     if (_win.document && _win.document.visibilityState !== "visible") return;
     const t = now();
     _tick++;
@@ -354,6 +408,8 @@ export function capture(reason) {
       deviceMemoryGB: safeNum(() => _win.navigator.deviceMemory),
       recorderSelfUs: _selfUs || undefined,
       counterSamples: counters.length,
+      ...headerProbe(),
+      envMarks: _envMarks.filter((m) => m[0] >= since).map((m) => [m[0] - since, m[1], m[2], m[3]]),
       frameDeltas: deltas,
       gaps,
       tasks,
@@ -501,8 +557,10 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
    * frame back is treated as the start of a new one and its enormous delta is dropped. */
   try {
     win.document.addEventListener("visibilitychange", () => {
+      envMark(win.document.visibilityState === "visible" ? ENV_VISIBLE : ENV_HIDDEN);
       if (win.document.visibilityState !== "visible") { _activeUntil = 0; _prevFrameT = 0; }
     }, { passive: true });
+    win.addEventListener("resize", envSize, { passive: true });
   } catch (_) { /* ignore */ }
 
   bindPerfRecorder((reason) => capture(reason));
@@ -515,6 +573,7 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
       state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, undelivered: _undelivered, suppressed: _suppressed, running: _running }),
       delivery: () => _lastDelivery,
       captures: () => _captures.slice(),
+      env: () => _envMarks.map((m) => m.slice()),   // NEW-1/NEW-3 — the environment marks, for a console read and for the guard
       capture: (reason) => capture(reason),
       config: () => ({ ..._cfg, trigger: { ..._trig.cfg } }),
       __benchFrame: (n) => benchFrame(n),
@@ -549,7 +608,7 @@ export function __resetPerfRecorder(win) {
   _frames = _tasks = _counters = _strings = _trig = _scratch = null;
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
   _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
-  _sent = 0; _manual = 0; _captures = []; _gapMarks = []; _selfUs = 0;
+  _sent = 0; _manual = 0; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0;
   _lastDelivery = null; _undelivered = 0; _suppressed = 0;
   bindPerfRecorder(null);
   bindPerfDelivery(null);

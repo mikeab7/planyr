@@ -185,6 +185,9 @@ function QuestionIcon() {
 }
 
 const rowStyle = { display: "flex", alignItems: "center", gap: 9 };
+// NEW-2 (2026-10-22) — the Report and Help views are taller than the menu; in a window too short for them the popover scrolls
+// inside itself, and their action row (Back / Send) sticks to the panel's bottom edge so it is always reachable.
+const STICKY_FOOT = { display: "flex", gap: 8, justifyContent: "flex-end", position: "sticky", bottom: 0, background: "var(--surface-raised)", paddingTop: 4 };
 
 export default function HelpReportControl({ user }) {
   const anchorRef = useRef(null);
@@ -485,8 +488,8 @@ export default function HelpReportControl({ user }) {
                 Nothing from your drawing (no shapes, addresses, or names) — only this screen, the app version, and your window size.
               </div>
             </details>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setView("menu")} style={{ border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
+            <div style={STICKY_FOOT}>
+              <button type="button" data-testid="report-back" onClick={() => setView("menu")} style={{ border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
               <button
                 type="button"
                 onClick={submitProblem}
@@ -520,7 +523,9 @@ export default function HelpReportControl({ user }) {
             <p style={{ margin: 0 }}>
               Press <kbd>?</kbd> anywhere in the app to see every keyboard shortcut it has.
             </p>
-            <button type="button" onClick={() => setView("menu")} style={{ alignSelf: "flex-end", border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
+            <div style={STICKY_FOOT}>
+              <button type="button" data-testid="help-back" onClick={() => setView("menu")} style={{ border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
+            </div>
           </div>
         )}
       </AnchoredMenu>

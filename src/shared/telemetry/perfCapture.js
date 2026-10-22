@@ -58,6 +58,12 @@ export const CAPTURE_NUMERIC_KEYS = [
   "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
   "ppf", "editsSinceLoad", "planSwitches", "dpr", "viewportW", "viewportH", "hardwareThreads",
   "deviceMemoryGB", "recorderSelfUs", "counterSamples", "sentRows",
+  /* NEW-1/NEW-3 (2026-10-22, work-laptop report) — "is the page's own DOM sound while the picture is wrong?". `hdrH` is the
+   * header's laid-out height in CSS px (0 = no header box in the DOM at all), `hdrHit` is 1 when the topmost element at the
+   * header's centre belongs to the header (0 = something else covers it), `hasFocus` is 1 when the document has focus.
+   * A press on "Something was slow" while the header paints as a dark band reads hdrH>0, hdrHit=1 — which says the app's
+   * DOM is intact and the fault is in painting, not in app logic. */
+  "hdrH", "hdrHit", "hasFocus",
   /* NEW-2 (B1317824) — the SUPPLEMENT rows' own facts (see encodeSupplements): how many continuation
    * rows this capture sent, which one this is, how many of its series it carries, and where its
    * frame chunk starts in the full track. Present only on a capture the one-row budget could not hold. */
@@ -227,6 +233,9 @@ export function buildCapture(parts) {
   num("deviceMemoryGB", p.deviceMemoryGB, 1);
   num("recorderSelfUs", p.recorderSelfUs, 2);
   num("counterSamples", p.counterSamples);
+  num("hdrH", p.hdrH);
+  num("hdrHit", p.hdrHit);
+  num("hasFocus", p.hasFocus);
   num("suppRows", p.suppRows);   // NEW-2 (B1317824) — set by the recorder AFTER it has built the supplements
 
   /* Series. Arrays of NUMBERS only — never of records, never of strings except the interned
@@ -237,6 +246,10 @@ export function buildCapture(parts) {
   cap.ltNames = Array.isArray(p.taskNames) ? p.taskNames.map(sanitizeAttribution) : [];
   cap.c = Array.isArray(p.counters) ? p.counters.map((row) => row.map((x) => (Number.isFinite(x) ? r2(x) : null))) : [];
   cap.cCols = Array.isArray(p.counterColumns) ? p.counterColumns.slice() : [];
+  /* NEW-1/NEW-3 — environment marks inside the window, [ms into the window, code, a, b] (perfRecorder.ENV_*): the page going
+   * hidden/visible, the window or pixel ratio changing, and the timer that drives the counters running LATE. Absent when
+   * nothing happened — a quiet window carries no key. */
+  if (Array.isArray(p.envMarks) && p.envMarks.length) cap.em = p.envMarks.map((m) => m.map((x) => Math.round(x)));
 
   enu("note", NOTE_VOCAB.includes(p.note) ? p.note : "");
   if (cap.note === "") delete cap.note;
@@ -289,7 +302,7 @@ export function assertCaptureClean(cap) {
   const bad = [];
   const numeric = new Set(CAPTURE_NUMERIC_KEYS);
   const enums = new Set(CAPTURE_ENUM_KEYS);
-  const series = new Set(["f", "g", "lt", "ltNames", "c", "cCols"]);
+  const series = new Set(["f", "g", "lt", "ltNames", "c", "cCols", "em"]);
   for (const [k, v] of Object.entries(cap || {})) {
     if (numeric.has(k)) {
       if (typeof v !== "number" || !Number.isFinite(v)) bad.push(`${k}: not a finite number`);

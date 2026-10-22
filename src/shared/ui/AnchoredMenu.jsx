@@ -139,10 +139,22 @@ export default function AnchoredMenu({
       ro = new ResizeObserver(place);
       ro.observe(anchorRef.current);
     }
+    /* ⛔ NEW-2 (2026-10-22, work-laptop report "the question mark help button isn't even working") — THE PANEL'S OWN SIZE
+     * IS AN INPUT TO ITS PLACEMENT, and it was measured exactly once. A bottom-corner menu ("above-left") puts its TOP at
+     * `anchor.top − gap − menuH`; the Help control swaps a 164 px menu for a 366 px Help / report view in the same
+     * portal, so the top stayed where the short menu wanted it and the taller view hung 112 px below a 641 px window
+     * (measured at 1913×641 @2.68: panel bottom 753) — its Back button off-screen, which read as "Help does nothing".
+     * Re-place whenever the panel itself changes size, never only when the anchor or window does. */
+    let panelRo;
+    if (typeof ResizeObserver !== "undefined" && menuRef.current) {
+      panelRo = new ResizeObserver(place);
+      panelRo.observe(menuRef.current);
+    }
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
       ro?.disconnect();
+      panelRo?.disconnect();
     };
   }, [open, placement, gap, width, anchorRef]);
 
