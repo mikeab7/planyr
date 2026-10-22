@@ -1219,7 +1219,7 @@ export function createExportSheet(ctx) {
         releaseCanvas(canvas); // NEW-5 — a full-page sheet at print DPI; released once encoded
         const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
         const fileName = sheetFileName({ project: siteLabel, plan: planLabel }); // B201 — date · project · plan
-        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName, annotations: annotationSet ? annotationSet.annots : [] });
+        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName, annotations: annotationSet ? annotationSet.annots : [], viewport: annotationSet ? annotationSet.viewport : null });
         // LOUD-FAILURE: a markup that could not become a fully native annotation is still in the file (as a
         // look-alike) — but say so, never let it pass as a clean editable export.
         const simplified = annotationSet ? annotationSet.degraded.length - annotationsKeptInPage : 0; // pins are said below
