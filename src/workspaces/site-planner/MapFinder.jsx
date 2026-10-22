@@ -2864,6 +2864,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * "everything draws" / "only the larger lots" / "nothing yet"), and whether any source's wide tiles are backing off from a busy county server. */
   const [outlineSources, setOutlineSources] = useState([]);
   const [wideBusy, setWideBusy] = useState(false);
+  const [wideRefused, setWideRefused] = useState(false); // a tile the county REFUSED (not a busy server): part of the view has no outlines, and the hint says so
   const wideBusyRef = useRef({});
   const [outlineFloor, setOutlineFloor] = useState(PARCEL_MINZOOM); // NEW-2 — the zoom the outlines in THIS view start at (a dense statewide source declares a higher one)
   /* NEW-1 — the ONE gate every parcel outage / "slow" banner passes (see lib/parcelOutageGate.js): Select parcels is on,
@@ -2985,7 +2986,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // identifies via a live point query, never against what happened to be drawn.
     const fl = makeParcelDisplayLayer(url, { getObstacles: lotNumberObstacles, wide: true, snapshotCounty: CLIENT_SNAPSHOT_COUNTIES.includes(key) ? key : undefined });
     // NEW-1 (wide view) — a source whose wide-view tiles are backing off from a busy county server says so (the bottom hint), instead of a silently blank patch
-    fl.on("widestate", (st) => { wideBusyRef.current[key] = !!(st && st.busy); setWideBusy(Object.values(wideBusyRef.current).some(Boolean)); });
+    fl.on("widestate", (st) => { wideBusyRef.current[key] = { busy: !!(st && st.busy), error: !!(st && st.error) }; const all = Object.values(wideBusyRef.current); setWideBusy(all.some((x) => x.busy)); setWideRefused(all.some((x) => x.error)); });
     // B1427664 — NEW-3: `fl.addTo(map)` is deferred to the END of this function, after every
     // listener below is wired. `onAdd` (fired synchronously inside `addTo`) is what actually
     // KICKS OFF this layer's first request — a vector FeatureLayer's own metadata fetch fires
@@ -3220,7 +3221,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     });
     displaysRef.current = {};
     displaySrcRef.current = {};
-    wideBusyRef.current = {}; setWideBusy(false);
+    wideBusyRef.current = {}; setWideBusy(false); setWideRefused(false);
     retractSourceNotice(); // NEW-1 — the tool is off; a parcel-source banner must not outlive it
     sourceNoticeDismissedRef.current = false; // NEW-1 (amendment) — the session ended; a later outage is a new occasion
     // B1427664 — every layer is gone, so nothing is "still loading" until select mode reopens
@@ -5602,6 +5603,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 : outlineSources.length && outlineHoldForView(zoom, outlineSources) === "held"
                 ? (wideBusy
                   ? "The parcel server is busy — showing the lots already loaded. Click any lot to add it (＋)."
+                  : wideRefused
+                  ? "Showing larger lots, but part of this view could not be loaded. Click any lot to add it (＋)."
                   : "Showing larger lots. Zoom in for small lots and labels. Click any lot to add it (＋).")
                 : slowDisplayKeys.size > 0
                 ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."

@@ -4,6 +4,7 @@ import {
   wideTileRequest, areaFieldForUrl, outlineHoldForView, relayFallbackWanted, geodesicAreaM2, geoJsonAcres, okAreaField, relayAllows,
   WIDE_MIN_ACRES, MID_MIN_ACRES, MAX_TILES_PER_VIEW, AREA_UNITS,
 } from "../src/workspaces/site-planner/lib/parcelWideRequest.js";
+import { isTransientEsriStatus } from "../src/workspaces/site-planner/lib/parcelQueryWire.js";
 import { b64urlDecode } from "../src/shared/gis/gisProxyCore.js";
 import { areaFieldsReady } from "../src/workspaces/site-planner/lib/parcelAreaFieldsLazy.js";
 
@@ -199,6 +200,15 @@ describe("when a tile that failed through the relay is asked of the county direc
     expect(relayFallbackWanted("direct", fail({ status: 404 }))).toBe(false);
     expect(relayFallbackWanted("gis-proxy", fail({ status: 404 }))).toBe(false);
     expect(relayFallbackWanted("gis-cache", { ok: true })).toBe(false);
+  });
+});
+
+describe("which failures are retried", () => {
+  it("network failure, 408, 429, 499 and EVERY 5xx (Cloudflare's 524 included) back off and retry", () => {
+    for (const c of [0, 408, 429, 499, 500, 502, 503, 504, 520, 522, 524, 599]) expect(isTransientEsriStatus(c)).toBe(true);
+  });
+  it("a refused query (other 4xx) and a good answer are never retried", () => {
+    for (const c of [200, 301, 400, 401, 403, 404, 405, 410]) expect(isTransientEsriStatus(c)).toBe(false);
   });
 });
 

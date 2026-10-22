@@ -12,7 +12,7 @@
  * service is authenticating or not using CORS, when the kill switch is set (VITE_PARCEL_QUERY_WORKER=0), or — for the
  * rest of the session — once the worker has crashed. */
 import * as EL from "esri-leaflet";
-import { serializeEsriParams, needsPost, isArcgisOnline, readEsriBody, esriResponseToFeatures } from "./parcelQueryWire.js";
+import { serializeEsriParams, needsPost, isArcgisOnline, readEsriBody, esriResponseToFeatures, isTransientEsriStatus } from "./parcelQueryWire.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 function enabled() {
@@ -100,14 +100,13 @@ export function routeQueryThroughWorker(query) {
  * `cb({ ok, features, exceeded, status, transient, message })`; returns { abort() } that really cancels the fetch. A 429 / 5xx / network
  * failure / a 499-500-503 ArcGIS error body is `transient` (back off and retry); anything else is a refusal. With no Worker (or after a
  * crash) the same parse runs on the calling thread — the answer is small by construction (size-filtered, generalised, one tile). */
-const TRANSIENT_CODES = new Set([0, 408, 429, 499, 500, 502, 503, 504]);
 export function fetchEsriFeatures({ url, body, timeout = 30000 }, cb) {
   const abs = new URL(url, location.href).href;
   const finish = (error, status, features, meta) => {
     if (error) {
       const code = Number((error.error && error.error.code) || error.code || status || 0);
       const message = (error.error && error.error.message) || error.message || `HTTP ${status}`;
-      cb({ ok: false, status, transient: TRANSIENT_CODES.has(status === 200 || !status ? code : status), message, unparsable: /^Could not parse response/.test(message) });
+      cb({ ok: false, status, transient: isTransientEsriStatus(status === 200 || !status ? code : status), message, unparsable: /^Could not parse response/.test(message) });
       return;
     }
     cb({ ok: true, status, features, exceeded: !!(meta && meta.exceededTransferLimit) });
