@@ -37,7 +37,7 @@
  *
  * ⛔ TEETH — run against the pre-fix tree (revert the MapFinder.jsx hunk that adds
  * `slowDisplayKeys`/`markDisplaySlow`/the third tip line), step 1 fails: the tip stays on the
- * ordinary "Click a lot… Add several, then Plan." line for the whole hang, with no indication
+ * ordinary "Click lots to add or remove" line for the whole hang, with no indication
  * anything is still loading — the exact silence that was reported.
  *
  * Fully hermetic — no real network to any GIS host is needed or attempted. The statewide

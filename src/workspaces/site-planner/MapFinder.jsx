@@ -7,7 +7,8 @@ import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
-import { wideSupportedForUrl, outlineHoldForView } from "./lib/parcelWideRequest.js";
+import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
+import { selectParcelsHintFor } from "./lib/selectParcelsHint.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
@@ -184,8 +185,8 @@ const NO_SITES_MATCH_STYLE = { fontSize: 11.5, color: PAL.muted, padding: "10px 
 const COMP_ACCENT = "#2f6fb0";
 const ON_COMP_ACCENT = PALETTES.light.onAccent; // white — see the palette.js import above
 
-// The right-click map menu (B684) and the right-click comp-marker menu (B711329) share this one
-// panel style — a single module-scope literal rather than each JSX block carrying its own copy.
+// The right-click comp-marker menu (B711329) panel style — a module-scope literal (the empty-map menu that used to share
+// it, B684, was removed 2026-10-22).
 const COMP_MAP_MENU_PANEL_STYLE = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" };
 
 /* NEW-1 (2026-09-08) — the ON-MAP chips: a selection's acreage, and a dropped decide pin. These
@@ -523,6 +524,15 @@ const PinGlyph = ({ size = 12 }) => (
  * gap to the panel's RADIUS.lg=12 edge): a literal that already equals a token's pixel value still
  * drifts independently of it (docs/DESIGN.md's radius section, exception 3) — this ties it to the
  * panel it actually nests inside instead. */
+/* NEW-1 — the two glyphs of the Select-parcels bottom hint (selectParcelsHint.js names which): a magnifier with + (zoom in) and a
+ * pointer arrow (click). Tabler-style outline strokes in the current text colour. Module scope. */
+function SelectParcelsHintIcon({ kind }) {
+  const common = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, style: { flex: "none" } };
+  return kind === "zoom-in"
+    ? <svg {...common}><circle cx="10" cy="10" r="7" /><path d="M7 10h6M10 7v6M21 21l-6-6" /></svg>
+    : <svg {...common}><path d="M7.904 17.563a1.2 1.2 0 0 0 2.228 .308l2.09 -3.093l4.907 4.907a1.067 1.067 0 0 0 1.509 0l1.047 -1.047a1.067 1.067 0 0 0 0 -1.509l-4.907 -4.907l3.113 -2.09a1.2 1.2 0 0 0 -.309 -2.228l-13.582 -3.904l3.904 13.563z" /></svg>;
+}
+
 function RailTab({ label, count, active, onClick, title }) {
   return (
     <button type="button" role="tab" aria-selected={active} onClick={onClick} title={title} style={{
@@ -1358,7 +1368,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const setSitesSort = (sort) => patchSitesPanel({ sort });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [dateEditor, setDateEditor] = useState(null); // {site, x, y} — B1161793 (NEW-2) "Deal dates…" popover
-  const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [compMenu, setCompMenu] = useState(null);     // {comp, x, y} — right-click-on-a-comp-marker menu (KMZ site-record export) (B711329)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
   // B706 / NEW-2: always a STATE, never silence. `zoom` picks the lattice band the cursor
@@ -1465,13 +1474,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [statusMenu]);
-  // Escape also closes the right-click map (KMZ export) menu.
-  useEffect(() => {
-    if (!mapMenu) return;
-    const onKey = (e) => { if (e.key === "Escape") setMapMenu(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [mapMenu]);
   // Escape also closes the right-click comp-marker menu (site-record KMZ export, B711329).
   useEffect(() => {
     if (!compMenu) return;
@@ -1520,47 +1522,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [activeOverlayId]);
-  // Export the sites currently on the map — plus any selected parcels — to a Google Earth .kmz
-  // (B684). Each visible site becomes its own folder; its boundary + drawn layout are reprojected
-  // to WGS84 via the SAME feetToLatLng the map render uses (KML is lon,lat, so we flip [lat,lng]).
-  // Selected parcels are already lon/lat. Honors the status-chip filter. LOUD-FAILURE: siteToFeatures
-  // throws on a non-finite reprojection → caught, surfaced via setErr, no partial file written.
-  const exportSitesKmz = async (extrude = false) => {
-    setMapMenu(null);
-    try {
-      // B1042 — the KMZ writer loads only when a Google Earth export is actually asked for,
-      // so it never rides the planner's boot bundle. It is the one dependency here.
-      const { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } = await import("./lib/kmzExport.js");
-      const projectFor = (o) => (pt) => { const [la, ln] = feetToLatLng(pt, o.lat, o.lon); return [ln, la]; };
-      const features = [];
-      sites.forEach((site) => {
-        if (!site.origin) return;
-        // Dimension lines off. Dock doors always export, as one run per dock side — and neither
-        // is read off each saved site's own settings, so a multi-site file cannot vary with what
-        // someone happened to have shown on screen when they last saved plan #3.
-        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, includeDimensions: false, prefix: [site.site || site.name || "Site"] }));
-      });
-      selected.forEach((sp, i) => {
-        (sp.rings || []).forEach((ring) => {
-          if (!ring || ring.length < 3) return;
-          const closed = ring.map(([lon, lat]) => [lon, lat]);
-          const a = closed[0], b = closed[closed.length - 1];
-          if (a[0] !== b[0] || a[1] !== b[1]) closed.push([a[0], a[1]]);
-          features.push({ geom: "polygon", name: sp.addr || sp.acct || `Parcel ${i + 1}`, folder: ["Selected parcels"], rings: [closed], style: { line: "#0E7490", fill: "#0E7490", fillOpacity: 0.08 } });
-        });
-      });
-      if (!features.length) { setErr("Nothing to export yet — save a site or select a parcel first."); return; }
-      const blob = new Blob([buildKmz("Planyr sites", features)], { type: KMZ_MIME });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = kmzFilename("planyr-sites");
-      a.click();
-      URL.revokeObjectURL(a.href);
-    } catch (e) {
-      setErr(`Couldn't build the Google Earth file: ${(e && e.message) || "unexpected error"}.`);
-    }
-  };
-
   // A comp's county key -> "County, ST" (mirrors CompsPanel.jsx's own countyEntry/countyDisplayName
   // — kept as a small local copy rather than a cross-component import, same as that file's own
   // note on why this stays self-contained).
@@ -1994,22 +1955,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       });
     };
     const onCoordOut = () => { setHoverLL(null); contourHover(map, null); };
-    // Right-click on EMPTY map → the KMZ export menu (B684). A right-click ON a site keeps its own
-    // status menu: skip when the DOM target is an interactive site layer / marker, so the two never fight.
-    const onMapCtx = (e) => {
-      const oe = e.originalEvent;
-      if (oe && oe.target && oe.target.closest && oe.target.closest(".leaflet-interactive, .leaflet-marker-pane")) return;
-      if (oe) { oe.preventDefault(); oe.stopPropagation(); }
-      setStatusMenu(null);
-      setMapMenu({ x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
-    };
     map.on("click", onClick);
     map.on("zoomend", onZoom);
     map.on("moveend", onMove);
     map.on("mousemove", onMouseMove);
     map.on("mousemove", onCoordMove);
     map.on("mouseout", onCoordOut);
-    map.on("contextmenu", onMapCtx);
+    // Owner decision 2026-10-22 (B2380112): NO right-click menu on the EMPTY map — the Google Earth export that lived
+    // there (B684) is gone (the Site Planner's File ▾ is its one home), so the browser keeps its own right-click.
     map.on("dragstart", onDragStart);
     map.on("dragend", onDragEnd);
     // B64: track whether a pointer is currently pressed on the map, so the saved-site
@@ -2053,7 +2006,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -4676,22 +4629,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           }}>Notes couldn't load — {mapNotesErr}</div>
         )}
 
-        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684), and the
-            right-click-on-a-comp-marker menu → export that comp's owning SITE RECORD (B711329).
-            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge; the two menus
-            share one panel style (COMP_MAP_MENU_PANEL_STYLE) rather than each carrying its own
-            copy of the same shadow literal. */}
-        {mapMenu && (
-          <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={() => setMapMenu(null)} minWidth={236} zIndex={3999}
-            className="" ariaLabel="Map actions" panelStyle={COMP_MAP_MENU_PANEL_STYLE}>
-            <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
-            <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
-            <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
-          </ContextMenu>
-        )}
-
+        {/* Right-click-on-a-comp-marker menu → export that comp's owning SITE RECORD (B711329). There is NO
+            empty-map right-click menu any more (owner decision 2026-10-22, B2380112: the Google Earth export of
+            all sites that lived there, B684, was removed — the Site Planner's File ▾ is the one home).
+            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge. */}
         {compMenu && (
           <ContextMenu x={compMenu.x} y={compMenu.y} onClose={() => setCompMenu(null)} minWidth={236} zIndex={3999}
             className="" ariaLabel="Comp actions" panelStyle={COMP_MAP_MENU_PANEL_STYLE}>
@@ -5655,17 +5596,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   the statewide layer, which is never pulled on a hiccup and so never times out on
                   its own). Says so plainly instead of leaving a blank map that reads as "no data
                   here" while a click already works. */}
-              {(outlineSources.length ? outlineHoldForView(zoom, outlineSources) === "far" : zoom != null && zoom < outlineFloor)
-                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : outlineSources.length && outlineHoldForView(zoom, outlineSources) === "held"
-                ? (wideBusy
-                  ? "The parcel server is busy — showing the lots already loaded. Click any lot to add it (＋)."
-                  : wideRefused
-                  ? "Showing larger lots, but part of this view could not be loaded. Click any lot to add it (＋)."
-                  : "Showing larger lots. Zoom in for small lots and labels. Click any lot to add it (＋).")
-                : slowDisplayKeys.size > 0
-                ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."
-                : "Click a lot on the map to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+              {(() => {
+                const h = selectParcelsHintFor({ zoom, outlineSources, outlineFloor, wideBusy, wideRefused, slowLoading: slowDisplayKeys.size > 0 });
+                return (
+                  <span data-hint-stage={h.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: h.strong ? 600 : 400 }}>
+                    <SelectParcelsHintIcon kind={h.icon} />
+                    <span>{h.text}</span>
+                  </span>
+                );
+              })()}
             </div>
           </FloatingNotice>
         )}
