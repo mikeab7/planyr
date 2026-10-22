@@ -811,6 +811,119 @@ export const GIS_SOURCES = {
     fullPurposeOnly: true,
     lastVerified: "2026-10-02",
   },
+  /* NEW-1 (New Jersey + New York) — the NJ / NY counterparts of `county` / `countyCa`: county lines and municipal limits for
+   * the two states, each an OWN row with `states`, the Texas / Colorado / Georgia / California rows untouched. STATE AGENCY
+   * FIRST, MEASURED LIVE 2026-10-22 from the build sandbox (all four hosts ArcGIS-Online hosted, `access-control-allow-origin: *`,
+   * no key, so no relay is needed):
+   *   • NEW JERSEY — the NJ Office of GIS (NJOGIS, org XVOqAjTOJ5P6ngMu — the state's own AGOL org; `maps.nj.gov` itself is
+   *     egress-blocked here, and the hosted 3857 copies are the ones NJOGIS publishes for web maps). Counties: exactly 21
+   *     (data edited 2025-04-10); municipalities: exactly 564 — Borough 253 · Township 239 · City 53 · Town 15 · Village 4 — which
+   *     tile the WHOLE state (there is no unincorporated land). Two legal-name quirks, handled in `njnyJurisdiction.js`:
+   *     `NAME` is typed for boroughs / townships but not for cities / towns, and `GNIS_NAME` reads "Township of City of Orange"
+   *     for the City of Orange Township and carries no type for Princeton.
+   *   • NEW YORK — NYS ITS Geospatial Services' "NYS Civil Boundaries", through the official NYS GIS AGOL org (EbVsqZ18sv1kVJ3k, the
+   *     org that publishes NYS_Tax_Parcels_Public; `gisservices.its.ny.gov` is egress-blocked here). One FeatureServer, four layers
+   *     (March 2026 publication): Counties 62 (the five NYC boroughs flagged `NYC = 'Y'`) · Cities 62 (New York City is ONE
+   *     polygon) · Towns 933 · Villages 532 — a village sits inside a town (a few straddle two), so a village site is in TWO rows,
+   *     which is the fact the badge exists to state ("Village of Pleasantville · Town of Mount Pleasant"). `Counties` (not
+   *     `Counties_Shoreline`) is used: it runs out to the state line over water, so a shoreline or river site is not "outside".
+   * The roster the owner quoted for towns (932) is one short of the layer's 933. Measured: the extra polygon is the Town of Palm
+   * Tree (Orange County, 1.5 sq mi, 2020 population 32,954 — the Kiryas Joel area, a town created c. 2020), so the
+   * 932 figure most likely predates it; the registry records the layer's own number rather than assert the other.
+   * REJECTED, each measured: the personal-account / school-district / consultant republications of "Municipal Boundaries of NJ" in
+   * the AGOL search (Rutgers `kdd56_rutgers`, `sniemeyer@gpinet.com`, `equiroz_thtnj`, `zrittner_SPFSD`, …: third parties with no
+   * provenance and no edit guarantee); NJHMFA's `NJ_Municipalities` (a housing agency's copy). Census TIGERweb was not tried
+   * (tigerweb.geo.census.gov answers 403 at this sandbox's egress; the verify-before-you-wire rule forbids an unmeasured source).
+   * Point fixtures live 2026-10-22 — NJ: Newark → City of Newark (Essex) · Fort Lee → Borough of Fort Lee (Bergen) · Seaside
+   * Heights → Borough (Ocean) · Cape May → City of Cape May · Phillipsburg → Town of Phillipsburg (Warren) · Easton PA, Greenwich
+   * CT, Lockport IL → none. NY: Brooklyn / Manhattan / Staten Island / Bronx / Queens → New York City + Kings / New York / Richmond /
+   * Bronx / Queens · Pleasantville → Village of Pleasantville in Town of Mount Pleasant (Westchester) · Hempstead → Village of
+   * Hempstead in Town of Hempstead (Nassau); Levittown → Town of Hempstead alone · Buffalo (Erie) · Rochester (Monroe) · Plattsburgh
+   * (Clinton) · Saratoga Springs (Saratoga) → cities · Indian Lake (Hamilton) → Town of Indian Lake · Pearl River (Rockland) → Town
+   * of Orangetown · Montvale NJ, Greenwich CT, Lockport IL, Easton PA → none. */
+  countyNj: {
+    key: "countyNj",
+    label: "County boundaries (New Jersey)",
+    provider: "NJ Office of GIS (NJOGIS) — County Boundaries of NJ, hosted",
+    serviceUrl: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/NJ_Counties_3857/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "COUNTY", fips: "FIPSSTCO", full: "COUNTY_LABEL" },
+    coverage: "newjersey",
+    states: ["NJ"],
+    tier: "production",
+    lastVerified: "2026-10-22",
+  },
+  cityNj: {
+    key: "cityNj",
+    label: "Municipal boundaries (New Jersey)",
+    provider: "NJ Office of GIS (NJOGIS) — Municipal Boundaries of NJ, hosted",
+    serviceUrl: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/NJ_Municipalities_3857/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", type: "MUN_TYPE", fips: "CENSUS2020", gnis: "GNIS_NAME" },
+    coverage: "newjersey",
+    states: ["NJ"],
+    tier: "production",
+    // NEW-1 cityLimitClass rule: a NJ municipality has no limited-purpose or strip-annexation class — one polygon, one government.
+    fullPurposeOnly: true,
+    lastVerified: "2026-10-22",
+  },
+  countyNy: {
+    key: "countyNy",
+    label: "County boundaries (New York)",
+    provider: "NYS ITS Geospatial Services — NYS Civil Boundaries (counties)",
+    serviceUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Civil_Boundaries/FeatureServer/2",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", fips: "FIPS_CODE", nyc: "NYC" },
+    coverage: "newyork",
+    states: ["NY"],
+    tier: "production",
+    lastVerified: "2026-10-22",
+  },
+  cityNy: {
+    key: "cityNy",
+    label: "City limits (New York)",
+    provider: "NYS ITS Geospatial Services — NYS Civil Boundaries (cities)",
+    serviceUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Civil_Boundaries/FeatureServer/4",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", type: "MUNI_TYPE", fips: "FIPS_CODE" },
+    coverage: "newyork",
+    states: ["NY"],
+    tier: "production",
+    fullPurposeOnly: true, // New York cities have no limited-purpose / strip class
+    lastVerified: "2026-10-22",
+  },
+  townNy: {
+    key: "townNy",
+    label: "Town boundaries (New York)",
+    provider: "NYS ITS Geospatial Services — NYS Civil Boundaries (towns)",
+    serviceUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Civil_Boundaries/FeatureServer/5",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", type: "MUNI_TYPE", fips: "FIPS_CODE", county: "COUNTY" },
+    coverage: "newyork",
+    states: ["NY"],
+    tier: "production",
+    fullPurposeOnly: true,
+    lastVerified: "2026-10-22",
+  },
+  villageNy: {
+    key: "villageNy",
+    label: "Village boundaries (New York)",
+    provider: "NYS ITS Geospatial Services — NYS Civil Boundaries (villages)",
+    serviceUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Civil_Boundaries/FeatureServer/7",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", town: "TOWN", fips: "FIPS_CODE", county: "COUNTY" },
+    coverage: "newyork",
+    states: ["NY"],
+    tier: "production",
+    fullPurposeOnly: true,
+    lastVerified: "2026-10-22",
+  },
   city: {
     key: "city",
     label: "City limits",

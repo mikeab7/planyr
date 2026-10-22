@@ -29,6 +29,8 @@ const ok = (name, cond, detail = "") => { results.push({ name, pass: !!cond, det
 const HOUSTON = "state=TX&lat=29.76&lng=-95.37&county=harris";
 const ATLANTA = "state=GA&lat=33.75&lng=-84.39&county=none";
 const DENVER = "state=CO&lat=39.74&lng=-104.99&county=co_denver";
+const NEWARK_NJ = "state=NJ&lat=40.7357&lng=-74.1724&county=none";           // NEW-1 (New Jersey + New York)
+const PLEASANTVILLE_NY = "state=NY&lat=41.1329&lng=-73.7926&county=none";
 const CASES = [
   { name: "planner · desktop · light", q: `surface=planner&w=384&theme=light&${HOUSTON}`, vw: 520 },
   { name: "planner · desktop · dark", q: `surface=planner&w=384&theme=dark&${HOUSTON}`, vw: 520 },
@@ -225,6 +227,22 @@ try {
   const co = await rowsAcross(`surface=planner&w=384&${DENVER}`);
   ok("Colorado: MHFD rows sit under Drainage District (Drainageways & Basins · Channels & Outfalls)", co.tiers.includes("local") && co.flat.includes("Drainageways & Basins") && co.flat.includes("Channels & Outfalls"), JSON.stringify(co.all.flood));
   ok("Colorado: no Texas row (Road Ownership · Oil & Gas · LPST · Pipelines · HCFCD/BKDD/Storm Sewer/faults)", [...["Road Ownership", "Oil & Gas Wells", "Leaking Petroleum Tanks", "Pipelines"], ...HOUSTON_ONLY].every((n) => !co.flat.includes(n)), JSON.stringify(co.all));
+  // NEW-1 (New Jersey + New York) — the same location arms: NJ / NY show their own rows and no Texas, Houston or other state's row.
+  const njA = await rowsAcross(`surface=planner&w=384&${NEWARK_NJ}`), nyA = await rowsAcross(`surface=planner&w=384&${PLEASANTVILLE_NY}`);
+  ok("New Jersey: no Texas-only or Houston-only row appears", [...TX_ONLY, ...HOUSTON_ONLY].filter((n) => njA.flat.some((x) => x.startsWith(n))).length === 0, JSON.stringify(njA.all));
+  ok("New York: no Texas-only or Houston-only row appears", [...TX_ONLY, ...HOUSTON_ONLY].filter((n) => nyA.flat.some((x) => x.startsWith(n))).length === 0, JSON.stringify(nyA.all));
+  ok("New Jersey and New York: Counties & Cities is ONE row each", njA.flat.filter((x) => x === "Counties & Cities").length === 1 && nyA.flat.filter((x) => x === "Counties & Cities").length === 1);
+  const nnKey = async (q, on) => {
+    const page = await open(q + `&on=${on}`);
+    await selectGroup(page, "jur");
+    await page.click('[data-testid="layer-caret-counties_cities"]');
+    const txt = await page.evaluate(() => document.querySelector('[data-testid="layer-row-counties_cities-menu"] [data-part="legend"]')?.innerText.replace(/\s+/g, " ") || "");
+    await page.close();
+    return txt;
+  };
+  const njKey = await nnKey(`surface=planner&w=384&${NEWARK_NJ}`, "nj_county,nj_city"), nyKey = await nnKey(`surface=planner&w=384&${PLEASANTVILLE_NY}`, "ny_county,ny_city,ny_town,ny_village");
+  ok("Counties & Cities key on a New Jersey site: County · Municipal Limits, NO ETJ", /County/.test(njKey) && /Municipal Limits/.test(njKey) && !/ETJ/.test(njKey), njKey);
+  ok("Counties & Cities key on a New York site: County · City · Town · Village Limits, NO ETJ", /County/.test(nyKey) && /City Limits/.test(nyKey) && /Town Limits/.test(nyKey) && /Village Limits/.test(nyKey) && !/ETJ/.test(nyKey), nyKey);
   const un = await rowsAcross(`surface=planner&w=384&state=none&lat=none&county=harris`);
   ok("Unknown location fails OPEN: every state's rows show", ["Road Ownership", "Oil & Gas Wells", "Channels & ROW"].every((n) => un.flat.includes(n)) && un.flat.some((x) => /Hazardous Sites/.test(x)), `${un.flat.length} rows`);
 

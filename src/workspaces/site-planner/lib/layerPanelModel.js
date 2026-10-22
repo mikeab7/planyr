@@ -160,11 +160,15 @@ export function rampGradient(cfg) {
 /* Which key entry a member of a merged row contributes ("Counties & Cities": heavier county line,
  * thin city line, dashed ETJ). Members without a role contribute nothing. */
 const KEY_ROLE = {
-  jur_county: "County", ga_county: "County", ca_county: "County",
-  jur_city: "City Limits", ga_city: "City Limits", ca_city: "City Limits", co_city: "City Limits",
+  jur_county: "County", ga_county: "County", ca_county: "County", nj_county: "County", ny_county: "County",
+  jur_city: "City Limits", ga_city: "City Limits", ca_city: "City Limits", co_city: "City Limits", ny_city: "City Limits",
+  nj_city: "Municipal Limits", ny_town: "Town Limits", ny_village: "Village Limits", // NEW-1 (NJ + NY): NJ's one municipal layer; NY's nested town / village tiers
   jur_etj: "ETJ",
 };
-const KEY_STYLE = { County: { weight: 3.5, dash: false }, "City Limits": { weight: 1.5, dash: false }, ETJ: { weight: 1.5, dash: true } };
+const KEY_STYLE = {
+  County: { weight: 3.5, dash: false }, "City Limits": { weight: 1.5, dash: false }, ETJ: { weight: 1.5, dash: true },
+  "Municipal Limits": { weight: 1.5, dash: false }, "Town Limits": { weight: 1.5, dash: false }, "Village Limits": { weight: 1.5, dash: false },
+};
 export function boundaryKey(members) {
   const seen = new Map();
   for (const [id, cfg] of members || []) {
@@ -173,7 +177,8 @@ export function boundaryKey(members) {
     // County is a KEY of line weight, not of hue — a dark-grey county line is invisible on a dark panel, so it reads in the panel's own text colour.
     seen.set(label, { label, color: label === "County" ? "var(--text-secondary)" : ((cfg && cfg.color) || "currentColor"), ...KEY_STYLE[label] });
   }
-  return ["County", "City Limits", "ETJ"].filter((l) => seen.has(l)).map((l) => seen.get(l));
+  // NEW-1 (NJ + NY): the order is governing-tier-last-to-first by size — county, then the municipal tiers from widest to narrowest, ETJ (Texas only) last.
+  return ["County", "City Limits", "Municipal Limits", "Town Limits", "Village Limits", "ETJ"].filter((l) => seen.has(l)).map((l) => seen.get(l));
 }
 
 /* The legend/key a row's dropdown shows: its own `legend`, the boundary key for a Counties & Cities

@@ -24,6 +24,8 @@
  * Pure — no DOM, no React. Guarded in test/headerNavPriority.test.js.
  */
 
+import { isNjNyState, municipalDisplayName, sortMunicipalNames } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+
 /**
  * The badge's display segments in reading order, governing fact first.
  * @param {object|null} badge a `formatJurisdictionBadge` result.
@@ -107,13 +109,17 @@ export function governingIdentity(badge) {
   if (!badge) return null;
   const one = (v) => (Array.isArray(v) && v.length ? String(v[0]) : null);
   const part = one(badge.partialCities);
-  if (part) return `Part in City of ${part}`;
-  const gov = one(badge.governingCities);
-  if (gov) return `City of ${gov}`;
+  /* NEW-1 (New Jersey + New York) — a municipality is named with its own type ("Village of Pleasantville"), never "City of …", and a
+   * confirmed NJ / NY point with no municipality is a data gap, never "Unincorporated" (neither state has any). */
+  const nn = isNjNyState(badge.state);
+  const nameOf = (c) => (nn ? municipalDisplayName(c) : `City of ${c}`);
+  if (part) return `Part in ${nameOf(part)}`;
+  const gov = nn ? one(sortMunicipalNames(Array.isArray(badge.governingCities) ? badge.governingCities : [])) : one(badge.governingCities);
+  if (gov) return nameOf(gov);
   const etj = one(badge.etjLabels);
   if (etj) return `City of ${etj} ETJ`;
   if (badge.cityContainment === "unknown") return "Couldn't check city limits";
-  return badge.cityContainment === "none" ? "Unincorporated" : null;
+  return badge.cityContainment === "none" ? (nn ? "No municipality found" : "Unincorporated") : null;
 }
 
 export function jurisdictionRungs(badge) {

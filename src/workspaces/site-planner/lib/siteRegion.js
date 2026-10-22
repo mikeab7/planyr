@@ -16,6 +16,7 @@
  */
 
 import { inCaliforniaEnvelope } from "./californiaJurisdiction.js";
+import { njnyStateAt, NJ_OUTLINE, NY_OUTLINE } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 
 /* Coarse state envelopes. Generous on purpose — this decides which RULES may apply, so a false
  * "unknown" (pre-Colorado behaviour, safe) is far better than a false confident answer. */
@@ -58,6 +59,12 @@ export const STATE_POLYGONS = {
   ],
 };
 
+/* NEW-1 (New Jersey + New York) — registered here so the set of states `siteState` can return stays ONE declared list (the layer registry's
+ * state-coverage guard reads these keys), but they are NOT matched by the loop in `siteState`: the two outlines overlap on the Hudson, so a
+ * point in both is settled by `njnyStateAt`'s border polygon instead of by key order. */
+STATE_POLYGONS.NJ = NJ_OUTLINE;
+STATE_POLYGONS.NY = NY_OUTLINE;
+
 function inPolygon(lng, lat, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -67,7 +74,7 @@ function inPolygon(lng, lat, poly) {
   return inside;
 }
 
-/* "TX" | "CO" | "FL" | "GA" | "CA" | null. Null for a site with no coordinates (every legacy saved plan) and
+/* "TX" | "CO" | "FL" | "GA" | "CA" | "NJ" | "NY" | null. Null for a site with no coordinates (every legacy saved plan) and
  * for one outside every region — and null behaves exactly as the app did before Colorado existed. The
  * guard fires on a POSITIVE answer, never on the absence of one.
  *
@@ -81,8 +88,15 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
   const la = Number(lat), lo = Number(lng != null ? lng : lon);
   if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
   for (const [st, poly] of Object.entries(STATE_POLYGONS)) {
+    if (st === "NJ" || st === "NY") continue; // settled together below — their outlines overlap
     if (inPolygon(lo, la, poly)) return st;
   }
+  /* NEW-1 (New Jersey + New York) — real-boundary OUTLINES (grown a few km), with the Hudson / Arthur Kill overlap settled by the NJ
+   * border polygon (njnyJurisdiction.njnyStateAt). Disjoint from the FL / GA outlines above and from the TX / CO / CA boxes below, so
+   * asking here moves nobody else. Like every answer in this file it scopes which RULES may apply — a wrong "NJ" or "NY" on the PA
+   * or CT side of a river only ever HIDES a Texas number; which county / municipality a point is in is the polygon layers' call. */
+  const nn = njnyStateAt(la, lo);
+  if (nn) return nn;
   for (const [st, b] of Object.entries(STATE_ENVELOPES)) {
     if (la >= b[0] && la <= b[2] && lo >= b[1] && lo <= b[3]) {
       // NEW-1 — California's box is only the pre-filter; its diagonal east edge is refined by an outline (see californiaJurisdiction.js)
@@ -96,3 +110,5 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
 export const isColorado = (pt) => siteState(pt) === "CO";
 export const isGeorgia = (pt) => siteState(pt) === "GA";
 export const isCalifornia = (pt) => siteState(pt) === "CA";
+export const isNewJersey = (pt) => siteState(pt) === "NJ";
+export const isNewYork = (pt) => siteState(pt) === "NY";

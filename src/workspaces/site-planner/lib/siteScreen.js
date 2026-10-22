@@ -22,7 +22,7 @@ import { TRUSTED_CHECKS } from "./siteChecks.js";
 
 /* The city-limits layer keys per state — the Layers panel's own "City limits & ETJ" pair in Texas (one merged
  * row), the state's city layer elsewhere. Anything unknown gets no "Show lines" link rather than a dead one. */
-const LINE_LAYERS = { TX: ["jur_city", "jur_etj"], GA: ["ga_city"], CA: ["ca_city"], CO: ["co_city"] };
+const LINE_LAYERS = { TX: ["jur_city", "jur_etj"], GA: ["ga_city"], CA: ["ca_city"], CO: ["co_city"], NJ: ["nj_city"], NY: ["ny_village", "ny_city", "ny_town"] }; // NEW-1 — NJ / NY: no ETJ line exists
 
 /* Road frontage is asked of EVERY active parcel (largest first, capped) — see mergeRoadAnswers. */
 const MAX_ROAD_RINGS = 12;

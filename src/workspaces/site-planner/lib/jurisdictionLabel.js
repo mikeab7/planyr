@@ -57,6 +57,8 @@
  * badge strings are pinned per shape against real recorded agency answers in
  * test/jurisdictionShapes.test.js. */
 
+import { municipalDisplayName, sortMunicipalNames, isNewYorkCity, nycBoroughOf } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+
 // The three separators, exported so no consumer re-types one and no test asserts a literal.
 export const SLOT_SEP = " · ";   // governing chain:  ·
 export const PEER_SEP = " + ";        // co-equal peers inside one slot
@@ -106,6 +108,16 @@ function leadFor(model, shape) {
   const part = list(model.partialCities);
   const etj = list(model.etjCities);
   if (shape === "unknown") return "Couldn't check city limits";
+  if (shape === "split" && isMuni(model)) {
+    /* NEW-1 (New Jersey + New York) — a split in a state with NO unincorporated land and NO ETJ. A municipality that holds the WHOLE
+     * site still leads (New York's town, when a village holds only part of the site), then each partial one is named with its share.
+     * The remainder is named only when nothing else holds it — and it is never "unincorporated" or an ETJ. */
+    const bare = String(model.splitNote || "").trim().replace(/^\((.*)\)$/, "$1");
+    const note = bare ? ` (${bare})` : "";
+    const heldAll = sortMunicipalNames(gov).map(municipalDisplayName);
+    const partial = sortMunicipalNames(part).map((c) => `Part in ${municipalDisplayName(c)}${note}`);
+    return [...heldAll, ...partial, !gov.length ? model.remainderLabel : null].filter(Boolean);
+  }
   if (shape === "split") {
     /* NEW-1/NEW-2 — the split lead names the CLASS and states the share as an AREA fraction. Both
      * halves are the item: "part in City of Baytown" gave no idea whether that is a third of the
@@ -130,6 +142,12 @@ function leadFor(model, shape) {
      * same separator. Asserted in test/jurisdictionLabel.test.js. */
     return [cities, model.remainderLabel].filter(Boolean);
   }
+  if (gov.length && isMuni(model)) {
+    /* NEW-1 (New Jersey + New York) — the municipality is named with its TYPE, as the state names it ("Township of Edison",
+     * "Borough of Fort Lee"), never "City of Edison". New York's chain is several governments, each its own slot:
+     * village → town ("Village of Pleasantville · Town of Mount Pleasant"). The state is not appended. */
+    return sortMunicipalNames(gov).map(municipalDisplayName);
+  }
   if (gov.length) {
     /* NEW-1 (Georgia) — "City of X, GA". A consolidated city-county (Athens-Clarke, Augusta-Richmond,
      * Columbus-Muscogee, Macon-Bibb) is ONE government, so it is named as itself — never "City of
@@ -148,6 +166,9 @@ function leadFor(model, shape) {
    * for a strip two cities claim; the claimants stay in the structured result, not on the badge. */
   if (model.etjUndetermined) return "ETJ undetermined (disputed)";
   if (list(model.etjReleased).length) return releasedText(list(model.etjReleased));
+  /* NEW-1 (New Jersey + New York) — no ETJ, and NO unincorporated land. A confirmed NJ / NY point that no municipal layer named is a
+   * data gap (open water, a boundary seam), said as exactly that — never "Unincorporated", which is false in both states. */
+  if (isMuni(model)) return "No municipality found";
   /* NEW-1 (Georgia) — no ETJ exists there, and outside city limits the COUNTY governs, so the lead names
    * the county: "Unincorporated Gwinnett County, GA". Without a county (a failed lookup) it stays honest. */
   if (isGa(model)) {
@@ -165,6 +186,10 @@ function leadFor(model, shape) {
  * confirmed site). Both are "no ETJ — the county governs outside city limits" states with the same label grammar, so
  * the one predicate (still named `isGa` for the call sites above) covers both and `stateAbbr` prints which. */
 const isGa = (model) => ["GA", "CA"].includes(String(model.state || "").toUpperCase());
+/* NEW-1 (New Jersey + New York) — municipal-form states: every acre is in a municipality, there is no ETJ, the municipality's type
+ * is part of its name, and the county slot never leads. Deliberately NOT folded into `isGa` (whose branches say "Unincorporated
+ * <County>, GA"). */
+const isMuni = (model) => ["NJ", "NY"].includes(String(model.state || "").toUpperCase());
 const stateAbbr = (model) => String(model.state || "").toUpperCase();
 const sameName = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
@@ -232,8 +257,13 @@ export function formatJurisdictionLabel(model = {}) {
   const jur = slots.join(SLOT_SEP);
 
   const counties = list(model.counties);
+  /* NEW-1 (New York) — New York City's five boroughs are each a county, and people say the borough: "Brooklyn (Kings County)". */
+  const countyText = (c) => {
+    const borough = isMuni(model) && String(model.state).toUpperCase() === "NY" && isNewYorkCity(list(model.governingCities)) ? nycBoroughOf(c) : null;
+    return borough ? `${borough} (${c} County)` : `${c} County`;
+  };
   const county = counties.length
-    ? counties.map((c) => `${c} County`).join(PEER_SEP)
+    ? counties.map(countyText).join(PEER_SEP)
     : model.countyUnresolved ? "Couldn't check county" : null;
 
   const isds = list(model.isds);
@@ -245,9 +275,10 @@ export function formatJurisdictionLabel(model = {}) {
    * happen for a year. */
   const adjacent = list(model.adjacentCities);
   const unclassified = list(model.unclassifiedCities);
+  const touchName = (c) => (isMuni(model) ? municipalDisplayName(c) : `City of ${c}`);
   const touches = [
-    adjacent.length ? `touches ${adjacent.map((c) => `City of ${c}`).join(", ")}` : null,
-    unclassified.length ? `touches ${unclassified.map((c) => `City of ${c}`).join(", ")}, containment unchecked` : null,
+    adjacent.length ? `touches ${adjacent.map(touchName).join(", ")}` : null,
+    unclassified.length ? `touches ${unclassified.map(touchName).join(", ")}, containment unchecked` : null,
   ].filter(Boolean);
   const tail = touches.length ? touches.join("; ") : null;
 
