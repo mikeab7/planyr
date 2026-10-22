@@ -132,7 +132,7 @@ export async function handleGisCache({
     if (!res || !res.ok) return redirectTo(upstream.url);
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";
-    if (isStorableBody(upstream.url, buf)) defer(store(client, folderId, key, buf, ct));
+    if (isStorableBody(upstream.url, buf)) defer(store(client, folderId, key, buf, ct, { dedupe: !isQueryUrl(upstream.url) }));
     return bytesResponse(buf, ct);
   } catch (_) {
     return metaMode ? json({ cached: false }) : redirectTo(upstream.url);
@@ -142,9 +142,14 @@ export async function handleGisCache({
 // Create a fresh copy then drop older same-name copies (no gap for concurrent readers).
 // Hard client.del is DELIBERATE here (NEW-F2): this is a regenerable public GIS cache, not
 // user data — trashing stale copies would just hold Drive quota for 30 days of junk.
-export async function store(client, folderId, name, bytes, contentType) {
+export async function store(client, folderId, name, bytes, contentType, { dedupe = true } = {}) {
   try {
     const created = await client.create({ bytes, contentType, name, parentFolderId: folderId });
+    /* NEW-1 (parcel tiles): the dedupe lists the folder (one page of up to 1,000 files, ~200 KB) after EVERY store. Imagery is a few hundred files; a
+     * parcel-tile cache is tens of thousands, so the list would both miss most duplicates (it is one page) and cost a 200 KB read per tile. A /query
+     * tile is stored once per cold tile and read newest-first (`findFile` orders by modifiedTime), so an occasional duplicate from two first-ever
+     * requests landing together is harmless — it is simply not worth the list. */
+    if (!dedupe) return;
     const dupes = (await client.list({ parentFolderId: folderId }).catch(() => [])) || [];
     for (const f of dupes) if (f.name === name && f.id !== (created && created.id)) await client.del(f.id).catch(() => {});
   } catch (_) { /* best-effort — a failed store just means the next view re-fetches */ }

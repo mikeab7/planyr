@@ -275,6 +275,21 @@ describe("handleGisCache — parcel tile /query answers (wide view)", () => {
     expect(client.calls.create).toBe(0);
   });
 
+  it("storing a parcel tile does NOT list the whole cache folder (a 200 KB read per tile, and a miss on 10,000s of files); imagery still dedupes", async () => {
+    const client = fakeDrive();
+    let lists = 0;
+    const origList = client.list.bind(client);
+    client.list = async (...a) => { lists++; return origList(...a); };
+    const bag = deferBag();
+    await handleGisCache({ client, segs: QSEGS, search: QSEARCH, fetchImpl: okFetch('{"features":[]}', "application/json"), folderIdFor, defer: bag.defer });
+    await bag.settle();
+    expect(client.calls.create).toBe(1);
+    expect(lists).toBe(0);
+    await handleGisCache({ client, segs: SEGS, search: SEARCH, fetchImpl: okFetch("IMG"), folderIdFor, defer: bag.defer });
+    await bag.settle();
+    expect(lists).toBe(1);
+  });
+
   it("isStorableBody: only a /query body that OPENS with an error member is refused; a feature set and any imagery body are stored", () => {
     const enc = (s) => new TextEncoder().encode(s);
     const q = "https://x.arcgis.com/arcgis/rest/services/P/FeatureServer/0/query?f=json";
