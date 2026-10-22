@@ -3043,6 +3043,22 @@ function suggestScheduleName(projects, ownerKind, siteId, siteName) {
 
 /* SCHEDULE-OWNERSHIP:END */
 
+// NEW-1 (B2429233) — THE ONE removal of a schedule from the document. It used to refuse the LAST
+// schedule (`projects.length <= 1`) from inside deleteProject, so the shell's confirm closed and
+// nothing happened, with no message. There is no real reason to refuse: since B2285440 a document
+// with no schedule renders the "No schedules yet" empty state, and the cloud write soft-deletes any
+// row missing from the document. So the last schedule deletes like any other and `aPid` becomes
+// null (never a dangling id). Returns `d` itself, unchanged, only when `id` names no schedule.
+function removeScheduleFromDoc(d, id) {
+  if (!d || !d.projects || !d.projects[id]) return d;
+  const newProjects = { ...d.projects };
+  delete newProjects[id];
+  const remaining = Object.keys(newProjects).map(Number);
+  const newAPid = d.aPid === id ? (remaining.length ? remaining[0] : null) : d.aPid;
+  return pruneScheduleRefs({...d, aPid: newAPid, projects: newProjects});
+}
+// (end removeScheduleFromDoc)
+
 // ⛔ crossScheduleLabel/scheduleLabelParts USED TO LIVE HERE, OUTSIDE THE SYNC BLOCK ABOVE
 // (B1939344, 2026-09-28) — moved INTO it and INTO the canonical src/shared/schedule/
 // scheduleOwnership.js. The old comment here argued they had "no reason to be duplicated" in the
@@ -10602,7 +10618,7 @@ function App() {
 
   const deleteProject = useCallback((id, { skipConfirm = false } = {}) => {
     setData(d => {
-      if (!d || Object.keys(d.projects || {}).length <= 1) return d; // B644 — null-safe pre-load
+      if (!d || !d.projects || !d.projects[id]) return d; // B644 — null-safe pre-load; B2429233 — the last schedule is deletable
       const proj = d.projects[id];
       const taskCount = proj?.tasks?.length || 0;
       // B1873361 — a destructive confirm names the qualified label, not the bare name: deleting
@@ -10618,18 +10634,14 @@ function App() {
       }
       // Fire-and-forget the labeled snapshot of the PRE-delete state
       try { window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-delete-project", skipSanity: true }); } catch {}
-      const newProjects = {...d.projects};
-      delete newProjects[id];
-      const remaining = Object.keys(newProjects).map(Number);
-      const newAPid = d.aPid === id ? remaining[0] : d.aPid;
-      // Invariant 6 — a delete prunes the deleted schedule's per-schedule bookkeeping: its
+      // Invariant 6— a delete prunes the deleted schedule's per-schedule bookkeeping: its
       // next-task-id counter (`nTid`) and any "last schedule I looked at" pointer aimed at it
       // (`lastActiveBySite`). Neither was ever pruned, so production still carried counters for
       // ids 4, 8–14, 17 and 18 — schedules deleted long ago — inside a document that is the ENTIRE
       // account in one row, where that growth is unbounded. pruneScheduleRefs asks the LIVE set
       // rather than the removed id, so it cannot miss a map by forgetting to name it here, and a
       // stale pointer left by any other path is swept at the same time.
-      return pruneScheduleRefs({...d, aPid: newAPid, projects: newProjects});
+      return removeScheduleFromDoc(d, id);
     });
   }, []);
 
@@ -10824,8 +10836,9 @@ function App() {
         const projCount = latestData.current ? Object.keys(latestData.current.projects || {}).length : 0;
         const wasActive = latestData.current && latestData.current.aPid === m.id;
         deleteProject(m.id, { skipConfirm: true });
-        // Only route home when a delete actually happens — deleteProject refuses to remove the LAST
-        // project, so routing unconditionally kicked the user to the Dashboard on a no-op.
+        // Route home only when a schedule actually remains to land on: deleting the LAST schedule
+        // (B2429233) leaves the document's own "No schedules yet" empty state, which is the right
+        // place to stay (there is no Dashboard worth routing to).
         if (wasActive && projCount > 1) setData(d => ({ ...d, section: "reports" }));
       } else if (m.type === "planar:nav-select-task" && m.siteId != null && (m.taskId != null || m.taskSid != null)) {
         // B1953795 (S3) — a caller that knows the task's STABLE `_sid` (the Dashboard feeds) sends it; a task
@@ -11867,7 +11880,7 @@ function App() {
         <ProjContextMenu
           x={projCtx.x} y={projCtx.y}
           projId={projCtx.id}
-          canDelete={Object.keys(data.projects).length > 1}
+          canDelete={true}
           onRename={() => { setRenameModal({id: projCtx.id, name: data.projects[projCtx.id]?.name || ""}); setProjCtx(null); }}
           onDuplicate={() => { duplicateProject(projCtx.id); setProjCtx(null); }}
           onDelete={() => { deleteProject(projCtx.id); setProjCtx(null); }}
@@ -20269,6 +20282,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     let mergedForApp = null;
     let anythingMerged = false;
     let anyFailure = false;
+    let deleteRefused = false;   // B2429233 — a soft-delete the database refused (not a stale-tab condition: no "reload" banner)
     const ensureMergedForApp = () => { if (!mergedForApp) mergedForApp = _deepClone(parsed); return mergedForApp; };
 
     if (indexBase === null || !_mEq(decomposed.index, indexBase)) {
@@ -20300,14 +20314,37 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
 
     for (const key of Object.keys(scheduleBase)) {
       if (currentIds.has(key)) continue;   // still present -- nothing to tombstone
-      try { await sb.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", Number(key)); }
-      catch (e) { console.error("[schedule rows] soft-delete failed for schedule " + key, e); }
+      // B2429233 LOUD-FAILURE — supabase-js RETURNS {error} instead of throwing, so the old try/catch
+      // never saw a refused soft-delete and the schedule base was dropped as if it had worked: the
+      // row stayed in the database and came back on reload with nothing said. Check the result (an
+      // error, or zero rows touched = refused by RLS), keep the base so the NEXT save retries it,
+      // and say so.
+      let softDeleteFailed = null;
+      try {
+        const sd = await sb.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", Number(key)).select("id");
+        if (sd.error) softDeleteFailed = sd.error;
+        else if (!Array.isArray(sd.data) || sd.data.length === 0) softDeleteFailed = { message: "no row was updated", code: "0 rows" };
+      } catch (e) { softDeleteFailed = e; }
+      if (softDeleteFailed) {
+        console.error("[schedule rows] soft-delete failed for schedule " + key, softDeleteFailed);
+        deleteRefused = true;
+        try {
+          const now = Date.now();
+          if (now - (window.__planarSaveFailToastAt || 0) >= 8000) {
+            window.__planarSaveFailToastAt = now;
+            if (typeof showToast === "function") showToast("A deleted schedule could NOT be removed from the cloud (" + (softDeleteFailed.code || softDeleteFailed.status || "error") + "). It may come back when you reload — try the delete again.", { type: "error", duration: 10000 });
+            window.dispatchEvent(new CustomEvent("planar:cloud-save-failed", { detail: { key: "hs-v1", code: softDeleteFailed.code } }));
+          }
+        } catch (e) {}
+        continue;
+      }
       delete scheduleBase[key]; delete scheduleKnownRev[key]; delete scheduleStaleSnapped[key];
     }
 
     if (anythingMerged) {
       try { window.dispatchEvent(new CustomEvent("planar:merged", { detail: { key: "hs-v1", base: _deepClone(parsed), value: mergedForApp } })); } catch {}
     }
+    if (deleteRefused) return null;   // already toasted + planar:cloud-save-failed above; never announce "saved"
     try { window.dispatchEvent(new CustomEvent("planar:cloud-saved", { detail: { key: "hs-v1" } })); } catch {}
 
     if (anyFailure && !anythingMerged) {
