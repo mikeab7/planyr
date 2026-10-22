@@ -52,7 +52,7 @@ describe("NEW-1: in-planner parcel identify routes by the CLICKED POINT, never a
   it("the click's \"no parcel\" message distinguishes real causes instead of always blaming aim", () => {
     // NEW-2 — a healthy source answering honestly, an unconfigured county, and an unreachable
     // server must not all collapse to "click directly on a lot."
-    expect(region.includes("noParcelSourceNote")).toBe(true);
+    expect(region.includes("parcelGapNotice")).toBe(true);
     expect(region.includes("res.responded === 0")).toBe(true);
   });
 });

@@ -74,7 +74,7 @@ test.describe("Memphis radius — the no-project lot picker: Shelby selects a lo
     await openMap(page);
     await page.waitForTimeout(2500); // polygons resident
     await pickAt(page, 33.5409, -89.2631);
-    await expect.poll(() => body(page), { timeout: 15_000 }).toMatch(/Webster County — no parcel data wired here yet/);
+    await expect.poll(() => body(page), { timeout: 15_000 }).toMatch(/Planyr hasn't found a public parcel map it can use for Webster County/);
   });
 
   test("the owner's spot (airport east, Shelby) — the Shelby Assessor source answers and ONE lot is selected", async ({ page }) => {
@@ -97,7 +97,7 @@ test.describe("Memphis radius — the no-project lot picker: Shelby selects a lo
     await openMap(page);
     await page.waitForTimeout(2500);
     await pickAt(page, 36.5526, -89.1734);
-    await expect.poll(() => body(page), { timeout: 15_000 }).toMatch(/Fulton County — no parcel data wired here yet/);
+    await expect.poll(() => body(page), { timeout: 15_000 }).toMatch(/Planyr hasn't found a public parcel map it can use for Fulton County/);
     const t = await body(page);
     expect(t, "the generic message blames the click for a coverage gap").not.toMatch(GENERIC);
     expect(t, "an outage message for a county that has no source at all").not.toMatch(OUTAGE);
@@ -106,7 +106,7 @@ test.describe("Memphis radius — the no-project lot picker: Shelby selects a lo
   test("Fulton, clicked BEFORE the county polygons land: still names the county", async ({ page }) => {
     await openMap(page, { delayPolygonsMs: 6000 });
     await pickAt(page, 36.5526, -89.1734);
-    await expect.poll(() => body(page), { timeout: 20_000 }).toMatch(/Fulton County — no parcel data wired here yet/);
+    await expect.poll(() => body(page), { timeout: 20_000 }).toMatch(/Planyr hasn't found a public parcel map it can use for Fulton County/);
     expect(await body(page)).not.toMatch(GENERIC);
   });
 });

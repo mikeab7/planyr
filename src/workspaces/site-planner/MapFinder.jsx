@@ -4,7 +4,9 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { parcelGapNotice } from "./lib/parcelGaps.js";
+import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 import { wideSupportedForUrl, outlineHoldForView } from "./lib/parcelWideRequest.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
@@ -627,6 +629,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [err, setErr] = useState("");
   const errRef = useRef("");
   useEffect(() => { errRef.current = err; }, [err]);
+  /* NEW-1 (2026-10-22) — a county with no parcel data says WHY and carries an "Email Michael to request it" link. The link belongs
+   * to exactly the message it was raised with (the `errRetry` pattern): `gapRequest.message === err` is what shows it, so any
+   * later `setErr` — a different message, or "" — drops the link without anyone having to remember to clear it. */
+  const [gapRequest, setGapRequest] = useState(null);
+  const gapToast = (gap) => {
+    const text = `${gap.message} You can still trace the lot from the Aerial underlay.`;
+    setGapRequest({ message: text, href: gap.href });
+    return text;
+  };
   /* NEW-1 (the Texarkana/Chambers bug) — which place a currently-shown parcel-SOURCE-outage
    * notice is ABOUT: `{ county }` (a real county's bbox — the hang-guard's two banners) or
    * `{ state }` (the statewide composite's own banner, which names no county). `message` is the
@@ -3501,10 +3512,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * and pending cases keep their existing wording untouched. Same shape as the no-hits branch
      * below, which has named the county since B209502. */
     if (!candidates.length) {
-      const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
+      const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
       if (!nearSources.length && !skippedCandidates(latlng).length) { // NEW-1 (Memphis line band) — else a county across a nearby line (or a breaker-skipped one) is still asked below
         setErr(gap
-          ? `${gap} You can still trace the lot from the Aerial underlay.`
+          ? gapToast(gap)
           : "Parcel services are still loading — give it a second and click again.");
         ack?.empty("No lot here");
         return;
@@ -3587,7 +3598,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * blames the user for a gap in our coverage. `countyIdentity` knows the difference: it
          * names the county from real geometry and reports `no-source` when nothing is wired there.
          * Naming the wrong county is worse than admitting a gap — and so is naming none at all. */
-        const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
+        const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
         /* NEW-4 — an OUTAGE carries the fallback; the other two do not. "No parcel right there" is a
@@ -3596,14 +3607,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * where the service that WOULD have answered is down. */
         // NEW-1 (Memphis line band) — when the county itself has no source, only a NEIGHBOUR was asked: its silence is not
         // this county's outage, so the county's own gap sentence stands.
-        if (gap && candidates.length === 0) { ack?.empty("No lot here"); setErr(`${gap} You can still trace the lot from the Aerial underlay.`); return; }
+        if (gap && candidates.length === 0) { ack?.empty("No lot here"); setErr(gapToast(gap)); return; }
         /* NEW-2 (2026-10-22) — "No lot here" is only ever said when EVERY server asked answered. One that never did (timed out, errored) may be the one holding the lot, so its silence is
          * reported as silence, with a Try again — never as an empty point, whether or not a neighbour across a line did answer. */
         const silentCount = res.responded === 0 || res.errors > 0;
         ack?.empty(silentCount ? "Couldn't reach the county server" : "No lot here");
         if (silentCount) failUnavailable(`${silentServerPhrase(res.silent)} didn't answer, so this point couldn't be checked. Try again, or start the plan here and draw the boundary yourself.`, latlng, () => handleClick(latlng));
         else setErr(gap
-          ? `${gap} You can still trace the lot from the Aerial underlay.`
+          ? gapToast(gap)
           : "No parcel right there — zoom in and click directly on a lot.");
         return;
       }
@@ -3689,8 +3700,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * rule the click path already follows: an OUTAGE carries the fallback, a coverage fact does not
      * (the aerial trace, offered in the copy, is the way forward for this one). */
     if (!candidates.length) {
-      const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      if (!nearSources.length && !skippedCandidates(latlng).length) { if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label }); return; }
+      const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
+      if (!nearSources.length && !skippedCandidates(latlng).length) { if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap.message, request: gap.href } : { status: "unavailable", label }); return; }
     }
     let res;
     try {
@@ -3722,8 +3733,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
       if (candidates.length === 0) {
         // NEW-1 — only a neighbour was asked (the routed county has no source) and it had nothing: the county's own gap stands.
-        const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-        if (gap) { setParcelInfo({ status: "no-source", label, note: gap }); return; }
+        const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
+        if (gap) { setParcelInfo({ status: "no-source", label, note: gap.message, request: gap.href }); return; }
       }
       /* NEW-1 (TN, 2026-10-21) — a healthy server answered and the geocoded point is in the road: before the "no parcel" card, ask the county's own
        * layer for the lot the ADDRESS names (house number + street, within a short walk of the point). Narrow by design — see lib/addressSnap.js. */
@@ -4536,6 +4547,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * bottom-centre with a ✕; every other `err` stays in the bottom-left stack. A banner that carries an action button
    * (`fallbackOffer`) or shares the slot with the locate offer keeps the stack, which owns those buttons. */
   const retryShown = !!err && !!errRetry && errRetry.message === err; // NEW-1/NEW-2 — the "Try again" belongs to exactly the message it was raised with
+  const gapShown = !!err && !!gapRequest && gapRequest.message === err; // NEW-1 (2026-10-22) — the "Email Michael to request it" link rides only with the message it was raised for
   const sourceNoticeFloats = !!err && !fallbackOffer && !locateFar && !retryShown
     && !!sourceNoticeRef.current && sourceNoticeRef.current.message === err;
 
@@ -5511,8 +5523,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         {/* error toast — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
             from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
         {((err && !sourceNoticeFloats) || locateFar) && (
-          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar || retryShown) ? "auto" : "none" }}>
+          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar || retryShown || gapShown) ? "auto" : "none" }}>
             {err}
+            {gapShown && <ParcelRequestLink href={gapRequest.href} testId="map-gap-request" />}
             {retryShown && (
               <button onClick={() => { const run = errRetry.run; setErrRetry(null); setErr(""); setFallbackOffer(null); run(); }} data-testid="map-try-again"
                 style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>

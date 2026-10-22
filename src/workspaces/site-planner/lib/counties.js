@@ -37,7 +37,8 @@ import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster, c
 /* NEW-4 — county ROUTING KEYS are normalised at the map itself, not at each call site.
  * See shared/gis/countyKeys.js for why (a raw `MAP[county]` missed the two production rows
  * spelled "Harris", silently). */
-import { byCountyKey, countyKeySet, normCountyKey } from "../../../shared/gis/countyKeys.js";
+import { byCountyKey, countyKeySet, normCountyKey, countyNameSlug } from "../../../shared/gis/countyKeys.js";
+import { parcelGapNotice } from "./parcelGaps.js";
 /* CITY-SCOPED SOURCES (B1583296) — a point-in-city-polygon check that runs BEFORE the nationwide
  * county geometry. See cityScopes.js's own header for why this is a genuine resolution tier, not a
  * config line: a county whose only real parcel source covers just one city inside it cannot be
@@ -4057,21 +4058,19 @@ export function silentServerPhrase(keys) {
 
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is
  * nothing to say. Kept here beside the resolver so the wording cannot drift from the verdict it
- * describes, and deliberately short (PANEL-BREVITY): the county name is the fact, the absence is
- * the qualifier.
+ * describes, and deliberately short (PANEL-BREVITY): the county name is the fact, the reason is the
+ * qualifier.
  *
- * B1361425 — the suffix is TX-only, not "every state but Colorado". Texas's own source
- * (`Texas_County_Boundaries`) and Colorado's (`Colorado_Counties`) both publish BARE names
- * ("Harris", "Adams") — TX needs " County" appended, CO's own UI convention appends nothing.
- * Every OTHER state's geometry (the Esri `USA_Counties_Generalized_Boundaries` nationwide layer,
- * B1361425) already carries its own correct designation in the name itself — "Orleans Parish",
- * "Denali Borough", "Fairfax city", "District of Columbia" — so appending " County" there would
- * read "Orleans Parish County". Never assume "County" is the universal case; ask the source. */
+ * NEW-1 (2026-10-22) — this used to be the bare "<County> — no parcel data wired here yet." It now says WHY
+ * (paywall · locked · unreachable · none — `parcelGaps.js`, the one table) and the call sites that can
+ * show a link also take `parcelGapNotice(identity, point)` for the "Email Michael to request it" mailto.
+ * The naming rules did not change: B1361425 — the suffix is TX/CO only, because the nationwide
+ * geometry already carries every other state's own designation ("Orleans Parish", "Denali Borough",
+ * "Fairfax city"), and appending " County" there would read "Orleans Parish County". Never assume
+ * "County" is the universal case; ask the source. */
 export function noParcelSourceNote(identity) {
-  if (!identity || identity.status !== "no-source") return null;
-  if (identity.statewideKey) return null; // NEW-1 — a statewide layer covers this county
-  const suffix = identity.state === "TX" ? " County" : "";
-  return `${identity.name}${suffix} — no parcel data wired here yet.`;
+  const n = parcelGapNotice(identity);
+  return n ? n.message : null;
 }
 
 // The county keys whose parcel source is the STATEWIDE TxGIO layer (covers all 254
@@ -4264,7 +4263,7 @@ const INDEPENDENT_CITY_KEYS = { MO: { stlouiscity: "stlouiscity" } };
 
 export function countyKeyForName(name, state = null) {
   if (!name) return null;
-  const slug = String(name).toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
+  const slug = countyNameSlug(name);
   const st = state ? String(state).toUpperCase() : null;
   const independent = st && INDEPENDENT_CITY_KEYS[st] && INDEPENDENT_CITY_KEYS[st][String(name).toLowerCase().replace(/[^a-z]/g, "")];
   const generalSlug = independent || (st && CONSOLIDATED_GOV_ALIAS[st] && CONSOLIDATED_GOV_ALIAS[st][slug]) || slug;

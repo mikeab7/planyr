@@ -182,7 +182,7 @@ describe("what must not move", () => {
   it("Knox stays a named, locked gap and never borrows the composite", () => {
     const id = countyIdentity(35.96, -83.92);
     expect(id.status).toBe("no-source");
-    expect(noParcelSourceNote(id)).toMatch(/Knox County — no parcel data wired here yet/);
+    expect(noParcelSourceNote(id)).toBe("Knox County has a parcel map, but it isn't open to the public, so Planyr can't show lots here yet."); // locked: KGIS REST answers 401 (NEW-1, 2026-10-22)
   });
   it("Texas is untouched", () => {
     expect(countyIdentity(29.7604, -95.3698).key).toBe("harris");

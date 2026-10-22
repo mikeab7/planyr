@@ -244,7 +244,9 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { parcelGapNotice } from "./lib/parcelGaps.js";
+import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -17083,8 +17085,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const nearSources = await neighbourCandidatesAt(lat, lng); // NEW-1 (Memphis line band) — a county across a nearby line
       if (tok !== identifyTok.current) return;
       if (!candidates.length && !nearSources.length && !(await skippedCandidatesAt(lat, lng)).length) {
-        const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
+        const gap = parcelGapNotice(countyIdentity(lat, lng), { lat, lng });
+        setRes({ error: gap ? `${gap.message} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again.", ...(gap ? { request: gap.href } : {}) });
         return;
       }
       const res = await identifyWithLineFallback({
@@ -17096,10 +17098,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // NEW-2 — say the TRUE reason instead of blaming the user's aim: a healthy source
         // genuinely found no lot here, this county has no parcel source wired at all, or every
         // source that could have answered this point was unreachable this click.
-        const gap = noParcelSourceNote(countyIdentity(lat, lng));
+        const gap = parcelGapNotice(countyIdentity(lat, lng), { lat, lng });
         // NEW-1 (Memphis line band) — a county with no source only asked a NEIGHBOUR; its silence is not this county's outage.
         if (res.responded === 0 && !(gap && !candidates.length)) { setRes({ error: `${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment.` }); return; }
-        setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing).", noLot: true });
+        setRes({ error: gap ? `${gap.message} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing).", noLot: true, ...(gap ? { request: gap.href } : {}) });
         return;
       }
       const hit = res.hits[0]; // first county whose service answered owns the lot
@@ -23030,7 +23032,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {identifyRes && (
                   <div data-testid="identify-result" style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
-                      : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
+                      : identifyRes.error ? <><span style={{ color: PAL.warn }}>{identifyRes.error}</span>{identifyRes.request && <ParcelRequestLink href={identifyRes.request} testId="identify-gap-request" />}</>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
                       : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>
                       : <>

@@ -44,7 +44,7 @@ describe("every county in the radius resolves to a source or an explicit gap", (
     if (gap) {
       expect(id.status).toBe("no-source");
       expect(id.statewideKey, "a gap must not borrow a statewide layer that holds none of it").toBeUndefined();
-      expect(noParcelSourceNote(id)).toMatch(/no parcel data/);
+      expect(noParcelSourceNote(id)).toContain(c.name); // NEW-1 (2026-10-22) — says WHY (parcelGaps.js), still names the county
     } else if (id.status === "ok") {
       expect(COUNTIES[id.key].layerUrl).toBeTruthy();
     } else {

@@ -319,11 +319,12 @@ describe("countyIdentity / noParcelSourceNote (B209502)", () => {
   });
 
   it("names the county — with the right suffix per state — when nothing is wired there", () => {
+    // NEW-1 (2026-10-22) — the sentence says WHY now ("none" = nothing found, the default for an unresearched county); the
+    // suffix rule is unchanged for Texas and now also applies to Colorado, whose bare boundary names would not read as prose.
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Walker", state: "TX" }))
-      .toBe("Walker County — no parcel data wired here yet.");
-    // Colorado rows read as bare county names in this app's copy, so no "County" suffix.
+      .toBe("Planyr hasn't found a public parcel map it can use for Walker County.");
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Mesa", state: "CO" }))
-      .toBe("Mesa — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Mesa County.");
   });
 
   // B1361425 — every state OTHER than Texas now carries geometry from the nationwide Esri source,
@@ -333,17 +334,17 @@ describe("countyIdentity / noParcelSourceNote (B209502)", () => {
   // "every state but CO"; this proves the fix directly against the specific defect it closes.
   it("never double-suffixes a name that already carries its own designation (a parish, a borough, an independent city)", () => {
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Orleans Parish", state: "LA" }))
-      .toBe("Orleans Parish — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Orleans Parish.");
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Denali Borough", state: "AK" }))
-      .toBe("Denali Borough — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Denali Borough.");
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Fairfax city", state: "VA" }))
-      .toBe("Fairfax city — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Fairfax city.");
   });
 
   it("is actually WIRED into the click path (B1120 — an unused export ships nothing)", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
     expect(src).toMatch(/import \{[^}]*countyIdentity[^}]*\} from "\.\/lib\/counties\.js"/s);
-    expect(src).toMatch(/noParcelSourceNote\(countyIdentity\(/);
+    expect(src).toMatch(/parcelGapNotice\(countyIdentity\(/);
   });
 });
 
