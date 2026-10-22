@@ -85,6 +85,9 @@ import NoteToolbar from "./NoteToolbar.jsx";
 import NoteSlashMenu from "./NoteSlashMenu.jsx";
 import NoteOutline from "./NoteOutline.jsx";
 import NoteHistory from "./NoteHistory.jsx";
+/* The ONE shared drag-cursor pin (owner convention 2026-10-20). Importing it here, in the lazy editor chunk, adds no
+ * shared chunk to the Site route — verified by ui-audit/perf-bundle-audit.mjs. */
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
 /* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
@@ -411,11 +414,22 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
 .planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip,
 .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip { opacity: 1; }
-/* ⛔ AND THE CURSOR READS grab OVER THE WHOLE DRAGGABLE AREA, not over a sliver of chrome —
-   his third point on NEW-2. It flips to a text cursor for the one state where a press is about
+/* ⛔ THE CURSOR SAYS WHAT A PRESS ON THE BOX WILL DO (owner convention 2026-10-20, docs/DESIGN.md
+   "Cursor convention"; it REPLACES NEW-2 point 3's open hand for a box's body). The four-arrow MOVE
+   cursor belongs to a body that really drags, and keeps it for the whole drag (notesAnchorNode.js
+   and NoteEditor pin it): that is a member of a MULTI-SELECTION (data-movable, painted beside
+   data-selected). A single box's body does not drag on this build — press 1 selects, press 2 enters
+   it, and a drag from an unselected body pans the page (B2156912, "click and drag should ALWAYS
+   pan") — so an unselected box keeps the open hand, and it is the grip (always a drag, always a
+   move) that carries grab/grabbing. The text cursor is for the one state where a press is about
    words rather than position: while the caret is inside this box. data-editing is painted from
-   the editor's own two-stage state, beside data-selected. */
+   the editor's own two-stage state, and a box being edited is never also drawn as movable. */
 .planyr-note .ProseMirror .planyr-anchor { cursor: grab; }
+/* A SELECTED single box with words in it: the next press ENTERS it and puts the caret where it lands. */
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-movable="1"]):has(.planyr-anchor-content p) { cursor: text; }
+.planyr-note .ProseMirror .planyr-anchor[data-movable="1"] { cursor: move; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-movable="1"]):has(.planyr-anchor-content p) .planyr-anchor-content { cursor: text; }
+.planyr-note .ProseMirror .planyr-anchor[data-movable="1"] .planyr-anchor-content { cursor: move; }
 .planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { cursor: text; }
 .planyr-note .ProseMirror .planyr-anchor[data-editing="1"] .planyr-anchor-content { cursor: text; }
 /* ⛔ THE BOX'S OWN CHROME SITS ABOVE THE BOX'S OWN TEXT, AND THAT z-index IS THE WHOLE FIX
@@ -443,7 +457,11 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror .planyr-anchor[data-arrow-target="1"] { outline: 2px solid var(--accent-notes); outline-offset: 2px; }
 /* Click-to-connect's own source highlight — a box waiting to be the arrow's start point. */
 .planyr-note .ProseMirror .planyr-anchor[data-arrow-source="1"] { border-color: var(--accent-notes); border-style: dashed; }
-.planyr-note [data-testid="note-mat"][data-arrow-mode="1"] { cursor: crosshair; }
+/* ⛔ ARMED CLICK-TO-CONNECT OWNS THE CURSOR OVER EVERYTHING IT CAN BE CLICKED ON — the mat, the sheet
+   and every box on it (convention 2026-10-20). The rule used to name the mat alone, so the moment the
+   pointer crossed onto a box or the page it read the box's own move/text/auto: crosshair on grey only. */
+.planyr-note [data-testid="note-mat"][data-arrow-mode="1"],
+.planyr-note [data-testid="note-mat"][data-arrow-mode="1"] * { cursor: crosshair !important; }
 /* ⛔ EIGHT HANDLES, PAINTED FROM ONE RULE PLUS EIGHT POSITIONS (NEW-PICTURE-CANVAS / NEW-2).
    Bluebeam's and Office's convention: small square grips on every corner and every edge, visible
    only while the box is SELECTED — never on hover, which B434418 removed for good reasons. The
@@ -604,8 +622,21 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    changed into something else. */
 .planyr-note [data-testid="note-mat"] { cursor: grab; }
 .planyr-note [data-testid="note-sheet"] { cursor: auto; }
+/* ⛔ SPACE HELD = THE HAND, BEFORE THE DRAG STARTS. data-space-pan was set on the mat and nothing read
+   it, so the cursor stayed whatever the pointer was over until the first movement. Important, because
+   the mat's descendants (boxes, sheet, edge grips) each set their own cursor. */
+.planyr-note [data-testid="note-mat"][data-space-pan="1"],
+.planyr-note [data-testid="note-mat"][data-space-pan="1"] * { cursor: grab !important; }
 .planyr-note [data-testid="note-mat"][data-panning="1"],
-.planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing; }
+.planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing !important; }
+/* A TABLE'S COLUMN BORDER. ProseMirror-tables toggles resize-cursor on the editor root while the
+   pointer is inside the border's hit zone, but nothing styled it, so the only cue was the 4px
+   handle sliver (which also lost to the box's own cursor). Important: the box and its cells each
+   set their own cursor. Not while a pan/arrow mode owns the pointer (their rules above are
+   important too and come later in source order for panning; arrow mode never resizes). */
+.planyr-note .ProseMirror.resize-cursor, .planyr-note .ProseMirror.resize-cursor * { cursor: col-resize !important; }
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor,
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor * { cursor: grabbing !important; }
 
 /* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the box grip (12 px), the eight resize handles
    (10 px), the connect dot (11 px) and the sheet edge grips (left alone, see the note). The
@@ -853,7 +884,10 @@ function FindReplaceBar({ editor, find, onClose }) {
     height: 26, padding: "0 8px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
     background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12, width: 150,
   };
-  const btnStyle = { height: 26, padding: "0 9px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer" };
+  const btnStyle = { height: 26, padding: "0 9px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 700 };
+  /* The stylesheet owns the disabled arrow (index.css `button:disabled`); an enabled button still has to ask for the
+   * pointer, so it comes from here, only while enabled. */
+  const btnFor = (enabled) => ({ ...btnStyle, cursor: enabled ? "pointer" : "default", opacity: enabled ? 1 : 0.45 });
 
   return (
     <div
@@ -873,14 +907,14 @@ function FindReplaceBar({ editor, find, onClose }) {
       <span data-testid="note-find-replace-count" style={{ fontSize: 12, color: "var(--text-tertiary)", minWidth: 60 }}>
         {term ? (count ? `${index + 1} of ${count}` : "No matches") : ""}
       </span>
-      <button type="button" data-testid="note-find-replace-prev" title="Previous match" disabled={!count} onClick={() => step(-1)} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>‹</button>
-      <button type="button" data-testid="note-find-replace-next" title="Next match" disabled={!count} onClick={() => step(1)} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>›</button>
+      <button type="button" data-testid="note-find-replace-prev" title="Previous match" disabled={!count} onClick={() => step(-1)} style={btnFor(!!count)}>‹</button>
+      <button type="button" data-testid="note-find-replace-next" title="Next match" disabled={!count} onClick={() => step(1)} style={btnFor(!!count)}>›</button>
       <input data-testid="note-replace-input" value={replacement} placeholder="Replace"
         onChange={(e) => setReplacement(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); replaceOne(); } }}
         style={inputStyle} />
-      <button type="button" data-testid="note-replace-one" disabled={!count} onClick={replaceOne} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>Replace</button>
-      <button type="button" data-testid="note-replace-all" disabled={!count} onClick={replaceAll} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>Replace all</button>
+      <button type="button" data-testid="note-replace-one" disabled={!count} onClick={replaceOne} style={btnFor(!!count)}>Replace</button>
+      <button type="button" data-testid="note-replace-all" disabled={!count} onClick={replaceAll} style={btnFor(!!count)}>Replace all</button>
       <button type="button" data-testid="note-find-replace-close" aria-label="Close find and replace" onClick={onClose}
         style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
     </div>
@@ -1024,7 +1058,7 @@ function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
   if (!offer) return null;
   const box = {
     position: "absolute", left: Math.max(6, offer.x), top: offer.y + 4, zIndex: 40,
-    display: "flex", alignItems: "center", gap: 3, padding: 3,
+    display: "flex", alignItems: "center", gap: 3, padding: 3, cursor: "default",   // chrome: the arrow, not the mat's open hand
     borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
     background: "var(--surface-raised)", boxShadow: "0 8px 22px rgba(0,0,0,0.18)",
   };
@@ -1266,7 +1300,7 @@ function MiniBar({ editor }) {
         style={{
           height: 24, maxWidth: 62, border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
           background: "var(--surface-base)", color: "var(--text-primary)", font: "inherit", fontSize: 12,
-          padding: "0 2px", flex: "0 0 auto",
+          padding: "0 2px", flex: "0 0 auto", cursor: "pointer",
         }}
       >
         {SIZES.map((n) => <option key={String(n)} value={n == null ? "" : `${n}px`}>{n == null ? "Size" : n}</option>)}
@@ -1507,6 +1541,7 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
          * unmeasured position — the flicker that a post-paint effect would produce. */
         visibility: box ? "visible" : "hidden",
         zIndex: 60, display: "flex", flexDirection: "column", alignItems: "flex-start",
+        cursor: "default",          // chrome: the arrow, whatever surface (the mat's hand, a box's move) it floats over
       }}
     >
       <MiniBar editor={editor} />
@@ -3014,6 +3049,13 @@ const NoteEditor = forwardRef(function NoteEditor({
          * paint also runs from the editor's own transaction handler, outside React's render. */
         if (String(editingRef.current || "") === id) el.setAttribute("data-editing", "1");
         else el.removeAttribute("data-editing");
+        /* ⛔ WHETHER A PRESS ON THIS BOX'S BODY WILL MOVE IT (convention 2026-10-20: the cursor never lies). Measured on
+         * this build: a SINGLE box's body is not a move surface in any state — press 1 selects, press 2 ENTERS it
+         * (data-editing flips on the mousedown, so the body drag stands down), and a drag from an unselected body
+         * pans. The one body that drags is a member of a multi-selection (`beginGroupDrag`, claimed on the mat's
+         * mousedown before the box is entered). So the four-arrow cursor is painted from this, not from data-selected. */
+        if (on && selRef.current.size >= 2 && String(editingRef.current || "") !== id) el.setAttribute("data-movable", "1");
+        else el.removeAttribute("data-movable");
         /* ⛔ THE ARROW'S SOURCE BOX, HIGHLIGHTED WHILE CLICK-TO-CONNECT IS WAITING FOR THE
          * SECOND CLICK (NEW-2) — the visual feedback the acceptance bar asks for, painted the
          * same way and for the same reason as `data-selected`/`data-editing` above. */
@@ -3078,16 +3120,20 @@ const NoteEditor = forwardRef(function NoteEditor({
    * gesture. (Leaflet does the same, for the same reason.)
    */
   /* The pan's on/off switch, shared by the blank-paper pan and the content pan below it. */
+  const panPinRef = useRef(null);
   const setMatPanning = useCallback((on) => {
     const mat = scrollerRef.current;
     if (mat) {
       if (on) mat.setAttribute("data-panning", "1");
       else mat.removeAttribute("data-panning");
     }
-    /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
-     * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
-     * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
-    document.body.style.cursor = on ? "grabbing" : "";
+    /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome), and an
+     * element's OWN cursor out-ranks the one it would inherit from body — so a body-style write left the
+     * hand showing only where nothing set its own cursor. `pinDragCursor` pins it at the document root
+     * for the life of the gesture and releases on pointerup / cancel / Escape / blur; the explicit
+     * release here is the mouse-event path's own exit. Idempotent — called once per pan. */
+    if (on) { if (!panPinRef.current) panPinRef.current = pinDragCursor("grabbing"); }
+    else if (panPinRef.current) { panPinRef.current(); panPinRef.current = null; }
     document.body.style.userSelect = on ? "none" : "";
   }, []);
 
@@ -3112,6 +3158,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const baseSelection = new Set([...selRef.current].map(String));
     /* What this gesture has committed to. `null` until it travels; never goes back. */
     let latched = null;
+    let releaseBand = null;
 
     const setPanning = setMatPanning;
 
@@ -3129,6 +3176,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         });
         return;
       }
+      if (!was) releaseBand = pinDragCursor("crosshair");     // the rubber band is a draw gesture: crosshair, held
       const to = toDoc(at.x, at.y);
       if (!to) return;
       const rect = marqueeRect(from, to);
@@ -3141,6 +3189,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("mouseup", onUp);
       setBand(null);
       setPanning(false);
+      releaseBand?.();
       /* ⛔ THE LATCH, NOT A FRESH READING AT MOUSE-UP. A pan returned to its own origin measures
        * zero travel, and asking the distance again here would call that a press and leave a note
        * behind at the end of every round trip. See `latchGesture`. */
@@ -3171,7 +3220,9 @@ const NoteEditor = forwardRef(function NoteEditor({
     e.preventDefault();
     e.stopPropagation();
 
+    let releaseCursor = null;
     const onMove = (ev) => {
+      if (!releaseCursor) releaseCursor = pinDragCursor("move");      // the group moves: MOVE, for the whole drag
       const dx = (ev.clientX - start.x) / f.scale;
       const dy = (ev.clientY - start.y) / f.scale;
       const moves = moveSelection(startBoxes, { dx, dy }, { maxX: f.dom.offsetWidth });
@@ -3183,6 +3234,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      releaseCursor?.();
       const dx = (ev.clientX - start.x) / f.scale;
       const dy = (ev.clientY - start.y) / f.scale;
       if (!dx && !dy) return;                        // a press that never moved writes NOTHING
@@ -4041,9 +4093,8 @@ const NoteEditor = forwardRef(function NoteEditor({
     const from = { ...viewRef.current };
     const sc = scrollerRef.current;
     if (sc) sc.setAttribute("data-panning", "1");
-    const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = "grabbing";
+    const releaseCursor = pinDragCursor("grabbing");
     document.body.style.userSelect = "none";
     const onMove = (ev) => {
       setView({ x: from.x - (ev.clientX - start.x), y: from.y - (ev.clientY - start.y), z: from.z });
@@ -4053,7 +4104,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
       if (sc) sc.removeAttribute("data-panning");
-      document.body.style.cursor = prevCursor;
+      releaseCursor();
       document.body.style.userSelect = prevSelect;
     };
     window.addEventListener("pointermove", onMove);
@@ -4793,9 +4844,8 @@ const NoteEditor = forwardRef(function NoteEditor({
     widthDragRef.current = drag;
     viewTouchedRef.current = true;          // the page is theirs now; never re-frame over a drag
     setWidthDragEdge(edge);
-    const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
+    const releaseCursor = pinDragCursor("col-resize");
     document.body.style.userSelect = "none";
 
     /** What the geometry should be for a pointer at `clientX`. Pure apart from the two library
@@ -4845,7 +4895,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      document.body.style.cursor = prevCursor;
+      releaseCursor();
       document.body.style.userSelect = prevSelect;
       widthDragRef.current = null;
       setWidthDragEdge(null);
@@ -4957,9 +5007,8 @@ const NoteEditor = forwardRef(function NoteEditor({
     heightDragRef.current = drag;
     viewTouchedRef.current = true;          // as for the width grips — see `framedForRef`
     setHeightDragEdge(edge);
-    const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = "row-resize";
+    const releaseCursor = pinDragCursor("row-resize");
     document.body.style.userSelect = "none";
 
     const liveHeightFor = (clientY) => {
@@ -5020,7 +5069,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      document.body.style.cursor = prevCursor;
+      releaseCursor();
       document.body.style.userSelect = prevSelect;
       heightDragRef.current = null;
       setHeightDragEdge(null);

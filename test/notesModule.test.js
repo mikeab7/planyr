@@ -561,8 +561,19 @@ describe("the mirrored control scale still matches the shared one", () => {
   });
 
   it("no notes file imports controls.jsx — that hoists a THIRD shared chunk onto the Site route", () => {
+    /* ONE sanctioned exception (B2426784, cursor convention 2026-10-20): `pinDragCursor`, the app's single drag-cursor pin, is
+     * imported by the two LAZY editor files only. Measured, not assumed: ui-audit/perf-bundle-audit.mjs reads the same 27
+     * Site-route chunks with and without the import (controls.jsx already lives in the AppHeader chunk the Notes route shares).
+     * Nothing else from controls.jsx may be imported, and no other file may import it. */
+    const PIN_ONLY = new Set(["components/NoteEditor.jsx", "lib/notesAnchorNode.js"]);
     for (const f of ALL_NOTES_FILES) {
-      expect(code(f), `${f} imports controls.jsx; the Site route's chunk allowlist goes red`).not.toMatch(/shared\/ui\/controls/);
+      const src = code(f);
+      if (PIN_ONLY.has([...PIN_ONLY].find((n) => f.endsWith(n)) || "")) {
+        const lines = src.split("\n").filter((l) => /shared\/ui\/controls/.test(l));
+        for (const l of lines) expect(l, `${f} may import ONLY pinDragCursor from controls.jsx`).toMatch(/^\s*import \{ pinDragCursor \} from "[./]+\/shared\/ui\/controls\.jsx";/);
+        continue;
+      }
+      expect(src, `${f} imports controls.jsx; the Site route's chunk allowlist goes red`).not.toMatch(/shared\/ui\/controls/);
     }
   });
 });

@@ -58,6 +58,10 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   Review "Opening <sheet>…" chip's three-way decision — arrived / genuinely failed / past the backstop —
   which replaced a bare `renderedPage !== page` whose only exit was one success line, so every bail and
   every swallowed throw left the chip up forever AND the sheet pinned at 0.35 opacity.
+- `reviewCursor.js` (NEW-4, B2426785) — the viewport's cursor, DERIVED from state (the markup overlay is pointer-events:none, so one viewport div owns it):
+  `viewportCursor` (pan/gesture/armed/hover priority), `gripCursorFor` (rect-ish grips directional from POSITION, never index order), `vertexGripAt` (the ONE
+  grip-hit rule the press and the hover share), `fileDropEffect`. Never read a cursor from a ref at render; guards: repo-root `test/` **cursorConventionReview**
+  + the ui-audit harness **verify-cursors-review** (docs/DESIGN.md "Cursor convention").
 - `releaseCanvas.js` (NEW-5) — hand an offscreen canvas's backing store back once its pixels have
   been consumed. This workspace is the biggest producer of them: `pdf.js`'s `renderInto` runs on a
   throttle DURING a continuous pan, so a minute of panning used to leave hundreds of full-density

@@ -1008,6 +1008,7 @@ export default function Scheduler({
               opacity: (ready && !gridMismatched) ? 0 : 1,
               transition: "opacity 0.45s ease",
               pointerEvents: (ready && !gridMismatched) ? "none" : "auto",
+              cursor: (ready && !gridMismatched) ? "default" : "progress",
             }}
           >
             <ModuleLoader module="scheduler" />

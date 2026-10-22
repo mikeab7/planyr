@@ -44,7 +44,7 @@ export default function NoteSlashMenu({ open, items = [], index = 0, at, onPick,
         width: 268, maxHeight: 268, overflow: "hidden",
         borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
         background: "var(--surface-raised)", boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
-        display: "flex", flexDirection: "column",
+        display: "flex", flexDirection: "column", cursor: "default",   // chrome: the arrow, not the mat's open hand
       }}
     >
       <div ref={listRef} style={{ overflowY: "auto", padding: "4px 0" }}>

@@ -409,7 +409,7 @@ function EmptyState({ onCreate, templates = [] }) {
 
 function EditorFallback() {
   return (
-    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-page)" }}>
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-page)", cursor: "progress" }}>
       <span data-testid="notes-editor-loading" style={{ fontSize: 13, fontWeight: 600, color: "var(--accent-notes-text)" }}>Opening the editor…</span>
     </div>
   );
