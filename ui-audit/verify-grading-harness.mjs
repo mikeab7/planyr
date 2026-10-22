@@ -125,7 +125,7 @@ try {
 
   // ---- layers: Cut & Fill (default ON) paints the SLOPES, never the pad
   await page.waitForSelector('[data-layer="cutfill"] image', { timeout: 30000 });
-  check("Cut & Fill is on by default and painted (image + daylight line + the limit's dashed line)", (await page.locator('[data-layer="cutfill"] image').count()) === 1 && (await page.locator('[data-layer="cutfill"] path').count()) === 3 && (await page.locator('[data-grading-limit] path').count()) === 1);
+  check("Cut & Fill is on by default and painted (the tint clipped to the traced band + the daylight line + the limit's dashed line)", (await page.locator('[data-layer="cutfill"] image[data-band-tint]').count()) === 1 && (await page.locator('[data-band-clip]').count()) === 1 && (await page.locator('[data-daylight-line]').count()) === 1 && (await page.locator('[data-grading-limit] path').count()) === 1);
   check("Level-pad limit is OFF by default: no tint, no line", (await page.locator('[data-layer="buildable"]').count()) === 0);
   // ---- per-plan switch + "Show cut and fill on the map" (NEW-1/NEW-2): one source of truth, clean when off
   await page.click('[data-testid="grading-show-on-map"]');
@@ -147,7 +147,10 @@ try {
     const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
     const g = c.getContext("2d"); g.drawImage(img, 0, 0);
     const d = g.getImageData(0, 0, c.width, c.height).data;
-    const px = (ft) => { const i = Math.floor((ft.x - L.bboxFt.x) / (L.bboxFt.w / c.width)), j = Math.floor((ft.y - L.bboxFt.y) / (L.bboxFt.h / c.height)); return d[(j * c.width + i) * 4 + 3]; };
+    // ROUND 7: what is PAINTED is the tint inside the traced band polygon (the raster reaches past it on purpose)
+    const clip = document.querySelector("[data-band-clip]");
+    const inBand = (ft) => !clip || clip.isPointInFill(new DOMPoint(ft.x, ft.y));
+    const px = (ft) => { const i = Math.floor((ft.x - L.bboxFt.x) / (L.bboxFt.w / c.width)), j = Math.floor((ft.y - L.bboxFt.y) / (L.bboxFt.h / c.height)); return inBand(ft) ? d[(j * c.width + i) * 4 + 3] : 0; };
     const els = window.__harness.els;
     const cen = (ring) => ({ x: ring.reduce((a, p) => a + p.x, 0) / ring.length, y: ring.reduce((a, p) => a + p.y, 0) / ring.length });
     let inked = 0; for (let k = 3; k < d.length; k += 4) if (d[k] > 0) inked++;
@@ -197,7 +200,7 @@ try {
   page = await open("?buildable=0&ppf=0.2");
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1500);
   await page.waitForSelector('[data-layer="cutfill"] image');
-  check("zoomed out (parcel not filling the map): the bands and the line stay, the pills go", (await page.locator("[data-grade-pill]").count()) === 0 && (await page.locator('[data-layer="cutfill"] path').count()) === 3);
+  check("zoomed out (parcel not filling the map): the bands and the line stay, the pills go", (await page.locator("[data-grade-pill]").count()) === 0 && (await page.locator('[data-band-clip]').count()) === 1 && (await page.locator('[data-daylight-line]').count()) === 1);
   await page.close();
 
   // ================= 3. pond spoil counts as fill =================
@@ -307,7 +310,10 @@ try {
     const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
     const g = c.getContext("2d"); g.drawImage(img, 0, 0);
     const d = g.getImageData(0, 0, c.width, c.height).data;
-    const px = (ft) => { const i = Math.floor((ft.x - L.bboxFt.x) / (L.bboxFt.w / c.width)), j = Math.floor((ft.y - L.bboxFt.y) / (L.bboxFt.h / c.height)); return d[(j * c.width + i) * 4 + 3]; };
+    // ROUND 7: what is PAINTED is the tint inside the traced band polygon (the raster reaches past it on purpose)
+    const clip = document.querySelector("[data-band-clip]");
+    const inBand = (ft) => !clip || clip.isPointInFill(new DOMPoint(ft.x, ft.y));
+    const px = (ft) => { const i = Math.floor((ft.x - L.bboxFt.x) / (L.bboxFt.w / c.width)), j = Math.floor((ft.y - L.bboxFt.y) / (L.bboxFt.h / c.height)); return inBand(ft) ? d[(j * c.width + i) * 4 + 3] : 0; };
     const els = window.__harness.els; const b = els[0].ring;
     // the strip between the court's far edge and the limit (the shoulder) and the rounded corner inside the limit: no ink
     return { shoulder: px({ x: b[0].x + 260, y: b[0].y + 300 + 130 + 2 }), pad: px({ x: b[0].x + 260, y: b[0].y + 150 }) };

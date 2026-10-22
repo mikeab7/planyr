@@ -122,6 +122,12 @@ export const LAYER_TIER = {
   ga_city: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",
+  nj_county: "context",            // NEW-1 (New Jersey + New York)
+  nj_city: "context",
+  ny_county: "context",
+  ny_city: "context",
+  ny_town: "context",
+  ny_village: "context",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",

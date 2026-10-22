@@ -3,6 +3,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 import { formatAge } from "../lib/gisCache.js";
 import { PinIcon } from "./icons.jsx";
 import { abbreviateJurisdiction, jurisdictionRungs } from "../lib/jurisdictionBadgeFit.js";
+import { isNjNyState, municipalDisplayName } from "../lib/njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 
 /* B763 — the passive jurisdiction badge in the site header. Display-only screening
  * info from the B93 identify, auto-run once per active-parcel activation (never per
@@ -114,6 +115,8 @@ export default function JurisdictionBadge({ badge }) {
   }, [text, rungs.length]);
 
   if (!badge || !badge.text) return null;
+  // NEW-1 (New Jersey + New York) — a NJ / NY municipality is named with its own type ("Village of Pleasantville"), never "City of …".
+  const cityWord = (c) => (isNjNyState(badge.state) ? municipalDisplayName(c) : `City of ${c}`);
   const age = badge.ageMs != null ? formatAge(badge.ageMs) : null;
   const title = [
     // NEW-2 — the FULL line leads the tooltip, so a shortened pill is one hover from complete.
@@ -134,12 +137,12 @@ export default function JurisdictionBadge({ badge }) {
      * the dash: the old label joined "this city governs your platting" and "this city is next door"
      * with the same slash, and a reader could not tell them apart. B793's edge-only sliver is the
      * ordinary case — the city's limits meet the parcel boundary and nothing more. */
-    badge.edgeOnlyCities?.length ? `After the dash — ${badge.edgeOnlyCities.map((c) => `City of ${c}`).join(", ")} meets only the parcel edge. It does not govern this site; it is named so a neighbouring jurisdiction is never a surprise.` : "",
+    badge.edgeOnlyCities?.length ? `After the dash — ${badge.edgeOnlyCities.map(cityWord).join(", ")} meets only the parcel edge. It does not govern this site; it is named so a neighbouring jurisdiction is never a surprise.` : "",
     // NEW-1 — the two states the whole-site containment model added. A "part in" city really does
     // govern part of the site, so it is stated as membership; a "touches" city is a city we could
     // not classify, and saying which it is matters more than hiding the gap.
-    badge.partialCities?.length ? `"Part in": some of the drawn parcels sit inside ${badge.partialCities.map((c) => `City of ${c}`).join(", ")} and some do not — the site is split, and both standards may apply.` : "",
-    badge.touchesCities?.length ? `"Containment unchecked": ${badge.touchesCities.map((c) => `City of ${c}`).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
+    badge.partialCities?.length ? `"Part in": some of the drawn parcels sit inside ${badge.partialCities.map(cityWord).join(", ")} and some do not — the site is split, and both standards may apply.` : "",
+    badge.touchesCities?.length ? `"Containment unchecked": ${badge.touchesCities.map(cityWord).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
     badge.failureNote || "",
     badge.etjNote || "",
     // NEW-1 (Georgia) — the county governs outside city limits; the consolidated city-county note rides with it.

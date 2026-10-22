@@ -36,6 +36,7 @@ import { summarizeWells } from "./wellStatus.js";
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
 import { siteState } from "./siteRegion.js";
 import { GA_JURISDICTION_SOURCE_NAME } from "./georgiaJurisdiction.js";
+import { NJ_JURISDICTION_SOURCE_NAME, NY_JURISDICTION_SOURCE_NAME, isNjNyState, municipalDisplayName, sortMunicipalNames } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 // NEW-1 (FL/GA pipelines) — the pure half of the "never clear outside Texas" rule (see that module).
 import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineScreen.js";
 // The wording + combiner are loaded ON DEMAND (only a non-Texas site reads them): `eiaPipelineScreenCopy.js`.
@@ -349,7 +350,7 @@ export const ANALYSIS_SOURCES = [
 // (2) A card that exists only for some states (`extraFor` — the Georgia cards) is simply ABSENT elsewhere, so a
 //     Houston plan gains no Georgia rows and nothing there reads as "not screened" about a check it never had.
 // ---------------------------------------------------------------------------
-const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California", FL: "Florida" };
+const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California", FL: "Florida", NJ: "New Jersey", NY: "New York" };
 export const stateName = (st) => STATE_NAMES[st] || "this state";
 
 export const cardExistsIn = (source, state) => !Array.isArray(source.extraFor) || (!!state && source.extraFor.includes(state));
@@ -907,19 +908,23 @@ export function analyzeSource(source, rings, opts = {}) {
 // Jurisdiction / road / zoning findings (reuse the verified jurisdiction.js engine)
 // ---------------------------------------------------------------------------
 // Whose boundary services the jurisdiction card actually read — by state (the Texas string was shown on every site).
-const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: GA_JURISDICTION_SOURCE_NAME, CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)" };
+const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: GA_JURISDICTION_SOURCE_NAME, CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)", NJ: NJ_JURISDICTION_SOURCE_NAME, NY: NY_JURISDICTION_SOURCE_NAME };
 export function buildJurisdictionFinding(j, state = null) {
   const rows = [];
   rows.push(["County", j.county.length ? j.county.join(" + ") : "—", j.ages.county]);
   // NEW-1 (DFW ETJ) — "Unincorporated" and "not in a city ETJ" are POSITIVE findings; where the ETJ
   // data cannot speak to the point (or the lookup failed) they read "unavailable" instead.
-  rows.push(["City", j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : j.city.join(" + "), j.ages.city]);
+  /* NEW-1 (New Jersey + New York) — every acre is in a municipality (none is "Unincorporated"), named with its type and, in New York,
+   * village → town ("Village of Pleasantville + Town of Mount Pleasant"). The row keeps its "City" label across states. */
+  rows.push(["City", isNjNyState(state)
+    ? (j.city.length ? sortMunicipalNames(j.city).map(municipalDisplayName).join(" + ") : "No municipality found")
+    : j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : j.city.join(" + "), j.ages.city]);
   const etjState = (j.sources.find((s) => s.id === "etj") || {}).state;
   // NEW-2 — a disputed strip lists its CLAIMANTS as claims (never as an answer); a release area names the city.
   const undet = (j.etjUndetermined || []).length
     ? `ETJ undetermined (disputed)${(j.etjUndetermined || []).flatMap((u) => u.claimants || []).length ? " — claimed by " + [...new Set((j.etjUndetermined || []).flatMap((u) => u.claimants || []))].join(" and ") : ""}` : null;
   const rel = (j.etjReleased || []).length ? (j.etjReleased || []).map((n) => `${n} ETJ release area (SB 2038)`).join(" + ") : null;
-  const noEtjStates = state === "GA" || state === "CA"; // these states give a city no reach beyond its limits
+  const noEtjStates = state === "GA" || state === "CA" || isNjNyState(state); // these states give a city no reach beyond its limits
   rows.push(["ETJ", noEtjStates ? `None in ${stateName(state)} — a city has no reach beyond its limits` : [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
   // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
   // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
@@ -1002,7 +1007,7 @@ export function deriveZoning(j, state = null) {
   const src = ANALYSIS_SOURCES.find((s) => s.id === "zoning");
   const cities = (j.city || []).map((c) => String(c).toLowerCase());
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
-  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : null; // NEW-1 (California) — a state we positively identify states its OWN doctrine
+  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : isNjNyState(state) ? state : null; // NEW-1 (California; NJ + NY) — a state we positively identify states its OWN doctrine
   let summary;
   // ⛔ NEW-5 (2026-09-05, owner-reported) — `j.unincorporated` used to be checked FIRST, so it won
   // on every non-Houston ETJ site (an ETJ IS unincorporated land by definition — jurisdictionLabel.js's
@@ -1011,7 +1016,14 @@ export function deriveZoning(j, state = null) {
   // The `etj.includes("houston")` branch below was the ONLY city this ever named — every other city's
   // ETJ fell straight through it. City limits still win outright over ETJ; ETJ still wins over the
   // blanket unincorporated sentence, generalized to whichever city's ETJ actually reaches the site.
-  if (cities.includes("houston")) summary = "City of Houston — NO zoning (deed restrictions + Ch. 42 development code apply instead).";
+  if (isNjNyState(st)) {
+    /* NEW-1 (New Jersey + New York) — no Houston, no ETJ, no unincorporated land: land is zoned by the municipality that holds it
+     * (in New York, the village over the town that holds it). Said in the municipality's own terms, never "city zoning". */
+    const names = sortMunicipalNames(j.city || []).map(municipalDisplayName);
+    summary = names.length
+      ? `Within ${names.join(" + ")} — municipal zoning applies${st === "NY" && names.length > 1 ? " (a village's zoning governs inside it; the town's elsewhere)" : ""}; confirm the district + entitlement path.`
+      : "Municipality not found for this point — confirm the zoning authority with the county and the nearest municipality.";
+  } else if (cities.includes("houston")) summary = "City of Houston — NO zoning (deed restrictions + Ch. 42 development code apply instead).";
   else if (cities.length) summary = `Within ${j.city.join(", ")} — city zoning likely applies; confirm the district + entitlement path.`;
   else if (etj.includes("houston")) summary = "Houston ETJ — no zoning, but city subdivision/platting authority applies in the ETJ.";
   else if (etj.length) summary = `${j.etj.join(", ")} ETJ — no zoning, but the city's subdivision/platting authority applies in the ETJ; confirm with the city.`;
@@ -1027,7 +1039,7 @@ export function deriveZoning(j, state = null) {
     status: "info", summary, detail: [], rows: null,
     sourceName: "Derived from jurisdiction", ageMs: null, ts: null,
     // NEW-1 — the shared caveat names City of Houston, which is Texas trivia on a Colorado card.
-    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : st === "CA" ? CA_ZONING_CAVEAT : src.caveat, verified: false,
+    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : st === "CA" ? CA_ZONING_CAVEAT : isNjNyState(st) ? NJNY_ZONING_CAVEAT : src.caveat, verified: false,
   };
 }
 
@@ -1039,6 +1051,10 @@ const UNINCORPORATED_ZONING = {
   CA: "Unincorporated — California counties DO zone, so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a conditional use permit.",
   unknown: "Unincorporated — county zoning authority varies by state. Confirm with the county before assuming the land is unzoned.",
 };
+
+const NJNY_ZONING_CAVEAT =
+  "Zoning is municipality-specific. New Jersey and New York have no unincorporated land and no ETJ; confirm the district and the entitlement " +
+  "path with the municipality (in New York, the village if there is one, otherwise the town or city) — the county is not the zoning authority.";
 
 const CA_ZONING_CAVEAT =
   "Zoning is jurisdiction-specific. California cities (including charter cities under their own charters) and counties each zone " +
