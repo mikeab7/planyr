@@ -55,10 +55,13 @@ async function clickRow({ name, lat, lng, expectKey, idRe, ownerRe, control = fa
   const drawn = await waitFor(async () => { const d = await page.evaluate(() => (window.__mapParcelDisplay ? window.__mapParcelDisplay() : null)); return d && d.drawn > 0 ? d : null; }, 30000);
   const c = await toContainer(lat, lng);
   await page.mouse.click(c.x, c.y);
-  const got = await waitFor(async () => { const h = await held(); const x = h && h[h.length - 1]; return x && x.attrs && Object.keys(x.attrs).length ? h : null; }, 30000);
+  /* the outline paints the lot at once with the id; the county's point identify (which carries the owner and situs) answers a moment later — wait for the owner, like the pass-1 harness waits for the situs */
+  const OWNER_RE = /^(owner|owner1|owner_1|ownername1)$/i;
+  const got = await waitFor(async () => { const h = await held(); const x = h && h[h.length - 1]; return x && x.attrs && pick(x.attrs, OWNER_RE) ? h : null; }, 40000)
+    || await waitFor(async () => { const h = await held(); return h && h.length ? h : null; }, 2000);
   const x = got && got[got.length - 1];
   const idVal = x ? [pick(x.attrs, idRe), x.acct].filter(Boolean)[0] : null;
-  const owner = x ? pick(x.attrs, /^(owner|owner1|owner_1|ownername1)$/i) : null;
+  const owner = x ? pick(x.attrs, OWNER_RE) : null;
   const txt = await bodyText();
   const pass = !!(drawn && x && (!expectKey || String(x.county) === expectKey) && idVal && (!ownerRe || ownerRe.test(owner || "")) && !/No parcel at this point/i.test(txt));
   await record({ name, pass, control, detail: x ? `outlines ${drawn ? `${drawn.drawn} drawn (${drawn.sources.join(",")})` : "NONE"} · county key ${x.county} · id ${idVal} · owner ${owner}` : `nothing selected; outlines ${drawn ? "drawn" : "none"}; page says: ${(txt.match(/No parcel[^\n]*/) || [""])[0]}` });
@@ -69,7 +72,8 @@ let voided = false;
 try {
   /* the four counties wired in pass 2 */
   await clickRow({ name: "1 Williamson (Nolensville Rd) — outlines draw, lot selects with id + owner", lat: 35.952628, lng: -86.669169, expectKey: "tn_williamson", idRe: /^parcel_id$/i, ownerRe: /WILLIAMS/i });
-  await clickRow({ name: "1b Williamson (Franklin Public Square) — City of Franklin", lat: 35.925209, lng: -86.86894, expectKey: "tn_williamson", idRe: /^parcel_id$/i, ownerRe: /CITY OF FRANKLIN/i });
+  /* Franklin's Public Square is two OVERLAPPING Williamson lots (078 10900 UDC and 078 11000 CITY OF FRANKLIN both contain the point — the county's own data), so it is not a fixed expectation; Thompson's Station is a single lot. */
+  await clickRow({ name: "1b Williamson (Thompson's Station town lot)", lat: 35.800089, lng: -86.909925, expectKey: "tn_williamson", idRe: /^parcel_id$/i, ownerRe: /THOMPSONS STATION/i });
   await clickRow({ name: "2 Hamilton (Soddy-Daisy, Dayton Pike) — outlines draw, lot selects with tax-map no + owner", lat: 35.258812, lng: -85.174379, expectKey: "tn_hamilton", idRe: /^tax_map_no$/i, ownerRe: /VANESSAS COTTAGE/i });
   await clickRow({ name: "2b Hamilton (Enterprise South / Volkswagen Dr)", lat: 35.081328, lng: -85.13771, expectKey: "tn_hamilton", idRe: /^tax_map_no$/i, ownerRe: /INDUSTRIAL DEV BOARD/i });
   await clickRow({ name: "3 Montgomery (Franklin St, Clarksville) — outlines draw, lot selects with parcel no + owner", lat: 36.528787, lng: -87.350438, expectKey: "tn_montgomery", idRe: /^parcelno$/i, ownerRe: /IMMACULATE CONCEPTION/i });
