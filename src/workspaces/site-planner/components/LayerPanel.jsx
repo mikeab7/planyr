@@ -59,6 +59,7 @@ import {
   CONTOUR_INTERVALS, contourIntervalLabel, contourRowValue, CORRIDOR_WIDTH_CHOICES, corridorWidthOptions,
   opacityFromPercent, percentOf, OPACITY_MIN, OPACITY_MAX, pickGroup,
 } from "../lib/layerPanelModel.js";
+import { useServiceAreas } from "../lib/useServiceAreas.js";
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
 
@@ -73,10 +74,18 @@ const STATUS = {
   failed: { color: "var(--danger)", label: "failed" },
   unconfigured: { color: "var(--text-tertiary)", label: "needs setup" },
 };
-const RELEVANCE_OPTIONS = [{ key: "all", label: "Show" }, { key: "dim", label: "Dim" }, { key: "hide", label: "Hide" }];
+/* "Layers with no data here": Show (the row renders like every other row) or Hide (it is not rendered). NO "Dim" — a faded row builds
+ * hierarchy by fading text toward the background, which the theming rule forbids (NEW-2). A stored "dim" reads as Show. */
+const RELEVANCE_OPTIONS = [{ key: "all", label: "Show" }, { key: "hide", label: "Hide" }];
 const GROUP_PREF_KEY = "planyr:layerPanelGroup";
 const NARROW_BELOW_PX = 310; // the panel's OWN box (ResizeObserver) — never the window; below it the group list becomes a dropdown
 const NAV_W = 120;
+/* A ROW'S INLINE RHYTHM (NEW-1): checkbox · swatch slot · name sit one small gap apart — the panel's normal inline gap, no more. The
+ * slot stays reserved on EVERY row (PR 2467: names start at one x in every pane) but is only as wide as its chip. Measured on the
+ * planner card before/after: checkbox right edge → name left edge 27 → 18. */
+const INLINE_GAP = 4;
+const SWATCH_SLOT = 10;
+const CHECKBOX_RESET = { margin: 0, flex: "none" }; // the browser's own 3-4 px checkbox margins were the rest of the hole
 const OUT_OF_AREA_LINE = "No data in this area — this layer only covers its home region. The map still shows whatever the source returns here.";
 
 /* ── small presentational pieces (module scope — MODULE-SCOPE-COMPONENTS) ───────────────────── */
@@ -101,10 +110,10 @@ function StatusDot({ meta, loading, dormant, hidden, title }) {
 function Swatch({ color, show }) {
   /* EVERY row reserves the slot — a row with no map colour (labels, Your Data, the owner-only grading rows) keeps it empty — so every
    * row's name starts at the same x in every pane. */
-  if (!color) return <span aria-hidden="true" data-swatch="none" style={{ width: 12, height: 12, flex: "none" }} />;
+  if (!color) return <span aria-hidden="true" data-swatch="none" style={{ width: SWATCH_SLOT, height: SWATCH_SLOT, flex: "none" }} />;
   return (
     <span aria-hidden="true" data-swatch={show && color ? "on" : "none"}
-      style={{ width: 12, height: 12, flex: "none", boxSizing: "border-box",
+      style={{ width: SWATCH_SLOT, height: SWATCH_SLOT, flex: "none", boxSizing: "border-box",
         background: show && color ? color : "transparent", border: show && color ? `1px solid ${LINE}` : "none" }} />
   );
 }
@@ -264,14 +273,14 @@ function RowDropdown({ spec }) {
 
 /* ONE row. Checkbox · swatch · name (+ value) · status dot · ▾. Nothing else, ever. */
 function LayerRow({ spec, open, onToggleOpen }) {
-  const dormant = spec.dormant;
+  /* NO ROW IS EVER FADED (NEW-2): a zoom-gated ("dormant") row reads like every other row — the hollow status dot and the ▾ line say it. */
   return (
     <div data-testid={`layer-row-${spec.id}`} data-layer-state={spec.state} style={{ marginBottom: 4 }}>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", minHeight: 24, opacity: spec.dim ? 0.55 : (dormant ? 0.78 : 1) }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
-          <input type="checkbox" checked={spec.checked} onChange={(e) => spec.onCheck(e.target.checked)} aria-label={spec.label} />
+      <div style={{ display: "flex", gap: INLINE_GAP, alignItems: "center", minHeight: 24 }}>
+        <label style={{ display: "flex", gap: INLINE_GAP, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+          <input type="checkbox" checked={spec.checked} onChange={(e) => spec.onCheck(e.target.checked)} aria-label={spec.label} style={CHECKBOX_RESET} />
           <Swatch color={spec.swatch} show={spec.checked} />
-          <span title={spec.label} style={{ flex: 1, minWidth: 0, color: dormant ? MUTED : INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <span title={spec.label} style={{ flex: 1, minWidth: 0, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {spec.label}
             {spec.value && <span data-testid={`layer-value-${spec.id}`} style={{ color: MUTED, fontWeight: 600 }}> {spec.value}</span>}
           </span>
@@ -293,8 +302,8 @@ function LayerRow({ spec, open, onToggleOpen }) {
 function SimpleCheckRow({ id, label, checked, onChange, testId }) {
   return (
     <div data-testid={`layer-row-${id}`} style={{ marginBottom: 4, minHeight: 24, display: "flex", alignItems: "center" }}>
-      <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
-        <input type="checkbox" data-testid={testId} checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
+      <label style={{ display: "flex", gap: INLINE_GAP, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+        <input type="checkbox" data-testid={testId} checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} style={CHECKBOX_RESET} />
         <Swatch color={null} show={false} />
         <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
       </label>
@@ -412,6 +421,7 @@ export default function LayerPanel({
   const rootRef = useRef(null);
   const narrow = useNarrow(rootRef);
   const hidden = useLayersHidden();
+  useServiceAreas(!!siteLocation); // a row scoped to a service area (HCFCD, City of Houston, BKDD) is judged once its geometry loads — the state change re-renders the rows
   const scope = useMemo(() => ({ state: siteState || null, loc: siteLocation || null }), [siteState, siteLocation]);
   const jur = jurisdictionFor(county);
 
@@ -429,7 +439,6 @@ export default function LayerPanel({
   useEffect(() => subscribeRelevance((p) => { setMode(p.mode); setRadius(p.radius); }), []);
   const [interval, setIntervalState] = useState(getContourInterval);
   useEffect(() => subscribeContourInterval(setIntervalState), []);
-  const [revealHidden, setRevealHidden] = useState({});
   const [floodCopy, setFloodCopy] = useState(null); // the lazily-loaded flood copy tier (B1349: loaded when there is something for it to say)
   const hasFloodFacts = !!floodContext?.flood?.state;
   useEffect(() => {
@@ -488,7 +497,7 @@ export default function LayerPanel({
   };
 
   /* ── building one row spec from a slot ── */
-  const slotSpec = (slot, { dim = false, why = null } = {}) => {
+  const slotSpec = (slot, { why = null } = {}) => {
     const members = slot.kind === "merge" ? slot.members : [slot.entry];
     const id = slot.kind === "merge" ? slot.mergeGroup : slot.entry[0];
     const cfg0 = members[0][1];
@@ -507,7 +516,6 @@ export default function LayerPanel({
       : rowInfoSections(cfg0, { vintage: layerVintage(id, cfg0), age, ls: ls0 });
     if (id === "fema") info = [...femaExtras(), ...info];
     if (cfg0.agency && slot.kind === "solo") info = [{ text: `Agency: ${cfg0.agency}` }, ...info];
-    if (dim) info = [{ text: cfg0.needsSetup && !tok ? "Needs setup — not configured." : "No data in this area.", tone: "warn" }, ...info];
 
     // the status line (failed / slow / empty / needs-setup / out-of-area) leads the dropdown when it applies — LOUD-FAILURE keeps the dot on the row
     let status = null;
@@ -532,7 +540,7 @@ export default function LayerPanel({
     const swatch = members.map(([, c]) => rowSwatch(c)).find(Boolean) || null;
     const dormant = isDormant(vis);
     return {
-      id, label, value: id === "contours" ? contourRowValue(interval) : null, swatch, dim, dormant, state: vis.state,
+      id, label, value: id === "contours" ? contourRowValue(interval) : null, swatch, dormant, state: vis.state,
       checked: anyOn,
       onCheck: writeOn((v) => setAll({ on: v })),
       dot: {
@@ -552,7 +560,8 @@ export default function LayerPanel({
     };
   };
 
-  /* A group's rows with the relevance treatment applied (ordering / dimming only — never the map). */
+  /* A group's rows with the relevance treatment applied. Show renders every row the same; Hide leaves out the unchecked rows whose
+   * data does not reach this view (ordering / hiding only — never the map). No row is ever rendered faded (NEW-2). */
   const slotsOf = (entries) => buildGroupSlots(entries);
   const slotLowRel = (slot) => (slot.kind === "merge" ? slot.members.every(([id, cfg]) => lowRel(id, cfg)) : lowRel(slot.entry[0], slot.entry[1]));
   const slotAnyOn = (slot) => (slot.kind === "merge" ? mergeSlotAnyOn(slot.members, overlays) : !!overlays[slot.entry[0]]?.on);
@@ -560,29 +569,8 @@ export default function LayerPanel({
     const spec = slotSpec(slot, opts);
     return <LayerRow key={spec.id} spec={spec} open={openRow === spec.id} onToggleOpen={() => toggleOpen(spec.id)} />;
   };
-  const groupRows = (entries, groupKey, render = (sl, o) => rowFor(sl, o)) => {
-    const slots = slotsOf(entries);
-    if (mode === "all") return <>{slots.map((sl) => render(sl, {}))}</>;
-    const hi = [], lo = [];
-    for (const sl of slots) (slotLowRel(sl) ? lo : hi).push(sl);
-    return (
-      <>
-        {hi.map((sl) => render(sl, {}))}
-        {lo.length > 0 && (mode === "dim"
-          ? lo.map((sl) => render(sl, { dim: true }))
-          : (
-            <>
-              <button type="button" onClick={() => setRevealHidden((s) => ({ ...s, [groupKey]: !s[groupKey] }))}
-                aria-expanded={!!revealHidden[groupKey]} aria-label={`${revealHidden[groupKey] ? "Hide" : "Show"} ${lo.length} layer${lo.length > 1 ? "s" : ""} with no local data in the ${groupKey} group`}
-                style={{ background: "transparent", border: "none", color: MUTED, fontFamily: "inherit", fontSize: TEXT, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
-                {revealHidden[groupKey] ? "▾ Hide" : "▸ Show"} {lo.length} layer{lo.length > 1 ? "s" : ""} with no local data here
-              </button>
-              {revealHidden[groupKey] && lo.map((sl) => render(sl, { dim: true }))}
-            </>
-          ))}
-      </>
-    );
-  };
+  const shownSlots = (entries) => { const slots = slotsOf(entries); return mode === "hide" ? slots.filter((sl) => !slotLowRel(sl)) : slots; };
+  const groupRows = (entries, render = (sl, o) => rowFor(sl, o)) => <>{shownSlots(entries).map((sl) => render(sl, {}))}</>;
 
   /* ── the groups ── */
   const foldEntry = jur && Object.keys(jur.layers || {}).length === 1 ? Object.entries(jur.layers)[0] : null;
@@ -608,7 +596,7 @@ export default function LayerPanel({
   // A group with no rows left for this location is hidden from the left pane (Map Base always stays).
   const visibleGroups = unlocated
     ? [PANEL_GROUPS[0]]
-    : PANEL_GROUPS.filter((g) => g.key === "base" || slotsOf(entriesFor(g.key)).length > 0 || (g.key === "topo" && (gradingRows?.rows || []).length > 0));
+    : PANEL_GROUPS.filter((g) => g.key === "base" || shownSlots(entriesFor(g.key)).length > 0 || (g.key === "topo" && (gradingRows?.rows || []).length > 0));
   const counts = { base: baseCount };
   for (const g of layerGroups) counts[g.key] = slotCount(g.key) + (g.key === "topo" ? gradingOnCount : 0);
   const selected = pickGroup(groupPref, visibleGroups.map((g) => g.key));
@@ -620,7 +608,7 @@ export default function LayerPanel({
   const roadNamesInfo = [{ text: "Road and highway names drawn OVER the aerial — the same labels the map finder shows; part of the base layer, not a separate overlay. It does not carry city, town or landmark names — those are the separate \"City Names\" row. Only visible once you're zoomed in past neighborhood scale. Fade it with Opacity, or turn it off for a clean picture of the ground." }];
   const cityNamesInfo = [{ text: "City and town names drawn over the map — the biggest cities first, smaller towns as you zoom in. They fade out as you reach parcel and site-plan zoom so nothing sits on your plan." }];
   const roadNamesSpec = placeNames && {
-    id: "road_names", label: "Road Names", value: null, swatch: null, dim: false, dormant: placeNamesDormant, state: placeNamesDormant ? "dormant-zoom" : (placeNames.value ? "drawing" : "off"),
+    id: "road_names", label: "Road Names", value: null, swatch: null, dormant: placeNamesDormant, state: placeNamesDormant ? "dormant-zoom" : (placeNames.value ? "drawing" : "off"),
     checked: !!placeNames.value, onCheck: writeOn(placeNames.onChange),
     // The same anatomy as every other row: a LIVE dot while the labels are drawing (green), hollow while the zoom gate holds them back.
     dot: { meta: placeNames.value && !placeNamesDormant ? STATUS.loaded : null, loading: false, dormant: placeNamesDormant, hidden: false, title: placeNamesDormant ? "On — not showing at this zoom" : (placeNames.value ? STATUS.loaded.label : "") },
@@ -637,7 +625,7 @@ export default function LayerPanel({
   // City names live in zooms 3..13 (`placeNamesVisible`); the row reads hollow outside that band, like any zoom-gated row.
   const cityNamesDormant = !!cityNames && !!cityNames.value && typeof mapZoom === "number" && !placeNamesVisible(mapZoom);
   const cityNamesSpec = cityNames && {
-    id: "city_names", label: "City Names", value: null, swatch: null, dim: false, dormant: cityNamesDormant, state: cityNamesDormant ? "dormant-zoom" : (cityNames.value ? "drawing" : "off"),
+    id: "city_names", label: "City Names", value: null, swatch: null, dormant: cityNamesDormant, state: cityNamesDormant ? "dormant-zoom" : (cityNames.value ? "drawing" : "off"),
     checked: !!cityNames.value, onCheck: writeOn(cityNames.onChange),
     dot: { meta: cityNames.value && !cityNamesDormant ? STATUS.loaded : null, loading: false, dormant: cityNamesDormant, hidden: false, title: cityNamesDormant ? "On — not showing at this zoom" : (cityNames.value ? STATUS.loaded.label : "") },
     dropdown: { plan: ["info"], status: null, info: cityNamesInfo },
@@ -703,10 +691,10 @@ export default function LayerPanel({
   };
   const floodBody = (
     <>
-      {floodScope.tiers.map((t) => (
+      {floodScope.tiers.filter((t) => shownSlots(t.rows).length > 0).map((t) => (
         <div key={t.key} data-testid={`flood-tier-${t.key}`}>
           <SectionHeading title={t.note}>{t.label}</SectionHeading>
-          {groupRows(t.rows, `flood-${t.key}`, floodRowFor)}
+          {groupRows(t.rows, floodRowFor)}
         </div>
       ))}
     </>
@@ -714,7 +702,7 @@ export default function LayerPanel({
 
   const gradingBody = gradingRows && gradingRows.rows && gradingRows.rows.map((g) => {
     const spec = {
-      id: `grading-${g.id}`, label: g.label, value: null, swatch: null, dim: false, dormant: false, state: g.on ? "drawing" : "off",
+      id: `grading-${g.id}`, label: g.label, value: null, swatch: null, dormant: false, state: g.on ? "drawing" : "off",
       checked: !!g.on, onCheck: writeOn((v) => gradingRows.onToggle(g.id, v)),
       dot: { meta: null, loading: false, dormant: false, hidden: false, title: "" },
       dropdown: { plan: ["info"], status: null, info: [{ text: g.info }, ...(g.on && g.sub ? [{ text: g.sub }] : [])] },
@@ -725,7 +713,7 @@ export default function LayerPanel({
   const bodyFor = (key) => {
     if (key === "base") return baseBody;
     if (key === "flood") return floodBody;
-    return <>{groupRows(entriesFor(key), key)}{key === "topo" && gradingBody}</>;
+    return <>{groupRows(entriesFor(key))}{key === "topo" && gradingBody}</>;
   };
 
   /* ── header actions ── */
@@ -759,8 +747,14 @@ export default function LayerPanel({
           mode={mode} onMode={setRelevanceMode} radius={radius} onRadius={setNearbyRadiusMiles} />
       </div>
       {narrow && visibleGroups.length > 1 && <GroupSelect groups={visibleGroups} counts={counts} selected={selected} onSelect={selectGroup} />}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-        {!narrow && visibleGroups.length > 1 && <GroupNav groups={visibleGroups} counts={counts} selected={selected} onSelect={selectGroup} />}
+      <div style={{ display: "flex", alignItems: "stretch" }}>
+        {!narrow && visibleGroups.length > 1 && (
+          <>
+            <GroupNav groups={visibleGroups} counts={counts} selected={selected} onSelect={selectGroup} />
+            {/* NEW-1: one hairline between the group list and the rows, the full height of the panes (the row stretches both). */}
+            <div aria-hidden="true" data-testid="layer-pane-divider" style={{ width: 1, flex: "none", alignSelf: "stretch", background: LINE, margin: "0 8px" }} />
+          </>
+        )}
         <div role="tabpanel" data-testid="layer-pane" data-group={selected} style={{ flex: 1, minWidth: 0 }}>
           {selected && bodyFor(selected)}
         </div>

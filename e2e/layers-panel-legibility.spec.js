@@ -14,7 +14,7 @@
  * no external GIS — so they are Claude-verifiable here, not parked for a live pass.
  */
 import { test, expect } from "@playwright/test";
-import { panelSel, openPlannerLayers, groupKeys, selectGroup, setLayer } from "./lib/layersPanel.js";
+import { panelSel, openPlannerLayers, groupKeys, selectGroup, setLayer, longestGroup } from "./lib/layersPanel.js";
 import fs from "node:fs";
 
 const LAT = 29.735, LON = -94.977; // Goose Creek / Baytown
@@ -141,7 +141,8 @@ test.describe("NEW-3 — the panel stops fighting the map", () => {
 
   test("the group list stays put while a long group's rows scroll", async ({ page }) => {
     const panel = await openPlanner(page);
-    await selectGroup(panel, "flood"); // the longest group
+    await selectGroup(panel, await longestGroup(panel)); // the longest group at this location
+    await panel.locator('[data-testid^="layer-caret-"]').first().click(); // one open dropdown, so the rows outrun the 230px box below
     /* ⛔ This must PROVE the list actually scrolled first (the old header-stickiness guard passed with the rule removed, because a panel
      * tall enough to need no scrolling leaves the header where it was). A guard that cannot tell "sticky" from "nothing moved" is not one. */
     const stuck = await panel.evaluate((root) => {
@@ -151,11 +152,11 @@ test.describe("NEW-3 — the panel stops fighting the map", () => {
       const nav = root.querySelector('[data-testid="layer-group-nav"]');
       if (!nav) return { ok: false, why: "no group list" };
       // Shorter than the content, but taller than the group list itself (a list taller than its box cannot stick whole).
-      scroller.style.maxHeight = "270px";
-      scroller.style.height = "270px";
+      scroller.style.maxHeight = "230px";
+      scroller.style.height = "230px";
       const first = root.querySelector('[data-testid^="layer-row-"] input[type="checkbox"]');
       const rowBefore = first.getBoundingClientRect().top;
-      scroller.scrollTop = 50; // within the panel's own height — the card holds more below it, and a sticky list ends with its panel
+      scroller.scrollTop = 30; // within the panel's own height — the card holds more below it, and a sticky list ends with its panel
       const s = scroller.getBoundingClientRect();
       const rowAfter = first.getBoundingClientRect().top;
       const scrolled = scroller.scrollTop > 0 && Math.abs(rowAfter - rowBefore) > 10;

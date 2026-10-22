@@ -68,3 +68,15 @@ export async function readRowInfo(page, rowId, opts = {}) {
   if (!(await info.count())) await about.click();
   return (await info.textContent()) || "";
 }
+
+/* The group with the MOST rows at this location (ties → the first in panel order). Specs that need "a long group" ask for it instead of
+ * naming one: which group is longest depends on WHERE the site is (a Houston-area source only lists inside its own service area). */
+export async function longestGroup(panel) {
+  let best = null, bestN = -1;
+  for (const key of await groupKeys(panel)) {
+    await selectGroup(panel, key);
+    const n = await panel.locator('[data-testid^="layer-row-"]:not([data-testid$="-menu"])').count();
+    if (n > bestN) { best = key; bestN = n; }
+  }
+  return best;
+}
