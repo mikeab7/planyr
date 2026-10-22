@@ -7606,7 +7606,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const publishClip = (clip) => {
     if (clip) writeSystemClip(clip, undefined, (why) => {
       flashWarn("⚠ Copied inside Planyr, but the system clipboard refused it — an image copied earlier may paste instead.", 6000);
-      reportClientEvent("copy-clipboard-write-failed", why, { entry: "copy" });
+      reportClientEvent("copy-clipboard-write-failed", why, { result: "refused" });
     });
     return clip;
   };
