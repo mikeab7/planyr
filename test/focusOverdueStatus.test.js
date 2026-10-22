@@ -109,7 +109,7 @@ describe("B717 anti-drift: the single-source-of-truth fix is present in the real
   });
 
   it("the flatTasks memo depends on settings and NOW so Focus tracks the grid's overdue rollover", () => {
-    expect(src).toMatch(/\}, \[proj, data\?\.settings, NOW\]\);/);
+    expect(src).toMatch(/\}, \[proj, data\?\.settings, NOW(, focusPins)?\]\);/); // NEW-1 (B2428272) added focusPins
   });
 
   // NEW-schedule-health: the fixed 3-toggle cfRules (completeGreen/overdueRed/dueSoonYellow) was
