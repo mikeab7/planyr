@@ -229,6 +229,7 @@ import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateC
 /* NEW-1 — the clipboard PAYLOAD lives at module scope, above every remount boundary. It used to
  * be a `useRef` inside this component, which `SitePlannerApp` mounts keyed on the plan id, so
  * switching plans destroyed the copy. Read planClipboardStore.js's header before moving it back. */
+import { writeSystemClip, parseClip, systemWriteFailed } from "./lib/clipBridge.js"; // NEW-1 — the copy also lives on the SYSTEM clipboard, so it beats a stale OS image
 import { setCanvasClip, getCanvasClip, hasCanvasClip, setOverlayClip, getOverlayClip, hasOverlayClip } from "./lib/planClipboardStore.js";
 import { remapBondRefs, carryHostRoleTags } from "./lib/bondRemap.js";
 import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
@@ -2406,6 +2407,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDeletedIds((d) => { const s = new Set(d); for (const x of add) s.add(x); return s.size === d.length ? d : [...s]; });
   };
   const reAddFileRef = useRef(null);                    // B784 — always-mounted picker for re-adding a missing overlay's file
+  const pasteClipRef = useRef(null);                    // NEW-1 — latest pasteClip, for the window paste listener
   const addOverlayFileRef = useRef(null);               // NEW-1 — latest addOverlayFile, for the window paste listener
   const keyPasteTimerRef = useRef(null);                // NEW-1 — Ctrl+V keydown defers the INTERNAL paste one tick so a clipboard image can win
   const reAddIdRef = useRef(null);                      // B784 — id of the overlay a re-add picker will replace in place
@@ -7276,8 +7278,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const onPaste = (e) => {
       if (!active) return;
-      const file = imageFileFromClipboard(e.clipboardData);
-      if (!file) return;
+      const cd = e.clipboardData;
+      /* NEW-1 — a Planyr payload on the system clipboard IS the most recent copy: it pastes the
+       * elements (same pasteClip as the menu), whatever else is or was on the clipboard. */
+      let clipped = null;
+      try { clipped = parseClip(cd && cd.getData ? cd.getData("text/plain") : ""); } catch { clipped = null; }
+      const file = clipped ? null : imageFileFromClipboard(cd);
+      if (!file && !clipped) return;
       const t = document.activeElement;
       const tgt = e.target && e.target.nodeType === 1 ? e.target : null;
       const canvasEl = wrapRef.current || svgRef.current;
@@ -7289,6 +7296,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lastTouchedCanvas: canvasTouchRef.current === TOUCH.CANVAS,
       });
       if (scope !== SCOPE.CANVAS) return;
+      if (clipped) {
+        e.preventDefault();
+        clearTimeout(keyPasteTimerRef.current); keyPasteTimerRef.current = null; // the paste event does it — no second paste from the keydown timer
+        setCanvasClip(clipped);
+        pasteClipRef.current?.();
+        return;
+      }
+      /* A failed system write means the in-app copy is the newest thing the user copied: it beats a stale OS image. */
+      if (systemWriteFailed() && hasCanvasClip()) return;
       e.preventDefault();
       clearTimeout(keyPasteTimerRef.current); keyPasteTimerRef.current = null; // the image wins — no element paste on top
       const name = pastedImageName((stateRef.current.sheetOverlays || []).map((o) => o.name));
@@ -7582,14 +7598,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!refs.length) return null;
     const payload = collectClipboard(refs, stateRef.current);
     if (!payload.items.length) return null;
-    return setCanvasClip({ ...payload, ...clipProvenance() });
+    return publishClip(setCanvasClip({ ...payload, ...clipProvenance() }));
+  };
+  /* NEW-1 — put the copy on the SYSTEM clipboard too (replacing any screenshot there), so Ctrl+V
+   * sees a Planyr payload instead of a stale image. A refused write is announced, never silent:
+   * the in-app copy still pastes, but an older OS image could win until the write works. */
+  const publishClip = (clip) => {
+    if (clip) writeSystemClip(clip, undefined, (why) => {
+      flashWarn("⚠ Copied inside Planyr, but the system clipboard refused it — an image copied earlier may paste instead.", 6000);
+      reportClientEvent("copy-clipboard-write-failed", why, { result: "refused" });
+    });
+    return clip;
   };
   // Copy an EXPLICIT ref (a right-click menu's just-clicked item) without waiting for the
   // selection state to land — the same escape hatch `deleteSel(target)` uses.
   const copyRef = (ref) => {
     const payload = collectClipboard([ref], stateRef.current);
     if (!payload.items.length) return null;
-    setCanvasClip({ ...payload, ...clipProvenance() });
+    publishClip(setCanvasClip({ ...payload, ...clipProvenance() }));
     flashWarn(`Copied — ${MOD_LABEL}V pastes it where your cursor is.`, 3500);
     return payload;
   };
@@ -7650,6 +7676,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (made.parcels.length) flashWarn(`Pasted parcel${made.parcels.length > 1 ? "s" : ""} start Off — turn one On to count it in the site area.`, 5000);
     else if (note) flashWarn(`Pasted${note}`, 4500);
   };
+  pasteClipRef.current = pasteClip; // NEW-1
   // Duplicate an element (offset ~10′, unattached). Used constantly from the menu.
   const duplicateEl = (id) => {
     const src = els.find((x) => x.id === id);
