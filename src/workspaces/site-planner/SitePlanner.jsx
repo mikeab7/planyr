@@ -7825,7 +7825,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMulti([]); setSelVtx(null);
     setSel({ kind: "measure", i });
     setParcelMenu(null); setOvMenu(null); setTypeMenu(null);
-    setMapMenu({ x: e.clientX, y: e.clientY, kind: "measure", i, id: m.id });
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "measure", i, id: m.id, edge: contextEdgeFor({ kind: "measure", i }, e) });
   };
 
   /* ------------ pointer handlers (svg root) ------------ */
@@ -9177,8 +9177,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      an easement — no per-type forks. The always-on "+" midpoint handles are gone; a control
      point is dropped exactly where the edge was touched. */
   // Which closed/open path (if any) is vertex-editable right now, given the selection.
-  const editablePath = () => {
-    if (tool !== "select" || !sel) return null;
+  const editablePath = () => (tool !== "select" || !sel ? null : editablePathOf(sel));
+  // The same resolver for ANY selection-shaped reference — a right-click on a not-yet-selected line asks it too, so the
+  // selected and unselected cases answer with ONE rule (NEW-1, 2026-10-22: the road's right-click menu).
+  const editablePathOf = (sel) => {
+    if (!sel) return null;
     if (sel.kind === "parcel") { if (!editingCorners) return null; const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
     if (sel.kind === "el") {
       const el = els.find((x) => x.id === sel.id);
@@ -9235,6 +9238,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     return { v, e };
+  };
+  // NEW-1 (2026-10-22) — the edge a right-click lands on, for ANY line-like object, selected or not: {layer,id,index,pt} or null.
+  // Null when the click is at a corner (the vertex menu owns that), off the path, or the object is locked / has no editable path.
+  const contextEdgeFor = (selLike, e) => {
+    try {
+      const path = editablePathOf(selLike);
+      if (!path) return null;
+      const { v, e: edge } = hitEditPath(path, p2f(e.clientX, e.clientY));
+      return edge && !v ? { layer: path.layer, id: path.id, index: edge.index, pt: edge.pt } : null;
+    } catch (_) { return null; }
   };
   // Insert a control point at `ptFeet` (the nearest point on edge `edgeIndex`) into whichever
   // layer owns the path, and select the new point so Delete can remove it.
@@ -9405,7 +9418,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // "Add / Delete control point" is where the owner already right-clicks for it.
       const roadEnd = path.layer === "road" ? (v.index === 0 ? "start" : v.index === path.pts.length - 1 ? "end" : null) : null;
       setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, wholeDeleteLabel, roadEnd, x: e.clientX, y: e.clientY });
-    } else if (edge) { // on an edge (away from any corner) → Add control point here
+    } else if (edge) { // on an edge (away from any corner) → the object's FULL menu, "Add control point" on top (NEW-1, 2026-10-22)
+      // This used to open a one-row menu that preempted the element's own context menu, so once a road was selected the T / branch
+      // row was unreachable. Every layer with a full menu hands over to it (it re-derives the same edge itself); a parcel has no
+      // second menu while its corners are being edited, so it keeps the small one.
+      if (path.layer === "road" || path.layer === "el") { onElContext(e, path.id); return; }
+      if (path.layer === "ease" || path.layer === "markup") { onMarkupContext(e, path.id); return; }
+      if (path.layer === "measure") { onMeasureContext(e, path.id); return; }
       e.preventDefault(); e.stopPropagation();
       setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
     }
@@ -12749,7 +12768,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!markups.some((m) => m.id === id)) return;
     setSel({ kind: "markup", id }); // B656: selection alone surfaces the companion
     setParcelMenu(null); setOvMenu(null);
-    setMapMenu({ x: e.clientX, y: e.clientY, kind: "markup", id });
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "markup", id, edge: contextEdgeFor({ kind: "markup", id }, e) });
   };
   // Multi-leader — same dedicated right-click menu, for the SEPARATE `callouts` collection (its own
   // {tip|tips, box} shape, not a `markups` entry). `leaderIndex` >= 0 when the right-click landed on
@@ -13144,7 +13163,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // spot the user actually pointed at, not from the element's centre.
     let w = null;
     try { w = p2f(e.clientX, e.clientY); } catch (_) { w = null; }
-    setTypeMenu({ id, x: e.clientX, y: e.clientY, w });
+    // NEW-1 (2026-10-22) — a right-click along a road (or any polygon element's edge) carries the clicked edge point, so the
+    // menu's two top rows ("Add control point", "Add a T-intersection here") act at the exact spot. Selected or not: same answer.
+    const edge = contextEdgeFor({ kind: "el", id }, e);
+    setTypeMenu({ id, x: e.clientX, y: e.clientY, w, edge });
   };
   /* NEW-2 — the `data-feature` key of the CURRENTLY SELECTED annotation, but only while it is in
      the behind-the-plan band. Anything else returns null, so the priority rule above cannot fire
@@ -31115,6 +31137,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>;
         };
         const sep = <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />;
+        // NEW-1 (2026-10-22) — a right-click along an easement / markup line / measurement leads with "Add control point" at the spot.
+        const addPointRows = mapMenu.edge ? (<>
+          <button data-testid="map-menu-add-control-point" title="Drop a control point on the line at the spot you clicked"
+            style={{ ...menuItem(false), cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
+            onClick={() => { const ed = mapMenu.edge; close(); insertVtx(ed.layer, ed.id, ed.index, ed.pt); }}>
+            <span aria-hidden="true">＋</span><span>Add control point</span>
+          </button>
+          {sep}
+        </>) : null;
         let header = "", body = null;
         if (mapMenu.kind === "markup") {
           const m = markups.find((x) => x.id === mapMenu.id);
@@ -31134,6 +31165,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // front could land underneath a markup it used to be above.
           const setBehind = () => { setMarkupBand(m.id, !m.behindEls); close(); };
           body = <>
+            {addPointRows}
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
             {/* NEW-1 — a markup reaches its inspector from its own menu, like a measurement always could. */}
             {row({ text: "Properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
@@ -31179,6 +31211,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
              menu's "Bring to Front"), which is the drift in miniature — same concept, same
              keyboard chords already wired, half the rows and a different capitalisation. */
           body = <>
+            {addPointRows}
             {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); openInspector(); close(); } })}
             {m.id && arrangeGroup({ kind: "measure", id: m.id }, { hdr: sep })}
             {m.id && row({ text: m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND,
@@ -31288,6 +31321,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               });
               return (
                 <>
+                  {/* ── 0. AT THE POINT CLICKED (NEW-1, 2026-10-22) — a right-click along a line always opens THIS full menu, with the two
+                         point actions leading: Add control point, then (a road only, unlocked) Add a T-intersection here. They act at
+                         the exact spot (`typeMenu.edge.pt` — on the drawn centreline — else the raw click). ── */}
+                  {(typeMenu.edge || (isCenterlineRoad(t) && !t.locked)) && (
+                    <>
+                      {typeMenu.edge && miRow({
+                        icon: <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>＋</span>, text: "Add control point", testId: "el-menu-add-control-point",
+                        title: "Drop a control point on the line at the spot you clicked",
+                        onClick: () => { const ed = typeMenu.edge; setTypeMenu(null); insertVtx(ed.layer, ed.id, ed.index, ed.pt); },
+                      })}
+                      {isCenterlineRoad(t) && !t.locked && miRow({
+                        icon: <RoadBranchIcon />, text: "Add a T-intersection here", testId: "road-branch-here",
+                        title: "Start a new road here, joined to this one as a T. It inherits this road's class and width; click where it should go, then ✓ Done.",
+                        onClick: () => { const at = (typeMenu.edge && typeMenu.edge.pt) || typeMenu.w; setTypeMenu(null); startRoadBranch(t, at); },
+                      })}
+                      <div style={{ height: 1, background: PAL.panelLine, margin: "4px 0" }} />
+                    </>
+                  )}
                   {/* ── 1. ELEMENT-SPECIFIC — the only section whose contents vary by type. ── */}
                   {(t.type === "sidewalk" || t.type === "landscape") && (
                     <>
@@ -31406,17 +31457,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       })}
                     </>
                   )}
-                  {/* NEW-8 — branch a road off this one, tee'd at the point that was right-clicked. */}
-                  {isCenterlineRoad(t) && !t.locked && (
-                    <>
-                      <div style={hdr()}>Road</div>
-                      {miRow({
-                        icon: <RoadBranchIcon />, text: "Branch a road from here", testId: "road-branch-here",
-                        title: "Start a new road here, joined to this one as a T. It inherits this road's class and width; click where it should go, then ✓ Done.",
-                        onClick: () => { const at = typeMenu.w; setTypeMenu(null); startRoadBranch(t, at); },
-                      })}
-                    </>
-                  )}
+                  {/* NEW-8 — "branch a road from here" now leads the menu (section 0 above) as "Add a T-intersection here"; it is not repeated here. */}
 
                   {/* ── 2. ARRANGE — exactly four rows, identical everywhere, shortcuts right-aligned. ── */}
                   {af && (
