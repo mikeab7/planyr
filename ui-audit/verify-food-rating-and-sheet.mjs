@@ -263,7 +263,7 @@ async function formStackingSection(engine, phone) {
     await section(`${tagp} 2 ${height}`, async () => {
       const { ctx, page } = await open(engine, phone, "ios");
       await openPlace(page, "aburi", /aburi/i);
-      const hb = await page.locator('[data-testid="food-sheet-drag-handle"]').boundingBox();
+      const hb = await page.locator('[data-testid="food-sheet-drag-handle"] > span').boundingBox(); // the visible bar (NEW-1, 2026-10-23)
       const x = hb.x + hb.width / 2, y = hb.y + hb.height / 2;
       if (height !== "half") {
         await page.mouse.move(x, y); await page.mouse.down(); await sleep(500);

@@ -1160,6 +1160,12 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
   -webkit-appearance: none; appearance: none; display: block; width: 100%; margin: 0; padding: 0;
   background: transparent; cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent;
 }
+/* NEW-6 (2026-10-23): the visit sheet's Date field. iOS Safari draws a native date control whose inner "value" box has its own minimum width
+   and centres its text, so inside a narrow sheet it could run past the right edge (owner screenshot). Take the native chrome off, pin the box
+   to the column (width/max-width 100%, min-width 0), left-align the value like every other field, and keep an empty value one line tall. */
+.food-date-input { -webkit-appearance: none; appearance: none; display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; text-align: left; overflow: hidden; }
+.food-date-input::-webkit-date-and-time-value { text-align: left; min-height: 1.3em; margin: 0; }
+.food-date-input::-webkit-datetime-edit { padding: 0; }
 .food-rating-slider:focus-visible { outline: 2px solid var(--accent-food); outline-offset: 2px; border-radius: 8px; }
 .food-rating-slider::-webkit-slider-runnable-track {
   height: 100%; border-radius: 8px;

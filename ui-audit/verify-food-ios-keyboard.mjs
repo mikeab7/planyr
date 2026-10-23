@@ -212,7 +212,7 @@ try {
     for (const start of ["peek", "full"]) {
       await section(`${mode} 5 ${start}`, async () => {
         const { ctx, page } = await open(browser, `${FIX}?buffalo=1`, mode);
-        const handle = page.locator('[data-testid="food-sheet-drag-handle"]');
+        const handle = page.locator('[data-testid="food-sheet-drag-handle"] > span'); // the visible bar (NEW-1, 2026-10-23)
         const hb = await handle.boundingBox();
         const x = hb.x + hb.width / 2, y = hb.y + hb.height / 2;
         await page.mouse.move(x, y); await page.mouse.down();

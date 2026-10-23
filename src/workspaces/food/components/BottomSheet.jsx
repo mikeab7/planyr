@@ -68,16 +68,22 @@ import { flushSync } from "react-dom";
 import { heightForSnap, resolveRelease, releaseVelocity, dragBounds, dragVisibleHeight, RUBBER_CAP } from "../lib/bottomSheetSnap.js";
 import { currentKeyboardInset, visualViewportBox } from "../lib/keyboardInset.js";
 import { reportSheetSideways, reportSheetStuck } from "../lib/foodStore.js";
+import { opensKeyboard } from "../lib/textEntry.js";
 import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
+// NEW-1 (2026-10-23): the handle's TOUCH zone stays 56 high (B2243584 — a forgiving grab) but only HANDLE_ZONE_PX - HANDLE_OVERLAP_PX of it takes layout
+// space: the bar sits at the TOP of the zone and the header slides up under the zone's lower part (a negative margin), so the header starts right
+// under the bar like an iOS sheet instead of 44 px of empty white below it. Where the header paints over the zone it is itself a grab area
+// ([data-sheet-grab], touch events), so the drag is as forgiving as before; only the bar's own strip answers the handle's pointer events.
+const HANDLE_ZONE_PX = 56;
+const HANDLE_OVERLAP_PX = 32;
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
 const TRANSITION_MS = 220;
-const TEXT_ENTRY = /^(INPUT|TEXTAREA|SELECT)$/;
 const REVEAL_MARGIN = 12; // breathing room between a revealed field and the sheet's visible edge
 const FOCUS_RECHECK_MS = [0, 120, 350, 700];
 const FLICK_DOWN = 0.35; // px/ms — a keyboard-up pull this fast puts the keyboard away even if short
 const VIEWPORT_WATCH_MS = 120; // while typing, re-read the visual viewport this often (iOS can move it without an event)
-const textEntryFocused = () => TEXT_ENTRY.test(document.activeElement?.tagName || "");
+const textEntryFocused = () => opensKeyboard(document.activeElement); // not the tag alone: a focused rating slider opens no keyboard (lib/textEntry.js)
 // While a field in the sheet has focus (`data-typing`): the "Log a visit" bar steps out of the way and
 // every sticky bar (header, the form's Save/Done) flows with its content instead of floating over the
 // card being edited (B2046224 ×3, owner: "while typing, the card being edited is fully visible").
@@ -144,7 +150,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // name field got a scroll area barely taller than itself).
   const handleRef = useRef(null);
   const sheetRef = useRef(null);
-  const handleHeight = () => handleRef.current?.offsetHeight ?? 0;
+  const handleHeight = () => Math.max(0, (handleRef.current?.offsetHeight ?? 0) - HANDLE_OVERLAP_PX); // the LAYOUT height — the overlap belongs to the header
   // The content's OWN height (the inner wrapper), never the scroller's scrollHeight: a scroller
   // reports max(content, its own box), so once the sheet had been pulled taller than its content the
   // "content height" grew with the box and the full stop ratcheted up by the overshoot (measured on
@@ -185,7 +191,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // Keep the focused field inside the visible part of THIS sheet's scroller — never the page's.
   const revealField = useCallback((el) => {
     const box = contentRef.current;
-    if (!box || !el || !box.contains(el) || !TEXT_ENTRY.test(el.tagName)) return;
+    if (!box || !el || !box.contains(el) || !opensKeyboard(el)) return;
     const b = box.getBoundingClientRect();
     const vv = window.visualViewport;
     const visTop = Math.max(b.top, vv ? vv.offsetTop : b.top);
@@ -249,7 +255,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // The re-checks stand down the moment anything else scrolls the sheet (a finger moving on to the
   // next field) — they exist to catch a late keyboard, never to drag the list back to the field.
   const onFocusIn = useCallback((e) => {
-    if (!TEXT_ENTRY.test(e.target.tagName)) return;
+    if (!opensKeyboard(e.target)) return;
     setTyping(true);
     const focusedAt = performance.now();
     for (const ms of FOCUS_RECHECK_MS) {
@@ -263,7 +269,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   const onFocusOut = useCallback(() => {
     setTimeout(() => {
       const a = document.activeElement;
-      setTyping(!!(a && TEXT_ENTRY.test(a.tagName) && rootRef.current?.contains(a)));
+      setTyping(!!(a && opensKeyboard(a) && rootRef.current?.contains(a)));
       measureViewport();
     }, 0);
   }, [measureViewport]);
@@ -419,8 +425,11 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
       if (e.touches.length !== 1 || dragRef.current) return;
       if (e.target.closest?.('input[type="range"], [data-no-sheet-drag]')) return;
       const t0 = e.touches[0];
-      // A press on the sheet's HEADER (marked data-sheet-grab) is a grab like the handle: it moves the sheet either way.
-      touchRef.current = { x0: t0.clientX, y0: t0.clientY, mode: "pending", grab: !!e.target.closest?.("[data-sheet-grab]") };
+      // A press on the sheet's HEADER (marked data-sheet-grab) is a grab like the handle: it moves the sheet either way. So is a press
+      // anywhere in the top HANDLE_ZONE_PX of the sheet, whatever is under it: the handle's zone overlaps the content (NEW-1, 2026-10-23),
+      // and with the keyboard up the header is un-stuck and scrolled away, so the strip must not depend on what the list happens to show.
+      const sheetTop = sheetRef.current?.getBoundingClientRect().top ?? -Infinity;
+      touchRef.current = { x0: t0.clientX, y0: t0.clientY, mode: "pending", grab: !!e.target.closest?.("[data-sheet-grab]") || t0.clientY - sheetTop <= HANDLE_ZONE_PX };
     };
     // Which way may the sheet still move? up = taller than now, down = shorter (or closed when allowed).
     const canMove = (up, grab) => {
@@ -515,8 +524,8 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
         onPointerUp={onHandlePointerEnd}
         onPointerCancel={onHandlePointerEnd}
         style={{
-          flex: "0 0 auto", height: 22, minHeight: 56, cursor: "grab", touchAction: "none",
-          display: "flex", justifyContent: "center", alignItems: "flex-end", paddingBottom: 8, boxSizing: "border-box", // the bar sits at the BOTTOM of the zone (NEW-1, 2026-10-20)
+          flex: "0 0 auto", height: 22, minHeight: HANDLE_ZONE_PX, cursor: "grab", touchAction: "none", marginBottom: -HANDLE_OVERLAP_PX,
+          display: "flex", justifyContent: "center", alignItems: "flex-start", paddingTop: 8, boxSizing: "border-box", // the bar sits at the TOP of the zone (NEW-1, 2026-10-23; was the bottom of a 56-high strip)
         }}
       >
         <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: "var(--border-strong, var(--border-default))" }} />

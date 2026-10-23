@@ -2196,7 +2196,8 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
 
   it("the drag handle's own hit area is at least 44 CSS px tall", () => {
     const handleBlock = sheet.slice(sheet.indexOf('data-testid="food-sheet-drag-handle"'), sheet.indexOf('data-testid="food-sheet-drag-handle"') + 400);
-    expect(handleBlock).toMatch(/minHeight:\s*(44|56)/); // NEW-5 (2026-10-11): 56
+    expect(handleBlock).toMatch(/minHeight:\s*(44|56|HANDLE_ZONE_PX)/); // NEW-5 (2026-10-11): 56 — a constant since NEW-1 (2026-10-23)
+    expect(sheet).toMatch(/const HANDLE_ZONE_PX = 56;/);
   });
 
   it("never renders a full-viewport backdrop — the map above the sheet must stay directly interactive (no scrim to swallow its pan gesture)", () => {
