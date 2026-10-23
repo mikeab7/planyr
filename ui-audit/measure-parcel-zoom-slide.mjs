@@ -29,6 +29,7 @@ import { encodeRgbPng } from "./lib/fakeTile.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 import { readFrame } from "./lib/lineLockScan.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { profileCrossing, judgeCrossing, cropPng } from "./lib/slideCrop.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const LIVE = process.argv.includes("--live");
@@ -39,6 +40,8 @@ const SHOTS = process.argv.includes("--shots");
 const ONLY = arg("--only", null);
 const DEBUG = process.argv.includes("--debug");
 const DUMP = process.argv.includes("--dump");
+const CROPS = arg("--crops", null); // V1882768: every frame over the limit → a magnified crop + a verdict (outline off its imagery, or imagery vs imagery)
+const RUN_TAG = arg("--tag", "");
 const LEVELS = process.argv.includes("--levels"); // diagnostic: per-rAF, where every GridLayer level puts one fixed point (map-pane px)
 const DPRS = String(arg("--dpr", "1,2")).split(",").map(Number);
 const LIMIT_PX = Number(arg("--limit", "2")); // CSS px; a line is "on the imagery" within this
@@ -204,15 +207,31 @@ async function runAtDpr(dpr) {
     await sleep(hold);
     recording = false; await cdp.send("Page.stopScreencast");
     if (LEVELS) { const rows = await page.evaluate(() => window.__lv.stop()); for (const r of rows.filter((r) => { const v = r.L.filter((l) => l.tiles && l.vis > 0 && !l.hid); const xs = v.map((l) => l.x); return xs.length && Math.max(...xs) - Math.min(...xs) > 3; }).slice(0, 12)) console.log(`   ${String(r.t).padStart(5)}ms z${r.z}${r.anim ? "*" : " "} ` + r.L.filter((l) => l.tiles).map((l) => `${l.id}@${l.z}${l.hid ? "H" : ""} (${l.x},${l.y}) s${l.s} n${l.tiles} v${l.vis}`).join(" | ")); }
-    const per = frames.map((f) => ({ t: f.t, r: read(decodePng(Buffer.from(f.data, "base64"))) }));
+    const per = frames.map((f) => { const img = decodePng(Buffer.from(f.data, "base64")); const r = read(img); return { t: f.t, r, img }; });
     const t0 = per.length ? per[0].t : 0;
+    const verdicts = {};
+    if (CROPS) {
+      const fs = await import("node:fs"); fs.mkdirSync(CROPS, { recursive: true });
+      for (const [i, p] of per.entries()) {
+        if (!(p.r.crossings && p.r.worst > LIMIT_PX && p.r.worstAt)) continue;
+        const k = p.img.width / 1440;
+        const j = judgeCrossing(profileCrossing(p.img, p.r.worstAt, { k }), { limit: LIMIT_PX });
+        verdicts[j.verdict] = (verdicts[j.verdict] || 0) + 1;
+        const name = `${CROPS}/${RUN_TAG ? RUN_TAG + "-" : ""}dpr${dpr}-${label.replace(/\W+/g, "_")}-f${String(i).padStart(3, "0")}-${p.r.worst.toFixed(1)}px-${j.verdict}`;
+        fs.writeFileSync(name + ".png", cropPng(p.img, p.r.worstAt, { k }));
+        fs.writeFileSync(name + "-frame.png", Buffer.from(frames[i].data, "base64"));
+        fs.writeFileSync(name + ".json", JSON.stringify({ build: liveBuild && (liveBuild.build || liveBuild.commit), dpr, gesture: label, frame: i, ms: Math.round((p.t - t0) * 1000), worstPx: +p.r.worst.toFixed(2), at: p.r.worstAt, ...j }, null, 1));
+        console.log(`    frame ${i} (${Math.round((p.t - t0) * 1000)} ms) ${p.r.worst.toFixed(1)} px → ${j.verdict}: ${j.why} [band spread ${j.bandSpread}, outline spread ${j.inkSpread}, on band ${Math.round((j.onBandShare || 0) * 100)}% of ${j.steps} steps]`);
+      }
+    }
+    for (const p of per) p.img = null;
     const read_ = per.filter((p) => p.r.crossings);
     const worst = read_.reduce((m, p) => Math.max(m, p.r.worst), 0);
     const off = per.filter((p) => p.r.crossings && p.r.worst > LIMIT_PX).length;
     const lost = per.filter((p) => p.r.unpaired > 0).length;
     const blank = per.filter((p) => !p.r.inkRuns && p.r.bands).length; // imagery on screen, no outline on it
     const bare = per.filter((p) => p.r.overBare > 0).length; // an outline over bare map (imagery not loaded there yet) — reported, not a slide
-    const row = { dpr, label, frames: per.length, worstPx: Number(worst.toFixed(1)), framesOff: off, framesUnpaired: lost, framesNoOutline: blank, framesOverBare: bare, drawn };
+    const row = { dpr, label, frames: per.length, worstPx: Number(worst.toFixed(1)), framesOff: off, framesUnpaired: lost, framesNoOutline: blank, framesOverBare: bare, drawn, verdicts };
     results.push(row);
     console.log(`  ${label.padEnd(46)} frames ${String(per.length).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${String(off).padStart(3)}  ink-off-band ${String(lost).padStart(3)}  no-outline ${String(blank).padStart(3)}${drawn ? "" : " (leaves the drawn range)"}  over-bare-map ${String(bare).padStart(3)}`);
     if (TRACE) console.log("    " + per.map((p) => `${Math.round((p.t - t0) * 1000)}ms:${p.r.worst == null ? "-" : p.r.worst.toFixed(1)}/${p.r.crossings}${p.r.unpaired ? "u" + p.r.unpaired : ""}`).join(" "));
