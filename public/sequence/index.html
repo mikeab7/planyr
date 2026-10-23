@@ -5726,6 +5726,45 @@ const promoteChildrenAndDelete = (tasks, deleteIds) => {
   ));
 };
 
+// ── Insert row ABOVE the selection — the Insert key and the right-click "Insert row above" (NEW-1).
+// Excel / Microsoft Project parity: the new row lands immediately above the selected row IN THE
+// VISIBLE ORDER, and NOTHING that was hidden (Focus-filtered or collapsed) is expanded or unhidden.
+// `visibleIds` is the grid's own visible order (flatTasks ids). Pure: returns the raw task array
+// with `newTask` spliced in (parentId set) — every other task is returned untouched, so no
+// isExpanded / focused flag can change. Parent rule, read off the VISIBLE row directly above:
+//  · no row above (the selection is the first visible row) → same parent as the selection, directly
+//    before it;
+//  · the row above IS the selection's parent (selection is its first visible child) → same parent
+//    as the selection, directly before it;
+//  · otherwise → the next sibling of the row above: after that row's own (possibly hidden) subtree
+//    and after any hidden siblings that follow it, i.e. directly before the first VISIBLE sibling
+//    after it, or as its parent's last child when there is none. Sibling order is raw-array order
+//    (sortByVisualOrder groups children by raw position), so placing newTask in the raw array is
+//    all the positioning needed.
+// An anchor that is null / not in the task list → appended at the end as a top-level row.
+const insertRowAbove = (tasks, visibleIds, anchorId, newTask) => {
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const anchor = anchorId == null ? null : byId.get(anchorId);
+  if (!anchor) return [...tasks, { ...newTask, parentId: null }];
+  const pos = visibleIds.indexOf(anchorId);
+  const above = pos > 0 ? byId.get(visibleIds[pos - 1]) : null;
+  const out = [...tasks];
+  const anchorParent = anchor.parentId ?? null;
+  if (!above || above.id === anchorParent) {
+    out.splice(out.indexOf(anchor), 0, { ...newTask, parentId: anchorParent });
+    return out;
+  }
+  const parentId = above.parentId ?? null;
+  const visible = new Set(visibleIds);
+  const siblings = tasks.filter(t => (t.parentId ?? null) === parentId);
+  const after = siblings.slice(siblings.indexOf(above) + 1);
+  const nextVisible = after.find(t => visible.has(t.id));
+  const row = { ...newTask, parentId };
+  if (nextVisible) out.splice(out.indexOf(nextVisible), 0, row);
+  else out.splice(out.indexOf(siblings[siblings.length - 1]) + 1, 0, row);
+  return out;
+};
+
 const COLS = [
   {k:"id",              l:"ID",      w:30,  e:false           },
   {k:"name",            l:"Task",    w:220, e:true            },
@@ -8526,6 +8565,10 @@ function App() {
   const [editStartChar, setEditStartChar] = useState(null);
   const [selectedId,    setSelectedId]    = useState(null);
   const [selRange,      setSelRange]      = useState(null); // {r1,r2,c1,c2} — row/col indices into flatTasks/COLS
+  // NEW-1 — _sids of rows inserted under a Focus filter this session: Focus never hides them (view-only,
+  // never saved), so an inserted blank row stays on screen without un-focusing its parent. Cleared when
+  // any Focus toggle is pressed (re-applying the filter).
+  const [focusPins, setFocusPins] = useState(() => new Set());
   const [selectedColIdx, setSelectedColIdx] = useState(0);
   // Keep "today" current within a live session so overdue/due-soon colors and the today line
   // re-evaluate on tab focus and roll over at midnight — no reload needed. NOW is module-scope
@@ -10048,67 +10091,36 @@ function App() {
     if (selectedId === taskId) setSelectedId(null);
   }, [selectedId]);
 
-  const insertTask = useCallback(() => {
+  // NEW-1 — the one insert-above path (Insert key + context menu). Never touches isExpanded / focused:
+  // the new row is pinned visible past its parent's Focus filter instead (focusPinsRef, by _sid), so the
+  // rows Focus hides stay hidden and the row just added doesn't vanish into them.
+  const insertAboveAnchor = useCallback((anchorId) => {
+    const visibleIds = (flatTasksRef.current || []).map(t => t.id);
+    const sid = _mintTaskSid();
     setData(d => {
       const pid = d.aPid;
-      const rawTasks = d.projects[pid].tasks;
-
-      // Build flat visual order with level info (same walk as the grid display)
-      const flatOrder = [];
-      const walk = (parentId, level) => {
-        rawTasks.filter(t => t.parentId === parentId).forEach(t => {
-          flatOrder.push({...t, level});
-          if (t.isExpanded) walk(t.id, level + 1);
-        });
-      };
-      walk(null, 0);
-
-      // Find selected task in visual order
-      const flatIdx = selectedId !== null
-        ? flatOrder.findIndex(t => t.id === selectedId)
-        : flatOrder.length;
-
-      const selectedTask = flatIdx >= 0 && flatIdx < flatOrder.length ? flatOrder[flatIdx] : null;
-      const prevTask     = flatIdx > 0 ? flatOrder[flatIdx - 1] : null;
-
-      // The new task inherits the level of the visually-previous row when that row is
-      // DEEPER than the selected row (e.g., a grandchild sitting above a sibling at a
-      // shallower level — the new row continues that deeper branch). Otherwise it
-      // matches the selected row's level, which correctly handles the first-child case
-      // (row above is the parent at a shallower level → falling back to selected.parentId
-      // avoids the old prevTask-only bug of jumping up to the grandparent).
-      let newParentId;
-      if (selectedTask === null) {
-        newParentId = null;
-      } else if (prevTask && prevTask.level > selectedTask.level) {
-        newParentId = prevTask.parentId;
-      } else {
-        newParentId = selectedTask.parentId;
-      }
-      // New tasks start with empty dates/duration. User fills them in or lets cascade do it
-      // when they add a predecessor or set a parent. Side-effects (cascadeDates, rollupParentDates,
-      // GanttView, fmtDate) all guard against empty strings now.
-      const newTask = mkt(0, "", "", "", newParentId);
-
-      // Insert in raw array directly before the selected task (visual position handled by sort)
-      let tasks = [...rawTasks];
-      if (selectedId === null) {
-        tasks.push(newTask);
-      } else {
-        const rawIdx = tasks.findIndex(t => t.id === selectedId);
-        if (rawIdx === -1) tasks.push(newTask);
-        else tasks.splice(rawIdx, 0, newTask);
-      }
-
-      // expand & un-spotlight ancestors so the new row can't be hidden
-      const anc = new Set(); { let p = newParentId; while (p != null) { anc.add(p); const par = tasks.find(t => t.id === p); p = par ? par.parentId : null; } }
-      if (anc.size) tasks = tasks.map(t => anc.has(t.id) ? {...t, isExpanded: true, focused: t.id === newParentId ? false : t.focused} : t);
+      const newTask = { ...mkt(0, "", "", "", null), _sid: sid };
+      const tasks = insertRowAbove(d.projects[pid].tasks, visibleIds, anchorId, newTask);
       const finalArr = sortByVisualOrder(tasks);
-      revealRef.current = finalArr.indexOf(newTask) + 1;
+      revealRef.current = finalArr.findIndex(t => t._sid === sid) + 1;
       return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(finalArr) } } };
     });
+    setFocusPins(p => { const n = new Set(p); n.add(sid); return n; });
     revealInserted();
-  }, [selectedId]);
+  }, []);
+
+  // NEW-1 — Insert key: a new row directly above the selection in the VISIBLE order (Excel / MS Project
+  // parity), with no Focus filter or collapsed subtree opened. All positioning is insertRowAbove (pure,
+  // shared with the context menu's insertTaskAbove). A multi-row selection inserts ONE row above its top.
+  const insertTask = useCallback(() => {
+    const flat = flatTasksRef.current || [];
+    let anchorId = selectedId;
+    if (selRange && selRange.r1 !== selRange.r2) {
+      const top = flat[Math.min(selRange.r1, selRange.r2)];
+      if (top) anchorId = top.id;
+    }
+    insertAboveAnchor(anchorId);
+  }, [selectedId, selRange]);
 
   // (indentTask/outdentTask removed — the keyboard handler now calls the identical
   //  indentSelectionByIds/outdentSelectionByIds helpers below with the resolved selection. B255,
@@ -10145,44 +10157,7 @@ function App() {
   // insertTaskAbove: takes taskId directly to avoid stale-closure bug in context menu
   // (context menu called setSelectedId + insertTask() but state update is async,
   //  so insertTask() always saw the old selectedId — not the right-clicked row)
-  const insertTaskAbove = useCallback((taskId) => {
-    setData(d => {
-      const pid = d.aPid;
-      const rawTasks = d.projects[pid].tasks;
-      const targetTask = rawTasks.find(t => t.id === taskId);
-      if (!targetTask) return d;
-
-      // Same level-pick rule as insertTask: if the visually-previous row is deeper than
-      // the target, the new row continues that deeper branch.
-      const flatOrder = [];
-      const walk = (parentId, level) => {
-        rawTasks.filter(t => t.parentId === parentId).forEach(t => {
-          flatOrder.push({...t, level});
-          if (t.isExpanded) walk(t.id, level + 1);
-        });
-      };
-      walk(null, 0);
-      const flatIdx = flatOrder.findIndex(t => t.id === taskId);
-      const target  = flatIdx >= 0 ? flatOrder[flatIdx] : null;
-      const prev    = flatIdx > 0 ? flatOrder[flatIdx - 1] : null;
-      let newParentId;
-      if (target === null)                          newParentId = targetTask.parentId;
-      else if (prev && prev.level > target.level)   newParentId = prev.parentId;
-      else                                          newParentId = target.parentId;
-
-      // New tasks start blank (see insertTask)
-      const newTask = mkt(0, "", "", "", newParentId);
-      let tasks = [...rawTasks];
-      const rawIdx = tasks.findIndex(t => t.id === taskId);
-      if (rawIdx === -1) tasks.push(newTask);
-      else tasks.splice(rawIdx, 0, newTask);
-      const anc = new Set(); { let p = newParentId; while (p != null) { anc.add(p); const par = tasks.find(t => t.id === p); p = par ? par.parentId : null; } }
-      if (anc.size) tasks = tasks.map(t => anc.has(t.id) ? {...t, isExpanded: true, focused: t.id === newParentId ? false : t.focused} : t);
-      revealRef.current = tasks.indexOf(newTask) + 1;
-      return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(tasks) } } };
-    });
-    revealInserted();
-  }, []);
+  const insertTaskAbove = useCallback((taskId) => { insertAboveAnchor(taskId); }, []);
 
   // Deadline row: a milestone spliced directly above its bound anchor, linked via deadlineForTaskId
   // so the cascade post-pass keeps it on the anchor's call/file-by date forever. The link is set with
@@ -11045,14 +11020,14 @@ function App() {
     const walk = (parentId, level) => {
       const parent = parentId === null ? null : byId[parentId];
       let children = kidsOf(parentId);
-      if (parent && parent.focused) children = children.filter(c => !hideStatusOf(c.id));
+      if (parent && parent.focused) children = children.filter(c => !hideStatusOf(c.id) || focusPins.has(c._sid));
       children.forEach(t => {
         const hasChildren = childSet.has(t.id);
         // Separate counts of what Focus would hide: completed, paused, not-started
         let hideableDone = 0, hideableUpcoming = 0, hideablePaused = 0;
         if (hasChildren) {
           kidsOf(t.id).forEach(c => {
-            const hs = hideStatusOf(c.id);
+            const hs = focusPins.has(c._sid) ? null : hideStatusOf(c.id);
             if (hs === "done") hideableDone++;
             else if (hs === "upcoming") hideableUpcoming++;
             else if (hs === "paused") hideablePaused++;
@@ -11066,12 +11041,16 @@ function App() {
     };
     walk(null, 0);
     return out;
-  }, [proj, data?.settings, NOW]); // settings→cfRules, NOW→overdue rollover: keep Focus in sync with the grid's display health (B717)
+  }, [proj, data?.settings, NOW, focusPins]); // settings→cfRules, NOW→overdue rollover: keep Focus in sync with the grid's display health (B717)
 
   // Keep a ref in sync so the keydown handler can read tasks without a stale closure. NEW-1 — a LAYOUT
   // effect, not a passive one: it lands in the same commit as the state, so a key pressed right after an
   // edit can never read the previous (or an empty) list.
   React.useLayoutEffect(() => { flatTasksRef.current = flatTasks; }, [flatTasks]);
+  // NEW-1 — a Focus toggle (any task's `focused` changing, keyed by _sid so a renumber is not a toggle)
+  // re-applies the filter: rows pinned visible by an insert drop back under it.
+  const focusSig = (proj?.tasks || []).filter(t => t.focused).map(t => t._sid).join(",");
+  React.useEffect(() => { setFocusPins(p => (p.size ? new Set() : p)); }, [focusSig]);
   // NEW-1 — the flat index the selection was last SEEN at. When its row is deleted (selection → null) the
   // arrow keys re-anchor here instead of jumping to the first / last row (stepGridRow). Only ever written
   // while the selection is actually in the list, so a hide or a delete leaves the last real position.
