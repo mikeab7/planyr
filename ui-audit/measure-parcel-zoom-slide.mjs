@@ -263,6 +263,6 @@ for (const d of DPRS) all.push(await runAtDpr(d));
 const flat = all.flatMap((r) => r.results || []);
 const voided = all.filter((r) => r.void).length;
 const bad = flat.filter((r) => r.worstPx > LIMIT_PX || r.framesUnpaired > 0 || (r.drawn && r.framesNoOutline > 0));
-console.log(`\n${voided ? `❌ VOID at ${voided} pixel ratio(s)\n` : ""}${bad.length ? `❌ ${bad.length}/${flat.length} gestures had a frame where an outline was more than ${LIMIT_PX} CSS px off its imagery line, had no band near it, or (inside the drawn range) was missing altogether` : `✅ every frame of every gesture: outlines within ${LIMIT_PX} CSS px of the imagery, and never missing inside the drawn range`}`);
+console.log(`\n${voided ? `❌ VOID at ${voided} pixel ratio(s) — no verdict for them\n` : ""}${voided && !flat.length ? "" : bad.length ? `❌ ${bad.length}/${flat.length} gestures had a frame where an outline was more than ${LIMIT_PX} CSS px off its imagery line, had no band near it, or (inside the drawn range) was missing altogether` : `✅ every frame of every gesture: outlines within ${LIMIT_PX} CSS px of the imagery, and never missing inside the drawn range`}`);
 console.log("JSON " + JSON.stringify(flat));
 process.exit(voided ? 2 : bad.length ? 1 : 0);
