@@ -544,6 +544,12 @@ try {
       projects: { 1: { id: 1, name: "Perf Fixture", tasks: bigTasks } } };
     const bpage = await browser.newPage({ viewport: { width: 1600, height: 950 } });
     await bootAndImport(bpage, url, bigFixture);
+    // Let the post-import settle finish BEFORE the observer starts. Measured (NEW-1/NEW-3 session): the import triggers ONE late
+    // whole-list re-render (the 44 rendered rows' health dots remount: 44 removed + 44 added = 88 childList records) roughly
+    // 0.4–1s after bootAndImport returns, and whether it lands inside the drag window depends only on timing — any unrelated
+    // change to the page's size/timing moved it in or out (same build: 88 at 0ms settle, 0 at 3s settle; 88 is one event,
+    // not 24 mouse moves' worth). This check is about the DRAG causing no churn, so the window starts after the settle.
+    await pacedWait(bpage, 2500);
     await bpage.evaluate(() => {
       const wrap = document.querySelector('[data-task-row]')?.parentElement;
       if (!wrap) { window.__moveObs = { error: "no rows wrapper found" }; return; }
@@ -824,18 +830,15 @@ for (const rh of [20, 34]) {
   // range cell background color, not eyeballed. (Tasks 120 and 121 — the last two of the 121-row
   // fixture — are adjacent, plain top-level rows.)
   await selectRowRange(gpage, "Task 120", "Task 121");
-  const badgeText = await gpage.evaluate(() => {
-    const badge = [...document.querySelectorAll('div')].find(d => /^\d+\s*×\s*\d+$/.test((d.textContent || "").trim()) && d.children.length === 0);
-    return badge ? badge.textContent.trim() : null;
-  });
-  const bg121 = await gpage.evaluate(() => getComputedStyle(document.querySelector('[data-task-row="121"] [data-col-key="id"]')).backgroundColor);
-  // Dragging in the ID column is Excel row-header behavior — it selects the WHOLE row across
-  // every visible column ("2 × 18", not "2 × 1"), by design (see the rowMode branch in the
-  // mousedown handler). Assert the ROW count only; the column count is fixture/column-config
-  // dependent and isn't what this check is about.
-  const badgeRows = badgeText ? Number(badgeText.split("×")[0].trim()) : null;
-  ok(`M5 · ROW_H=${rh}: a two-row drag across the ID cells STILL produces a range selection spanning both rows (badge="${badgeText}"), selected cell background is the range-select blue — the grip change did not regress this`,
-    badgeRows === 2 && bg121 === "rgb(219, 234, 254)", `badge="${badgeText}" bg121="${bg121}"`);
+  // (NEW-2, B2444657) the "rows × columns" pill this check used to read was removed — it was a readout only. The same fact
+  // is asserted from the range fill itself: BOTH rows' ID cells carry the range-select blue and the row above does not.
+  const blueOf = id => gpage.evaluate(i => { const c = document.querySelector(`[data-task-row="${i}"] [data-col-key="id"]`); return c ? getComputedStyle(c).backgroundColor : null; }, id);
+  const bg120 = await blueOf(120), bg121 = await blueOf(121), bg119 = await blueOf(119);
+  const RANGE_BLUE = "rgb(219, 234, 254)";
+  // Dragging in the ID column is Excel row-header behavior — it selects the WHOLE row across every visible column, by design
+  // (see the rowMode branch in the mousedown handler).
+  ok(`M5 · ROW_H=${rh}: a two-row drag across the ID cells STILL produces a range selection spanning both rows (rows 120 + 121 range-blue, 119 not), selected cell background is the range-select blue — the grip change did not regress this`,
+    bg120 === RANGE_BLUE && bg121 === RANGE_BLUE && bg119 !== RANGE_BLUE, `bg119="${bg119}" bg120="${bg120}" bg121="${bg121}"`);
   await gpage.close();
 }
 
