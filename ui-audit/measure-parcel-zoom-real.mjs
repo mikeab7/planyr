@@ -11,6 +11,7 @@
  * KNOWN-GOOD ARM: two rest frames must register at scale 1 (± 0.002) with the outline ≤ 1 px median, or the county is VOID.
  * A frame whose imagery does not register (NCC < 0.5 — e.g. a new imagery level still loading) is counted, never judged.
  * FOREGROUND-OR-VOID: assertMeasurable before anything. */
+import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -30,7 +31,11 @@ const CASES = [
 ].filter((c) => !ONLY_COUNTY || c.key === ONLY_COUNTY);
 
 async function runAtDpr(dpr) {
-  const { browser, context, page, build } = await openSignedIn({ base: BASE, viewport: { width: 1440, height: 900 }, contextOptions: { deviceScaleFactor: dpr, hasTouch: true }, initScripts: [[() => { window.__PLANYR_E2E = true; }]] });
+  // a local preview (the positive control: a known-broken build) has no sign-in route — plain Chromium there
+  const local = /localhost|127\.0\.0\.1/.test(BASE);
+  const { browser, context, page, build } = local
+    ? await (async () => { const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox"] }); const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr, hasTouch: true }); await context.addInitScript(() => { window.__PLANYR_E2E = true; }); return { browser, context, page: await context.newPage(), build: null }; })()
+    : await openSignedIn({ base: BASE, viewport: { width: 1440, height: 900 }, contextOptions: { deviceScaleFactor: dpr, hasTouch: true }, initScripts: [[() => { window.__PLANYR_E2E = true; }]] });
   await assertMeasurable(page, "measure-parcel-zoom-real");
   const ver = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null));
   console.log(`\n=== dpr ${dpr} === planyr.io build ${ver && (ver.build || ver.commit || JSON.stringify(ver))} (helper read ${build && (build.build || build.commit)})`);
