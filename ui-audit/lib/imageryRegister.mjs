@@ -118,19 +118,31 @@ export function outlinePoints(img, win, n = 1500) {
 
 /** Carry the rest outline through the imagery's transform and read how far each lands from this frame's nearest outline pixel.
  *  Returns { n, median, p90, lost } in the frame's px; `lost` = landed inside `win` with no outline within `reach` px (not drawn there). */
-export function outlineOffset(restOutline, frameImg, xf, { win, reach = 12 } = {}) {
+export function outlineOffset(restOutline, frameImg, xf, { win, reach = 12, perPoint = false } = {}) {
   const { width, height, channels, data } = frameImg; const [x0, y0, x1, y1] = win;
   const ink = (x, y) => { if (x < 0 || y < 0 || x >= width || y >= height) return false; const o = (y * width + x) * channels; return isOutline(data[o], data[o + 1], data[o + 2]); };
-  const d = []; let lost = 0;
+  const d = []; let lost = 0; const each = [];
   for (const [px, py] of restOutline) {
-    const X = xf.s * px + xf.tx, Y = xf.s * py + xf.ty; if (X < x0 + reach || Y < y0 + reach || X > x1 - reach || Y > y1 - reach) continue;
+    const X = xf.s * px + xf.tx, Y = xf.s * py + xf.ty; if (X < x0 + reach || Y < y0 + reach || X > x1 - reach || Y > y1 - reach) { each.push(null); continue; }
     const cx = Math.round(X), cy = Math.round(Y); let best = null;
     for (let r = 0; r <= reach && best == null; r++) for (let yy = cy - r; yy <= cy + r; yy++) for (let xx = cx - r; xx <= cx + r; xx++) {
       if (Math.max(Math.abs(xx - cx), Math.abs(yy - cy)) !== r || !ink(xx, yy)) continue;
       const dd = Math.hypot(xx - X, yy - Y); if (best == null || dd < best) best = dd;
     }
     if (best == null) lost++; else d.push(best);
+    each.push(best);
   }
   d.sort((a, b) => a - b);
-  return { n: d.length, median: d.length ? d[Math.floor(d.length / 2)] : null, p90: d.length ? d[Math.floor(d.length * 0.9)] : null, lost };
+  return { n: d.length, median: d.length ? d[Math.floor(d.length / 2)] : null, p90: d.length ? d[Math.floor(d.length * 0.9)] : null, lost, ...(perPoint ? { each } : {}) };
+}
+
+/** Keep only the reference outline pixels that are ALSO drawn in the settled view at the other end of the gesture (within `tol` px of an
+ *  outline there, through that view's own imagery transform). A zoom that crosses a display stage changes WHICH lots are drawn — out to the
+ *  wide stage only the large lots stay ("Large lots only") — and a line removed by design is not a line off its imagery. Returns the kept
+ *  points and the share kept (a low share means the two ends disagree everywhere, which the caller must report, never judge). */
+export function persistentOutline(restOutline, endImg, xfEnd, { win, tol = 1.5, reach = 12 } = {}) {
+  const r = outlineOffset(restOutline, endImg, xfEnd, { win, reach, perPoint: true });
+  const kept = restOutline.filter((_, i) => r.each[i] != null && r.each[i] <= tol);
+  const seen = r.each.filter((v) => v != null).length + r.lost;
+  return { kept, share: seen ? kept.length / seen : 0 };
 }

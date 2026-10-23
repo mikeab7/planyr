@@ -15,7 +15,7 @@ import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
-import { fitImagery, outlinePoints, outlineOffset } from "./lib/imageryRegister.mjs";
+import { fitImagery, outlinePoints, outlineOffset, persistentOutline } from "./lib/imageryRegister.mjs";
 import { cropPng } from "./lib/slideCrop.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -34,7 +34,7 @@ async function runAtDpr(dpr) {
   // a local preview (the positive control: a known-broken build) has no sign-in route — plain Chromium there
   const local = /localhost|127\.0\.0\.1/.test(BASE);
   const { browser, context, page, build } = local
-    ? await (async () => { const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox"] }); const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr, hasTouch: true }); await context.addInitScript(() => { window.__PLANYR_E2E = true; }); return { browser, context, page: await context.newPage(), build: null }; })()
+    ? await (async () => { const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium", args: ["--no-sandbox"] }); const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr, hasTouch: true }); await context.addInitScript(() => { window.__PLANYR_E2E = true; }); return { browser, context, page: await context.newPage(), build: null }; })()
     : await openSignedIn({ base: BASE, viewport: { width: 1440, height: 900 }, contextOptions: { deviceScaleFactor: dpr, hasTouch: true }, initScripts: [[() => { window.__PLANYR_E2E = true; }]] });
   await assertMeasurable(page, "measure-parcel-zoom-real");
   const ver = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null));
@@ -45,6 +45,9 @@ async function runAtDpr(dpr) {
   await waitFor(() => page.evaluate(() => !!window.__mapFinderMap), 20000);
   await sleep(2500);
   await page.addStyleTag({ content: ".planyr-lot-no,.leaflet-marker-pane,.leaflet-shadow-pane{display:none!important}" });
+  /* --plant-lag: the POSITIVE CONTROL. The parcel layer's level containers get a CSS transition, so on screen the outlines trail the imagery
+   * through a zoom and catch up after — the exact shape of the defect this harness exists to see. A run with it must go RED. */
+  if (process.argv.includes("--plant-lag")) await page.addStyleTag({ content: ".leaflet-container .leaflet-zoom-anim .leaflet-overlay-pane .leaflet-tile-container.leaflet-zoom-animated{transition:transform 160ms linear!important}" /* outranks lockstepZoom's transition:none */ });
   const disp = () => page.evaluate(() => { const d = window.__mapParcelDisplay && window.__mapParcelDisplay(); return d ? d.layers : null; });
   const settled = async () => { await waitFor(async () => { const d = await disp(); return d && d.length && d.every((l) => !l.wide || l.wide.loading === 0); }, 20000); await waitFor(() => page.evaluate(() => [...document.querySelectorAll(".leaflet-tile-pane img.leaflet-tile")].every((i) => i.complete)), 15000); await sleep(1200); };
   const box = await page.evaluate(() => { const r = window.__mapFinderMap.getContainer().getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
@@ -91,7 +94,14 @@ async function runAtDpr(dpr) {
        * outline off screen and left the late frames unjudgeable.) */
       await settled();
       const zoomIn = label.includes(" in") || label.includes("+");
-      const rest = zoomIn ? await shot() : before; const restOutline = outlinePoints(rest, win);
+      const after = await shot();
+      const rest = zoomIn ? after : before, other = zoomIn ? before : after;
+      // judge only lines drawn at BOTH ends: a stage change drops small lots by design (persistentOutline)
+      const xfOther = fitImagery(rest, other, { win, anchor, coarse: Math.round(4 * k0), slack: 40 * k0, sMin: 0.12, sMax: 3.2 });
+      const per = persistentOutline(outlinePoints(rest, win, 4000), other, xfOther, { win, tol: 1.5 * k0, reach: Math.round(12 * k0) });
+      if (process.argv.includes("--debug-ends")) { const fs = await import("node:fs"); const { encodeRgbPng } = await import("./lib/fakeTile.mjs"); for (const [n, im] of [["rest", rest], ["other", other]]) fs.writeFileSync(`/tmp/claude-0/end-${n}.png`, encodeRgbPng(im.width, im.height, (row, col, p, raw) => { const o = (row * im.width + col) * im.channels; raw[p] = im.data[o]; raw[p + 1] = im.data[o + 1]; raw[p + 2] = im.data[o + 2]; })); console.log("ends", JSON.stringify(xfOther), per.share); }
+      if (xfOther.ncc < 0.5 || per.share < 0.25) { console.log(`  ${label.padEnd(34)} ❌ VOID — the two settled ends do not share their lines (kept ${Math.round(per.share * 100)}%, ncc ${xfOther.ncc.toFixed(2)})`); results.push({ dpr, county: c.key, label, void: true }); return; }
+      const restOutline = per.kept.length > 1500 ? per.kept.filter((_, i) => i % Math.ceil(per.kept.length / 1500) === 0) : per.kept;
       const t0 = frames.length ? frames[0].t : 0;
       let prev = null, worst = 0, off = 0, unreg = 0, judged = 0, worstFrame = -1; const verdictLines = [];
       for (const [i, f] of frames.entries()) {
@@ -116,9 +126,9 @@ async function runAtDpr(dpr) {
           verdictLines.push(`    frame ${i} (${Math.round((f.t - t0) * 1000)} ms) outline median ${med.toFixed(1)} px, p90 ${(o.p90 / k).toFixed(1)} px off the imagery (scale ${xf.s.toFixed(3)}, ncc ${xf.ncc.toFixed(2)})`);
         }
       }
-      const row = { dpr, county: c.key, label, frames: frames.length, judged, unregistered: unreg, worstPx: +worst.toFixed(2), framesOff: off };
+      const row = { dpr, county: c.key, label, frames: frames.length, judged, unregistered: unreg, worstPx: +worst.toFixed(2), framesOff: off, linesKept: +per.share.toFixed(2) };
       results.push(row);
-      console.log(`  ${label.padEnd(34)} frames ${String(frames.length).padStart(3)} judged ${String(judged).padStart(3)} unregistered ${String(unreg).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${off}`);
+      console.log(`  ${label.padEnd(34)} lines kept ${String(Math.round(per.share * 100)).padStart(3)}%  frames ${String(frames.length).padStart(3)} judged ${String(judged).padStart(3)} unregistered ${String(unreg).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${off}`);
       for (const l of verdictLines) console.log(l);
     }
     const btn = (sel) => page.locator(sel).first().click();

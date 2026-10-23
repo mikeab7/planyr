@@ -35,3 +35,17 @@ describe("imageryRegister", () => {
     expect(r.median).toBeGreaterThan(3);
   });
 });
+
+describe("imageryRegister — lines removed by design", () => {
+  it("keeps only the reference lines still drawn at the other end of the gesture", async () => {
+    const { persistentOutline } = await import("../ui-audit/lib/imageryRegister.mjs");
+    const rest = render(1, 200, 150);
+    // the other end: same imagery, but the horizontal line is gone (a stage that no longer draws it) — only the vertical one survives
+    const end = render(1, 200, 150); const d = end.data;
+    for (let Y = 118; Y <= 122; Y++) for (let X = 0; X < W; X++) { const o = (Y * W + X) * 3; if (d[o] === OUT[0] && d[o + 1] === OUT[1]) { d[o] = 120; d[o + 1] = 130; d[o + 2] = 100; } }
+    const pts = outlinePoints(rest, win, 4000);
+    const p = persistentOutline(pts, end, { s: 1, tx: 0, ty: 0 }, { win });
+    expect(p.kept.length).toBeGreaterThan(50);
+    expect(p.kept.every(([x]) => Math.abs(x - 150) <= 2)).toBe(true);
+  });
+});
