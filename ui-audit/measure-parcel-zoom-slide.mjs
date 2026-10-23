@@ -180,7 +180,9 @@ async function runAtDpr(dpr) {
   if (!rest.crossings || rest.crossings < 8 || rest.worst > 1.5) { console.log("❌ VOID — the instrument cannot see the outlines on the imagery at rest"); await browser.close(); return { dpr, void: true }; }
 
   const results = [];
-  async function gesture(label, action, { hold = 1600 } = {}) {
+  /* `drawn`: the gesture starts AND ends inside the zoom range where outlines are drawn (wide stage and closer), so a frame showing imagery
+   * and no outline is a DROPOUT and fails the run; a gesture that leaves the range (a long zoom-out) only reports the count. */
+  async function gesture(label, action, { hold = 1600, drawn = true } = {}) {
     if (ONLY && !label.includes(ONLY)) return;
     if (LEVELS) { const { install } = await import("/tmp/claude-0/levels.mjs"); await page.evaluate(install.replace("__P__", `${home.ring[0][1]}, ${home.ring[0][0]}`)); await page.evaluate(() => window.__lv.start()); }
     frames = []; recording = true;
@@ -197,9 +199,10 @@ async function runAtDpr(dpr) {
     const off = per.filter((p) => p.r.crossings && p.r.worst > LIMIT_PX).length;
     const lost = per.filter((p) => p.r.unpaired > 0).length;
     const blank = per.filter((p) => !p.r.inkRuns && p.r.bands).length; // imagery on screen, no outline on it
-    const row = { dpr, label, frames: per.length, worstPx: Number(worst.toFixed(1)), framesOff: off, framesUnpaired: lost, framesNoOutline: blank };
+    const bare = per.filter((p) => p.r.overBare > 0).length; // an outline over bare map (imagery not loaded there yet) — reported, not a slide
+    const row = { dpr, label, frames: per.length, worstPx: Number(worst.toFixed(1)), framesOff: off, framesUnpaired: lost, framesNoOutline: blank, framesOverBare: bare, drawn };
     results.push(row);
-    console.log(`  ${label.padEnd(46)} frames ${String(per.length).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${String(off).padStart(3)}  ink-off-band ${String(lost).padStart(3)}  no-outline ${String(blank).padStart(3)}`);
+    console.log(`  ${label.padEnd(46)} frames ${String(per.length).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${String(off).padStart(3)}  ink-off-band ${String(lost).padStart(3)}  no-outline ${String(blank).padStart(3)}${drawn ? "" : " (leaves the drawn range)"}  over-bare-map ${String(bare).padStart(3)}`);
     if (TRACE) console.log("    " + per.map((p) => `${Math.round((p.t - t0) * 1000)}ms:${p.r.worst == null ? "-" : p.r.worst.toFixed(1)}/${p.r.crossings}${p.r.unpaired ? "u" + p.r.unpaired : ""}`).join(" "));
     if (DUMP) { const fs = await import("node:fs"); fs.mkdirSync("/tmp/claude-0/frames", { recursive: true }); frames.forEach((f, i) => fs.writeFileSync(`/tmp/claude-0/frames/${label.replace(/\W+/g, "_")}-${String(i).padStart(3, "0")}-${Math.round((f.t - t0) * 1000)}ms.png`, Buffer.from(f.data, "base64"))); }
     if (SHOTS && per.length) {
@@ -233,10 +236,12 @@ async function runAtDpr(dpr) {
   await reset(17.4);
   await gesture("wheel notch out", () => wheel(100));
   await gesture("wheel notch in", () => wheel(-100));
-  await gesture("wheel flick out (5 notches)", () => wheel(100, 5, 25), { hold: 2200 });
+  await gesture("wheel flick out (5 notches)", () => wheel(100, 5, 25), { hold: 2200, drawn: false });
+  await reset(15.4); // zoom IN from the wide stage, through mid, into close: every frame should carry outlines
   await gesture("wheel flick in (5 notches)", () => wheel(-100, 5, 25), { hold: 2200 });
   await reset(17.4);
-  await gesture("trackpad scroll out (6 × small)", () => stream(8, 6, 16), { hold: 1800 });
+  await gesture("trackpad scroll out (6 × small)", () => stream(8, 6, 16), { hold: 1800, drawn: false });
+  await reset(15.4);
   await gesture("trackpad scroll in (6 × small)", () => stream(-8, 6, 16), { hold: 1800 });
   await reset(17.4);
   await gesture("trackpad pinch out (ctrl, 25 × small)", () => stream(4, 25, 16, true), { hold: 1600 });
@@ -257,7 +262,7 @@ const all = [];
 for (const d of DPRS) all.push(await runAtDpr(d));
 const flat = all.flatMap((r) => r.results || []);
 const voided = all.filter((r) => r.void).length;
-const bad = flat.filter((r) => r.worstPx > LIMIT_PX || r.framesUnpaired > 0);
-console.log(`\n${voided ? `❌ VOID at ${voided} pixel ratio(s)\n` : ""}${bad.length ? `❌ ${bad.length}/${flat.length} gestures had a frame where an outline was more than ${LIMIT_PX} CSS px off its imagery line (or off the imagery altogether)` : `✅ every frame of every gesture: outlines within ${LIMIT_PX} CSS px of the imagery`}`);
+const bad = flat.filter((r) => r.worstPx > LIMIT_PX || r.framesUnpaired > 0 || (r.drawn && r.framesNoOutline > 0));
+console.log(`\n${voided ? `❌ VOID at ${voided} pixel ratio(s)\n` : ""}${bad.length ? `❌ ${bad.length}/${flat.length} gestures had a frame where an outline was more than ${LIMIT_PX} CSS px off its imagery line, had no band near it, or (inside the drawn range) was missing altogether` : `✅ every frame of every gesture: outlines within ${LIMIT_PX} CSS px of the imagery, and never missing inside the drawn range`}`);
 console.log("JSON " + JSON.stringify(flat));
 process.exit(voided ? 2 : bad.length ? 1 : 0);

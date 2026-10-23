@@ -26,6 +26,10 @@ describe("classify", () => {
     expect(classify(...INK)).toBe("ink");
     expect(classify(...WHITE)).toBe(null);
   });
+  it("a band pixel the outline's antialiased edge only grazes is still band (frame 017's false 34 px)", () => {
+    expect(classify(230, 7, 46)).toBe("red");
+    expect(classify(191, 19, 119)).toBe("ink");
+  });
 });
 
 describe("pairOffsets / readFrame", () => {
@@ -50,6 +54,22 @@ describe("pairOffsets / readFrame", () => {
   it("one darkened pixel inside a band does not split it into two half-bands", () => {
     const runs = scanRuns((i) => (i === 5 ? [159, 23, 16] : i < 12 ? RED : WHITE), 20);
     expect(runs.length).toBe(1);
+  });
+  it("an outline on a thin band whose edge pixel it grazes reads ~0, not the next band", () => {
+    const px = { 17: [255, 207, 207], 18: [230, 7, 46], 19: [191, 19, 119], 50: [255, 0, 0], 51: [255, 0, 0] };
+    const runs = scanRuns((i) => px[i] || WHITE, 80);
+    const p = pairOffsets(runs, { bandPx: 8, maxPx: 40 });
+    expect(p.pairs.length).toBe(1);
+    expect(Math.abs(p.pairs[0].offset)).toBeLessThan(2);
+  });
+  it("an outline over BARE map (no imagery loaded there yet) is counted on its own — never a slide, never paired", () => {
+    const DARK = [42, 51, 36];
+    const px = { 40: [110, 38, 114], 70: [255, 0, 0], 71: [255, 0, 0] };
+    const runs = scanRuns((i) => px[i] || (i < 50 ? DARK : WHITE), 90);
+    const p = pairOffsets(runs, { bandPx: 8, maxPx: 40 });
+    expect(p.pairs.length).toBe(0);
+    expect(p.overBare).toBe(1);
+    expect(p.unpairedInk).toBe(0);
   });
   it("ink with no band within reach is counted as unpaired, never as a small offset", () => {
     const p = pairOffsets([{ start: 10, end: 11, red: [], ink: [10, 11], w: [150, 150] }], { bandPx: 16, maxPx: 40 });

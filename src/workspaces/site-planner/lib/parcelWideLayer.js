@@ -212,6 +212,7 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
     index = new IndexClass();
     tilesLayer = new TilesClass(index, { pane: pane || "overlayPane", zIndex: 0, minZoom: wideFloorFor(floor), maxZoom: 24, tileSize: 512, keepBuffer: 1 });
     tilesLayer._busy = () => queue.pending > 0;
+    tilesLayer._dataPending = () => info.loading > 0 || queue.pending > 0 || (tilesLayer.repaintPending ? tilesLayer.repaintPending() : false); // B2426464 ×3
     tilesLayer.addTo(map);
   };
   /* The close layer fires `load` when its lots are queued-in; its tile canvases repaint a frame or more later (budgeted), so letting go of the wide lines ON `load`

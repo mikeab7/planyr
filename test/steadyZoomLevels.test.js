@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { holdNewZoomLevels, HOLD_MS, HOLD_FRAMES } from "../src/shared/map/steadyZoomLevels.js";
+import { holdNewZoomLevels, HOLD_MS, HOLD_FRAMES, DATA_HOLD_CAP_MS } from "../src/shared/map/steadyZoomLevels.js";
 import { attachFreeWheelZoom } from "../src/shared/map/freePinchZoom.js";
 
 /* B2426464 ×2 — the parcel outlines slid off the imagery during a zoom and snapped back when it ended. Measured on composited frames
@@ -80,6 +80,40 @@ describe("holdNewZoomLevels — a new zoom level is built out of sight and shown
     L._animateZoom({ zoom: 17 });
     expect(L._levels[16].el.style.visibility).toBeUndefined();
   });
+  it("on a LOCKSTEP map nothing is hidden (the new level is animated from its start) and clearing old tiles waits for quiet", () => {
+    const L = holdNewZoomLevels(fakeLayer());
+    L._map.__lockstepZoom = true;
+    L._map._animatingZoom = true;
+    L._animateZoom({ zoom: 17 });
+    expect(L._levels[17].el.style.visibility).toBeUndefined();
+    L._pruneTiles(); // a new tile is ready
+    vi.advanceTimersByTime(HOLD_MS / 2);
+    L._pruneTiles(); // another one — the wait restarts
+    vi.advanceTimersByTime(HOLD_MS / 2 + 16);
+    expect(L.prunes).toBe(0);
+    settle();
+    expect(L.prunes).toBe(1); // once, after the last request had HOLD_FRAMES frames and HOLD_MS to draw
+  });
+  it("on a lockstep map, old tiles stay while the layer's data for the new view is still coming (empty new tiles never clear them)", () => {
+    const L = holdNewZoomLevels(fakeLayer());
+    L._map.__lockstepZoom = true;
+    let pending = true;
+    L._dataPending = () => pending;
+    L._pruneTiles();
+    settle(); settle();
+    expect(L.prunes).toBe(0); // the county has not answered: keep what is drawn
+    pending = false;
+    settle();
+    expect(L.prunes).toBe(1); // answered and repainted: now, after the usual hold
+  });
+  it("…but a server that never answers cannot pin old tiles past DATA_HOLD_CAP_MS", () => {
+    const L = holdNewZoomLevels(fakeLayer());
+    L._map.__lockstepZoom = true;
+    L._dataPending = () => true;
+    L._pruneTiles();
+    vi.advanceTimersByTime(DATA_HOLD_CAP_MS + HOLD_MS + 16 * (HOLD_FRAMES + 4));
+    expect(L.prunes).toBe(1);
+  });
   it("is idempotent", () => {
     const L = holdNewZoomLevels(fakeLayer());
     const a = L._animateZoom;
@@ -134,6 +168,10 @@ describe("trackpad pinch moves the map like a touch pinch — never a view reset
 describe("wiring — the Map view's imagery and the parcel tiles both use the one rule", () => {
   const read = (p) => readFileSync(new URL(`../src/${p}`, import.meta.url), "utf8");
   it("ParcelTiles holds its new zoom levels", () => expect(read("workspaces/site-planner/lib/parcelDisplay.js")).toMatch(/holdNewZoomLevels\(this\)/));
+  it("every parcel tile layer says when its data is still coming", () => {
+    expect(read("workspaces/site-planner/lib/parcelDisplay.js").match(/tiles\._dataPending = /g)?.length).toBe(2);
+    expect(read("workspaces/site-planner/lib/parcelWideLayer.js")).toMatch(/tilesLayer\._dataPending = /);
+  });
   it("the Map view's imagery layer holds its new zoom levels, and the map runs without the tile fade", () => {
     const s = read("workspaces/site-planner/MapFinder.jsx");
     expect(s).toMatch(/holdNewZoomLevels\(withTileRetry\(L\.tileLayer\(/);

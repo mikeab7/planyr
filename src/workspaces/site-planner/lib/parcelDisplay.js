@@ -123,6 +123,8 @@ const ParcelTiles = L.GridLayer.extend({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x, items });
   },
+  /** A repaint is queued or in progress (lots arrived and a tile has not been redrawn with them yet). */
+  repaintPending() { return !!(this._dirty || this._flushTimer || (this._todo && this._todo.size)); },
   /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, a few per frame. */
   markDirty(bbox) {
     if (!bbox) return;
@@ -367,6 +369,7 @@ export function makeParcelLayer(url, opts) {
     // carrying through a zoom-out (parcelHandoff.js). Lots only enter the index inside the layer's own range, so a lower floor draws nothing extra — it just lets the carried ones stay.
     tiles = new ParcelTiles(index, { pane: pane || "overlayPane", zIndex: 0, minZoom: layer._wide ? Math.min(layer.options.minZoom, layer._wide.wideFloor) : layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 }); // `pane`: the planner's Parcels-in-front host (mapStack PANE_PARCEL_PICK); everyone else keeps the overlay pane
     tiles._busy = () => queue.pending > 0;
+    tiles._dataPending = () => layer._activeRequests > 0 || queue.pending > 0 || tiles.repaintPending(); // B2426464 ×3 — old zoom levels stay until the new one is drawn
     tiles.addTo(mapRef);
   });
   layer.on("remove", () => {
@@ -542,6 +545,7 @@ export function makeSnapshotLayer(county, { getObstacles } = {}) {
     mapRef = map;
     tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: PARCEL_MINZOOM, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
     tiles._busy = () => queue.pending > 0;
+    tiles._dataPending = () => queue.pending > 0 || tiles.repaintPending();
     tiles.addTo(map);
     map.on("moveend zoomend", refresh);
     unsub = onSnapshotChange((c) => { if (c === county) { dropAll(); refresh(); } }); // a fresher copy: new lots, new keys

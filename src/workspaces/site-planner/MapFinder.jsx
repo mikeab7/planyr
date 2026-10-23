@@ -165,6 +165,7 @@ import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
 import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
+import { lockstepZoomAnimation } from "../../shared/map/lockstepZoom.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -1802,6 +1803,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
        (the next wheel notch) started its frames late and slid off the imagery; see shared/map/steadyZoomLevels.js. */
     const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21, fadeAnimation: false, ...FREE_ZOOM_OPTIONS }).setView(cfg.center, cfg.zoom);
     const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1 — pinch lands where the fingers stop; a wheel notch stays one level
+    const detachLockstep = lockstepZoomAnimation(map); // B2426464 ×3 — every layer moves together through a zoom (shared/map/lockstepZoom.js)
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__mapFinderMap = map;
     // "Locate me" (NEW — mobile pinch/locate/telemetry lap): a 3rd button stacked directly below
     // the zoom control (same `bottomleft` corner — every OTHER corner is already claimed, per
@@ -2009,7 +2011,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); detachLockstep(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

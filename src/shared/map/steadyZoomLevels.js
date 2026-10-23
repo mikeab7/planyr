@@ -20,8 +20,14 @@
  *  long AND this many frames after a reveal). */
 export const HOLD_FRAMES = 3;
 export const HOLD_MS = 120;
+/** The longest a layer's own "my data for the new view is still coming" may hold old tiles (a server that never answers cannot pin them). */
+export const DATA_HOLD_CAP_MS = 4000;
 
-/** Patch one Leaflet GridLayer (instance). Idempotent. Returns the layer. */
+/** Patch one Leaflet GridLayer (instance). Idempotent. Returns the layer.
+ *  `layer._dataPending` (optional, read at call time): a layer whose tiles are created EMPTY and filled when its data answers (the parcel tiles —
+ *  a tile is "loaded" the moment it is created, blank or not) says so here, and on a lockstep map old tiles are kept until it reports false or
+ *  DATA_HOLD_CAP_MS passes. Without it Leaflet cleared the old level the moment the new one's empty tiles existed: no outline at all until the
+ *  county answered (a frame on a fast mock, the whole answer's wait on a real county — B2426464 ×3). */
 export function holdNewZoomLevels(layer) {
   if (!layer || layer.__holdNewZoomLevels) return layer;
   layer.__holdNewZoomLevels = true;
@@ -40,7 +46,32 @@ export function holdNewZoomLevels(layer) {
   const basePrune = layer._pruneTiles;
   /* …and none may be dropped WHILE a level is hidden either: with `fadeAnimation: false` Leaflet prunes the moment each new tile is
    * ready (its non-fade `_tileReady` ignores the zoom-in-progress `_noPrune` flag), which emptied the screen mid-zoom. */
+  /* On a LOCKSTEP map (lockstepZoom.js) nothing is hidden — a new level is animated from its correct start and shown from the first frame —
+   * so the one rule left is the hold: old tiles are cleared only HOLD_FRAMES frames and HOLD_MS after the LAST request to clear them, so a
+   * just-arrived tile has been drawn before the one under it goes. */
+  const lockstep = () => !!(layer._map && layer._map.__lockstepZoom);
+  let quietToken = 0;
+  let dataWaitFrom = null; // when the current "data still coming" wait began (survives restarts, so the cap is a real ceiling)
+  const dataPending = () => { try { return typeof layer._dataPending === "function" && !!layer._dataPending(); } catch (_) { return false; } };
+  const pruneWhenQuiet = () => {
+    prunePending = true;
+    const token = ++quietToken, t0 = now();
+    let frames = 0;
+    const tick = () => {
+      if (token !== quietToken) return; // a later request restarted the wait
+      if (dataPending()) {
+        if (dataWaitFrom == null) dataWaitFrom = now();
+        if (now() - dataWaitFrom < DATA_HOLD_CAP_MS) { frames = 0; raf(tick); return; } // keep the old tiles; the frame count restarts once the data is in
+      }
+      if (++frames < HOLD_FRAMES || now() - t0 < HOLD_MS) { raf(tick); return; }
+      dataWaitFrom = null;
+      prunePending = false;
+      if (layer._map) basePrune.call(layer);
+    };
+    raf(tick);
+  };
   layer._pruneTiles = function () {
+    if (lockstep()) { pruneWhenQuiet(); return; }
     if (holding || hidden.size) { prunePending = true; return; }
     basePrune.call(this);
   };
@@ -66,6 +97,7 @@ export function holdNewZoomLevels(layer) {
   };
   const baseAnimate = layer._animateZoom, baseReset = layer._resetView, baseMoveEnd = layer._onMoveEnd;
   layer._animateZoom = function (e) {
+    if (lockstep()) return baseAnimate.call(this, e); // the lockstep animation places and shows the new level itself
     const t = now(), levels = this._levels || {};
     const young = [], drawn = [];
     for (const z of Object.keys(levels)) {
@@ -91,6 +123,6 @@ export function holdNewZoomLevels(layer) {
     baseMoveEnd.call(this);
     if (done) done();
   };
-  layer.on("remove", () => { hidden.forEach((el) => { el.style.visibility = ""; }); hidden.clear(); shownAt.clear(); holding = 0; prunePending = false; });
+  layer.on("remove", () => { hidden.forEach((el) => { el.style.visibility = ""; }); hidden.clear(); shownAt.clear(); holding = 0; quietToken++; prunePending = false; });
   return layer;
 }
