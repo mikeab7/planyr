@@ -145,8 +145,20 @@ async function runAtDpr(dpr) {
   await waitFor(() => page.evaluate(() => !!window.__mapFinderMap), 15000);
   await page.addStyleTag({ content: ".planyr-lot-no,.leaflet-marker-pane,.leaflet-shadow-pane{display:none!important}" });
   const home = lotAt(0, 0);
-  const setView = (z) => page.evaluate(([a, b, zz]) => window.__mapFinderMap.setView([a, b], zz, { animate: false }), [home.centre[0], home.centre[1], z]);
-  await setView(17.4); await sleep(500);
+  const setViewOnce = (z) => page.evaluate(([a, b, zz]) => window.__mapFinderMap.setView([a, b], zz, { animate: false }), [home.centre[0], home.centre[1], z]);
+  /* The app opens the map where the account's sites are (landingView), and on a signed-in live run that camera move can land AFTER this
+   * harness placed the map — the whole run then measures Houston at zoom 9 and reads VOID (seen live at pixel ratio 2, B2426464 ×3).
+   * So: place it, and re-place it until it has STAYED at the test point for a second. */
+  const setView = async (z) => {
+    const t0 = Date.now();
+    for (;;) {
+      await setViewOnce(z); await sleep(1000);
+      const ok = await page.evaluate(([a, b, zz]) => { const m = window.__mapFinderMap, c = m.getCenter(); return Math.abs(m.getZoom() - zz) < 0.01 && Math.abs(c.lat - a) < 1e-4 && Math.abs(c.lng - b) < 1e-4; }, [home.centre[0], home.centre[1], z]);
+      if (ok) return;
+      if (Date.now() - t0 > 20000) throw new Error("measure-parcel-zoom-slide: the map would not stay at the test point (something keeps moving the camera)");
+    }
+  };
+  await setView(17.4);
   await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click(); await sleep(1800);
   const disp = () => page.evaluate(() => { const d = window.__mapParcelDisplay && window.__mapParcelDisplay(); return d ? d.layers.find((l) => /HdTo6HJqh92wn4D8/.test(l.url || "")) || null : null; });
   const settled = async () => { await waitFor(async () => { const d = await disp(); return d && (!d.wide || d.wide.loading === 0); }, 9000); await sleep(900); };
