@@ -28,6 +28,11 @@
  * not green — nothing below could be a measurement of it) and the hover outline
  * must be lit on a plain pointer rest before any key is pressed.
  *
+ * LIVE MODE (V1888160): `E2E_LOGIN_KEY=… PLANYR_URL=https://planyr.io [EXPECT_BUILD=<sha>] node ui-audit/verify-grid-strip.mjs` signs in
+ * as the test account (ui-audit/lib/signedInSession.mjs), seeds ONE throwaway cloud schedule from the same fixture, drives the
+ * DEPLOYED /sequence/ page with the same checks (reading /version.json in the same call), saves the Grid and Split screenshots
+ * when SHOTS_DIR is set, and soft-deletes every row it created (owner constraint 15). Never touches a real schedule.
+ *
  * Run: node ui-audit/verify-grid-strip.mjs   [HTML=<path to an index.html to drive instead>] [SHOTS_DIR=<dir>] [PW_CHROME=<chrome>]
  *      (red-proof: HTML=<a copy of main's public/sequence/index.html> — the checks below must go red on it.)
  */
@@ -74,21 +79,58 @@ const results = [];
 const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); console.log(`${cond ? "PASS ✅" : "FAIL ❌"} — ${name}${extra ? "  ::  " + extra : ""}`); };
 const void_ = why => { console.log(`VOID ⚠ — ${why}`); process.exit(2); };
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
-const page = await browser.newPage({ viewport: { width: 2400, height: 900 } });
-page.on("dialog", d => d.accept());
-page.on("pageerror", e => console.log("  [pageerror]", e.message.slice(0, 160)));
-await page.goto(URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
-await page.waitForSelector("[data-task-row]", { timeout: 40000 });
-await assertMeasurable(page, "verify-grid-strip");
-await page.locator('[data-testid="open-history-desktop"]').click();
-await pacedWait(page, 250);
-await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(fixture)) });
-await pacedWait(page, 700);
-await page.locator('[data-testid="history-panel"] button:has-text("Close")').click();
-await pacedWait(page, 1500);
-await page.locator('.hdr-view button:has-text("Grid")').click();
-await pacedWait(page, 700);
+const LIVE = process.env.PLANYR_URL || null;
+let browser = null, page, liveSession = null, liveBefore = null, liveBuild = null;
+const liveIds = () => liveSession.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id").is("deleted_at", null); if (q.error) throw new Error(q.error.message); return q.data.map(r => r.id); });
+if (LIVE) {
+  const { openSignedIn } = await import("./lib/signedInSession.mjs");
+  liveSession = await openSignedIn({ base: LIVE, viewport: { width: 2400, height: 900 } });
+  ok("[known-good] signed in as the test account", liveSession.proof.email === "e2e@planyr.test", liveSession.proof.email);
+  liveBefore = new Set(await liveIds());
+  // seed ONE throwaway cloud schedule (a first visit to /sequence/ creates the row), then overwrite it with the fixture
+  let ids = [];
+  const seedPage = await liveSession.page.context().newPage(); await seedPage.setViewportSize({ width: 1600, height: 950 });
+  await seedPage.goto(LIVE + "/sequence/", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await seedPage.waitForSelector('[data-testid="open-history-desktop"], button:has-text("New schedule")', { timeout: 40000 });
+  if (!(await seedPage.locator('[data-testid="open-history-desktop"]').count())) { await seedPage.getByRole("button", { name: "New schedule" }).click(); await pacedWait(seedPage, 3000); }
+  await pacedWait(seedPage, 3000); await seedPage.close();
+  ids = (await liveIds()).filter(i => !liveBefore.has(i));
+  if (ids.length !== 1) { console.log("expected exactly one throwaway schedule row, found " + JSON.stringify(ids)); process.exit(1); }
+  const seedErr = await liveSession.page.evaluate(async ({ id, fx }) => {
+    const r = await window.pfSupabase.from("schedules").select("rev").eq("id", id).single();
+    if (r.error) return r.error.message;
+    const u = await window.pfSupabase.from("schedules").update({ name: fx.name, data: { ...fx, id }, rev: (r.data.rev || 0) + 1 }).eq("id", id).select("id");
+    return u.error ? u.error.message : (u.data && u.data.length ? null : "update matched no row"); }, { id: ids[0], fx: fixture.projects[1] });
+  if (seedErr) { console.log("could not seed the throwaway row: " + seedErr); process.exit(1); }
+  page = await liveSession.page.context().newPage(); await page.setViewportSize({ width: 2400, height: 900 });
+  page.on("dialog", d => d.accept());
+  page.on("pageerror", e => console.log("  [pageerror]", e.message.slice(0, 160)));
+  await page.goto(LIVE + "/sequence/", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForSelector("[data-task-row]", { timeout: 40000 });
+  await pacedWait(page, 1800);
+  await assertMeasurable(page, "verify-grid-strip");
+  liveBuild = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then(r => r.json()).then(j => j.build).catch(() => "unreadable"));
+  console.log("served build", liveBuild);
+  if (process.env.EXPECT_BUILD) ok("served build matches the build under test", String(liveBuild).startsWith(process.env.EXPECT_BUILD.slice(0, 7)), liveBuild);
+  await page.locator('.hdr-view button:has-text("Grid")').click();
+  await pacedWait(page, 900);
+} else {
+  browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+  page = await browser.newPage({ viewport: { width: 2400, height: 900 } });
+  page.on("dialog", d => d.accept());
+  page.on("pageerror", e => console.log("  [pageerror]", e.message.slice(0, 160)));
+  await page.goto(URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForSelector("[data-task-row]", { timeout: 40000 });
+  await assertMeasurable(page, "verify-grid-strip");
+  await page.locator('[data-testid="open-history-desktop"]').click();
+  await pacedWait(page, 250);
+  await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(fixture)) });
+  await pacedWait(page, 700);
+  await page.locator('[data-testid="history-panel"] button:has-text("Close")').click();
+  await pacedWait(page, 1500);
+  await page.locator('.hdr-view button:has-text("Grid")').click();
+  await pacedWait(page, 700);
+}
 await page.waitForSelector('[data-grid-scroll="1"]');
 
 const G = '[data-grid-scroll="1"]';
@@ -164,7 +206,7 @@ ok("N1a every rendered row carries a filler strip", stripCount === ids.length, `
   ok("N1d the outline's right edge sits at the pane's right edge", edgeBlue === "37,99,235", edgeBlue);
   ok("N1d the outline's top and bottom run across the strip", s2.px(sb3.x + sb3.w / 2, rb3.y + 0.5) === "37,99,235" && s2.px(sb3.x + sb3.w / 2, rb9.y + rb9.h - 2) === "37,99,235", `${s2.px(sb3.x + sb3.w / 2, rb3.y + 0.5)} / ${s2.px(sb3.x + sb3.w / 2, rb9.y + rb9.h - 2)}`);
   ok("N2 no size readout with rows selected", (await badgeText()) === "", await badgeText());
-  if (SHOTS) { await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, "grid-wide-range.png"), clip: { x: 900, y: 60, width: 1500, height: 440 } }); }
+  if (SHOTS) { await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, LIVE ? "live-grid-range.png" : "grid-wide-range.png"), clip: { x: 900, y: 60, width: 1500, height: 440 } }); await page.screenshot({ path: join(SHOTS, LIVE ? "live-grid-full.png" : "grid-full.png") }); }
 
   // a press in the strip → that row (single selection)
   const click = async (id, dx = 0.5, shift = false) => { const sb = await stripBox(id), rb = await rowBox(id);
@@ -190,9 +232,23 @@ ok("N1a every rendered row carries a filler strip", stripCount === ids.length, `
   { await idCell(30).click(); await page.keyboard.down("Shift"); await idCell(33).click(); await page.keyboard.up("Shift"); await pacedWait(page, 200);
     const grip = page.locator(`[data-task-row="31"] [data-row-drag-handle]`); const gb = await grip.boundingBox();
     await page.mouse.move(gb.x + 3, gb.y + 6); await page.mouse.down(); await page.mouse.move(gb.x + 40, gb.y + 90, { steps: 8 }); await pacedWait(page, 250);
+    // aim at a row's TOP edge: the centre of a row now shows the "Nest inside" box instead of the insertion line (B2445008)
+    let dragY = gb.y + 90;
+    { const t = await rowBox(36); if (t) { dragY = t.y + 1.5; await page.mouse.move(gb.x + 40, dragY, { steps: 4 }); await pacedWait(page, 300); } }
     ok("N2 no size readout DURING a row drag", (await badgeText()) === "", await badgeText());
-    const line = await page.evaluate(sel => { const l = document.querySelector("[data-drag-insert-line]"); const r = document.querySelector("[data-task-row]"); if (!l || l.style.display === "none") return null; return { r: l.getBoundingClientRect().right, rowR: r.getBoundingClientRect().right }; }, G);
-    ok("N1g the drag-row indicator line spans to the pane's right edge", !!line && Math.abs(line.r - line.rowR) < 1, line ? `${line.r} vs ${line.rowR}` : "line not shown");
+    const readDrag = () => page.evaluate(sel => { const l = document.querySelector("[data-drag-insert-line]"); const n = document.querySelector("[data-drag-nest]"); const r = document.querySelector("[data-task-row]");
+      const vis = e => !!e && getComputedStyle(e).display !== "none";
+      return { line: vis(l) ? { r: l.getBoundingClientRect().right, rowR: r.getBoundingClientRect().right } : null, nest: vis(n) ? n.getAttribute("data-drag-nest-kind") : null, dimmed: [...document.querySelectorAll("[data-task-row]")].filter(x => x.style.opacity === "0.45").map(x => x.getAttribute("data-task-row")) }; }, G);
+    let lineState = await readDrag();
+    // the pointer can rest on a row's CENTRE (autoscroll shifts the list under it) — that shows the nest box instead of the line, so step to the top edge of whatever row is under it
+    for (let k = 0; k < 5 && !lineState.line; k++) {
+      const top = await page.evaluate(({ x, y }) => { const r = document.elementFromPoint(x, y)?.closest?.("[data-task-row]"); return r ? r.getBoundingClientRect().top : null; }, { x: gb.x + 40, y: dragY });
+      if (top == null) break;
+      dragY = top + 1.5; await page.mouse.move(gb.x + 40, dragY, { steps: 2 }); await pacedWait(page, 300);
+      lineState = await readDrag();
+    }
+    const line = lineState.line;
+    ok("N1g the drag-row indicator line spans to the pane's right edge", !!line && Math.abs(line.r - line.rowR) < 1, line ? `${line.r} vs ${line.rowR}` : `line not shown (nest box: ${lineState.nest}; rows dimmed = drag started: ${lineState.dimmed.join(",") || "none"})`);
     await page.mouse.up(); await pacedWait(page, 300); }
 
   // column resize in flight
@@ -267,6 +323,7 @@ const centre = async id => { const nb = await cellBox(id, "cost"); return { x: n
 // ── N1g — the grid pane in Split view, and a narrow window ──────────────────────────────────────────────────
 await page.locator('.hdr-view button:has-text("Split")').click();
 await pacedWait(page, 900);
+if (SHOTS) { await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, LIVE ? "live-split.png" : "split.png") }); }
 await page.waitForSelector('[data-grid-scroll="1"] [data-grid-strip]', { timeout: 8000 }).catch(() => {});
 { const ids4 = await allIds(); let bad4 = [];
   for (const id of ids4.slice(0, 15)) { const rb = await rowBox(id), sb = await stripBox(id); if (!sb || !sb.el || Math.abs(sb.r - (rb.x + rb.w)) > 0.6) bad4.push(id); }
@@ -281,7 +338,16 @@ await page.setViewportSize({ width: 760, height: 900 }); await pacedWait(page, 8
   const e = await page.evaluate(sel => { const g = document.querySelector(sel); const row = document.querySelector("[data-task-row]"); const cells = [...row.querySelectorAll("[data-col-key]")]; return { rowR: row.getBoundingClientRect().right, gR: g.getBoundingClientRect().right, lastR: cells[cells.length - 1].getBoundingClientRect().right }; }, G);
   ok("N1f scrolled fully right: the last cell meets the pane's edge, nothing blank beyond it", Math.abs(e.lastR - e.gR) <= 1.5, JSON.stringify(e)); }
 
-await browser.close(); server.close();
+if (LIVE) {
+  // Cleanup (owner constraint 15): soft-delete every schedule row this run created, then prove none remains live.
+  const created = (await liveIds()).filter(i => !liveBefore.has(i));
+  const err = await liveSession.page.evaluate(async (ids) => { for (const i of ids) { const u = await window.pfSupabase.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", i); if (u.error) return u.error.message; } return null; }, created);
+  const left = (await liveIds()).filter(i => !liveBefore.has(i));
+  ok(`cleanup: the ${created.length} throwaway schedule row(s) this run created are deleted and none remains live`, !err && left.length === 0, JSON.stringify({ created, err, left }));
+  console.log("build at the end of the run", await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then(r => r.json()).then(j => j.build).catch(() => "unreadable")));
+  await liveSession.close();
+} else { await browser.close(); server.close(); }
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) { console.log("FAILED:\n - " + failed.map(f => f.name).join("\n - ")); process.exit(1); }
+process.exit(0);
