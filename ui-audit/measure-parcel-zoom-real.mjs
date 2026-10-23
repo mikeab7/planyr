@@ -95,21 +95,36 @@ async function runAtDpr(dpr) {
       await settled();
       const zoomIn = label.includes(" in") || label.includes("+");
       const after = await shot();
-      const rest = zoomIn ? after : before, other = zoomIn ? before : after;
-      // judge only lines drawn at BOTH ends: a stage change drops small lots by design (persistentOutline)
-      const xfOther = fitImagery(rest, other, { win, anchor, coarse: Math.round(4 * k0), slack: 40 * k0, sMin: 0.12, sMax: 3.2 });
-      const per = persistentOutline(outlinePoints(rest, win, 4000), other, xfOther, { win, tol: 1.5 * k0, reach: Math.round(12 * k0) });
-      if (process.argv.includes("--debug-ends")) { const fs = await import("node:fs"); const { encodeRgbPng } = await import("./lib/fakeTile.mjs"); for (const [n, im] of [["rest", rest], ["other", other]]) fs.writeFileSync(`/tmp/claude-0/end-${n}.png`, encodeRgbPng(im.width, im.height, (row, col, p, raw) => { const o = (row * im.width + col) * im.channels; raw[p] = im.data[o]; raw[p + 1] = im.data[o + 1]; raw[p + 2] = im.data[o + 2]; })); console.log("ends", JSON.stringify(xfOther), per.share); }
-      if (xfOther.ncc < 0.5 || per.share < 0.25) { console.log(`  ${label.padEnd(34)} ❌ VOID — the two settled ends do not share their lines (kept ${Math.round(per.share * 100)}%, ncc ${xfOther.ncc.toFixed(2)})`); results.push({ dpr, county: c.key, label, void: true }); return; }
-      const restOutline = per.kept.length > 1500 ? per.kept.filter((_, i) => i % Math.ceil(per.kept.length / 1500) === 0) : per.kept;
+      const rest = zoomIn ? after : before;
       const t0 = frames.length ? frames[0].t : 0;
-      let prev = null, worst = 0, off = 0, unreg = 0, judged = 0, worstFrame = -1; const verdictLines = [];
-      for (const [i, f] of frames.entries()) {
-        const img = decodePng(Buffer.from(f.data, "base64")); const k = img.width / 1440;
-        const w = WIN.map((v) => v * k), an = [cx * k, cy * k];
+      const dec = (i) => decodePng(Buffer.from(frames[i].data, "base64"));
+      /* Pass 1 — register every frame against the reference, CHAINED from the reference's own end of the gesture (a zoom-in's reference is
+       * where it lands, so walk the frames backwards from there): each frame starts its search from its neighbour's fit, which stays
+       * reliable across a multi-level zoom where one direct jump from end to end does not (seen: a 0.125 false optimum). */
+      const order = frames.map((_, i) => i); if (zoomIn) order.reverse();
+      const xfs = new Array(frames.length).fill(null); let prev = null, unreg = 0;
+      for (const i of order) {
+        const img = dec(i); const k = img.width / 1440; const w = WIN.map((v) => v * k), an = [cx * k, cy * k];
         const xf = fitImagery(rest, img, { win: w, anchor: an, coarse: Math.round(4 * k), slack: 40 * k, prev, sMin: 0.12, sMax: 3.2 });
         if (xf.ncc < 0.5) { unreg++; prev = null; continue; }
-        prev = xf;
+        xfs[i] = xf; prev = xf;
+      }
+      // judge only lines drawn at BOTH ends: a stage change drops small lots by design (persistentOutline). The other end = the registered
+      // frame farthest from the reference along the walk.
+      const otherIdx = [...order].reverse().find((i) => xfs[i]);
+      if (otherIdx == null) { console.log(`  ${label.padEnd(34)} ❌ VOID — no frame registered to the imagery`); results.push({ dpr, county: c.key, label, void: true }); return; }
+      const per = persistentOutline(outlinePoints(rest, win, 4000), dec(otherIdx), xfs[otherIdx], { win, tol: 1.5 * k0, reach: Math.round(12 * k0) });
+      if (process.argv.includes("--debug-ends")) { const fs = await import("node:fs"); fs.writeFileSync(`/tmp/claude-0/end-other-${label.replace(/\W+/g, "_")}.png`, Buffer.from(frames[otherIdx].data, "base64")); console.log("   ends:", otherIdx, "of", frames.length, JSON.stringify(xfs[otherIdx]), "zoom now", await page.evaluate(() => window.__mapFinderMap.getZoom())); }
+      /* When the other end draws few of the reference's lines (the zoom crosses into a stage that draws none of these lots — "Large lots
+       * only", or past the drawn range), judge on the reference's own lines but only on frames within ~half a zoom level of the reference,
+       * where the same stage is still on screen; reported as PARTIAL, never hidden. */
+      const partial = per.share < 0.25;
+      const pool = partial ? outlinePoints(rest, win, 4000) : per.kept;
+      const restOutline = pool.length > 1500 ? pool.filter((_, i) => i % Math.ceil(pool.length / 1500) === 0) : pool;
+      let worst = 0, off = 0, judged = 0, worstFrame = -1; const verdictLines = [];
+      for (const [i, f] of frames.entries()) {
+        const xf = xfs[i]; if (!xf || (partial && (xf.s < 0.7 || xf.s > 1.43))) continue;
+        const img = dec(i); const k = img.width / 1440; const w = WIN.map((v) => v * k);
         const o = outlineOffset(restOutline, img, xf, { win: w, reach: Math.round(12 * k) });
         if (!o.n || o.n < 40) continue;
         judged++;
@@ -126,9 +141,9 @@ async function runAtDpr(dpr) {
           verdictLines.push(`    frame ${i} (${Math.round((f.t - t0) * 1000)} ms) outline median ${med.toFixed(1)} px, p90 ${(o.p90 / k).toFixed(1)} px off the imagery (scale ${xf.s.toFixed(3)}, ncc ${xf.ncc.toFixed(2)})`);
         }
       }
-      const row = { dpr, county: c.key, label, frames: frames.length, judged, unregistered: unreg, worstPx: +worst.toFixed(2), framesOff: off, linesKept: +per.share.toFixed(2) };
+      const row = { dpr, county: c.key, label, frames: frames.length, judged, unregistered: unreg, worstPx: +worst.toFixed(2), framesOff: off, linesKept: +per.share.toFixed(2), partial };
       results.push(row);
-      console.log(`  ${label.padEnd(34)} lines kept ${String(Math.round(per.share * 100)).padStart(3)}%  frames ${String(frames.length).padStart(3)} judged ${String(judged).padStart(3)} unregistered ${String(unreg).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${off}`);
+      console.log(`  ${label.padEnd(34)} lines kept ${String(Math.round(per.share * 100)).padStart(3)}%${partial ? " PARTIAL" : "        "} frames ${String(frames.length).padStart(3)} judged ${String(judged).padStart(3)} unregistered ${String(unreg).padStart(3)}  worst ${String(row.worstPx).padStart(5)} px  off>${LIMIT_PX} ${off}`);
       for (const l of verdictLines) console.log(l);
     }
     const btn = (sel) => page.locator(sel).first().click();
