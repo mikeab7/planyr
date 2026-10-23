@@ -27,6 +27,7 @@
  * box, no separate RPC call; `view === "list"` skips the snapshot lookup entirely.
  */
 import { noAutofill } from "../lib/noAutofill.js";
+import { chipBox } from "../lib/chipStyle.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
@@ -219,9 +220,9 @@ export default function SearchBox({
                 )}
               </span>
               {p.mine && (
-                <span style={{
-                  flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
-                  color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: 999, padding: "2px 6px",
+                <span data-chip="" style={{
+                  ...chipBox(18, 6), flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                  color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: 999,
                 }}>
                   Been here
                 </span>
@@ -230,10 +231,10 @@ export default function SearchBox({
                   (p.mine wins, same rule the map pins follow), so this only ever shows on its own.
                   Outlined, not filled, echoing the hollow map-pin treatment for the same flag. */}
               {!p.mine && p.wishlisted && (
-                <span style={{
-                  flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                <span data-chip="" style={{
+                  ...chipBox(18, 6), flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
                   color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
-                  borderRadius: 999, padding: "1px 6px",
+                  borderRadius: 999,
                 }}>
                   Want to try
                 </span>

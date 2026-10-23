@@ -28,6 +28,7 @@ import { dishRowsForTable, formatCents, formatScore, dishScoreTier, dishDate } f
 import { dishSections, dishSubline, dishHistoryEntries } from "../lib/restaurantPanel.js";
 import RatingSlider from "./RatingSlider.jsx";
 import { noAutofill } from "../lib/noAutofill.js";
+import { chipBox } from "../lib/chipStyle.js";
 import { suggestDishes, sameDishName } from "../lib/dishSuggest.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
@@ -329,14 +330,14 @@ function DishEditRow({ initial, mode = initial ? "edit" : "new", rows = [], open
 function DishBadge({ score, section }) {
   const dark = section === "order";
   const base = {
-    display: "flex", alignItems: "center", justifyContent: "center", minWidth: 38, height: 26, padding: "0 6px",
+    ...chipBox(26, 6), minWidth: 38, // NEW-3: the shared centred chip box (lib/chipStyle.js)
     borderRadius: RADIUS.sm, fontWeight: 700, fontSize: FONT_SIZE.control, flex: "none", fontVariantNumeric: "tabular-nums",
   };
   if (score == null) {
-    return <span data-testid="dish-score-chip" data-score-tier="unset" data-badge="unset" style={{ ...base, border: DASHED_BORDER, color: "var(--text-tertiary)" }}>—</span>;
+    return <span data-chip="" data-testid="dish-score-chip" data-score-tier="unset" data-badge="unset" style={{ ...base, border: DASHED_BORDER, color: "var(--text-tertiary)" }}>—</span>;
   }
   return (
-    <span data-testid="dish-score-chip" data-score-tier={dishScoreTier(score)} data-badge={dark ? "dark" : "light"} style={{
+    <span data-chip="" data-testid="dish-score-chip" data-score-tier={dishScoreTier(score)} data-badge={dark ? "dark" : "light"} style={{
       ...base,
       background: dark ? "var(--text-primary)" : "var(--hover-ghost)", // --hover-ghost: the light grey fill in both themes (--chrome-muted is a dark fill)
       color: dark ? "var(--surface-raised)" : "var(--text-secondary)",

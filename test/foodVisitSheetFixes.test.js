@@ -83,7 +83,8 @@ describe("NEW-4 — one plain close X", () => {
 describe("NEW-5 — the sheet's drag rules", () => {
   const sheet = read("components/BottomSheet.jsx");
   it("the grab zone is tall (>= 56) and the header is a grab area", () => {
-    expect(sheet).toMatch(/minHeight: 56, cursor: "grab"/);
+    expect(sheet).toMatch(/const HANDLE_ZONE_PX = 56;/);
+    expect(sheet).toMatch(/minHeight: HANDLE_ZONE_PX, cursor: "grab"/);
     expect(sheet).toMatch(/closest\?\.\("\[data-sheet-grab\]"\)/);
     expect(read("components/VisitPanel.jsx")).toMatch(/data-sheet-grab=""/);
   });

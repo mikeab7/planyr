@@ -32,8 +32,10 @@
 import { useMemo, useState } from "react";
 import { manualPinKey } from "../lib/foodStore.js";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
+import { chipBox } from "../lib/chipStyle.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 
 const SORTS = {
   // A dateless visit's key is "" — the empty string, which string-compares BELOW every real
@@ -134,10 +136,10 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>
                       {v.placeName}
                       {v.isWishlist && (
-                        <span style={{
-                          marginLeft: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                        <span data-chip="" style={{
+                          ...chipBox(16, 5), marginLeft: 6, fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
                           color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
-                          borderRadius: RADIUS.pill, padding: "0 5px",
+                          borderRadius: RADIUS.pill,
                         }}>
                           Want to try
                         </span>
@@ -145,8 +147,8 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     </td>
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating ? (
-                        <span style={{
-                          display: "inline-block", borderRadius: RADIUS.sm, padding: "1px 6px", fontWeight: 700,
+                        <span data-chip="" style={{
+                          ...chipBox(20, 6), borderRadius: RADIUS.sm, fontWeight: 700,
                           background: colorForRating(v.rating), color: textColorForRating(v.rating),
                         }}>
                           {/* Number(): rating is a Postgres numeric(4,2) column, so PostgREST's raw
@@ -161,8 +163,8 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     </td>
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating_ambiance ? (
-                        <span style={{
-                          display: "inline-block", borderRadius: RADIUS.sm, padding: "1px 6px", fontWeight: 700,
+                        <span data-chip="" style={{
+                          ...chipBox(20, 6), borderRadius: RADIUS.sm, fontWeight: 700,
                           background: colorForRating(v.rating_ambiance), color: textColorForRating(v.rating_ambiance),
                         }}>
                           {Number(v.rating_ambiance)}/10

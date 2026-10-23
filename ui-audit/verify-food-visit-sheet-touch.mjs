@@ -28,7 +28,8 @@ const section = async (name, fn) => { try { await fn(); } catch (e) { check(`${n
 
 const sheetState = (page) => page.evaluate((SHEET) => {
   const s = document.querySelector(SHEET); if (!s) return null;
-  const c = s.children[1], r = s.getBoundingClientRect(), hb = s.children[0].getBoundingClientRect();
+  // handleY is the centre of the VISIBLE grab bar (NEW-1, 2026-10-23: the bar moved to the top of the 56-high zone, whose lower part now overlaps the header — the zone's own centre is just content)
+  const c = s.children[1], r = s.getBoundingClientRect(), hb = (s.children[0].querySelector("span") || s.children[0]).getBoundingClientRect();
   const rootB = s.parentElement.getBoundingClientRect().bottom; // B2243588 x2: mid-drag the box is taller than what shows (it is slid by a transform)
   return { h: Math.round(rootB - r.top), top: Math.round(r.top), snap: s.dataset.sheetSnap, scrollTop: c.scrollTop, handleY: hb.top + hb.height / 2, x: r.left + r.width / 2 };
 }, SHEET);
@@ -128,6 +129,16 @@ try {
     await ts.drag(s.x, s.handleY + 20, s.handleY + 260, { ms: 400 }); await sleep(600);
     const a = await sheetState(page);
     check("5d a grab off-centre of the bar still moves the sheet", !a || a.h < s.h - 20, `${s.h} -> ${a && a.h}`);
+    await ctx.close();
+  });
+  await section("zone's lower part", async () => {
+    // NEW-1 (2026-10-23): the 56-high zone's lower part now overlaps the header — a finger 44 px below the sheet's top edge (on the title /
+    // address block, not on a control) must still carry the sheet, exactly as the old zone did.
+    const { ctx, page, ts } = await mk();
+    const s = await sheetState(page);
+    await ts.drag(s.x, s.top + 44, s.top + 44 + 260, { ms: 400 }); await sleep(600);
+    const a = await sheetState(page);
+    check("5m a grab 44 px below the sheet's top edge (the zone's lower part) still moves the sheet", !a || a.h < s.h - 20, `${s.h} -> ${a && a.h}`);
     await ctx.close();
   });
   await section("content at top", async () => {

@@ -19,7 +19,7 @@ export const LIVE_MARK = "ZZ-E2E-THROWAWAY";
 export const LIVE_ABURI = "81f01ab6-64d4-46b1-bf67-d99c4eb98dd4";
 
 export const BASE = process.argv.find((a, i) => i > 1 && a.startsWith("http")) || (LIVE ? "https://planyr.io" : "http://localhost:4180");
-export const PHONES = { "iPhone 15": { kb: 380 }, "iPhone SE": { kb: 304 } };
+export const PHONES = { "iPhone 15": { kb: 380 }, "iPhone 15 Pro Max": { kb: 400 }, "iPhone SE": { kb: 304 } };
 
 // ── a painted stand-in for satellite imagery (so a gap is visible in the screenshot) ─────────────
 function crc32(buf) { let c, crc = 0xffffffff; for (const b of buf) { c = (crc ^ b) & 0xff; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; } return (crc ^ 0xffffffff) >>> 0; }

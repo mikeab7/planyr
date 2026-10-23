@@ -52,6 +52,7 @@ import { OrderAgainControl } from "./DishesSection.jsx";
 import RatingSlider from "./RatingSlider.jsx";
 import { cleanDraftDishes, newDraftDish } from "../lib/draftDishes.js";
 import { noAutofill } from "../lib/noAutofill.js";
+import { chipBox } from "../lib/chipStyle.js";
 import { createDraftStore, DraftStoreContext, useDraftStore, useDraftField } from "../lib/draftStore.js";
 
 // var(--accent-food) — a real DOM/CSS element (unlike FoodMap's canvas-drawn pin, which must use
@@ -99,7 +100,7 @@ function fieldStyle() {
   return {
     width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 8,
     border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
-    font: "inherit", fontSize: 13, minHeight: 40,
+    font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 400, minHeight: 40, // fontWeight 400: fields sit inside bold labels and `font: inherit` would carry the bold in
     // NEW-3: a text or date field (the iOS date control above all) has an intrinsic minimum width wider than a narrow flex/label cell and
     // pushes its row past the screen edge — let it shrink to the cell and never exceed it.
     minWidth: 0, maxWidth: "100%", display: "block",
@@ -118,7 +119,7 @@ function DraftDishes({ rows, setRows, isMobile, knownRows = [] }) {
   const pick = (key, k) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, name: k.name, note: r.note || k.note || "", order_again: r.order_again ?? k.order_again ?? null } : r)));
   return (
     <div data-testid="visit-dishes" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
+      <div style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
       {rows.map((r, i) => (
         <div key={r.key} data-testid="visit-dish-row" data-edit-card="" style={{
           display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 12px", borderRadius: RADIUS.lg, minWidth: 0,
@@ -147,7 +148,7 @@ function DraftDishes({ rows, setRows, isMobile, knownRows = [] }) {
       <button type="button" onClick={() => setRows((rs) => [...rs, newDraftDish()])} data-testid="visit-dish-add"
         style={{
           minHeight: 44, border: "1px dashed var(--border-default)", borderRadius: RADIUS.md, background: "transparent",
-          color: "var(--accent-food)", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 700,
+          color: "var(--accent-food)", cursor: "pointer", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700,
         }}>
         + Add another dish
       </button>
@@ -216,28 +217,32 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
     }
   };
 
-  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)", minWidth: 0 };
+  // ONE label style for every field heading in the form (Food, Ambiance, Dishes, Date, Cost, Notes) — NEW-6 (2026-10-23): "Food" and
+  // "Date" were 12 px regular while "Dishes" was 12 px bold, so the form read as two dialects.
+  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-secondary)", minWidth: 0 };
   return (
     <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
-      {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} knownRows={knownRows} />}
-      {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: 12, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
       {initial?.what_i_had && (
         <div data-testid="visit-legacy-had" style={{ fontSize: FONT_SIZE.emphasis, color: "var(--text-secondary)" }}>
           <span style={{ fontWeight: 700 }}>What I had (saved earlier):</span> {initial.what_i_had}
         </div>
       )}
+      {/* NEW-4 (2026-10-23, owner): the order is Food, Ambiance, THEN the dishes, then Date, then the rest and the actions — rate the
+          place first, then the plate. Same order when editing a past visit (which has no dish rows here). */}
       {/* div, not label: a <label> around a button group forwards a tap on its text to the FIRST
           button inside it, which would set the rating to 1 on a stray tap. */}
-      <div role="group" aria-label="Food" style={groupLabel}>
+      <div role="group" aria-label="Food" data-testid="visit-food-group" style={groupLabel}>
         Food
         <RatingSlider value={rating} onChange={setRating} label="Food rating" isMobile={isMobile} />
       </div>
-      <div role="group" aria-label="Ambiance" style={groupLabel}>
+      <div role="group" aria-label="Ambiance" data-testid="visit-ambiance-group" style={groupLabel}>
         Ambiance
         <RatingSlider value={ratingAmbiance} onChange={setRatingAmbiance} label="Ambiance rating" isMobile={isMobile} />
       </div>
+      {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} knownRows={knownRows} />}
+      {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: FONT_SIZE.control, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
       <label data-edit-card="" style={groupLabel}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 20 }}>
           <span>Date</span>
           {/* Explicit clear affordance, matching the rating slider's own "Clear" link — a native
            * date input's built-in clear gesture isn't reliably reachable on every platform (a
@@ -245,13 +250,13 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
           {visitedOn && (
             <button type="button" onClick={() => setVisitedOn("")} style={{
               border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer",
-              font: "inherit", fontSize: 11.5, padding: 0, textDecoration: "underline",
+              font: "inherit", fontSize: FONT_SIZE.label, fontWeight: 400, padding: "4px 0 4px 12px", textDecoration: "underline",
             }}>
               Clear
             </button>
           )}
         </div>
-        <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-day")} data-testid="visit-date-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
+        <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-day")} data-testid="visit-date-input" className="food-date-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }} />
       </label>
       <label data-edit-card="" style={groupLabel}>
         Cost
@@ -261,18 +266,18 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
         Notes
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} {...noAutofill("visit-notes")} data-testid="visit-notes-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, resize: "vertical" }} />
       </label>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-secondary)" }}>
         Would return?
         <button type="button" onClick={() => setWouldReturn(wouldReturn === true ? null : true)}
           style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 44, cursor: "pointer",
             background: wouldReturn === true ? "var(--accent-food)" : "transparent",
-            color: wouldReturn === true ? "var(--on-accent-food)" : "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
+            color: wouldReturn === true ? "var(--on-accent-food)" : "var(--text-primary)", font: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
           Yes
         </button>
         <button type="button" onClick={() => setWouldReturn(wouldReturn === false ? null : false)}
           style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 44, cursor: "pointer",
             background: wouldReturn === false ? "var(--chrome-muted)" : "transparent",
-            color: "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
+            color: "var(--text-primary)", font: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
           No
         </button>
       </div>
@@ -285,14 +290,14 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
       }}>
         <button type="submit" disabled={pending} style={{
           flex: 1, border: "none", borderRadius: RADIUS.md, padding: "10px 0", minHeight: 44, cursor: pending ? "default" : "pointer",
-          background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: 13.5, fontWeight: 700,
+          background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: FONT_SIZE.display, fontWeight: 700,
           opacity: pending ? 0.6 : 1,
         }}>
           {pending ? "Saving…" : submitLabel}
         </button>
         <button type="button" onClick={cancel} style={{
           border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 14px", minHeight: 44, cursor: "pointer",
-          background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 13,
+          background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: FONT_SIZE.emphasis,
         }}>
           Cancel
         </button>
@@ -348,8 +353,10 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
   const mapsUrl = directionsUrl(lat, lon);
   const showPrice = !!onSetPriceLevel && !manualNameEditable;
   return (
-    <div data-edit-card={manualNameEditable ? "" : undefined} data-sheet-grab="" style={{ padding: "2px 16px 6px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+    <div data-edit-card={manualNameEditable ? "" : undefined} data-sheet-grab="" style={{ padding: "4px 16px 6px" }}>
+      {/* NEW-2 (2026-10-23): the ✕ is centred on the title's FIRST line (flex-start + its own -10 overhang), so a long name that wraps
+          leaves the ✕ beside the first line like an iOS sheet, not floating at the middle of two. The place-name input keeps centring. */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: manualNameEditable ? "center" : "flex-start", gap: 8 }}>
         {manualNameEditable ? (
           <input
             type="text" autoFocus value={manualName} onChange={(e) => onManualNameChange(e.target.value)}
@@ -357,9 +364,9 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
             style={{ ...fieldStyle(), fontSize: 17, fontWeight: 700 }}
           />
         ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0, flex: 1 }}>
             <span data-testid="food-panel-accent-dot" aria-hidden="true" style={{
-              display: "inline-block", width: 9, height: 9, borderRadius: "50%",
+              display: "inline-block", width: 9, height: 9, borderRadius: "50%", marginTop: 8, // 8 = half of the title's 24-high first line less half the dot
               background: SELECTED_ACCENT, flex: "0 0 auto",
             }} />
             <div data-testid="food-panel-title" style={{
@@ -399,14 +406,14 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
 function ScorePills({ aggregates, listsControl }) {
   const { avgFood, avgAmbiance } = aggregates;
   // --hover-ghost is the one LIGHT grey fill that stays light in the light theme and subtle in the dark one (--chrome-muted is a dark fill).
-  const pill = { display: "inline-flex", alignItems: "baseline", gap: 4, borderRadius: RADIUS.pill, padding: "4px 10px", background: "var(--hover-ghost)", color: "var(--text-secondary)", fontSize: FONT_SIZE.control, minHeight: 28, boxSizing: "border-box" };
+  const pill = chipBox(28, 10, { gap: 4, borderRadius: RADIUS.pill, background: "var(--hover-ghost)", color: "var(--text-secondary)", fontSize: FONT_SIZE.control }); // NEW-3: centred on both axes (lib/chipStyle.js)
   return (
     <div data-testid="food-score-pills" style={{ padding: "4px 16px 6px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
       {avgFood != null && (
-        <span style={pill} data-testid="food-score-pill-food"><b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{formatRating(avgFood)}</b> Food</span>
+        <span style={pill} data-chip="" data-testid="food-score-pill-food"><b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{formatRating(avgFood)}</b> Food</span>
       )}
       {avgAmbiance != null && (
-        <span style={pill} data-testid="food-score-pill-ambiance"><b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{formatRating(avgAmbiance)}</b> Ambiance</span>
+        <span style={pill} data-chip="" data-testid="food-score-pill-ambiance"><b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{formatRating(avgAmbiance)}</b> Ambiance</span>
       )}
       {listsControl}
     </div>
@@ -425,8 +432,8 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
     border: "1px solid var(--border-default)", borderRadius: RADIUS.md, cursor: "pointer",
     font: "inherit", fontWeight: 700, minHeight: 44,
   };
-  const primary = { ...base, flex: 1, border: "none", padding: "11px 0", fontSize: 14, background: "var(--accent-food)", color: "var(--on-accent-food)" };
-  const secondary = { ...base, flex: "0 0 auto", padding: "11px 16px", fontSize: 13, background: "transparent", color: "var(--text-primary)" };
+  const primary = { ...base, flex: 1, border: "none", padding: "11px 0", fontSize: FONT_SIZE.display, background: "var(--accent-food)", color: "var(--on-accent-food)" };
+  const secondary = { ...base, flex: "0 0 auto", padding: "11px 16px", fontSize: FONT_SIZE.emphasis, background: "transparent", color: "var(--text-primary)" };
   // ⛔ B1022960 round 2 — never filled: mirrors the SAME "want to try" flag's OWN established look elsewhere in this module
   // (outlined, transparent, accent text/border) so the active state reads as "flagged" without competing with the primary CTA.
   const wishActive = { background: "transparent", color: "var(--accent-food)", border: "1px solid var(--accent-food)" };

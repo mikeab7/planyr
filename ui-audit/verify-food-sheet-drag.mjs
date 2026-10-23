@@ -31,7 +31,7 @@ const frames = (page, n = 2) => page.evaluate((n) => new Promise((r) => { const 
 
 const state = (page) => page.evaluate((SHEET) => {
   const s = document.querySelector(SHEET); if (!s) return null;
-  const c = s.children[1], r = s.getBoundingClientRect(), hb = s.children[0].getBoundingClientRect();
+  const c = s.children[1], r = s.getBoundingClientRect(), hb = (s.children[0].querySelector("span") || s.children[0]).getBoundingClientRect(); // the VISIBLE grab bar (NEW-1, 2026-10-23: the 56-high zone's lower part overlaps the header, so its centre is content)
   return { h: Math.round(r.height), top: r.top, snap: s.dataset.sheetSnap, scrollTop: c.scrollTop, handleY: hb.top + hb.height / 2, x: r.left + r.width / 2,
     styleH: s.style.height, transform: s.style.transform, renders: window.__foodSheetRenders || 0, vh: innerHeight };
 }, SHEET);

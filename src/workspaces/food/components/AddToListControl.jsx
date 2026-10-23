@@ -9,6 +9,7 @@ import { Button, SIZE } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { noAutofill } from "../lib/noAutofill.js";
+import { chipBox } from "../lib/chipStyle.js";
 import { validateListName } from "../lib/foodLists.js";
 import { Swatch, IOS_NO_ZOOM, PANEL_SHADOW } from "./ListChips.jsx";
 
@@ -31,10 +32,10 @@ export default function AddToListControl({ lists, onListIds, onToggle, onCreate,
   return (
     <div data-testid="food-add-to-list" data-variant={variant} style={pill ? { display: "contents" } : { margin: "8px 16px 0", display: "flex", flexDirection: "column", gap: 6 }}>
       {pill ? (
-        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={disabled} data-testid="food-add-to-list-btn"
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={disabled} data-testid="food-add-to-list-btn" data-chip=""
           aria-label={names.length ? `Lists: on ${names.join(", ")}` : "Add to a list"}
           style={{
-            marginLeft: "auto", flex: "none", display: "inline-flex", alignItems: "center", gap: 4, minHeight: 28, padding: "4px 10px", margin: "8px 0 8px auto",
+            ...chipBox(28, 10), flex: "none", gap: 4, margin: "8px 0 8px auto", // NEW-3: the same centred chip box as the score pills beside it
             borderRadius: RADIUS.pill, border: "1px solid var(--border-default)", background: open ? "var(--chrome-muted)" : "transparent",
             color: "var(--text-primary)", font: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
           }}>
