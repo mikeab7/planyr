@@ -11,6 +11,12 @@
  * was also the BIGGER, easier-to-hit target. See BAND TABLE + PIXEL SWEEP below for the measured
  * numbers, old vs new, at every row-height the slider allows.
  *
+ * ⚠ AMENDED 2026-10-23 (NEW-ROWNEST, owner: could not drag rows under a task with no children yet): the
+ * two-outcome rule below stays for the TOP and BOTTOM of a row, but a deliberately SMALL centre zone
+ * (30% — smaller than either side zone, so the #1107 mistake of nesting being the biggest target cannot
+ * recur) now means "make the dragged rows children of THIS row". Section N below drives it with the real
+ * mouse; STEP 2 / NESTBAND assert the zone exists AND is the smallest of the three.
+ *
  * THE FIX, decided in three passes as the owner refined the brief mid-session (all confirmed live
  * in this file, in order):
  *   1. Kill the middle band. A drag now has exactly TWO outcomes, above or below — it can never
@@ -390,10 +396,14 @@ if (oldBody) {
 }
 const new20 = sweepResults.find(r => r.label.startsWith("NEW") && r.rowHeight === 20);
 const new34 = sweepResults.find(r => r.label.startsWith("NEW") && r.rowHeight === 34);
-ok("STEP2 · NEW@20px: ZERO \"into\" outcomes across the full pixel sweep — a drag can no longer reparent by vertical position",
-  new20.counts.into === 0, `into=${new20.counts.into}/${new20.rh}px`);
-ok("STEP2 · NEW@34px: ZERO \"into\" outcomes across the full pixel sweep (contrast row height)",
-  new34.counts.into === 0, `into=${new34.counts.into}/${new34.rh}px`);
+// NEW-ROWNEST (owner, 2026-10-23): a childless row can only be nested under from a centre zone, so
+// the zero-"into" claim above is retired. What replaces it is the property the original complaint
+// actually needs: nesting is possible (>0) but is the SMALLEST target on the row, never the easiest.
+for (const r of [new20, new34]) {
+  ok(`STEP2 · NEW@${r.rowHeight}px: an "into" zone EXISTS (nesting under a childless row is reachable)`, r.counts.into > 0, `into=${r.counts.into}/${r.rh}px`);
+  ok(`STEP2 · NEW@${r.rowHeight}px: the "into" zone is NEVER LARGER than either "place beside" zone (the #1107 mistake — nesting as the biggest target — cannot recur)`,
+    r.counts.into <= r.counts.before && r.counts.into <= r.counts.after, `into=${r.counts.into} before=${r.counts.before} after=${r.counts.after} (nominal 30% vs 35%/35%; a real-mouse sweep is ±1px, so the claim is "never the biggest", exact shares are pinned in test/scheduleDropNest.test.js)`);
+}
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
 // FUNCTIONAL NON-NEGOTIABLES (A–M) — run against the fixed source, one fresh page per test.
@@ -902,6 +912,206 @@ console.log("\n═══ SCREENSHOTS (ROW_H=20) ═══");
   console.log(`  saved: ${SHOT_DIR}01-at-rest-grip-visible.png, 02-mid-drag-sibling-depth.png, 03-mid-drag-nested-depth.png`);
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// SECTION N — NEW-ROWNEST: drag rows onto the CENTRE of a row (incl. a childless leaf) to nest them.
+// Real mouse input, the owner's reported shape (Grand Port > Master Schedule): a mixed-depth range
+// (children of "Plan B" AND siblings of "Plan B", one a collapsed parent) onto a childless "Plan A".
+// ════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n═══ SECTION N — NEW-ROWNEST (nest under any row, real mouse) ═══");
+const NEST_FIXTURE = {
+  aPid: 1, nPid: 2, nTid: 1000, view: "grid", section: "projects",
+  projects: { 1: { id: 1, name: "Nest Fixture", tasks: [
+    task({ id: 1, name: "Pipeline Coordination" }),
+    task({ id: 2, name: "Plan B", parentId: 1 }),
+    task({ id: 3, name: "Easement Acquisition", parentId: 2, start: "2026-01-05", end: "2026-01-06", duration: 2, durValue: 2 }),
+    task({ id: 4, name: "Design", parentId: 2, start: "2026-01-07", end: "2026-01-07" }),
+    task({ id: 5, name: "Surveying", parentId: 1, start: "2026-01-08", end: "2026-01-08" }),
+    task({ id: 6, name: "Kinder Morgan", parentId: 1, start: "2026-01-09", end: "2026-01-09", predecessors: [{ id: 5, type: "FS", lag: 0 }] }),
+    task({ id: 7, name: "Enterprise", parentId: 1, isExpanded: false, start: "2026-01-12", end: "2026-01-13", duration: 2 }),
+    task({ id: 8, name: "Enterprise Fab", parentId: 7, start: "2026-01-12", end: "2026-01-12" }),
+    task({ id: 9, name: "Enterprise Install", parentId: 7, start: "2026-01-13", end: "2026-01-13" }),
+    task({ id: 10, name: "Exxon", parentId: 1, start: "2026-01-14", end: "2026-01-14" }),
+    task({ id: 11, name: "Air Liquide", parentId: 1, start: "2026-01-15", end: "2026-01-15", predecessors: [{ id: 10, type: "FS", lag: 0 }] }),
+    task({ id: 12, name: "Plan A", start: "2026-02-02", end: "2026-02-02", duration: 0, durValue: 0 }),
+    task({ id: 13, name: "Plan C", start: "2026-02-03", end: "2026-02-03", duration: 5, durValue: 5, end: "2026-02-09" }),
+  ]}},
+};
+const nestSnap = async (pg) => (await rowsWithLevel(pg)).map(r => `${r.name}:${r.level}:${r.expanded}`).join("|");
+const levels = async (pg) => Object.fromEntries((await rowsWithLevel(pg)).map(r => [r.name, r.level]));
+const toastText = (pg) => pg.evaluate(() => document.querySelector('[data-testid="schedule-toast-text"]')?.textContent || "");
+// hold a drag from `fromName`'s grip with the pointer at `frac` of `toName`'s row; returns after the paint settled
+async function holdDragAt(pg, fromName, toName, frac) {
+  const from = await byName(pg, fromName), to = await byName(pg, toName);
+  const grip = await pg.locator(`[data-row-drag-handle="${from.id}"]`).boundingBox();
+  const target = await pg.locator(`[data-task-row="${to.id}"]`).boundingBox();
+  await pg.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await pg.mouse.down();
+  await pacedWait(pg, 60);
+  await pg.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 8 });
+  await pacedWait(pg, 120);
+  await pg.mouse.move(target.x + target.width / 2, target.y + target.height * frac, { steps: 3 });
+  await pacedWait(pg, 200);
+  return target;
+}
+const nestBox = (pg) => pg.evaluate(() => {
+  const n = document.querySelector('[data-drag-nest]'), l = document.querySelector('[data-drag-insert-line]');
+  const vis = (e) => !!e && getComputedStyle(e).display !== "none";
+  const r = vis(n) ? n.getBoundingClientRect() : null;
+  return { nestVisible: vis(n), kind: n?.getAttribute("data-drag-nest-kind") || null, lineVisible: vis(l), chip: n?.firstChild?.textContent || "", top: r?.top ?? null, h: r?.height ?? null };
+});
+async function freshNestPage() {
+  const pg = await browser.newPage({ viewport: { width: 1600, height: 950 } });
+  await bootAndImport(pg, url, NEST_FIXTURE);
+  return pg;
+}
+
+try {
+  // N1 — the paint: centre of a childless row shows the nest box (not the line); top band shows the line (not the box)
+  {
+    const pg = await freshNestPage();
+    const n1Before = await nestSnap(pg);
+    const target = await holdDragAt(pg, "Surveying", "Plan A", 0.5);
+    const mid = await nestBox(pg);
+    ok("N1 · pointer on the CENTRE of childless 'Plan A' shows the nest-under box on that row (and not the insertion line)",
+      mid.nestVisible && mid.kind === "into" && !mid.lineVisible && mid.chip === "Nest inside" && Math.abs(mid.top - target.y) < 3 && Math.abs(mid.h - target.height) < 3,
+      JSON.stringify(mid));
+    await pg.mouse.move(target.x + target.width / 2, target.y + 1.5, { steps: 3 });
+    await pacedWait(pg, 200);
+    const top = await nestBox(pg);
+    ok("N1b · pointer on the TOP edge of the same row switches to the insertion line (no nest box) — two distinct, visually different targets",
+      top.lineVisible && !top.nestVisible, JSON.stringify(top));
+    await pg.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 3 });
+    await pacedWait(pg, 150);
+    await pg.keyboard.press("Escape");
+    await pacedWait(pg, 200);
+    await pg.mouse.up();
+    await pacedWait(pg, 300);
+    ok("N1c · Escape while hovering the nest target CANCELS the drop (nothing moved)", (await nestSnap(pg)) === n1Before, `equal=${(await nestSnap(pg)) === n1Before}`);
+    await pg.close();
+  }
+
+  // N2 — single row onto a childless leaf; toast says it became a summary; Plan A takes the child's dates; Ctrl+Z reverts it all
+  {
+    const pg = await freshNestPage();
+    const before = await nestSnap(pg);
+    const planABefore = await byName(pg, "Plan A");
+    await holdDragAt(pg, "Surveying", "Plan A", 0.5);
+    await pg.mouse.up();
+    await pacedWait(pg, 450);
+    const lv = await levels(pg);
+    const planA = await byName(pg, "Plan A");
+    ok("N2 · single row dropped on the centre of a childless task becomes its child (Surveying level 1, Plan A stays top level)",
+      lv["Plan A"] === 0 && lv["Surveying"] === 1, JSON.stringify(lv));
+    const rows = (await rowsWithLevel(pg)).map(r => r.name);
+    ok("N2b · Surveying now sits directly beneath Plan A, and Plan A is now a summary row (expand marker)",
+      rows.indexOf("Surveying") === rows.indexOf("Plan A") + 1 && planA.expanded === true, `idx=${rows.indexOf("Plan A")},${rows.indexOf("Surveying")} expanded=${planA.expanded}`);
+    ok("N2c · Plan A's date rolled up from its new child (was 02/02/26-ish, now Surveying's 01/08/26) — and it was SAID out loud in a toast",
+      planA.start !== planABefore.start && /summary row/.test(await toastText(pg)), `start ${planABefore.start} -> ${planA.start}; toast="${await toastText(pg)}"`);
+    await pg.keyboard.press("Control+z");
+    await pacedWait(pg, 300);
+    ok("N2d · ONE Ctrl+Z fully reverts the nest — structure, expansion and Plan A's own date all restored",
+      (await nestSnap(pg)) === before && (await byName(pg, "Plan A")).start === planABefore.start, `equal=${(await nestSnap(pg)) === before}`);
+    await pg.close();
+  }
+
+  // N3 — THE REPORTED CASE: mixed-depth range (under Plan B + siblings of Plan B, one collapsed parent) onto childless Plan A
+  {
+    const pg = await freshNestPage();
+    await selectRowRange(pg, "Easement Acquisition", "Air Liquide");
+    await holdDragAt(pg, "Surveying", "Plan A", 0.5);
+    const mid = await nestBox(pg);
+    ok("N3a · mid-drag with the 7-row mixed-depth range: Plan A shows the nest box", mid.nestVisible && mid.kind === "into", JSON.stringify(mid));
+    await pg.mouse.up();
+    await pacedWait(pg, 500);
+    const lv = await levels(pg);
+    const kids = ["Easement Acquisition", "Design", "Surveying", "Kinder Morgan", "Enterprise", "Exxon", "Air Liquide"];
+    ok("N3b · every selected top-most row is now a child of Plan A (level 1), keeping their original order",
+      kids.every(k => lv[k] === 1) && lv["Plan A"] === 0 && (await rowsWithLevel(pg)).map(r => r.name).join(",").includes(kids.join(",")), JSON.stringify(lv));
+    const enterprise = await byName(pg, "Enterprise");
+    ok("N3c · the COLLAPSED parent travelled with its hidden children (still collapsed; expanding it shows both)",
+      enterprise.expanded === false, `expanded=${enterprise.expanded}`);
+    await pg.locator(`[data-task-row="${enterprise.id}"] [data-col-key="name"]`).first().click({ position: { x: 24, y: 8 } });
+    await pg.keyboard.press("ArrowRight").catch(() => {});
+    await pacedWait(pg, 200);
+    // expand via the toggle glyph directly
+    const exp = (await byName(pg, "Enterprise")).expanded;
+    if (exp === false) { await pg.evaluate((id) => { const el = document.querySelector(`[data-task-row="${id}"] [data-col-key="name"] span`); el && el.click(); }, enterprise.id); await pacedWait(pg, 250); }
+    const lv2 = await levels(pg);
+    ok("N3d · …expanded, 'Enterprise Fab' and 'Enterprise Install' are still its children (level 2) — nothing was flattened",
+      lv2["Enterprise Fab"] === 2 && lv2["Enterprise Install"] === 2, JSON.stringify({ fab: lv2["Enterprise Fab"], inst: lv2["Enterprise Install"] }));
+    ok("N3e · the vacated parent 'Plan B' is a childless leaf again and 'Pipeline Coordination' is untouched at top level",
+      (await directChildCount(pg, "Plan B")) === 0 && lv2["Pipeline Coordination"] === 0, `planB kids=${await directChildCount(pg, "Plan B")}`);
+    const kmDates = await byName(pg, "Kinder Morgan"), surv = await byName(pg, "Surveying");
+    ok("N3f · a predecessor link on a moved row stays LIVE — Kinder Morgan (FS after Surveying) still starts the day after Surveying",
+      kmDates.start !== "" && surv.start !== "" && kmDates.start > surv.start, `surveying=${surv.start} kinderMorgan=${kmDates.start}`);
+    await pg.close();
+    // undo on a CLEAN drag (expanding Enterprise above is itself an undoable step)
+    const pu = await freshNestPage();
+    await selectRowRange(pu, "Easement Acquisition", "Air Liquide");
+    const beforeU = await nestSnap(pu);
+    await holdDragAt(pu, "Surveying", "Plan A", 0.5);
+    await pu.mouse.up();
+    await pacedWait(pu, 450);
+    const movedU = await nestSnap(pu);
+    await pu.keyboard.press("Control+z");
+    await pacedWait(pu, 350);
+    ok("N3g · ONE Ctrl+Z undoes the whole 7-row move (structure, expansion state, dates)", movedU !== beforeU && (await nestSnap(pu)) === beforeU, `moved=${movedU !== beforeU} restored=${(await nestSnap(pu)) === beforeU}`);
+    await pu.close();
+  }
+
+  // N4 — onto a COLLAPSED parent (becomes last children, it opens) and an EXPANDED parent, target above/below the dragged row
+  {
+    const pg = await freshNestPage();
+    await holdDragAt(pg, "Exxon", "Enterprise", 0.5);
+    await pg.mouse.up();
+    await pacedWait(pg, 450);
+    const lv = await levels(pg);
+    const e = await byName(pg, "Enterprise");
+    ok("N4 · centre-drop onto a COLLAPSED parent nests under it and opens it so the move is visible",
+      e.expanded === true && lv["Exxon"] === 2 && (await directChildCount(pg, "Enterprise")) === 3, `expanded=${e.expanded} exxonLevel=${lv["Exxon"]} kids=${await directChildCount(pg, "Enterprise")}`);
+    await pg.keyboard.press("Control+z"); await pacedWait(pg, 300);
+    await holdDragAt(pg, "Plan C", "Plan B", 0.5);   // EXPANDED parent, target ABOVE the dragged row
+    await pg.mouse.up();
+    await pacedWait(pg, 450);
+    const rows = (await rowsWithLevel(pg)).map(r => `${r.name}:${r.level}`);
+    const i = rows.indexOf("Design:2");
+    ok("N4b · centre-drop onto an EXPANDED parent (target above the dragged row) lands as its LAST child, existing children undisturbed",
+      rows[i + 1] === "Plan C:2" && (await directChildCount(pg, "Plan B")) === 3, rows.join(" | "));
+    await pg.close();
+  }
+
+  // N5 — never a silent no-op: a parent onto the centre of its own child is flagged and refused; nothing moves
+  {
+    const pg = await freshNestPage();
+    const before = await nestSnap(pg);
+    await holdDragAt(pg, "Plan B", "Design", 0.5);
+    const mid = await nestBox(pg);
+    ok("N5 · hovering the centre of a row INSIDE the dragged parent shows the red 'Not allowed' box",
+      mid.nestVisible && mid.kind === "blocked" && mid.chip === "Not allowed", JSON.stringify(mid));
+    await pg.mouse.up();
+    await pacedWait(pg, 450);
+    ok("N5b · releasing there changes nothing AND says why (toast)", (await nestSnap(pg)) === before && /into itself/.test(await toastText(pg)), `toast="${await toastText(pg)}"`);
+    await pg.close();
+  }
+
+  // N6 — the other nesting paths still work (Tab / indent on keyboard, right-click Move to…)
+  {
+    const pg = await freshNestPage();
+    const r = await byName(pg, "Exxon");
+    await pg.locator(`[data-task-row="${r.id}"] [data-col-key="id"]`).click();
+    await pg.keyboard.press("Shift+Alt+ArrowRight");
+    await pacedWait(pg, 400);
+    ok("N6 · keyboard indent (Shift+Alt+Right) still nests a row under the sibling above it", (await levels(pg))["Exxon"] === 2, JSON.stringify(await levels(pg)));
+    await pg.close();
+  }
+
+  // (Reload-persistence + cloud sync are NOT provable in this standalone build — the app only persists signed in.
+  //  They are the signed-in live check recorded against this item: see its V# in ledger/verification.)
+} catch (e) {
+  ok(`SECTION N · crashed: ${e.message}`, false);
+}
+
 if (page) await page.close();
 server.close();
 
@@ -921,35 +1131,21 @@ async function runMutation(label, needle, replacement, run, fixture = FIXTURE) {
   }
 }
 
-// TWO-BAND · MUTATION: reintroduce a middle dead zone (widen back toward the old 30/40/30 split,
-// but landing NOWHERE rather than "into" — see below), proving the STEP2 "zero into" sweep is
-// discriminating, not just never exercised. Verified via the SAME sweep methodology STEP2 itself
-// uses (bandFixture, T1→T3, dragRowToPixelY + classifyBandOutcome), rather than a single ad-hoc
-// drag: an early version of this check aimed one exact drag at the full nested FIXTURE's
-// dead-center pixel and was flaky there (real tick-to-tick jitter of a whole row's worth of Y
-// under headless Chromium against that more complex fixture — confirmed via instrumentation to
-// be a measurement artifact, not a product defect). The flat bandFixture + a multi-pixel sweep is
-// what STEP2 already proved reliable across 20–34 samples with zero instability; reusing it here
-// inherits that reliability instead of re-deriving a new flaky probe.
-await runMutation("TWOBAND",
-  'const frac = rowFloat - idx;\n          gapIndex = frac < 0.5 ? idx : idx + 1;',
-  'const frac = rowFloat - idx;\n          if (frac > 0.3 && frac < 0.7) { gapIndex = null; }\n          else gapIndex = frac < 0.5 ? idx : idx + 1;',
+// NESTBAND · MUTATION: widen the centre zone back to the old oversized share (60% — bigger than both
+// "place beside" zones combined would allow). The STEP2 "into is the smallest zone" check must go red.
+await runMutation("NESTBAND",
+  "const ROW_NEST_BAND = 0.30;",
+  "const ROW_NEST_BAND = 0.60;",
   async (mpage) => {
-    // this mutation makes the middle band produce NO drop (gapIndex null) rather than a true
-    // "into" — different failure shape than the original #1107 bug, but still proves the
-    // band-count check is live: some pixel in the row's middle now does NOTHING on drop, where
-    // the real two-band code always lands before/after.
-    const before = (await rowsByName(mpage)).map(r => r.name).join(",");
     const target = await mpage.locator('[data-task-row="3"]').boundingBox(); // T3
-    let anyNoOp = false;
-    for (let y = 0; y < target.height && !anyNoOp; y++) {
+    const counts = { before: 0, after: 0, into: 0, unchanged: 0 };
+    for (let y = 0; y < target.height; y++) {
       await dragRowToPixelY(mpage, "T1", "T3", y);
-      const after = (await rowsByName(mpage)).map(r => r.name).join(",");
-      if (after === before) anyNoOp = true;
-      else { await mpage.keyboard.press("Control+z"); await pacedWait(mpage, 90); }
+      counts[await classifyBandOutcome(mpage, "T1", "T3")]++;
+      await mpage.keyboard.press("Control+z"); await pacedWait(mpage, 90);
     }
-    ok("TWOBAND · MUTATION (middle dead-zone reintroduced): at least one pixel in the row's middle now produces NO drop at all, where the real two-band code always lands before/after it — check correctly goes red",
-      anyNoOp, `anyNoOp=${anyNoOp}`);
+    ok("NESTBAND · MUTATION (centre zone widened to 60%): \"into\" is no longer the smallest zone — the STEP2 size check correctly goes red",
+      !(counts.into <= counts.before && counts.into <= counts.after), JSON.stringify(counts));
   },
   bandFixture(24));
 
@@ -1029,8 +1225,8 @@ await runMutation("E",
 
 // F · MUTATION: wire moveRows into the per-frame paint loop too (the B1121-shaped regression).
 await runMutation("F",
-  "const onMove = (ev) => { state.lastClientY = ev.clientY; };",
-  "const onMove = (ev) => { state.lastClientY = ev.clientY; if (state.overGapIndex != null && moveRows) { const { destParentId, insertAfterId } = resolveDropParent(state.overGapIndex); moveRows(anchorTaskId, destParentId, insertAfterId); } };",
+  "const onMove = (ev) => { state.lastClientY = ev.clientY; if (!state.moved",
+  "const onMove = (ev) => { state.lastClientY = ev.clientY; if (state.intent && state.intent.kind === \"gap\" && moveRows) { moveRows(anchorTaskId, state.intent.destParentId, state.intent.insertAfterId); } if (!state.moved",
   async (mpage) => {
     const snapshot = async () => (await rowsByName(mpage)).map(r => r.name).join("|");
     const beforeSnap = await snapshot();
