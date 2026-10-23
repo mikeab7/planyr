@@ -5714,6 +5714,63 @@ const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfte
   return key(result) === key(tasks) ? null : result;
 };
 
+// ── NEW-ROWNEST — what a row-drag release means at a given pointer position (pure; GridView's drag
+// calls this every frame and again on drop, the unit tests call it directly). A hovered row has THREE
+// zones: the top and bottom bands mean "insert above / below this row" (the 2BAND rule, unchanged), and
+// a CENTRE band means "make the dragged rows children of THIS row" — the only way to nest under a row
+// that has no children yet, where there is no gap between a parent and a first child to aim at.
+// WHY THE CENTRE BAND IS DELIBERATELY THE SMALLEST OF THE THREE (30% vs 35% + 35%): the original
+// three-band drag (#1107) had a 40% "into" band, the biggest target on the row, and nested rows by
+// accident ("I tried to move a task above another task, and it somehow put it as a subtask"). Nesting
+// must be the deliberate, harder-to-hit outcome; ui-audit/verify-schedule-row-move.mjs asserts the
+// ordering (into < before and into < after) at every row height.
+const ROW_NEST_BAND = 0.30;
+const rowDropZone = frac => frac < 0.5 - ROW_NEST_BAND / 2 ? "before" : frac >= 0.5 + ROW_NEST_BAND / 2 ? "after" : "into";
+
+// The new PARENT + insertion anchor (+ resulting indent LEVEL, for the drop indicator) for a drop
+// landing at gapIndex — "insert immediately before tasks[gapIndex]" in the CURRENT visible order,
+// 0 <= gapIndex <= tasks.length. `blocked` = the dragged rows + every descendant: they are still
+// physically present in `tasks` during the drag (only dimmed), so they cannot answer for "the row
+// above/below" and are skipped. Depth rule (NEW-ROWMOVE-2BAND): match the row above the insertion
+// point, but never shallower than the row below (the row below can only be deeper when it is the row
+// above's own first child — landing shallower would silently adopt it).
+const resolveDropParent = (tasks, blocked, gapIndex) => {
+  let ai = gapIndex - 1;
+  while (ai >= 0 && blocked.has(tasks[ai].id)) ai--;
+  const rowAbove = ai >= 0 ? tasks[ai] : null;
+  let bi = gapIndex;
+  while (bi < tasks.length && blocked.has(tasks[bi].id)) bi++;
+  const rowBelow = bi < tasks.length ? tasks[bi] : null;
+  if (!rowAbove) return { destParentId: null, insertAfterId: "start", level: 0 };
+  if (rowBelow && rowBelow.parentId === rowAbove.id) return { destParentId: rowAbove.id, insertAfterId: "start", level: rowBelow.level };
+  return { destParentId: rowAbove.parentId ?? null, insertAfterId: rowAbove.id, level: rowAbove.level };
+};
+
+// rowFloat = (pointer y within the row area − header) / ROW_H, fractional. Returns one of
+//   {kind:"gap",     gapIndex, destParentId, insertAfterId, level}   insert above/below
+//   {kind:"into",    index, targetId, destParentId, insertAfterId:"end"}   nest under the hovered row
+//   {kind:"blocked", index}  the CENTRE of a row that is being dragged or sits inside one — a nest
+//                            into itself / its own descendant is NOT a legal drop, shown as "not
+//                            allowed" (never a silent no-op)
+//   {kind:"none"}            over a blocked row's top/bottom band, or past the end of the list over one
+const rowDropIntent = (tasks, blocked, rowFloat) => {
+  if (!tasks.length) return { kind: "none" };
+  const idxRaw = Math.floor(rowFloat);
+  const idx = Math.max(0, Math.min(tasks.length - 1, idxRaw));
+  const hover = tasks[idx];
+  const over = idxRaw >= 0 && idxRaw < tasks.length;   // the pointer is really ON a row
+  if (blocked.has(hover.id)) return over && rowDropZone(rowFloat - idx) === "into" ? { kind: "blocked", index: idx } : { kind: "none" };
+  let gapIndex;
+  if (idxRaw < 0) gapIndex = 0;
+  else if (idxRaw >= tasks.length) gapIndex = tasks.length;
+  else {
+    const zone = rowDropZone(rowFloat - idx);
+    if (zone === "into") return { kind: "into", index: idx, targetId: hover.id, destParentId: hover.id, insertAfterId: "end" };
+    gapIndex = zone === "before" ? idx : idx + 1;
+  }
+  return { kind: "gap", gapIndex, ...resolveDropParent(tasks, blocked, gapIndex) };
+};
+
 // ── Delete-with-children: "keep subtasks" path — promote survivors to the nearest ancestor NOT
 // being deleted. Handles a whole deleted CHAIN transitively (delete a parent and its own selected
 // child together, and the child's own children promote past both, straight to the grandparent) —
@@ -13124,6 +13181,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // recompute (and the one render) the whole gesture produces.
   const rowDragRef  = useRef(null); // {ids, blocked, overIdx, overPos, overTaskId, lastClientY, rafId} while active
   const dragLineRef = useRef(null);   // insertion-line indicator DOM node
+  const dragNestRef = useRef(null);   // NEW-ROWNEST — nest-under / blocked-target box DOM node
 
   // Ids the drag should move: the WHOLE active row-selection range when the grabbed row is part of
   // one, else just the grabbed row — the exact same rule App's structuralTargets applies to
@@ -13149,11 +13207,11 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     let grew = true;
     while (grew) { grew = false; allTasks.forEach(t => { if (t.parentId != null && blocked.has(t.parentId) && !blocked.has(t.id)) { blocked.add(t.id); grew = true; } }); }
 
-    const state = { ids, blocked, lastClientY: e.clientY, rafId: null, overGapIndex: null };
+    const state = { ids, blocked, lastClientY: e.clientY, rafId: null, overGapIndex: null, intent: null, moved: false };
     rowDragRef.current = state;
     // The cursor stays the grab hand for the WHOLE drag (pinned at the root: every cell, header and Gantt row paints its own
     // inline cursor, which a body-level cursor loses to). Escape / blur / pointercancel CANCEL the drop (no move).
-    const releaseCursor = window.pinSchedCursor("grabbing", { onExit: () => { state.overGapIndex = null; onUp(); } });
+    const releaseCursor = window.pinSchedCursor("grabbing", { onExit: () => { state.overGapIndex = null; state.intent = null; onUp(); } });
     document.body.style.userSelect = "none";
     // Dim the dragged rows once, at drag start — not a per-frame cost, just marks what's moving
     // (matters most for a multi-row block, so it's visibly the WHOLE selection, not just the
@@ -13173,72 +13231,29 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // row (fixed column widths), so any currently-rendered row's cell answers for all of them.
     const nameCellEl = el0 ? el0.querySelector('[data-col-key="name"]') : null;
     const nameIndentBase = nameCellEl ? nameCellEl.offsetLeft : 0;
+    const nameCellW = nameCellEl ? nameCellEl.offsetWidth : 0;
+    const startX = e.clientX, startY = e.clientY;
 
-    // Resolve the new PARENT + insertion anchor (+ the resulting INDENT LEVEL, for the drop
-    // indicator below) for a drop landing at gapIndex — "insert immediately before
-    // tasks[gapIndex]" in the CURRENT visible order, 0 <= gapIndex <= tasks.length.
-    // NEW-ROWMOVE-2BAND (owner rule, 2026-08-25): a drag has exactly two outcomes, above or
-    // below — there is no third "make it a subtask" band, so depth is never chosen by which half
-    // of a row the cursor released in. A release in the top half of row N and a release in the
-    // bottom half of row N-1 land on the SAME gap and must resolve identically — the old code
-    // disagreed with itself here (it derived depth from whichever row happened to be under the
-    // cursor), which is exactly how "drop above X" could reparent INTO X.
-    //   Depth rule, verbatim: "match the row above the insertion point, but never shallower than
-    //   the row below." The floor is forced by the tree, not a preference — the ONLY way the row
-    //   below can be deeper than the row above is when it's the row above's own first child (a
-    //   flattened depth-first walk can only ever step one level deeper, never more), so landing
-    //   any shallower than that would silently adopt that child (and everything under it) into
-    //   the dropped row's new subtree. No row above at all (dropping above the first row) is a
-    //   hard top-level case, not a clamp — there is nothing to match. Because that's also true of
-    //   the CHILD case (rowBelow's own level already reflects "one deeper than rowAbove"), the
-    //   resulting level is always just rowBelow's level (clamp) or rowAbove's level (sibling) —
-    //   no separate +1/-1 arithmetic needed, which is also why it can't drift out of sync with
-    //   moveSelectionToDestination's own reparenting.
-    //   The dragged row(s) themselves are STILL PHYSICALLY PRESENT in `tasks` at their old
-    //   position during the drag (only dimmed, never removed — see the zero-DOM-churn note at
-    //   the top of startRowDrag), so a gap immediately beside where the drag started can have a
-    //   dragged/blocked row sitting right at gapIndex-1 or gapIndex. That row is being REMOVED
-    //   from there, so it can't answer for "the row above/below" — skip past the whole blocked
-    //   set to the nearest row that will actually still be there. (Measured regression: without
-    //   this, dropping a row back next to its own immediately-adjacent neighbor — the smallest
-    //   possible move, and the one the owner described doing — resolved insertAfterId to the
-    //   dragged row's OWN id, which moveSelectionToDestination can't find in `remaining` and
-    //   silently fell back to "end of the list", moving the row to the very bottom instead.)
-    const resolveDropParent = (gapIndex) => {
-      let ai = gapIndex - 1;
-      while (ai >= 0 && state.blocked.has(tasks[ai].id)) ai--;
-      const rowAbove = ai >= 0 ? tasks[ai] : null;
-      let bi = gapIndex;
-      while (bi < tasks.length && state.blocked.has(tasks[bi].id)) bi++;
-      const rowBelow = bi < tasks.length ? tasks[bi] : null;
-      if (!rowAbove) return { destParentId: null, insertAfterId: "start", level: 0 };
-      if (rowBelow && rowBelow.parentId === rowAbove.id) return { destParentId: rowAbove.id, insertAfterId: "start", level: rowBelow.level };
-      return { destParentId: rowAbove.parentId ?? null, insertAfterId: rowAbove.id, level: rowAbove.level };
+    // The drop decision itself (gap vs nest vs blocked, and the depth rule) is the module-level
+    // rowDropIntent / resolveDropParent above — pure, so the unit tests exercise the real code. This
+    // closure only paints it and, on release, commits it.
+    const intentAt = () => {
+      const el = ref.current;
+      if (!el || !tasks.length) return { kind: "none" };
+      const rect = el.getBoundingClientRect();
+      const docY = (state.lastClientY - rect.top) + el.scrollTop;
+      return rowDropIntent(tasks, state.blocked, (docY - TL_H) / ROW_H);
     };
 
     const computeAndPaint = () => {
       const el = ref.current;
       if (!el || !tasks.length) return;
       const rect = el.getBoundingClientRect();
-      const docY = (state.lastClientY - rect.top) + el.scrollTop;
-      const rowFloat = (docY - TL_H) / ROW_H;
-      const idxRaw = Math.floor(rowFloat);
-      const idx = Math.max(0, Math.min(tasks.length - 1, idxRaw));
-      const hoverTask = tasks[idx];
-      let gapIndex = null, paintTop = null, level = 0;
-      if (hoverTask && !state.blocked.has(hoverTask.id)) {
-        if (idxRaw < 0)                  gapIndex = 0;
-        else if (idxRaw >= tasks.length) gapIndex = tasks.length;
-        else {
-          // The row's own midpoint is the one boundary — top half lands ABOVE this row (the same
-          // gap as the bottom half of the row before it), bottom half lands BELOW it.
-          const frac = rowFloat - idx;
-          gapIndex = frac < 0.5 ? idx : idx + 1;
-        }
-        paintTop = gapIndex * ROW_H;
-        level = resolveDropParent(gapIndex).level;
-      }
-      state.overGapIndex = gapIndex;
+      const intent = intentAt();
+      state.intent = intent;
+      state.overGapIndex = intent.kind === "gap" ? intent.gapIndex : null;
+      const paintTop = intent.kind === "gap" ? intent.gapIndex * ROW_H : null;
+      const level = intent.kind === "gap" ? intent.level : 0;
 
       if (dragLineRef.current) {
         dragLineRef.current.style.display = paintTop != null ? "block" : "none";
@@ -13250,6 +13265,29 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
           // `paddingLeft:4+task.level*14` for the name column exactly (name cell's real DOM
           // offset + that formula), so it's pixel-true, not an approximation.
           dragLineRef.current.style.left = `${nameIndentBase + 4 + level * 14}px`;
+        }
+      }
+
+      // NEW-ROWNEST — the nest-under / blocked target: a box around the WHOLE hovered row (a line
+      // between rows can never read as "inside this row"), blue for a legal nest, red dashed for a row
+      // that is being dragged or sits inside one. Imperative like the line — no React state.
+      const nb = dragNestRef.current;
+      if (nb) {
+        const showBox = intent.kind === "into" || (intent.kind === "blocked" && state.moved);
+        nb.style.display = showBox ? "block" : "none";
+        if (showBox) {
+          const bad = intent.kind === "blocked";
+          nb.style.top = `${intent.index * ROW_H}px`;
+          nb.style.height = `${ROW_H}px`;
+          nb.style.border = bad ? "2px dashed #dc2626" : "2px solid var(--blue)";
+          nb.style.background = bad ? "rgba(220,38,38,0.10)" : "rgba(37,99,235,0.14)";
+          nb.setAttribute("data-drag-nest-kind", bad ? "blocked" : "into");
+          const chip = nb.firstChild;
+          if (chip) {
+            chip.textContent = bad ? "Not allowed" : "Nest inside";
+            chip.style.background = bad ? "#dc2626" : "var(--blue)";
+            chip.style.left = `${Math.max(0, nameIndentBase + nameCellW - 86)}px`;
+          }
         }
       }
 
@@ -13269,7 +13307,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       state.rafId = requestAnimationFrame(tick);
     };
 
-    const onMove = (ev) => { state.lastClientY = ev.clientY; };
+    const onMove = (ev) => { state.lastClientY = ev.clientY; if (!state.moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 4) state.moved = true; };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
@@ -13277,6 +13315,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       releaseCursor();
       document.body.style.userSelect = "";
       if (dragLineRef.current) dragLineRef.current.style.display = "none";
+      if (dragNestRef.current) dragNestRef.current.style.display = "none";
       // Clear the dim + in-flight outline applied at drag start. A SUCCESSFUL move re-renders
       // every row from scratch (fresh inline styles) anyway; this matters for the no-op/
       // cancelled-drop case, where no setData fires and these exact DOM nodes would otherwise
@@ -13284,9 +13323,19 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       const elEnd = ref.current;
       if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = ""; r.style.outline = ""; r.style.outlineOffset = ""; } });
       rowDragRef.current = null;
-      if (state.overGapIndex != null && moveRows) {
-        const { destParentId, insertAfterId } = resolveDropParent(state.overGapIndex);
-        moveRows(anchorTaskId, destParentId, insertAfterId);
+      const intent = state.intent;
+      if (intent && intent.kind === "gap" && moveRows) {
+        moveRows(anchorTaskId, intent.destParentId, intent.insertAfterId);
+      } else if (intent && intent.kind === "into" && moveRows) {
+        // NEW-ROWNEST — nest under the hovered row. A row with no children becomes a SUMMARY row:
+        // its own start/finish/duration are replaced by the roll-up of what was just put under it
+        // (the same thing indent does). Say so — never a silent change; Ctrl+Z restores the lot.
+        const target = allTasks.find(t => t.id === intent.targetId);
+        const wasLeaf = target && !allTasks.some(t => t.parentId === target.id);
+        moveRows(anchorTaskId, intent.destParentId, intent.insertAfterId);
+        if (wasLeaf && target) showToast(`"${target.name || "Untitled"}" is now a summary row — its dates and duration roll up from the rows under it. Ctrl+Z undoes the move.`, { type: "success", duration: 5000 });
+      } else if (intent && intent.kind === "blocked" && state.moved) {
+        showToast("A row can't be moved into itself or its own sub-rows.", { type: "error", duration: 3500 });
       }
     };
     computeAndPaint(); // paint immediately at the mousedown position, before any move
@@ -14051,6 +14100,12 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
             or when hovering a blocked target (itself or its own descendant). */}
         <div ref={dragLineRef} data-drag-insert-line
           style={{position:"absolute", left:0, right:0, height:3, background:"var(--blue)", zIndex:50, pointerEvents:"none", display:"none"}} />
+        {/* NEW-ROWNEST — the nest-under target: a box around the hovered row (blue = legal, red dashed =
+            a row being dragged or inside one). Same imperative contract as the line above. */}
+        <div ref={dragNestRef} data-drag-nest
+          style={{position:"absolute", left:0, right:0, boxSizing:"border-box", borderRadius:3, zIndex:49, pointerEvents:"none", display:"none"}}>
+          <span style={{position:"absolute", top:"50%", transform:"translateY(-50%)", left:0, color:"#fff", fontSize:10, fontWeight:600, lineHeight:1, padding:"2px 6px", borderRadius:3, fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap"}} />
+        </div>
         {tasks.slice(startIdx, endIdx).map((task, i) => {
           const ri = startIdx + i;
           if (task.__rvProposed) {
