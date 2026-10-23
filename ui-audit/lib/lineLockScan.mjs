@@ -10,7 +10,12 @@
 
 /** Pixel classes. Thresholds are wide on purpose: a band edge antialiased against white, or the 0.95-opacity outline over red, must still classify. */
 export function classify(r, g, b) {
-  if (r > 190 && g < 95 && b < 30) return "red";             // the imagery's lot band
+  // the imagery's lot band — including a band pixel the outline's antialiased edge only grazes (230,7,46): the band still dominates it,
+  // and reading it as outline left a locked outline with no band in its run, paired with the NEXT lot's band ~34 px away
+  if (r > 190 && g < 95 && b < 0.35 * r) return "red";
+  // …and the same band thinned to a couple of pixels at a far zoom-out, antialiased against white into pink (an unread band there made a
+  // locked outline pair with the NEXT lot's band and read ~34 px off — the instrument's own false slide)
+  if (r > 200 && g < 175 && b < 175 && Math.abs(g - b) < 30) return "red";
   if (r > 90 && g < 130 && b >= 30 && b > g + 15) return "ink"; // the parcel outline (#a21caf) — over white, over red, or antialiased against red
   return null;
 }
@@ -31,6 +36,10 @@ export function scanRuns(get, n) {
     if (c === "red") cur.red.push(i); else { cur.ink.push(i); cur.w.push(b); } // ink weighted by its blue: a half-covered pixel counts half
   }
   if (cur) runs.push(cur);
+  // a run that touches BARE MAP (dark: no imagery loaded there yet) lies at the edge of the imagery, where its own band is cut off —
+  // it has nothing to be measured against and must not be paired with the next lot's band
+  const bare = (i) => { if (i < 0 || i >= n) return false; const [r, g, b] = get(i); return r < 110 && g < 110 && b < 110; };
+  for (const r of runs) r.atImageryEdge = bare(r.start - 1) || bare(r.start - 2) || bare(r.end + 1) || bare(r.end + 2);
   return runs;
 }
 
@@ -39,19 +48,20 @@ export function scanRuns(get, n) {
  *  · Ink with no red in its run: it is beside a band; pair it with the nearest red run within `maxPx` (a slide), else it is unpaired ink.
  *  · A red run with ink on ONE side only: the outline overlaps the band's edge — the band centre is then estimated from the run's red-only
  *    side plus the known band width `bandPx` (the full red run when nothing covers it).
- *  Returns { pairs: [{ at, offset }], unpairedInk, bands } — `bands` counts red runs (so "no imagery under the outline" is visible). */
+ *  Returns { pairs: [{ at, offset }], unpairedInk, overBare, bands } — `bands` counts red runs (so "no imagery under the outline" is visible). */
 export function pairOffsets(runs, { bandPx = 8, maxPx = 40 } = {}) {
   const pairs = [];
-  let unpairedInk = 0;
+  let unpairedInk = 0, overBare = 0;
   const redRuns = runs.filter((r) => r.red.length);
   const bandCentreOf = (run) => {
     const rmin = Math.min(...run.red), rmax = Math.max(...run.red);
     if (!run.ink.length) return (rmin + rmax) / 2;
     const imin = Math.min(...run.ink), imax = Math.max(...run.ink);
     if (rmin < imin && rmax > imax) return (rmin + rmax) / 2; // ink inside the band
-    // ink covers one edge of the band — reconstruct the band from the uncovered edge
-    if (rmin < imin) return rmin + bandPx / 2 - 0.5;
-    return rmax - bandPx / 2 + 0.5;
+    /* ink covers one edge of the band. The band's true width varies with the level's scale (a couple of px at a far zoom-out, thinner
+     * than the outline itself), so it is never reconstructed from a nominal width: the centre of the whole red+ink blob is used. An
+     * outline that has really slid off its band is a SEPARATE run (no red in it) and is paired below, so this cannot hide a slide. */
+    return (Math.min(rmin, imin) + Math.max(rmax, imax)) / 2;
   };
   for (const run of runs) {
     if (!run.ink.length) continue;
@@ -60,6 +70,9 @@ export function pairOffsets(runs, { bandPx = 8, maxPx = 40 } = {}) {
     const ic = sx / sw;
     if (run.red.length) { pairs.push({ at: ic, offset: ic - bandCentreOf(run) }); continue; }
     // ink with no red under it — the outline is OFF the band: nearest band within maxPx
+    // …unless it sits on BARE MAP (no imagery loaded there yet, e.g. the margin a zoom-out uncovers): there is nothing to be locked to,
+    // so it is counted on its own — never as a slide, never paired with the next lot's band
+    if (run.atImageryEdge) { overBare++; continue; }
     let best = null;
     for (const rr of redRuns) {
       const c = bandCentreOf(rr);
@@ -68,7 +81,7 @@ export function pairOffsets(runs, { bandPx = 8, maxPx = 40 } = {}) {
     }
     if (best == null) unpairedInk++; else pairs.push({ at: ic, offset: best });
   }
-  return { pairs, unpairedInk, bands: redRuns.length };
+  return { pairs, unpairedInk, overBare, bands: redRuns.length };
 }
 
 /** A crossing's band must extend at least this many times the run's length along the perpendicular. */
@@ -82,7 +95,7 @@ export function readFrame(img, { rows = [], cols = [], bandPx = 8, maxPx = 40, x
   const { width, height, channels, data } = img;
   const px = (x, y) => { const o = (y * width + x) * channels; return [data[o], data[o + 1], data[o + 2]]; };
   const all = [];
-  let unpaired = 0, bands = 0, inkRuns = 0;
+  let unpaired = 0, overBare = 0, bands = 0, inkRuns = 0;
   const dbg = [];
   /* A run is a CROSSING only where the band runs across the scan line: the band then extends far along the perpendicular through the
    * run's middle (≥ ACROSS_FACTOR × the run's own length), and the same run repeats on the parallel lines NEIGHBOUR px either side.
@@ -109,7 +122,7 @@ export function readFrame(img, { rows = [], cols = [], bandPx = 8, maxPx = 40, x
     if (debug) dbg.push({ tag, runs: k.map((r) => ({ s: r.start, e: r.end, red: r.red.length, ink: r.ink.length })) });
     inkRuns += k.filter((r) => r.ink.length).length;
     const p = pairOffsets(k, { bandPx, maxPx });
-    all.push(...(debug ? p.pairs.map((q) => ({ ...q, tag })) : p.pairs)); unpaired += p.unpairedInk; bands += p.bands;
+    all.push(...(debug ? p.pairs.map((q) => ({ ...q, tag })) : p.pairs)); unpaired += p.unpairedInk; overBare += p.overBare; bands += p.bands;
   };
   for (const [runs, range, tag] of lines) take(runs, range, tag);
   const abs = all.map((p) => Math.abs(p.offset)).sort((a, b) => a - b);
@@ -117,7 +130,7 @@ export function readFrame(img, { rows = [], cols = [], bandPx = 8, maxPx = 40, x
     crossings: all.length,
     worst: abs.length ? abs[abs.length - 1] : null,
     median: abs.length ? abs[Math.floor(abs.length / 2)] : null,
-    unpaired, bands, inkRuns,
+    unpaired, overBare, bands, inkRuns,
     ...(debug ? { dbg, pairs: all } : {}),
   };
 }
