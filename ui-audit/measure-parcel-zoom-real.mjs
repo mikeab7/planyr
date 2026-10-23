@@ -81,17 +81,23 @@ async function runAtDpr(dpr) {
     async function gesture(label, action, { hold = 1800, startZ = c.close } = {}) {
       if (ONLY && !label.includes(ONLY)) return;
       await setView(startZ); await settled();
-      const rest = await shot(); const restOutline = outlinePoints(rest, win);
+      const before = await shot();
       frames = []; recording = true;
       await cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth: Math.round(1440 * dpr), maxHeight: Math.round(900 * dpr) });
       await sleep(120); await action(); await sleep(hold);
       recording = false; await cdp.send("Page.stopScreencast");
+      /* The reference is the CLOSER of the two settled views (before / after): every frame then shows that picture at a scale ≤ 1, so the
+       * reference's outline stays inside the window on every frame. (Referencing the start of a fast multi-level zoom-IN carried most of its
+       * outline off screen and left the late frames unjudgeable.) */
+      await settled();
+      const zoomIn = label.includes(" in") || label.includes("+");
+      const rest = zoomIn ? await shot() : before; const restOutline = outlinePoints(rest, win);
       const t0 = frames.length ? frames[0].t : 0;
       let prev = null, worst = 0, off = 0, unreg = 0, judged = 0, worstFrame = -1; const verdictLines = [];
       for (const [i, f] of frames.entries()) {
         const img = decodePng(Buffer.from(f.data, "base64")); const k = img.width / 1440;
         const w = WIN.map((v) => v * k), an = [cx * k, cy * k];
-        const xf = fitImagery(rest, img, { win: w, anchor: an, coarse: Math.round(4 * k), slack: 40 * k, prev });
+        const xf = fitImagery(rest, img, { win: w, anchor: an, coarse: Math.round(4 * k), slack: 40 * k, prev, sMin: 0.12, sMax: 3.2 });
         if (xf.ncc < 0.5) { unreg++; prev = null; continue; }
         prev = xf;
         const o = outlineOffset(restOutline, img, xf, { win: w, reach: Math.round(12 * k) });
