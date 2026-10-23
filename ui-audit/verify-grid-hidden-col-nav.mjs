@@ -87,9 +87,11 @@ const COST = 7, SUCC = 6, PRED = 5, NOTES = 8;
 const activeCell = () => page.evaluate(() => {
   const rows = [...document.querySelectorAll("[data-task-row]")];
   for (const row of rows) {
-    const cells = [...row.children].filter(el => el.tagName === "DIV");
+    // Column CELLS only: the row's right-edge filler strip (NEW-1, [data-grid-strip]) is not a column. The ACTIVE cell's
+    // outline is the 2px box on all four sides — the selected row's first cell also carries a one-sided "inset 2px 0 0 0" accent.
+    const cells = [...row.children].filter(el => el.tagName === "DIV" && el.hasAttribute("data-col-key"));
     for (let idx = 0; idx < cells.length; idx++) {
-      if (/inset/.test(cells[idx].style.boxShadow || "")) return { idx, cellCount: cells.length, rowId: row.getAttribute("data-task-row") };
+      if (/inset(?: 0(?:px)?){3} 2px|(?:0(?:px)?\s+){3}2px\s+inset/.test(cells[idx].style.boxShadow || "")) return { idx, cellCount: cells.length, rowId: row.getAttribute("data-task-row") };
     }
   }
   return null;
@@ -100,7 +102,7 @@ const press = async key => { await page.keyboard.press(key); await page.waitForT
 
 if (booted) {
   const rowId = await firstRowId();
-  const rowCells = await page.locator(`[data-task-row="${rowId}"] > div`).count();
+  const rowCells = await page.locator(`[data-task-row="${rowId}"] > div[data-col-key]`).count();
   ok("only the 9 visible columns render (Health/Status/Owner are not on screen)", rowCells === VISIBLE.length, `rendered=${rowCells} expected=${VISIBLE.length}`);
 
   // Click Cost → it becomes the active cell.
