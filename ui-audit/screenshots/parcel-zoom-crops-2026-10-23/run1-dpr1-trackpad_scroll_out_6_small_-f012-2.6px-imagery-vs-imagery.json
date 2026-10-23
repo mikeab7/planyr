@@ -1,0 +1,25 @@
+{
+ "build": "e5d81d0",
+ "dpr": 1,
+ "gesture": "trackpad scroll out (6 × small)",
+ "frame": 12,
+ "ms": 686,
+ "worstPx": 2.63,
+ "at": {
+  "offset": 2.6256157635467616,
+  "horizontal": true,
+  "x": 687.6256157635468,
+  "y": 511
+ },
+ "verdict": "imagery-vs-imagery",
+ "why": "the band jumps along its own length; the straight outline is on it along most of it",
+ "steps": 42,
+ "inkSpread": 0,
+ "bandSpread": 3.5,
+ "onBandShare": 0.62,
+ "worstOffset": 2.63,
+ "doubledSteps": 0,
+ "firstPassVerdict": "imagery-vs-imagery",
+ "byEye": "two copies of the band at a tile seam (old enlarged level beside the new); outline on the new level",
+ "currentJudge": "imagery-vs-imagery (re-judged from the crop with the final slideCrop rules)"
+}

@@ -115,22 +115,24 @@ export function readFrame(img, { rows = [], cols = [], bandPx = 8, maxPx = 40, x
   const steady = (runs, a, b) => runs.filter((r) => [a, b].every((o) => o.some((q) => Math.abs(q.start - r.start) <= 2 && Math.abs(q.end - r.end) <= 2)));
   const rowRuns = (y) => scanRuns((i) => px(i, y), width), colRuns = (x) => scanRuns((i) => px(x, i), height);
   const lines = [];
-  for (const y of rows) if (y - NEIGHBOUR >= 0 && y + NEIGHBOUR < height) lines.push([steady(rowRuns(y), rowRuns(y - NEIGHBOUR), rowRuns(y + NEIGHBOUR)).filter((r) => crossing(r, y, true)), xRange, `row${y}`]);
-  for (const x of cols) if (x - NEIGHBOUR >= 0 && x + NEIGHBOUR < width) lines.push([steady(colRuns(x), colRuns(x - NEIGHBOUR), colRuns(x + NEIGHBOUR)).filter((r) => crossing(r, x, false)), yRange, `col${x}`]);
-  const take = (runs, [from, to], tag) => {
+  for (const y of rows) if (y - NEIGHBOUR >= 0 && y + NEIGHBOUR < height) lines.push([steady(rowRuns(y), rowRuns(y - NEIGHBOUR), rowRuns(y + NEIGHBOUR)).filter((r) => crossing(r, y, true)), xRange, `row${y}`, y, true]);
+  for (const x of cols) if (x - NEIGHBOUR >= 0 && x + NEIGHBOUR < width) lines.push([steady(colRuns(x), colRuns(x - NEIGHBOUR), colRuns(x + NEIGHBOUR)).filter((r) => crossing(r, x, false)), yRange, `col${x}`, x, false]);
+  let worstAt = null; // where the worst crossing is (device px) — so a big reading can be CROPPED and judged by eye (V1882768)
+  const take = (runs, [from, to], tag, line, horizontal) => {
     const k = runs.filter((r) => r.start >= from && r.end <= to);
     if (debug) dbg.push({ tag, runs: k.map((r) => ({ s: r.start, e: r.end, red: r.red.length, ink: r.ink.length })) });
     inkRuns += k.filter((r) => r.ink.length).length;
     const p = pairOffsets(k, { bandPx, maxPx });
+    for (const q of p.pairs) if (!worstAt || Math.abs(q.offset) > Math.abs(worstAt.offset)) worstAt = { offset: q.offset, horizontal, x: horizontal ? q.at : line, y: horizontal ? line : q.at };
     all.push(...(debug ? p.pairs.map((q) => ({ ...q, tag })) : p.pairs)); unpaired += p.unpairedInk; overBare += p.overBare; bands += p.bands;
   };
-  for (const [runs, range, tag] of lines) take(runs, range, tag);
+  for (const [runs, range, tag, line, horizontal] of lines) take(runs, range, tag, line, horizontal);
   const abs = all.map((p) => Math.abs(p.offset)).sort((a, b) => a - b);
   return {
     crossings: all.length,
     worst: abs.length ? abs[abs.length - 1] : null,
     median: abs.length ? abs[Math.floor(abs.length / 2)] : null,
-    unpaired, overBare, bands, inkRuns,
+    unpaired, overBare, bands, inkRuns, worstAt,
     ...(debug ? { dbg, pairs: all } : {}),
   };
 }

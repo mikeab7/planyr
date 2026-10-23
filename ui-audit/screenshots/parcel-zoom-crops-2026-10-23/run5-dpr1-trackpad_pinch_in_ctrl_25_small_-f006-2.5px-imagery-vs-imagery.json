@@ -1,0 +1,26 @@
+{
+ "build": "e5d81d0",
+ "dpr": 1,
+ "gesture": "trackpad pinch in (ctrl, 25 × small)",
+ "frame": 6,
+ "ms": 873,
+ "worstPx": 2.53,
+ "at": {
+  "offset": -2.5323193916349283,
+  "horizontal": false,
+  "x": 469,
+  "y": 687.4676806083651
+ },
+ "verdict": "imagery-vs-imagery",
+ "why": "the band's edges step along its length (two copies of the picture overlapping); the outline is straight",
+ "steps": 40,
+ "inkSpread": 0,
+ "bandSpread": 4,
+ "edgeSpread": 8,
+ "onBandShare": 0.35,
+ "worstOffset": 3.03,
+ "doubledSteps": 0,
+ "firstPassVerdict": "imagery-vs-imagery",
+ "byEye": "two band copies offset at the corner; outline on one",
+ "currentJudge": "imagery-vs-imagery (re-judged from the crop with the final slideCrop rules)"
+}
