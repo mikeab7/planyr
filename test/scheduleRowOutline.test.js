@@ -15,7 +15,8 @@ const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8")
 
 describe("Schedule grid — row outline runs through the pinned columns (NEW-1)", () => {
   it("draws the hover/selected top+bottom line on each cell, not as a row-level box-shadow", () => {
-    expect(seq).toMatch(/\.drow:hover > \[data-col-key\]::before, \.drow\[data-row-sel\] > \[data-col-key\]::before/);
+    expect(seq).toMatch(/\.drow:hover > \[data-col-key\]::before/);
+    expect(seq).toMatch(/\.drow\[data-row-sel\] > \[data-col-key\]::before/);
     expect(seq).not.toMatch(/\.drow:hover \{ box-shadow/);
   });
   it("marks the selected row so the same line shows without hover", () => {

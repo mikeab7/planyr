@@ -332,7 +332,14 @@ select.ei { cursor: pointer; }
 /* NEW-1 (selected/hovered row outline) — the top + bottom line is drawn ON EACH CELL (a ::before inside
    it), not as a row-level inset shadow: the pinned ID / TASK cells paint an opaque background over the row's
    own shadow, so the old line started at START and stopped short of the frozen columns. */
-.drow:hover > [data-col-key]::before, .drow[data-row-sel] > [data-col-key]::before {
+/* NEW-3 — the HOVER outline only paints while the pointer is the thing driving: the grid sets data-kbnav on its
+   scroll container the moment a navigation key is pressed and clears it on the next REAL pointer move, so a
+   parked mouse can never keep a second row lit while the arrow keys walk the blue box down the list. (The
+   selected-row outline below is not hover and is unaffected.) The filler strip [data-grid-strip] at each row's
+   right edge (NEW-1) carries the same outline so the line runs edge to edge. */
+[data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-col-key]::before,
+[data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-grid-strip]::before,
+.drow[data-row-sel] > [data-col-key]::before, .drow[data-row-sel] > [data-grid-strip]::before {
   content:""; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:1;
   border-top:1px solid #94a3b8; border-bottom:1px solid #94a3b8; }
 /* A full-cell hover-revealed overlay does NOT work here: :hover is true for the ENTIRE mousedown
@@ -342,7 +349,7 @@ select.ei { cursor: pointer; }
    Fix: the grip is a narrow strip at the cell's edge, not the whole cell, so it never overlaps
    where a click aiming at the row number naturally lands — always interactive, opacity is cosmetic. */
 .rowgrip { opacity: .55; transition: opacity .1s; cursor: grab; }
-.drow:hover .rowgrip { opacity: 1; }
+[data-grid-scroll]:not([data-kbnav]) .drow:hover .rowgrip { opacity: 1; }
 .rowgrip:active { cursor: grabbing !important; }
 /* NEW-ROWMOVE-2BAND — the drag insertion line's leading dot. A plain 2-3px line reads fine at a
    34px row but is easy to lose against 20px-tall grid lines/borders at his actual row height; the
@@ -13294,6 +13301,24 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     return () => document.removeEventListener("mouseup", up);
   }, []);
 
+  // NEW-3 — keyboard navigation hands the highlight to the keyboard. While a nav key is the last thing that
+  // happened, the grid carries data-kbnav (CSS then drops the row-HOVER outline); only a REAL pointer move — its
+  // coordinates differ from where the pointer sat when the key went down — gives hover back. A scroll or a
+  // re-render under a parked pointer can synthesize a pointermove at the SAME coordinates, which is ignored, so a
+  // row sliding under a still mouse never re-lights. Imperative on purpose: a re-render per keystroke is not free.
+  useEffect(() => {
+    const NAV = new Set(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Tab","PageUp","PageDown","Home","End","Enter"]);
+    const ptr = { x: null, y: null }, at = { x: null, y: null };
+    const onKey = e => { if (!NAV.has(e.key)) return; const el = ref.current; if (!el) return;
+      at.x = ptr.x; at.y = ptr.y; el.setAttribute("data-kbnav", "1"); };
+    const onMove = e => { ptr.x = e.clientX; ptr.y = e.clientY;
+      const el = ref.current; if (!el || !el.hasAttribute("data-kbnav")) return;
+      if (e.clientX !== at.x || e.clientY !== at.y) el.removeAttribute("data-kbnav"); };
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("pointermove", onMove, true);
+    return () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("pointermove", onMove, true); };
+  }, []);
+
   // Is cell (ri, ci) inside the current selRange?
   const inRange = (ri, ci) => {
     if (!selRange) return false;
@@ -13313,12 +13338,98 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // (B2160464) no inner 1px row separator here any more: every cell now draws its OWN bottom line
     // (GRID_LINE_RANGE inside a range), so an inset one would stack a second blue line beside it.
     if(ci===minC) s.push("inset 2px 0 0 0 #2563eb");
-    if(ci===maxC) s.push("inset -2px 0 0 0 #2563eb");
+    // when the range reaches the LAST visible column, the right edge belongs to the row's filler strip (its far end)
+    if(ci===maxC && !(stripJoinsRange && ci===stripCi)) s.push("inset -2px 0 0 0 #2563eb");
     return s.join(",");
   };
-  const rangeRowCount = selRange ? Math.abs(selRange.r2 - selRange.r1) + 1 : 0;
-  const rangeColCount = selRange ? Math.abs(selRange.c2 - selRange.c1) + 1 : 0;
-  const hasRange = rangeRowCount > 1 || rangeColCount > 1;
+  // The ONE press / drag-enter / right-click behaviour of a body cell. The row's right-edge FILLER strip
+  // (NEW-1) calls these same three with the row's last visible column, so a press in the leftover width
+  // selects the row exactly as a press on that row's own last cell does (shift-extend and drag included).
+  const cellMouseDown = (e, task, ri, c, ci) => {
+    if (e.button !== 0) return;
+    // Shift+click — Excel-style: extend selection from anchor (current selectedId/selectedColIdx)
+    // to this cell. Anchor stays put so subsequent shift-clicks/shift-arrows continue from it.
+    if (e.shiftKey && selectedId !== null) {
+      e.preventDefault();
+      const anchorRi = tasks.findIndex(t => t.id === selectedId);
+      const anchorCi = selectedColIdx ?? 0;
+      if (anchorRi >= 0) {
+        // ID column shift-click extends to full rows
+        if (c.k === "id") {
+          setSelRange({r1: anchorRi, r2: ri, c1: 0, c2: allCols.length-1});
+        } else {
+          setSelRange({r1: anchorRi, r2: ri, c1: anchorCi, c2: ci});
+        }
+        // Keep focus on the grid container; keyboard nav is handled at the document level.
+        setTimeout(()=>ref.current?.focus({preventScroll:true}), 0);
+        return;
+      }
+    }
+    // Health dot: the HealthPicker opens itself on mousedown.
+    // Here we only sync row/column selection — no drag-select from the dot.
+    if (c.k === "health" && e.target.closest("[data-health-dot]")) {
+      setSelectedId(task.id);
+      setSelectedColIdx(ci);
+      // Keep an active multi-row range that COVERS this row so the picker fills the whole
+      // range — the mouse path used to collapse here, so a multi-row health/status fill
+      // silently changed only the clicked cell while the keyboard path filled every row.
+      // Only collapse when the click is OUTSIDE the range (a fresh single selection).
+      const inSpan = selRange && ri >= Math.min(selRange.r1, selRange.r2) && ri <= Math.max(selRange.r1, selRange.r2);
+      if (!inSpan) setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
+      return;
+    }
+    // ID column — Excel row-header behavior: click selects the
+    // whole row, and dragging up/down extends the selection
+    // across full rows. rowMode tells onMouseEnter to span all
+    // columns no matter which column the pointer crosses.
+    if (c.k === "id") {
+      dragAnchor.current = {ri, ci: 0, rowMode: true};
+      isDraggingCells.current = true;
+      setSelectedId(task.id);
+      setSelectedColIdx(0);
+      setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1});
+      return;
+    }
+    // Everywhere else: pure Excel — drag starts immediately on mousedown
+    dragAnchor.current = {ri, ci};
+    isDraggingCells.current = true;
+    setSelectedId(task.id);
+    setSelectedColIdx(ci);
+    setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
+  };
+  const cellMouseEnter = (task, ri, c, ci) => {
+    if (!isDraggingCells.current || !dragAnchor.current) return;
+    // A range-select drag that has reached a second cell shows the `cell` cursor until the button is released
+    // (pinned, driven by the gesture — never by a ref read at render, which left it stuck after mouseup). A plain
+    // click never gets here, so a click does not flash it.
+    if (!cellDragPin.current) cellDragPin.current = window.pinSchedCursor("cell", { onExit: () => { isDraggingCells.current = false; cellDragPin.current = null; } });
+    // Row-header drag: always span every column, regardless of
+    // which column the pointer happens to pass through.
+    if (dragAnchor.current.rowMode) {
+      setSelRange({r1:dragAnchor.current.ri, r2:ri, c1:0, c2:allCols.length-1});
+      setSelectedId(task.id);
+      setSelectedColIdx(0);
+      return;
+    }
+    setSelRange({r1:dragAnchor.current.ri, r2:ri, c1:dragAnchor.current.ci, c2:ci});
+    setSelectedId(task.id);
+    setSelectedColIdx(ci);
+  };
+  const cellContextMenu = (e, task, ri, c, ci) => {
+    e.preventDefault(); e.stopPropagation();
+    // Excel semantics: right-clicking INSIDE the current
+    // selection keeps it (so the menu can act on the whole
+    // thing — e.g. "Delete N Rows"); right-clicking OUTSIDE
+    // collapses the selection to this cell so the previous
+    // click's highlight never lingers alongside this one.
+    if (!inRange(ri, ci)) setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
+    setSelectedId(task.id); setSelectedColIdx(ci);
+    if (setTaskCtx) setTaskCtx({task, projId: proj?.id, x: e.clientX, y: e.clientY});
+  };
+  // (NEW-2) the old "rows × columns" size pill that used to paint in the header's leftover width is GONE — it
+  // was a readout only (nothing read it back) and nobody could tell what "14 × 18" meant. `hasRange` is still the
+  // one "a multi-cell selection exists" test the range paint below keys off.
+  const hasRange = !!selRange && (Math.abs(selRange.r2 - selRange.r1) > 0 || Math.abs(selRange.c2 - selRange.c1) > 0);
 
   const colWidthsRef = useRef(null);
   const pinRef = useRef({ lw: 0, rw: 0, l: [], r: [], w: {} });   // NEW-1 — pinned-column geometry for the reveal effect
@@ -13748,6 +13859,23 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // (built-ins + formula columns) so a formula column is navigable too and lines up with the
   // row render's ci = allCols.indexOf(c). Mirrors stepVisibleColIdx (gridColNav.js).
   const colMasterIdxs = orderedCols.map(c => allCols.indexOf(c));
+  // NEW-1 — the leftover width right of the last column ("the strip"). Each row carries a flex-filling filler cell
+  // there so the strip reads as the row continuing: same tint (the row's own background), the same solid cell line,
+  // the multi-row selection highlight + outline running to the pane's edge, and a press selecting the row exactly as
+  // a press on its last visible cell does. It is flex:1 1 0, so it is zero-width (and adds no scroll width) when the
+  // columns already fill the pane.
+  const stripCol = orderedCols[orderedCols.length - 1];
+  const stripCi = stripCol ? allCols.indexOf(stripCol) : -1;
+  const stripJoinsRange = hasRange && stripCi >= Math.min(selRange.c1, selRange.c2) && stripCi <= Math.max(selRange.c1, selRange.c2);
+  const stripShadow = (ri) => {
+    if (!stripJoinsRange || !inRange(ri, stripCi)) return "none";
+    const minR = Math.min(selRange.r1, selRange.r2), maxR = Math.max(selRange.r1, selRange.r2);
+    const sh = [];
+    if (ri === minR) sh.push("inset 0 2px 0 0 #2563eb");
+    if (ri === maxR) sh.push("inset 0 -2px 0 0 #2563eb");
+    sh.push("inset -2px 0 0 0 #2563eb");
+    return sh.join(",");
+  };
 
   // If the selected column is no longer on screen — hidden via the Columns chooser, or the
   // initial id column hidden in this layout — snap the cursor to the nearest visible column
@@ -13914,14 +14042,6 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
               onMouseLeave={e=>e.currentTarget.style.background="transparent"} />}
           </div>
         ))}
-        {hasRange && (
-          <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",
-            background:"var(--blue)",color:"#fff",borderRadius:10,padding:"1px 9px",
-            fontSize:10,fontFamily:"'Inter',system-ui,sans-serif",fontWeight:600,
-            pointerEvents:"none",zIndex:20}}>
-            {rangeRowCount} × {rangeColCount}
-          </div>
-        )}
       </div>
 
       <div style={{position:"relative",height:totalRows*ROW_H,minWidth:totalW}}>
@@ -13984,6 +14104,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     ...(pinStyle(c.k, [creating ? "#ecfdf3" : "#f3f0ff"], 5) || {})};
                   return <div key={c.k} className={pinCls(c.k) || undefined} style={wrap}>{inner}</div>;
                 })}
+                <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, borderBottom:GRID_LINE}} />
               </div>
             );
           }
@@ -14033,88 +14154,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     // NEW-1 — a pinned cell paints its own opaque look (row colour, then any range / cell fill on top)
                     ...(pinStyle(c.k, [rowBg, (selected && hasRange) ? "#dbeafe" : cfmt?.fill], 5) || {})
                   }}
-                    onMouseDown={e => {
-                      if (e.button !== 0) return;
-                      // Shift+click — Excel-style: extend selection from anchor (current selectedId/selectedColIdx)
-                      // to this cell. Anchor stays put so subsequent shift-clicks/shift-arrows continue from it.
-                      if (e.shiftKey && selectedId !== null) {
-                        e.preventDefault();
-                        const anchorRi = tasks.findIndex(t => t.id === selectedId);
-                        const anchorCi = selectedColIdx ?? 0;
-                        if (anchorRi >= 0) {
-                          // ID column shift-click extends to full rows
-                          if (c.k === "id") {
-                            setSelRange({r1: anchorRi, r2: ri, c1: 0, c2: allCols.length-1});
-                          } else {
-                            setSelRange({r1: anchorRi, r2: ri, c1: anchorCi, c2: ci});
-                          }
-                          // Keep focus on the grid container; keyboard nav is handled at the document level.
-                          setTimeout(()=>ref.current?.focus({preventScroll:true}), 0);
-                          return;
-                        }
-                      }
-                      // Health dot: the HealthPicker opens itself on mousedown.
-                      // Here we only sync row/column selection — no drag-select from the dot.
-                      if (c.k === "health" && e.target.closest("[data-health-dot]")) {
-                        setSelectedId(task.id);
-                        setSelectedColIdx(ci);
-                        // Keep an active multi-row range that COVERS this row so the picker fills the whole
-                        // range — the mouse path used to collapse here, so a multi-row health/status fill
-                        // silently changed only the clicked cell while the keyboard path filled every row.
-                        // Only collapse when the click is OUTSIDE the range (a fresh single selection).
-                        const inSpan = selRange && ri >= Math.min(selRange.r1, selRange.r2) && ri <= Math.max(selRange.r1, selRange.r2);
-                        if (!inSpan) setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
-                        return;
-                      }
-                      // ID column — Excel row-header behavior: click selects the
-                      // whole row, and dragging up/down extends the selection
-                      // across full rows. rowMode tells onMouseEnter to span all
-                      // columns no matter which column the pointer crosses.
-                      if (c.k === "id") {
-                        dragAnchor.current = {ri, ci: 0, rowMode: true};
-                        isDraggingCells.current = true;
-                        setSelectedId(task.id);
-                        setSelectedColIdx(0);
-                        setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1});
-                        return;
-                      }
-                      // Everywhere else: pure Excel — drag starts immediately on mousedown
-                      dragAnchor.current = {ri, ci};
-                      isDraggingCells.current = true;
-                      setSelectedId(task.id);
-                      setSelectedColIdx(ci);
-                      setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
-                    }}
-                    onMouseEnter={() => {
-                      if (!isDraggingCells.current || !dragAnchor.current) return;
-                      // A range-select drag that has reached a second cell shows the `cell` cursor until the button is released
-                      // (pinned, driven by the gesture — never by a ref read at render, which left it stuck after mouseup). A plain
-                      // click never gets here, so a click does not flash it.
-                      if (!cellDragPin.current) cellDragPin.current = window.pinSchedCursor("cell", { onExit: () => { isDraggingCells.current = false; cellDragPin.current = null; } });
-                      // Row-header drag: always span every column, regardless of
-                      // which column the pointer happens to pass through.
-                      if (dragAnchor.current.rowMode) {
-                        setSelRange({r1:dragAnchor.current.ri, r2:ri, c1:0, c2:allCols.length-1});
-                        setSelectedId(task.id);
-                        setSelectedColIdx(0);
-                        return;
-                      }
-                      setSelRange({r1:dragAnchor.current.ri, r2:ri, c1:dragAnchor.current.ci, c2:ci});
-                      setSelectedId(task.id);
-                      setSelectedColIdx(ci);
-                    }}
+                    onMouseDown={e => cellMouseDown(e, task, ri, c, ci)}
+                    onMouseEnter={() => cellMouseEnter(task, ri, c, ci)}
                     onClick={() => { setSelectedColIdx(ci); }}
-                    onContextMenu={e => {
-                      e.preventDefault(); e.stopPropagation();
-                      // Excel semantics: right-clicking INSIDE the current
-                      // selection keeps it (so the menu can act on the whole
-                      // thing — e.g. "Delete N Rows"); right-clicking OUTSIDE
-                      // collapses the selection to this cell so the previous
-                      // click's highlight never lingers alongside this one.
-                      if (!inRange(ri, ci)) setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
-                      setSelectedId(task.id); setSelectedColIdx(ci);
-                      if (setTaskCtx) setTaskCtx({task, projId: proj?.id, x: e.clientX, y: e.clientY});
-                    }}
+                    onContextMenu={e => cellContextMenu(e, task, ri, c, ci)}
                     onDoubleClick={() => {
                       if (review) return;
                       const isParentDateLocked = task.hasChildren && (c.k==="start"||c.k==="end"||c.k==="duration"||c.t==="cost");
@@ -14143,6 +14186,14 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                   </div>
                 );
               })}
+              {stripCol && <div data-grid-strip
+                onMouseDown={e => cellMouseDown(e, task, ri, stripCol, stripCi)}
+                onMouseEnter={() => cellMouseEnter(task, ri, stripCol, stripCi)}
+                onContextMenu={e => cellContextMenu(e, task, ri, stripCol, stripCi)}
+                style={{flex:"1 1 0", minWidth:0, height:ROW_H, position:"relative", cursor:"default",
+                  background: (stripJoinsRange && inRange(ri, stripCi)) ? "#dbeafe" : "transparent",
+                  borderBottom: (stripJoinsRange && inRange(ri, stripCi)) ? GRID_LINE_RANGE : GRID_LINE,
+                  boxShadow: stripShadow(ri)}} />}
             </div>
           );
         })}
@@ -14168,6 +14219,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                   {ri===tasks.length && c.k==="name" ? "+ New task" : ""}
                 </div>
               ))}
+              <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, borderBottom:GRID_LINE}} />
             </div>
           );
         })}
