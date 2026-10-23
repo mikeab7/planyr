@@ -160,18 +160,7 @@ try {
   ok("cloud: predecessor links survived the move (Kinder Morgan ← Surveying, Air Liquide ← Exxon)", JSON.stringify(c1.preds["Kinder Morgan"]) === '["Surveying"]' && JSON.stringify(c1.preds["Air Liquide"]) === '["Exxon"]', JSON.stringify(c1.preds));
   ok("cloud: the 7 rows sit in order directly under Plan A in the saved array", (() => { const i = c1.order.indexOf("Plan A"); const seq = c1.order.slice(i + 1).filter(n => KIDS.includes(n)); return seq.join("|") === KIDS.join("|"); })(), c1.order.join(" | "));
 
-  // 3. cache-busted reload
-  await page.goto(base + "/sequence/?cb=" + Date.now(), { waitUntil: "domcontentloaded", timeout: 60000 });
-  await page.waitForSelector("[data-task-row]", { timeout: 40000 }); await pacedWait(page, 2500);
-  const rl = await rows(page), lv2 = await levelsOf(page);
-  ok(`reload (cache-busted): the nest is still there (build ${rl.build})`, KIDS.every(k => lv2[k] === 1) && lv2["Plan A"] === 0, JSON.stringify(lv2));
-  const ent = (await rows(page)).rows.find(r => r.name === "Enterprise");
-  await page.locator(`[data-task-row="${ent.id}"] [data-col-key="name"] span`).first().click(); await pacedWait(page, 400);
-  const lv3 = await levelsOf(page);
-  ok("reload: expanding Enterprise shows its two hidden children still beneath it", lv3["Enterprise Fab"] === 2 && lv3["Enterprise Install"] === 2, JSON.stringify({ f: lv3["Enterprise Fab"], i: lv3["Enterprise Install"] }));
-  await page.locator(`[data-task-row="${ent.id}"] [data-col-key="name"] span`).first().click(); await pacedWait(page, 300);   // collapse again so the undo test is on a clean state
-
-  // 4. one Ctrl+Z undoes the whole move (and the cloud follows)
+  // 3. one Ctrl+Z undoes the whole move (same session — a reloaded page has no undo history) and the cloud follows
   await page.locator(`[data-task-row="${await idOf(page, "Plan A")}"] [data-col-key="id"]`).click(); await pacedWait(page, 200);
   await page.keyboard.press("Control+z"); await pacedWait(page, 800);
   const lv4 = await levelsOf(page);
@@ -179,16 +168,38 @@ try {
   const c2 = await waitCloud(c => c.parent["Surveying"] === "Pipeline Coordination");
   ok("undo: the cloud row follows", !c2.error && sameParents(c2.parent, ORIGINAL_PARENT), JSON.stringify(c2.parent || c2));
 
+  // 4. drop it again, then a cache-busted reload shows it persisted
+  await selectRange(page, "Easement Acquisition", "Air Liquide");
+  await holdDrag(page, "Surveying", "Plan A", 0.5);
+  await page.mouse.up(); await pacedWait(page, 800);
+  const c3 = await waitCloud(c => c.parent["Surveying"] === "Plan A");
+  ok("re-drop: the cloud row holds the nest again", !c3.error && sameParents(c3.parent, NEWPARENT), JSON.stringify(c3.parent || c3));
+  await page.goto(base + "/sequence/?cb=" + Date.now(), { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForSelector("[data-task-row]", { timeout: 40000 }); await pacedWait(page, 2500);
+  const rl = await rows(page), lv2 = await levelsOf(page);
+  ok(`reload (cache-busted): the nest is still there (build ${rl.build})`, KIDS.every(k => lv2[k] === 1) && lv2["Plan A"] === 0, JSON.stringify(lv2));
+  const entId = await idOf(page, "Enterprise");
+  await page.locator(`[data-task-row="${entId}"] [title^="Expand"]`).first().click(); await pacedWait(page, 500);
+  const lv3 = await levelsOf(page);
+  ok("reload: expanding Enterprise shows its two hidden children still beneath it", lv3["Enterprise Fab"] === 2 && lv3["Enterprise Install"] === 2, JSON.stringify({ f: lv3["Enterprise Fab"], i: lv3["Enterprise Install"] }));
+  await page.locator(`[data-task-row="${entId}"] [title^="Collapse"]`).first().click(); await pacedWait(page, 300);
+  // put Plan B back as the parent of Easement/Design for the blocked check: undo is gone after reload, so re-seed via the cloud row
+  await page.close();
+  const p2 = await s.page.context().newPage(); await p2.setViewportSize({ width: 1600, height: 950 });
+  await s.page.evaluate(async ({ id, fx }) => { const r = await window.pfSupabase.from("schedules").select("rev").eq("id", id).single();
+    await window.pfSupabase.from("schedules").update({ data: { ...fx, id }, rev: (r.data.rev || 0) + 1 }).eq("id", id); }, { id: rowId, fx: FIXTURE.projects[1] });
+  await boot(p2, base + "/sequence/?cb=" + Date.now());
+
   // 5. refused: a parent onto its own descendant
-  const beforeBlocked = JSON.stringify(await levelsOf(page));
-  await holdDrag(page, "Plan B", "Design", 0.5);
-  const blocked = await nestBox(page);
+  const beforeBlocked = JSON.stringify(await levelsOf(p2));
+  await holdDrag(p2, "Plan B", "Design", 0.5);
+  const blocked = await nestBox(p2);
   ok("blocked: the centre of a row inside the dragged parent shows the red 'Not allowed' box", blocked.nestVisible && blocked.kind === "blocked" && blocked.chip === "Not allowed", JSON.stringify(blocked));
-  await page.mouse.up(); await pacedWait(page, 600);
-  ok("blocked: releasing there changes nothing and says why", JSON.stringify(await levelsOf(page)) === beforeBlocked && /into itself/.test(await toast(page)), await toast(page));
+  await p2.mouse.up(); await pacedWait(p2, 600);
+  ok("blocked: releasing there changes nothing and says why", JSON.stringify(await levelsOf(p2)) === beforeBlocked && /into itself/.test(await toast(p2)), await toast(p2));
 
   ok("no page errors on the schedule page", errs.length === 0, errs.slice(0, 2).join(" | "));
-  await page.close();
+  await p2.close();
 } catch (e) { ok("run completed without throwing", false, e.stack || e.message); }
 finally {
   // Cleanup (constraint #15): soft-delete every schedule row this run created, then prove none remains live.
