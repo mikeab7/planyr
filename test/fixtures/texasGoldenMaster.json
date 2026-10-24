@@ -280,7 +280,8 @@
       "fort bend": "fortbend",
       "montgomery": "montgomery",
       "chambers": "chambers",
-      "waller": "waller"
+      "waller": "waller",
+      "tarrant": "tarrant"
     },
     "authorityShort": {
       "hcfcd": "HCFCD",
@@ -288,7 +289,9 @@
       "coh": "City of Houston",
       "montgomery": "Montgomery Co.",
       "chambers": "Chambers Co.",
-      "waller": "Waller Co."
+      "waller": "Waller Co.",
+      "tarrant": "Tarrant Co.",
+      "fortworth": "City of Fort Worth"
     },
     "authorityChoices": [
       {
@@ -314,6 +317,14 @@
       {
         "id": "waller",
         "label": "Waller County"
+      },
+      {
+        "id": "tarrant",
+        "label": "Tarrant County"
+      },
+      {
+        "id": "fortworth",
+        "label": "City of Fort Worth"
       },
       {
         "id": "missouricity",
