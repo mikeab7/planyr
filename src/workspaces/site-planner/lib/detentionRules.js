@@ -2318,9 +2318,13 @@ export function hydrateDrainageContext(slim) {
   const hasFacts = jur.city.length > 0 || jur.county.length > 0 || jur.etj.length > 0;
   const storedFlags = a.flags || [];
   const storedOverlays = a.overlays || [];
-  let primaryReviewer, channelAuthority, overlays, ambiguous, flags;
+  let primaryReviewer, channelAuthority, overlays, ambiguous, flags, unmodeledCounty = null;
   if (hasFacts) {
     const rd = authorityForJurisdiction(jur);
+    // B877440 (recurrence, found by the Tarrant live check) — the LIVE path hands `unmodeledCounty` to the verdict row (resolveDrainageContext);
+    // the remembered-check path re-derived the flag but dropped the county, so a reloaded plan in any unmodeled county (Dallas, Amarillo…) read
+    // "checking flood data" forever instead of "no detention criteria on file for <County>" + the request link.
+    unmodeledCounty = rd.unmodeledCounty || null;
     primaryReviewer = rd.primary ? { authorityId: rd.primary, rule: ruleFor(rd.primary) } : null;
     channelAuthority = rd.channelAuthority;
     overlays = [...rd.overlays, ...storedOverlays.filter((ov) => !AUTHORITY_DERIVED_OVERLAY_KINDS.has(ov?.kind))];
@@ -2366,6 +2370,7 @@ export function hydrateDrainageContext(slim) {
       overlays,
       ambiguous,
       flags,
+      unmodeledCounty,
       mud: { state: a.mudState ?? null, districts: [] },
       jurisdiction: jur,
       sources: [],

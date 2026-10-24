@@ -84,6 +84,20 @@ describe("detention cascade — Tarrant County / Fort Worth", () => {
   });
 });
 
+describe("B877440 recurrence — a REMEMBERED check in an unmodeled county still names the county (found by the Tarrant live check)", () => {
+  const slimFor = (jurisdiction) => ({ checkedAt: Date.now(), authority: { primaryReviewerId: null, overlays: [], ambiguous: [], flags: [], mudState: null, jurisdiction }, flood: { zones: [], panels: [], state: "loaded" } });
+  it("Dallas (unmodeled) rehydrates with unmodeledCounty + the no-criteria flag, so the verdict row can say so and offer the request", () => {
+    const a = hydrateDrainageContext(slimFor({ city: [], county: ["Dallas"], etj: [] })).authority;
+    expect(a.flags).toContain("no-criteria-modeled");
+    expect(a.unmodeledCounty).toBe("dallas");
+  });
+  it("modeled counties and Fort Worth rehydrate with NO unmodeledCounty (control)", () => {
+    for (const j of [{ city: [], county: ["Harris"], etj: [] }, { city: [], county: ["Tarrant"], etj: [] }, { city: ["Fort Worth"], county: ["Denton"], etj: [], cityCentroid: ["Fort Worth"] }]) {
+      expect(hydrateDrainageContext(slimFor(j)).authority.unmodeledCounty, JSON.stringify(j)).toBeNull();
+    }
+  });
+});
+
 describe("detention records — method-only, honest, no invented number", () => {
   for (const id of ["tarrant", "fortworth"]) {
     const rule = (DETENTION_RULES[id] || [])[0] || { params: {}, source: {} }; // collects (and fails per-test) on a tree with no record
