@@ -31,7 +31,7 @@ export default function CriteriaRequestsSection() {
                 <Td num>{r.request_count}</Td>
                 <Td><RelTime iso={r.first_asked} /></Td>
                 <Td><RelTime iso={r.last_asked} /></Td>
-                <Td><Chip tone={r.wired ? "ok" : "warn"}>{r.wired ? "Wired" : "Outstanding"}</Chip></Td>
+                <Td><Chip tone={r.wired && !r.unverified ? "ok" : "warn"}>{r.wired ? (r.unverified ? "On file · source unread" : "Wired") : "Outstanding"}</Chip></Td>
               </tr>
             ))}
           </tbody>

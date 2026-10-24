@@ -337,6 +337,92 @@ export const DETENTION_RULES = {
       },
     },
   ],
+  /* NEW-1 (Tarrant County, 2026-10-24) — METHOD-ONLY records. There is NO ac-ft/ac number here and none may be
+   * invented: ruleType "method" carries the governing documents and the criteria wording read so far, and
+   * computeRequiredDetention returns kind:"unknown" + the `method-based` flag for it (never a volume, never a band).
+   *
+   * ⛔ SOURCE STATUS — READ BEFORE TRUSTING ANYTHING BELOW. Every county / city / NCTCOG host that publishes these
+   * documents (tarrantcountytx.gov, fortworthtexas.gov, nctcog.org, amlegal.com) is DENIED by the build sandbox's egress
+   * policy, so the PDFs themselves were NOT read. What is recorded is limited to short VERBATIM FRAGMENTS of those
+   * documents that a web-search excerpt returned, each stored in `evidence` with the document it came from and flagged
+   * `sourceRead: "search-excerpt"` / `secondarySource: true` (the BKDD precedent). No section numbers are claimed
+   * because none were seen. `params.documentsToRead` lists the exact documents to read to close this to
+   * primary-sourced — until then the verdict row says so (yieldVerdicts.methodDetentionRow) and admin shows the
+   * request as "on file · source unread", not "Wired". `effectiveDate` is taken from the edition stamped in each
+   * document's file name (the documents were not opened), not from an adoption date. */
+  tarrant: [
+    {
+      id: "tarrant-slur-esm-2026",
+      authority: "tarrant",
+      authorityLabel: "Tarrant County",
+      ruleType: "method",
+      effectiveDate: "2026-03-01",
+      verifiedOn: "2026-10-24",
+      secondarySource: true,
+      sourceRead: "search-excerpt",
+      source: {
+        name: "Tarrant County Development Regulations Manual (Subdivision & Land Development Regulations, Mar 2026) + Tarrant County Engineering Standards Manual (Jan 2026); administered under Court Order No. 141911",
+        section: "NOT READ — section numbers unknown (documents unreachable from the build sandbox)",
+        url: "https://www.tarrantcountytx.gov/en/engineering-services/development/subdivision-and-land-use-regulations.html",
+      },
+      params: {
+        noPublishedVolumetricRate: true, // no ac-ft/ac figure was seen in any excerpt — never fabricate one
+        methodSummary: "county manual governs; iSWM recommended, not adopted; no volume rate on file",
+        iswmAdopted: false, // county guidance: "hasn't officially adopted the iSWM manual" — strongly recommended
+        surfaceDrawdownHr: 24, // ESM: surface detention "designed to drain within 24 hours"
+        evidence: [
+          { doc: "Guideline for Development in Unincorporated Areas of Tarrant County (Jul 2026)",
+            url: "https://www.tarrantcountytx.gov/content/dam/main/engineering-services/engineering-updates/GuidelineforDevelopmentinUnincorporatedAreasofTarrantCounty_JULY2026.pdf",
+            quote: "according to the Tarrant County Subdivision and Land Use Regulations Manual. Although Tarrant County hasn't officially adopted the iSWM manual, we strongly recommend you follow the procedures and standards set forth within the manual." },
+          { doc: "Tarrant County Engineering Standards Manual (Jan 2026)",
+            url: "https://www.tarrantcountytx.gov/content/dam/main/engineering-services/engineering-updates/EngineeringStandardsManual_JAN2026.pdf",
+            quote: "Underground detention systems are allowable, but gravity drainage is required. Surface detention facilities shall be designed to drain within 24 hours." },
+        ],
+        documentsToRead: [
+          "Tarrant County Development Regulations Manual (Mar 2026) — the drainage / detention chapter (peak-flow criterion, design storms, any volume rate)",
+          "Tarrant County Engineering Standards Manual (Jan 2026) — the detention section (the 24-hour drawdown line above is a fragment)",
+          "NCTCOG iSWM Criteria Manual, Hydrology Technical Manual — only if the County regulations incorporate it",
+        ],
+      },
+    },
+  ],
+  /* NEW-1 (Tarrant County) — City of Fort Worth, same method-only shape and the same SOURCE STATUS banner as `tarrant`
+   * above. Applies inside Fort Worth CITY LIMITS and — per the County's own guidance — its ETJ ("plats inside Fort Worth's
+   * extraterritorial jurisdiction go to the city, which applies drainage standards set forth by the City"; that sentence
+   * is a search-summary reading of the County Guideline and is NOT stored as a quote). */
+  fortworth: [
+    {
+      id: "fortworth-swcm-2024",
+      authority: "fortworth",
+      authorityLabel: "City of Fort Worth",
+      ruleType: "method",
+      effectiveDate: "2024-07-01",
+      verifiedOn: "2026-10-24",
+      secondarySource: true,
+      sourceRead: "search-excerpt",
+      source: {
+        name: "City of Fort Worth Stormwater Criteria Manual (July 2024 official edition; 2015 edition for the quoted fragment) — adopted through the City Subdivision Ordinance (Code § 31-105 Stormwater Management)",
+        section: "NOT READ — section numbers unknown (documents unreachable from the build sandbox)",
+        url: "https://www.fortworthtexas.gov/files/assets/public/v/1/tpw/stormwater/documents/regulation-updates/july-2024-official-stormwater-criteria-manual.pdf",
+      },
+      params: {
+        noPublishedVolumetricRate: true,
+        methodSummary: "peak-discharge mitigation by drainage study; no volume rate on file",
+        evidence: [
+          { doc: "City of Fort Worth Stormwater Criteria Manual (2015)",
+            url: "https://www.fortworthtexas.gov/files/assets/public/v/1/tpw/stormwater/documents/2015-cfw-stormwater-criteria-manual.pdf",
+            quote: "Detention must completely mitigate the increase in peak discharge due to proposed development." },
+          { doc: "City of Fort Worth Stormwater Criteria Manual (July 2024)",
+            url: "https://www.fortworthtexas.gov/files/assets/public/v/1/tpw/stormwater/documents/regulation-updates/july-2024-official-stormwater-criteria-manual.pdf",
+            quote: "The Drainage Study is necessary to determine infrastructure and easement needs, and perform an Adverse Impact Assessment to determine the Zone of Influence and required mitigation." },
+        ],
+        documentsToRead: [
+          "City of Fort Worth Stormwater Criteria Manual (July 2024) — the detention chapter: storms to match, the adverse-impact test, any threshold below which detention is waived",
+          "Fort Worth Code § 31-105 Stormwater Management — and whether it applies in the ETJ",
+        ],
+      },
+    },
+  ],
   // B861 (chat NEW-2) — Brookshire–Katy Drainage District. NOT a county-level reviewing
   // authority (it's ADDITIVE — a drainage-district OVERLAY, excluded from
   // DETENTION_AUTHORITY_CHOICES below); this record holds the transcribed criteria + the
@@ -729,6 +815,30 @@ export function computeRequiredDetention(args = {}) {
     }
     const basis = `${lo}–${hi} ac-ft/ac (${why}) × ${acres.toFixed(2)} ac`;
     return bandResult([lo * acres, hi * acres], basis, rule, flags, [lo, hi], "screening band");
+  }
+
+  // ---- method records (NEW-1, Tarrant County / Fort Worth): the authority is MODELED but publishes (or we have
+  // read) NO volumetric rate. Returns kind:"unknown" like rate-match — never a number, never a band — with the
+  // `method-based` flag the verdict row keys on (yieldVerdicts.methodDetentionRow) so it reads as a NAMED state, not
+  // "checking flood data", and not as "no criteria on file" either. `detail` carries the cited fragments + the
+  // documents still to be read, so the panel can show them behind the ⓘ.
+  if (rule.ruleType === "method") {
+    const ev = p.evidence || [];
+    const detail = [
+      `${rule.authorityLabel} — no volumetric detention rate is on file. ${p.methodSummary || ""}.`,
+      ...ev.map((e) => `“${e.quote}” — ${e.doc}`),
+      rule.sourceRead === "search-excerpt"
+        ? "Source status: the documents themselves have not been read (fragments above came from search excerpts) — NOT verified."
+        : null,
+      p.documentsToRead && p.documentsToRead.length ? `To confirm: ${p.documentsToRead.join("; ")}.` : null,
+    ].filter(Boolean).join("\n");
+    return {
+      kind: "unknown", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: `${rule.authorityLabel}: ${p.methodSummary} — size by drainage study / hydrologic routing`,
+      detail, rule, governing: null,
+      flags: ["method-based", "verify-with-county-engineer", ...(rule.secondarySource ? ["source-unverified"] : [])],
+      caveat: SCREENING_CAVEAT,
+    };
   }
 
   // ---- rate-match records (B861, BKDD): RATE control, no volumetric rate to price ----
@@ -1631,6 +1741,7 @@ export const COUNTY_AUTHORITY = {
   montgomery: "montgomery",
   chambers: "chambers",
   waller: "waller",
+  tarrant: "tarrant", // NEW-1 (Tarrant) — method-only record, no volume rate
 };
 
 /* City (TxGIO city_name, lowercased) → municipal overlay id. */
@@ -1645,6 +1756,8 @@ export const AUTHORITY_SHORT = {
   montgomery: "Montgomery Co.",
   chambers: "Chambers Co.",
   waller: "Waller Co.",
+  tarrant: "Tarrant Co.",
+  fortworth: "City of Fort Worth",
 };
 
 /* B861 (chat NEW-2) — the Brookshire–Katy DD overlay copy. `short` is the ≤110-char
@@ -1730,12 +1843,35 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
     // Map each straddled city to its AUTHORITY id (Houston→coh, overlay cities→their
     // overlay id, otherwise the containing county's authority) so the UI can price
     // each candidate — raw city names would every one render "unknown".
-    const cityAuth = (c) => (c === "houston" ? "coh" : CITY_OVERLAYS[c] || countyAuth || null);
+    const cityAuth = (c) => (c === "houston" ? "coh" : c === "fort worth" ? "fortworth" : CITY_OVERLAYS[c] || countyAuth || null);
     out.ambiguous.push({
       kind: "straddle",
       candidates: cities.map(cityAuth),
       detail: `Parcel straddles ${city.join(" + ")} city limits — reviewing city ambiguous.`,
     });
+    return out;
+  }
+
+  /* NEW-1 (Tarrant) — FORT WORTH. Inside the city limits the City's Stormwater Criteria Manual governs; in its ETJ the
+   * City reviews plats and applies its own drainage standards per the County's guidance (a search-summary reading of
+   * Tarrant's Guideline — the ETJ half is flagged `fort-worth-etj` and unverified). This is the OPPOSITE of the
+   * Houston-ETJ rule above, on purpose: Houston's ETJ sits under county drainage districts, Fort Worth's does not.
+   * Placed BEFORE the unmodeled-county flag: Fort Worth spans Tarrant, Denton, Parker, Wise and Johnson counties, and a
+   * Fort Worth point in an unmodeled county must not also read "no criteria on file". A release area (SB 2038) is not
+   * in `etj` (it is reported separately), so it falls through to the county. */
+  // `cities` is the UNION of every city the ring merely touches (see cityCentroid above), so a frontage sliver of Fort Worth
+  // on an unincorporated parcel must not hand it the City's rule: when the centroid WAS tested it has to sit in the city;
+  // untested (point query / outage / legacy stored check) fails open, exactly like the flag below.
+  const fwTested = Array.isArray(cityCentroid);
+  const fwCentroid = fwTested ? cityCentroid.map((c) => String(c).toLowerCase()) : null;
+  const inFortWorth = cities.includes("fort worth") && (!fwTested || fwCentroid.includes("fort worth"));
+  const inAnyCity = fwTested ? fwCentroid.length > 0 : cities.length > 0;
+  if (inFortWorth) { out.primary = "fortworth"; return out; }
+  if (!inAnyCity && etjs.includes("fort worth")) {
+    out.primary = "fortworth";
+    const fwNote = "This parcel is in the Fort Worth ETJ (extraterritorial jurisdiction). Per the County's guidance, plats there go to the City, which applies its own drainage standards — read from a search excerpt of the County Guideline, not confirmed against the City ordinance. Verify with the City.";
+    out.overlays.push({ kind: "etj", city: "Fort Worth", note: fwNote, short: "Fort Worth ETJ — the City's drainage criteria apply (unverified)", detail: fwNote });
+    out.flags.push("fort-worth-etj");
     return out;
   }
 
@@ -2138,7 +2274,7 @@ export function slimDrainageContext(ctx) {
  * this to split a stored check's derived facts (replaced by a fresh re-derivation) from
  * its query-outcome facts (mud overlays, jurisdiction-partial, …), which describe the
  * check-time fetches and can't be re-derived from the raw jurisdiction names. */
-const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired", "california-not-wired", ...NJNY_NOT_WIRED_FLAGS]);
+const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "fort-worth-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired", "california-not-wired", ...NJNY_NOT_WIRED_FLAGS]);
 const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
 
 /* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record

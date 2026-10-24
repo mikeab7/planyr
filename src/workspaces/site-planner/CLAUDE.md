@@ -1845,6 +1845,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds
   `detentionStorage` (the pond stage/volume calc shared by panel, yield metrics, solver) plus the
   B708 anchored tier (`bandedStorage` / `usablePondVolume` — the ONE per-pond usable/dead split).
+  **Tarrant County / Fort Worth (NEW-1/NEW-2, 2026-10-24) — `ruleType: "method"` records, NO volume number, and the sources were NOT READ.** The
+  county/city/NCTCOG hosts are denied by the build sandbox, so `DETENTION_RULES.tarrant|fortworth` and `easementRules` `tarrant|fortworth`
+  hold only verbatim fragments from search excerpts (`sourceRead: "search-excerpt"`, `secondarySource: true`, `evidence[]`, `documentsToRead[]`);
+  `computeRequiredDetention` returns `kind:"unknown"` + `method-based` + `source-unverified` (never a rate or band) and
+  `yieldVerdicts.methodDetentionRow` is its named row. **To close it to primary-sourced: read the listed documents, replace fragments with
+  section-cited text, drop `sourceRead`, and add a rate only if a document prints one.** Cascade: Fort Worth city limits (centroid-gated) and
+  its ETJ → `fortworth`; unincorporated Tarrant → `tarrant`; easements take the same reviewer via `defaultJurForCounty(county, authorityId)`.
+  Guard: repo-root `test/` **tarrantCriteria** (incl. admin-list parity).
 - Floodplain suite (B707–B712): `floodplainRules.js` / `floodplainMitigation.js` (compensating-storage
   engine, pure; incl. the NEW-1 Waller floodway-buffer screen + the NEW-2 Zone-A boundary-grade WSE
   estimator + the NEW-3 HAG proxy), `pondCriteriaRules.js` (berm/slope/freeboard criteria),

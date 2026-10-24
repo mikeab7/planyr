@@ -5,7 +5,10 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-05._
+_Last updated: 2026-10-24._
+
+## 🌐 Tarrant County criteria: let me read the county's own documents (B2452179)
+- [ ] **Allow 6 websites for the coding sessions (or hand me the PDFs).** Tarrant County's detention and easement criteria are now "on file", but only as honest placeholders that say *"no volume rate on file (source unverified)"* — the coding environment is blocked from reaching the county and Fort Worth websites, so I could not read the real manuals. To finish it properly, add these under the cloud environment's **Network access → Allowed domains** (environment menu in the session's title bar → Edit): `www.tarrantcountytx.gov`, `www.fortworthtexas.gov`, `fortworthtexas.gov`, `iswm.nctcog.org`, `www.nctcog.org`, `codelibrary.amlegal.com`. Or drop the six PDFs listed on B2452179 into a chat. Until then nothing in the app claims a Tarrant number.
 
 ## 📅 A decision: should a freshly inserted blank schedule row stay visible after a reload? (B2428272)
 - [ ] **Decide.** Insert now puts the row where you asked, and nothing hidden opens. While you're working, the new blank row stays on screen even inside a Focus-filtered group. After you reload the page it is hidden again until it has a status, the same as every other not-started task in that group (Focus hides finished, not-started and paused rows). The row is saved in the right place — open the group's chip and it's there. **Option A (my recommendation):** leave it; naming the row and giving it a status is the normal flow. **Option B:** remember inserted rows as "keep visible" in the saved schedule — small, but it adds a saved field.

@@ -14,9 +14,12 @@ describe("easementRules.defaultJurForCounty — no silent Houston default", () =
   it("returns null (never 'generic') for a county with no easement record", () => {
     expect(defaultJurForCounty("chambers")).toBe(null);
     expect(defaultJurForCounty("waller")).toBe(null);
-    expect(defaultJurForCounty("tarrant")).toBe(null);
     expect(defaultJurForCounty("dallas")).toBe(null);
     expect(defaultJurForCounty("potter")).toBe(null); // Amarillo
+  });
+  it("NEW-2: Tarrant now has its own (width-less, unverified) record — never a borrowed Houston one", () => {
+    expect(defaultJurForCounty("tarrant")).toBe("tarrant");
+    expect(DEFAULT_EASEMENT_RULES.tarrant.waterWidth).toBe(null);
   });
   it("returns null for an unresolved/blank county — never a hardcoded Harris/Houston fallback", () => {
     expect(defaultJurForCounty(null)).toBe(null);

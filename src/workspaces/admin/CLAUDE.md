@@ -60,10 +60,15 @@ no-data state), most-requested first, with state, first/last asked, and a "Wired
 read through `admin_list_criteria_requests()`, a RPC defined in the site-planner workspace's `db/` folder
 (the migration that creates the request table and this RPC together), the same
 SECURITY DEFINER + `is_admin()` pattern as `admin_users.sql`. "Wired" is decided CLIENT-SIDE
-(`criteriaRequestsAdmin.isWired`) by cross-referencing the request's county against the same
-modeled-jurisdiction lists the app itself routes against (`detentionRules.COUNTY_AUTHORITY`,
-`easementRules.MODELED_COUNTIES`) — the database has no way to know what a given deploy has modeled, and
-this keeps "wired" self-correcting the moment a county is added, with nothing to update by hand.
+(`criteriaRequestsAdmin.isWired`) by cross-referencing the request's county against the per-family modeled lists, and a
+fulfilled request leaves the "outstanding" count with no hand-edited status. **The lists are a hand-kept MIRROR of the
+app's registries, not an import** (importing the detention-rules module here hoisted a ~120 KB shared chunk onto the plain Site route —
+see the file header), **so drift is guarded by a test, not by hope:** repo-root `test/` **tarrantCriteria** asserts each
+family's list equals the registry keys (`COUNTY_AUTHORITY` for detention, `MODELED_COUNTIES` for easement, the pond and
+floodplain defaults for those) and fails the moment a county is added to one side only. **A third state, "On file · source
+unread"** (`isUnverified`), is for a record built from search excerpts because its governing document could not be read
+(`sourceRead: "search-excerpt"` on the rule record — Tarrant County, NEW-1/NEW-2); the same test pins that list to the
+records. Pond and floodplain no longer alias the detention list.
 
 **Signup log (B1160721, NEW-2) — now the collapsed log inside `UsersSection.jsx`.** Signup volume visibility —
 reads through `admin_list_signup_attempts()` (the migration lives in the shared `auth/db/` folder), the
