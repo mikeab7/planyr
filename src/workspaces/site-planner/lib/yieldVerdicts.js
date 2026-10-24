@@ -260,6 +260,25 @@ function noCriteriaDetentionRow(req) {
   });
 }
 
+/* NEW-1 (Tarrant County) — the sibling for an authority that IS modeled but carries NO volumetric rate (a `method`
+ * rule record: Tarrant County, Fort Worth). It must be a NAMED terminal state: `computeRequiredDetention` returns
+ * kind:"unknown" + the `method-based` flag for it, which matches none of the numeric branches and would otherwise
+ * fall to `loadingRow` — the permanent "checking flood data" spinner (B1127's failure again). Not "no criteria on
+ * file" either: the record, its documents and what is still unread are on file, behind the ⓘ (`detail`). The word
+ * "unverified" rides the sentence while the record's source is a search excerpt, so the row never reads as a
+ * confirmed criterion. ONE sentence (PANEL-BREVITY). */
+function methodDetentionRow(req) {
+  const who = (req.rule && req.rule.authorityLabel) || "this authority";
+  const unverified = Array.isArray(req.flags) && req.flags.includes("source-unverified");
+  const sentence = `${who}: no volume rate on file${unverified ? " (source unverified)" : ""}`;
+  return finish({
+    key: "det", label: "Detention", pill: "N/A", tone: "warn", sentence,
+    unavailable: true, loading: false, short: false, action: false,
+    headline: null,
+    sortRank: 2.5,
+  });
+}
+
 function detentionVerdict(d) {
   const req = d.req;
   const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / AC_FT;
@@ -268,6 +287,7 @@ function detentionVerdict(d) {
   // falling through to them is what produced the permanent "checking flood data".
   if (req && req.kind === "unavailable") return unavailableDetentionRow(req);
   if (req && req.kind === "unknown" && Array.isArray(req.flags) && req.flags.includes("no-criteria-modeled")) return noCriteriaDetentionRow(req);
+  if (req && req.kind === "unknown" && Array.isArray(req.flags) && req.flags.includes("method-based")) return methodDetentionRow(req);
   const requiredAcFt = req && req.kind === "point" && req.requiredAcFt > EPS ? req.requiredAcFt
     : req && req.kind === "band" ? req.bandAcFt[1] : null;
   if (requiredAcFt == null) {

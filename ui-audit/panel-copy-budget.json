@@ -123,7 +123,20 @@
     "    2 lines / 80 chars, most of what this one sentence costs.",
     "  COLLAPSED: nothing further to fold — the sentence IS the fact, one line, no explanation",
     "    trailing it; the county name is threaded through the same computed-subject shape rule 5",
-    "    already established (one template literal, not one per with/without-county branch)."
+    "    already established (one template literal, not one per with/without-county branch).",
+    "",
+    "RAISE 2026-10-24 (NEW-1, Tarrant County): lib-yield-verdicts 14->15 lines, 661->709 chars.",
+    "Justification, per the rule:",
+    "  ADDED: one template literal — '${who}: no volume rate on file${unverified ? \" (source unverified)\" : \"\"}' —",
+    "    the SEVENTH Detention verdict state: an authority that IS modeled but publishes no volumetric rate (Tarrant",
+    "    County, Fort Worth: ruleType \"method\"). Without it that carrier (kind unknown + method-based) matches no",
+    "    numeric branch and reads 'checking flood data' forever — B1127's bug a third time. The words \"source",
+    "    unverified\" are in the default view on purpose: the record was built from search excerpts because the",
+    "    governing PDFs could not be read, and a verdict row that omitted that would read as a confirmed criterion.",
+    "  REMOVED: nothing available — the sibling no-criteria sentence is a different fact and still fires for every",
+    "    unmodeled county. The row has no headline literal (headline: null, as noCriteriaDetentionRow).",
+    "  COLLAPSED: the cited fragments, the unread-document list and the full caveat live behind the Detention",
+    "    row's existing info affordance (req.detail), not in the default view."
   ],
   "measuredOn": "2026-08-30",
   "regions": {
@@ -144,8 +157,8 @@
       "maxChars": 258
     },
     "lib-yield-verdicts": {
-      "maxLines": 14,
-      "maxChars": 661
+      "maxLines": 15,
+      "maxChars": 709
     }
   }
 }

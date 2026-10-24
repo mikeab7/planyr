@@ -12,7 +12,7 @@ describe("isWired", () => {
     expect(isWired("Montgomery", "detention")).toBe(true); // case/normalisation
   });
   it("an unmodeled county is outstanding", () => {
-    expect(isWired("tarrant", "detention")).toBe(false);
+    expect(isWired("dallas", "detention")).toBe(false); // NEW-1: Tarrant moved to wired (method-only record); Dallas is still unmodeled
     expect(isWired("dallas", "pond")).toBe(false);
     expect(isWired("potter", "floodplain")).toBe(false);
   });
@@ -32,11 +32,11 @@ describe("prepareCriteriaRequestRows", () => {
   it("sorts outstanding (unwired) requests before wired ones, most-requested first within each group", () => {
     const rows = [
       { county_key: "harris", family: "detention", request_count: 1 }, // wired
-      { county_key: "tarrant", family: "detention", request_count: 5 }, // outstanding
+      { county_key: "amarillo", family: "detention", request_count: 5 }, // outstanding
       { county_key: "dallas", family: "detention", request_count: 9 }, // outstanding
     ];
     const out = prepareCriteriaRequestRows(rows);
-    expect(out.map((r) => r.county_key)).toEqual(["dallas", "tarrant", "harris"]);
+    expect(out.map((r) => r.county_key)).toEqual(["dallas", "amarillo", "harris"]);
     expect(out.map((r) => r.wired)).toEqual([false, false, true]);
   });
   it("handles an empty/missing list without throwing", () => {

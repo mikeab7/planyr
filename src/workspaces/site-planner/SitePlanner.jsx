@@ -16871,7 +16871,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
   const siteCounty = restored?.county || null;
-  const jurKey = resolveEasementJur(settings.easementJurOverride, siteCounty, easeRules);
+  const jurKey = resolveEasementJur(settings.easementJurOverride, siteCounty, easeRules, drainAuthorityId); // NEW-2 — the drainage cascade's reviewer (Fort Worth city/ETJ) rides in
   const setJurKey = (k) => setSettings((sx) => {
     const next = { ...sx };
     if (k) next.easementJurOverride = k; else delete next.easementJurOverride; // empty pick = back to derived
@@ -20731,7 +20731,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // jurisdiction by hand (still fully functional) or file a request.
     const rule = easeRules[jurKey];
     if (!rule) { openEaseRules(); flashWarn("No easement width on file for this jurisdiction — pick one in the Easement ▾ menu (Easement rules), or request criteria.", 6000); return; }
-    startRoute("water", { width: rule.waterWidth || 15, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
+    // NEW-2 — a record with no published width (Tarrant, Fort Worth) is declined like a missing record: no `|| 15`.
+    if (rule.waterWidth == null) { openEaseRules(); flashWarn(`No published water-easement width on file for ${rule.label} — enter one in Easement rules if you have it.`, 6000); return; }
+    startRoute("water", { width: rule.waterWidth, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
   };
 
   // Upload + extract a title-commitment PDF via the Claude API.
@@ -27183,7 +27185,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <>
                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                               <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
-                              <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                              <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} placeholder={rule.waterWidth == null ? "none" : undefined} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                               <span style={{ flex: 1 }} />
                               <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
                                 <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
@@ -34561,7 +34563,7 @@ function DrainagePanel({
                   : warnNote("Exact criteria tables pending transcription — treat as a screening band only.", "band"));
             } else if (req && req.kind === "unknown") {
               detR.push(row("Detention required", "unknown"));
-              detR.push(warnNote(req.basis, "unk"));
+              detR.push(warnNote(req.basis, "unk", req.detail || null)); // NEW-1 (Tarrant) — a method-only record carries its cited fragments + unread documents in `detail`
               if (req.governing?.candidates?.length) {
                 for (const c of req.governing.candidates) {
                   detR.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f1(c.result.bandAcFt[1])} AC-FT` : `${f1(c.acFt)} AC-FT`, "", true));

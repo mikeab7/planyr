@@ -33,7 +33,7 @@ describe("rule records — integrity sweep", () => {
       for (const r of recs) {
         expect(r.id, auth).toBeTruthy();
         expect(r.authority).toBe(auth);
-        expect(["rate", "tiered", "table-band", "policy-band", "overlay", "rate-match"]).toContain(r.ruleType);
+        expect(["rate", "tiered", "table-band", "policy-band", "overlay", "rate-match", "method"]).toContain(r.ruleType);
         expect(r.effectiveDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(r.verifiedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(r.source?.name).toBeTruthy();
