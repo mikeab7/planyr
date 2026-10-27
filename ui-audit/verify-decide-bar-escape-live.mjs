@@ -77,11 +77,13 @@ try {
   // 3 — layered with Record info
   await selectOne();
   await page.getByTestId("map-decide-record-info").click();
-  const menuOpen = await page.getByTestId("map-decide-verb-note").isVisible();
+  // wait for the menu to MOUNT — an immediate isVisible() races the click and reads "not open" (seen once on the first live run)
+  const menuOpen = await page.getByTestId("map-decide-verb-note").waitFor({ state: "visible", timeout: 5000 }).then(() => true, () => false);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(400);
   const menuClosed = !(await page.getByTestId("map-decide-verb-note").isVisible().catch(() => false));
-  check("3a. first Escape closes ONLY the Record info menu", menuOpen && menuClosed && (await count()) === 1 && !!(await summary()));
+  const afterCount = await count(), afterBar = await summary();
+  check("3a. first Escape closes ONLY the Record info menu", menuOpen && menuClosed && afterCount === 1 && !!afterBar, `menuOpenedBefore=${menuOpen} menuClosedAfter=${menuClosed} selected=${afterCount} bar=${JSON.stringify(afterBar)}`);
   await page.keyboard.press("Escape");
   check("3b. second Escape clears the selection", (await barGone()) && (await count()) === 0);
 

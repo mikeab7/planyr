@@ -198,4 +198,14 @@ describe("MapFinder wiring of the Escape key (B2451472)", () => {
       expect(effect, flag).toContain(flag);
     }
   });
+
+  it("a clear abandons an in-flight lot lookup: the selection epoch is bumped by clearSel and checked after every await (live-found, 5 of 6 Escapes)", () => {
+    expect(finder).toMatch(/const selectEpochRef = useRef\(0\)/);
+    expect(finder).toMatch(/const clearSel = \(\) => \{ selectEpochRef\.current \+= 1;/);
+    const click = finder.slice(finder.indexOf("const handleClick = async"), finder.indexOf("const snapToAddressLot"));
+    expect(click).toMatch(/const epoch = selectEpochRef\.current/);
+    expect(click.match(/cleared\(\)/g).length).toBeGreaterThanOrEqual(3); // after identify, after the snapshot lookup, in the catch
+    const pick = finder.slice(finder.indexOf("const selectParcelAt = async"), finder.indexOf("const goAddress = async"));
+    expect(pick).toMatch(/epoch === selectEpochRef\.current/);
+  });
 });
