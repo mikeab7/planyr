@@ -172,8 +172,13 @@ try {
 
 const L = (b) => b.toString("latin1");
 const edit = L(out.edit), flat = L(out.flat);
-const dicts = edit.match(/\/Type \/Annot [^\n]*/g) || [];
+const allDicts = edit.match(/\/Type \/Annot [^\n]*/g) || [];
+/* NEW-1 (2026-10-27) — the sheet's own furniture (scale bar, north arrow, the Buildings table when it is on) is written as Stamps of
+   its own, so the annotations COUNTED below are the plan's: the furniture ones are asserted separately. */
+const furn = allDicts.filter((a) => /\/NM \(planyr-sheet-furniture-/.test(a));
+const dicts = allDicts.filter((a) => !/\/NM \(planyr-sheet-furniture-/.test(a));
 check(!/\/Annots/.test(flat), "toggle ON: zero annotations");
+check(furn.length >= 2 && furn.some((a) => /scale-bar/.test(a)) && furn.some((a) => /north-arrow/.test(a)) && allDicts.slice(-furn.length).every((a) => /sheet-furniture/.test(a)), `the scale bar and north arrow are their own annotations, written after the plan's (${furn.length} furniture Stamps)`);
 const sub = dicts.map((a) => /\/Subtype \/(\w+)/.exec(a)[1]).sort();
 console.log("   toggle OFF subtypes:", JSON.stringify(sub));
 check(dicts.length === 6 && sub.join() === "Line,Polygon,Polygon,Square,Square,Stamp", "toggle OFF: six annotations — two Squares (default + behind-the-plan rectangle), Line (measurement), one Polygon per building (the bump-outs are NOT annotations of their own), the parcel's acreage label (Stamp)");
@@ -186,7 +191,7 @@ const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const an = await (await (await pdfjs.getDocument({ data: new Uint8Array(out.edit), verbosity: 0 }).promise).getPage(1)).getAnnotations();
 const polys = an.filter((a) => a.annotationType === 7);
 const vertsOf = (a) => { const v = a.vertices || []; return typeof v[0] === "number" ? Array.from({ length: v.length / 2 }, (_, i) => ({ x: v[2 * i], y: v[2 * i + 1] })) : v.map((p) => ({ x: p.x, y: p.y })); };
-check(an.length === 6 && an.every((a) => (a.annotationFlags & 192) === 0 && a.hasAppearance), `pdf.js reads ${an.length} annotations back, unlocked, each with an appearance`);
+check(an.length === 6 + furn.length && an.every((a) => (a.annotationFlags & 192) === 0 && a.hasAppearance), `pdf.js reads ${an.length} annotations back, unlocked, each with an appearance`);
 const plain = polys.find((a) => vertsOf(a).length === 4), bumped = polys.find((a) => vertsOf(a).length === 8);
 check(polys.length === 2 && !!plain && !!bumped, `pdf.js: two Building Polygons — one with 4 vertices, one with 8 (${polys.map((a) => vertsOf(a).length).join(", ")})`);
 let bumpRegions = null;

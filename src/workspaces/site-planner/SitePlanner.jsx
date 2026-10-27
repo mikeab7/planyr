@@ -17842,11 +17842,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const printAspectRef = useRef(null);
   const printAspect = () => printAspectRef.current || (11 / 8.5); // letter-landscape paper, guard only
   const refreshPrintAspect = async () => {
-    const { sheetPlanAspect } = await loadExportSheet();
+    const { sheetPlanAspect, buildingsBandInput } = await loadExportSheet();
     printAspectRef.current = sheetPlanAspect({
       paper: printPaper, orient: printOrient,
       metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
       includeMetrics: settings.printMetricsBand !== false,
+      buildings: buildingsBandInput(els, settings.printBuildingsTable !== false), // the table's band narrows the plan box the frame is shaped to
     });
     return printAspectRef.current;
   };
@@ -17891,7 +17892,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * to a stated ratio (plan-box inches × ft-per-inch) around that same center, and if the
    * picked area doesn't fit at that ratio we say so — never silently rescale (`checkScaleFits`). */
   const recomputeCompose = async () => {
-    const { sheetLayoutBoxesIn, pageSizeForFit } = await loadExportSheet();
+    const { sheetLayoutBoxesIn, pageSizeForFit, buildingsBandInput } = await loadExportSheet();
     const pf = pickedFrameRef.current;
     // NEW-1 (B1783056) — Fit-to-frame page: the page itself is shaped to the PICKED frame's
     // own aspect (long edge at the chosen paper size), computed ONCE here so every downstream
@@ -17904,6 +17905,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       titleBlockExtra: !!printScale,
       includeMetrics: settings.printMetricsBand !== false,
       page: pageOverride,
+      buildings: buildingsBandInput(els, settings.printBuildingsTable !== false), // same band the sheet reserves — the printed scale is computed from this plan box
     });
     setComposeBoxIn(box);
     // Keep the Shift-snap aspect current for whenever the owner returns to the canvas (◂
@@ -17930,7 +17932,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!composeMode) return;
     recomputeCompose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composeMode, printPaper, printOrient, printScale, printFitToFramePage, settings.printMetricsBand]);
+  }, [composeMode, printPaper, printOrient, printScale, printFitToFramePage, settings.printMetricsBand, settings.printBuildingsTable]);
   // The live sheet preview — debounced, and built through the SAME `buildComposedSheet` the
   // final PDF rasterizes (PDF-PARITY by construction, not by inspection). Re-runs on every
   // knob the sheet's CONTENTS depend on; paper/orient/scale changes reach here indirectly
@@ -24186,12 +24188,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     /* NEW-1 (print ignores send-to-back) — the REAL editable-PDF composition (the default "Flatten markups" OFF
        path): which annotations became native PDF annotations (they paint ABOVE the page) and which stayed in the
        page picture. Read-only; same gate. */
-    const composedHook = async () => {
+    const composedHook = async (o = {}) => {
       const { createExportSheet } = await loadExportSheet();
-      const c = await createExportSheet(exportCtx()).buildComposedSheet("letter", "landscape", true, true, "", "", true, null, true, true);
+      // `o` (E2E only): { paper, orient, buildingsTable, annotate } — the sheet shape under test; defaults are the editable-PDF Letter sheet
+      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false);
       if (!c) return null;
       return {
         sheetSvg: c.sheetSvg,
+        layout: { page: c.layout.page, plan: c.layout.plan, buildings: c.layout.buildings ? { x: c.layout.buildings.x, y: c.layout.buildings.y, w: c.layout.buildings.w, h: c.layout.buildings.h } : null },
+        annotRects: (c.annotationSet?.annots || []).map((a) => ({ nm: a.nm, family: a.family, subtype: a.subtype, rect: a.rect })),
         liftedIds: (c.annotationSet?.annots || []).length,
         keptInPage: c.annotationsKeptInPage || 0,
         pins: c.annotationPins || [],
@@ -26729,10 +26734,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               reviewed CLEAR/SLAB values before printing — were removed in B1804993; per-building
               overrides are still set on the building itself (Properties → Structure) or from
               Standards → Buildings' "Defaults by building size" tier table. B1934529 brought the
-              printed table back as a compact "Buildings" content toggle (default on) — a small
-              corner inset (lib/sheetFurniture.js `buildingsPlate`), never the old full-width
-              column; see buildingSfTable.js for the row values (the SAME numbers the canvas
-              labels and the Yield panel already show). */}
+              printed table back as a compact "Buildings" content toggle (default on). 2026-10-27: it
+              now sits in its own band under the title block (lib/buildingsBand.js), never on the
+              drawing, and in the editable PDF it is its own removable object; see
+              buildingSfTable.js for the row values (the SAME numbers the canvas labels and the
+              Yield panel already show). */}
           {composeMode && (
             <LazyPanel name="Compose exhibit" minHeight={400} label="Loading…">
               <PrintCompose

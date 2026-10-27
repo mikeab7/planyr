@@ -3,38 +3,39 @@
 // and screenshots it. Confirms the title block, the plan and the metrics band live in ONE
 // cohesive SVG. (The right-hand buildings table this once also confirmed — B197 — was
 // removed in B1804993; the plan takes the full width that column used to reserve. B1934529
-// brought a printed buildings table back as a compact CORNER INSET, toggleable — this harness
+// brought a printed buildings table back as a compact, toggleable table (since 2026-10-27 in its own band under the title block) — this harness
 // now renders the sheet with that inset ON and OFF and screenshots both, so the before/after is
 // a real artifact, not just an assertion.)
 import { chromium } from "playwright";
 import { writeFileSync, mkdirSync } from "fs";
 import { buildPrintSheetSvg, printSheetLayout, sheetFileName } from "../src/workspaces/site-planner/lib/printSheet.js";
 import { buildSheetFurnitureSvg } from "../src/workspaces/site-planner/lib/sheetFurnitureLayout.js";
+import { buildingEntries } from "../src/workspaces/site-planner/lib/buildingsBand.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const PAL = { ink: "#26231e", muted: "#8a8473", panelLine: "#cfc6af", paper: "#ffffff" };
-const layout = printSheetLayout({ paper: "letter", orient: "landscape" });
-const pb = layout.plan;
+/* NEW-1 (2026-10-27) — the buildings table is no longer a corner inset on the plan: it has its own BAND between the title block
+   and the plan (printSheetLayout({ buildings })), so the layout is built twice — band on, band off. */
+const BUILDING_ROWS = [{ name: "Building 1", sf: 1176940 }, { name: "Building 2", sf: 245574 }];
+const BUILDING_TOTAL = BUILDING_ROWS.reduce((s, r) => s + r.sf, 0);
+const layoutOn = printSheetLayout({ paper: "letter", orient: "landscape", buildings: { entries: buildingEntries(BUILDING_ROWS, BUILDING_TOTAL) } });
+const layoutOff = printSheetLayout({ paper: "letter", orient: "landscape" });
 const metrics = [
   ["Site area", "42.0 ac (1,829,520 sf)"], ["Building", "1,110,000 sf"], ["Lot coverage", "61%"],
   ["FAR (1-story)", "0.61"], ["Car stalls", "640 (0.6/1k sf)"], ["Trailer stalls", "60"],
   ["Impervious", "82%"], ["Detention", "120,000 sf"], ["Open / green", "7.6 ac"],
 ];
-const BUILDING_ROWS = [{ name: "Building 1", sf: 1176940 }, { name: "Building 2", sf: 245574 }];
-const BUILDING_TOTAL = BUILDING_ROWS.reduce((s, r) => s + r.sf, 0);
 
 // Synthetic "plan" — a nested <svg> sized to the plan box with its own viewBox, exactly how the
 // real plan clone is embedded, PLUS the same sheet-furniture group `buildExportSvgRaw` appends
 // (scale bar / north arrow / the buildings inset when toggled on) — so this fixture exercises the
 // same composition the real export builds, not a simplified stand-in that could hide a defect.
 function planSvgFor({ withBuildingsTable }) {
+  const pb = (withBuildingsTable ? layoutOn : layoutOff).plan;
   const contentW = 800, contentH = 560;
   const furniture = buildSheetFurnitureSvg({
     x: 0, y: 0, w: contentW, h: contentH, ftPerUnit: 2, fmtFeet: (n) => String(Math.round(n)), pal: {},
     obstacles: [{ x: 110, y: 90, w: 420, h: 200 }, { x: 110, y: 330, w: 600, h: 150 }],
-    buildingRows: withBuildingsTable ? BUILDING_ROWS : [],
-    buildingTotal: BUILDING_TOTAL,
-    fmtSf: (n) => Math.round(n).toLocaleString(),
   });
   return `<svg x="${pb.x}" y="${pb.y}" width="${pb.w}" height="${pb.h}" viewBox="0 0 ${contentW} ${contentH}" preserveAspectRatio="xMidYMid meet">`
     + `<rect x="0" y="0" width="${contentW}" height="${contentH}" fill="#eef3ec"/>`
@@ -48,11 +49,11 @@ function planSvgFor({ withBuildingsTable }) {
 
 mkdirSync("ui-audit/screens", { recursive: true });
 const sheetOn = buildPrintSheetSvg({
-  layout, planSvg: planSvgFor({ withBuildingsTable: true }), title: "Cypress Logistics", sub: "Plan 1", date: "2026.06.19",
+  layout: layoutOn, planSvg: planSvgFor({ withBuildingsTable: true }), title: "Cypress Logistics", sub: "Plan 1", date: "2026.06.19",
   metrics, note: "Concept site plan — planning-level estimates, not a survey.", pal: PAL,
 });
 const sheetOff = buildPrintSheetSvg({
-  layout, planSvg: planSvgFor({ withBuildingsTable: false }), title: "Cypress Logistics", sub: "Plan 1", date: "2026.06.19",
+  layout: layoutOff, planSvg: planSvgFor({ withBuildingsTable: false }), title: "Cypress Logistics", sub: "Plan 1", date: "2026.06.19",
   metrics, note: "Concept site plan — planning-level estimates, not a survey.", pal: PAL,
 });
 const htmlFor = (sheet) => `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -105,14 +106,15 @@ await browser.close();
 
 const checks = {
   on, off,
-  // NEW-2 (B1934529): toggling the inset adds/removes it and nothing else — same plan box.
+  // the toggle adds/removes the table's band; it never reaches the plan: same width and left edge, the band sits wholly above it
   toggleAddsInsetOnly: on.hasBuildingsHeading && on.hasBuilding1Row && !off.hasBuildingsHeading && !off.hasBuilding1Row,
-  planBoxUnaffectedByToggle: on.planX === off.planX && on.planW === off.planW, // the map area is not shrunk by the toggle
+  planBoxUnaffectedByToggle: on.planX === off.planX && on.planW === off.planW,
+  bandClearOfPlan: !!layoutOn.buildings && layoutOn.buildings.y + layoutOn.buildings.h <= layoutOn.plan.y && layoutOn.plan.h < layoutOff.plan.h,
 };
 console.log("checks:", JSON.stringify(checks, null, 2));
 console.log("filename example:", sheetFileName({ project: "Cypress Logistics", n: 1, date: new Date(2026, 5, 19) }));
 console.log("wrote ui-audit/screens/print-sheet-buildings-on.png + print-sheet-buildings-off.png");
-if (!checks.toggleAddsInsetOnly || !checks.planBoxUnaffectedByToggle) {
+if (!checks.toggleAddsInsetOnly || !checks.planBoxUnaffectedByToggle || !checks.bandClearOfPlan) {
   console.error("FAIL — see checks above");
   process.exit(1);
 }

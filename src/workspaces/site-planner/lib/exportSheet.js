@@ -40,6 +40,7 @@ import {
 } from "./arcgis.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js";
 import { buildingSfRows } from "./buildingSfTable.js";
+import { buildingEntries, buildingsBandModel, bandSvg, bandTree } from "./buildingsBand.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
@@ -57,8 +58,8 @@ import { gridRequest } from "./demGrid.js";
  * canvas matches the printed plan area, not the raw paper (B200). Lives here because it is
  * the only other consumer of printSheetLayout; SitePlanner awaits it when entering print
  * mode and when paper/orientation changes. */
-export function sheetPlanAspect({ paper, orient, metricsPairs, stormwaterBars, includeMetrics = true, page = null }) {
-  const layout = printSheetLayout({ paper, orient, metricsPairs, stormwaterBars, includeMetrics, page });
+export function sheetPlanAspect({ paper, orient, metricsPairs, stormwaterBars, includeMetrics = true, page = null, buildings = null }) {
+  const layout = printSheetLayout({ paper, orient, metricsPairs, stormwaterBars, includeMetrics, page, buildings });
   return layout.plan.w / layout.plan.h;
 }
 
@@ -67,9 +68,21 @@ export function sheetPlanAspect({ paper, orient, metricsPairs, stormwaterBars, i
  * preview (which shows the WHOLE page, not just the plan box). Same lazy-chunk reasoning as
  * `sheetPlanAspect` above — SitePlanner awaits this through the export chunk, never a static
  * import of printSheetLayout. */
-export function sheetLayoutBoxesIn({ paper, orient, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics = true, page = null }) {
-  const layout = printSheetLayout({ paper, orient, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics, page });
+export function sheetLayoutBoxesIn({ paper, orient, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics = true, page = null, buildings = null }) {
+  const layout = printSheetLayout({ paper, orient, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics, page, buildings });
   return { planW: layout.plan.w / 100, planH: layout.plan.h / 100, pageW: layout.page.wIn, pageH: layout.page.hIn };
+}
+
+/* The Buildings table's input for the SHEET LAYOUT — { entries } or null (toggle off, or a plan with no buildings).
+ * ONE function every caller of printSheetLayout uses (compose screen frame aspect + explicit-scale math, label tier, the
+ * final sheet), because the table's band takes height off the plan box: a caller that left it out would size the frame
+ * for a taller plan box than the sheet really has, and the printed scale would be wrong. The values come from
+ * buildingSfRows — the one place a building's SF is summed — never a copy. */
+export function buildingsBandInput(els, include = true) {
+  if (!include) return null;
+  const { rows, total } = buildingSfRows(els);
+  const entries = buildingEntries(rows, total);
+  return entries ? { entries } : null;
 }
 
 export function createExportSheet(ctx) {
@@ -155,7 +168,7 @@ export function createExportSheet(ctx) {
      taken at different zooms make identical label decisions. Falls back to the notional
      letter-landscape plan box the PNG path uses when no paper is named. Null → nothing to
      frame, and the label tier stays on the live view (the pre-NEW-1 behaviour). */
-  const sheetLabelPpfFor = (frame, paper, orient, includeMetrics = true, page = null) => {
+  const sheetLabelPpfFor = (frame, paper, orient, includeMetrics = true, page = null, buildings = null) => {
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
     let plan;
@@ -163,7 +176,7 @@ export function createExportSheet(ctx) {
       plan = printSheetLayout({
         paper: paper || "letter", orient: orient || "landscape",
         metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
-        includeMetrics, page,
+        includeMetrics, page, buildings,
       }).plan;
     } catch (_) { return null; } // a sheet-layout hiccup must never block the export itself
     return sheetLabelPpf({ extentWft: fe.maxX - fe.minX, extentHft: fe.maxY - fe.minY, planW: plan.w, planH: plan.h });
@@ -196,11 +209,12 @@ export function createExportSheet(ctx) {
   // case, and any caller that just wants the plan SVG).
   const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null, includeBuildingsTable = true) =>
     withFullRender(
-      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, includeBuildingsTable),
-      sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics, pageOverride),
+      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays),
+      // the Buildings table has its own band on a SHEET (it narrows the plan box the labels are sized to); the PNG has no sheet
+      sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics, pageOverride, sheetPaper ? buildingsBandInput(els, includeBuildingsTable) : null),
     );
 
-  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null, includeBuildingsTable = true) => {
+  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -424,13 +438,9 @@ export function createExportSheet(ctx) {
     // was pressed — a dark-inked or dark-plated scale bar on a PDF would be worse than the
     // on-screen bug this fixes. Passing no pal lets scaleBarPlate/northArrowPlate fall back to
     // their own fixed, print-safe ink/plate defaults (sheetFurniture.js), same as they always have.
-    // B1934529 — the compact "Buildings" SF inset, same corner-placement family as the scale bar
-    // / north arrow above (a THIRD no-occlude corner). `includeBuildingsTable` is the compose
-    // screen's own Content toggle (default on); a plan with no buildings never reserves a plate
-    // regardless of the toggle (buildingSfRows returns an empty rows array, and furnitureLayout
-    // treats that identically to omitting it — no corner spent, nothing drawn).
-    const bldgTable = includeBuildingsTable ? buildingSfRows(els) : { rows: [], total: 0 };
-    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles, buildingRows: bldgTable.rows, buildingTotal: bldgTable.total, fmtSf: f0 });
+    // The BUILDINGS table is NOT furniture: it has its own band on the sheet (printSheet.js) or its own strip on the PNG, so
+    // it can never sit on the drawing (owner report 2026-10-27 — site geometry painted over a corner table).
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles });
     root.appendChild(furn);
     return { clone, w, h };
   };
@@ -1033,6 +1043,27 @@ export function createExportSheet(ctx) {
     flashWarn(`⚠ Couldn't load ${dropped.length} map layer${many ? "s" : ""} (${dropped.join(", ")}), so the ${fmt} was exported without ${many ? "them" : "it"}. Your plan and measurements are all included.`, 8000);
   };
 
+  /* The PNG has no sheet, so the Buildings table gets a STRIP of its own under the picture (white paper, the same card the
+     sheet's band draws, sized to the frame) — extending the canvas rather than sitting on the plan, so it can never cover
+     site content. Returns the new viewBox height (unchanged when there is no table). The frame keeps its own clip. */
+  const addBuildingsStrip = (clone, w, frameH) => {
+    const input = buildingsBandInput(els, true);
+    if (!input) return frameH;
+    const [vx, vy] = clone.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
+    const refS = Math.min(w, frameH), margin = refS * 0.02;
+    const model = buildingsBandModel({ entries: input.entries, width: w - 2 * margin, fs: refS * 0.0185, pal: { paper: "#ffffff" } });
+    if (!model) return frameH;
+    const stripH = model.h + 2 * margin, NS = "http://www.w3.org/2000/svg";
+    const strip = document.createElementNS(NS, "g");
+    strip.setAttribute("data-export-strip", "buildings");
+    strip.innerHTML = `<rect x="${vx}" y="${vy + frameH}" width="${w}" height="${stripH}" fill="#ffffff"/>${bandSvg(model, vx + margin, vy + frameH + margin)}`;
+    clone.appendChild(strip);
+    const total = frameH + stripH;
+    clone.setAttribute("viewBox", `${vx} ${vy} ${w} ${total}`);
+    clone.setAttribute("height", Math.round(total));
+    return total;
+  };
+
   const exportPNG = async () => {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (stitched cached tiles, or the dynamic /export fallback)
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …)
@@ -1040,13 +1071,15 @@ export function createExportSheet(ctx) {
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
     const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial, exportOverlays, true, exportVectorOverlays); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
-    const { clone, w, h } = built;
+    const { clone, w, h: frameH } = built;
+    let h = frameH;
     const { aerialDropped, overlaysDropped } = await inlineImages(clone); // embed the aerial + GIS layers so the raster includes them (warned loudly on the success path below — B735/B739)
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
     const lp = printSheetLayout({ paper: "letter", orient: "landscape", metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length });
-    restyleExportClone(clone, sheetFitScale(w, h, lp.plan.w, lp.plan.h));
+    restyleExportClone(clone, sheetFitScale(w, frameH, lp.plan.w, lp.plan.h));
+    h = addBuildingsStrip(clone, w, frameH);
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
     try {
@@ -1127,7 +1160,9 @@ export function createExportSheet(ctx) {
     // the SAME outer SVG coordinate system.
     const metricPairs = printMetricPairs();
     const swBars = printStormwaterBars();
-    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
+    // The Buildings table's band (null when the toggle is off or there are no buildings) — the SAME input every other
+    // caller of printSheetLayout passes, so the plan box this sheet is built on is the one the frame was sized for.
+    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride, buildings: buildingsBandInput(els, includeBuildingsTable) });
     // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
     // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
     // is identical regardless of the zoom the user was at when they hit print.
@@ -1139,10 +1174,11 @@ export function createExportSheet(ctx) {
        object — site elements included; the aerial, GIS, parcels, references and furniture stay page content. The preview
        never passes `annotate`, so it still shows everything. */
     let annotationSet = null;
+    let tableAsAnnotation = false; // the Buildings table left the page picture to become its own annotation
     let annotationPins = [];
     let annotationsKeptInPage = 0; // NEW-1 — annotations stacked behind page content stay in the picture (see annotationExtract)
     if (annotate) {
-      const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
+      const [{ extractMarkupAnnotations, domToTree }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
       const mctx = document.createElement("canvas").getContext("2d");
       const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
       const { descriptors, patterns, flattened, pinned, notes } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, els, f2p, measureText });
@@ -1161,7 +1197,33 @@ export function createExportSheet(ctx) {
       const a0 = f2p({ x: 0, y: 0 }), a1 = f2p({ x: 1, y: 0 });
       const unitsPerFt = Math.hypot(a1.x - a0.x, a1.y - a0.y);
       const ftPerPt = unitsPerFt > 0 && k > 0 ? 1 / (unitsPerFt * k) : null;
+      /* NEW-1 (2026-10-27) — SHEET FURNITURE AS ITS OWN ANNOTATIONS: the Buildings table, the scale bar and the north arrow.
+         Page content paints UNDER every annotation, so any of them left in the page picture can be painted over by a site
+         element's annotation (the owner's Buildings table lost "Building" off its third row) and none can be removed in
+         Bluebeam. Each becomes a Stamp — its own object to select, move or delete — appended LAST, so it also keeps the
+         top of the stack it has on the flattened sheet. The table sits in its own band off the plan (page units → points
+         with the page matrix, outside the plan window); the plates sit where the corner picker put them. */
+      const furnLift = [];
+      for (const fel of Array.from(built.clone.querySelectorAll("[data-furniture-kind]"))) {
+        const kind = fel.getAttribute("data-furniture-kind");
+        descriptors.push({ family: "sheet-furniture", id: kind, kind, tree: domToTree(fel, { measureText, root: built.clone }), meta: { subject: kind === "scale-bar" ? "Scale bar" : "North arrow" } });
+        furnLift.push({ el: fel, kind });
+      }
+      if (layout.buildings) {
+        descriptors.push({
+          family: "sheet-furniture", id: "buildings-table", kind: "buildings-table", tree: bandTree(layout.buildings.model, layout.buildings.x, layout.buildings.y),
+          M0: [pu, 0, 0, -pu, 0, pageHpt], frame: [0, 0, layout.page.wIn * 72, pageHpt], meta: { subject: "Buildings table" },
+        });
+      }
       annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString(), ftPerPt });
+      // LOUD-FAILURE: a plate is taken out of the page ONLY once its annotation exists — never a table or scale bar in neither place
+      const haveAnnot = (id) => annotationSet.annots.some((a) => a.family === "sheet-furniture" && a.id === id);
+      for (const { el, kind } of furnLift) {
+        if (haveAnnot(kind)) el.remove();
+        else annotationSet.degraded.push(`${kind === "scale-bar" ? "scale bar" : "north arrow"} stays in the page (it could not be written as its own annotation)`);
+      }
+      tableAsAnnotation = !!layout.buildings && haveAnnot("buildings-table");
+      if (layout.buildings && !tableAsAnnotation) annotationSet.degraded.push("the Buildings table stays in the page (it could not be written as its own annotation)");
       // LOUD-FAILURE: every object kept in the page, and why, rides the same warning list as any other simplification
       const WHY = { "under-reference": "a reference drawing shown above the plan covers it", "under-pinned": "it sits under something that is printed into the page", "under-page": "page content drawn after it covers it", straddle: "it and another object each sit partly on top of the other" };
       for (const pin of pinned) annotationSet.degraded.push(`${pin.name} is printed into the page, not editable: ${WHY[pin.why] || pin.why}${pin.by ? ` (${pin.by})` : ""}`);
@@ -1183,6 +1245,7 @@ export function createExportSheet(ctx) {
         ? "Concept site plan — planning-level estimates, not a survey. Detention & floodplain-mitigation volumes are screening figures — confirm with your engineer and the reviewing authority."
         : "Concept site plan — planning-level estimates, not a survey.",
       pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
+      buildingsAsAnnotation: tableAsAnnotation,
     });
     return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage, annotationPins };
   };
