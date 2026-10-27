@@ -119,6 +119,10 @@ const fmt = (o) => Object.entries(o).map(([k, v]) => `${k}:${(+v).toFixed(1)}`).
 async function cardChecks(page, L, root, { desktop = false } = {}) {
   await page.locator('[data-testid="food-dishes-skip-toggle"]').first().evaluate((b) => { if (b.getAttribute("aria-expanded") !== "true") b.click(); }).catch(() => {}); await sleep(400);
   const m = await page.evaluate(measure, root);
+  if (LIVE) { // merged ≠ live: name the build being judged IN THE SAME RUN as the assertions, and prove it carries this change
+    const ver = await page.evaluate(async () => { try { return await (await fetch("/version.json?cb=" + Date.now(), { cache: "no-store" })).json(); } catch (e) { return { error: String(e) }; } });
+    check(`${L} BUILD MARKER: the page being judged carries the section-label contract (≥ 1 [data-section-label]) — version ${JSON.stringify(ver).slice(0, 100)}`, m.labels.length >= 1, `${m.labels.length}`);
+  }
   const offenders = Object.entries(m.sizes).filter(([s]) => !SIZES.includes(+s));
   check(`${L} T1 every text on the card is one of the 4 token sizes ${JSON.stringify(SIZES)}`, offenders.length === 0, offenders.length ? offenders.map(([s, t]) => `${s}px: ${t.slice(0, 3).join("|")}`).join("; ") : `sizes seen: ${Object.keys(m.sizes).join(",")}`);
   check(`${L} T2 VACUITY: the card shows ≥ 4 section labels (What to order, Maybe, Skip, Visits)`, m.labels.length >= 4, m.labels.map((l) => l.text).join(" | "));
