@@ -453,7 +453,7 @@ try {
       const pane = document.querySelector('[data-testid="layer-pane"]');
       const left = pane.getBoundingClientRect().left;
       return [...pane.querySelectorAll('[data-testid^="layer-row-"]')].filter((r) => !r.getAttribute("data-testid").endsWith("-menu")).map((r) => {
-        const sp = r.querySelector("label > span:last-child") || r.querySelector("label span");
+        const sp = r.querySelector("label > span[title]") || r.querySelector("label > span");
         return { id: r.getAttribute("data-testid").replace("layer-row-", ""), x: Math.round((sp.getBoundingClientRect().left - left) * 10) / 10 };
       });
     });
@@ -507,12 +507,12 @@ try {
       await page.evaluate(() => localStorage.removeItem("planyr:contourInterval"));
       await page.click('[data-testid="layer-caret-contours"]');
       const plan = await page.getAttribute('[data-testid="layer-row-contours-menu"]', "data-plan");
-      ok(`${tag}: Contour Lines is OFF and its ▾ still offers Interval (and ⓘ)`, off.checked === false && /(^|,)interval(,|$)/.test(plan) && /info/.test(plan) && !/opacity/.test(plan), JSON.stringify({ off, plan }));
+      ok(`${tag}: Contour Lines is OFF and its ▾ offers the same parts as an ON row — Opacity, Interval, ⓘ (NEW-2)`, off.checked === false && plan === "opacity,interval,info", JSON.stringify({ off, plan }));
       const iv = await page.$('[data-testid="contour-interval"]');
       if (!iv) { ok(`${tag}: the off-row Interval select exists (the rest of this arm cannot run without it)`, false, plan); await page.close(); continue; }
       ok(`${tag}: the off-row Interval select shows the row's current value (${off.value})`, (await iv.evaluate((e) => e.value)) === String(parseFloat(off.value)), off.value);
       await page.selectOption('[data-testid="contour-interval"]', "5");
-      ok(`${tag}: changing Interval on an OFF row sticks and the row's value follows`, (await page.textContent('[data-testid="layer-value-contours"]')).trim() === "5′" && (await page.evaluate(() => localStorage.getItem("planyr:contourInterval"))) === "5");
+      ok(`${tag}: changing Interval on an OFF row sticks, the row's value follows, and the row stays OFF`, (await page.textContent('[data-testid="layer-value-contours"]')).trim() === "5′" && (await page.evaluate(() => localStorage.getItem("planyr:contourInterval"))) === "5" && !(await page.isChecked('[data-testid="layer-row-contours"] input[type="checkbox"]')), "");
       await page.check('[data-testid="layer-row-contours"] input[type="checkbox"]');
       const on = await page.getAttribute('[data-testid="layer-row-contours-menu"]', "data-plan");
       ok(`${tag}: turned ON it keeps the Interval and gains the drawing controls (known-good arm)`, /interval/.test(on) && /opacity/.test(on) && (await page.$eval('[data-testid="contour-interval"]', (e) => e.value)) === "5", on);
@@ -520,8 +520,8 @@ try {
       await page.close();
     }
   
-    // ── NEW-1 (B2436064 ×3): a hairline between the panes; the name sits one small gap after the checkbox + swatch slot ──
-    const GAP_TARGET_PX = 18; // checkbox right edge → name left edge; measured 27 before the tightening (planner card, Flood & Drainage)
+    // ── NEW-1 (B2436064 ×3): a hairline between the panes; the name sits ONE gap (SPACE.sm) after the checkbox on every row, on or off ──
+    const GAP_PX = 6; // SPACE.sm — checkbox right edge → name left edge, EXACTLY, on every row (it measured 27, then 18 with an empty reserved slot)
     for (const [surf, size, theme, vw, w] of [...ALIGN, ["planner", "phone-two-pane", "light", 380, 330], ["finder", "phone-two-pane", "dark", 380, 330]]) {
       const tag = `${surf} · ${size} · ${theme}`;
       const page = await open(`surface=${surf}&w=${w}&theme=${theme}&${HOUSTON}`, vw);
@@ -539,17 +539,18 @@ try {
         ok(`${tag}: the group dropdown layout has no divider (nothing sits side by side)`, !geo.div);
       }
       const keys = await visibleGroupKeys(page);
-      let worst = 0, rowsMeasured = 0, bad = [];
+      let worst = 0, rowsMeasured = 0, bad = [], chipBad = [], chips = 0;
       for (const k of keys) {
         await selectGroup(page, k);
         const gaps = await page.evaluate(() => [...document.querySelectorAll('[data-testid="layer-pane"] [data-testid^="layer-row-"]')].filter((r) => !r.getAttribute("data-testid").endsWith("-menu") && r.querySelector("label span[title]")).map((row) => {
           const cb = row.querySelector('input[type="checkbox"]').getBoundingClientRect(), nm = row.querySelector("label span[title]");
           const rg = document.createRange(); rg.selectNodeContents(nm.firstChild);
-          return { id: row.getAttribute("data-testid"), gap: Math.round((rg.getBoundingClientRect().left - cb.right) * 10) / 10 };
+          return { id: row.getAttribute("data-testid"), gap: Math.round((rg.getBoundingClientRect().left - cb.right) * 10) / 10, chip: !!row.querySelector("[data-swatch]"), checked: row.querySelector('input[type="checkbox"]').checked, chipAfterName: (() => { const c = row.querySelector("[data-swatch]"); return !c || c.getBoundingClientRect().left >= rg.getBoundingClientRect().right - 0.5; })() };
         }));
-        for (const g of gaps) { rowsMeasured++; worst = Math.max(worst, g.gap); if (g.gap > GAP_TARGET_PX + 0.5) bad.push(`${k}/${g.id} ${g.gap}`); }
+        for (const g of gaps) { rowsMeasured++; worst = Math.max(worst, g.gap); if (Math.abs(g.gap - GAP_PX) > 0.6) bad.push(`${k}/${g.id} ${g.gap}`); if (g.chip && (!g.checked || !g.chipAfterName)) chipBad.push(`${k}/${g.id}`); if (g.chip) chips++; }
       }
-      ok(`${tag}: checkbox → name distance is at most ${GAP_TARGET_PX} on every row (worst ${worst}, ${rowsMeasured} rows)`, rowsMeasured > 8 && bad.length === 0, bad.slice(0, 3).join(" | "));
+      ok(`${tag}: checkbox → name distance is exactly ${GAP_PX} on every row, on or off (worst ${worst}, ${rowsMeasured} rows)`, rowsMeasured > 8 && bad.length === 0, bad.slice(0, 3).join(" | "));
+      ok(`${tag}: a colour chip appears only on an ON row and only AFTER the name (${chips} chips)`, chipBad.length === 0, chipBad.slice(0, 3).join(" | "));
       await page.close();
     }
 
