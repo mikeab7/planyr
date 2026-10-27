@@ -22,6 +22,7 @@
 // hands the string in as `planSvg`.
 
 import { bulletBarSvg } from "./yieldBar.js";
+import { buildingsBandModel, bandSvg } from "./buildingsBand.js";
 
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const r2 = (n) => Number(Number(n).toFixed(2));
@@ -99,7 +100,7 @@ export function metricsRowsFor(pairsOrCount, bandW) {
   return Math.max(2, rows);
 }
 
-export function printSheetLayout({ paper = "letter", orient = "landscape", metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true, page: pageOverride = null } = {}) {
+export function printSheetLayout({ paper = "letter", orient = "landscape", metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true, page: pageOverride = null, buildings = null } = {}) {
   // NEW-1 (B1783056) — `pageOverride` (from pageSizeForFit) replaces the standard paper/orient
   // lookup with a page shaped to the picked frame; everything below only ever reads `page.w/h`,
   // so nothing else in this layout needs to know which source it came from.
@@ -123,7 +124,15 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", metri
   const metricRows = metricsRowsFor(metricsPairs || metricsCount, inner.w);
   const metricsH = includeMetrics ? 18 + metricRows * 17 + 12 + stormwaterBandH(stormwaterBars) : 0;
   const gap = 14;
-  const contentTop = inner.y + titleH + gap;
+  /* The BUILDINGS table's own band, between the title block and the plan (owner report 2026-10-27: it used to be a
+     corner plate inside the plan frame, where site geometry painted over it). `buildings` is { entries } from
+     buildingsBand.buildingEntries; null → no band and the geometry below is byte-identical to before. Every caller
+     that sizes the plan from this layout (the compose screen's frame aspect and explicit-scale math, the label
+     tier) must pass the SAME `buildings`, or the printed scale would not describe the plan box it was computed for. */
+  const BAND_PAD_X = 10, BAND_GAP = 8;
+  const bandModel = buildings && buildings.entries ? buildingsBandModel({ entries: buildings.entries, width: inner.w - 2 * BAND_PAD_X }) : null;
+  const bandBox = bandModel ? { x: inner.x + BAND_PAD_X, y: inner.y + titleH + BAND_GAP, w: bandModel.w, h: bandModel.h, model: bandModel } : null;
+  const contentTop = bandBox ? bandBox.y + bandBox.h + gap : inner.y + titleH + gap;
   const contentBot = includeMetrics ? inner.y + inner.h - metricsH - gap : inner.y + inner.h;
   const contentH = Math.max(0, contentBot - contentTop);
   // NEW-2 (B1804993) — the right-hand buildings table is gone; the plan always takes the
@@ -134,6 +143,7 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", metri
     inner,
     title: { x: inner.x, y: inner.y, w: inner.w, h: titleH },
     plan: { x: inner.x, y: contentTop, w: inner.w, h: contentH },
+    buildings: bandBox,
     metrics: includeMetrics ? { x: inner.x, y: contentBot + gap, w: inner.w, h: metricsH } : null,
   };
 }
@@ -213,6 +223,7 @@ export function buildPrintSheetSvg({
   stormwater = [],
   note = "",
   pal = {},
+  buildingsAsAnnotation = false,
 } = {}) {
   const L = layout || printSheetLayout({});
   const ink = pal.ink || "#26231e";
@@ -241,6 +252,10 @@ export function buildPrintSheetSvg({
   // plan frame + the nested plan SVG (caller-positioned)
   s += `<rect x="${r2(L.plan.x)}" y="${r2(L.plan.y)}" width="${r2(L.plan.w)}" height="${r2(L.plan.h)}" fill="none" stroke="${line}" stroke-width="0.75"/>`;
   s += planSvg;
+  /* The BUILDINGS table (its own band, off the drawing). In the editable PDF it is NOT part of the picture: the
+     caller emits it as its own annotation so Bluebeam can select, move or delete it (`buildingsAsAnnotation`) — the
+     band is still reserved either way, so the plan sits exactly where it does with the table printed. */
+  if (L.buildings && !buildingsAsAnnotation) s += bandSvg(L.buildings.model, L.buildings.x, L.buildings.y);
   // metrics band (+ the B862 stormwater required-vs-provided bar strip) — NEW-2: `L.metrics`
   // is null when the print menu's "Stats band" toggle is off, and the disclaimer note goes
   // with it (it is part of the band, not a separate thing the owner is trying to evade).
