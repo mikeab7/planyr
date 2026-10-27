@@ -212,6 +212,17 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-drag-pan.mjs
+      # Notes box BORDER move handle (B2426788, owner decision 2026-10-27). The striped grip is retired: a box is
+      # moved by grabbing its outline, PowerPoint / Bluebeam-style. Real mouse + stored-document reads: the ring
+      # (just outside / on / just inside each edge resolves to the move band with the move cursor; the middle does
+      # not), hover feedback, a border drag moves the box and a click only selects, a middle drag still pans, a
+      # resize handle keeps priority, a box with the caret is still movable by its edge, a two-box selection moves
+      # together, a picture box has the same handle. 31 ✗ on pre-fix main; known-good arms VOID the run. The touch
+      # twin uses Chromium touch emulation (WebKit cannot be installed on the runner). Reuses the preview server.
+      - name: Notes box border move handle (the outline moves a box; the middle still pans — B2426788)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-box-edge.mjs && node ui-audit/verify-notes-box-edge-touch.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at

@@ -396,6 +396,13 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   passed because a signed-out sandbox has nothing that re-renders mid-gesture. The check was right
   and its CONDITIONS were unreachable; `verify-notes-box-selection` now forces that re-render on
   every run.
+- **⛔ A BOX IS MOVED BY ITS BORDER — THE STRIPED GRIP IS RETIRED (B2426788, owner decision 2026-10-27, CLAUDE.md constraint #37).**
+  Four `.planyr-anchor-edge` strips (notesAnchorNode.js) straddle the outline — 5 px out, the line, 3 px in, inside the box's own padding so
+  no letter is covered — with the `move` cursor, an accent-coloured thickening on hover (an INSET shadow, no reflow), and a drag that
+  moves the box or the whole selection whether or not the caret is inside it. A click on the band only SELECTS (`focusFromMat`'s band
+  branch; the pointer capture retargets the `mousedown` to the box, so the node view flags the press with `data-edge-press`); the resize
+  handles paint above it and keep their spots; a drag from the MIDDLE of a box still pans. On touch a SELECTED box's band reaches further
+  outward only. Guards: the **verify-notes-box-edge** harness and its touch twin under `ui-audit/`; read carry-forward trap 48 before touching it.
 - **SELECT SEVERAL BOXES AND MOVE THEM TOGETHER (B421494, `lib/notesMarquee.js`).** A press on blank
   page already meant "place a box", so one gesture had to learn two meanings: the boundary is
   DISTANCE and it is decided at **mouse-UP** — deciding at mouse-down is impossible and deciding at

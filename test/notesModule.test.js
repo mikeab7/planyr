@@ -1321,12 +1321,12 @@ describe("the project a notebook belongs to", () => {
      * being grip-only was the owner's "dragging the note by its BODY does nothing at all,
      * silently" — with a 9x14px grip at zero opacity as the only alternative. The grip is now
      * decoration and takes no presses at all, which also retires instrument trap #9. */
-    expect(node, "the box body carries the drag").toMatch(/dom\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ immediate: false \}\)\)/);
-    /* ⛔ …AND THE GRIP STILL DOES TOO, unconditionally. The body stands down while the caret is
-     * inside the box (a press-and-travel there is somebody selecting a phrase), so without this
-     * the one box you are typing in would be the one box you cannot move. */
-    expect(node, "the grip drags too, and owns its press outright")
-      .toMatch(/grip\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ immediate: true \}\)\)/);
+    expect(node, "the box body carries the drag").toMatch(/dom\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ band: false \}\)\)/);
+    /* ⛔ …AND THE BORDER BAND DOES TOO, caret or not (B2426788 — it replaced the striped grip). The body
+     * stands down while the caret is inside the box (a press-and-travel there is somebody selecting
+     * a phrase), so without this the one box you are typing in would be the one box you cannot move. */
+    expect(node, "the border band drags too, caret or not")
+      .toMatch(/edge\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ band: true \}\)\)/);
     const print = read(NOTES, "lib", "notesPrint.js");
     /* ⛔ MATCHED ON THE SHARED HANDLE CLASS (NEW-PICTURE-CANVAS). There are eight resize handles
      * now, and pinning the exact selector LIST would mean this guard has to be edited every time
@@ -1334,7 +1334,7 @@ describe("the project a notebook belongs to", () => {
      * that catches anything. `.planyr-anchor-h` is the class they all carry, so a ninth handle is
      * covered by construction and cannot start printing by omission. */
     expect(print, "no chrome on paper").toMatch(/\.note-body \.planyr-anchor-h \{ display: none; \}/);
-    expect(print, "…and the grip still does not print either").toMatch(/\.note-body \.planyr-anchor-grip/);
+    expect(print, "…and the border band does not print either").toMatch(/\.note-body \.planyr-anchor-edge/);
     /* ⛔ AND A PICTURE BOX PRINTS AT THE SIZE IT WAS DRAGGED TO (PDF-PARITY). The height rides the
      * node's own style attribute exactly as the position does, but BOTH DOM shapes have to be
      * named here: the node view builds a figure wrapping the img, while `renderHTML` — which is

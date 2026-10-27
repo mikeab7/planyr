@@ -266,10 +266,10 @@ ${listMarkerCssRules(".note-body")}
    across so a narrowed block wraps its words at the same place on paper. The grip is hidden
    rather than removed from the layout for exactly that reason. */
 .note-body .planyr-anchor { position: absolute; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; break-inside: avoid; }
-/* No chrome on paper: the grab handle and every resize handle are ways to CHANGE the box, and
+/* No chrome on paper: the border move handle and every resize handle are ways to CHANGE the box, and
    none of them is part of what it says. Matched on the SHARED class rather than on each of the
    eight, so a handle added later cannot start printing by omission. */
-.note-body .planyr-anchor-grip, .note-body .planyr-anchor-del, .note-body .planyr-anchor-size, .note-body .planyr-anchor-h { display: none; }
+.note-body .planyr-anchor-edge, .note-body .planyr-anchor-del, .note-body .planyr-anchor-size, .note-body .planyr-anchor-h { display: none; }
 /* ⛔ A BOX HOLDING A PICTURE PRINTS AT THE SIZE IT WAS DRAGGED TO (PDF-PARITY). The height rides
    the node's own style attribute, exactly as the position does, so paper reads it for free — but
    the padding and the image fit have to be mirrored here or the picture prints inset inside its

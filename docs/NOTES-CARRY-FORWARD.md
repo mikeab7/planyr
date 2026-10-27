@@ -85,6 +85,13 @@ Two more found since, each worth its own line because each returned a confident 
    > the two behave the same on a press that travels. What is unchanged, and is why this stays:
    > the grip still owns its own press, still sits at the box's top-left, and still is not content
    > — so a fixed offset from the corner is still not a way to reach a word.
+   > **⛔ AND AMENDED AGAIN 2026-10-27 (B2426788) — THE GRIP IS GONE, AND THE SAME TRAP HAS MOVED TO THE WHOLE
+   > OUTLINE.** `.planyr-anchor-grip` no longer exists; the box's BORDER band (four `.planyr-anchor-edge`
+   > strips, 5 px outside the line · the line · 3 px inside it) is the move handle. A harness aiming at
+   > `box.x + 10, box.y + 10` or at the last pixel of a box is now pressing the band, which selects a box
+   > on a click and never enters it. Aim at the box's content (the centre of a real word) for a caret, and
+   > at `box.x + 0.3 × width, box.y + 0.5` for the top edge. The north strip's own centre is a picture
+   > box's north resize handle — which is why every harness here grabs the edge at 30 %, not at the middle.
 
 10. **A DRAG THAT LEAVES ITS OWN ELEMENT STOPS BEING DELIVERED TO IT (2026-09-08).** A body drag
    wired with `pointerdown` + `pointermove` on the box, capturing the pointer only once a movement
@@ -596,6 +603,20 @@ be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 ---
 
 47. **⛔ A CURSOR READ UNDER A DRAG IS READ AT TWO PLACES, AND A BOX THAT FOLLOWS THE POINTER HIDES ONE OF THEM (B2426784, 2026-10-22).** `getComputedStyle(elementFromPoint(x, y)).cursor` is the cursor the browser paints — but while a box is being dragged by its grip the box moves WITH the pointer, so the element under it is the dragged box's own grip and reads `grabbing` whatever the page's cursor rules do. A harness that read only there reported "the grip drag is fine" on a tree where the cursor reverted the moment the pointer outran the box. **Read twice: at a point the dragged thing has NOT followed to (the toolbar is the cheap one — it sets its own pointer, so a pinned cursor is the only way it reads `grabbing`), and, for a captured pointer, on the capture target itself** (`document.querySelectorAll('[data-testid="note-anchor"]')[n]` — Chromium paints the captured element's cursor). Measured with the second read: an EDITING box's grip drag read `text` on the box (an I-beam under the hand) before the fix and `grabbing` after. Also measured the same pass, so nobody re-hunts it: **a single box's BODY is not a move surface in any state** — press 1 selects, press 2 ENTERS it (`data-editing` flips on the `mousedown`, so the body drag stands down; a selected picture box does not move either), and a drag from an unselected body pans. The only bodies that drag are members of a multi-selection (`beginGroupDrag`), which is why `data-movable` exists. And two harness traps: `vite preview` serves a **cached directory listing** (rebuild into the same `--outDir` and the running server still serves the old build — restart it, and compare `/version.json`), and `{ type: "text", text: "" }` in a seeded document is an invalid node that blanks the WHOLE page with no error (an empty paragraph has no `content`).
+48. **⛔ A BORDER BAND IS A RING, AND POINTER CAPTURE RETARGETS THE `mousedown` THAT FOLLOWS ITS PRESS (B2426788, 2026-10-27).**
+   Three things to know before touching `.planyr-anchor-edge` (notesAnchorNode.js) or the band branch in `focusFromMat`.
+   (a) **The band takes the pointer at the press (`setPointerCapture` on the BOX), and Chromium delivers the compat `mousedown` to
+   the capture target — the box, not the strip.** `focusFromMat` therefore cannot ask `e.target.closest(".planyr-anchor-edge")`
+   alone; the node view sets `data-edge-press="1"` on the box for exactly the length of the press and the branch reads both. A
+   probe that checks only the target reports "a click on the border selects nothing" about working code.
+   (b) **A press on the band must not run `beginGroupDrag` too** — the node view already moves the whole selection from the DOM
+   (`[data-selected="1"]`), so two group drags would apply the delta twice. The band branch returns before it.
+   (c) **Its inside depth is bounded by the box's own padding** (3 px top/bottom, 6 right, 16 left) so it never covers a letter;
+   widening it (a finger-sized band on touch reaches only OUTWARD, and only on a SELECTED box) is the safe direction, deepening it
+   is not. The resize handles paint above the strips (z-index 2 vs 1) — a handle keeps its press, its cursor and its resize.
+   Guards: `ui-audit/verify-notes-box-edge.mjs` (mouse; 49 rows, 31 ✗ on pre-fix main, known-good arms for the pan and the handle),
+   `ui-audit/verify-notes-box-edge-touch.mjs` (Chromium touch emulation — WebKit cannot be installed on this host).
+
 
 ## 2 · The fixture that finds real bugs
 
@@ -1521,13 +1542,14 @@ was, Shift or no Shift:
 | travels, no modifier | **pan** — the mat's own `scrollLeft`/`scrollTop`, one-to-one with the pointer |
 | travels, Shift held | **select** — the rubber band; every box it touches, replacing the selection |
 | starts on one of the four sheet edge grips | **resize the page** — the grip's `pointerdown` calls `preventDefault()`, which suppresses the compat `mousedown`, so `focusFromMat` never runs at all |
+| starts on a BOX'S BORDER BAND (B2426788) | **move the box** (or the whole selection) — a click only SELECTS it; the band moves a box whether or not it has the caret. The middle of a box keeps every rule above |
 
 **⛔ AND A FIFTH ROW SINCE 2026-10-06 (NEW-1 / B2156912): a plain mouse press that starts on a BOX'S CONTENT
 (table cell / header / border, picture, text) of a box that is neither selected nor being edited is DEFERRED —
 the capture-phase effect above the touch pan in `NoteEditor.jsx` takes the `pointerdown`/`mousedown` before
 ProseMirror, the box body drag and `focusFromMat` can see them, so nothing is selected on the press. Travels →
 the same pan as above (followed from the press); does not travel → the press is REPLAYED into `focusFromMat`
-unchanged (a plain click is exactly what it was). It does NOT claim: the grip / resize handles / connect dot /
+unchanged (a plain click is exactly what it was). It does NOT claim: the box's border band / resize handles / connect dot /
 column-resize handle / page grips, controls and links, any modifier, middle button, Space, click-to-connect,
 touch, a selected box (its press is the click-in; a group still drags) or the box being edited (text
 selection). Guard: `ui-audit/verify-notes-drag-pan.mjs` (required `build` step; 21 ✗ on pre-fix main).

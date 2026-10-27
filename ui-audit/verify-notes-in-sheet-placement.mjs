@@ -630,7 +630,7 @@ await section("14 · drag from a selected box's connect dot onto another box dra
 });
 
 /* ═══ 15 · MOVING A CONNECTED BOX — THE ARROW'S ENDPOINT FOLLOWS IT ════════════════════════════ */
-await section("15 · dragging a connected box by its grip moves the arrow's endpoint with it", async (page) => {
+await section("15 · dragging a connected box by its border moves the arrow's endpoint with it", async (page) => {
   const body = await bodyRect(page);
   await dbl(page, body.left + 30, body.top + 30, "box A"); await page.keyboard.type("Acquisition");
   await pacedWait(page, 900);
@@ -647,8 +647,10 @@ await section("15 · dragging a connected box by its grip moves the arrow's endp
   ok("seed: one arrow exists before the move", (await arrowLines(page)).length === 1);
 
   await selectBox(page, b);
-  const grip = await chromeRect(page, b.id, ".planyr-anchor-grip");
-  ok("the grip exists on the selected box", !!grip);
+  /* B2426788: the striped grip is retired — the box is moved by its BORDER (top edge, 30% across, on the line). */
+  const edgeBox = await chromeRect(page, b.id, "");
+  const grip = edgeBox ? { cx: edgeBox.left + edgeBox.width * 0.3, cy: edgeBox.top + 0.5 } : null;
+  ok("the border band exists on the selected box", !!grip);
   if (grip) {
     const DX = 0; const DY = 220;
     await page.mouse.move(grip.cx, grip.cy);
