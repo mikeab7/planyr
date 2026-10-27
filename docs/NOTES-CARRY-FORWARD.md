@@ -614,6 +614,10 @@ be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
    (c) **Its inside depth is bounded by the box's own padding** (3 px top/bottom, 6 right, 16 left) so it never covers a letter;
    widening it (a finger-sized band on touch reaches only OUTWARD, and only on a SELECTED box) is the safe direction, deepening it
    is not. The resize handles paint above the strips (z-index 2 vs 1) — a handle keeps its press, its cursor and its resize.
+   (d) **A SEEDED FIXTURE NEVER SHRINKS, AND A BOX PLACED BY A REAL DOUBLE-CLICK ALWAYS DOES (`fit`, B2248944).** The east-handle row
+   was green on every local run and failed live (+114 for a 50 pull) until the boxes were built by real presses (`DBL=1`); the cause
+   (B2458960, a shrunk box jumps to ~160 on the first move of a handle drag) is PRE-EXISTING and identical on the pre-change build.
+   Same species as trap 14: a fixture only varies the dimensions you varied — here, "has this box ever been clicked out of".
    Guards: `ui-audit/verify-notes-box-edge.mjs` (mouse; 49 rows, 31 ✗ on pre-fix main, known-good arms for the pan and the handle),
    `ui-audit/verify-notes-box-edge-touch.mjs` (Chromium touch emulation — WebKit cannot be installed on this host).
 
