@@ -83,6 +83,11 @@ const { page } = s;
 let exit = 0;
 try {
   await assertMeasurable(page, "verify-records-header-row");
+  if (live) { // same boot dance as verify-comps-records-search: WebKit's cache-busting redirect can interrupt the first load
+    await page.goto(base + "/#/site", { waitUntil: "domcontentloaded" }).catch(() => {});
+    await page.waitForLoadState("domcontentloaded");
+    await page.reload({ waitUntil: "domcontentloaded" });
+  }
   console.log("BUILD", s.build, live ? "(signed in, live)" : `(local ${base}, signed out)`, phone ? `WebKit iPhone 15 ${landscape ? "landscape" : "portrait"}` : "Chromium");
   for (const v of WIDTHS) {
     if (v) await page.setViewportSize({ width: v.w, height: 900 });
