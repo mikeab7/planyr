@@ -630,6 +630,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
   const activeOverlayIdRef = useRef(null); // NEW-2 (B848496): read by the once-bound click handler, to deselect on a background click
   const selectedRef = useRef([]);
+  /* B2451472 — SELECTION EPOCH. Bumped every time the selection is dropped (`clearSel`, returning to the map). A lot lookup
+   * (`handleClick`, `selectParcelAt`) is async and captures the epoch it started in; when it lands in a LATER epoch the
+   * selection was cleared meanwhile, so it must not re-add the lot (or toast about it). The ✕ hid this — a click on it
+   * outlasts the lookup — and Escape, being instant, exposed it: measured live, 5 of 6 Escapes brought a lot back. */
+  const selectEpochRef = useRef(0);
   const draggingRef = useRef(false);
   // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
   // (or a health dot flipping) never re-binds a Leaflet listener.
@@ -2393,7 +2398,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      existing "clears a committed selection on return" contract above. */
   useEffect(() => {
     setSelectMode(false); setBackupNotice(null); setCachedNotice(null);
-    if (visible) { clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
+    if (visible) { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -3462,6 +3467,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const snapshotHitAt = (lng, lat) => snapshotHitAtLib(lng, lat, SNAPSHOT_COUNTIES);
 
   const handleClick = async (latlng, ack = null) => {
+    const epoch = selectEpochRef.current; // B2451472 — a clear while this lookup is in flight abandons it (see selectEpochRef)
+    const cleared = () => epoch !== selectEpochRef.current;
     await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
@@ -3527,6 +3534,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         skipped: () => skippedCandidates(latlng, [opt && opt.county]),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
+      if (cleared()) return; // B2451472 — cleared (Escape / ✕) while the lookup ran: nothing to add, nothing to say
       lastIdentifyRef.current = { at: [latlng.lat, latlng.lng], routed: candidateCountiesForPoint(latlng.lat, latlng.lng).map((k) => ({ key: k, url: !!layerUrlsRef.current[k], open: isSourceOpen(k) })), primary: candidates.map((c) => c.county), queried: res.queried.map((c) => c.county), via: res.via, hits: res.hits.map((h) => h.county), silent: res.silent };
       if (!res.hits.length) {
         // Live returned nothing. If the optimistic highlight came from a loaded Drive snapshot
@@ -3550,6 +3558,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * path already uses — regardless of what's currently painted on the map. */
         if (res.responded === 0) {
           const cached = await snapshotHitAt(latlng.lng, latlng.lat);
+          if (cleared()) return;
           if (cached) {
             const added = addParcelHit(cached, latlng);
             if (added) {
@@ -3611,6 +3620,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
+      if (cleared()) return;
       failUnavailable(humanizeError(e), latlng, () => handleClick(latlng)); // NEW-4 — a thrown lookup is an outage too
     } finally {
       stopSlow(); setLookupNote("");
@@ -3652,7 +3662,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const selectParcelAt = async (latlng, label, tok, noSnap = false) => {
     // B545: when called from a search, `tok` is that search's generation; a newer search makes
     // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
-    const live = () => tok == null || tok === addrTokRef.current;
+    const epoch = selectEpochRef.current; // B2451472 — a clear while the lookup is in flight supersedes it too
+    const live = () => (tok == null || tok === addrTokRef.current) && epoch === selectEpochRef.current;
     await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2)
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     const nearSources = neighbourCandidates(latlng); // NEW-1 (Memphis line band)
@@ -3810,7 +3821,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     try { await selectParcelAt(at, label, null, true); } finally { stopSlow(); setLookupNote(""); setBusy(false); }
   };
 
-  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
+  const clearSel = () => { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
 
   /* NEW-1 (2026-09-24) — a decide-bar verb that finishes WITHOUT leaving the map (Log a comp, Add a
    * note) must exit select mode ITSELF, not just empty the selection. "Plan this site" gets that for

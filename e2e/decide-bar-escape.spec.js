@@ -21,14 +21,19 @@ const summary = (page) => page.evaluate(() => (document.querySelector('[data-tes
 const selectedCount = (page) => page.evaluate(() => (window.__mapSelectedParcels ? window.__mapSelectedParcels().length : -1));
 const bar = (page) => page.getByTestId("map-decide-summary");
 
+// Lot B's answer can be held back (ms) so a lookup is still in flight when the selection is cleared.
+let holdLotBMs = 0;
+
 async function openMap(page) {
-  await page.route(/\/(MapServer|FeatureServer)(\/|\?|$)/i, (route) => {
+  holdLotBMs = 0;
+  await page.route(/\/(MapServer|FeatureServer)(\/|\?|$)/i, async (route) => {
     const req = route.request();
     const u = decodeURIComponent(req.url() + " " + (req.postData() || ""));
     if (!/\/query/.test(u) || !/esriGeometryPoint/.test(u)) return;
     const m = u.match(/"x":\s*(-?[\d.]+),\s*"y":\s*(-?[\d.]+)/);
     const lng = m ? +m[1] : NaN, lat = m ? +m[2] : NaN;
     const features = /scgis\.shelbycountytn\.gov/.test(u) ? [LOT_A, LOT_B].filter((f) => inRing(f, lng, lat)) : [];
+    if (holdLotBMs && features.some((f) => f === LOT_B)) await new Promise((r) => setTimeout(r, holdLotBMs));
     route.fulfill({ contentType: "application/json", body: JSON.stringify({ spatialReference: { wkid: 4326 }, fields: [], features }) });
   });
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
@@ -137,4 +142,23 @@ test.describe("Escape clears the decide bar like its ✕", () => {
     expect(await selectedCount(page)).toBe(0);
     expect(errors).toEqual([]);
   });
+
+  // Found live (V1894976): Escape is instant, so it can land while a lot lookup is still in flight; the late answer used to
+  // re-add the lot the person had just cleared (5 of 6 Escapes). Both ways of clearing must abandon an in-flight lookup.
+  for (const [how, clear] of [
+    ["Escape", (page) => page.keyboard.press("Escape")],
+    ["the ✕", (page) => page.getByTestId("map-decide-clear").click()],
+  ]) {
+    test(`${how} while a second lot's lookup is still in flight: the late answer does NOT bring the selection back`, async ({ page }) => {
+      await openMap(page);
+      await selectOne(page);
+      holdLotBMs = 2500;
+      await clickLot(page, 35.03, -89.944); // lot B: its answer arrives 2.5 s later
+      await clear(page);
+      await expect(bar(page)).toHaveCount(0);
+      await page.waitForTimeout(4000); // well past the held answer
+      expect(await selectedCount(page)).toBe(0);
+      await expect(bar(page)).toHaveCount(0);
+    });
+  }
 });
