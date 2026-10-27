@@ -11,7 +11,7 @@ import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
 import { selectParcelsHintFor } from "./lib/selectParcelsHint.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
-import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
+import { decideTargetOf, escapeClearsDecideBar, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, snapshotHitAt as snapshotHitAtLib, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
@@ -3840,6 +3840,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // NEW-1 — leaving the decide bar without answering it. Never destructive: a pin is a point the
   // user marked, nothing has been written anywhere yet.
   const clearDecidePin = () => setDroppedPin(null);
+  /* The decide bar's ✕ AND its Escape key (B2451472): clears whichever ground the bar is about. The ✕ keeps the
+   * selection-clearing contract of `clearSel()` — NOT `finishGroundAction` — so clearing to re-pick stays in
+   * select mode (test/decideBarDismiss). `decideTarget` is the per-render value, defined further down. */
+  const clearDecide = () => { if (decideTargetOf({ selectedCount: selectedRef.current.length, hasPin: !!droppedPin }) === "parcels") clearSel(); else clearDecidePin(); };
 
   /* NEW-4 — THE FALLBACK. Start a plan with no parcel, LOCATED at `at` (or wherever the map is
    * looking), so the owner can draw the boundary himself and still get the aerial, the flood
@@ -4298,6 +4302,40 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [decideTarget, selected, droppedPin, lastVerb]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* B2451472 — ESCAPE DOES WHAT THE BAR'S ✕ DOES: `clearDecide` is the ONE clearing path (the ✕ calls the same
+   * function), so every selected parcel — or the dropped pin — goes, with the outline, the acreage chip and the
+   * bar. The rule for WHEN is the pure `escapeClearsDecideBar`; this listener only reads the live facts.
+   * One listener for the component's life (a ref carries the facts, so no re-subscribe per render and none left
+   * behind on unmount). It is registered at mount, so it runs BEFORE any menu's own Escape listener of the same
+   * keypress — which is why an open Record info menu is read from the ref (still open) and left alone: the
+   * first Escape closes only the menu, the next one clears. The finder stays mounted but hidden behind an open
+   * project / another workspace, so it also demands `visible && isActive`. */
+  const escapeFactsRef = useRef(null);
+  escapeFactsRef.current = {
+    decideTarget,
+    mapShown: !!(visible && isActive),
+    ownedElsewhere: !!(
+      recordMenuOpen || statusMenu || compMenu || dateEditor || locateNotice || editingNote || renaming ||
+      calibration || activeOverlayId || clickableOverlayId || placingCompPin || pinDecideArmed
+    ),
+    clear: clearDecide,
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const f = escapeFactsRef.current;
+      if (!f) return;
+      const ae = document.activeElement;
+      const typing = isTextControl(ae) || (!!ae && PICKER_TAGS.includes(ae.tagName));
+      // A modal dialog (any surface's) keeps its own Escape.
+      const modalOpen = !!document.querySelector('[aria-modal="true"]');
+      if (!escapeClearsDecideBar({ decideTarget: f.decideTarget, mapShown: f.mapShown, typing, ownedElsewhere: f.ownedElsewhere || modalOpen })) return;
+      f.clear();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
 
   /* B427410 — the `field` style object that used to live here dressed ONE control: the Imagery
@@ -4874,7 +4912,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   : "Pin dropped"}
               </span>
               <button
-                onClick={() => { if (decideTarget === "parcels") clearSel(); else clearDecidePin(); }}
+                onClick={clearDecide}
                 title={decideTarget === "parcels" ? "Clear selection" : "Remove the pin"}
                 data-testid="map-decide-clear"
                 style={{
