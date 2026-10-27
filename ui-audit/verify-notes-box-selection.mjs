@@ -74,7 +74,7 @@ const visibleControls = (page, idx = 0) => page.evaluate((i) => {
   const el = [...document.querySelectorAll('[data-testid="note-anchor"]')][i];
   if (!el) return null;
   const seen = [];
-  for (const id of ["note-anchor-grip", "note-anchor-delete", "note-anchor-size"]) {
+  for (const id of ["note-anchor-delete", "note-anchor-size"]) {   // B2426788: the border band draws nothing, so it is never "visible chrome"
     const n = el.querySelector(`[data-testid="${id}"]`);
     if (n && parseFloat(getComputedStyle(n).opacity) > 0.05) seen.push(id);
   }
@@ -109,6 +109,10 @@ const handleOf = async (page, idx, which) => {
   const n = el?.querySelector(`[data-testid="${w}"]`);
   if (!n) return null;
     const r = n.getBoundingClientRect();
+    if (w === "note-anchor-edge") {   // B2426788: the first strip is the whole top edge — grab it 30% across, on the line
+      const b = el.getBoundingClientRect();
+      return { x: Math.round(b.left + b.width * 0.3), y: Math.round(b.top + 0.5) };
+    }
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
   }, [idx, which]);
 };
@@ -193,28 +197,24 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   const c0 = await centreOf(page, 0);
   await page.mouse.move(c0.x, c0.y);          // HOVER only — no press
   await pacedWait(page, 500);
-  /* ⛔ AMENDED — the grip is a deliberate HOVER affordance since B1370544 ("the grip is a 12×20
-   * affordance visible on hover… a box you have just typed into must still be movable without
-   * pressing Escape first"), unconditional on selection (`.planyr-anchor:hover .planyr-anchor-grip`
-   * carries no `[data-selected]` qualifier). So "hovering reveals nothing at all" was true only
-   * before that feature shipped; the real, current, documented invariant is narrower: hovering an
-   * UNSELECTED box reveals the grip alone, never the resize/delete handles (`.planyr-anchor-h` IS
-   * gated on `[data-selected="1"]`). */
+  /* ⛔ AMENDED AGAIN (B2426788, 2026-10-27) — the striped hover grip (B1370544) is RETIRED: the box's BORDER is the move
+   * handle now and draws nothing off hover, so hovering the BODY of an unselected box reveals nothing at all — not the
+   * resize / delete handles either (`.planyr-anchor-h` is gated on `[data-selected="1"]`). */
   const hoverShown = await visibleControls(page);
-  ok(`${label} · ⛔ HOVERING AN UNSELECTED BOX REVEALS ONLY THE DRAG GRIP, NOTHING ELSE`,
-    hoverShown.length === 1 && hoverShown[0] === "note-anchor-grip", JSON.stringify(hoverShown));
+  ok(`${label} · ⛔ HOVERING THE BODY OF AN UNSELECTED BOX REVEALS NOTHING (the border band draws nothing off hover — B2426788)`,
+    hoverShown.length === 0, JSON.stringify(hoverShown));
   ok(`${label} · …and hovering does not select it either`, !(await renderedBoxes(page))[0].selected);
 
   /* ═══ ATTACK 2 — A CLICK SELECTS, AND SELECTION IS VISIBLE (NEW-1) ════════════════════════ */
   await page.mouse.click(c0.x, c0.y);
   await pacedWait(page, 400);
   ok(`${label} · ⛔ CLICKING A BOX SELECTS IT`, (await renderedBoxes(page))[0].selected);
-  /* ⛔ AMENDED (B539651): TWO controls, not three — the delete × is gone. *"the delete option
+  /* ⛔ AMENDED (B539651): ONE visible control now (B2426788 retired the grip; B539651 had removed the delete ×). *"the delete option
    * shouldn't just be shown, like, anytime I click on the box… I should only be able to use the
    * keystroke to delete or a right click and then delete option."* So this now asserts BOTH
    * halves: the non-destructive controls appear, and the destructive one does NOT. */
   const shown = await visibleControls(page);
-  ok(`${label} · …and NOW the controls are there`, shown.length === 2, JSON.stringify(shown));
+  ok(`${label} · …and NOW the controls are there (the east resize handle; the move handle is the invisible border band — B2426788)`, shown.length === 1 && shown[0] === "note-anchor-size", JSON.stringify(shown));
   ok(`${label} · ⛔ …and NOTHING destructive is among them`, !shown.some((c) => /delete/.test(c)), JSON.stringify(shown));
 
   /* ═══ ATTACK 3 — SELECTED, DELETE REMOVES IT; UNDO BRINGS IT BACK ═════════════════════════ */
@@ -264,7 +264,7 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   await seed(page, ONE);
   await page.mouse.click((await centreOf(page, 0)).x, (await centreOf(page, 0)).y);
   await pacedWait(page, 400);
-  await dragHandle(page, 0, "note-anchor-grip", 120, 70);
+  await dragHandle(page, 0, "note-anchor-edge", 120, 70);   // B2426788: the border is the move handle
   const movedTo = (await storedBoxes(page))[0];
   ok(`${label} · the box really moved first`, movedTo.x !== 60 || movedTo.y !== 120, JSON.stringify(movedTo));
   await dragHandle(page, 0, "note-anchor-size", 90, 0);
@@ -316,13 +316,8 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   await page.keyboard.press("Escape");
   await pacedWait(page, 400);
   ok(`${label} · ⛔ ESCAPE AGAIN DESELECTS`, !(await renderedBoxes(page))[0].selected);
-  /* ⛔ THE MOUSE MUST MOVE AWAY FIRST — the grip is a HOVER affordance since B1370544 ("the grip is
-   * a 12×20 affordance visible on hover"), independent of selection by design (`.planyr-anchor:hover
-   * .planyr-anchor-grip` in EditorStyles). The pointer is still resting on the box from the two
-   * clicks above, so checking `visibleControls` without moving away first was asserting a stale
-   * invariant (no controls at all once deselected) against a real, later, intentional feature (a
-   * deselected-but-hovered box still shows its grip) — a false failure unrelated to this box's
-   * selection state at all. */
+  /* ⛔ THE MOUSE MOVES AWAY FIRST anyway: the pointer is still resting on the box from the two clicks above, and a
+   * hovered box is allowed to show hover feedback (the border band's accent outline, B2426788). */
   await page.mouse.move(5, 5);
   await pacedWait(page, 200);
   ok(`${label} · …and the controls went away with the selection`, (await visibleControls(page)).length === 0);

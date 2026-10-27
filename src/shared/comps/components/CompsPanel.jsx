@@ -1249,7 +1249,7 @@ export default function CompsPanel({
                 (MapFinder.jsx's RailTab — see its own comment for why "Records" rather than the
                 full "Site record"); this is the tab's own content header, so it must read the
                 same word as the tab that opens it. */}
-            <div style={{ padding: "10px 14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div data-records-header style={{ padding: "10px 14px 0", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "6px 8px" }}>
               <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Records</span>
               {/* B849232/NEW-1 — the paste-grid, not the map pin tool, is the everyday way in now:
                   Michael enters comps in batches from broker emails, most of which don't start
@@ -1261,9 +1261,12 @@ export default function CompsPanel({
                   action and competed with the map's own comp-placement entry point for the same
                   job. This button's real job is bulk paste from a broker email or a spreadsheet
                   block, which "Paste comps" says outright. */}
-              <span style={{ display: "flex", gap: 6, flex: "none" }}>
+              {/* B2450464 — the three actions are wider than the narrowest rail, so the group wraps: it
+                    sits beside the label while they fit, else drops under it, and the buttons
+                    themselves wrap among each other; each label stays on one line, never cut. */}
+              <span style={{ display: "flex", flexWrap: "wrap", gap: 6, minWidth: 0 }}>
                 <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet"
-                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
                   ＋ Paste comps
                 </button>
                 {/* B849233/NEW-2 — the ONLY door into the draft staging table; picking a file
@@ -1271,7 +1274,7 @@ export default function CompsPanel({
                     .kmz alongside .kml (a Google Earth "My Places" export, and Planyr's own
                     export, are both .kmz far more often than bare .kml). */}
                 <label title="Import a Google My Maps export"
-                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
                   ⤒ Import (KML/KMZ)
                   <input type="file" accept=".kml,.kmz" style={{ display: "none" }} disabled={kmlImporting}
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleKmlFile(f); }} />
@@ -1282,7 +1285,7 @@ export default function CompsPanel({
                     already use; the plan then resolves to a site on its own once it has a
                     location (see that module's header) — nothing else to do here. */}
                 <button onClick={() => startUploadRef?.current?.()} title="Upload a broker flyer or park plan"
-                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
                   ＋ Site plan
                 </button>
               </span>

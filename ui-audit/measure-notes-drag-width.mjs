@@ -154,12 +154,12 @@ const stopSampler = () => page.evaluate(() => {
  * animation frame, which is the only clock that can see the defect.
  */
 async function dragAndWatch({ dx, dy }) {
-  await page.locator(".planyr-anchor").first().click();      // stage 1: select, revealing the grip
+  await page.locator(".planyr-anchor").first().click();      // stage 1: select the box
   await pacedWait(page, 350);
-  const grip = page.locator('[data-testid="note-anchor-grip"]').first();
-  if (!(await grip.count())) return null;
-  const g = await grip.boundingBox();
-  if (!g) return null;
+  /* B2426788: the box is moved by its BORDER now (the striped grip is gone) — grab the top edge, 30% across. */
+  const bb = await page.locator(".planyr-anchor").first().boundingBox();
+  if (!bb) return null;
+  const g = { x: bb.x + bb.width * 0.3 - 1, y: bb.y - 1, width: 2, height: 2 };
 
   const before = await readBox();
   const cx = g.x + g.width / 2;

@@ -403,7 +403,7 @@ async function sweepBoxes(page, label) {
   const buried = await page.evaluate(() => {
     const out = [];
     for (const el of document.querySelectorAll('[data-testid="note-anchor"]')) {
-      for (const id of ["note-anchor-grip", "note-anchor-delete", "note-anchor-size"]) {
+      for (const id of ["note-anchor-edge", "note-anchor-delete", "note-anchor-size"]) {
         const n = el.querySelector(`[data-testid="${id}"]`);
         if (!n) { out.push({ id, why: "missing" }); continue; }
         const r = n.getBoundingClientRect();
