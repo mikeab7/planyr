@@ -114,7 +114,7 @@ async function openLive(phone, mode) {
   return { initScripts, desktop };
 }
 
-export async function open(browser, phone, mode) {
+export async function open(browser, phone, mode, fixtureOpts = {}) {
   if (LIVE) {
     const { initScripts, desktop } = await openLive(phone, mode);
     const s = await openSignedIn({ base: BASE, engine: browser.browserType().name() === "webkit" ? "webkit" : "chromium", device: desktop ? null : phone, viewport: { width: 1280, height: 800 }, initScripts });
@@ -133,7 +133,7 @@ export async function open(browser, phone, mode) {
   const ctx = await browser.newContext(desktop ? { viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true } : { ...devices[phone], ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
   page.setDefaultTimeout(5000);
-  const state = makeFixture({ aburi: true });
+  const state = makeFixture({ aburi: true, ...fixtureOpts });
   await installFixture(page, state);
   // satellite stand-in: any external image request (tile servers) gets the painted tile
   await page.route("**/*", (route) => {
