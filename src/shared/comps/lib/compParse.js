@@ -1551,11 +1551,64 @@ export function splitPasteLines(text) {
  * (or "/Yr") sets the period, so no row is flagged "Rate has no period" for a sheet that stated it
  * once; a term header that says "(months)"/"(years)" is the unit of a bare number. */
 
+/* NEAR-MISS SPELLINGS (owner's real sheet, 2026-10-27: "Lease Commenecement"). Real broker sheets
+ * carry typos, so before the rules run each header WORD that is not itself a known word is snapped
+ * to the one known header word within a small edit distance (an insertion, deletion, substitution or
+ * swap of two letters counts as one): words of 5–7 letters may be one edit off, 8+ letters two.
+ * Short words are never corrected (too easy to snap "sf" or "ti" into something else), a word with a
+ * digit is never corrected, and a tie between two candidates corrects nothing. The vocabulary also
+ * lists the common short header words, so a real word ("lease") is never "fixed" into a near one
+ * ("leased"). */
+const HEADER_VOCAB = [
+  "commencement", "commence", "executed", "execution", "expiration", "escalation", "escalations", "increase", "increases",
+  "abatement", "abated", "tenant", "landlord", "allowance", "improvement", "improvements", "latitude", "longitude",
+  "clear", "height", "clearance", "ceiling", "leased", "building", "property", "address", "submarket", "market",
+  "transaction", "occupancy", "operating", "expenses", "expense", "duration", "starting", "effective", "months", "month",
+  "comments", "comment", "remarks", "coordinates", "purchase", "purchaser", "seller", "buyer", "owner", "developer",
+  "lessor", "lessee", "occupant", "grantee", "grantor", "square", "footage", "construction", "signed", "closing",
+  "consideration", "allowances", "renewal", "expansion", "dimensions", "parking", "location",
+  // short / common words — listed so they are never "corrected" into a neighbour
+  "lease", "rate", "rent", "term", "type", "date", "name", "city", "state", "notes", "price", "size", "total", "base",
+  "free", "load", "year", "built", "units", "unit", "basis", "period", "rental", "asking", "start", "sales", "sale",
+  "space", "deal", "title", "park", "project", "street", "years", "annual", "monthly", "feet", "acres", "level",
+];
+const HEADER_VOCAB_SET = new Set(HEADER_VOCAB);
+
+function editDistance(a, b, cap) {
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+/** One header word -> the known word it is a near miss of, or itself. Exported for the tests. */
+export function correctHeaderWord(word) {
+  const w = String(word || "");
+  if (w.length < 5 || /\d/.test(w) || HEADER_VOCAB_SET.has(w)) return w;
+  const cap = w.length >= 8 ? 2 : 1;
+  let best = null, bestD = cap + 1, tie = false;
+  for (const v of HEADER_VOCAB_SET) {
+    if (v.length < 5) continue;
+    const dist = editDistance(w, v, cap);
+    if (dist < bestD) { best = v; bestD = dist; tie = false; } else if (dist === bestD) tie = true;
+  }
+  return best && bestD <= cap && !tie ? best : w;
+}
+
 function headerParts(raw) {
+  // Trim handles padded headers (" Leased SF ", "Submarket "); each word is then typo-corrected.
   const s = String(raw || "").trim();
   const lower = s.toLowerCase();
   const paren = (lower.match(/\(([^)]*)\)/g) || []).join(" ");
-  const n = lower.replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+  const n = lower.replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
+    .split(" ").map(correctHeaderWord).join(" ");
   return { raw: s, lower, paren, n };
 }
 
