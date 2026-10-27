@@ -11,6 +11,7 @@ import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
+import { useBelowHeader } from "./lib/useBelowHeader.js";
 import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { refineSheetTitles, projectStopTexts } from "../../shared/files/sheetTitleSet.js";
@@ -539,6 +540,7 @@ export default function DocReview({
     return { id: projectId, name: name || "Untitled project" };
   }, [projectId, meta.projectId, meta.project]);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
+  const [belowHeaderRef, belowHeaderTop] = useBelowHeader(); // B2426787 — where the app header ends, for the Compare overlay
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
   const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
 
@@ -2716,6 +2718,8 @@ export default function DocReview({
           </>
         }
       />
+      {/* B2426787 — zero-height marker straight under the header: Compare's overlay starts here, not under the header. */}
+      <div ref={belowHeaderRef} aria-hidden="true" style={{ flex: "none", height: 0 }} />
 
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
@@ -3259,7 +3263,7 @@ export default function DocReview({
       {/* Always-mounted so both the toolbar and empty-state "Compare" buttons can trigger it (B471). */}
       <input ref={compareInputRef} data-testid="compare-input" type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }} onChange={onPickCompare} />
       {compareFiles ? (
-        <CompareView a={compareFiles.a} b={compareFiles.b} onClose={() => setCompareFiles(null)} />
+        <CompareView a={compareFiles.a} b={compareFiles.b} topInset={belowHeaderTop} onClose={() => setCompareFiles(null)} />
       ) : null}
       {historyOpen && source && (
         <VersionHistorySheet fileName={source.name} versions={versions} isDoc={isDocFile} viewingSrcId={viewingSrcId} busy={histBusy}

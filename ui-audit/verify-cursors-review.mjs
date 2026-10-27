@@ -48,21 +48,12 @@ const vpCursor = () => page.evaluate(() => {
 });
 const cursorOf = (sel) => page.evaluate((s) => { const el = document.querySelector(s); if (!el) return "MISSING"; el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) || el; return getComputedStyle(h).cursor; }, sel);
 
-// Like cursorOf, but PROVES the point resolves to the target (or something inside it): if something else paints over it — the app header at a
-// wide window (B2426787) — that cover is hidden for the read, and a point that still is not the target is reported as COVERED, never read.
+// Like cursorOf, but PROVES the point resolves to the target (or something inside it): if something else paints over it, the read is reported
+// as COVERED, never taken. (B2426787 — this used to HIDE the app header to reach Compare's controls; they now sit below it, so nothing is hidden.)
 const cursorOfClear = (sel) => page.evaluate((s) => {
   const el = document.querySelector(s); if (!el) return "MISSING"; el.scrollIntoView({ block: "center" });
-  const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
-  const hidden = []; let out = "COVERED";
-  for (let i = 0; i < 14; i++) {
-    const h = document.elementFromPoint(x, y);
-    if (!h) { out = "NOHIT"; break; }
-    if (el.contains(h)) { out = getComputedStyle(h).cursor; break; }
-    const cover = h.closest("header, nav, [role=banner]") || h;   // the whole chrome region that paints over it, not one leaf at a time
-    hidden.push([cover, cover.style.visibility]); cover.style.visibility = "hidden";
-  }
-  for (const [c, v] of hidden) c.style.visibility = v;   // always put it back — later sections click the toolbar behind it
-  return out;
+  const r = el.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return !h ? "NOHIT" : el.contains(h) ? getComputedStyle(h).cursor : "COVERED";
 }, sel);
 const A = { x: 760, y: 380 }, B = { x: 910, y: 490 };     // rect 1: NW → SE
 const C = { x: 1100, y: 380 }, D = { x: 1000, y: 470 };   // rect 2 drawn NE → SW (index order ≠ position order)
@@ -276,9 +267,6 @@ try {
   if (busyCur) check("Compare · Comparing revisions… overlay", busyCur, "progress"); else note("Compare busy overlay", "compare finished before it could be sampled");
   await page.waitForFunction(() => document.querySelector('[data-cmp="compare-view"]')?.getAttribute("data-status") !== "loading", null, { timeout: 30000 });
   await page.waitForTimeout(400);
-  // The app header paints over the Compare header's right end at this width (pre-existing, unrelated to cursors) — hide it for the reads so the
-  // button under test is what the point resolves to, and say so rather than silently measuring the header's button instead.
-  await page.evaluate(() => { const h = document.querySelector("header[data-menu-scope]"); if (h) h.style.visibility = "hidden"; });
   const cv = await page.locator('[data-cmp="compare-view"] canvas').boundingBox();
   check("Compare · page-step ‹ disabled on page 1", await cursorOfClear('[data-cmp="page-a-prev"]'), "default");
   check("Compare · page-step › enabled", await cursorOfClear('[data-cmp="page-a-next"]'), "pointer");
@@ -291,7 +279,7 @@ try {
     await page.mouse.up(); await page.waitForTimeout(100);
     check("Compare · canvas after release (not stuck)", await cursorAt(cx + 30, cy + 10), "grab");
   } else { console.log("FAIL  compare canvas missing"); results.push({ name: "compare canvas", ok: false }); }
-  await page.evaluate(() => { document.querySelector('[data-cmp="close"]').click(); const h = document.querySelector("header[data-menu-scope]"); if (h) h.style.visibility = ""; });
+  await page.locator('[data-cmp="close"]').click();   // a REAL click — Playwright refuses it if anything covers the button
   await page.waitForTimeout(250);
 
   // ---- Stitcher ----

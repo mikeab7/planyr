@@ -10,6 +10,7 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 - **Tabs (NEW-1, B2058144)** — `components/ReviewTabStrip.jsx` (strip above the toolbar) + `lib/reviewTabs.js` (pure model: open / close-neighbour / reorder / per-device cache / account-copy merge) + `lib/tabSync.js` (tabs follow the ACCOUNT via `profiles.prefs.reviewTabs`, last change wins). `DocReview.jsx` holds ONE review at a time (the active tab) and swaps via `openReview`; Word/txt editors stay mounted-hidden in `docPool` (cursor + undo survive). Review is BLANK with no tab open — no landing screen (owner constraint 13). Close = the tab's ×; `components/CloseFileDialog.jsx` asks Save / Discard / Cancel for an unsaved Word/text tab. `lib/unfiled.js` — which rows are "Unfiled" + the "where did it save" sentence.
 
 **Key `lib/`**
+- `lib/useBelowHeader.js` (B2426787) — where the app header ends inside Review's root; Compare's overlay starts there (below the header, never under it). Guard: the review-overlay-reachability ui-audit harness.
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the
   planner's model. Read this before porting anything from the site-planner audit.** Markups carry **no
   visibility concept at all** — the shared markup engine has no `hidden`, no per-object filter, no
