@@ -281,7 +281,7 @@ function groupDigits(v) {
   const [i, f] = String(v).split(".");
   return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${f != null ? `.${f}` : ""}`;
 }
-function RangeBox({ value, onChange, placeholder, label, unit, grouped = true }) {
+function RangeBox({ value, onChange, placeholder, label, unit, grouped = true, fontSize = FONT.md }) {
   const [focused, setFocused] = useState(false);
   return (
     <span style={{ flex: "1 1 0", minWidth: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -291,8 +291,8 @@ function RangeBox({ value, onChange, placeholder, label, unit, grouped = true })
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d*\.\d*)\./, "$1"))}
         style={{
-          flex: "1 1 auto", minWidth: 0, boxSizing: "border-box", height: SIZE.sm.height, padding: "0 8px", fontSize: FONT.md,
-          border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.control, background: "var(--surface-raised)",
+          flex: "1 1 auto", minWidth: 0, boxSizing: "border-box", height: SIZE.sm.height, padding: "0 8px", fontSize,
+          border: `1px solid ${value !== "" && value != null ? "var(--accent)" : "var(--border-default)"}`, borderRadius: CONTROL_RADIUS.control, background: "var(--surface-raised)",
           color: "var(--text-primary)", fontFamily: "inherit", textAlign: "right",
         }}
       />
@@ -313,6 +313,21 @@ export function RangeFields({ label, min, max, onChange, unit, single = false, g
         )}
       </span>
     </Field>
+  );
+}
+
+/* RangeRow — the one-line form of RangeFields (Records filter panel, 2026-10-23): a fixed-width label on the
+ * left, then Min, the word "to", Max, so a column of ranges reads as a table with every Min box under the one
+ * above. An active (non-blank) box takes the accent border. Same input rules as RangeFields (digits and one
+ * point, thousands separators at rest, NO_AUTOFILL). `labelWidth` (a number of px or any CSS width) is the one thing a host may tune; the default scales with the row so a narrow rail keeps room for six-digit numbers. */
+export function RangeRow({ label, min, max, onChange, minPlaceholder = "Min", maxPlaceholder = "Max", grouped = true, labelWidth = "clamp(84px, 30%, 112px)", fontSize = FONT.md }) {
+  return (
+    <div role="group" aria-label={label} data-range-row style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize }}>
+      <span style={{ flex: `0 0 ${typeof labelWidth === "number" ? `${labelWidth}px` : labelWidth}`, minWidth: 0, color: "var(--text-secondary)", fontSize: "inherit" }}>{label}</span>
+      <RangeBox value={min} onChange={(v) => onChange({ min: v, max })} placeholder={minPlaceholder} label={`${label} min`} grouped={grouped} fontSize={fontSize} />
+      <span aria-hidden="true" style={{ flex: "none", color: "var(--text-secondary)" }}>to</span>
+      <RangeBox value={max} onChange={(v) => onChange({ min, max: v })} placeholder={maxPlaceholder} label={`${label} max`} grouped={grouped} fontSize={fontSize} />
+    </div>
   );
 }
 
