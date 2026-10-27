@@ -14,7 +14,7 @@
  */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ToggleChip, SegmentedControl, RangeFields, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
+import { Button, ToggleChip, SegmentedControl, RangeFields, RangeRow, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 
@@ -143,6 +143,15 @@ function GalleryBody() {
         </Specimen>
         <Specimen label="at least (single)" tokens="min box + unit">
           <div style={{ width: 220 }}><RangeFields label="Power" single min="2000" unit="A" onChange={() => {}} /></div>
+        </Specimen>
+      </Row>
+
+      <Row title="RangeRow — one line: label, Min, to, Max (Records filter panel)">
+        <Specimen label="blank and active" tokens="fixed label column · accent border when a box has a value">
+          <div style={{ width: 300 }}>
+            <RangeRow label="Size SF" min="100000" max="" onChange={() => {}} />
+            <RangeRow label="Year built" min="" max="" grouped={false} minPlaceholder="From" maxPlaceholder="To" onChange={() => {}} />
+          </div>
         </Specimen>
       </Row>
 
