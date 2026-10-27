@@ -206,8 +206,9 @@ export function legendFor(members, mergeKey) {
 
 /* ── The row dropdown plan ──────────────────────────────────────────────────────────────────── */
 
-/* WHAT A ROW'S ▾ HOLDS, in order, and only what applies. The component renders exactly this list;
- * a test asserts it. An OFF row holds the info only (muted). `ctx`:
+/* WHAT A ROW'S ▾ HOLDS, in order, and only what applies. The component renders exactly this list; a test asserts it. The SAME parts
+ * show whether the row is on or off (NEW-2: an off layer's Opacity used to be unreachable until its box was ticked) — only the two lines
+ * that are about a layer that is DRAWING right now (status, "Too far out to draw") wait for it to be on. `ctx`:
  *   on          the row is on
  *   zoomGated   the row is on but too far out to draw (layerZoomGate `dormant-zoom`)
  *   canLift     the "Draw above plan" lift applies (an AREA layer) and the surface is the planner
@@ -217,16 +218,10 @@ export function legendFor(members, mergeKey) {
  *   hasRamp     the legend is a continuous colour bar (Elevation Shading)
  *   hasInfo     there is source / vintage / caveat text behind the ⓘ
  */
-/* The settings that are a standing preference about HOW a layer draws (not a second layer with its own switch), so they stay reachable on an off row. */
-export const OFF_ROW_SETTINGS = new Set(["interval"]);
 export function dropdownPlan(ctx = {}) {
   const out = [];
-  /* A SETTING (contour interval, corridor width, the Mapillary token) is the person's choice about the layer, not a fact about what is
-   * drawing — so it is reachable whether the row is on or off. Everything else (status, zoom, opacity, lift, legend) is about a layer
-   * that is drawing, so an off row offers only its settings and its ⓘ. */
-  if (!ctx.on) { for (const st of ctx.settings || []) if (OFF_ROW_SETTINGS.has(st)) out.push(st); if (ctx.hasInfo) out.push("info"); return out; }
-  if (ctx.hasStatus) out.push("status");
-  if (ctx.zoomGated) out.push("zoom");
+  if (ctx.on && ctx.hasStatus) out.push("status");
+  if (ctx.on && ctx.zoomGated) out.push("zoom");
   out.push("opacity");
   for (const s of ctx.settings || []) out.push(s);
   if (ctx.canLift) out.push("above");
