@@ -24,7 +24,7 @@
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
-import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js";
 import { Button, IconButton, MenuItem, SegmentedControl, ToggleChip } from "../../../shared/ui/controls.jsx";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import {
@@ -80,11 +80,12 @@ const RELEVANCE_OPTIONS = [{ key: "all", label: "Show" }, { key: "hide", label: 
 const GROUP_PREF_KEY = "planyr:layerPanelGroup";
 const NARROW_BELOW_PX = 310; // the panel's OWN box (ResizeObserver) — never the window; below it the group list becomes a dropdown
 const NAV_W = 120;
-/* A ROW'S INLINE RHYTHM (NEW-1): checkbox · swatch slot · name sit one small gap apart — the panel's normal inline gap, no more. The
- * slot stays reserved on EVERY row (PR 2467: names start at one x in every pane) but is only as wide as its chip. Measured on the
- * planner card before/after: checkbox right edge → name left edge 27 → 18. */
-const INLINE_GAP = 4;
-const SWATCH_SLOT = 10;
+/* A ROW'S INLINE RHYTHM (B2436064 ×2): the name starts ONE gap after the checkbox on EVERY row — on or off, with or without a map colour
+ * — the same checkbox-to-label gap the dropdown's own checkbox rows use (SPACE.sm). No slot is reserved to line names up: every row
+ * starts its name right after the checkbox, so they align by construction. The layer's colour chip sits AFTER the name, only while the
+ * layer is on and has a map colour. */
+const CHECK_GAP = SPACE.sm;
+const CHIP = 10;
 const CHECKBOX_RESET = { margin: 0, flex: "none" }; // the browser's own 3-4 px checkbox margins were the rest of the hole
 const OUT_OF_AREA_LINE = "No data in this area — this layer only covers its home region. The map still shows whatever the source returns here.";
 
@@ -107,15 +108,10 @@ function StatusDot({ meta, loading, dormant, hidden, title }) {
   );
 }
 
+/* The layer's colour chip — after the name, only on an ON row that has a map colour. Nothing is rendered otherwise (no placeholder). */
 function Swatch({ color, show }) {
-  /* EVERY row reserves the slot — a row with no map colour (labels, Your Data, the owner-only grading rows) keeps it empty — so every
-   * row's name starts at the same x in every pane. */
-  if (!color) return <span aria-hidden="true" data-swatch="none" style={{ width: SWATCH_SLOT, height: SWATCH_SLOT, flex: "none" }} />;
-  return (
-    <span aria-hidden="true" data-swatch={show && color ? "on" : "none"}
-      style={{ width: SWATCH_SLOT, height: SWATCH_SLOT, flex: "none", boxSizing: "border-box",
-        background: show && color ? color : "transparent", border: show && color ? `1px solid ${LINE}` : "none" }} />
-  );
+  if (!show || !color) return null;
+  return <span aria-hidden="true" data-swatch="on" style={{ width: CHIP, height: CHIP, flex: "none", boxSizing: "border-box", background: color, border: `1px solid ${LINE}` }} />;
 }
 
 function Caret({ open }) {
@@ -182,8 +178,8 @@ function InfoReveal({ label, sections }) {
     <div data-part="info">
       <button type="button" aria-expanded={open} aria-controls={id} aria-label={`About ${label}`} onClick={() => setOpen((o) => !o)}
         style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: TEXT,
-          color: "var(--text-secondary)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <span aria-hidden="true">ⓘ</span> About this layer
+          color: "var(--text-secondary)", fontWeight: 600, display: "inline-flex", alignItems: "center" }}>
+        <span aria-hidden="true">ⓘ</span>
       </button>
       {open && (
         <div id={id} role="note" data-testid="layer-info-text" style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4, lineHeight: 1.42 }}>
@@ -271,19 +267,19 @@ function RowDropdown({ spec }) {
   );
 }
 
-/* ONE row. Checkbox · swatch · name (+ value) · status dot · ▾. Nothing else, ever. */
+/* ONE row. Checkbox · name (+ value) · colour chip (on rows with a map colour) · status dot · ▾. Nothing else, ever. */
 function LayerRow({ spec, open, onToggleOpen }) {
   /* NO ROW IS EVER FADED (NEW-2): a zoom-gated ("dormant") row reads like every other row — the hollow status dot and the ▾ line say it. */
   return (
     <div data-testid={`layer-row-${spec.id}`} data-layer-state={spec.state} style={{ marginBottom: 4 }}>
-      <div style={{ display: "flex", gap: INLINE_GAP, alignItems: "center", minHeight: 24 }}>
-        <label style={{ display: "flex", gap: INLINE_GAP, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+      <div style={{ display: "flex", gap: SPACE.xs, alignItems: "center", minHeight: 24 }}>
+        <label style={{ display: "flex", gap: CHECK_GAP, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
           <input type="checkbox" checked={spec.checked} onChange={(e) => spec.onCheck(e.target.checked)} aria-label={spec.label} style={CHECKBOX_RESET} />
-          <Swatch color={spec.swatch} show={spec.checked} />
-          <span title={spec.label} style={{ flex: 1, minWidth: 0, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <span title={spec.label} style={{ flex: "0 1 auto", minWidth: 0, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {spec.label}
             {spec.value && <span data-testid={`layer-value-${spec.id}`} style={{ color: MUTED, fontWeight: 600 }}> {spec.value}</span>}
           </span>
+          <Swatch color={spec.swatch} show={spec.checked} />
         </label>
         <StatusDot meta={spec.dot.meta} loading={spec.dot.loading} dormant={spec.dot.dormant} hidden={spec.dot.hidden} title={spec.dot.title} />
         {spec.dropdown && (
@@ -302,9 +298,8 @@ function LayerRow({ spec, open, onToggleOpen }) {
 function SimpleCheckRow({ id, label, checked, onChange, testId }) {
   return (
     <div data-testid={`layer-row-${id}`} style={{ marginBottom: 4, minHeight: 24, display: "flex", alignItems: "center" }}>
-      <label style={{ display: "flex", gap: INLINE_GAP, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+      <label style={{ display: "flex", gap: CHECK_GAP, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
         <input type="checkbox" data-testid={testId} checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} style={CHECKBOX_RESET} />
-        <Swatch color={null} show={false} />
         <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
       </label>
     </div>
@@ -509,6 +504,8 @@ export default function LayerPanel({
     const meta = combined && STATUS[combined.state];
     const vis = visForMembers(members);
     const setAll = (patch) => members.forEach(([mid]) => set(mid, patch));
+    // Changing how an OFF layer looks (opacity, Draw above plan, the easement corridor) turns it on first — one on-transition, like its checkbox.
+    const wakeRow = () => { if (hidden) setLayersHidden(false); setAll({ on: true }); };
     const ls0 = slot.kind === "solo" && anyOn ? layerStatus[id] : null;
     const age = ls0 && ls0.ts ? formatAge(Date.now() - ls0.ts) : "";
     let info = slot.kind === "merge"
@@ -530,7 +527,7 @@ export default function LayerPanel({
     const settings = [];
     if (id === "contours") settings.push("interval");
     if (hasPipelineLine && overlays.txrrc_pipe_easement) settings.push("corridor");
-    if (id === "fire_hydrants" && overlays.mapillary?.on) settings.push("token");
+    if (members.some(([mid]) => mid === "mapillary")) settings.push("token");
     const lift = showAbove && members.some(([, c]) => configCanLift(c));
     const ramp = id === "elevation" ? rampGradient(cfg0) : null;
     const legend = ramp ? [] : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null);
@@ -550,11 +547,13 @@ export default function LayerPanel({
       dropdown: plan.length ? {
         plan, status, info,
         zoom: { onZoom: typeof onZoomTo === "function" && vis.target != null ? () => onZoomTo(vis.target) : null },
-        opacity: { value: opacity, onChange: (v) => setAll({ opacity: v }) },
+        /* NEW-2: a change to how the layer LOOKS on an OFF row turns it on at that setting (`wakeRow`; Hide Layers ends too). Only the first
+         * tick of a drag is the off→on transition; the Contour Interval stays a standing preference and never calls it. */
+        opacity: { value: opacity, onChange: (v) => { if (!anyOn) wakeRow(); setAll({ opacity: v }); } },
         interval: { value: interval, onChange: setContourInterval },
-        corridor: { on: !!corr.on, widthFt: corr.widthFt ?? DEFAULT_CORRIDOR_WIDTH_FT, onToggle: writeOn((v) => set("txrrc_pipe_easement", { on: v })), onWidth: (w) => set("txrrc_pipe_easement", { widthFt: w }) },
+        corridor: { on: !!corr.on, widthFt: corr.widthFt ?? DEFAULT_CORRIDOR_WIDTH_FT, onToggle: (v) => { if (v && !anyOn) wakeRow(); set("txrrc_pipe_easement", { on: v }); }, onWidth: (w) => set("txrrc_pipe_easement", { widthFt: w }) },
         token: { value: tok, onChange: (v) => { setTok(v); setMapillaryToken(v.trim()); } },
-        above: { checked: members.some(([mid]) => overlays[mid]?.above === true), onChange: (v) => setAll({ above: v }) },
+        above: { checked: members.some(([mid]) => overlays[mid]?.above === true), onChange: (v) => { if (v && !anyOn) wakeRow(); setAll({ above: v }); } },
         ramp, legend,
       } : null,
     };

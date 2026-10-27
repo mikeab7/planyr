@@ -7,7 +7,7 @@
  *
  * What this pins, on the REAL app (a located plan):
  *   1. the card holds exactly the header row and the two panes — none of the four old texts anywhere inside it, and Map Base › Labels
- *      lists Road Names AND City Names (both on the same row anatomy as every other layer row: checkbox · swatch slot · name · ▾);
+ *      lists Road Names AND City Names (both on the same row anatomy as every other layer row: checkbox · name · ▾);
  *   2. the five evidence tools did NOT vanish — they are a "Utility Evidence" section on the right rail, each arms;
  *   3. Easement rules is reachable from the Easement tool's ▾, and the route tools' no-rule path opens it THERE and says where;
  *   4. an UNLOCATED plan shows no Utility Evidence section (they read the aerial / GIS around the site).
@@ -69,7 +69,7 @@ test("the layers card is the header row + the two panes, with Road Names AND Cit
     await expect(row, `Map Base lists ${id}`).toBeVisible();
     await expect(row.locator('input[type="checkbox"]')).toHaveCount(1);
     await expect(row.getByTestId(`layer-caret-${id}`), "the standard ▾ button").toBeVisible();
-    await expect(row.locator('[data-swatch]'), "the swatch slot every row reserves").toHaveCount(1);
+    await expect(row.locator('[data-swatch]'), "no reserved swatch slot — a label row has no map colour").toHaveCount(0);
   }
   // City Names is a real switch: off → on persists as a device pref.
   const city = panel.getByTestId("layer-row-city_names").locator('input[type="checkbox"]');

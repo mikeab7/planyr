@@ -7,7 +7,7 @@
  * For each of desktop / phone × light / dark it opens BOTH cards (the planner on a located plan; the finder on the map), asserts the
  * structure that must match, screenshots each card element, and pastes the pair side by side under ui-audit/screenshots/layers-card/.
  * Asserts (planner): the card holds ONLY the panel — no "Evidence tools", "Easement rules", "AI corridor scan" or "Layers sit beneath";
- * Map Base › Labels lists Road Names AND City Names; each label row has the standard anatomy (checkbox · swatch slot · name · status dot ·
+ * Map Base › Labels lists Road Names AND City Names; each label row has the standard anatomy (checkbox · name · status dot ·
  * the standard ▾ button) and the same row height as the finder's row; nothing is clipped sideways. Known-good arm: the finder's own Road
  * Names row must report the anatomy (an instrument that cannot see it could not vouch for the planner's). FOREGROUND-OR-VOID asserted first.
  * Live mode also reads /version.json IN THE SAME CALL as the assertions and (with --expect-sha) matches it to the merge commit. */
@@ -133,7 +133,7 @@ try {
       await page.waitForTimeout(500);
       const fCard = (await cardOf(fp)).asElement();
       const froad = await rowAnatomy(fp, "road_names"), fcity = await rowAnatomy(fp, "city_names");
-      check(`finder · ${tag}: known-good arm — the finder's own label rows report the anatomy`, !!froad && !!fcity && /checkbox · swatch · name/.test(froad.parts), JSON.stringify(froad));
+      check(`finder · ${tag}: known-good arm — the finder's own label rows report the anatomy`, !!froad && !!fcity && /^checkbox · name/.test(froad.parts), JSON.stringify(froad));
       shots[`finder-${tag}`] = { buf: await fCard.screenshot() };
       writeFileSync(`${OUT}finder-${tag}.png`, shots[`finder-${tag}`].buf);
       for (const [nm, a, b] of [["Road Names", road, froad], ["City Names", city, fcity]]) {
