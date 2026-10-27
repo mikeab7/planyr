@@ -6072,6 +6072,31 @@ function stepGridRow(flat, allTasks, selectedId, dir, lastIdx, topIdx) {
   return flat[clamp(g)].id;
 }
 
+// NEW-1 (B2455200) — Alt+F toggles Focus. WHICH group: the anchor row is the TOP selected row; if it is a
+// summary (has children) it is that row's own Focus, if it is a plain task it is its parent group's, and a
+// top-level plain task (no parent) has none -> null (the key does nothing, no error). Pure; unit-tested by
+// extracting this source (test/scheduleFocusKey.test.js).
+function focusToggleTarget(allTasks, anchorId) {
+  if (anchorId == null || anchorId === "__NEW_TASK__") return null;
+  const t = (allTasks || []).find(x => x.id === anchorId);
+  if (!t) return null;
+  if (allTasks.some(x => x.parentId === t.id)) return t.id;
+  return (t.parentId != null && allTasks.some(x => x.id === t.parentId)) ? t.parentId : null;
+}
+// After a Focus toggle: where the selection goes. Kept when its row is still visible; else the nearest
+// ANCESTOR that is visible (the parent summary row, or higher when the parent is itself hidden); null when
+// nothing qualifies (the selection is left alone).
+function focusReselectTarget(allTasks, visibleIds, selId) {
+  if (selId == null || selId === "__NEW_TASK__" || visibleIds.has(selId)) return selId;
+  const byId = new Map((allTasks || []).map(t => [t.id, t]));
+  let cur = byId.get(selId);
+  for (let guard = 0; cur && cur.parentId != null && guard < 1000; guard++) {
+    if (visibleIds.has(cur.parentId)) return cur.parentId;
+    cur = byId.get(cur.parentId);
+  }
+  return null;
+}
+
 // ── Task-complete celebration ("Ring & Spark" toast) ──────
 // A small toast rises from the bottom-center when a task transitions to
 // Complete: the green dot pops in, the check draws itself, a ring pulses
@@ -8626,6 +8651,9 @@ function App() {
   const [moveToCtx, setMoveToCtx] = useState(null); // {ids, projId} | null — "Move to…" destination-picker modal
   const moveSelectRef = useRef(null); // new id of the moved block's first root row → select + scroll to it after a move
   const [edit,       setEdit]       = useState(null);
+  const editLiveRef = useRef(null);   // NEW-1 — the key handler's closure is stale w.r.t. `edit`; this is live
+  useEffect(() => { editLiveRef.current = edit; }, [edit]);
+  const focusReselectRef = useRef(null);   // NEW-1 — set by Alt+F, consumed by the layout effect below
   const [editStartChar, setEditStartChar] = useState(null);
   const [selectedId,    setSelectedId]    = useState(null);
   const [selRange,      setSelRange]      = useState(null); // {r1,r2,c1,c2} — row/col indices into flatTasks/COLS
@@ -9402,6 +9430,19 @@ function App() {
         if (!e.repeat) insertTask();
         return;
       }
+      // NEW-1 (B2455200) — Alt+F toggles Focus for the group of the TOP selected row (see focusToggleTarget).
+      // e.code, not e.key: with Alt held a Mac reports "ƒ". Never while a cell is being edited (an input has
+      // focus, or the editor state is open) — then the key is left entirely alone. Outside editing,
+      // preventDefault always runs (even when there is no group to toggle) so Chrome's own File menu never
+      // opens on Windows: Alt+F is ours everywhere on the grid, consistently.
+      if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyF" &&
+          !typing && !document.activeElement?.isContentEditable && !editLiveRef.current) {
+        e.preventDefault();
+        if (e.repeat) return;
+        const ids = rowRangeSelIds();
+        toggleGroupFocus(ids.length ? ids[0] : selectedId, selectedId);
+        return;
+      }
       if (e.key === "Delete" && !typing) {
         if (!e.repeat && selectedId !== null) {
           e.preventDefault();
@@ -9655,6 +9696,27 @@ function App() {
     // changes. Referencing the helpers directly here would read them before initialization if the
     // build ever kept `const` block-scoping instead of hoisting to `var`.
   }, [selectedId, selectedColIdx, selRange, isUndoing]);
+
+  // NEW-1 (B2455200) — the Alt+F action: flips `focused` through updateTask, i.e. EXACTLY what the summary row's
+  // Focus chip does, so it is undoable the same way (one history step, Ctrl+Z). A multi-row selection
+  // collapses to its top row (the toggle changes which rows exist, so the old row range would be stale). The
+  // insert pins are dropped in the same batch (a Focus toggle re-applies the filter — the focusSig effect does
+  // it too, but one render later). The selection follows below, in the focusSig layout effect.
+  const toggleGroupFocus = (anchorId, selId) => {
+    const all = activeProjectOf(dataRef.current)?.tasks || [];
+    const gid = focusToggleTarget(all, anchorId);
+    if (gid == null) return;
+    const g = all.find(t => t.id === gid);
+    if (!g) return;
+    focusReselectRef.current = { selId };   // the row that IS selected (a range's cursor), not the range's top row
+    setFocusPins(p => (p.size ? new Set() : p));
+    setSelRange(null);
+    updateTask(gid, { focused: !g.focused });
+    // The chip is only drawn on an EXPANDED summary with something to hide; when it is not, say what happened.
+    const row = (flatTasksRef.current || []).find(t => t.id === gid);
+    if (!(row && row.isExpanded && row.hideableCount > 0))
+      showToast(`Focus ${g.focused ? "off" : "on"} for "${g.name || "Untitled"}"` + (g.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
+  };
 
   // Ctrl+scroll → zoom Gantt timeline instead of browser zoom
   // RAF-throttled so rapid scrolling doesn't overwhelm React with renders
@@ -11115,6 +11177,15 @@ function App() {
   // re-applies the filter: rows pinned visible by an insert drop back under it.
   const focusSig = (proj?.tasks || []).filter(t => t.focused).map(t => t._sid).join(",");
   React.useEffect(() => { setFocusPins(p => (p.size ? new Set() : p)); }, [focusSig]);
+  // NEW-1 (B2455200) — after an Alt+F toggle commits, a selection whose row Focus just hid moves to its
+  // nearest visible ancestor (the parent summary row) instead of staying on an invisible row. Runs only for
+  // a toggle the key made (focusReselectRef), never for a chip click or an undo.
+  React.useLayoutEffect(() => {
+    const r = focusReselectRef.current; if (!r) return;
+    focusReselectRef.current = null;
+    const next = focusReselectTarget(proj?.tasks || [], new Set(flatTasks.map(t => t.id)), r.selId);
+    if (next != null && next !== r.selId) setSelectedId(next);
+  }, [focusSig]);
   // NEW-1 — the flat index the selection was last SEEN at. When its row is deleted (selection → null) the
   // arrow keys re-anchor here instead of jumping to the first / last row (stepGridRow). Only ever written
   // while the selection is actually in the list, so a hide or a delete leaves the last real position.
@@ -14959,8 +15030,8 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             onClick={e=>{ e.stopPropagation(); updateTask(task.id, {focused: !task.focused}); }}
             onDoubleClick={e=>e.stopPropagation()}
             title={task.focused
-              ? `Show all tasks in this group — ${task.hideableDone} completed, ${task.hideablePaused} paused, ${task.hideableUpcoming} not started hidden`
-              : `Focus: hide ${task.hideableCount} completed / paused / not-started task${task.hideableCount>1?'s':''}`}
+              ? `Show all tasks in this group — ${task.hideableDone} completed, ${task.hideablePaused} paused, ${task.hideableUpcoming} not started hidden (Alt+F)`
+              : `Focus: hide ${task.hideableCount} completed / paused / not-started task${task.hideableCount>1?'s':''} (Alt+F)`}
             style={{
               marginLeft:"auto", flexShrink:0, cursor:"pointer", userSelect:"none",
               display:"inline-flex", alignItems:"center", gap:5,
