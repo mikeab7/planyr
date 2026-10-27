@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* probe-buildings-table-on-main — the RED PROOF for verify-buildings-table-off-drawing (NEW-1, 2026-10-27).
+/* probe-buildings-table-on-main — the RED PROOF for verify-sheet-furniture-on-top (NEW-1, 2026-10-27).
  *
  *   PLANYR_BASE=http://127.0.0.1:4174 node ui-audit/probe-buildings-table-on-main.mjs --fixture goose2 --out <dir>   (a build of the PRE-FIX tree)
  *
@@ -9,7 +9,8 @@
  * holding the BUILDINGS text), so no coordinate is hard-coded.
  *   PRE-FIX tree: the table is page picture inside the plan; the detention pond's annotation paints over it —
  *     measured 2026-10-27: 87.7% of the table's rectangle changed ("RESULT: DEFECT REPRODUCED").
- *   FIXED tree: the page picture has no table inside the plan frame at all ("RESULT: the page picture has no BUILDINGS table…").
+ *   FIXED tree: the page picture has no table at all — it is a Stamp written after every site annotation, so nothing can cover it
+ *     ("RESULT: the page picture has no BUILDINGS table…"; verify-sheet-furniture-on-top proves the Stamp survives).
  * It exits 0 either way: it reports, verify-buildings-table-off-drawing asserts. Needs pdftoppm.
  */
 import { chromium } from "playwright";
@@ -83,7 +84,7 @@ const num = (re, str) => Number((re.exec(str) || [])[1]);
 const nested = /<svg [^>]*viewBox="([-\d.\s]+)"[^>]*>/.exec(sheetSvg.slice(sheetSvg.indexOf("<svg", 10)));
 const nestedTag = sheetSvg.slice(sheetSvg.indexOf("<svg", 10), sheetSvg.indexOf(">", sheetSvg.indexOf("<svg", 10)) + 1);
 const at = sheetSvg.indexOf(">BUILDINGS<");
-if (at < 0 || !nested || sheetSvg.includes('data-sheet-table="buildings"')) { console.log("RESULT: the page picture has no BUILDINGS table inside the plan frame (the fixed layout: it is its own band + annotation)"); process.exit(0); }
+if (at < 0 || !nested) { console.log("RESULT: the page picture has no BUILDINGS table (fixed: it is its own Stamp, written after every site annotation)"); process.exit(0); }
 const [vx, vy, vw, vh] = nested[1].trim().split(/\s+/).map(Number);
 const px = num(/ x="([-\d.]+)"/, nestedTag), py = num(/ y="([-\d.]+)"/, nestedTag), pw = num(/ width="([-\d.]+)"/, nestedTag), ph = num(/ height="([-\d.]+)"/, nestedTag);
 const k = Math.min(pw / vw, ph / vh), ox = px + (pw - vw * k) / 2, oy = py + (ph - vh * k) / 2;
