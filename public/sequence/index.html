@@ -5771,6 +5771,28 @@ const rowDropIntent = (tasks, blocked, rowFloat) => {
   return { kind: "gap", gapIndex, ...resolveDropParent(tasks, blocked, gapIndex) };
 };
 
+// B2445008 (×2) — where the pointer is, in ROWS, over the grid's scroll element. The grid scales
+// itself with CSS `zoom` (Ctrl+wheel, `gridZoom`, kept per browser), so clientY and the element's
+// bounding rect are VISUAL pixels while scrollTop, the header and every row's layout are the element's
+// own, UNZOOMED CSS pixels. The first nest fix divided visual pixels by an unzoomed row height, so at
+// any zoom other than 100% the drop resolved to a row ABOVE (zoom < 1) or BELOW (zoom > 1) the one
+// under the pointer — and with the selection directly above the target, "the row above" is a dragged
+// row, which offers no drop at all. `zoom` is MEASURED (rect height / layout height), never assumed.
+const rowFloatAtPointer = (clientY, rectTop, scrollTop, zoom, headerH, rowH) =>
+  (((clientY - rectTop) / (zoom > 0 && isFinite(zoom) ? zoom : 1)) + scrollTop - headerH) / rowH;
+
+// B2445008 (×2) — does a press on row `ri`'s ID cell PICK UP the selected rows (Microsoft Project's
+// gesture: select rows by their ID, then drag an ID to move them) rather than start a new row
+// selection? Only when the row is inside a multi-row, full-row selection — a press on any other ID
+// cell (or on the only selected row) still selects/extends exactly as before. A press that does not
+// move is a plain click and selects that one row (GridView's startRowDrag onClick).
+const idPressMovesRows = (selRange, ri, colCount) => {
+  if (!selRange) return false;
+  const r1 = Math.min(selRange.r1, selRange.r2), r2 = Math.max(selRange.r1, selRange.r2);
+  const c1 = Math.min(selRange.c1, selRange.c2), c2 = Math.max(selRange.c1, selRange.c2);
+  return r2 > r1 && ri >= r1 && ri <= r2 && c1 === 0 && c2 >= colCount - 1;
+};
+
 // ── Delete-with-children: "keep subtasks" path — promote survivors to the nearest ancestor NOT
 // being deleted. Handles a whole deleted CHAIN transitively (delete a parent and its own selected
 // child together, and the child's own children promote past both, straight to the grandparent) —
@@ -13268,8 +13290,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     return ids.includes(anchorId) ? ids : [anchorId];
   };
 
-  const startRowDrag = (e, anchorTaskId) => {
+  const startRowDrag = (e, anchorTaskId, opts = null) => {
     if (review || e.button !== 0) return;
+    const onClick = opts && opts.onClick;   // a press that never moves (an ID-cell press inside the selection) is a click
     const ids = dragTargetIds(anchorTaskId);
     // Full blocked set (dragged rows + every descendant, from the FULL project tree so a
     // COLLAPSED descendant still blocks a drop into its own ancestor being dragged).
@@ -13312,8 +13335,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       const el = ref.current;
       if (!el || !tasks.length) return { kind: "none" };
       const rect = el.getBoundingClientRect();
-      const docY = (state.lastClientY - rect.top) + el.scrollTop;
-      return rowDropIntent(tasks, state.blocked, (docY - TL_H) / ROW_H);
+      const zoom = el.offsetHeight ? rect.height / el.offsetHeight : (gridZoom || 1);
+      return rowDropIntent(tasks, state.blocked, rowFloatAtPointer(state.lastClientY, rect.top, el.scrollTop, zoom, TL_H, ROW_H));
     };
 
     const computeAndPaint = () => {
@@ -13394,6 +13417,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       const elEnd = ref.current;
       if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = ""; r.style.outline = ""; r.style.outlineOffset = ""; } });
       rowDragRef.current = null;
+      // A press that never moved is a click, not a drag (an ID-cell press inside the selection).
+      if (!state.moved && onClick) { onClick(); return; }
       const intent = state.intent;
       if (intent && intent.kind === "gap" && moveRows) {
         moveRows(anchorTaskId, intent.destParentId, intent.insertAfterId);
@@ -13503,6 +13528,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // across full rows. rowMode tells onMouseEnter to span all
     // columns no matter which column the pointer crosses.
     if (c.k === "id") {
+      // B2445008 (×2) — the ID cell of a row inside a multi-row selection is a pick-up handle for the
+      // whole selection (the 8px grip was the only way in, and the owner drags by the ID he selected by).
+      if (!review && idPressMovesRows(selRange, ri, allCols.length)) {
+        e.preventDefault();
+        startRowDrag(e, task.id, { onClick: () => { setSelectedId(task.id); setSelectedColIdx(0); setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1}); } });
+        return;
+      }
       dragAnchor.current = {ri, ci: 0, rowMode: true};
       isDraggingCells.current = true;
       setSelectedId(task.id);
@@ -14276,7 +14308,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     borderBottom: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
                     boxShadow: [selShadow(ri, ci, selected, active), (isFocused && c === orderedCols[0]) ? "inset 2px 0 0 0 var(--blue)" : "none"].filter(x => x !== "none").join(",") || "none",
                     userSelect: isDraggingCells.current ? "none" : "auto",
-                    cursor: "default",   // the range-select drag's own `cell` cursor is pinned by the gesture (cellDragPin), never read from a ref here
+                    cursor: (c.k === "id" && !review && idPressMovesRows(selRange, ri, allCols.length)) ? "grab" : "default",   // the range-select drag's own `cell` cursor is pinned by the gesture (cellDragPin), never read from a ref here; an ID cell inside a multi-row selection is a pick-up handle (B2445008 ×2)
                     // NEW-1 — a pinned cell paints its own opaque look (row colour, then any range / cell fill on top)
                     ...(pinStyle(c.k, [rowBg, (selected && hasRange) ? "#dbeafe" : cfmt?.fill], 5) || {})
                   }}

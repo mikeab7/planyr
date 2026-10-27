@@ -546,7 +546,7 @@ describe("wiring in public/sequence/index.html", () => {
   });
 
   it("the drag gesture pushes NO undo state mid-drag — moveRows (the only setData-triggering call) fires ONLY from onUp, never from computeAndPaint/tick/onMove", () => {
-    const startRowDragBody = extractFn(src, "const startRowDrag = (e, anchorTaskId) => {");
+    const startRowDragBody = extractFn(src, "const startRowDrag = (e, anchorTaskId, opts = null) => {");
     expect(startRowDragBody, "startRowDrag not found in index.html").not.toBeNull();
     // computeAndPaint is the per-frame function; onUp is the drop handler. Isolate computeAndPaint's
     // OWN body (up to onUp's declaration) and assert it never calls moveRows/setData itself.
