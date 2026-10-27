@@ -83,7 +83,8 @@ try {
   const fillRange = async (label, v) => { const el = page.getByLabel(label, { exact: true }); await el.fill(v); await el.blur(); await settle(); };
   const sectionIds = () => page.locator("[data-filter-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-filter-section")));
   const headerValue = (id) => page.locator(`[data-filter-section="${id}"] [data-filter-value]`).innerText();
-  const visibleText = () => page.locator("body").innerText();
+  // The filter bar + panel only: the list below it carries the seeded comps' own titles ("… Lease C undated"), which are not UI copy.
+  const visibleText = () => page.getByTestId("comps-query-bar").innerText();
   const clearAll = async () => { await closePanel(); const b = page.getByRole("button", { name: "Clear all" }); if (await b.count()) { await b.first().click(); await settle(); } await setSort("newest"); };
 
   // known-good arm: unfiltered, searching only the throwaway prefix → all 7 present
@@ -107,6 +108,7 @@ try {
     const panelBox = await page.getByTestId("comps-filter-panel").boundingBox();
     ok("panel fits the screen width", panelBox && panelBox.x >= -1 && panelBox.x + panelBox.width <= vp.width + 1, JSON.stringify(panelBox));
     await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+    await closePanel(); // the results line shows only while the panel is closed
     ok("Lease chip applies on a phone: 3 of N", (await shown()) === 3 && (await chipLabels()).includes("Lease ✕"), await line());
     await openPanel();
     await fillRange("Size SF min", "100000");
@@ -167,7 +169,7 @@ try {
   await page.getByRole("button", { name: "Any", exact: true }).click(); await settle();
   await page.getByRole("button", { name: "Bldg Sale", exact: true }).click(); await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
   ok("Bldg Sale only: sale fields and Seller / Buyer labels", (await page.getByLabel("Cap rate % min").count()) === 1 && (await page.getByLabel("Rate $/SF/yr min").count()) === 0 && (await page.getByLabel("Seller name contains").count()) === 1 && (await page.getByLabel("Buyer name contains").count()) === 1);
-  ok("deselecting Lease dropped its filters (3 mo date kept: it applies to every type)", (await headerValue("date")).trim() === "Past 3 months");
+  ok("Type header now reads Bldg Sale and the lease-only fields are gone", (await headerValue("type")).trim() === "Bldg Sale" && (await page.getByLabel("Term (yrs) min").count()) === 0);
   await page.getByRole("button", { name: "Bldg Sale", exact: true }).click(); await page.getByRole("button", { name: "Land", exact: true }).click(); await settle();
   ok("Land only: Land section with Acres; Building hidden", (await sectionIds()).includes("land") && !(await sectionIds()).includes("building") && (await page.getByLabel("Acres min").count()) === 1, JSON.stringify(await sectionIds()));
   await clearAll(); await search(P); await openPanel();

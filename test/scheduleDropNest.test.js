@@ -243,7 +243,7 @@ describe("adjacent cases", () => {
 });
 
 describe("wiring in public/sequence/index.html", () => {
-  const body = extractFn("const startRowDrag = (e, anchorTaskId) => {");
+  const body = extractFn("const startRowDrag = (e, anchorTaskId, opts = null) => {");
   it("the drop commits through the ONE moveRows call per outcome (one setData → one undo step), only from onUp", () => {
     const upAt = body.indexOf("const onUp = ");
     expect(upAt).toBeGreaterThan(0);

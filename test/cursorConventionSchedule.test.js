@@ -91,7 +91,7 @@ describe("the pin helper (the iframe's own pinDragCursor — it cannot import sr
 
 describe("row reorder pins grabbing for the WHOLE drag (every cell / header / Gantt row sets its own inline cursor)", () => {
   it("startRowDrag pins through the helper, not body.style.cursor", () => {
-    const s = slice("const startRowDrag = (e, anchorTaskId)", 2600);
+    const s = slice("const startRowDrag = (e, anchorTaskId", 2600);
     expect(s).toMatch(/pinSchedCursor\("grabbing"[,)]/);
     expect(s).not.toMatch(/document\.body\.style\.cursor\s*=\s*"grabbing"/);
   });
