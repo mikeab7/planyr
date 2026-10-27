@@ -257,9 +257,8 @@ await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
 await pacedWait(page, 500);
 // ⛔ CLICK THE BOX'S ACTUAL CONTENT, NEVER ITS TOP-LEFT CORNER — the corner (a few px in from
-// the border) is where the 9x14px drag grip lives (`.planyr-anchor-grip`, left:3px;top:5px in
-// notesAnchorNode's CSS), and a press there goes through the grip's OWN mousedown handler,
-// never `focusFromMat`, which looks exactly like a stuck caret if you're not watching for it.
+// the border) USED to be where the drag grip lived (retired by B2426788 — the box's BORDER band is
+// the move handle now, and a press ON the outline selects only, never enters). Still click the content.
 const firstCellBox = await page.locator(".planyr-anchor table td", { hasText: "Row one" }).boundingBox();
 await page.mouse.click(firstCellBox.x + firstCellBox.width / 2, firstCellBox.y + firstCellBox.height / 2);
 await pacedWait(page, 150);
