@@ -69,12 +69,18 @@ export function dishSubline(row) {
   return { kind: "empty", text: "Add a note" };
 }
 
-/** A visit's one-line row: "<date> · Food 8.25 · Ambiance 8.0". Missing parts are left out; a missing date reads "No date". */
+/** A visit's one-line row as parts, so the row can set the date (secondary) apart from the scores (primary — NEW-1, 2026-10-27):
+ *  [{ kind: "date", text }, { kind: "score", label: "Food", value: "8.25" }, …]. Missing scores are left out; a missing date reads "No date". */
+export function visitRowParts(visit, formatDate) {
+  const parts = [{ kind: "date", text: visit.visited_on ? formatDate(visit.visited_on) : "No date", undated: !visit.visited_on }];
+  if (visit.rating != null) parts.push({ kind: "score", label: "Food", value: formatRating(visit.rating) });
+  if (visit.rating_ambiance != null) parts.push({ kind: "score", label: "Ambiance", value: formatRating(visit.rating_ambiance) });
+  return parts;
+}
+
+/** A visit's one-line row as plain text: "<date> · Food 8.25 · Ambiance 8.0" (the accessible name of the row). */
 export function visitRowLabel(visit, formatDate) {
-  const parts = [visit.visited_on ? formatDate(visit.visited_on) : "No date"];
-  if (visit.rating != null) parts.push(`Food ${formatRating(visit.rating)}`);
-  if (visit.rating_ambiance != null) parts.push(`Ambiance ${formatRating(visit.rating_ambiance)}`);
-  return parts.join(" · ");
+  return visitRowParts(visit, formatDate).map((p) => (p.kind === "date" ? p.text : `${p.label} ${p.value}`)).join(" · ");
 }
 
 export const VISITS_SHOWN = 2;

@@ -40,12 +40,14 @@ import { useLandscapePhone } from "../lib/phoneLayout.js";
 import DishesSection, { DishNameField, DishSheet } from "./DishesSection.jsx";
 import { computeVisitAggregates } from "../lib/visitAggregates.js";
 import { dishRowsForTable } from "../lib/dishAggregates.js";
-import { formatRating, PRICE_LEVELS, nextPriceLevel, headerSubline, visitRowLabel, visitsToShow } from "../lib/restaurantPanel.js";
+import { formatRating, PRICE_LEVELS, nextPriceLevel, headerSubline, visitRowLabel, visitRowParts, visitsToShow } from "../lib/restaurantPanel.js";
 import { formatVisitDate } from "../lib/dateFormat.js";
 import { directionsUrl } from "../lib/directions.js";
 import { formatCuisine, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { FOOD_TYPE, COLUMN_X, GROUP_STEP, ITEM_STEP } from "../lib/foodType.js";
+import SectionLabel from "./SectionLabel.jsx";
 import ScoreMeter from "./ScoreMeter.jsx";
 import CloseX from "./CloseX.jsx";
 import { OrderAgainControl } from "./DishesSection.jsx";
@@ -119,7 +121,7 @@ function DraftDishes({ rows, setRows, isMobile, knownRows = [] }) {
   const pick = (key, k) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, name: k.name, note: r.note || k.note || "", order_again: r.order_again ?? k.order_again ?? null } : r)));
   return (
     <div data-testid="visit-dishes" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
+      <div data-section-label="" style={FOOD_TYPE.label}>Dishes</div>
       {rows.map((r, i) => (
         <div key={r.key} data-testid="visit-dish-row" data-edit-card="" style={{
           display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 12px", borderRadius: RADIUS.lg, minWidth: 0,
@@ -219,9 +221,9 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
 
   // ONE label style for every field heading in the form (Food, Ambiance, Dishes, Date, Cost, Notes) — NEW-6 (2026-10-23): "Food" and
   // "Date" were 12 px regular while "Dishes" was 12 px bold, so the form read as two dialects.
-  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-secondary)", minWidth: 0 };
+  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 };
   return (
-    <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
+    <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: `${GROUP_STEP}px ${COLUMN_X}px 0`, minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
       {initial?.what_i_had && (
         <div data-testid="visit-legacy-had" style={{ fontSize: FONT_SIZE.emphasis, color: "var(--text-secondary)" }}>
           <span style={{ fontWeight: 700 }}>What I had (saved earlier):</span> {initial.what_i_had}
@@ -232,18 +234,18 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
       {/* div, not label: a <label> around a button group forwards a tap on its text to the FIRST
           button inside it, which would set the rating to 1 on a stray tap. */}
       <div role="group" aria-label="Food" data-testid="visit-food-group" style={groupLabel}>
-        Food
+        <span style={FOOD_TYPE.label}>Food</span>
         <RatingSlider value={rating} onChange={setRating} label="Food rating" isMobile={isMobile} />
       </div>
       <div role="group" aria-label="Ambiance" data-testid="visit-ambiance-group" style={groupLabel}>
-        Ambiance
+        <span style={FOOD_TYPE.label}>Ambiance</span>
         <RatingSlider value={ratingAmbiance} onChange={setRatingAmbiance} label="Ambiance rating" isMobile={isMobile} />
       </div>
       {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} knownRows={knownRows} />}
       {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: FONT_SIZE.control, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
       <label data-edit-card="" style={groupLabel}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 20 }}>
-          <span>Date</span>
+          <span style={FOOD_TYPE.label}>Date</span>
           {/* Explicit clear affordance, matching the rating slider's own "Clear" link — a native
            * date input's built-in clear gesture isn't reliably reachable on every platform (a
            * concern that matters for editing: "date (including clearing it back to unknown)"). */}
@@ -259,15 +261,15 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
         <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-day")} data-testid="visit-date-input" className="food-date-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }} />
       </label>
       <label data-edit-card="" style={groupLabel}>
-        Cost
+        <span style={FOOD_TYPE.label}>Cost</span>
         <input type="number" step="0.01" min="0" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" {...noAutofill("visit-total")} data-testid="visit-cost-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
       <label data-edit-card="" style={groupLabel}>
-        Notes
+        <span style={FOOD_TYPE.label}>Notes</span>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} {...noAutofill("visit-notes")} data-testid="visit-notes-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, resize: "vertical" }} />
       </label>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-secondary)" }}>
-        Would return?
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={FOOD_TYPE.label}>Would return?</span>
         <button type="button" onClick={() => setWouldReturn(wouldReturn === true ? null : true)}
           style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 44, cursor: "pointer",
             background: wouldReturn === true ? "var(--accent-food)" : "transparent",
@@ -290,7 +292,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, knownRows, s
       }}>
         <button type="submit" disabled={pending} style={{
           flex: 1, border: "none", borderRadius: RADIUS.md, padding: "10px 0", minHeight: 44, cursor: pending ? "default" : "pointer",
-          background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: FONT_SIZE.display, fontWeight: 700,
+          background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700,
           opacity: pending ? 0.6 : 1,
         }}>
           {pending ? "Saving…" : submitLabel}
@@ -353,7 +355,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
   const mapsUrl = directionsUrl(lat, lon);
   const showPrice = !!onSetPriceLevel && !manualNameEditable;
   return (
-    <div data-edit-card={manualNameEditable ? "" : undefined} data-sheet-grab="" style={{ padding: "4px 16px 6px" }}>
+    <div data-edit-card={manualNameEditable ? "" : undefined} data-sheet-grab="" style={{ padding: `4px ${COLUMN_X}px 0` }}>
       {/* NEW-2 (2026-10-23): the ✕ is centred on the title's FIRST line (flex-start + its own -10 overhang), so a long name that wraps
           leaves the ✕ beside the first line like an iOS sheet, not floating at the middle of two. The place-name input keeps centring. */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: manualNameEditable ? "center" : "flex-start", gap: 8 }}>
@@ -364,15 +366,14 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
             style={{ ...fieldStyle(), fontSize: 17, fontWeight: 700 }}
           />
         ) : (
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0, flex: 1 }}>
+          <div style={{ position: "relative", minWidth: 0, flex: 1 }}>
+            {/* NEW-1 (2026-10-27): the dot HANGS in the gutter left of the column (absolute, 4 px in from the card's edge) so the name, subtitle, address, chips and
+                every row below start on one edge — it used to sit inline and push the whole header 17 px right of everything else. */}
             <span data-testid="food-panel-accent-dot" aria-hidden="true" style={{
-              display: "inline-block", width: 9, height: 9, borderRadius: "50%", marginTop: 8, // 8 = half of the title's 24-high first line less half the dot
-              background: SELECTED_ACCENT, flex: "0 0 auto",
+              position: "absolute", left: -12, top: 8, width: 8, height: 8, borderRadius: "50%", // top 8 = half of the title's 24-high first line less half the dot
+              background: SELECTED_ACCENT,
             }} />
-            <div data-testid="food-panel-title" style={{
-              fontSize: 20, fontWeight: 680, letterSpacing: "-0.01em", lineHeight: 1.22, // design-exempt: the panel's one hero line (the restaurant name)
-              color: "var(--text-primary)", overflowWrap: "anywhere",
-            }}>
+            <div data-testid="food-panel-title" style={{ ...FOOD_TYPE.title, color: "var(--text-primary)", overflowWrap: "anywhere" }}>
               {name}
             </div>
           </div>
@@ -381,7 +382,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
         <CloseX onClick={onClose} label="Close" testId="food-panel-close" style={{ margin: "-10px -8px -10px 0" }} />
       </div>
       {(subline || showPrice) && (
-        <div data-testid="food-panel-subline" style={{ marginTop: 2, marginLeft: 17, fontSize: FONT_SIZE.emphasis, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap" }}>
+        <div data-testid="food-panel-subline" style={{ marginTop: 2, ...FOOD_TYPE.body, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap" }}>
           {subline && <span>{subline}</span>}
           {subline && showPrice && <span aria-hidden="true">&nbsp;·&nbsp;</span>}
           {showPrice && <PriceLevelControl level={priceLevel} onChange={onSetPriceLevel} />}
@@ -390,7 +391,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
       {formattedAddress && mapsUrl && (
         <a
           href={mapsUrl} target="_blank" rel="noopener noreferrer" data-testid="food-directions-link"
-          style={{ display: "block", marginTop: 2, marginLeft: 17, fontSize: FONT_SIZE.control, color: "var(--text-secondary)", textDecoration: "none" }}
+          style={{ display: "block", margin: "-4px 0 -8px", padding: "8px 0", ...FOOD_TYPE.caption, color: "var(--text-secondary)", textDecoration: "none" }} // padding + opposite margin = a ~32 tall tap target without moving the line
         >
           {formattedAddress} · <span style={{ fontWeight: 700 }}>Directions</span>
         </a>
@@ -406,9 +407,9 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
 function ScorePills({ aggregates, listsControl }) {
   const { avgFood, avgAmbiance } = aggregates;
   // --hover-ghost is the one LIGHT grey fill that stays light in the light theme and subtle in the dark one (--chrome-muted is a dark fill).
-  const pill = chipBox(28, 10, { gap: 4, borderRadius: RADIUS.pill, background: "var(--hover-ghost)", color: "var(--text-secondary)", fontSize: FONT_SIZE.control }); // NEW-3: centred on both axes (lib/chipStyle.js)
+  const pill = chipBox(28, 10, { gap: 4, borderRadius: RADIUS.pill, background: "var(--hover-ghost)", color: "var(--text-secondary)", ...FOOD_TYPE.caption }); // NEW-3: centred on both axes (lib/chipStyle.js)
   return (
-    <div data-testid="food-score-pills" style={{ padding: "4px 16px 6px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+    <div data-testid="food-score-pills" style={{ padding: `${GROUP_STEP}px ${COLUMN_X}px 0`, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
       {avgFood != null && (
         <span style={pill} data-chip="" data-testid="food-score-pill-food"><b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{formatRating(avgFood)}</b> Food</span>
       )}
@@ -432,8 +433,8 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
     border: "1px solid var(--border-default)", borderRadius: RADIUS.md, cursor: "pointer",
     font: "inherit", fontWeight: 700, minHeight: 44,
   };
-  const primary = { ...base, flex: 1, border: "none", padding: "11px 0", fontSize: FONT_SIZE.display, background: "var(--accent-food)", color: "var(--on-accent-food)" };
-  const secondary = { ...base, flex: "0 0 auto", padding: "11px 16px", fontSize: FONT_SIZE.emphasis, background: "transparent", color: "var(--text-primary)" };
+  const primary = { ...base, flex: 1, border: "none", padding: "11px 0", ...FOOD_TYPE.body, background: "var(--accent-food)", color: "var(--on-accent-food)" };
+  const secondary = { ...base, flex: "0 0 auto", padding: "11px 16px", ...FOOD_TYPE.body, background: "transparent", color: "var(--text-primary)" };
   // ⛔ B1022960 round 2 — never filled: mirrors the SAME "want to try" flag's OWN established look elsewhere in this module
   // (outlined, transparent, accent text/border) so the active state reads as "flagged" without competing with the primary CTA.
   const wishActive = { background: "transparent", color: "var(--accent-food)", border: "1px solid var(--accent-food)" };
@@ -461,7 +462,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
 
   return (
     <div data-testid="food-actions-row" data-sheet-sticky="bottom" data-hide-while-typing="" data-hide-while-form="" style={{
-      position: "sticky", bottom: 0, marginTop: "auto", display: "flex", gap: 8, padding: "10px 16px",
+      position: "sticky", bottom: 0, marginTop: "auto", display: "flex", gap: 8, padding: `10px ${COLUMN_X}px`,
       background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
     }}>
       {[logBtn, wishBtn].filter(Boolean)}
@@ -479,7 +480,7 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
       <div data-testid="food-visit-card-editing" data-sheet-form="" style={{ borderBottom: "1px solid var(--border-default)" }}>
         {/* NEW-1 (2026-10-20): the visit ROW is one compact line now, so an old visit's saved free text is read here, above its form — never an input, never rewritten. */}
         {visit.what_was_good && (
-          <div data-testid="visit-legacy-good" style={{ padding: "10px 16px 0", fontSize: FONT_SIZE.emphasis, color: "var(--text-secondary)" }}>
+          <div data-testid="visit-legacy-good" style={{ padding: `10px ${COLUMN_X}px 0`, ...FOOD_TYPE.body, color: "var(--text-secondary)" }}>
             <span style={{ fontWeight: 700 }}>What was good (saved earlier):</span> {visit.what_was_good}
           </div>
         )}
@@ -502,10 +503,18 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
     <div
       data-testid="food-visit-card" onClick={onOpenEdit} role="button" tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter") onOpenEdit(); }}
-      style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", minHeight: 44, borderBottom: "1px solid var(--border-default)", cursor: "pointer" }}
+      aria-label={visitRowLabel(visit, formatVisitDate)}
+      style={{ display: "flex", alignItems: "center", gap: 8, margin: `0 ${COLUMN_X}px`, minHeight: 44, boxSizing: "border-box", borderBottom: "1px solid var(--border-default)", cursor: "pointer" }}
     >
-      <span data-testid="food-visit-row-label" style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.emphasis, color: visit.visited_on ? "var(--text-primary)" : "var(--text-secondary)", fontVariantNumeric: "tabular-nums", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {visitRowLabel(visit, formatVisitDate)}
+      {/* NEW-1 (2026-10-27): the DATE is the quiet part (secondary, regular — "No date" included); the scores are the answer (the number bold, primary), the same
+          pairing as the score pills above. The row's accessible name is the plain one-line label. */}
+      <span data-testid="food-visit-row-label" style={{ flex: 1, minWidth: 0, ...FOOD_TYPE.body, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {visitRowParts(visit, formatVisitDate).map((p, i) => (
+          <span key={i}>
+            {i > 0 && " · "}
+            {p.kind === "date" ? p.text : <>{p.label} <b style={{ color: "var(--text-primary)", fontWeight: 700 }}>{p.value}</b></>}
+          </span>
+        ))}
       </span>
       <span aria-hidden="true" style={{ flex: "none", color: "var(--text-tertiary)", fontSize: FONT_SIZE.display, lineHeight: 1 }}>›</span>
     </div>
@@ -519,9 +528,7 @@ function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, 
   const { shown, hidden } = visitsToShow(pastVisits, expanded || (editingVisitId && !pastVisits.slice(0, 2).some((v) => v.id === editingVisitId)));
   return (
     <div data-testid="food-past-visits">
-      <div style={{ padding: "12px 16px 2px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)" }}>
-        Visits · {pastVisits.length}
-      </div>
+      <SectionLabel count={pastVisits.length}>Visits</SectionLabel>
       {shown.map((v) => (
         <VisitCard
           key={v.id} visit={v} onDelete={onDelete}
@@ -533,8 +540,8 @@ function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, 
       ))}
       {hidden > 0 && (
         <button type="button" onClick={() => setExpanded(true)} data-testid="food-visits-more" style={{
-          display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "0 16px", minHeight: 44,
-          cursor: "pointer", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--accent-food)",
+          display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", padding: `0 ${COLUMN_X}px`, minHeight: 44,
+          cursor: "pointer", font: "inherit", ...FOOD_TYPE.body, fontWeight: 700, color: "var(--accent-food)",
         }}>
           Show {hidden} more
         </button>
@@ -546,7 +553,7 @@ function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, 
 /* Empty state — never visited: no score pills, no "Visits · 0" header. Just the header, the actions row, and one line. */
 function EmptyStateNote() {
   return (
-    <div style={{ padding: "2px 16px 12px", fontSize: 12.5, color: "var(--text-tertiary)" }}>
+    <div style={{ padding: `${ITEM_STEP}px ${COLUMN_X}px ${GROUP_STEP}px`, ...FOOD_TYPE.caption, color: "var(--text-secondary)" }}>
       Shows as a hollow pin on the map until you log a visit here.
     </div>
   );
@@ -655,7 +662,7 @@ export default function VisitPanel({
           <div role="status" data-testid="food-save-confirmation" style={{
             margin: "0 16px 8px", padding: "7px 10px", borderRadius: 8,
             background: "var(--success-bg)", color: "var(--success-text)", border: "1px solid var(--success-border)",
-            fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6,
+            ...FOOD_TYPE.caption, fontWeight: 700, display: "flex", alignItems: "center", gap: 6,
           }}>
             <span style={{ flex: 1, minWidth: 0 }}>{savedNotice.kind === "edit" ? "✓ Changes saved" : `✓ Visit saved${savedNotice.dishes ? ` · ${savedNotice.dishes} ${savedNotice.dishes === 1 ? "dish" : "dishes"}` : ""}`}</span>
             {savedNotice.kind !== "edit" && (
@@ -666,7 +673,7 @@ export default function VisitPanel({
           </div>
         )}
         {everVisited && <ScorePills aggregates={aggregates} listsControl={listsControl} />}
-        {!everVisited && listsControl && <div style={{ padding: "0 16px 6px", display: "flex" }}>{listsControl}</div>}
+        {!everVisited && listsControl && <div style={{ padding: `${GROUP_STEP}px ${COLUMN_X}px 0`, display: "flex" }}>{listsControl}</div>}
         {!everVisited && !adding && <EmptyStateNote />}
       </div>
 
@@ -674,12 +681,12 @@ export default function VisitPanel({
         <DishesSection
           dishesWithDate={dishesWithDate || []} visits={visits}
           onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} pending={dishPending}
-          openWishlistNames={openDishWishlistNames} onOpenDish={openDish}
+          openWishlistNames={openDishWishlistNames} onOpenDish={openDish} hideAdd={adding || !!editingVisitId}
         />
       )}
 
       {error && (
-        <div role="alert" style={{ margin: "8px 16px 0", padding: "8px 10px", borderRadius: 8, background: "var(--danger-bg, rgba(220,38,38,0.1))", color: "var(--danger-text, var(--danger))", fontSize: 12 }}>
+        <div role="alert" style={{ margin: "8px 16px 0", padding: "8px 10px", borderRadius: 8, background: "var(--danger-bg, rgba(220,38,38,0.1))", color: "var(--danger-text, var(--danger))", ...FOOD_TYPE.caption }}>
           {error}
         </div>
       )}

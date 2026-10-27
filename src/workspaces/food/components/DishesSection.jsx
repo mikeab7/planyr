@@ -31,6 +31,8 @@ import { noAutofill } from "../lib/noAutofill.js";
 import { chipBox } from "../lib/chipStyle.js";
 import { suggestDishes, sameDishName } from "../lib/dishSuggest.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import SectionLabel from "./SectionLabel.jsx";
+import { FOOD_TYPE, ITEM_STEP } from "../lib/foodType.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 
 const COURSES = [
@@ -70,10 +72,7 @@ function useIsMobile() {
 // Every field label in the redesigned editor shares this one look (the brief: "small-caps, 10px,
 // letter-spaced, in the secondary text token — not the faded-grey-on-white the contrast audit
 // rejects"). FONT_SIZE.micro is exactly 10.
-const FIELD_LABEL_STYLE = {
-  display: "block", fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase",
-  letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 3,
-};
+const FIELD_LABEL_STYLE = { display: "block", ...FOOD_TYPE.label, marginBottom: 3 }; // NEW-1 (2026-10-27): the ONE caps label (lib/foodType.js) — no second dialect
 const FILLED_FIELD_STYLE = {
   width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 8,
   border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
@@ -220,7 +219,7 @@ function DishEditRow({ initial, mode = initial ? "edit" : "new", rows = [], open
       style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 12px", background: "var(--surface-raised)", border: "1px solid var(--accent-food)", borderRadius: RADIUS.lg, margin: "4px" }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }} data-testid="dish-edit-heading">
+        <span style={FOOD_TYPE.label} data-testid="dish-edit-heading">
           {isRerate ? "Rate again" : isEdit ? "Edit dish" : "New dish"}
         </span>
         <CloseX onClick={onCancel} label="Close" testId="dish-edit-close" size={44} />
@@ -357,16 +356,16 @@ function DishDisplayRow({ row, section, onOpen }) {
     <div
       data-testid="dish-row" data-dish-section={section} data-dish-scored={row.latestScore == null ? "false" : "true"} onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
-      style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", cursor: "pointer", minHeight: 48, borderBottom: "1px solid var(--border-default)" }}
+      style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", cursor: "pointer", minHeight: 48, boxSizing: "border-box", borderBottom: "1px solid var(--border-default)" }} // NEW-1: flat on the column edge — no rounded box pushing the badge in
     >
       <DishBadge score={row.latestScore} section={section} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{row.name}</div>
+        <div style={{ ...FOOD_TYPE.body, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{row.name}</div>
         {sub.kind === "note" ? (
           // One truncated line; the full text is in the dish sheet a tap on the row opens.
-          <div data-testid="dish-row-note" data-subline-kind="note" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub.text}</div>
+          <div data-testid="dish-row-note" data-subline-kind="note" style={{ ...FOOD_TYPE.caption, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub.text}</div>
         ) : (
-          <div data-testid="dish-row-subline" data-subline-kind={sub.kind} style={{ fontSize: FONT_SIZE.label, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: sub.kind === "empty" ? "var(--text-tertiary)" : "var(--text-secondary)" }}>{sub.text}</div>
+          <div data-testid="dish-row-subline" data-subline-kind={sub.kind} style={{ ...FOOD_TYPE.caption, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: sub.kind === "empty" ? "var(--text-tertiary)" : "var(--text-secondary)" }}>{sub.text}</div>
         )}
       </div>
       {CHEVRON}
@@ -374,7 +373,6 @@ function DishDisplayRow({ row, section, onOpen }) {
   );
 }
 
-const SECTION_HEADING = { fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)", padding: "10px 0 4px" };
 
 /* ── The dish sheet (NEW-2) ──────────────────────────────────────────────────────────────────────────────────────── */
 export function DishSheet({ row, restaurantName, visits, onBack, onSaveDish, onDeleteDish, pending, isMobile, scope = "place" }) {
@@ -473,7 +471,9 @@ export function DishSheet({ row, restaurantName, visits, onBack, onSaveDish, onD
   );
 }
 
-export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDeleteDish, pending, openWishlistNames = [], scope = "place", onOpenDish }) {
+/* `hideAdd` (NEW-2, 2026-10-27): a Log-a-visit / edit-a-visit form is open and carries its OWN "add a dish" — so the place card's steps aside (the
+ * open add-row draft stays in the panel's draft store and is back when the form closes). Never two add-a-dish controls on screen. */
+export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDeleteDish, pending, openWishlistNames = [], scope = "place", onOpenDish, hideAdd = false }) {
   // Which add row is open survives the card remounting (lib/draftStore.js); `scope` keeps the place-wide section and the one inside an editing visit apart.
   const [addingNew, setAddingNew] = useDraftField(`dishes-ui:${scope}`, "addingNew", false);
   const [skipOpen, setSkipOpen] = useState(false); // "Skip · N dishes ▾" — collapsed by default, one tap expands
@@ -490,57 +490,57 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
 
   const list = (sectionRows, section) => sectionRows.map((row) => <DishDisplayRow key={row.key} row={row} section={section} onOpen={() => open(row)} />);
 
+  const dishCount = (n) => `${n} ${n === 1 ? "dish" : "dishes"}`;
+  const group = (rowsIn, section) => <div>{list(rowsIn, section)}</div>;
+
   return (
-    <div data-testid="food-dishes-section" style={{ margin: "4px 16px 0" }}>
+    <div data-testid="food-dishes-section" style={{ margin: "0 16px" }}>
       {sections.order.length > 0 && (
         <div data-testid="food-dishes-order">
-          <div style={SECTION_HEADING}>What to order</div>
-          <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, overflow: "clip" }}>{list(sections.order, "order")}</div>
+          <SectionLabel inset={0} count={dishCount(sections.order.length)}>What to order</SectionLabel>
+          {group(sections.order, "order")}
         </div>
       )}
       {sections.maybe.length > 0 && (
         <div data-testid="food-dishes-maybe">
-          <div style={SECTION_HEADING}>Maybe</div>
-          <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, overflow: "clip" }}>{list(sections.maybe, "maybe")}</div>
+          <SectionLabel inset={0} count={dishCount(sections.maybe.length)}>Maybe</SectionLabel>
+          {group(sections.maybe, "maybe")}
         </div>
       )}
       {sections.skip.length > 0 && (
         <div data-testid="food-dishes-skip" data-open={skipOpen ? "true" : "false"}>
-          <button type="button" onClick={() => setSkipOpen((o) => !o)} aria-expanded={skipOpen} data-testid="food-dishes-skip-toggle" style={{
-            ...SECTION_HEADING, display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", font: "inherit", minHeight: 44,
-            fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)",
-          }}>
-            Skip · {sections.skip.length} {sections.skip.length === 1 ? "dish" : "dishes"} <span aria-hidden="true">{skipOpen ? "▴" : "▾"}</span>
-          </button>
-          {skipOpen && <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, overflow: "clip" }}>{list(sections.skip, "skip")}</div>}
+          <SectionLabel inset={0} count={dishCount(sections.skip.length)} open={skipOpen} onToggle={() => setSkipOpen((o) => !o)} testId="food-dishes-skip-toggle">Skip</SectionLabel>
+          {skipOpen && group(sections.skip, "skip")}
         </div>
       )}
 
-      <div style={{ marginTop: 6 }}>
-        {addingNew ? (
-          <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
-            // clip, not hidden: `hidden` makes this box a scroll container, so the open form's sticky Save bar
-            // pinned to THIS box (it scrolled away with the form) instead of the bottom of the sheet (NEW-2).
-            overflow: "clip" }}>
-            <DishEditRow
-              rows={rows} openWishlistNames={openWishlistNames} pending={pending} isMobile={isMobile}
-              onCancel={() => setAddingNew(false)} scope={scope}
-              onSave={saveNew}
-            />
-          </div>
-        ) : (
-          <button
-            type="button" onClick={() => setAddingNew(true)} data-testid="food-add-dish-btn"
-            style={{
-              display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", background: "transparent",
-              border: "none", borderTop: rows.length ? "none" : DASHED_BORDER, padding: "11px 12px", minHeight: 44, cursor: "pointer",
-              font: "inherit", fontSize: 13, fontWeight: 700, color: "var(--accent-food)",
-            }}
-          >
-            <span aria-hidden="true">+</span> Add a dish
-          </button>
-        )}
-      </div>
+      {!hideAdd && (
+        <div style={{ marginTop: ITEM_STEP * 2 }}>
+          {addingNew ? (
+            <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+              // clip, not hidden: `hidden` makes this box a scroll container, so the open form's sticky Save bar
+              // pinned to THIS box (it scrolled away with the form) instead of the bottom of the sheet (NEW-2).
+              overflow: "clip" }}>
+              <DishEditRow
+                rows={rows} openWishlistNames={openWishlistNames} pending={pending} isMobile={isMobile}
+                onCancel={() => setAddingNew(false)} scope={scope}
+                onSave={saveNew}
+              />
+            </div>
+          ) : (
+            <button
+              type="button" onClick={() => setAddingNew(true)} data-testid="food-add-dish-btn"
+              style={{
+                display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", background: "transparent", boxSizing: "border-box",
+                border: "none", borderBottom: "1px solid var(--border-default)", padding: 0, minHeight: 44, cursor: "pointer",
+                font: "inherit", ...FOOD_TYPE.body, fontWeight: 700, color: "var(--accent-food)",
+              }}
+            >
+              <span aria-hidden="true">+</span> Add a dish
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

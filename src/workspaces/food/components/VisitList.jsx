@@ -36,6 +36,7 @@ import { chipBox } from "../lib/chipStyle.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { FOOD_TYPE } from "../lib/foodType.js";
 
 const SORTS = {
   // A dateless visit's key is "" — the empty string, which string-compares BELOW every real
@@ -107,7 +108,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
         <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr style={{ textAlign: "left", color: "var(--text-tertiary)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <tr style={{ textAlign: "left", ...FOOD_TYPE.label }}>{/* NEW-1 (2026-10-27): the ONE caps label (lib/foodType.js) */}
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Place</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Rating</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Ambiance</th>
