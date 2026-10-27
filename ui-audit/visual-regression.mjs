@@ -372,6 +372,15 @@ export function buildTriageMarkdown(triage, reason) {
   return lines.join("\n") + "\n";
 }
 
+/* The OS the capture is rendered on (B2445360). System fonts and graphics libraries come from the OS image, and a
+ * baseline is only comparable to a render from the same one — `ubuntu-latest` moved from Ubuntu 24.04 to 26.04 on
+ * 2026-10-24 with no commit in between and every desktop surface failed on a few icon-edge pixels. Printing it makes
+ * that cause visible on the first screen of a failed run. Never throws and never gates anything. */
+export function renderOsLabel(osReleaseText) {
+  const m = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(osReleaseText || "");
+  return m ? m[1] : "unknown OS";
+}
+
 async function run() {
   const argv = process.argv.slice(2);
   const approve = argv.includes("--approve");
@@ -394,6 +403,9 @@ async function run() {
   }
 
   const manifest = loadManifest();
+  let osLabel = "unknown OS";
+  try { osLabel = renderOsLabel(readFileSync("/etc/os-release", "utf8")); } catch { /* not Linux — label stays unknown */ }
+  console.log(`Rendering on: ${osLabel}`);
   const EXEC = process.env.PW_CHROME || undefined;
   const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-background-networking"] });
 
@@ -546,6 +558,7 @@ async function run() {
     console.error("\ndocs/VISUAL-REGRESSION.md is out of date relative to ui-audit/visual-baselines/manifest.json — regenerate with `node ui-audit/visual-regression.mjs --approve` (or, if only the doc drifted with no pixel change, see the item's own note) and commit it.");
   }
   if (failing.length) {
+    console.error(`\nRendered on: ${osLabel}. If only a few edge pixels of icons/text differ on EVERY desktop surface and no UI code changed, suspect a runner OS-image change (system fonts/libraries) before a UI change — re-author through the "Authorize visual regression baselines" workflow (docs/VISUAL-REGRESSION.md).`);
     console.error(`\n${failing.length} surface/theme pair(s) did not match their baseline. Diff artifacts written to ${ARTIFACT_DIR}/ (gitignored — CI uploads this directory on failure). If the new picture is correct, approve it: node ui-audit/visual-regression.mjs --approve --reason="..."`);
   }
   if (docStale || failing.length) process.exit(1);
