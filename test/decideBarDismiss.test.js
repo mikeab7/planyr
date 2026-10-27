@@ -44,8 +44,11 @@ describe("finishGroundAction — the ONE way a decide-bar verb returns the map t
     expect(body).toMatch(/finishGroundAction\(\)/);
   });
 
-  it("the decide bar's own ✕ 'Clear selection' button keeps calling clearSel() directly — clearing to reselect must NOT exit select mode", () => {
+  it("the decide bar's own ✕ 'Clear selection' button keeps clearing via clearSel() directly — clearing to reselect must NOT exit select mode (B2451472: now the shared clearDecide, which Escape calls too)", () => {
+    const helper = finder.slice(finder.indexOf("const clearDecide ="), finder.indexOf("const clearDecide =") + 300);
+    expect(helper).toMatch(/=== "parcels"\) clearSel\(\); else clearDecidePin\(\);/);
+    expect(helper).not.toMatch(/finishGroundAction/);
     const clearBtn = finder.slice(finder.indexOf('data-testid="map-decide-clear"') - 300, finder.indexOf('data-testid="map-decide-clear"'));
-    expect(clearBtn).toMatch(/if \(decideTarget === "parcels"\) clearSel\(\); else clearDecidePin\(\);/);
+    expect(clearBtn).toMatch(/onClick=\{clearDecide\}/);
   });
 });

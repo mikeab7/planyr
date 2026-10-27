@@ -5,10 +5,10 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-05._
+_Last updated: 2026-10-27._
 
-## 📅 A decision: should a freshly inserted blank schedule row stay visible after a reload? (B2428272)
-- [ ] **Decide.** Insert now puts the row where you asked, and nothing hidden opens. While you're working, the new blank row stays on screen even inside a Focus-filtered group. After you reload the page it is hidden again until it has a status, the same as every other not-started task in that group (Focus hides finished, not-started and paused rows). The row is saved in the right place — open the group's chip and it's there. **Option A (my recommendation):** leave it; naming the row and giving it a status is the normal flow. **Option B:** remember inserted rows as "keep visible" in the saved schedule — small, but it adds a saved field.
+## 📅 A decision: should a freshly inserted blank schedule row stay visible after a reload? (B2428272) — ✅ DECIDED 2026-10-27, nothing for you here
+- [x] ~~**Decide.**~~ **Decided 2026-10-27: Option A — leave it as is.** A Focus filter hiding a not-started row after a reload is correct; naming the row and giving it a status is the normal flow. Nothing changed in the app. Recorded on B2428272.
 
 ## 🗺 A decision: two New York counties ride consultants' copies of commercial parcel data (B2387344)
 - [ ] **Decide.** To make every New York county answer, Chenango and Herkimer are wired to layers published by engineering/planning consultants (not the counties) that are built on Regrid-sourced data; Nassau is a land trust's copy of the 2020 roll and Dutchess an unconfirmed account's copy. They work and are labelled that way, but a consultant can remove a layer, and Regrid's licence on redistribution is your call. **Option A (my recommendation):** keep them until each county publishes its own; **Option B:** drop Chenango/Herkimer to a named "no parcel data" gap. Niagara County's own server is down today (B2387345).
