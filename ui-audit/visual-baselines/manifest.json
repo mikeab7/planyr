@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "14ac8245a",
+        "note": "Records filter-panel redesign (B2347488 amended, PR 2546): re-author CI-rendered baselines; the build gate currently reports a 3x2 px top-right header diff that also fails unrelated PR 2545, so triage must show whether it is noise or a real header change [CI-authored by run 40535464262 on 14ac8245a417b6f21181924ef643f08464b0191e]"
       }
     }
   }
