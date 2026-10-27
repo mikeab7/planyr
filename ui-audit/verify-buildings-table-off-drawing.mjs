@@ -201,8 +201,7 @@ try {
     if (png) writeFileSync(join(OUT, "export.png"), png);
   }
   await matrix(page, `${hosts} buildings`);
-  if (!LIVE) await browser.close().then(() => { browser = null; });
-  else { await session.close(); }
+  if (!LIVE) await browser.close().then(() => { browser = null; }); // signed in, the session stays open: the finally block below deletes the throwaway plan with it, THEN closes it
 
   // ---- 1 building, and the 16-building Goose Creek plan (local only — big fixture)
   if (!LIVE) {
