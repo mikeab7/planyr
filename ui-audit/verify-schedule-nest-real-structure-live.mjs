@@ -30,7 +30,7 @@ const before = new Set(await liveIds());
 const errs = [];
 
 // The cloud row read back through the app's own client: parent NAME of each named row (ids renumber on every structural save).
-const cloudShape = (id) => s.page.evaluate(async (id) => {
+const cloudShape = (id) => s.page.evaluate(async ({ id, LAST_SELECTED }) => {
   const q = await window.pfSupabase.from("schedules").select("rev,data").eq("id", id).single();
   if (q.error) return { error: q.error.message };
   const tasks = (q.data.data && q.data.data.tasks) || [], byId = new Map(tasks.map(t => [t.id, t]));
@@ -39,7 +39,7 @@ const cloudShape = (id) => s.page.evaluate(async (id) => {
   return { n: tasks.length, km: parentOf("Kinder Morgan"), ent: parentOf("Enterprise"), exx: parentOf("Exxon"), al: parentOf("Air Liquide"),
     planA: parentOf("Plan A"), surveying: parentOf("Surveying"), planB: parentOf("Plan B"), lastPred: predOf(LAST_SELECTED),
     meetingHeldParent: parentOf("Meeting Held") };
-}, id);
+}, { id, LAST_SELECTED });
 const nested = c => c && !c.error && c.km === "Plan A" && c.ent === "Plan A" && c.exx === "Plan A" && c.al === "Plan A";
 const original = c => c && !c.error && c.km === "Pipeline Coordination & LONOs" && c.ent === "Pipeline Coordination & LONOs" && c.exx === "Pipeline Coordination & LONOs" && c.al === "Pipeline Coordination & LONOs";
 
