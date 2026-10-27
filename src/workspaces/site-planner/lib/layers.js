@@ -1651,6 +1651,20 @@ const rasterComposite = (slots) => ({
   setOpacity(o) { slots.forEach((l) => { if (l && l.setOpacity) l.setOpacity(o); }); },
 });
 
+/* The opacity each live part of a layer ref is ACTUALLY drawn at (read-only; the e2e hooks on both hosts expose it so a spec can assert the
+ * map's own layer, never just the panel's saved number). A composite lists every part; a plain layer lists one; no live layer → []. */
+export function liveRefOpacities(ref) {
+  const out = [];
+  const visit = (l) => {
+    if (!l || l === "pending") return;
+    if (Array.isArray(l.__pfParts)) { l.__pfParts.forEach(visit); return; }
+    const o = l.options && l.options.opacity;
+    if (typeof o === "number") out.push(o);
+  };
+  visit(ref);
+  return out;
+}
+
 /* NEW-1 — per-surface memory of WHICH BAND each live layer was built into, so a "Show above
  * plan" flip can be detected and answered with a rebuild (Leaflet fixes a layer's pane at
  * construction — there is no `setPane`). A WeakMap keyed on the caller's own `refs` object:

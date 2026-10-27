@@ -14,11 +14,15 @@
  *    the other family — the panel only offers the acres pair when Land can match.
  *  · Date windows are relative to `now` and count DAYS (3 mo = 90, 6 mo = 180, 12 mo = 365), include
  *    today, and have no upper bound (a comp dated after today is not hidden by a rolling window).
- *    An undated comp is excluded by ANY active date filter; `undatedHidden` reports how many were.
+ *    An undated comp is excluded by ANY active date filter — and, like every other blank, is never
+ *    called out anywhere (owner, 2026-10-23: the count line is just "12 of 41 comps").
+ *  · A filter only exists while the selected TYPES can show its field. `normalizeFilters` prunes the
+ *    rest (deselect Lease and the rate / NNN / term state is DROPPED), so a hidden filter can never
+ *    keep filtering, and the chips list exactly what is applied.
  *  · Search NEVER triggers geocoding: the caller passes `cachedLocation(comp)`, which may only read
  *    what is already resolved (B1497889's gating stays).
  */
-import { annualLeaseRate, buildingPricePerSf, landPricePerSf, landSizeSf, sortCompsByRecency } from "./comps.js";
+import { annualLeaseRate, buildingPricePerSf, landPricePerSf, landSizeSf, parseLeaseTermYears, sortCompsByRecency } from "./comps.js";
 import { compSizeSf, countyLabel } from "../../../workspaces/dashboard/lib/compsCardModel.js";
 
 export const SF_PER_ACRE = 43560;
@@ -41,11 +45,37 @@ export function defaultFilters() {
     q: "",
     types: [],
     date: { mode: "any", from: "", to: "" },
-    sf: RANGE(), acres: RANGE(), clearHt: RANGE(), yearBuilt: RANGE(),
-    powerMin: "", docksMin: "",
-    rate: RANGE(), basis: [], bldgPsf: RANGE(), landPsf: RANGE(),
+    sf: RANGE(), acres: RANGE(), clearHt: RANGE(), yearBuilt: RANGE(), docks: RANGE(), power: RANGE(),
+    rate: RANGE(), basis: [], term: RANGE(), escal: RANGE(), freeRent: RANGE(), ti: RANGE(),
+    bldgPsf: RANGE(), capRate: RANGE(), noi: RANGE(), landPsf: RANGE(),
+    landlord: "", tenant: "",
     counties: [],
   };
+}
+
+/** Which field families the selected types can show (none selected = all). The filter panel renders
+ * from this and `normalizeFilters` prunes by it, so what is visible, applied and chipped never differ. */
+export function typeScope(types) {
+  const none = !types || types.length === 0;
+  const has = (t) => none || types.includes(t);
+  return { lease: has("lease"), sale: has("building_sale"), land: has("land"), building: none || types.some((t) => t !== "land") };
+}
+
+/** `filters` with every filter its types can no longer show reset. Pure; idempotent. */
+export function pruneForTypes(f) {
+  const sc = typeScope(f.types);
+  const d = defaultFilters();
+  const out = { ...f };
+  if (!sc.lease) for (const k of ["rate", "basis", "term", "escal", "freeRent", "ti"]) out[k] = d[k];
+  if (!sc.sale) for (const k of ["bldgPsf", "capRate", "noi"]) out[k] = d[k];
+  if (!sc.land) for (const k of ["landPsf", "acres"]) out[k] = d[k];
+  if (!sc.building) for (const k of ["sf", "clearHt", "yearBuilt", "docks", "power"]) out[k] = d[k];
+  return out;
+}
+
+/** The filters after a type toggle: the new types, with whatever they no longer show dropped. */
+export function withTypes(filters, types) {
+  return normalizeFilters({ ...filters, types });
 }
 
 /** A stored / foreign value → a complete, well-typed filters object (junk dropped, never thrown on). */
@@ -55,7 +85,9 @@ export function normalizeFilters(raw) {
   const str = (v) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
   const range = (v) => ({ min: str(v?.min), max: str(v?.max) });
   const list = (v, allowed) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && (!allowed || allowed.includes(x))) : []);
-  return {
+  // Power / dock doors used to be a single "at least" box (powerMin / docksMin); carry a stored one over.
+  const legacy = (min) => ({ min: str(min), max: "" });
+  return pruneForTypes({
     q: str(raw.q),
     types: list(raw.types, Object.keys(TYPE_FILTER_LABEL)),
     date: {
@@ -63,10 +95,13 @@ export function normalizeFilters(raw) {
       from: str(raw.date?.from), to: str(raw.date?.to),
     },
     sf: range(raw.sf), acres: range(raw.acres), clearHt: range(raw.clearHt), yearBuilt: range(raw.yearBuilt),
-    powerMin: str(raw.powerMin), docksMin: str(raw.docksMin),
-    rate: range(raw.rate), basis: list(raw.basis, ["nnn", "gross"]), bldgPsf: range(raw.bldgPsf), landPsf: range(raw.landPsf),
+    docks: raw.docks ? range(raw.docks) : legacy(raw.docksMin), power: raw.power ? range(raw.power) : legacy(raw.powerMin),
+    rate: range(raw.rate), basis: list(raw.basis, ["nnn", "gross"]),
+    term: range(raw.term), escal: range(raw.escal), freeRent: range(raw.freeRent), ti: range(raw.ti),
+    bldgPsf: range(raw.bldgPsf), capRate: range(raw.capRate), noi: range(raw.noi), landPsf: range(raw.landPsf),
+    landlord: str(raw.landlord).trim() ? str(raw.landlord) : "", tenant: str(raw.tenant).trim() ? str(raw.tenant) : "",
     counties: list(raw.counties),
-  };
+  });
 }
 
 export function normalizeSort(key) {
@@ -148,6 +183,13 @@ export function leaseAnnualRate(comp) {
   return comp?.compType === "lease" ? annualLeaseRate(comp) : null;
 }
 const buildingOnly = (comp, v) => (comp?.compType === "land" ? null : v);
+const leaseOnly = (comp, v) => (comp?.compType === "lease" ? v : null);
+const saleOnly = (comp, v) => (comp?.compType === "building_sale" ? v : null);
+/** Cap rate as a percentage (it is stored as a decimal fraction, 0.0575 → 5.75). */
+export function capRatePct(comp) {
+  const v = comp?.bldgCapRate;
+  return v == null || !Number.isFinite(Number(v)) ? null : Number((Number(v) * 100).toFixed(6));
+}
 
 function inRange(value, min, max) {
   if (value == null || !Number.isFinite(value)) return false;
@@ -168,19 +210,20 @@ function compile(filters, now) {
     types: f.types.length ? new Set(f.types) : null,
     dateB: dateBounds(f.date, now),
     sf: rangeOf(f.sf), acres: rangeOf(f.acres), clearHt: rangeOf(f.clearHt), yearBuilt: rangeOf(f.yearBuilt),
-    rate: rangeOf(f.rate), bldgPsf: rangeOf(f.bldgPsf), landPsf: rangeOf(f.landPsf),
-    powerMin: toNum(f.powerMin), docksMin: toNum(f.docksMin),
+    docks: rangeOf(f.docks), power: rangeOf(f.power),
+    rate: rangeOf(f.rate), term: rangeOf(f.term), escal: rangeOf(f.escal), freeRent: rangeOf(f.freeRent), ti: rangeOf(f.ti),
+    bldgPsf: rangeOf(f.bldgPsf), capRate: rangeOf(f.capRate), noi: rangeOf(f.noi), landPsf: rangeOf(f.landPsf),
+    landlord: f.landlord.trim().toLowerCase(), tenant: f.tenant.trim().toLowerCase(),
     basis: f.basis.length ? new Set(f.basis) : null,
     counties: f.counties.length ? new Set(f.counties) : null,
   };
 }
 
-/** True when `comp` passes every active filter. `skipDate` lets the caller ask "would it pass if
- * the date filter were off" (to count undated comps the date filter alone hid). */
-function passes(comp, c, { cachedLocation, skipDate = false } = {}) {
+/** True when `comp` passes every active filter. */
+function passes(comp, c, { cachedLocation } = {}) {
   if (c.tokens.length && !matchesSearch(comp, c.tokens, { cachedLocation })) return false;
   if (c.types && !c.types.has(comp.compType)) return false;
-  if (!skipDate && c.dateB) {
+  if (c.dateB) {
     const d = comp.compDate ? String(comp.compDate).slice(0, 10) : null;
     if (!d) return false;
     if (c.dateB.from && d < c.dateB.from) return false;
@@ -190,12 +233,20 @@ function passes(comp, c, { cachedLocation, skipDate = false } = {}) {
   if (rangeActive(c.acres) && !inRange(landAcres(comp), c.acres.min, c.acres.max)) return false;
   if (rangeActive(c.clearHt) && !inRange(buildingOnly(comp, comp.clearHeightFt), c.clearHt.min, c.clearHt.max)) return false;
   if (rangeActive(c.yearBuilt) && !inRange(buildingOnly(comp, comp.yearBuilt), c.yearBuilt.min, c.yearBuilt.max)) return false;
-  if (c.powerMin != null && !inRange(buildingOnly(comp, comp.powerAmps), c.powerMin, null)) return false;
-  if (c.docksMin != null && !inRange(buildingOnly(comp, comp.dockDoors), c.docksMin, null)) return false;
+  if (rangeActive(c.power) && !inRange(buildingOnly(comp, comp.powerAmps), c.power.min, c.power.max)) return false;
+  if (rangeActive(c.docks) && !inRange(buildingOnly(comp, comp.dockDoors), c.docks.min, c.docks.max)) return false;
   if (rangeActive(c.rate) && !inRange(leaseAnnualRate(comp), c.rate.min, c.rate.max)) return false;
   if (c.basis && !(comp.compType === "lease" && c.basis.has(comp.leaseRateExpense))) return false;
+  if (rangeActive(c.term) && !inRange(leaseOnly(comp, parseLeaseTermYears(comp.leaseTerm)), c.term.min, c.term.max)) return false;
+  if (rangeActive(c.escal) && !inRange(leaseOnly(comp, comp.leaseEscalationPct), c.escal.min, c.escal.max)) return false;
+  if (rangeActive(c.freeRent) && !inRange(leaseOnly(comp, comp.leaseFreeRentMonths), c.freeRent.min, c.freeRent.max)) return false;
+  if (rangeActive(c.ti) && !inRange(leaseOnly(comp, comp.leaseTi), c.ti.min, c.ti.max)) return false;
   if (rangeActive(c.bldgPsf) && !(comp.compType === "building_sale" && inRange(buildingPricePerSf(comp), c.bldgPsf.min, c.bldgPsf.max))) return false;
+  if (rangeActive(c.capRate) && !inRange(saleOnly(comp, capRatePct(comp)), c.capRate.min, c.capRate.max)) return false;
+  if (rangeActive(c.noi) && !inRange(saleOnly(comp, comp.bldgNoi), c.noi.min, c.noi.max)) return false;
   if (rangeActive(c.landPsf) && !(comp.compType === "land" && inRange(landPricePerSf(comp), c.landPsf.min, c.landPsf.max))) return false;
+  if (c.landlord && !String(comp.partyProvider || "").toLowerCase().includes(c.landlord)) return false;
+  if (c.tenant && !String(comp.partyAcquirer || "").toLowerCase().includes(c.tenant)) return false;
   if (c.counties && !c.counties.has(comp.anchor?.county)) return false;
   return true;
 }
@@ -208,17 +259,22 @@ export function applyFilters(comps, filters, { now = new Date(), cachedLocation 
   return out;
 }
 
-/** { shown, total, undatedHidden } — `undatedHidden` is how many undated comps ONLY the date filter
- * kept out (0 when no date filter is active), so the count line is never mysterious. */
+/** { shown, total }. A comp missing a filtered value is simply not shown — never counted or called out. */
 export function countFiltered(comps, filters, opts = {}) {
   const { now = new Date(), cachedLocation } = opts;
   const c = compile(filters, now);
-  let shown = 0, undatedHidden = 0;
-  for (const comp of comps || []) {
-    if (passes(comp, c, { cachedLocation })) shown++;
-    else if (c.dateB && !comp.compDate && passes(comp, c, { cachedLocation, skipDate: true })) undatedHidden++;
-  }
-  return { shown, total: (comps || []).length, undatedHidden };
+  let shown = 0;
+  for (const comp of comps || []) if (passes(comp, c, { cachedLocation })) shown++;
+  return { shown, total: (comps || []).length };
+}
+
+/** The results line — exactly "12 of 41 comps". */
+export function resultsLine({ shown, total }) {
+  return `${shown} of ${total} ${total === 1 ? "comp" : "comps"}`;
+}
+/** The panel footer's button — "Show 12 comps". */
+export function showButtonLabel({ shown }) {
+  return `Show ${shown} ${shown === 1 ? "comp" : "comps"}`;
 }
 
 /* ---- sort --------------------------------------------------------------------------------- */
@@ -260,44 +316,98 @@ export function queryComps(comps, filters, sortKey, opts = {}) {
   return sortComps(applyFilters(comps, filters, opts), sortKey);
 }
 
-/* ---- chips -------------------------------------------------------------------------------- */
+/** "Harris County, TX" → "Harris" (the panel and chips stay short). */
+export function countyShort(key) {
+  const full = countyLabel(key) || key;
+  return full.replace(/ County, [A-Z]{2}$/, "");
+}
+
+/* ---- chips and section summaries ----------------------------------------------------------- */
 
 const fmtN = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
 const fmtMoney = (n) => `$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-function rangeLabel(r, fmt, unit) {
-  const { min, max } = rangeOf(r);
-  if (min == null && max == null) return null;
-  const u = unit ? ` ${unit}` : "";
-  if (min != null && max != null) return `${fmt(min)}–${fmt(max)}${u}`;
-  return min != null ? `≥ ${fmt(min)}${u}` : `≤ ${fmt(max)}${u}`;
-}
+/** 100000 → "100k" (chips stay short); anything not a clean thousand keeps its full figure. */
+const fmtK = (n) => (Number.isInteger(n) && n >= 1000 && n % 1000 === 0 ? `${n / 1000}k` : fmtN(n));
+const fmtYear = (n) => String(n);
 const fmtDayShort = (iso) => { const [y, m, d] = iso.split("-"); return `${Number(m)}/${Number(d)}/${y.slice(2)}`; };
 
-/** Ordered `[{ key, label }]` — one removable chip per active filter (search text is not a chip; it
- * lives in the search box). `removeFilter(filters, key)` is the inverse. */
+/** One row per range filter: its state key, chip key, the panel section it lives in, and how it reads.
+ * The single table chips, removal and the section-header summaries all read, so they cannot drift. */
+const RANGE_DEFS = [
+  { field: "rate", key: "rate", section: "deal", name: "Rate", fmt: fmtMoney, unit: "/SF/yr" },
+  { field: "term", key: "term", section: "deal", name: "Term", fmt: fmtN, unit: "yrs" },
+  { field: "escal", key: "escal", section: "deal", name: "Escalations", fmt: fmtN, unit: "%" },
+  { field: "freeRent", key: "freeRent", section: "deal", name: "Free rent", fmt: fmtN, unit: "mo" },
+  { field: "ti", key: "ti", section: "deal", name: "TI", fmt: fmtMoney, unit: "/SF" },
+  { field: "bldgPsf", key: "bldgPsf", section: "deal", name: "Price", fmt: fmtMoney, unit: "/SF" },
+  { field: "capRate", key: "capRate", section: "deal", name: "Cap rate", fmt: fmtN, unit: "%" },
+  { field: "noi", key: "noi", section: "deal", name: "NOI", fmt: fmtMoney, unit: "" },
+  { field: "landPsf", key: "landPsf", section: "deal", name: "Land price", fmt: fmtMoney, unit: "/SF" },
+  { field: "sf", key: "sf", section: "building", name: "", fmt: fmtN, unit: "SF" },
+  { field: "clearHt", key: "clearHt", section: "building", name: "Clear height", fmt: fmtN, unit: "ft" },
+  { field: "docks", key: "docks", section: "building", name: "Dock doors", fmt: fmtN, unit: "" },
+  { field: "power", key: "power", section: "building", name: "Power", fmt: fmtN, unit: "A" },
+  { field: "yearBuilt", key: "year", section: "building", name: "Built", fmt: fmtYear, unit: "" },
+  { field: "acres", key: "acres", section: "land", name: "", fmt: fmtN, unit: "AC" },
+];
+const TEXT_DEFS = [
+  { field: "landlord", key: "landlord", section: "parties", name: "Landlord" },
+  { field: "tenant", key: "tenant", section: "parties", name: "Tenant" },
+];
+const FIELD_FOR_KEY = Object.fromEntries([...RANGE_DEFS, ...TEXT_DEFS].map((d) => [d.key, d.field]));
+
+/** "100,000 – 300,000" / "≥ 100,000" / "≤ 300,000", or null when the range is open at both ends. */
+function rangeText(r, fmt) {
+  const { min, max } = rangeOf(r);
+  if (min == null && max == null) return null;
+  if (min != null && max != null) return `${fmt(min)} – ${fmt(max)}`;
+  return min != null ? `≥ ${fmt(min)}` : `≤ ${fmt(max)}`;
+}
+const joinLabel = (name, text, unit) => [name, text, unit].filter(Boolean).join(" ");
+
+/** The party names switch to Seller / Buyer once only sales and land are in play. */
+export function partyLabels(types) {
+  const t = types || [];
+  if (t.length && t.every((x) => x === "lease")) return { landlord: "Landlord", tenant: "Tenant" };
+  if (t.length && t.every((x) => x !== "lease")) return { landlord: "Seller", tenant: "Buyer" };
+  return { landlord: "Landlord / seller", tenant: "Tenant / buyer" };
+}
+
+const DATE_WORDS = { "3mo": ["Past 3 mo", "Past 3 months"], "6mo": ["Past 6 mo", "Past 6 months"], "12mo": ["Past 12 mo", "Past 12 months"] };
+
+/** Ordered `[{ key, label, summary, section }]` — one removable chip per active filter (search text is
+ * not a chip; it lives in the search box). `label` is the compact chip text, `summary` the full text a
+ * section header shows. Exactly the filters that are applied: the filters are pruned by type first.
+ * `removeFilter(filters, key)` is the inverse. */
 export function activeFilterChips(filters, { now = new Date() } = {}) {
   const f = normalizeFilters(filters);
+  const labels = partyLabels(f.types);
   const chips = [];
-  for (const t of f.types) chips.push({ key: `type:${t}`, label: TYPE_FILTER_LABEL[t] });
+  const push = (key, section, label, summary = label) => chips.push({ key, section, label, summary });
+  for (const t of f.types) push(`type:${t}`, "type", TYPE_FILTER_LABEL[t]);
   const db = dateBounds(f.date, now);
   if (db) {
-    const label = f.date.mode === "custom"
-      ? (db.from && db.to ? `${fmtDayShort(db.from)}–${fmtDayShort(db.to)}` : db.from ? `Since ${fmtDayShort(db.from)}` : `Through ${fmtDayShort(db.to)}`)
-      : f.date.mode.replace("mo", " mo");
-    chips.push({ key: "date", label });
+    if (f.date.mode === "custom") {
+      const text = db.from && db.to ? `${fmtDayShort(db.from)} – ${fmtDayShort(db.to)}` : db.from ? `Since ${fmtDayShort(db.from)}` : `Through ${fmtDayShort(db.to)}`;
+      push("date", "date", text);
+    } else push("date", "date", DATE_WORDS[f.date.mode][0], DATE_WORDS[f.date.mode][1]);
   }
-  const add = (key, label) => { if (label) chips.push({ key, label }); };
-  add("sf", rangeLabel(f.sf, fmtN, "SF"));
-  add("acres", rangeLabel(f.acres, fmtN, "A"));
-  add("clearHt", rangeLabel(f.clearHt, fmtN, "ft clear"));
-  if (toNum(f.powerMin) != null) add("power", `Power ≥ ${fmtN(toNum(f.powerMin))} A`);
-  if (toNum(f.docksMin) != null) add("docks", `≥ ${fmtN(toNum(f.docksMin))} docks`);
-  add("year", rangeLabel(f.yearBuilt, (n) => String(n), "built"));
-  add("rate", rangeLabel(f.rate, fmtMoney, "/SF/yr"));
-  for (const b of f.basis) chips.push({ key: `basis:${b}`, label: b.toUpperCase() });
-  add("bldgPsf", rangeLabel(f.bldgPsf, fmtMoney, "/SF bldg"));
-  add("landPsf", rangeLabel(f.landPsf, fmtMoney, "/SF land"));
-  for (const c of f.counties) chips.push({ key: `county:${c}`, label: countyLabel(c) || c });
+  for (const c of f.counties) push(`county:${c}`, "location", countyShort(c));
+  for (const section of ["deal", "building", "land"]) {
+    for (const d of RANGE_DEFS) {
+      if (d.section !== section) continue;
+      const compact = d.fmt === fmtN ? fmtK : d.fmt;
+      const chip = rangeText(f[d.field], compact);
+      if (chip == null) continue;
+      push(d.key, section, joinLabel(d.name, chip, d.unit), joinLabel(d.name, rangeText(f[d.field], d.fmt), d.unit));
+      if (d.field === "rate") for (const b of f.basis) push(`basis:${b}`, "deal", b === "nnn" ? "NNN" : "Gross");
+    }
+    if (section === "deal" && !chips.some((c) => c.key === "rate")) for (const b of f.basis) push(`basis:${b}`, "deal", b === "nnn" ? "NNN" : "Gross");
+  }
+  for (const d of TEXT_DEFS) {
+    const v = f[d.field].trim();
+    if (v) push(d.key, d.section, `${labels[d.field]}: ${v}`);
+  }
   return chips;
 }
 
@@ -307,21 +417,30 @@ export function removeFilter(filters, key) {
   const d = defaultFilters();
   const [head, rest] = key.split(/:(.*)/s);
   switch (head) {
-    case "type": return { ...f, types: f.types.filter((t) => t !== rest) };
+    case "type": return withTypes(f, f.types.filter((t) => t !== rest));
     case "basis": return { ...f, basis: f.basis.filter((b) => b !== rest) };
     case "county": return { ...f, counties: f.counties.filter((c) => c !== rest) };
     case "date": return { ...f, date: d.date };
-    case "sf": return { ...f, sf: d.sf };
-    case "acres": return { ...f, acres: d.acres };
-    case "clearHt": return { ...f, clearHt: d.clearHt };
-    case "power": return { ...f, powerMin: "" };
-    case "docks": return { ...f, docksMin: "" };
-    case "year": return { ...f, yearBuilt: d.yearBuilt };
-    case "rate": return { ...f, rate: d.rate };
-    case "bldgPsf": return { ...f, bldgPsf: d.bldgPsf };
-    case "landPsf": return { ...f, landPsf: d.landPsf };
-    default: return f;
+    default: {
+      const field = FIELD_FOR_KEY[head];
+      return field ? { ...f, [field]: d[field] } : f;
+    }
   }
+}
+
+/** What each panel section's header shows at the right: the current setting, or null ("Any"). */
+export function sectionSummaries(filters, opts = {}) {
+  const chips = activeFilterChips(filters, opts);
+  const out = { type: null, date: null, location: null, deal: null, building: null, land: null, parties: null };
+  for (const section of Object.keys(out)) {
+    const mine = chips.filter((c) => c.section === section);
+    if (!mine.length) continue;
+    const groups = new Set(mine.map((c) => c.key.split(":")[0]));
+    if (groups.size > 1) out[section] = `${groups.size} set`;
+    else if (section === "location" && mine.length > 2) out[section] = `${mine.length} counties`;
+    else out[section] = mine.map((c) => c.summary).join(", ");
+  }
+  return out;
 }
 
 /** Anything narrowing the list at all (chips OR search text) — drives "Clear all" and the map signal. */
@@ -334,6 +453,6 @@ export function hasActiveQuery(filters) {
 export function countyOptions(comps) {
   const counts = new Map();
   for (const c of comps || []) { const k = c?.anchor?.county; if (k) counts.set(k, (counts.get(k) || 0) + 1); }
-  return [...counts.entries()].map(([key, count]) => ({ key, count, label: countyLabel(key) || key }))
+  return [...counts.entries()].map(([key, count]) => ({ key, count, label: countyLabel(key) || key, short: countyShort(key) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }

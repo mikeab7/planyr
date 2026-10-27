@@ -1,5 +1,6 @@
-/* verify-comps-records-search.mjs — B2347488 / B2347489 / B2347490 (V1778016): the Records search +
- * filters, power + dock doors, and OpEx surviving an edit, driven SIGNED IN as the throwaway test account
+/* verify-comps-records-search.mjs — B2347488 / B2347489 / B2347490 (V1778016) and the 2026-10-23 filter-menu
+ * redesign (sections that mirror the comp record: Type · Date signed · Location · Deal · Building/Land · Parties):
+ * the Records search + filters, power + dock doors, and OpEx surviving an edit, driven SIGNED IN as the throwaway test account
  * against a real deploy (default https://planyr.io; pass a *.pages.dev preview as argv[2]).
  *
  *   node ui-audit/verify-comps-records-search.mjs [base]            desktop (Chromium)
@@ -26,10 +27,10 @@ const row = (o) => ({ comp_type: "lease", anchor_kind: "pin", lat: 29.76, lon: -
 const SEED = [
   row({ title: `${P} Land 12ac`, comp_type: "land", comp_date: "2026-10-01", land_size_value: 12, land_size_unit: "ac", land_price: 4356000 }),
   row({ title: `${P} Land 3ac old`, comp_type: "land", comp_date: "2025-01-10", land_size_value: 130680, land_size_unit: "sf", land_price: 100000 }),
-  row({ title: `${P} Sale Beltway`, comp_type: "building_sale", comp_date: "2026-09-01", bldg_size_sf: 150000, bldg_price: 15000000, clear_height_ft: 32, year_built: 2015, power_amps: 2000, power_volts: 480, power_phase: 3, dock_doors: 20 }),
+  row({ title: `${P} Sale Beltway`, comp_type: "building_sale", comp_date: "2026-09-01", bldg_size_sf: 150000, bldg_price: 15000000, clear_height_ft: 32, year_built: 2015, power_amps: 2000, power_volts: 480, power_phase: 3, dock_doors: 20, bldg_noi: 900000, bldg_cap_rate: 0.06, comp_party_provider: "ZZRS Smith Trust", comp_party_acquirer: "ZZRS Acme Freight" }),
   row({ title: `${P} Sale Blank`, comp_type: "building_sale", comp_date: "2026-05-01", county: "fort_bend", bldg_size_sf: null }),
-  row({ title: `${P} Lease A`, comp_date: "2026-09-20", lease_size_sf: 120000, lease_rate: 0.5, lease_rate_period: "monthly", lease_rate_expense: "nnn", clear_height_ft: 28, dock_doors: 10, lease_opex: 3.25 }),
-  row({ title: `${P} Lease B`, comp_date: "2026-02-01", lease_size_sf: 40000, lease_rate: 7, lease_rate_period: "annual", lease_rate_expense: "gross" }),
+  row({ title: `${P} Lease A`, comp_date: "2026-09-20", lease_size_sf: 120000, lease_rate: 0.5, lease_rate_period: "monthly", lease_rate_expense: "nnn", clear_height_ft: 28, dock_doors: 10, lease_opex: 3.25, lease_term: "60 mo", lease_escalation_pct: 3, lease_free_rent_months: 2, lease_ti: 10, comp_party_provider: "ZZRS Prologis", comp_party_acquirer: "ZZRS Acme Freight" }),
+  row({ title: `${P} Lease B`, comp_date: "2026-02-01", lease_size_sf: 40000, lease_rate: 7, lease_rate_period: "annual", lease_rate_expense: "gross", lease_term: "10 yrs", lease_escalation_pct: 2, lease_free_rent_months: 6, lease_ti: 25, comp_party_provider: "ZZRS Smith Trust" }),
   row({ title: `${P} Lease C undated`, comp_date: null, lease_size_sf: 300000, lease_rate: 6, lease_rate_period: "annual", lease_rate_expense: "nnn" }),
 ];
 
@@ -71,9 +72,19 @@ try {
   const T = (name) => `${P} ${name}`;
   const setSort = async (k) => { await page.getByLabel("Sort comps").selectOption(k); await settle(); };
   const openPanel = async () => { if (!(await page.getByTestId("comps-filter-panel").count())) { await page.getByRole("button", { name: /^Filters/ }).click(); await settle(); } };
-  const chipLabels = async () => page.getByTestId("comps-active-chips").locator("button").allInnerTexts().catch(() => []);
+  // The footer's "Show N comps" closes the panel; its N is live. Returns that N so callers can compare it to the list.
+  const closePanel = async () => {
+    if (!(await page.getByTestId("comps-filter-panel").count())) return null;
+    const label = await page.getByTestId("comps-filter-show").innerText();
+    await page.getByTestId("comps-filter-show").click(); await settle();
+    return Number(label.match(/Show (\d+)/)?.[1]);
+  };
+  const chipLabels = async () => { const had = await page.getByTestId("comps-filter-panel").count(); if (had) await closePanel(); const l = await page.getByTestId("comps-active-chips").locator("button").allInnerTexts().catch(() => []); if (had) await openPanel(); return l.filter((t) => t.trim() !== "Clear all"); };
   const fillRange = async (label, v) => { const el = page.getByLabel(label, { exact: true }); await el.fill(v); await el.blur(); await settle(); };
-  const clearAll = async () => { const b = page.getByRole("button", { name: "Clear all" }); if (await b.count()) { await b.click(); await settle(); } await setSort("newest"); };
+  const sectionIds = () => page.locator("[data-filter-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-filter-section")));
+  const headerValue = (id) => page.locator(`[data-filter-section="${id}"] [data-filter-value]`).innerText();
+  const visibleText = () => page.locator("body").innerText();
+  const clearAll = async () => { await closePanel(); const b = page.getByRole("button", { name: "Clear all" }); if (await b.count()) { await b.first().click(); await settle(); } await setSort("newest"); };
 
   // known-good arm: unfiltered, searching only the throwaway prefix → all 7 present
   await search(P);
@@ -97,7 +108,16 @@ try {
     ok("panel fits the screen width", panelBox && panelBox.x >= -1 && panelBox.x + panelBox.width <= vp.width + 1, JSON.stringify(panelBox));
     await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
     ok("Lease chip applies on a phone: 3 of N", (await shown()) === 3 && (await chipLabels()).includes("Lease ✕"), await line());
-    await fillRange("Building size min", "100000");
+    await openPanel();
+    await fillRange("Size SF min", "100000");
+    const footer = page.getByTestId("comps-filter-footer");
+    // the footer stays reachable while the (long) panel scrolls: scroll the Records scroller to the middle of the panel
+    await page.evaluate(() => { const el = [...document.querySelectorAll("div")].find((d) => getComputedStyle(d).overflowY === "auto" && d.querySelector('[data-testid="comps-filter-panel"]')); if (el) el.scrollTop = 200; });
+    await settle();
+    const fb = await footer.boundingBox();
+    ok("sticky footer stays on screen while the panel scrolls", fb && fb.y >= 0 && fb.y + fb.height <= vp.height + 1, JSON.stringify(fb));
+    ok("panel footer button reads 'Show 2 comps'", /Show 2 comps/.test(await page.getByTestId("comps-filter-show").innerText()));
+    await closePanel();
     ok("size filter applies on a phone", (await shown()) === 2, await line());
     // scroll is not trapped: scroll the list container down and back
     const scrolled = await page.evaluate(async () => {
@@ -110,12 +130,15 @@ try {
     ok("the Records list scrolls (panel does not trap scroll)", scrolled.found ? scrolled.moved > scrolled.before : true, JSON.stringify(scrolled));
     await page.getByRole("button", { name: "Remove filter: Lease" }).click(); await settle();
     ok("removing a chip on a phone widens the list again", (await shown()) >= 3, await line());
+    ok("phone: no 'hidden' / 'Include them' text", !/hidden|include them/i.test(await visibleText()));
     await page.screenshot({ path: `/tmp/records-search-phone-${args.includes("--landscape") ? "land" : "port"}.png` });
     await clearAll();
   } else {
   // every filter once; the count line, chips, markers and avg strip move together
   const expectSet = async (name, want, extra = {}) => {
+    const showN = await closePanel(); // footer count is live; it must equal the list after closing
     const got = await titles();
+    if (showN != null) ok(`${name}: footer 'Show N comps' (${showN}) matches the list after closing`, showN === (await shown()), `${showN} vs ${await shown()}`);
     const wantT = want.map(T).sort(), gotT = [...got].sort();
     const same = JSON.stringify(wantT) === JSON.stringify(gotT);
     const mk = await markers();
@@ -123,23 +146,50 @@ try {
     ok(`${name}: count line + markers agree`, (await shown()) === want.length && mk === want.length, `line "${await line()}" markers ${mk}`);
     if (extra.chip) ok(`${name}: chip "${extra.chip}"`, (await chipLabels()).some((c) => c.startsWith(extra.chip)), JSON.stringify(await chipLabels()));
   };
+  // the panel: section order, the retired sentence, header values, type-dependent fields
   await openPanel();
+  ok("sections in record order (no type selected → union)", JSON.stringify(await sectionIds()) === JSON.stringify(["type", "date", "location", "deal", "building", "land", "parties"]), JSON.stringify(await sectionIds()));
+  const t0 = await visibleText();
+  ok("the 'Blank fields don't match a range' sentence is gone", !/blank fields/i.test(t0));
+  ok("no 'hidden' / 'Include them' / 'undated' text in the Records tab", !/\bhidden\b|include them|undated/i.test(t0));
+  ok("every header reads Any with nothing set", (await Promise.all(["type", "date", "location", "deal", "building", "land", "parties"].map(headerValue))).every((v) => v.trim() === "Any"));
+  ok("Location shows county chips with counts", (await page.locator('[data-filter-section="location"] button').allInnerTexts()).some((t) => /^Harris \d+$/.test(t.trim())));
   await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+  ok("Lease: the lease fields appear and sale/land fields do not", (await page.getByLabel("Term (yrs) min").count()) === 1 && (await page.getByLabel("Cap rate % min").count()) === 0 && (await page.getByLabel("Acres min").count()) === 0 && (await sectionIds()).includes("building") && !(await sectionIds()).includes("land"), JSON.stringify(await sectionIds()));
+  ok("Type header value reads Lease", (await headerValue("type")).trim() === "Lease");
   await expectSet("type Lease", ["Lease A", "Lease B", "Lease C undated"], { chip: "Lease" });
-  ok("avg strip labelled 'Avg of'", true);
+  await openPanel();
   await page.getByRole("button", { name: "3 mo", exact: true }).click(); await settle();
-  await expectSet("Lease + 3 mo", ["Lease A"], { chip: "3 mo" });
-  ok("undated hidden is announced", /1 undated hidden/.test(await line()), await line());
+  ok("Date signed header reads 'Past 3 months'", (await headerValue("date")).trim() === "Past 3 months");
+  await expectSet("Lease + 3 mo", ["Lease A"], { chip: "Past 3 mo" });
+  ok("no undated callout after a date filter hides one", !/undated|hidden/i.test(await line()) && (await line()).replace(/\s+/g, " ").trim() === `1 of ${await total()} comps`, await line());
+  await openPanel();
   await page.getByRole("button", { name: "Any", exact: true }).click(); await settle();
-  await page.getByRole("button", { name: "Remove filter: Lease" }).click(); await settle();
-  await fillRange("Building size min", "100000");
-  await expectSet("size ≥ 100,000 SF", ["Sale Beltway", "Lease A", "Lease C undated"], { chip: "≥ 100,000 SF" });
+  await page.getByRole("button", { name: "Bldg Sale", exact: true }).click(); await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+  ok("Bldg Sale only: sale fields and Seller / Buyer labels", (await page.getByLabel("Cap rate % min").count()) === 1 && (await page.getByLabel("Rate $/SF/yr min").count()) === 0 && (await page.getByLabel("Seller name contains").count()) === 1 && (await page.getByLabel("Buyer name contains").count()) === 1);
+  ok("deselecting Lease dropped its filters (3 mo date kept: it applies to every type)", (await headerValue("date")).trim() === "Past 3 months");
+  await page.getByRole("button", { name: "Bldg Sale", exact: true }).click(); await page.getByRole("button", { name: "Land", exact: true }).click(); await settle();
+  ok("Land only: Land section with Acres; Building hidden", (await sectionIds()).includes("land") && !(await sectionIds()).includes("building") && (await page.getByLabel("Acres min").count()) === 1, JSON.stringify(await sectionIds()));
   await clearAll(); await search(P); await openPanel();
-  await fillRange("Power (at least) minimum", "2000");
-  await expectSet("power ≥ 2,000 A", ["Sale Beltway"], { chip: "Power ≥ 2,000 A" });
+  await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+  await fillRange("Rate $/SF/yr min", "5"); await page.getByRole("button", { name: "Gross", exact: true }).click(); await settle();
+  await page.getByRole("button", { name: "Lease", exact: true }).click(); await page.getByRole("button", { name: "Land", exact: true }).click(); await settle(); // Land only → rate + Gross must go
+  ok("type change prunes: no stale rate / Gross chip once Lease is swapped for Land", !(await chipLabels()).some((c) => /Gross|Rate/.test(c)), JSON.stringify(await chipLabels()));
   await clearAll(); await search(P); await openPanel();
-  await fillRange("Dock doors (at least) minimum", "15");
+  await fillRange("Size SF min", "100000");
+  await expectSet("size ≥ 100,000 SF", ["Sale Beltway", "Lease A", "Lease C undated"], { chip: "≥ 100k SF" });
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Power amps min", "2000");
+  await expectSet("power ≥ 2,000 A", ["Sale Beltway"], { chip: "Power ≥ 2k A" });
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Power amps max", "1500");
+  await expectSet("power ≤ 1,500 A (max is new)", [], { chip: "Power ≤ 1,500 A" });
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Dock doors min", "15");
   await expectSet("docks ≥ 15", ["Sale Beltway"]);
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Dock doors max", "12");
+  await expectSet("docks ≤ 12 (max is new)", ["Lease A"]);
   await clearAll(); await search(P); await openPanel();
   await fillRange("Clear height min", "30");
   await expectSet("clear height ≥ 30 (blank excluded)", ["Sale Beltway"]);
@@ -147,15 +197,49 @@ try {
   await fillRange("Year built min", "2010"); await fillRange("Year built max", "2020");
   await expectSet("year built 2010–2020", ["Sale Beltway"]);
   await clearAll(); await search(P); await openPanel();
-  await fillRange("Lease rate min", "6");
+  await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+  await fillRange("Rate $/SF/yr min", "6");
   await expectSet("lease rate ≥ $6/SF/yr (monthly comp annualised)", ["Lease A", "Lease B", "Lease C undated"]);
+  await openPanel();
   await page.getByRole("button", { name: "Gross", exact: true }).click(); await settle();
   await expectSet("…and Gross", ["Lease B"]);
   await clearAll(); await search(P); await openPanel();
-  await fillRange("Land size min", "5");
+  await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+  await fillRange("Term (yrs) min", "5");
+  await expectSet("term ≥ 5 yrs (60 mo and 10 yrs; blank excluded)", ["Lease A", "Lease B"], { chip: "Term ≥ 5 yrs" });
+  await openPanel(); await fillRange("Term (yrs) max", "5");
+  await expectSet("term 5–5 yrs", ["Lease A"]);
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Escalations % min", "3");
+  await expectSet("escalations ≥ 3%", ["Lease A"]);
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Free rent (mo) min", "4");
+  await expectSet("free rent ≥ 4 mo", ["Lease B"]);
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("TI $/SF min", "20");
+  await expectSet("TI ≥ $20/SF", ["Lease B"]);
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("Cap rate % min", "5.5");
+  await expectSet("cap rate ≥ 5.5%", ["Sale Beltway"]);
+  await clearAll(); await search(P); await openPanel();
+  await fillRange("NOI $ min", "800000");
+  await expectSet("NOI ≥ $800,000", ["Sale Beltway"]);
+  await clearAll(); await search(P); await openPanel();
+  await page.getByLabel("Landlord / seller name contains").fill("prologis"); await settle();
+  await expectSet("landlord/seller contains 'prologis' (case-insensitive)", ["Lease A"], { chip: "Landlord / seller: prologis" });
+  await clearAll(); await search(P); await openPanel();
+  await page.getByLabel("Tenant / buyer name contains").fill("ACME"); await settle();
+  await expectSet("tenant/buyer contains 'ACME'", ["Lease A", "Sale Beltway"]);
+  await clearAll(); await search(P); await openPanel();
+  await page.getByRole("button", { name: "Lease", exact: true }).click(); await fillRange("Term (yrs) min", "3"); await fillRange("TI $/SF min", "5");
+  await page.getByLabel("Landlord name contains").fill("prologis"); await settle();
+  await expectSet("combined: term + TI + landlord", ["Lease A"]);
+  await clearAll(); await search(P); await openPanel();
+  await page.getByRole("button", { name: "Land", exact: true }).click(); await settle();
+  await fillRange("Acres min", "5");
   await expectSet("land ≥ 5 acres", ["Land 12ac"]);
   await clearAll(); await search(P); await openPanel();
-  await page.getByRole("button", { name: /^Fort Bend County/ }).click(); await settle();
+  await page.getByRole("button", { name: /^Fort Bend/ }).click(); await settle();
   await expectSet("county Fort Bend", ["Sale Blank"]);
   await clearAll(); await search(P); await openPanel();
   await page.getByRole("button", { name: "Custom", exact: true }).click(); await settle();
@@ -176,6 +260,7 @@ try {
   // back-from-record keeps the view
   await openPanel();
   await page.getByRole("button", { name: "Lease", exact: true }).click(); await settle();
+  await closePanel();
   await setSort("largest");
   const before = { line: await line(), t: await titles() };
   await page.getByTestId("comp-row").filter({ hasText: T("Lease A") }).click(); await settle();

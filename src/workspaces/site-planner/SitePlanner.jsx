@@ -67,7 +67,7 @@ import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsR
 import { ftPerPointForScale, chooseOverlayScale } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+import { syncOverlayLayers, liveRefOpacities, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
 import { buildingFloodExposure, exposureHeadline, FLOOD_CLASS_LABEL } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
@@ -6114,6 +6114,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 (Imagery & Layers) — what the map is actually told to draw (Hide Layers / hidden-here applied) and what has a LIVE layer right now.
       drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
       live: Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k] && overlayRefs.current[k] !== "pending"),
+      // What each live layer is really drawn at (NEW-2: "set 60% on an off layer" is asserted on the map's own layer, not the saved number).
+      opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])),
       identityEpoch: epoch,
     });
     window.__plannerLayers = hook;
