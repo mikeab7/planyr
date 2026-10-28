@@ -114,6 +114,13 @@ export function governingIdentity(badge) {
   const nn = isNjNyState(badge.state);
   const nameOf = (c) => (nn ? municipalDisplayName(c) : `City of ${c}`);
   if (part) return `Part in ${nameOf(part)}`;
+  /* NEW-1 (Tennessee) — a Metro government names itself ("Metro Nashville-Davidson County"), never "City of Nashville", and a point
+   * inside it that no city polygon names is still inside it (it has no unincorporated land). */
+  const cons = badge.state === "TN" && badge.consolidated ? badge.consolidated : null;
+  if (cons) {
+    const g1 = one(badge.governingCities);
+    if (!g1 || String(g1).trim().toLowerCase() === String(cons.city).trim().toLowerCase()) return cons.label;
+  }
   const gov = nn ? one(sortMunicipalNames(Array.isArray(badge.governingCities) ? badge.governingCities : [])) : one(badge.governingCities);
   if (gov) return nameOf(gov);
   const etj = one(badge.etjLabels);

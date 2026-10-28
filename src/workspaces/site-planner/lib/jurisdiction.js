@@ -40,6 +40,11 @@ import { resolveCounty } from "./countyPolygons.js";
 import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
 /* NEW-1 (Georgia) — the pure Georgia facts: envelope, consolidated city-counties, the county-governs note. */
 import { GA_ENVELOPE, georgiaConsolidatedFor, GA_COUNTY_GOVERNS_NOTE, GA_CONSOLIDATED_NOTE } from "./georgiaJurisdiction.js";
+/* NEW-1 (Tennessee) — the pure Tennessee facts: routing box, the three consolidated governments, the road-authority decoder. */
+import {
+  TN_ENVELOPE, inTennesseeEnvelope, inTennesseeOutline, tennesseeConsolidatedFor, tnRoadAuthority,
+  TN_COUNTY_GOVERNS_NOTE, TN_CONSOLIDATED_NOTE, SHELBY_UDC_NOTE, shelbyUdcApplies,
+} from "./tennesseeJurisdiction.js";
 /* NEW-1 (California) — the California twin: envelope, the one consolidated city-county (San Francisco), the
  * county-governs note, and the three legal city names the CDT layer publishes. Same shape, same rules. */
 import { inCaliforniaEnvelope, CA_CITY_DISPLAY, californiaConsolidatedFor, CA_COUNTY_GOVERNS_NOTE, CA_CONSOLIDATED_NOTE } from "./californiaJurisdiction.js";
@@ -108,6 +113,28 @@ export const JURISDICTION_SOURCES = {
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "Georgia DCA municipal boundaries",
     note: "Georgia city limits (DCA). A point in no city is unincorporated — the county governs (Georgia has no ETJ). Screening only — verify with the city.",
+  },
+  /* NEW-1 (Tennessee) — the State of Tennessee's county and city layers. Same roles as Georgia's, so every downstream consumer
+   * reads them identically. Routed to by `countySourcesForPoint` / `citySourcesForPoint` inside the Tennessee box, never by
+   * default. The city layer is NAME-only and a city that crosses a county line is one polygon, so the county of a site always
+   * comes from the county role at the site itself. */
+  countyTn: {
+    id: "countyTn", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyTn.serviceUrl,
+    fields: { name: "NAME", fips: "GEOID" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "State of Tennessee county boundaries",
+    note: "Tennessee county boundary (State of Tennessee, edited 2026-03-18). Screening only — verify with the jurisdiction.",
+  },
+  cityTn: {
+    id: "cityTn", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityTn.serviceUrl,
+    fields: { name: "NAME" },
+    fullPurposeOnly: GIS_SOURCES.cityTn.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "State of Tennessee city boundaries",
+    note: "Tennessee city limits (State of Tennessee, edited 2026-03-18 — annexations since then are not in it). A point in no city is unincorporated — the county governs (Tennessee has no ETJ). Screening only — verify with the city.",
   },
   /* NEW-1 (California) — CDT State Geoportal counties. Same `role: "county"`, so every downstream consumer
    * reads it identically; only endpoint and field names differ. Routed to by `countySourcesForPoint` inside
@@ -246,6 +273,17 @@ export const JURISDICTION_SOURCES = {
     ttl: 30 * 24 * 3600 * 1000,
     sourceName: "TxDOT Roadway Inventory",
     note: "Maintenance authority from the TxDOT Roadway Inventory. Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess. Screening only.",
+  },
+  /* NEW-1 (Tennessee) — TDOT's Road Segment inventory (updated monthly): GOVT_CTRL names who owns and maintains each segment. The
+   * Tennessee counterpart of the TxDOT row above, chosen by LOCATION in `identifyRoadAuthority` so no caller changes. */
+  roadTn: {
+    id: "roadTn", role: "road", label: "Road maintenance authority", kind: "line",
+    url: GIS_SOURCES.roadTn.serviceUrl,
+    fields: { name: "RTE_NME", authority: "GOVT_CTRL", system: "ADM_SYS", funcClass: "FUNC_CLASS", route: "NBR_RTE" },
+    tolMeters: 40,
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "TDOT Road Segment inventory",
+    note: "Maintenance authority from TDOT's Road Segment inventory (government control per segment; updated monthly). Screening only — verify with the road's owner.",
   },
 };
 
@@ -563,7 +601,14 @@ export function countySourcesForPoint(lat, lng) {
    * here proves nothing about the state: the DCA layer answering with a polygon is what says "Georgia"
    * (`identifyJurisdiction` flags an empty, error-free answer as `notInGeorgia`). Overlaps neither TX
    * nor CO, so those two resolve exactly as they always did. */
-  if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.countyGa];
+  /* NEW-1 (Tennessee) — same contract: the box only ROUTES (it also holds KY / VA / NC / GA / AL / MS / AR / MO ground); the state's own
+   * county layer answering with a polygon is what says "Tennessee". Tennessee's box and Georgia's overlap along the Georgia line
+   * (Chattanooga is in both), so a point in both asks BOTH layers and whichever has a county wins. Overlaps none of TX / CO / CA / NJ / NY. */
+  {
+    const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng);
+    if (tn) return [JURISDICTION_SOURCES.countyTn, ga ? JURISDICTION_SOURCES.countyGa : null].filter(Boolean);
+    if (ga) return [JURISDICTION_SOURCES.countyGa];
+  }
   /* NEW-1 (California) — same contract as Georgia's: the envelope only ROUTES (it also holds NV / OR / AZ /
    * Baja ground); the CDT layer answering with a polygon is what says "California". Overlaps none of TX / CO / GA. */
   if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.countyCa];
@@ -616,7 +661,11 @@ export const CITY_SOURCES = [
 export function citySourcesForPoint(lat, lng) {
   /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
-  if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.cityGa];
+  {
+    const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng); // NEW-1 (Tennessee) — overlaps Georgia's box; both are asked there
+    if (tn) return [JURISDICTION_SOURCES.cityTn, ga ? JURISDICTION_SOURCES.cityGa : null].filter(Boolean);
+    if (ga) return [JURISDICTION_SOURCES.cityGa];
+  }
   if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.cityCa]; // NEW-1 (California) — likewise
   /* NEW-1 (New Jersey + New York) — NJ: the one municipal layer. NY: village, city, town (governing order). A point in both
    * outlines asks all four; the one that is not that state's simply answers empty. */
@@ -1415,7 +1464,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       /* NEW-1 (Georgia) — Georgia has NO ETJ, so "no ETJ layer for this area yet" would be a false
        * promise of a coming feature (and would put ETJ wording on a Georgia site). The role is simply
        * not applicable there: silent, like every other role with nothing to ask. */
-      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inCaliforniaEnvelope(lat, lng) && !inNjNyEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
+      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inTennesseeEnvelope(lat, lng) && !inCaliforniaEnvelope(lat, lng) && !inNjNyEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
       return;
     }
     opts.onStatus && opts.onStatus(role, "loading");
@@ -1641,11 +1690,19 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
    * `formatJurisdictionBadge` returns null for it (its documented "nothing to show"). A FAILED county
    * lookup is NOT this — that is an outage, and stays an outage. A Georgia point that resolves a county
    * gets `state: "GA"`, which the label reads to say the county governs. */
-  const gaCountySrc = countySourcesForPoint(lat, lng)[0] === JURISDICTION_SOURCES.countyGa;
-  if (gaCountySrc && roles.includes("county")) {
+  /* ⛔ NEW-1 (Tennessee) — THE SAME RULE, AND THE ONE PLACE TWO STATES' BOXES MEET. Tennessee's routing box and Georgia's overlap along
+   * the Georgia line (Chattanooga, Cleveland, Rossville), so a point there asks BOTH county layers and the state is whichever one named a
+   * county — never the box. Neither naming one (an empty, error-free answer from every layer asked) means the point is in neither state. */
+  const gaTnCountySrcs = countySourcesForPoint(lat, lng).filter((sx) => sx === JURISDICTION_SOURCES.countyGa || sx === JURISDICTION_SOURCES.countyTn);
+  if (gaTnCountySrcs.length && roles.includes("county")) {
     const cs = out.sources.find((x) => x && x.id === "county");
-    if (out.county.length) out.state = "GA";
-    else if (cs && cs.state === "empty") { out.notInGeorgia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
+    const ids = out.countySourceIds || [];
+    if (out.county.length) out.state = ids.includes("countyTn") ? "TN" : "GA";
+    else if (cs && cs.state === "empty") {
+      if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyGa)) out.notInGeorgia = true;
+      if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyTn)) out.notInTennessee = true;
+      out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = [];
+    }
   }
   /* ⛔ NEW-1 (California) — THE SAME RULE AS GEORGIA'S ABOVE: POINT-IN-POLYGON DECIDES "IS THIS CALIFORNIA",
    * NEVER THE ENVELOPE. The routing box holds Reno / Las Vegas's edge, southern Oregon, the Colorado River's
@@ -1745,6 +1802,13 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
   // reads false here, and callers that need to tell the two apart read `cityContainment`.
   out.unincorporated = out.cityContainment === "none";
+  /* NEW-1 (Tennessee) — Davidson, Moore and Trousdale are consolidated city-county governments with NO unincorporated land: a point in
+   * the county that no city polygon names (a hole in the published layer, or Moore County outside the Lynchburg town polygon) is still
+   * inside the Metro government, never "unincorporated". Said as data so no consumer reads the silence as a finding. */
+  if (out.state === "TN") {
+    const cons = tennesseeConsolidatedFor(out.county);
+    if (cons) { out.consolidated = cons; if (out.cityContainment === "none") out.unincorporated = false; }
+  }
   /* NEW-1 (New Jersey + New York) — neither state has ANY unincorporated land, so "no municipality found" on a confirmed NJ / NY point
    * is a data gap (open water, a boundary seam), never "unincorporated". Said as its own flag so nothing reads silence as a finding. */
   if ((out.state === "NJ" || out.state === "NY") && out.cityContainment === "none") { out.unincorporated = false; out.noMunicipality = true; }
@@ -1806,7 +1870,8 @@ export function formatJurisdictionBadge(j, opts = {}) {
   if (!j) return null;
   // NEW-1 (Georgia) — the point sat in the Georgia routing envelope but in no Georgia county (SC / AL / FL
   // ground): there is no Georgia jurisdiction to name, and guessing "Unincorporated" would be a fabrication.
-  if (j.notInGeorgia) return null;
+  if (j.notInGeorgia && !j.state) return null; // NEW-1 (Tennessee) — a Tennessee point inside Georgia's box sets notInGeorgia AND state TN; it must keep its Tennessee answer
+  if (j.notInTennessee && !j.state) return null; // NEW-1 (Tennessee) — the same, for KY / VA / NC / AL / MS / AR / MO ground inside the routing box (a GA point in the overlap sets notInTennessee and state GA — it keeps its Georgia answer)
   if (j.notInCalifornia) return null; // NEW-1 (California) — the same, for NV / OR / AZ / Baja ground inside the routing box
   if (j.notInNjNy) return null; // NEW-1 (New Jersey + New York) — the same, for PA / DE / CT / MA / VT ground inside a routing outline
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
@@ -1935,7 +2000,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
   /* ⛔ NEW-1 — the remainder's own wording carries NO governing separator. It is one slot in the
    * governing chain, so an inner " · " would read as a second slot; a parenthetical does not. */
   const ownEtj = etjsRaw.find((e) => partCities.some((c) => samePlace(c, e)));
-  const remainderLabel = (j.state === "NJ" || j.state === "NY")
+  const remainderLabel = j.state === "TN" && tennesseeConsolidatedFor(counties)
+    ? `rest in ${tennesseeConsolidatedFor(counties).label}` // NEW-1 (Tennessee) — a consolidated county has no unincorporated land
+    : (j.state === "NJ" || j.state === "NY")
     ? "rest outside the mapped municipality" // NEW-1 — there is no ETJ and no unincorporated land here; the rest is another municipality, open water or off the map
     : ownEtj
     ? "rest in its ETJ"
@@ -1988,9 +2055,10 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const splitShare = partCities.length ? shareOfCity(partCities[0]) : null;
   /* NEW-1 (Georgia, California) — "GA" | "CA" on a point-in-polygon-confirmed site, else null. The field names
    * (`gaState`, `gaNote`) predate California and are kept: they are consumed by the badge component and tests. */
-  const gaState = ["GA", "CA", "NJ", "NY"].includes(j.state) ? j.state : null; // NEW-1 — NJ / NY ride the same state-aware label model
+  const gaState = ["GA", "CA", "TN", "NJ", "NY"].includes(j.state) ? j.state : null; // NEW-1 — NJ / NY / TN ride the same state-aware label model
   const gaConsolidated = gaState === "GA" ? georgiaConsolidatedFor(counties, coreCities)
-    : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities) : null; // NJ / NY: no consolidated city-county
+    : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities)
+    : gaState === "TN" ? tennesseeConsolidatedFor(counties) : null; // NJ / NY: no consolidated city-county
   const label = formatJurisdictionLabel({
     state: gaState,
     consolidated: gaConsolidated,
@@ -2037,6 +2105,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // (or null) and the one tooltip note that says the county governs (no ETJ exists there).
     state: gaState, consolidated: gaConsolidated,
     gaNote: gaState === "NJ" ? NJ_MUNICIPAL_NOTE : gaState === "NY" ? NY_MUNICIPAL_NOTE
+      : gaState === "TN" ? [!coreCities.length && !partCities.length && !gaConsolidated ? TN_COUNTY_GOVERNS_NOTE : "", // only where the county IS the local government — on a city site it is noise
+        gaConsolidated ? TN_CONSOLIDATED_NOTE : "", shelbyUdcApplies(counties, coreCities) ? SHELBY_UDC_NOTE : "",
+        `City limits are the State of Tennessee's layer, last edited ${GIS_SOURCES.cityTn.dataLastEdited}; annexations since then are not shown — verify with the city.`].filter(Boolean).join(" ")
       : gaState ? [gaState === "CA" ? CA_COUNTY_GOVERNS_NOTE : GA_COUNTY_GOVERNS_NOTE, gaConsolidated ? (gaState === "CA" ? CA_CONSOLIDATED_NOTE : GA_CONSOLIDATED_NOTE) : ""].filter(Boolean).join(" ") : null,
     /* NEW-2 (B371361) — the label's SLOTS, in reading order, so a consumer that has to SHORTEN the
      * line (the header pill at a laptop width) drops whole facts instead of cutting a sentence
@@ -2138,6 +2209,15 @@ export async function countyAtPoint(lng, lat, opts = {}) {
     }
     // Neither layer named a county: fall through to the offline floor below (which never invents a Texas key for another state).
   }
+  /* NEW-1 (Tennessee) — Tennessee's box overlaps Georgia's, so a point there has TWO candidate sources: ask them in turn (Tennessee
+   * first) and let the one that names a county decide the state. Neither naming one falls through to the offline floor below. */
+  if (srcList.includes(JURISDICTION_SOURCES.countyTn)) {
+    for (const tsrc of srcList) {
+      const tr = await identifySource(tsrc, { lng, lat }, opts).fresh;
+      const f = tr.items.map((it) => normalizeFeature(tsrc, it.attrs)).find((x) => x.name);
+      if (f) return { name: String(f.name), key: null, fips: f.fips ? String(f.fips) : null, state: tsrc === JURISDICTION_SOURCES.countyTn ? "TN" : "GA", ageMs: tr.ageMs, ts: tr.ts };
+    }
+  }
   /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all
    * (`countySourcesForPoint` returns `[]`), which used to mean this fired the live TxDOT query
    * anyway (it always returned features: [] for an out-of-state point, wasting a request to an
@@ -2205,8 +2285,31 @@ export async function countyAtPoint(lng, lat, opts = {}) {
 // authorities[] (distinct labels), ... } — or an honest empty/unknown when nothing
 // mapped is within tolerance (never a guess; the honest-unknown rule applies per road).
 // ---------------------------------------------------------------------------
+/* NEW-1 (Tennessee) — TDOT's functional-class text → the FHWA number the per-road list already decodes (1 Interstate … 7 Local),
+ * so a Tennessee road sorts and labels exactly like a Texas one. Unrecognised text stays null (no class is better than a wrong one). */
+export function tnFuncClassNumber(text) {
+  const t = String(text == null ? "" : text).toLowerCase();
+  if (!t) return null;
+  if (/interstate/.test(t)) return 1;
+  if (/freeway|expressway/.test(t)) return 2;
+  if (/principal arterial/.test(t)) return 3;
+  if (/minor arterial/.test(t)) return 4;
+  if (/minor collector/.test(t)) return 6;
+  if (/collector/.test(t)) return 5;
+  if (/local/.test(t)) return 7;
+  return null;
+}
+/* A TDOT road name, tidied: the inventory writes "CULVERT ST." with a trailing period (and a doubled one on a few). Display only. */
+const tnRoadName = (n) => {
+  const raw = n && n.name != null ? String(n.name).trim().replace(/\.+$/g, "").replace(/\s+/g, " ") : "";
+  return raw ? titleCase(raw).replace(/\bSr(\s*\d+)/g, "SR$1").replace(/\bUs(\s*\d+)/g, "US$1") : null;
+};
+
 export async function identifyRoadAuthority(lng, lat, opts = {}) {
-  const src = JURISDICTION_SOURCES.road;
+  /* NEW-1 (Tennessee) — the road source follows the LOCATION: a point inside the Tennessee outline reads TDOT's Road Segment inventory,
+   * everything else the TxDOT one it always did (callers already refuse to ask the TxDOT row off Texas ground). */
+  const tnRoad = opts.roadSource ? opts.roadSource === JURISDICTION_SOURCES.roadTn : inTennesseeOutline(lat, lng);
+  const src = opts.roadSource || (tnRoad ? JURISDICTION_SOURCES.roadTn : JURISDICTION_SOURCES.road);
   const ring = opts.ring && opts.ring.length >= 3 ? opts.ring : null;
   opts.onStatus && opts.onStatus("road", "loading");
   const q = identifySource(src, ring ? { ring } : { lng, lat }, opts);
@@ -2216,8 +2319,8 @@ export async function identifyRoadAuthority(lng, lat, opts = {}) {
   const rows = r.items.map((it) => {
     const n = normalizeFeature(src, it.attrs);
     return {
-      route: n.route, name: roadDisplayName(n), system: n.system, funcClass: n.funcClass,
-      authority: roadAuthority(n.authority, n.system),
+      route: n.route, name: tnRoad ? tnRoadName(n) : roadDisplayName(n), system: n.system, funcClass: tnRoad ? tnFuncClassNumber(n.funcClass) : n.funcClass,
+      authority: tnRoad ? tnRoadAuthority(n.authority, n.system) : roadAuthority(n.authority, n.system),
       distMeters: ring ? null : Math.round(polylineDistMeters(it.geometry, lng, lat)),
       lengthM: polylineLengthMeters(it.geometry, lat),
     };
@@ -2249,7 +2352,7 @@ export async function identifyRoadAuthority(lng, lat, opts = {}) {
   const state = roads.length ? "loaded" : r.error ? "failed" : "empty";
   opts.onStatus && opts.onStatus("road", state, r.error ? humanize(r.error) : null, { ts: r.ts, stale: q.stale });
   return {
-    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts, tolMeters: src.tolMeters,
+    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts, tolMeters: src.tolMeters, sourceName: src.sourceName,
     error: r.error ? humanize(r.error) : null,
     note: roads.length ? src.note : r.error ? humanize(r.error) : `No roads matched within ${src.tolMeters} m — screening only.`,
   };

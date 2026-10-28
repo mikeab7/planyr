@@ -70,7 +70,7 @@ async function boot(w = 1400, h = 800, view = "Grid") {
 const S = makeScenarios({ boot, rec: (tag, name, pass, extra = "") => ok(`[${tag}] ${name}`, pass, extra), headerH: 0 });
 
 try {
-  await S.runAll();
+  if (process.env.ONLY) await S[process.env.ONLY](process.env.ONLY.replace('Scenario','')); else await S.runAll();
   ok("no page errors on the schedule page", errs.length === 0, errs.slice(0, 2).join(" | "));
 } catch (e) { ok("run completed without throwing", false, e.message); }
 finally {

@@ -18,6 +18,7 @@ const extractFn = (signature) => {
   return src.slice(start, i);
 };
 const { focusToggleTarget, focusReselectTarget } = new Function(`
+  ${extractFn("function focusGroupIds(tasks) {")}
   ${extractFn("function focusToggleTarget(allTasks, anchorId) {")}
   ${extractFn("function focusReselectTarget(allTasks, visibleIds, selId) {")}
   return { focusToggleTarget, focusReselectTarget };
@@ -98,7 +99,7 @@ describe("Alt+F wiring (source pins)", () => {
     expect(src).toMatch(/updateTask\(task\.id, \{focused: !task\.focused\}\)/);
   });
   it("the chip's tooltip lists the shortcut, keeping the prefixes other harnesses key on", () => {
-    expect(src).toMatch(/`Focus: hide \$\{task\.hideableCount\}[^`]*\(Alt\+F\)`/);
+    expect(src).toMatch(/`Focus: hide \$\{row\.hideableCount\}[^`]*\(Alt\+F\)`/);
     expect(src).toMatch(/`Show all tasks in this group — [^`]*\(Alt\+F\)`/);
   });
 });

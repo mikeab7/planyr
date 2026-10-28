@@ -36,6 +36,7 @@ import { summarizeWells } from "./wellStatus.js";
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
 import { siteState } from "./siteRegion.js";
 import { GA_JURISDICTION_SOURCE_NAME } from "./georgiaJurisdiction.js";
+import { TN_JURISDICTION_SOURCE_NAME, tennesseeConsolidatedFor } from "./tennesseeJurisdiction.js"; // NEW-1 (Tennessee)
 import { NJ_JURISDICTION_SOURCE_NAME, NY_JURISDICTION_SOURCE_NAME, isNjNyState, municipalDisplayName, sortMunicipalNames } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 // NEW-1 (FL/GA pipelines) — the pure half of the "never clear outside Texas" rule (see that module).
 import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineScreen.js";
@@ -350,7 +351,7 @@ export const ANALYSIS_SOURCES = [
 // (2) A card that exists only for some states (`extraFor` — the Georgia cards) is simply ABSENT elsewhere, so a
 //     Houston plan gains no Georgia rows and nothing there reads as "not screened" about a check it never had.
 // ---------------------------------------------------------------------------
-const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California", FL: "Florida", NJ: "New Jersey", NY: "New York" };
+const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", TN: "Tennessee", CA: "California", FL: "Florida", NJ: "New Jersey", NY: "New York" };
 export const stateName = (st) => STATE_NAMES[st] || "this state";
 
 export const cardExistsIn = (source, state) => !Array.isArray(source.extraFor) || (!!state && source.extraFor.includes(state));
@@ -908,24 +909,27 @@ export function analyzeSource(source, rings, opts = {}) {
 // Jurisdiction / road / zoning findings (reuse the verified jurisdiction.js engine)
 // ---------------------------------------------------------------------------
 // Whose boundary services the jurisdiction card actually read — by state (the Texas string was shown on every site).
-const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: GA_JURISDICTION_SOURCE_NAME, CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)", NJ: NJ_JURISDICTION_SOURCE_NAME, NY: NY_JURISDICTION_SOURCE_NAME };
+const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: GA_JURISDICTION_SOURCE_NAME, TN: TN_JURISDICTION_SOURCE_NAME, CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)", NJ: NJ_JURISDICTION_SOURCE_NAME, NY: NY_JURISDICTION_SOURCE_NAME };
 export function buildJurisdictionFinding(j, state = null) {
   const rows = [];
-  rows.push(["County", j.county.length ? j.county.join(" + ") : "—", j.ages.county]);
+  /* NEW-1 (Tennessee) — inside a Metro government the county row names it ("Davidson — Metro Nashville-Davidson County"). */
+  const tnCons = state === "TN" ? tennesseeConsolidatedFor(j.county) : null;
+  rows.push(["County", j.county.length ? j.county.join(" + ") + (tnCons ? ` — ${tnCons.label}` : "") : "—", j.ages.county]);
   // NEW-1 (DFW ETJ) — "Unincorporated" and "not in a city ETJ" are POSITIVE findings; where the ETJ
   // data cannot speak to the point (or the lookup failed) they read "unavailable" instead.
   /* NEW-1 (New Jersey + New York) — every acre is in a municipality (none is "Unincorporated"), named with its type and, in New York,
    * village → town ("Village of Pleasantville + Town of Mount Pleasant"). The row keeps its "City" label across states. */
   rows.push(["City", isNjNyState(state)
     ? (j.city.length ? sortMunicipalNames(j.city).map(municipalDisplayName).join(" + ") : "No municipality found")
-    : j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : j.city.join(" + "), j.ages.city]);
+    : j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : (j.city.length ? j.city.join(" + ") : tnCons ? "Within the Metro government (no separate city)" : j.city.join(" + ")), j.ages.city]);
   const etjState = (j.sources.find((s) => s.id === "etj") || {}).state;
   // NEW-2 — a disputed strip lists its CLAIMANTS as claims (never as an answer); a release area names the city.
   const undet = (j.etjUndetermined || []).length
     ? `ETJ undetermined (disputed)${(j.etjUndetermined || []).flatMap((u) => u.claimants || []).length ? " — claimed by " + [...new Set((j.etjUndetermined || []).flatMap((u) => u.claimants || []))].join(" and ") : ""}` : null;
   const rel = (j.etjReleased || []).length ? (j.etjReleased || []).map((n) => `${n} ETJ release area (SB 2038)`).join(" + ") : null;
-  const noEtjStates = state === "GA" || state === "CA" || isNjNyState(state); // these states give a city no reach beyond its limits
-  rows.push(["ETJ", noEtjStates ? `None in ${stateName(state)} — a city has no reach beyond its limits` : [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
+  const noEtjStates = state === "GA" || state === "CA" || state === "TN" || isNjNyState(state); // these states give a city no reach beyond its limits
+  /* NEW-1 (Tennessee) — NO "ETJ" ROW AT ALL on a Tennessee site (owner rule): the word is not printed, even to say "none". */
+  if (state !== "TN") rows.push(["ETJ", noEtjStates ? `None in ${stateName(state)} — a city has no reach beyond its limits` : [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
   // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
   // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
   // The ISD source is Texas's TEA. Off Texas ground a bare "—" would read as "no school district" — it is a screen
@@ -980,7 +984,7 @@ export function buildRoadFinding(road) {
     summary: haveRoads ? null : (road.error || road.note || "No roads matched — screening only."),
     detail, rows,
     mapLayer: "jur_road_authority", // NEW-2/B571: lifts the B190 suppression — the card gets a "◍ Activate layer" toggle
-    sourceName: "TxDOT Roadway Inventory", ageMs: road.ageMs ?? null, ts: road.ts ?? null,
+    sourceName: road.sourceName || "TxDOT Roadway Inventory", ageMs: road.ageMs ?? null, ts: road.ts ?? null,
     error: road.error || null, caveat: road.note || "Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess.", verified: true,
   };
 }
@@ -1007,7 +1011,7 @@ export function deriveZoning(j, state = null) {
   const src = ANALYSIS_SOURCES.find((s) => s.id === "zoning");
   const cities = (j.city || []).map((c) => String(c).toLowerCase());
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
-  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : isNjNyState(state) ? state : null; // NEW-1 (California; NJ + NY) — a state we positively identify states its OWN doctrine
+  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : state === "TN" ? "TN" : isNjNyState(state) ? state : null; // NEW-1 (California; NJ + NY) — a state we positively identify states its OWN doctrine
   let summary;
   // ⛔ NEW-5 (2026-09-05, owner-reported) — `j.unincorporated` used to be checked FIRST, so it won
   // on every non-Houston ETJ site (an ETJ IS unincorporated land by definition — jurisdictionLabel.js's
@@ -1023,6 +1027,11 @@ export function deriveZoning(j, state = null) {
     summary = names.length
       ? `Within ${names.join(" + ")} — municipal zoning applies${st === "NY" && names.length > 1 ? " (a village's zoning governs inside it; the town's elsewhere)" : ""}; confirm the district + entitlement path.`
       : "Municipality not found for this point — confirm the zoning authority with the county and the nearest municipality.";
+  } else if (st === "TN" && j.consolidated && !(j.city || []).some((c) => String(c).toLowerCase() !== String(j.consolidated.city).toLowerCase())) {
+    /* NEW-1 (Tennessee) — inside a Metro government (Davidson, Moore, Trousdale): one government, no unincorporated land. */
+    summary = j.consolidated.county === "Davidson"
+      ? `${j.consolidated.label} — Metro zoning applies across the county except inside the satellite cities (Belle Meade, Berry Hill, Forest Hills, Oak Hill, parts of Goodlettsville and Ridgetop), which zone themselves; confirm the district and entitlement path with Metro Planning.`
+      : `${j.consolidated.label} — the city and county are one government; confirm the zoning district and entitlement path with the Metro government.`;
   } else if (cities.includes("houston")) summary = "City of Houston — NO zoning (deed restrictions + Ch. 42 development code apply instead).";
   else if (cities.length) summary = `Within ${j.city.join(", ")} — city zoning likely applies; confirm the district + entitlement path.`;
   else if (etj.includes("houston")) summary = "Houston ETJ — no zoning, but city subdivision/platting authority applies in the ETJ.";
@@ -1039,7 +1048,7 @@ export function deriveZoning(j, state = null) {
     status: "info", summary, detail: [], rows: null,
     sourceName: "Derived from jurisdiction", ageMs: null, ts: null,
     // NEW-1 — the shared caveat names City of Houston, which is Texas trivia on a Colorado card.
-    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : st === "CA" ? CA_ZONING_CAVEAT : isNjNyState(st) ? NJNY_ZONING_CAVEAT : src.caveat, verified: false,
+    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : st === "CA" ? CA_ZONING_CAVEAT : st === "TN" ? TN_ZONING_CAVEAT : isNjNyState(st) ? NJNY_ZONING_CAVEAT : src.caveat, verified: false,
   };
 }
 
@@ -1049,12 +1058,17 @@ const UNINCORPORATED_ZONING = {
   TX: "Unincorporated — Texas counties have no zoning; subdivision platting still applies.",
   CO: "Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review.",
   CA: "Unincorporated — California counties DO zone, so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a conditional use permit.",
+  TN: "Unincorporated — Tennessee counties MAY zone (T.C.A. title 13, ch. 7), and many do; some have no county zoning at all. Confirm with the county planning office whether this land is zoned before assuming it is not.",
   unknown: "Unincorporated — county zoning authority varies by state. Confirm with the county before assuming the land is unzoned.",
 };
 
 const NJNY_ZONING_CAVEAT =
   "Zoning is municipality-specific. New Jersey and New York have no unincorporated land and no ETJ; confirm the district and the entitlement " +
   "path with the municipality (in New York, the village if there is one, otherwise the town or city) — the county is not the zoning authority.";
+
+const TN_ZONING_CAVEAT =
+  "Zoning is jurisdiction-specific. Tennessee cities zone inside their limits; outside them it is the county's choice (many counties zone, some do not). " +
+  "Confirm the district and the entitlement path with whoever reviews the plat.";
 
 const CA_ZONING_CAVEAT =
   "Zoning is jurisdiction-specific. California cities (including charter cities under their own charters) and counties each zone " +
@@ -1124,7 +1138,7 @@ export async function runSiteAnalysis(rings, opts = {}) {
   // every parcel, correctly found the site partly inside a city's ETJ.
   const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
   // Road authority reads TxDOT's Roadway Inventory — a Texas-only source. Off Texas ground it is not asked at all.
-  const roadP = !sourceCoversState(GIS_SOURCES.road, state)
+  const roadP = !sourceCoversState(state === "TN" ? GIS_SOURCES.roadTn : GIS_SOURCES.road, state)
     ? Promise.resolve({ __notScreened: true })
     : Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
 

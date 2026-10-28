@@ -1,4 +1,5 @@
 import { NJ_JURISDICTION_SOURCE_NAME, NY_JURISDICTION_SOURCE_NAME } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+import { TN_JURISDICTION_SOURCE_NAME } from "./tennesseeJurisdiction.js"; // NEW-1 (Tennessee)
 
 /* Georgia jurisdiction facts — the pure, network-free half (NEW-1, the Colorado `countyCo` precedent).
  *
@@ -74,4 +75,5 @@ export const GA_DETENTION_DETAIL =
 export const GA_JURISDICTION_SOURCE_NAME = "Georgia DCA (county + municipal boundaries)";
 export const TX_JURISDICTION_SOURCE_NAME = "TxDOT / TxGIO / county & city ETJ publishers";
 export const jurisdictionSourceName = (state) => (state === "GA" ? GA_JURISDICTION_SOURCE_NAME
+  : state === "TN" ? TN_JURISDICTION_SOURCE_NAME
   : state === "NJ" ? NJ_JURISDICTION_SOURCE_NAME : state === "NY" ? NY_JURISDICTION_SOURCE_NAME : TX_JURISDICTION_SOURCE_NAME); // NEW-1 — NJ / NY name their own publishers

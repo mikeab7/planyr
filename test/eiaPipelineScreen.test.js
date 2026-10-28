@@ -251,7 +251,10 @@ describe("siteState — Florida and Georgia are real outlines, and neighbours ar
     // B1990960 (main): Georgia's ROUTING BOX is deliberately generous and answers "GA" for the SC / TN edges (fail-closed:
     // a wrong "GA" only hides a Texas number). Which of those points is truly Georgia is decided by county polygons in
     // jurisdiction.js. Pinned so a change to that decision is a visible one.
-    ["Aiken SC (inside the GA routing box)", 33.56, -81.72, "GA"], ["Chattanooga TN (inside the GA routing box)", 35.05, -85.3, "GA"],
+    ["Aiken SC (inside the GA routing box)", 33.56, -81.72, "GA"],
+    // NEW-1 (Tennessee): Chattanooga used to be pinned "GA" here (it sits in Georgia's box). Tennessee is now a real outline that starts
+    // exactly on the Georgia line, so Chattanooga is TN — and Rossville GA, 2 miles south of it, is still GA.
+    ["Chattanooga TN (inside the GA routing box)", 35.05, -85.3, "TN"], ["Rossville GA (just south of the line)", 34.98, -85.29, "GA"],
     // …but FLORIDA north of the box floor is Florida, not Georgia — the outlines are asked first.
     ["Jacksonville FL (inside the GA routing box)", 30.33, -81.66, "FL"], ["Tallahassee FL (inside the GA routing box)", 30.44, -84.28, "FL"],
     ["Houston TX", 29.76, -95.37, "TX"], ["Denver CO", 39.7, -104.99, "CO"],

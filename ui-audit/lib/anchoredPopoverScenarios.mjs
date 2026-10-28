@@ -152,16 +152,16 @@ export function makeScenarios({ boot, rec, headerH = 0, needle = "Project Kick O
     await ctx.close();
   }
   async function pinnedScenario(tag) {
-    const { ctx, page, frame } = await boot(900, 760, "Grid");
-    await setScroll(frame, null, await frame.evaluate(() => { const s = document.querySelector("[data-grid-scroll]"); const d = document.querySelectorAll("[data-health-dot]")[6].getBoundingClientRect(); return s.scrollLeft + d.left - 330; }));
+    const { ctx, page, frame } = await boot(700, 760, "Grid");   // narrow enough that there is room to slide the Health column under the pinned ones
+    await setScroll(frame, null, await frame.evaluate(() => { const s = document.querySelector("[data-grid-scroll]"); const d = document.querySelectorAll("[data-health-dot]")[6].getBoundingClientRect(); return s.scrollLeft + d.right - (s.getBoundingClientRect().right - 40); }));   // just inside the right edge: leaves the most room to scroll it leftwards
     await openHealth(page, frame, 6); await settle(frame);
     rec(tag, "Health dot popup opened (pinned test)", !!(await frame.evaluate(IN.popup)));
     // scroll sideways until the Health column sits fully UNDER the pinned id/name columns
-    const need = await frame.evaluate(() => { const s = document.querySelector("[data-grid-scroll]"); const dot = document.querySelectorAll("[data-health-dot]")[6].getBoundingClientRect(); const pin = [...document.querySelectorAll("[data-hdr-col]")].filter(h => getComputedStyle(h).position === "sticky").reduce((m, h) => Math.max(m, h.getBoundingClientRect().right), 0); return { shift: dot.right - pin + 4, max: s.scrollWidth - s.clientWidth, pin }; });
+    const need = await frame.evaluate(() => { const s = document.querySelector("[data-grid-scroll]"); const dot = document.querySelectorAll("[data-health-dot]")[6].getBoundingClientRect(); const pin = [...document.querySelectorAll("[data-hdr-col]")].filter(h => getComputedStyle(h).position === "sticky").reduce((m, h) => Math.max(m, h.getBoundingClientRect().right), 0); return { shift: dot.right - pin + 4, max: s.scrollWidth - s.clientWidth - s.scrollLeft, pin }; });
     rec(tag, "VACUITY: the grid has pinned columns and room to scroll the dot under them", need.pin > 0 && need.shift <= need.max, JSON.stringify(need));
     await setScroll(frame, null, await frame.evaluate(d => document.querySelector("[data-grid-scroll]").scrollLeft + d, need.shift));
-    const hid = await frame.evaluate(() => { const dot = document.querySelectorAll("[data-health-dot]")[6].getBoundingClientRect(); const pin = [...document.querySelectorAll("[data-hdr-col]")].filter(h => getComputedStyle(h).position === "sticky").reduce((m, h) => Math.max(m, h.getBoundingClientRect().right), 0); return dot.right <= pin; });
-    rec(tag, "VACUITY: the dot is now fully behind the pinned columns", hid);
+    const hid = await frame.evaluate(() => { const dot = document.querySelectorAll("[data-health-dot]")[6].getBoundingClientRect(); const pin = [...document.querySelectorAll("[data-hdr-col]")].filter(h => getComputedStyle(h).position === "sticky").reduce((m, h) => Math.max(m, h.getBoundingClientRect().right), 0); return { ok: dot.right <= pin, dotRight: Math.round(dot.right), dotLeft: Math.round(dot.left), pin: Math.round(pin), sl: document.querySelector("[data-grid-scroll]").scrollLeft }; });
+    rec(tag, "VACUITY: the dot is now fully behind the pinned columns", hid.ok, JSON.stringify(hid));
     rec(tag, "Health dot popup CLOSES when its cell goes under a pinned column", !(await frame.evaluate(IN.popup)));
     await ctx.close();
   }
