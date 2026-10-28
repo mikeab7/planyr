@@ -6244,6 +6244,30 @@ function gridCellBlank(task, col, env) {
   }
 }
 
+// B2470832 — THE one rule for "this row is a Focus group": it has at least one child. `hasChildren` on the grid's
+// rows (the flattened list and the review list), the Focus chip's visibility, and Alt+F's target all come from
+// this set, so they can never disagree. Whether anything is currently HIDEABLE in the group is a different
+// question (hideableCount) and decides only what the chip's tooltip and Alt+F's toast say — never whether the
+// control exists. (It used to decide that too, plus "is expanded": a group whose children were all in progress,
+// or one that was collapsed, had no Focus button at all while its siblings did.)
+function focusGroupIds(tasks) {
+  const ids = new Set();
+  (tasks || []).forEach(t => { if (t.parentId != null) ids.add(t.parentId); });
+  return ids;
+}
+// The grid draws a Focus chip on exactly these rows. `hideableCount` is a number only on the Focus-aware
+// grid list (flatTasks); the review list ignores Focus entirely, so it has no chip.
+function rowCanFocus(row) { return !!row && !!row.hasChildren && typeof row.hideableCount === "number"; }
+// Chip tooltip. Every variant keeps its established prefix ("Focus: hide" / "Show all tasks") — other
+// harnesses tell the chip's title apart from the task name by it.
+function focusChipTitle(row) {
+  if (row.focused)
+    return `Show all tasks in this group — ${row.hideableDone} completed, ${row.hideablePaused} paused, ${row.hideableUpcoming} not started hidden (Alt+F)`;
+  if (row.hideableCount > 0)
+    return `Focus: hide ${row.hideableCount} completed / paused / not-started task${row.hideableCount>1?'s':''} (Alt+F)`;
+  return "Focus: hide completed / paused / not-started tasks here — none right now (Alt+F)";
+}
+
 // NEW-1 (B2455200) — Alt+F toggles Focus. WHICH group: the anchor row is the TOP selected row; if it is a
 // summary (has children) it is that row's own Focus, if it is a plain task it is its parent group's, and a
 // top-level plain task (no parent) has none -> null (the key does nothing, no error). Pure; unit-tested by
@@ -6252,7 +6276,7 @@ function focusToggleTarget(allTasks, anchorId) {
   if (anchorId == null || anchorId === "__NEW_TASK__") return null;
   const t = (allTasks || []).find(x => x.id === anchorId);
   if (!t) return null;
-  if (allTasks.some(x => x.parentId === t.id)) return t.id;
+  if (focusGroupIds(allTasks).has(t.id)) return t.id;
   return (t.parentId != null && allTasks.some(x => x.id === t.parentId)) ? t.parentId : null;
 }
 // After a Focus toggle: where the selection goes. Kept when its row is still visible; else the nearest
@@ -8369,7 +8393,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
   // movers carry preview dates + Δ, other pending tasks get a clickable dot. Pure view state — only Approve writes.
   const flattenAll = (ts) => {
     if (!ts || !ts.length) return [];
-    const childSet = new Set(ts.filter(t => t.parentId != null).map(t => t.parentId));
+    const childSet = focusGroupIds(ts);
     const kids = new Map();
     ts.forEach(t => { if (!kids.has(t.parentId)) kids.set(t.parentId, []); kids.get(t.parentId).push(t); });
     const out = [];
@@ -11278,7 +11302,7 @@ function App() {
   const flatTasks = useMemo(() => {
     if (!proj) return [];
     const settings = data?.settings; // healthRules (or legacy cfRules) for computeDisplayHealth — Focus must classify by the SAME status the grid shows (B717)
-    const childSet = new Set(proj.tasks.filter(t => t.parentId !== null).map(t => t.parentId));
+    const childSet = focusGroupIds(proj.tasks);
     const byId = {};
     const kidsBy = new Map();
     proj.tasks.forEach(t => {
@@ -15247,13 +15271,12 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             {task.name || "New task"}
           </span>
         ); })()}
-        {task.hasChildren && task.isExpanded && task.hideableCount > 0 && (
+        {rowCanFocus(task) && (
           <span
+            data-focus-chip={task.focused ? "on" : "off"}
             onClick={e=>{ e.stopPropagation(); updateTask(task.id, {focused: !task.focused}); }}
             onDoubleClick={e=>e.stopPropagation()}
-            title={task.focused
-              ? `Show all tasks in this group — ${task.hideableDone} completed, ${task.hideablePaused} paused, ${task.hideableUpcoming} not started hidden (Alt+F)`
-              : `Focus: hide ${task.hideableCount} completed / paused / not-started task${task.hideableCount>1?'s':''} (Alt+F)`}
+            title={focusChipTitle(task)}
             style={{
               marginLeft:"auto", flexShrink:0, cursor:"pointer", userSelect:"none",
               display:"inline-flex", alignItems:"center", gap:5,
