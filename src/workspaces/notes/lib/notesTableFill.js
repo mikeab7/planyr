@@ -28,13 +28,24 @@
  */
 import { Extension } from "@tiptap/core";
 import { CellSelection, TableMap, isInTable, selectedRect } from "@tiptap/pm/tables";
-import { normalizeHex } from "../../../shared/ui/colorRecents.js";
 import { TABLE_FILLS } from "./notesFormatPalette.js";
 
 /* The palette itself lives with the module's other CONTENT colours (notesFormatPalette.js). */
 export { TABLE_FILLS };
 
 export const FILL_NONE = "transparent";
+
+/** A solid hex → lowercase #rrggbb, else null. ⛔ A deliberate LOCAL mirror of `shared/ui/colorRecents.js`'s
+ *  `normalizeHex` (six lines): importing that file from here makes the bundler hoist it into a shared chunk
+ *  that the Site route then loads, and the perf budget's Site-route allowlist goes red (measured on PR #2568).
+ *  The same reason NoteToolbar re-declares the shared control radii locally. */
+function normalizeHex(c) {
+  if (typeof c !== "string") return null;
+  const s = c.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(s)) return s;
+  if (/^#[0-9a-f]{3}$/.test(s)) return "#" + s.slice(1).split("").map((h) => h + h).join("");
+  return null;
+}
 
 /** The ONE validator for a stored / parsed fill: a solid hex, or the explicit "transparent", else null.
  *  `rgb(r,g,b)` (a browser's own spelling of a computed colour) folds to hex; anything with alpha, a
