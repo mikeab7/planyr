@@ -141,14 +141,36 @@ describe("NEW-1 — the protection this redesign keeps in full: nothing is auto-
   });
 });
 
+/* NEW-1 / B2465520 MOVED the per-frame tracking out of ContactPicker into the shared
+ * `useAnchoredPopover` (public/sequence/index.html) so every popover portaled out of a cell follows
+ * its cell — the two assertions below pinned the old PRIVATE loop and now pin the same properties at
+ * the shared one, plus that ContactPicker really uses it. Behaviour is proven end to end in
+ * test/anchoredPopover.test.js and ui-audit/verify-schedule-anchored-popovers.mjs. */
+const hookSrc = (() => {
+  const start = seq.indexOf("function useAnchoredPopover(");
+  expect(start, "useAnchoredPopover must exist").toBeGreaterThan(-1);
+  return seq.slice(start, seq.indexOf("\n}\n", start) + 3);
+})();
+const surroundSrc = (() => {
+  const start = seq.indexOf("function anchorSurroundings(");
+  expect(start, "anchorSurroundings must exist").toBeGreaterThan(-1);
+  return seq.slice(start, seq.indexOf("\n}\n", start) + 3);
+})();
+
 describe("NEW-4 — the popup tracks its cell every frame, not on a scroll/resize listener", () => {
-  it("position is recomputed in a requestAnimationFrame loop while the picker is open", () => {
-    expect(pickerSrc).toMatch(/requestAnimationFrame\(tick\)/);
-    expect(pickerSrc, "no listener-based repositioning is left to race the scroll").not.toMatch(/addEventListener\('scroll'/);
+  it("ContactPicker positions itself through the shared hook, with no private loop left", () => {
+    expect(pickerSrc).toMatch(/useAnchoredPopover\(/);
+    expect(pickerSrc, "no second copy of the tracking loop in the picker").not.toMatch(/requestAnimationFrame\(tick\)/);
+  });
+  it("position is recomputed in a requestAnimationFrame loop while the popover is open", () => {
+    expect(hookSrc).toMatch(/requestAnimationFrame\(tick\)/);
+    expect(hookSrc, "no listener-based repositioning is left to race the scroll").not.toMatch(/addEventListener\(['"]scroll['"]/);
   });
   it("the loop closes the editor when the cell scrolls outside its own scroll container", () => {
-    expect(pickerSrc).toMatch(/data-scroll-bounds/);
-    expect(pickerSrc).toMatch(/r\.bottom < b\.top \|\| r\.top > b\.bottom \|\| r\.right < b\.left \|\| r\.left > b\.right/);
+    expect(surroundSrc).toMatch(/data-scroll-bounds/);
+    expect(seq).toMatch(/r\.bottom <= area\.top \|\| r\.top >= area\.bottom \|\| r\.right <= area\.left \|\| r\.left >= area\.right/);
+    expect(hookSrc, "leaving the visible area calls the caller's close, which for the picker is finishEditing").toMatch(/goneRef\.current\(\)/);
+    expect(pickerSrc).toMatch(/\(\) => finishEditing\(\)/);
   });
   it("both grid views declare their own scroll-bounds container", () => {
     expect(seq).toMatch(/data-grid-scroll="1" data-scroll-bounds/);
