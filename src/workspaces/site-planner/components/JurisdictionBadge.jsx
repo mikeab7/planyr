@@ -145,6 +145,8 @@ export default function JurisdictionBadge({ badge }) {
     badge.touchesCities?.length ? `"Containment unchecked": ${badge.touchesCities.map(cityWord).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
     badge.failureNote || "",
     badge.etjNote || "",
+    // NEW-1 (Concept A) — ETJ the publishers' layers claim over ground a city's limits hold: never governing, but never hidden either.
+    badge.etjOverlapNote || "",
     // NEW-1 (Georgia) — the county governs outside city limits; the consolidated city-county note rides with it.
     badge.gaNote || "",
     /* ⛔ B689904 — two ETJs named together are an APPORTIONMENT, never a place both fully govern.

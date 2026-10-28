@@ -184,6 +184,22 @@ export function unionAreaSqM(polys, ref) {
   return pathsArea(normalizePolys(polys, ref));
 }
 
+/* `a` minus `b`, both already dissolved by `normalizePolys` (so they share one ref and one SCALE). Returns clipper paths in the same
+ * form `normalizePolys` does, so the result drops straight into `areaShare`'s `clipNorm`. This is how an ETJ is NETTED against the
+ * city limits that sit on top of it: an extraterritorial jurisdiction is, by definition, the ground OUTSIDE every city's limits
+ * (Local Gov't Code ch. 42), so whatever part of a published ETJ polygon lies under a city's limits is not ETJ — it is the
+ * publishers' two layers disagreeing, and the limits win. */
+export function subtractNorm(a, b) {
+  if (!a || !a.length) return new ClipperLib.Paths();
+  if (!b || !b.length) return a;
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(a, ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(b, ClipperLib.PolyType.ptClip, true);
+  const out = new ClipperLib.Paths();
+  c.Execute(ClipperLib.ClipType.ctDifference, out, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  return out;
+}
+
 /* Area (m²) of subject ∩ clip. Both sides are dissolved first, so overlapping subject parcels and
  * a jurisdiction published as several adjacent polygons both measure once. */
 export function intersectionAreaSqM(subject, clipPolys, ref, clipNorm) {

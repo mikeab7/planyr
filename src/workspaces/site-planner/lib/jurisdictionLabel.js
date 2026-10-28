@@ -29,17 +29,19 @@
  *   `—`  introduces the NON-GOVERNING tail: cities that merely touch the site, or that a failed
  *        containment lookup left unclassified. Nothing after this em dash regulates anything.
  *
- * ═══ THE FOUR SHAPES (the owner's, verbatim) — plus the two STATES that are not shapes ═══════════
+ * ═══ THE SHAPES (the owner's, verbatim) — plus the two STATES that are not shapes ═════════════════
  *   1. in-city       "City of Houston · Harris County"
- *   2. in-city-etj   "City of Humble · Houston ETJ · Harris County"      (in one city's limits AND
- *                                                                         inside another's ETJ)
- *   3. etj           "City of Houston ETJ · Harris County"               (NOT "Unincorporated /
+ *   2. etj           "City of Houston ETJ · Harris County"               (NOT "Unincorporated /
  *                                                                         City of Houston ETJ")
- *   4. unincorporated "Unincorporated · Harris County — touches City of Katy"
+ *   3. unincorporated "Unincorporated · Harris County — touches City of Katy"
  *
- *   Note the ETJ naming is deliberately asymmetric: the LEAD slot carries the full formal
- *   "City of X ETJ" because it is the governing authority; a SECONDARY ETJ is the qualifier
- *   "X ETJ". That is the owner's own wording in both shapes above.
+ *   ⛔ THERE IS NO "CITY + ANOTHER CITY'S ETJ" SHAPE (owner, 2026-10-28, on Concept A: "it says Houston ETJ but then also says City of
+ *   Sugar Land, and it can't be both"). An ETJ is the ground OUTSIDE every city's limits (Local Gov't Code ch. 42), so a site a city
+ *   holds has no ETJ; the old "in-city-etj" shape described two published layers overlapping, not a place. City limits outrank any
+ *   ETJ hit — `jurisdiction.js` withholds the ETJ, and `jurisdictionShapeOf` below refuses to print it even if a model hands one in.
+ *
+ *   The ETJ naming is deliberately asymmetric where an ETJ and another fact share a line: the LEAD slot carries the full formal
+ *   "City of X ETJ" because it is the governing authority; a SECONDARY ETJ (a split site's remainder) is the qualifier "X ETJ".
  *
  *   `split` and `unknown` are not among the four because they are not shapes of a settled answer —
  *   they are the two states where there ISN'T one, and they predate this item (B280704 / B276753):
@@ -65,7 +67,7 @@ export const PEER_SEP = " + ";        // co-equal peers inside one slot
 export const TOUCH_SEP = " — ";  // the non-governing tail:  —
 
 export const JURISDICTION_SHAPES = Object.freeze([
-  "in-city", "in-city-etj", "etj", "unincorporated", "split", "unknown",
+  "in-city", "etj", "unincorporated", "split", "unknown",
 ]);
 
 const list = (v) => (Array.isArray(v) ? v.filter((s) => s != null && s !== "").map(String) : []);
@@ -94,7 +96,11 @@ export function jurisdictionShapeOf(model = {}) {
   const etj = list(model.etjCities);
   if (model.cityUnresolved) return "unknown";
   if (part.length) return "split";
-  if (gov.length) return etj.length ? "in-city-etj" : "in-city";
+  /* ⛔ CITY LIMITS OUTRANK ANY ETJ (owner, 2026-10-28: "it says Houston ETJ but then also says City of Sugar Land, and it can't be
+   * both"). An ETJ is the ground OUTSIDE every city's limits, so a site a city holds has no ETJ — the shape that used to be
+   * "in-city-etj" described two published layers overlapping, not a place. `jurisdiction.js` withholds the ETJ before it gets here;
+   * this is the same rule at the leaf, so a hand-built model cannot print the contradiction either. */
+  if (gov.length) return "in-city";
   // NEW-2 (DFW gaps) — a disputed strip or an SB 2038 release area is an ETJ FINDING (the ground is marked as
   // ETJ ground by the publisher), never "unincorporated" and never a plain city's ETJ.
   if (etj.length || model.etjUndetermined || list(model.etjReleased).length) return "etj";
@@ -212,7 +218,7 @@ function etjLeadText(etj) {
  * lead (shape 3) this is empty by construction — printing it twice is the redundancy this item is
  * about, in a second costume. */
 function etjSlotFor(model, shape) {
-  const etj = list(model.etjCities);
+  const etj = shape === "in-city" ? [] : list(model.etjCities);   // a city that holds the site leaves no ETJ to name
   if (shape === "etj") {
     // NEW-2 — the lead already carries the first finding; a SECOND kind of finding gets its own slot.
     const extra = [];
@@ -304,7 +310,7 @@ export function formatJurisdictionLabel(model = {}) {
  *     (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "")
  * and handed the result to `assessAdministrator` as `cityLabel` — the signal that decides whether
  * a city's floodplain ordinance is even a CANDIDATE for the finished-floor elevation. Under the
- * grammar above that parse returns "Humble · Houston ETJ" for shape 2: no rule record matches it,
+ * grammar above that parse returns a multi-slot string whenever a second governing slot exists (a limited-purpose annexation, a split's remainder): no rule record matches it,
  * the city candidate silently vanishes, and the site is priced on the county's rule, which in flat
  * Harris/Fort Bend floodplain commonly sits 1–2 ft LOWER than the city's.
  *
