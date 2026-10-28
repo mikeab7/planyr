@@ -5,7 +5,8 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { claimInvites, listMyTeams } from "./lib/teams.js";
+import { listMyTeams } from "./lib/teams.js";
+import { TEAMS_CHANGED_EVENT } from "../../shared/teams/teamInviteModel.js";
 import { primeShareContext, defaultShareTeam, resetShareContext, resolveNewPlanTeam } from "./lib/newProjectSharing.js";
 import { loadUserPrefs } from "./lib/userPrefs.js";
 // B831777 (NEW-2) — CompsPanel is now rendered BY MapFinder itself, as the Comps tab in the
@@ -312,7 +313,7 @@ export default function App({
     // sign-out still runs in full.
     if (uid && uid === prevUid.current && event !== "SIGNED_OUT") return;
     /* B1594320 — stamp the dedup marker HERE, synchronously, before any `await` — not only at
-     * the end of this function (which still runs several awaits below: claimInvites, pullCloud,
+     * the end of this function (which still runs several awaits below: pullCloud,
      * refreshSites…). supabase-js can legitimately deliver more than one auth event for the SAME
      * resumed session close together (its own `_emitInitialSession`, fired the instant a NEW
      * listener subscribes, races `_recoverAndRefresh`'s separate `SIGNED_IN` broadcast on a cold
@@ -329,13 +330,10 @@ export default function App({
     setMigrateMsg(""); setHideMigrate(false); // reset the prompt on any real auth switch
     if (uid) {
       setCloudLoading(true);
-      // TEAM: activate any invites waiting on this user's email (an existing account invited
-      // after signup) BEFORE pulling, so a freshly-joined team's shared projects come down in
-      // the same pull. Best-effort — never blocks loading the user's own sites.
-      // NEW-1 audit: both catches below are reviewed and left non-blocking on purpose — neither
-      // is a one-shot user action, and both re-run on this device's every sign-in, so a failure
-      // here self-heals rather than strands anything. Telemetry only, no banner.
-      await claimInvites().catch((e) => reportClientEvent("cloud-write-failed", "claiming pending team invites failed (retried on next sign-in)", { error: (e && e.message) || "" }));
+      // TEAM: invites are NOT claimed here any more (NEW-1, invite inbox). A person who already has an
+      // account answers a pending invite from the account menu (Accept / Decline); a brand-new signup is
+      // still added by the database's signup trigger. On Accept the menu fires TEAMS_CHANGED_EVENT, which
+      // re-pulls (below) so a freshly-joined team's shared projects come down.
       // B326416 — warm the default-sharing answer (account preference + your teams) right after
       // invites are claimed, so the FIRST project created in this session already knows whether it
       // is born shared. Best-effort: a failure leaves the context unset, and an unset context
@@ -586,6 +584,20 @@ export default function App({
       document.removeEventListener("visibilitychange", maybePull);
       window.removeEventListener("focus", maybePull);
     };
+  }, [signedInUid]);
+  // NEW-1 (invite inbox) — accepting a team invite from the account menu changes which projects are
+  // shared with this user and which team new projects default to. Re-pull the cloud (shared projects
+  // come down) and re-prime the default-sharing context (it holds the team list) right away, instead of
+  // waiting for the next focus pull or reload.
+  useEffect(() => {
+    if (!signedInUid) return undefined;
+    const onTeamsChanged = () => {
+      resetShareContext();
+      primeShareContext(signedInUid, SHARE_LOADERS).catch((e) => reportClientEvent("cloud-write-failed", "priming default-sharing context failed after joining a team (falls back to private)", { error: (e && e.message) || "" }));
+      pullCloud(signedInUid).then((res) => { if (res && res.ok !== false) refreshSites(); }).catch((e) => reportClientEvent("cloud-write-failed", "pull after joining a team failed (the next focus pull retries)", { error: (e && e.message) || "" }));
+    };
+    window.addEventListener(TEAMS_CHANGED_EVENT, onTeamsChanged);
+    return () => window.removeEventListener(TEAMS_CHANGED_EVENT, onTeamsChanged);
   }, [signedInUid]);
   const goPlan = (id) => { startTransition(() => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); }); };
   /* NEW-5 — the ONE way to leave a project, and the ONE place the intent is recorded.
