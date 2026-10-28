@@ -17,6 +17,7 @@
 
 import { inCaliforniaEnvelope } from "./californiaJurisdiction.js";
 import { njnyStateAt, NJ_OUTLINE, NY_OUTLINE } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+import { TN_OUTLINE } from "./tennesseeJurisdiction.js"; // NEW-1 (Tennessee)
 
 /* Coarse state envelopes. Generous on purpose — this decides which RULES may apply, so a false
  * "unknown" (pre-Colorado behaviour, safe) is far better than a false confident answer. */
@@ -52,7 +53,10 @@ export const STATE_POLYGONS = {
     [-85.45, 29.45], [-86.55, 30.15], [-87.5, 30.15],
   ],
   GA: [
-    [-85.65, 35.02], [-83.1, 35.02], [-83.15, 34.5], [-82.85, 34.3], [-82.5, 33.9], [-82.15, 33.6],
+    /* NEW-1 (Tennessee) — the northern edge is the Georgia–Tennessee line itself (34.985° at the Alabama corner, 34.988° at
+     * Ducktown, 35.0° at the North Carolina corner), not the old 35.02° padding: Chattanooga's south side sits at 35.0° and was
+     * being called Georgia. Tennessee's outline (below) starts exactly where this one ends, so the two never overlap. */
+    [-85.65, 34.985], [-84.32, 34.988], [-83.1, 35.0], [-83.15, 34.5], [-82.85, 34.3], [-82.5, 33.9], [-82.15, 33.6],
     [-81.9, 33.45], [-81.65, 33.2], [-81.4, 32.8], [-81.1, 32.35], [-80.85, 32.3], [-80.7, 31.98], [-81.0, 31.45], [-81.35, 30.95],
     [-81.4, 30.7], [-82.05, 30.36], [-82.23, 30.58], [-83.1, 30.63], [-84.88, 30.72], [-85.0, 31.02],
     [-85.05, 31.6], [-85.15, 32.3], [-85.19, 32.87],
@@ -62,6 +66,10 @@ export const STATE_POLYGONS = {
 /* NEW-1 (New Jersey + New York) — registered here so the set of states `siteState` can return stays ONE declared list (the layer registry's
  * state-coverage guard reads these keys), but they are NOT matched by the loop in `siteState`: the two outlines overlap on the Hudson, so a
  * point in both is settled by `njnyStateAt`'s border polygon instead of by key order. */
+/* NEW-1 (Tennessee) — an OUTLINE, not a box: Georgia's box (below) reaches 35.1°N and used to call Chattanooga, Cleveland and
+ * Dalton's neighbours "GA". It is matched by the same loop as Florida and Georgia, after them; the two outlines share the
+ * border line exactly, so order does not matter. */
+STATE_POLYGONS.TN = TN_OUTLINE;
 STATE_POLYGONS.NJ = NJ_OUTLINE;
 STATE_POLYGONS.NY = NY_OUTLINE;
 
@@ -74,7 +82,7 @@ function inPolygon(lng, lat, poly) {
   return inside;
 }
 
-/* "TX" | "CO" | "FL" | "GA" | "CA" | "NJ" | "NY" | null. Null for a site with no coordinates (every legacy saved plan) and
+/* "TX" | "CO" | "FL" | "GA" | "TN" | "CA" | "NJ" | "NY" | null. Null for a site with no coordinates (every legacy saved plan) and
  * for one outside every region — and null behaves exactly as the app did before Colorado existed. The
  * guard fires on a POSITIVE answer, never on the absence of one.
  *
@@ -109,6 +117,7 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
 
 export const isColorado = (pt) => siteState(pt) === "CO";
 export const isGeorgia = (pt) => siteState(pt) === "GA";
+export const isTennessee = (pt) => siteState(pt) === "TN"; // NEW-1 (Tennessee)
 export const isCalifornia = (pt) => siteState(pt) === "CA";
 export const isNewJersey = (pt) => siteState(pt) === "NJ";
 export const isNewYork = (pt) => siteState(pt) === "NY";

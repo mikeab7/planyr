@@ -208,6 +208,36 @@ export const SOURCE_FIXTURES = {
     { label: "Macon-Bibb County (consolidated)", point: [-83.63, 32.84], expectMinCount: 1 }, // live: Macon-Bibb County
   ],
   },
+  countyTn: {
+  fixtures: [
+    // NEW-1 (Tennessee) · live 2026-10-28: 95 county polygons (the full roster). Spread Memphis ↔ Nashville ↔ Chattanooga ↔ Knoxville.
+    { label: "20 Culvert St, Nashville (Davidson)", point: [-86.75516, 36.137653], expectMinCount: 1 }, // live: Davidson
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: Shelby
+    { label: "Chattanooga (Hamilton)", point: [-85.3097, 35.0456], expectMinCount: 1 }, // live: Hamilton
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: Knox
+    { label: "Goodlettsville, Sumner side", point: [-86.7, 36.345], expectMinCount: 1 }, // live: Sumner
+  ],
+  },
+  cityTn: {
+  fixtures: [
+    // NEW-1 (Tennessee) · live 2026-10-28: 345 municipal polygons (the whole roster).
+    { label: "Nashville (the Davidson balance)", point: [-86.75516, 36.137653], expectMinCount: 1 }, // live: Nashville
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: Memphis
+    { label: "Chattanooga", point: [-85.3097, 35.0456], expectMinCount: 1 }, // live: Chattanooga
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: Knoxville
+    { label: "Belle Meade (satellite inside Davidson)", point: [-86.85, 36.1], expectMinCount: 1 }, // live: Belle Meade
+    { label: "Lynchburg (Moore, consolidated)", point: [-86.3719, 35.2845], expectMinCount: 1 }, // live: Lynchburg
+  ],
+  },
+  roadTn: {
+  fixtures: [
+    // NEW-1 (Tennessee) · live 2026-10-28 (60 m buffer): Culvert St → 4 city streets · Memphis downtown → 5 · Epps Mill / I-24 (800 m) → county roads + I-24 + SR-2.
+    { label: "Culvert St, Nashville", point: [-86.75516, 36.137653], expectMinCount: 1 }, // live: 4 (Municipal Highway Agency)
+    { label: "Memphis downtown", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 5 (State + Municipal)
+    { label: "Chattanooga", point: [-85.3097, 35.0456], expectMinCount: 1 }, // live: 10+
+    { label: "Epps Mill Rd, Rutherford", point: [-86.3194, 35.7299], expectMinCount: 1 }, // live: 10+ within 800 m (I-24 State Highway Agency)
+  ],
+  },
   /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
    * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
    * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
@@ -1100,6 +1130,24 @@ export const SOURCE_DOCS = {
     "The Georgia counterpart of `city`. DCA municipal limits (538). Georgia has NO ETJ: outside a city's limits the county " +
     "governs. Consolidated governments publish under their consolidated names (Athens-Clarke County, Augusta-Richmond " +
     "County, Macon-Bibb County; Columbus is plain 'Columbus'). A boundary means the city HAS JURISDICTION — never proof it serves utilities.",
+  },
+  countyTn: {
+  notes:
+    "The Tennessee counterpart of `county` / `countyGa`. State of Tennessee (STS) statewide counties (95, TIGER attributes). A point " +
+    "in NO polygon is not in Tennessee (the routing box also holds KY/VA/NC/GA/AL/MS/AR/MO ground) — point-in-polygon decides.",
+  },
+  cityTn: {
+  notes:
+    "The Tennessee counterpart of `city`. State of Tennessee (STS) city limits: 345 polygons, NAME only, edited 2026-03-18 — an " +
+    "annexation after that date is not in it. Tennessee has NO ETJ: outside a city's limits the county governs. Nashville is the " +
+    "Davidson 'balance' (the satellite cities are separate polygons); Lynchburg (Moore) and Hartsville (Trousdale) are the other two " +
+    "consolidated governments. A city that crosses a county line is ONE polygon — the county always comes from `countyTn`. A boundary " +
+    "means the city HAS JURISDICTION — never proof it serves utilities.",
+  },
+  roadTn: {
+  notes:
+    "The Tennessee counterpart of `road`. TDOT's Road Segment inventory (updated monthly): GOVT_CTRL says who owns/maintains each " +
+    "segment (State / County / Municipal Highway Agency …). Local-road coverage is TDOT's — an honest 'Unknown' beats a wrong guess.",
   },
   hsiGa: {
   notes:
