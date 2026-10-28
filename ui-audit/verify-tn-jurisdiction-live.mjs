@@ -24,8 +24,9 @@ const note = (s) => console.log("   · " + s);
 
 const RUN = Math.random().toString(36).slice(2, 6);
 const H = 150; // parcel half-side, site-frame feet (a ~300 ft lot, so containment is clean at a city line)
-const mk = (tag, lat, lon, county) => {
+const mk = (tag, lat, lon, county, half = H) => {
   const id = `zz-tnjur-${tag}-${RUN}`;
+  const H = half;
   return {
     id, groupId: id, site: `zz TN jurisdiction ${tag}`, name: "Plan 1", origin: { lat, lon }, county,
     parcels: [{ id: "pc1", active: true, locked: false, points: [{ x: -H, y: -H }, { x: H, y: -H }, { x: H, y: H }, { x: -H, y: H }] }],
@@ -51,7 +52,8 @@ const TN = [
   ["lynchburg", 35.2845, -86.3719, "tn_statewide", "Metro Lynchburg-Moore County, TN", false],
   ["hartsville", 36.3987, -86.1594, "tn_statewide", "Metro Hartsville-Trousdale County, TN", false],
 ];
-const CASES = Object.fromEntries(TN.map(([tag, lat, lon, county]) => [tag, mk(tag, lat, lon, county)]));
+// Epps Mill Rd / I-24 sits ~300 m off the nearest road: a ~3,000 ft tract (the size a real industrial site is) fronts I-24 / Manchester Hwy and the county roads.
+const CASES = Object.fromEntries(TN.map(([tag, lat, lon, county]) => [tag, mk(tag, lat, lon, county, tag === "eppsmill" ? 1500 : H)]));
 CASES.katy = mk("katy", 29.78, -95.79, "fortbend");
 CASES.atlanta = mk("atlanta", 33.749, -84.388, "ga_fulton");
 
@@ -151,15 +153,19 @@ try {
     }
   }
 } finally {
-  // Delete every throwaway site (cloud + local) and verify.
+  // Delete every throwaway site (cloud + local) and verify. The table refuses a hard delete until the row is in the trash (soft-delete first), and
+  // this also sweeps any `zz-tnjur-*` row an earlier, interrupted run left behind (owner rule: test artifacts are ALWAYS cleared).
   const gone = await page.evaluate(async (ids) => {
-    for (const id of ids) { try { await window.pfSupabase.from("sites").delete().eq("id", id); } catch (_) {} }
+    const sb = window.pfSupabase;
+    const { data: stray } = await sb.from("sites").select("id").like("id", "zz-tnjur-%");
+    const all = Array.from(new Set([...ids, ...((stray || []).map((r) => r.id))]));
+    for (const id of all) { try { await sb.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await sb.from("sites").delete().eq("id", id); } catch (_) {} }
     try {
       const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-      for (const id of ids) delete raw[id];
+      for (const id of all) delete raw[id];
       localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
     } catch (_) {}
-    const { data } = await window.pfSupabase.from("sites").select("id").in("id", ids);
+    const { data } = await sb.from("sites").select("id").like("id", "zz-tnjur-%");
     return (data || []).length;
   }, ids).catch(() => -1);
   check("every throwaway site is gone from the test account", gone === 0, `${gone} remain`);
