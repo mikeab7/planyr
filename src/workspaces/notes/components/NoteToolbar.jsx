@@ -73,7 +73,7 @@ import {
   SPACE_AFTER_DEFAULT, SPACE_BEFORE_DEFAULT, SPACING_LINE_OPTIONS, SPACING_PRESETS, fontSizePx,
 } from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
-import { DEFAULT_SIZE, FONTS, HIGHLIGHT_COLORS, SIZE_MAX, SIZE_MIN, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
+import { DEFAULT_SIZE, FILL_MIXED_SWATCH, FONTS, HIGHLIGHT_COLORS, SIZE_MAX, SIZE_MIN, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import {
   MIXED, formatDisplayValue, selectionAlignments, selectionBlockShapes, selectionFontFamilies,
   selectionFontSizes, selectionLineHeights, selectionListKinds, selectionMarkAttrs,
@@ -82,6 +82,7 @@ import {
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
 import { resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
 import { nextAnchorSpot, selectionInsideAnchor } from "../lib/notesAnchorNode.js";
+import { BOLD_TITLE, BOLD_TITLE_IN_HEADER, TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -507,6 +508,91 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
               }}
             >{c.value ? "" : "✕"}</button>
           ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** FILL FOR THE TABLE ROW / SELECTED CELLS (NEW-2). A swatch dropdown with "No fill" ON TOP as a labelled
+ *  row (a bare ✕ square is not obviously "remove"), then the tints. The button shows the current fill; a
+ *  mixed target shows a diagonal split. Picks go straight to `setCellFill`, which decides the target
+ *  (the cell selection, else the caret cell's whole row). */
+function FillPopover({ current, onPick, big }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const mixed = current === "mixed";
+  const shown = mixed ? null : current;
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <TBButton title={mixed ? "Fill — mixed" : "Fill row or selected cells"} testid="nt-fill" wide big={big} onClick={() => setOpen((o) => !o)}>
+        <span
+          data-testid="nt-fill-swatch"
+          data-fill={mixed ? "mixed" : (shown || "none")}
+          style={{
+            width: 14, height: 14, borderRadius: 3, border: "1px solid var(--border-strong)", flex: "0 0 auto",
+            background: mixed
+              ? FILL_MIXED_SWATCH
+              : (shown || "var(--surface-page)"),
+          }}
+        />
+        <span>Fill</span>
+        <Icon size={8}><path d="M4 6.5L8 10.5l4-4" /></Icon>
+      </TBButton>
+      {open && (
+        <div
+          ref={popRef}
+          data-testid="nt-fill-popover"
+          onMouseDown={stop}
+          style={{
+            padding: 8, display: "flex", flexDirection: "column", gap: 6, minWidth: 168,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
+            ...anchorStyle,
+          }}
+        >
+          <button
+            type="button"
+            data-testid="nt-fill-none"
+            onMouseDown={stop}
+            onClick={() => { onPick(null); setOpen(false); }}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, width: "100%", minHeight: big ? 44 : 28, padding: "0 8px",
+              border: "1px solid var(--border-default)", borderRadius: RADIUS.control, background: "transparent",
+              color: "var(--text-primary)", font: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left",
+            }}
+          >
+            <span style={{ width: 14, height: 14, borderRadius: 3, border: "1px solid var(--border-strong)", background: "var(--surface-page)", color: "var(--text-tertiary)", fontSize: 10, lineHeight: "12px", textAlign: "center" }}>✕</span>
+            No fill
+          </button>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(4, ${big ? 36 : 28}px)`, gap: 6 }}>
+            {TABLE_FILLS.filter((f) => f.value).map((f) => (
+              <button
+                key={f.name}
+                type="button"
+                title={f.name}
+                aria-label={`Fill ${f.name}`}
+                data-testid={`nt-fill-${f.name.toLowerCase()}`}
+                aria-pressed={shown === f.value.toLowerCase() ? "true" : "false"}
+                onMouseDown={stop}
+                onClick={() => { onPick(f.value); setOpen(false); }}
+                style={{
+                  width: big ? 36 : 28, height: big ? 36 : 28, borderRadius: RADIUS.control, cursor: "pointer", padding: 0,
+                  border: shown === f.value.toLowerCase() ? "2px solid var(--accent-notes)" : "1px solid var(--border-strong)",
+                  background: f.value,
+                }}
+              />
+            ))}
+          </div>
         </div>
       )}
     </span>
@@ -1368,7 +1454,11 @@ export default function NoteToolbar({
     caretValue: editor.isActive(name),
     rangeValues: rangeOf(() => selectionMarkPresence(doc, from, to, name)),
   });
-  const boldPressed = markPressed("bold");
+  /* ⛔ A HEADER CELL'S TEXT IS BOLD BY STYLE, NOT BY MARK — the B button must never read "off" on text that
+   * is visibly bold (NEW-1, 2026-10-28). `boldTruth` is the one rule; its tooltip names the real control. */
+  const headerCells = titleActive ? "none" : selectionInHeaderCells(editor.state);
+  const boldPressed = boldTruth(markPressed("bold"), headerCells);
+  const boldInHeader = headerCells === "all";
   const italicPressed = markPressed("italic");
   const underlinePressed = markPressed("underline");
   const strikePressed = markPressed("strike");
@@ -1446,7 +1536,8 @@ export default function NoteToolbar({
       <TBButton title="Insert column right" testid="nt-col-after" wide big={narrow} label="Col →" onClick={() => chain().addColumnAfter().run()} />
       <TBButton title="Delete column" testid="nt-col-del" wide big={narrow} label="Col ✕" onClick={() => chain().deleteColumn().run()} />
       <TBButton title="Merge or split cells" testid="nt-merge" wide big={narrow} label="Merge/split" onClick={() => chain().mergeOrSplit().run()} />
-      <TBButton title="Toggle header row" testid="nt-header-row" wide big={narrow} label="Header" onClick={() => chain().toggleHeaderRow().run()} />
+      <TBButton title="Header row" testid="nt-header-row" wide big={narrow} label="Header row" pressed={headerRowsState(editor.state) ?? "false"} onClick={() => chain().toggleHeaderRows().run()} />
+      <FillPopover current={currentFill(editor.state)} big={narrow} onPick={(v) => chain().setCellFill(v).run()} />
       <TBButton title="Delete table" testid="nt-table-del" wide big={narrow} label="Delete table" onClick={() => chain().deleteTable().run()} />
     </>
   ) : null;
@@ -1485,7 +1576,7 @@ export default function NoteToolbar({
   );
   const bIU = (
     <>
-      <TBButton title="Bold" testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => chain().toggleBold().run()}>
+      <TBButton title={boldInHeader ? BOLD_TITLE_IN_HEADER : BOLD_TITLE} testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => { if (!boldInHeader) chain().toggleBold().run(); }}>
         <span style={{ fontWeight: 800, fontSize: 13 }}>B</span>
       </TBButton>
       <TBButton title="Italic" testid="nt-italic" big={narrow} disabled={titleActive} pressed={italicPressed} onClick={() => chain().toggleItalic().run()}>

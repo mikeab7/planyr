@@ -76,6 +76,8 @@ import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
 } from "../lib/notesMarkdown.js";
 import { docToHtml } from "../lib/notesDocHtml.js";
+import { FILL_INK } from "../lib/notesFormatPalette.js";
+import { TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
 import { buildPrintDocument, printHtmlDocument } from "../lib/notesPrint.js";
 import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
 import { activeOutlineIndex, outlineFromDoc } from "../lib/notesOutline.js";
@@ -342,6 +344,10 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror table td, .planyr-note .ProseMirror table th { border: 1px solid var(--border-strong); padding: 6px 9px; vertical-align: top; position: relative; min-width: 2em; }
 .planyr-note .ProseMirror table th { background: var(--surface-page); font-weight: 650; text-align: left; }
+/* A CELL FILL (NEW-2) is a solid content colour — the same in every theme — so a cell that carries one forces a
+   dark ink on its unmarked text, or light-theme-pale-on-dark-theme-light-text would be unreadable. Text with its
+   own colour mark is untouched (the mark is more specific than inheritance). "transparent" is not a fill. */
+.planyr-note .ProseMirror table td[data-cell-fill]:not([data-cell-fill="transparent"]), .planyr-note .ProseMirror table th[data-cell-fill]:not([data-cell-fill="transparent"]) { color: ${FILL_INK}; }
 .planyr-note .ProseMirror table .selectedCell:after { content: ""; position: absolute; inset: 0; background: var(--accent-notes); opacity: 0.16; pointer-events: none; }
 .planyr-note .ProseMirror .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: var(--accent-notes); cursor: col-resize; }
 .planyr-note .ProseMirror .tableWrapper { overflow-x: auto; }
@@ -1263,8 +1269,12 @@ function MiniColor({ id, title, colors, current, onPick }) {
 function MiniBar({ editor }) {
   const chain = () => editor.chain().focus();
   const size = editor.getAttributes("textStyle")?.fontSize || "";
+  /* A header cell's text is bold by style — the B must never read off on it (NEW-1, 2026-10-28). */
+  const headerCells = selectionInHeaderCells(editor.state);
+  const boldInHeader = headerCells === "all";
+  const boldLit = boldTruth(editor.isActive("bold") ? "true" : "false", headerCells) !== "false";
   const items = [
-    { id: "bold", title: "Bold (Ctrl+B)", active: editor.isActive("bold"), run: () => chain().toggleBold().run() },
+    { id: "bold", title: boldInHeader ? "Bold (header row: use Header row to change)" : "Bold (Ctrl+B)", active: boldLit, run: () => { if (!boldInHeader) chain().toggleBold().run(); } },
     { id: "italic", title: "Italic (Ctrl+I)", active: editor.isActive("italic"), run: () => chain().toggleItalic().run() },
     { id: "underline", title: "Underline (Ctrl+U)", active: editor.isActive("underline"), run: () => chain().toggleUnderline().run() },
     { id: "strike", title: "Strikethrough", active: editor.isActive("strike"), run: () => chain().toggleStrike().run() },
@@ -1389,6 +1399,9 @@ function MenuRow({ item, onClose }) {
         textAlign: "left", cursor: "pointer",
       }}
     >
+      {item.chip !== undefined ? (
+        <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 3, border: "1px solid var(--border-strong)", flex: "0 0 auto", background: item.chip || "var(--surface-page)", color: "var(--text-tertiary)", fontSize: 10, lineHeight: "12px", textAlign: "center" }}>{item.chip ? "" : "✕"}</span>
+      ) : null}
       <span style={{ flex: 1 }}>{item.label}</span>
       {item.accel ? <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>{item.accel}</span> : null}
     </button>
@@ -1434,6 +1447,27 @@ export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
   if (left + width + margin > vw) left = vw - width - margin;   // the right edge, same rule
   left = Math.max(margin, left);
   return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
+}
+
+/** The table section of the right-click menu: "Header row" (shown as on/off) and "Fill ▸" with No fill first. */
+function tableMenuItems(editor) {
+  const state = editor.state;
+  const fillNow = currentFill(state);
+  return [
+    SEP,
+    { id: "header-row", label: "Header row", active: headerRowsState(state) === "true", run: () => editor.chain().focus().toggleHeaderRows().run() },
+    {
+      id: "fill",
+      label: "Fill",
+      sub: TABLE_FILLS.map((f) => ({
+        id: f.value ? `fill-${f.name.toLowerCase()}` : "fill-none",
+        label: f.name,
+        chip: f.value || "",
+        active: f.value ? fillNow === f.value.toLowerCase() : false,
+        run: () => editor.chain().focus().setCellFill(f.value).run(),
+      })),
+    },
+  ];
 }
 
 function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable, pressGuardRef }) {
@@ -1514,6 +1548,10 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
        table is the only thing in its list item). Its own row, not lumped with `link`, because
        it restructures the document rather than formatting a selection. */
     ...(onConvertTable ? [SEP, { id: "convert-table-text", label: "Convert table to text", run: onConvertTable }] : []),
+    /* NEW-1/NEW-2 (2026-10-28) — the table's Header row and Fill, where a right-click lands. The SAME two
+       commands the toolbar's Table group runs (`toggleHeaderRows` / `setCellFill`): the cell selection if
+       there is one, else the caret cell's whole row. */
+    ...(at?.inTable ? tableMenuItems(editor) : []),
     ...(onDeleteBox ? [SEP, { id: "delete-box", label: "Delete this box", accel: "Del", danger: true, run: onDeleteBox }] : []),
   ];
 
