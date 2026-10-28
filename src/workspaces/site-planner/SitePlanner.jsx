@@ -547,7 +547,7 @@ import {
  * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
-import { jurisdictionSourceName, GA_JURISDICTION_SOURCE_NAME } from "./lib/georgiaJurisdiction.js";
+import { jurisdictionSourceName } from "./lib/georgiaJurisdiction.js";
 import { NJNY_NOT_WIRED_FLAGS, isNjNyState } from "./lib/njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
@@ -14136,7 +14136,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
     // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
     // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
-    : siteStateId === "GA" || siteStateId === "CA" || isNjNyState(siteStateId) // NEW-1 (California; New Jersey + New York) — same carrier, "not available in <State> yet"
+    : siteStateId === "GA" || siteStateId === "TN" || siteStateId === "CA" || isNjNyState(siteStateId) // NEW-1 (California; New Jersey + New York) — same carrier, "not available in <State> yet"
     ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
@@ -14144,7 +14144,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "CA" && !isNjNyState(siteStateId) && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "TN" && siteStateId !== "CA" && !isNjNyState(siteStateId) && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -17095,7 +17095,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           straddle: false, governingCities: [], edgeOnlyCities: [], partialCities: [], touchesCities: [],
           unresolvedRoles: ["city", "etj", "county"], unresolved: true,
           cityContainment: "unknown", etjLabels: [],
-          sourceName: siteStateId === "GA" ? GA_JURISDICTION_SOURCE_NAME : "TxDOT / TxGIO / H-GAC",
+          sourceName: jurisdictionSourceName(siteStateId), // NEW-1 (Tennessee) — was GA-or-Texas only
           failureNote: `The jurisdiction lookup could not be completed (${String((e && e.message) || e)}). Nothing here is settled — re-check before relying on the floodplain rule.`,
         });
       });

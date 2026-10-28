@@ -116,7 +116,7 @@ export function normalizeRoadName(raw) {
   return s.split(/\s+[-–—]\s+/).map(dedupeSuffix).filter(Boolean).join(" / ");
 }
 
-const AUTH_SHORT = { "State (TxDOT)": "state", County: "county", City: "city", Federal: "federal", Unknown: "unknown", "Toll / managed-lane authority": "toll" };
+const AUTH_SHORT = { "State (TxDOT)": "state", "State (TDOT)": "state", County: "county", City: "city", Federal: "federal", Unknown: "unknown", "Toll / managed-lane authority": "toll" };
 const AUTH_ORDER = ["state", "county", "city", "toll", "federal", "unknown"];
 const authShort = (label) => AUTH_SHORT[label] || String(label).replace(/\s*\(.*?\)\s*/g, " ").trim().toLowerCase();
 export const ROADS_LIST_MAX = 10;

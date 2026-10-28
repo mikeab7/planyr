@@ -155,7 +155,8 @@ function leadFor(model, shape) {
     if (isGa(model)) {
       const isCons = (c) => !!(model.consolidated && sameName(c, model.consolidated.city));
       const named = gov.map((c) => (isCons(c) ? model.consolidated.label : `City of ${c}`));
-      return `${named.join(PEER_SEP)}, ${stateAbbr(model)}${gov.some(isCons) ? " (consolidated)" : ""}`;
+      /* NEW-1 (Tennessee) — a Metro government names itself ("Metro Nashville-Davidson County"), so "(consolidated)" would only repeat it. */
+      return `${named.join(PEER_SEP)}, ${stateAbbr(model)}${gov.some(isCons) && !isTn(model) ? " (consolidated)" : ""}`;
     }
     return gov.map((c) => `City of ${c}`).join(PEER_SEP);
   }
@@ -169,6 +170,9 @@ function leadFor(model, shape) {
   /* NEW-1 (New Jersey + New York) — no ETJ, and NO unincorporated land. A confirmed NJ / NY point that no municipal layer named is a
    * data gap (open water, a boundary seam), said as exactly that — never "Unincorporated", which is false in both states. */
   if (isMuni(model)) return "No municipality found";
+  /* NEW-1 (Tennessee) — a consolidated county (Davidson, Moore, Trousdale) has NO unincorporated land: a point in it that no city
+   * polygon names is still inside the Metro government, and the lead says so ("Metro Lynchburg-Moore County, TN"). */
+  if (isTn(model) && model.consolidated) return `${model.consolidated.label}, TN`;
   /* NEW-1 (Georgia) — no ETJ exists there, and outside city limits the COUNTY governs, so the lead names
    * the county: "Unincorporated Gwinnett County, GA". Without a county (a failed lookup) it stays honest. */
   if (isGa(model)) {
@@ -185,7 +189,8 @@ function leadFor(model, shape) {
 /* NEW-1 (Georgia, California) — a state-aware model carries `state: "GA" | "CA"` (set only on a point-in-polygon
  * confirmed site). Both are "no ETJ — the county governs outside city limits" states with the same label grammar, so
  * the one predicate (still named `isGa` for the call sites above) covers both and `stateAbbr` prints which. */
-const isGa = (model) => ["GA", "CA"].includes(String(model.state || "").toUpperCase());
+const isGa = (model) => ["GA", "CA", "TN"].includes(String(model.state || "").toUpperCase()); // NEW-1 — Tennessee is the same "no ETJ, the county governs" grammar
+const isTn = (model) => String(model.state || "").toUpperCase() === "TN";
 /* NEW-1 (New Jersey + New York) — municipal-form states: every acre is in a municipality, there is no ETJ, the municipality's type
  * is part of its name, and the county slot never leads. Deliberately NOT folded into `isGa` (whose branches say "Unincorporated
  * <County>, GA"). */
@@ -259,6 +264,9 @@ export function formatJurisdictionLabel(model = {}) {
   const counties = list(model.counties);
   /* NEW-1 (New York) — New York City's five boroughs are each a county, and people say the borough: "Brooklyn (Kings County)". */
   const countyText = (c) => {
+    /* NEW-1 (Tennessee) — inside a Metro government the county slot names the Metro ("Metro Nashville-Davidson County"), also beside a
+     * satellite city such as Belle Meade, which is a city inside that county government. */
+    if (isTn(model) && model.consolidated && sameName(c, model.consolidated.county)) return model.consolidated.label;
     const borough = isMuni(model) && String(model.state).toUpperCase() === "NY" && isNewYorkCity(list(model.governingCities)) ? nycBoroughOf(c) : null;
     return borough ? `${borough} (${c} County)` : `${c} County`;
   };

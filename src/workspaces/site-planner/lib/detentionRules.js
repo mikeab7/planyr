@@ -32,6 +32,7 @@
 import { GA_DETENTION_HEADLINE, GA_DETENTION_DETAIL } from "./georgiaJurisdiction.js";
 import { CA_DETENTION_HEADLINE, CA_DETENTION_DETAIL } from "./californiaJurisdiction.js"; // NEW-1 (California)
 import { NJNY_DETENTION_HEADLINE, NJNY_DETENTION_DETAIL, NJNY_NOT_WIRED_FLAGS } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+import { TN_DETENTION_HEADLINE, TN_DETENTION_DETAIL, TN_NOT_WIRED_FLAG } from "./tennesseeJurisdiction.js"; // NEW-1 (Tennessee)
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import {
   identifyJurisdiction,
@@ -614,6 +615,22 @@ export function computeRequiredDetention(args = {}) {
       detail: GA_DETENTION_DETAIL,
       rule: null, governing: null,
       flags: ["georgia-not-wired", "no-criteria-modeled"],
+      caveat: SCREENING_CAVEAT,
+    };
+  }
+  /* NEW-1 (Tennessee) — the same hard guard for a POSITIVE Tennessee answer. Tennessee has a Montgomery, a Washington, a Jefferson, a
+   * Lincoln and a Franklin County (and more) that share names with Texas counties, and no modeled criteria at all: the only correct
+   * output is the named "not available in Tennessee yet" state — never a Texas number. */
+  if (String(siteState || "").toUpperCase() === "TN") {
+    return {
+      kind: "unavailable",
+      requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: "detention criteria not yet available for Tennessee",
+      headline: TN_DETENTION_HEADLINE,
+      verdictSubject: "Tennessee detention", // yieldVerdicts.unavailableDetentionRow's subject
+      detail: TN_DETENTION_DETAIL,
+      rule: null, governing: null,
+      flags: [TN_NOT_WIRED_FLAG, "no-criteria-modeled"],
       caveat: SCREENING_CAVEAT,
     };
   }
@@ -1681,6 +1698,8 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
    * positively-Georgia answer there is NO modeled authority — the named "not available in Georgia yet"
    * state — and nothing below runs. */
   if (String(state || "").toUpperCase() === "GA") { out.flags.push("georgia-not-wired", "no-criteria-modeled"); return out; }
+  // NEW-1 (Tennessee) — Tennessee has a Montgomery County too (Clarksville); same rule, same carrier.
+  if (String(state || "").toUpperCase() === "TN") { out.flags.push(TN_NOT_WIRED_FLAG, "no-criteria-modeled"); return out; }
   // NEW-1 (California) — California has an Orange County and a Trinity County too; same rule, same carrier.
   if (String(state || "").toUpperCase() === "CA") { out.flags.push("california-not-wired", "no-criteria-modeled"); return out; }
   /* NEW-1 (New Jersey + New York) — NY has a Montgomery, an Orange, a Jefferson and a Washington County, every one of them a Texas
@@ -2138,7 +2157,7 @@ export function slimDrainageContext(ctx) {
  * this to split a stored check's derived facts (replaced by a fresh re-derivation) from
  * its query-outcome facts (mud overlays, jurisdiction-partial, …), which describe the
  * check-time fetches and can't be re-derived from the raw jurisdiction names. */
-const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired", "california-not-wired", ...NJNY_NOT_WIRED_FLAGS]);
+const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired", "california-not-wired", TN_NOT_WIRED_FLAG, ...NJNY_NOT_WIRED_FLAGS]);
 const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
 
 /* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record
