@@ -34,6 +34,28 @@ export const HIGHLIGHT_COLORS = [
   { name: "Orange", value: "#FED7AA" }, { name: "Purple", value: "#DDD6FE" },
 ];
 
+/** Table cell fills (NEW-2, 2026-10-28). Light tints on purpose — the same reasoning HIGHLIGHT_COLORS gives —
+ *  and `null` is "No fill", listed first. CONTENT colours, not chrome: a fill somebody picks is written into
+ *  their document and means the same thing on every device, in every theme and in every export. */
+export const TABLE_FILLS = [
+  { name: "No fill", value: null },
+  { name: "Gray", value: "#E5E7EB" },   // design-exempt: content colour written into a document, not chrome
+  { name: "Yellow", value: "#FEF08A" }, // design-exempt: content colour written into a document, not chrome
+  { name: "Orange", value: "#FED7AA" }, // design-exempt: content colour written into a document, not chrome
+  { name: "Pink", value: "#FBCFE8" },   // design-exempt: content colour written into a document, not chrome
+  { name: "Purple", value: "#DDD6FE" }, // design-exempt: content colour written into a document, not chrome
+  { name: "Blue", value: "#BFDBFE" },   // design-exempt: content colour written into a document, not chrome
+  { name: "Teal", value: "#A5F3FC" },   // design-exempt: content colour written into a document, not chrome
+  { name: "Green", value: "#BBF7D0" },  // design-exempt: content colour written into a document, not chrome
+];
+
+/** The ink an unmarked run takes inside a FILLED cell: the palette's own "Black", so a pale fill is readable
+ *  in the dark theme too (the page's normal ink flips to near-white there). */
+export const FILL_INK = TEXT_COLORS[1].value;
+
+/** The Fill button's "mixed" swatch: two of the tints split on the diagonal. */
+export const FILL_MIXED_SWATCH = `linear-gradient(135deg, ${TABLE_FILLS[2].value} 50%, ${TABLE_FILLS[6].value} 50%)`;
+
 export const FONTS = [
   { label: "Default", value: null }, { label: "Arial", value: "Arial, Helvetica, sans-serif" },
   { label: "Georgia", value: "Georgia, serif" }, { label: "Times New Roman", value: "'Times New Roman', Times, serif" },

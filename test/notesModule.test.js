@@ -106,7 +106,7 @@ const ALL_NOTES_FILES = [
   // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
   "lib/notesTableToText.js",
   "lib/notesTablePaste.js",
-  "lib/notesTableClipboard.js",
+  "lib/notesTableClipboard.js", "lib/notesTableFill.js",
   // NEW-1/NEW-2 (B1554272/B1554273) — widening a table column must not squeeze its neighbours,
   // and a column may never be squeezed below a readable floor. Pure decision + the editor command.
   "lib/notesTableWidth.js", "lib/notesTableColumns.js",
@@ -520,10 +520,13 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      *     "More" panel, neither of which can mirror the editor: `moreOpen` (the panel is open) and
      *     `moreBox` (where it hangs — `{ top, max }` measured off the bar's own
      *     `getBoundingClientRect()` and `visualViewport`, so it never exceeds the visible area).
+     *   ⛔ RAISED 18 → 19 (NEW-2, 2026-10-28) — `FillPopover`'s `open` (the table Fill swatch dropdown), the
+     *     same transient popover flag every other picker here carries; the fill it shows is read from
+     *     the document (`currentFill(editor.state)`), never stored in React.
      * If a future change makes any of these read `editor.` at init, the sharp assertion above
      * fails first and this inventory is not what saves it. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(18);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(19);
   });
 });
 
