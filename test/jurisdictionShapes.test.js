@@ -24,7 +24,7 @@ import { replay, freshCache } from "../ui-audit/lib/shapeReplay.js";
  *
  * The four shapes, and their real sites (all four coordinates are the owner's own production rows):
  *   in-city                                  → Gessner       (Houston)
- *   in-city PLUS an ETJ                      → Will Clayton  (Humble limits, Houston ETJ)
+ *   city limits that overlap another ETJ    → Will Clayton  (Humble limits, Houston ETJ polygon — limits win)
  *   unincorporated INSIDE an ETJ             → Bain          (Houston ETJ, Katy on the edge)
  *   unincorporated, city within 1 km         → Goose Creek   (Baytown)
  *
@@ -80,15 +80,20 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
     expect(b.straddle).toBe(false);
   });
 
-  it("in-city PLUS an ETJ — Will Clayton names Humble's limits AND the Houston ETJ", async () => {
+  /* ⛔ RE-STATED 2026-10-28 (Concept A). This fixture used to assert "City of Humble · Houston ETJ · Harris County" and call it a
+   * shape — "in-city PLUS an ETJ". It is not a place: an ETJ is the ground OUTSIDE every city's limits (Local Gov't Code ch. 42), so
+   * the recorded answers are two published layers (TxGIO's Humble limits, H-GAC's Houston ETJ) overlapping on the owner's own site —
+   * the same defect the owner reported on Sugar Land ("it can't be both"). City limits outrank any ETJ hit. The overlap is still
+   * RECORDED (`etjOverlap`) so the tooltip can disclose it, but the ETJ no longer governs, and no longer reaches the floodplain
+   * administrator (`etjLabels`). */
+  it("a city that holds the site never prints another city's ETJ — Will Clayton is Humble's limits only, the Houston ETJ overlap disclosed", async () => {
     const { b, j } = await badgeFor("Will Clayton");
-    // SHAPE 2 — the governing city leads, the other city's ETJ is the qualifier beside it.
-    expect(b.text).toBe("City of Humble · Houston ETJ · Harris County");
-    expect(b.shape).toBe("in-city-etj");
+    expect(b.text).toBe("City of Humble · Harris County");
+    expect(b.shape).toBe("in-city");
     expect(j.cityContainment).toBe("in");
-    // The ETJ must survive the dedupe: it is a DIFFERENT city from the one whose limits hold the
-    // site, and dropping it loses the Ch. 19 floodplain rule.
-    expect(b.etjLabels).toEqual(["Houston"]);
+    expect(b.etjLabels).toEqual([]);
+    expect(b.etjOverlap).toEqual(["Houston"]);
+    expect(b.etjOverlapNote).toMatch(/limits govern/);
   });
 
   /* SHAPE 3, RE-STATED BY NEW-1 (B367296) after the owner's Clay & Porter report. It read

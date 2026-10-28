@@ -54,7 +54,7 @@ import { etjNamesOf } from "./etjNames.js";
  * area is 96.2% on the owner's own Goose Creek parcel, and 70–85% where it is 99% at Grand Port. */
 import {
   areaShare, unionAreaSqM, ringsAsPolygons, esriPolygons, SQM_PER_ACRE,
-  siteWindow, clipPolysToWindow, normalizePolys, distanceToBoundaryM,
+  siteWindow, clipPolysToWindow, normalizePolys, distanceToBoundaryM, subtractNorm,
 } from "./jurisdictionShare.js";
 import { yieldToMain } from "./yieldToMain.js";
 /* ⛔ NEW-1 — "city limits" is three jurisdiction classes, not a boolean. */
@@ -1176,9 +1176,24 @@ function* cityAreasSteps(src, features, rings, ref, opts = {}) {
     if (!g.polys.length) continue;
     const near = clipPolysToWindow(g.polys, win);
     // dissolved ONCE per jurisdiction and reused by the whole-site measurement and every parcel's
-    const clipNorm = near.length ? normalizePolys(near, ref) : null;
+    const rawClipNorm = near.length ? normalizePolys(near, ref) : null;
+    /* ⛔ NEW-1 (Concept A, 2026-10-28) — AN ETJ IS MEASURED NET OF EVERY CITY'S FULL-PURPOSE LIMITS. An ETJ is by definition the
+     * ground OUTSIDE all city limits (Local Gov't Code ch. 42), so where a published ETJ polygon lies under a city's limits the
+     * two layers are disagreeing and the limits win. Before this, a site wholly inside Sugar Land read "City of Sugar Land ·
+     * Houston ETJ" because Houston's ETJ polygon (H-GAC's AND Houston's own planning layer — identical coverage) overlaps ~8% of
+     * the ground around it that Sugar Land's limits (TxGIO AND Fort Bend CAD) also cover. `opts.clipOutNorm` is the dissolved
+     * union of those limits; it is applied to ETJ groups ONLY, and the share that was removed is kept (`overlapShare`) so the
+     * disagreement is reported, not hidden. */
+    const net = src.role === "etj" && opts.clipOutNorm && opts.clipOutNorm.length && rawClipNorm;
+    const clipNorm = net ? subtractNorm(rawClipNorm, opts.clipOutNorm) : rawClipNorm;
     yield;
     const whole = areaShare(site, near, ref, { toleranceM, totalSqM, clipNorm, skipDistance: true });
+    let overlapShare = 0;
+    if (net) {
+      const rawWhole = areaShare(site, near, ref, { toleranceM, totalSqM, clipNorm: rawClipNorm, skipDistance: true });
+      overlapShare = Math.max(0, (rawWhole.rawShare || 0) - (whole.rawShare || 0));
+      yield;
+    }
     /* `distanceM` stays EXACT. The nearest-boundary distance is measured on the windowed polygon, which is exact whenever it is
      * under the window's pad (every cut edge is at least that far away); a boundary further than the pad — or an empty
      * window — takes the full published polygon, so the answer never changes, it only stops being paid for in the common case. */
@@ -1198,6 +1213,7 @@ function* cityAreasSteps(src, features, rings, ref, opts = {}) {
       share: whole.share, rawShare: whole.rawShare,
       insideAcres: whole.insideAcres, distanceM: whole.distanceM,
       confident: whole.confident, refusedReason: whole.refusedReason,
+      overlapShare,
       perParcel,
     });
   }
@@ -1267,6 +1283,7 @@ export function mergeCityAreas(results) {
     totalSqM: base.totalSqM, totalAcres: base.totalAcres,
     parcelCount: base.parcelCount, parcelAcres: base.parcelAcres, parcelIds: base.parcelIds,
     sources: live.map((r) => r.sourceId),
+    netted: live.every((r) => r.netted),
     rows: Array.from(byKey.values()).sort((a, b) => (b.rawShare || 0) - (a.rawShare || 0)),
   };
 }
@@ -1280,7 +1297,9 @@ export function identifyCityShares(src, rings, ref, opts = {}) {
   const fetchJson = opts.fetchJson || defaultFetchJson;
   const ring = shareQueryRing(rings);
   if (!ring) return Promise.resolve(null);
-  const key = "jurshare:" + src.id + ":" + ringKey(rings.flat());
+  // NEW-1 — an ETJ answer netted against city limits is a different quantity from the raw one cached before; its own key.
+  const net = src.role === "etj" && typeof opts.clipOutFn === "function";
+  const key = "jurshare:" + src.id + (net ? ":net1" : "") + ":" + ringKey(rings.flat());
   /* ⛔ ONE COMPUTE PER (cache, key) AT A TIME. The header badge and the drainage authority both ask for the same share the
    * moment a plan opens, and `cache.swr` only dedupes a FETCH (via the shared request coalescer), not the clipper work that
    * follows it — so a cold open measured the same city boundary being dissolved twice, back to back. A second caller now
@@ -1297,18 +1316,59 @@ export function identifyCityShares(src, rings, ref, opts = {}) {
     if (proxied) { try { j = await fetchJson(proxied); } catch (_) { j = await fetchJson(direct); } }
     else j = await fetchJson(direct);
     const feats = (j.features || []).map((f) => ({ attrs: f.attributes || {}, geometry: f.geometry || null }));
-    const res = await cityAreasFromFeaturesAsync(src, feats, rings, ref, { parcelIds: opts.parcelIds, sliceMs: opts.sliceMs, yieldFn: opts.yieldFn, now: opts.now });
+    /* The city limits to net against are fetched only when there is an ETJ polygon to net. If they cannot be had the ETJ share is
+     * still measured (un-netted, exactly as before) but is marked `netted: false` and dropped from the cache below, so a raw answer
+     * is never remembered under the netted key; the caller then leans on the whole-site-in-a-city rule instead. */
+    let clipOutNorm = null;
+    if (net && feats.length) clipOutNorm = await opts.clipOutFn();
+    const res = await cityAreasFromFeaturesAsync(src, feats, rings, ref, { parcelIds: opts.parcelIds, sliceMs: opts.sliceMs, yieldFn: opts.yieldFn, now: opts.now, clipOutNorm });
     // A null here is "could not measure" — cache nothing, so the next call retries.
     if (!res) throw new Error("city share: source answered without geometry");
+    res.netted = net && (!feats.length || !!clipOutNorm);
     return res;
   };
   const { fresh } = cache.swr(key, fetcher, { ttl: src.ttl || 0 });
-  const out = fresh.then((r) => (r && r.data && r.data.rows ? r.data : null)).catch(() => null)
+  const out = fresh.then((r) => {
+    if (net && r && r.data && r.data.netted === false) { try { cache.remove(key); } catch (_) { /* best effort */ } }
+    return r && r.data && r.data.rows ? r.data : null;
+  }).catch(() => null)
     .finally(() => { live.delete(key); });
   live.set(key, out);
   return out;
 }
 const _shareInFlight = new WeakMap();
+
+/* NEW-1 — the dissolved union of every FULL-PURPOSE city limit around the site, as clipper paths in the identify's own frame, for
+ * netting an ETJ against. Limited-purpose and strip annexation are not subtracted (they are not the city's whole reach and are
+ * reported in their own field). Cut to the same window the shares use. Null only when NO city source answered; one source down
+ * while another answered just subtracts less. */
+export async function fetchCityClipOut(citySrcs, rings, ref, opts = {}) {
+  const fetchJson = opts.fetchJson || defaultFetchJson;
+  const ring = shareQueryRing(rings);
+  if (!ring || !(citySrcs || []).length) return null;
+  const win = siteWindow(rings, SHARE_WINDOW_PAD_M);
+  const polys = [];
+  let answered = 0;
+  await Promise.all(citySrcs.map(async (src) => {
+    try {
+      const params = buildIdentifyParams(src, { ring, returnGeometry: true, maxVerts: 8 });
+      const direct = buildQueryUrl(src.url, params);
+      const proxied = src.viaProxy ? proxiedQueryUrl(src.url, params) : null;
+      let j;
+      if (proxied) { try { j = await fetchJson(proxied); } catch (_) { j = await fetchJson(direct); } }
+      else j = await fetchJson(direct);
+      for (const f of (j && j.features) || []) {
+        if (!f || !f.geometry) continue;
+        const n = normalizeFeature(src, f.attributes || {});
+        if ((n.limitClass || CITY_LIMIT_CLASSES.unknown.id) !== CITY_LIMIT_CLASSES.full.id) continue;
+        polys.push(...esriPolygons(f.geometry));
+      }
+      answered++;
+    } catch (_) { /* this source adds nothing to the netting; see the header */ }
+  }));
+  if (!answered) return null;
+  return normalizePolys(clipPolysToWindow(polys, win), ref);
+}
 
 export async function identifyJurisdiction(lng, lat, opts = {}) {
   const geom = opts.ring && opts.ring.length >= 3 ? { ring: opts.ring } : { lng, lat };
@@ -1340,6 +1400,13 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   // NEW-2 — the rings the SHARE is measured on: every active parcel when the caller has them.
   const shareRings = (opts.rings && opts.rings.length ? opts.rings : (opts.ring ? [opts.ring] : []))
     .filter((r) => r && r.length >= 3);
+  /* NEW-1 — the city limits an ETJ is netted against, fetched at most once and only if an ETJ share pass actually needs them. */
+  const clipCitySrcs = shareRings.length && roles.includes("etj")
+    ? citySourcesForPoint(lat, lng).filter((s) => s && !s.unavailable && s.url) : [];
+  let clipOutPromise = null;
+  const clipOutFn = clipCitySrcs.length
+    ? () => (clipOutPromise || (clipOutPromise = fetchCityClipOut(clipCitySrcs, shareRings, [lng, lat], opts)))
+    : null;
   await Promise.all(roles.map(async (role) => {
     const srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
     if (!srcs.length) {
@@ -1542,7 +1609,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
        * A source that cannot be measured (no geometry returned, an outage) leaves the union-query
        * `names` from above untouched — exactly the city fallback's own contract. */
       const areaParts = await Promise.all(srcs.filter((sx) => !sx.release).map((s) =>
-        identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds })));
+        identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds, clipOutFn: role === "etj" ? clipOutFn : null })));
       const merged = mergeCityAreas(areaParts);
       if (merged && areaParts.some(Boolean)) {
         const stated = merged.rows.filter((r) => r.share != null);
@@ -1550,10 +1617,19 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
         // A clip below the floor is real (it touched) but never a governing peer — named on its own
         // field so a consumer (the badge's non-governing tail) can say so rather than drop it silent.
         const edge = uniq(stated.filter((r) => r.share < CITY_SHARE_MIN && r.rawShare > 0).map((r) => r.name));
-        if (governing.length || edge.length) {
+        if (governing.length || edge.length || (role === "etj" && merged.netted)) {
           out[role] = governing;
           out[role + "Edge"] = edge;
           out[role + "ShareMethod"] = "area";
+        }
+        if (role === "etj" && merged.netted) {
+          /* NEW-1 — this ETJ answer is net of city limits, so an empty list here is a FINDING ("none of the site is outside a city's
+           * limits and in an ETJ"), not "the area pass said nothing". What the netting removed rides along, so the overlap between
+           * the publishers' layers is disclosed rather than silently resolved. */
+          out.etjNetted = true;
+          out.etjCityOverlap = merged.rows
+            .filter((r) => (r.overlapShare || 0) >= CITY_SHARE_MIN)
+            .map((r) => ({ name: r.name, share: r.overlapShare }));
         }
       }
     }
@@ -1611,6 +1687,17 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     : out.cityAll.length ? "in"
     : out.citySome.length ? "partial"
     : "none";
+  /* ⛔ NEW-1 (Concept A, 2026-10-28) — CITY LIMITS OUTRANK ANY ETJ HIT, EVEN WHERE THE ETJ COULD NOT BE NETTED BY AREA.
+   * The area pass above nets the ETJ against the limits exactly. This is the floor beneath it, for the two cases it cannot reach: a
+   * bare POINT (no ring to measure) and an area pass whose city limits or ETJ geometry did not come back. A full-purpose city that
+   * holds the WHOLE site (`cityContainment === "in"`) leaves no ground for any ETJ to govern — an ETJ never lies inside a city's
+   * limits — so an ETJ name here is the publishers' layers overlapping, and it is withheld from `etj` (and recorded). A PARTIAL
+   * city is deliberately left alone: the rest of the site is exactly where an ETJ can legitimately be. */
+  if (!out.etjNetted && out.cityContainment === "in" && (out.etj || []).length) {
+    out.etjCityOverlap = out.etj.map((name) => ({ name, share: null }));
+    out.etj = [];
+  }
+  out.etjCityOverlap = out.etjCityOverlap || [];
   /* NEW-2 — with the area pass the coverage IS complete: every active parcel is measured, not a
    * largest-first sample to 98% of drawn area, so `sampled`/`truncated` are both false by
    * construction and `areaShare` (the share of the site the TEST covered) is 1. The city shares
@@ -1877,7 +1964,16 @@ export function formatJurisdictionBadge(j, opts = {}) {
 
   // The ETJ slot. `unavailable` means there is genuinely no ETJ layer for this area — an honest
   // "not applicable", distinct from a failure, so it stays quiet.
-  const etjs = etjsAll;
+  /* ⛔ NEW-1 (Concept A, 2026-10-28) — A CITY THAT HOLDS THE WHOLE SITE LEAVES NO ETJ. The dedupe above only removes the SAME city's
+   * ETJ ("City of Houston" + "Houston ETJ"); a DIFFERENT city's ETJ polygon over ground inside the limits survived it, and the badge
+   * read "City of Sugar Land · Houston ETJ". An ETJ lies outside every city's limits by definition (Local Gov't Code ch. 42), so when
+   * the limits hold the whole site an ETJ name here is two published layers overlapping, and the limits win. What was withheld is
+   * kept in `etjOverlap` so the tooltip can say so. A SPLIT site (`partCities`) is untouched: its other part is where an ETJ lives. */
+  const etjOverlapNames = coreCities.length
+    ? uniq([...etjsRaw, ...(j.etjCityOverlap || []).map((o) => o.name)].filter(Boolean).map(String)
+        .filter((e) => !coreCities.some((c) => samePlace(c, e))))
+    : [];
+  const etjs = coreCities.length ? [] : etjsAll;
   // …and once a city is named as the ETJ, its edge sliver is not a second fact worth a slot.
   const edgeParts = edgeCities.filter((c) => !etjs.some((e) => samePlace(e, c)));
   const isds = uniq((j.isd || []).filter((v) => v != null && v !== "").map(String));
@@ -1968,6 +2064,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
     cityShareMethod: j.cityShareMethod || null,
     citySharePct: splitShare != null ? splitShare : (coreCities.length ? shareOfCity(coreCities[0]) : null),
     etjUnmappedCities: j.etjUnmappedCities || [],
+    /* NEW-1 — ETJ the publishers' layers claim over ground the city limits hold. Never governing; carried so the tooltip can disclose it. */
+    etjOverlap: etjOverlapNames,
+    etjOverlapNote: etjOverlapNames.length
+      ? `${etjOverlapNames.map((n) => `${n}'s ETJ layer`).join(" and ")} also covers part of this ground, but it lies inside ${coreCities.map((c) => `City of ${c}`).join(" + ")}'s limits. An ETJ is outside city limits by definition, so the limits govern.`
+      : null,
     // NEW-1 (DFW) — carried as data so a consumer never parses the label for it.
     etjUnavailable: !!j.etjUnavailable && !etjs.length,
     etjCoverage: j.etjCoverage || null,

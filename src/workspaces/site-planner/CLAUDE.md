@@ -711,6 +711,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   A publisher's naming quirks are registry data read by `lib/etjNames.js`: an overlap strip "A/B" is TWO ETJ
   claims and both are reported. Re-check with **audit-dfw-etj-coverage** (live fixtures + count floor),
   **audit-etj-coverage** (roster drift) and **verify-dfw-etj-map** (paints, labels).
+  **(10) B2472944 (Concept A, 2026-10-28) — CITY LIMITS OUTRANK ANY ETJ, AND THE RULE LIVES IN THE ONE IDENTIFY.** The header read "City of Sugar Land
+  · Houston ETJ" and the owner said it cannot be both — he is right: an ETJ is the ground OUTSIDE every city's limits (Local Gov't Code ch. 42). Measured live,
+  four sources: TxGIO and Fort Bend CAD agree on Sugar Land's limits, H-GAC and **Houston's own planning layer** agree on Houston's ETJ polygon, and the two
+  overlap (it is the publishers' data, not an H-GAC staleness quirk; do not go hunting for a stale saved verdict). The old dedupe only removed the SAME city's
+  ETJ. Now: the ETJ share pass is measured NET of every city's full-purpose limits (`jurisdictionShare.subtractNorm`, `fetchCityClipOut`, `identifyCityShares`
+  `clipOutFn`; ETJ cache key `:net1`; a netted answer that could not be netted is dropped from the cache), the removed share rides `etjCityOverlap`/`etjOverlap`
+  (tooltip `etjOverlapNote`, Who-governs note — it REPLACES the redundant "100% … in city limits" line), a bare point / failed netting falls to the floor "a city
+  that holds the WHOLE site leaves no ETJ", and the leaf agrees (`jurisdictionLabel` has no "in-city-etj" shape; `formatJurisdictionBadge` returns
+  `etjLabels: []` for a site a city holds, so the floodplain administrator never raises a second city's ETJ rule there). A genuinely SPLIT site is untouched.
+  36 cross-city pairs exist in the Houston metro (ui-audit **audit-etj-city-overlap**). Never re-add an in-city-plus-other-ETJ shape, and never dedupe an ETJ by
+  NAME alone. The drawn ETJ map layer still paints the overlap — B2472945. Guards: repo-root `test/` **etjCityPrecedence** (real recorded polygons; RED on the
+  pre-fix source), **jurisdictionLabel**, **jurisdictionShapes**; ui-audit **verify-jurisdiction-badge-shapes** (real browser), live **verify-etj-city-precedence-live**
+  (V1919872, signed in, throwaway plans — it must show the bug on a pre-fix build with `--pre-fix`).
   **(9) NEW-2 / B1992435 — THE SECOND SWEEP, and what it added to the rule.** Twelve more publishers (Dallas
   County, Ellis + Waxahachie, the Johnson SUD compile, Grayson, Forney, Talty, Mansfield, Sunnyvale, Corsicana,
   Blooming Grove; Fort Worth swapped 2018 → 2025). **The per-county table is the DFW county-table module in the repo-root

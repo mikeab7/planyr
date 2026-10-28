@@ -16465,7 +16465,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        *     (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "")
        * — the governing city recovered by PARSING the badge string. It survived only because the
        * old label happened to put the city first and join everything with " / ". Under NEW-1's
-       * grammar the same parse returns "Humble · Houston ETJ" on an in-city-plus-ETJ site; that
+       * grammar the same parse returns a multi-slot string on any site with a second governing slot; that
        * matches no rule record, so the CITY's floodplain ordinance is never raised as a candidate
        * and the site is priced on the county's, which in flat Harris/Fort Bend floodplain commonly
        * sits 1–2 ft LOWER. `governingCityOf` answers the same question from the structured model

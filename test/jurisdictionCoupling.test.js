@@ -37,25 +37,27 @@ const preFixCityLabel = (b) =>
 
 const badgeFor = (j) => formatJurisdictionBadge({ sources: [], ...j });
 
-/* SHAPE 2 with HOUSTON as the governing city: in Houston's limits and inside a second city's ETJ.
- * This is the arrangement that turns a wording change into a floodplain-rule change, because
- * Houston is the jurisdiction whose Ch. 19 rule is the strictest thing in the registry. */
+/* HOUSTON as the governing city with a SECOND governing slot (a limited-purpose annexation of another city). This is the
+ * arrangement that turns a wording change into a floodplain-rule change, because Houston is the jurisdiction whose Ch. 19 rule is
+ * the strictest thing in the registry. (It used to be "Houston's limits + a second city's ETJ"; that pairing can no longer be
+ * built — city limits outrank any ETJ, Concept A 2026-10-28 — so the second slot is the one that still exists.) */
 const HOUSTON_PLUS_ETJ = badgeFor({
   city: ["Houston"], cityCentroid: ["Houston"], cityAll: ["Houston"],
-  etj: ["Jersey Village"], county: ["Harris"],
+  etj: [], county: ["Harris"],
+  cityLimitedAreas: [{ name: "Jersey Village", class: "limited", share: 0.1 }],
 });
 
 describe("NEW-2 — the RED proof: the old string coupling silently downgraded the floodplain rule", () => {
   it("shape 2 breaks the parse, and the broken parse loses the City of Houston candidate", () => {
-    expect(HOUSTON_PLUS_ETJ.jur).toBe("City of Houston · Jersey Village ETJ");
+    expect(HOUSTON_PLUS_ETJ.jur).toBe("City of Houston · Jersey Village limited-purpose annexation (10% by area)");
 
     const broken = preFixCityLabel(HOUSTON_PLUS_ETJ);
     const correct = governingCityOf(HOUSTON_PLUS_ETJ);
-    expect(broken).toBe("Houston · Jersey Village ETJ");   // ← the coupling, in one string
+    expect(broken).toBe("Houston · Jersey Village limited-purpose annexation (10% by area)");   // ← the coupling, in one string
     expect(correct).toBe("Houston");
 
     const candidatesFrom = (cityLabel) =>
-      administratorCandidates({ county: "Harris", cityLabel, etjLabel: "Jersey Village", rules: RULES });
+      administratorCandidates({ county: "Harris", cityLabel, etjLabel: null, rules: RULES });
 
     const withBroken = candidatesFrom(broken);
     const withCorrect = candidatesFrom(correct);
