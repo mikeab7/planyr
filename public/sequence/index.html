@@ -6094,6 +6094,74 @@ function stepGridRow(flat, allTasks, selectedId, dir, lastIdx, topIdx) {
   return flat[clamp(g)].id;
 }
 
+// NEW-1 (B2451776, owner request 2026-10-28) — Ctrl/Cmd+Arrow jumps across blank cells like Excel: ride a run of
+// filled cells to its last one, otherwise land on the next filled cell, otherwise the edge (first / last TASK row
+// — never "+ New task" — or first / last visible column). Navigation is by VISIBLE order, so collapsed / Focused-away
+// rows are skipped. "Blank" = the cell draws nothing that carries data (a rolled-up date on a summary IS data; the
+// Notes "+" and an empty Owner are not). These three functions mirror src/workspaces/scheduler/lib/gridCtrlNav.js
+// BYTE-IDENTICALLY (save the `export `); test/gridCtrlNav.test.js fails if they diverge. Rules + rationale live there.
+function ctrlJumpIndex(isBlank, n, cur, dir) {
+  const inRange = i => i >= 0 && i < n;
+  const edge = dir > 0 ? n - 1 : 0;
+  const next = cur + dir;
+  if (!inRange(next)) return inRange(cur) ? cur : null;           // already on the edge (or off it, heading away)
+  if (inRange(cur) && !isBlank(cur) && !isBlank(next)) {
+    let i = next;                                                   // inside a run: ride it to its last cell
+    while (inRange(i + dir) && !isBlank(i + dir)) i += dir;
+    return i;
+  }
+  let i = next;                                                     // on / before a gap: the next filled cell
+  while (inRange(i) && isBlank(i)) i += dir;
+  return inRange(i) ? i : edge;                                     // none → the edge
+}
+
+function gridCtrlArrowTarget(key, rowCount, colMasters, row, col, blankAt) {
+  const dir = (key === "ArrowDown" || key === "ArrowRight") ? 1 : -1;
+  if (key === "ArrowUp" || key === "ArrowDown") {
+    if (!(rowCount > 0)) return null;
+    const r = ctrlJumpIndex(i => blankAt(i, col), rowCount, row, dir);
+    return r == null ? null : { row: r, col };
+  }
+  const nc = colMasters ? colMasters.length : 0;
+  if (!nc) return null;
+  const pos = colMasters.indexOf(col);
+  if (pos < 0) {                                                    // the cursor sits on a hidden column: snap toward dir
+    if (dir > 0) { const f = colMasters.find(i => i > col); return { row, col: f !== undefined ? f : colMasters[nc - 1] }; }
+    let b; colMasters.forEach(i => { if (i < col) b = i; });
+    return { row, col: b !== undefined ? b : colMasters[0] };
+  }
+  const j = ctrlJumpIndex(q => blankAt(row, colMasters[q]), nc, pos, dir);
+  return j == null ? null : { row, col: colMasters[j] };
+}
+
+function gridCellBlank(task, col, env) {
+  if (!task) return true;
+  if (col.t === "formula") {
+    const f = env.formula(task.id, col.k);
+    return !f || f.display === "" || f.display == null;
+  }
+  switch (col.k) {
+    case "id": return false;
+    case "name": return String(task.name == null ? "" : task.name).trim() === "";
+    case "start": case "end": return !task[col.k];
+    case "duration": return task.duration === "" || task.duration == null;
+    case "predecessors": return env.predCount(task.predecessors) === 0;
+    case "successors": return env.succCount(task.id) === 0;
+    case "health": case "status": return !!(task.hasChildren && task.isExpanded);
+    case "percentComplete": return false;
+    case "responsibleParty": return env.ownerCount(task) === 0;
+    case "cost": case "budget": case "actualCost": {
+      const rolledKey = col.k === "cost" ? "rolledCost" : col.k === "budget" ? "rolledBudget" : "rolledActual";
+      return !(task[rolledKey] ?? (Number(task[col.k]) || 0));
+    }
+    case "notes": return !(task.notes && task.notes.length);
+    case "meetingBody": return task.hasChildren ? true : !(task.deadlineForTaskId != null || task.meetingBound);
+    case "floatToDeadline": return env.floatDays(task) == null;
+    case "costIfMissed": return env.costDays(task) == null;
+    default: return task[col.k] == null || task[col.k] === "";
+  }
+}
+
 // NEW-1 (B2455200) — Alt+F toggles Focus. WHICH group: the anchor row is the TOP selected row; if it is a
 // summary (has children) it is that row's own Focus, if it is a plain task it is its parent group's, and a
 // top-level plain task (no parent) has none -> null (the key does nothing, no error). Pure; unit-tested by
@@ -9510,6 +9578,55 @@ function App() {
               updateTask(selectedId, {[col.k]: blank});
             }
           }
+        }
+        return;
+      }
+      // NEW-1 (B2451776) — Ctrl/Cmd+Arrow: jump across blank cells like Excel (the rule and the definition of
+      // "blank" live in src/workspaces/scheduler/lib/gridCtrlNav.js; the three functions are mirrored near
+      // stepGridRow). NAVIGATION MODE ONLY: a focused input / an open cell editor (editLiveRef) / a contentEditable
+      // all fall through untouched so Ctrl+Arrow still moves by word in the text. preventDefault runs only once the
+      // grid has an anchor to move from. Ctrl+Shift+Arrow extends the Shift+Arrow range from its moving end.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && selectedId !== null &&
+          !document.activeElement?.isContentEditable && !editLiveRef.current &&
+          (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        const flat = flatTasksRef.current;
+        const NEW_ROW = "__NEW_TASK__";
+        const anchorRow = selectedId === NEW_ROW ? flat.length : flat.findIndex(t => t.id === selectedId);
+        if (anchorRow < 0) return;                       // the selected row is hidden / gone — nothing to anchor on
+        e.preventDefault();
+        const proj = activeProjectOf(dataRef.current);
+        const eff = activeEffectiveCols(dataRef.current);
+        let formulas = null, succIds = null;             // built lazily — only if a scan actually reaches such a column
+        const env = {
+          formula: (id, k) => { if (!formulas) formulas = computeFormulaValues(flat, formulaColsOf(proj), proj); return formulas[id]?.[k]; },
+          predCount: arr => normPreds(arr).length,
+          succCount: id => {
+            if (!succIds) { succIds = new Set(); (proj?.tasks || []).forEach(t => normPreds(t.predecessors).forEach(p => succIds.add(p.id))); }
+            return succIds.has(id) ? 1 : 0;
+          },
+          ownerCount: t => ownerListOf(t).length,
+          floatDays: t => t.hasChildren ? null : meetingFloatBD(t, fdLocal(new Date())),
+          costDays: t => t.hasChildren ? null : meetingCostDays(t, MEETING_BODY_INDEX[t.meetingBodyId]),
+        };
+        // "+ New task" (row === flat.length) is a blank row to scan THROUGH, never a destination.
+        const blankAt = (r, c) => r >= flat.length || !eff[c] ? true : gridCellBlank(flat[r], eff[c], env);
+        const colMasters = visibleColIdxs();
+        if (e.shiftKey) {
+          if (selectedId === NEW_ROW) return;            // Shift+Arrow ignores "+ New task" too
+          const cur = selRange || {r1:anchorRow, r2:anchorRow, c1:selectedColIdx, c2:selectedColIdx};
+          const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, cur.r2, cur.c2, blankAt);
+          if (t) {
+            setSelRange({...cur, r2:t.row, c2:t.col});
+            // the range's moving end is not the selection, so the grid's selection-chase doesn't follow it — ask it to
+            document.dispatchEvent(new CustomEvent("planar-reveal-cell", {detail: {row: t.row, col: t.col}}));
+          }
+          return;
+        }
+        const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, anchorRow, selectedColIdx, blankAt);
+        if (t) {
+          setSelectedColIdx(t.col);
+          if (t.row !== anchorRow && flat[t.row]) setSelectedId(flat[t.row].id);
+          setSelRange(null);
         }
         return;
       }
@@ -13697,6 +13814,50 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     el.scrollTop = Math.max(0, st + anchor * (ROW_H - prevRH));
   }, [ROW_H]);
 
+  // NEW-1 (B2451776) — the two scroll-into-view moves of the selection chase below, as closures so the grid can
+  // ALSO reveal a cell that is not the selection: Ctrl+Shift+Arrow moves a range's far end (the selection itself
+  // stays at the anchor), and asks for it via the "planar-reveal-cell" event. Bodies are the chase effect's own,
+  // moved verbatim — row N's document top is TL_H + N*ROW_H (the sticky header holds TL_H).
+  const revealRowIdx = idx => {
+    const el = ref.current;
+    if (!el || !(idx >= 0)) return;
+    const rowTop = TL_H + idx * ROW_H, rowBottom = rowTop + ROW_H;
+    const visTop = el.scrollTop + TL_H, visBottom = el.scrollTop + el.clientHeight;
+    if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
+    else if (rowBottom > visBottom) el.scrollTop = rowBottom - el.clientHeight;
+  };
+  const revealColKey = selKey => {
+    const el = ref.current;
+    if (!el) return;
+    // Horizontal reveal: measure from the columns ACTUALLY rendered (the visible set in
+    // display order) — not COLS.slice, which would sum hidden columns' widths and scroll
+    // to the wrong place when columns are hidden or reordered.
+    const pin = pinRef.current || { lw: 0, rw: 0, l: [], r: [], w: {} };
+    const cw = { ...(colWidthsRef.current || {}), ...pin.w };     // DISPLAY widths (the Task cap applies)
+    const dispPos = selKey ? colOrder.indexOf(selKey) : -1;
+    if (dispPos >= 0) {
+      // +2: every row/header starts after its 2px left border (the selection/review marker), so a column's
+      // true offset in the scrolled content is 2px more than the sum of the widths before it.
+      const colLeft  = 2 + colOrder.slice(0, dispPos).reduce((s, k) => s + (cw[k] || colByK[k]?.w || 0), 0);
+      const colRight = colLeft + (cw[selKey] || colByK[selKey]?.w || 0);
+      // NEW-1 — the pinned columns cover the edges of the scrollport, so "visible" is the strip BETWEEN
+      // them; a pinned column itself is always visible and never needs a scroll.
+      const selPinned = pin.l.includes(selKey) || pin.r.includes(selKey);
+      const visLeft  = el.scrollLeft + pin.lw, visRight = el.scrollLeft + el.clientWidth - pin.rw;
+      if (!selPinned) {
+        if (colLeft < visLeft)          el.scrollLeft = colLeft - pin.lw;
+        else if (colRight > visRight)   el.scrollLeft = colRight - (el.clientWidth - pin.rw);
+      }
+    }
+  };
+  const revealCellRef = useRef(null);
+  revealCellRef.current = (row, masterCol) => { revealRowIdx(row); revealColKey(allCols[masterCol]?.k); };
+  useEffect(() => {
+    const on = e => { const d = e.detail || {}; if (revealCellRef.current) revealCellRef.current(d.row, d.col); };
+    document.addEventListener("planar-reveal-cell", on);
+    return () => document.removeEventListener("planar-reveal-cell", on);
+  }, []);
+
   const chasedSelRef = useRef({ id: selectedId, col: selectedColIdx });
   useEffect(() => {
     const suppressSelChase = suppressSelChaseRef.current;
@@ -13716,37 +13877,11 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const shouldChase = selMoved || selChaseAllowedRef.current;
     const idx = tasks.findIndex(t => t.id === selectedId);
     if (idx >= 0 && !suppressSelChase && shouldChase) {
-      // Row N's document top is TL_H + N*ROW_H (the sticky header holds TL_H — same formula the
-      // B463922 anchor effect above already uses). Omitting TL_H here nudged the topmost fully-
-      // visible row up by one header height on a plain click/select — bug C of NEW-1.
-      const rowTop = TL_H + idx * ROW_H, rowBottom = rowTop + ROW_H;
-      const visTop = el.scrollTop + TL_H, visBottom = el.scrollTop + el.clientHeight;
-      if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
-      else if (rowBottom > visBottom) el.scrollTop = rowBottom - el.clientHeight;
+      // Omitting TL_H in revealRowIdx nudged the topmost fully-visible row up by one header height on a
+      // plain click/select — bug C of NEW-1.
+      revealRowIdx(idx);
     }
-    // Horizontal reveal: measure from the columns ACTUALLY rendered (the visible set in
-    // display order) — not COLS.slice, which would sum hidden columns' widths and scroll
-    // to the wrong place when columns are hidden or reordered.
-    const pin = pinRef.current || { lw: 0, rw: 0, l: [], r: [], w: {} };
-    const cw = { ...(colWidthsRef.current || {}), ...pin.w };     // DISPLAY widths (the Task cap applies)
-    // B583: resolve via the effective registry (allCols/colByK) so a formula column scrolls
-    // into view too; compute left offset from the DISPLAY order (main's gridColNav approach).
-    const selKey = allCols[selectedColIdx]?.k;
-    const dispPos = selKey ? colOrder.indexOf(selKey) : -1;
-    if (dispPos >= 0) {
-      // +2: every row/header starts after its 2px left border (the selection/review marker), so a column's
-      // true offset in the scrolled content is 2px more than the sum of the widths before it.
-      const colLeft  = 2 + colOrder.slice(0, dispPos).reduce((s, k) => s + (cw[k] || colByK[k]?.w || 0), 0);
-      const colRight = colLeft + (cw[selKey] || colByK[selKey]?.w || 0);
-      // NEW-1 — the pinned columns cover the edges of the scrollport, so "visible" is the strip BETWEEN
-      // them; a pinned column itself is always visible and never needs a scroll.
-      const selPinned = pin.l.includes(selKey) || pin.r.includes(selKey);
-      const visLeft  = el.scrollLeft + pin.lw, visRight = el.scrollLeft + el.clientWidth - pin.rw;
-      if (!selPinned) {
-        if (colLeft < visLeft)          el.scrollLeft = colLeft - pin.lw;
-        else if (colRight > visRight)   el.scrollLeft = colRight - (el.clientWidth - pin.rw);
-      }
-    }
+    revealColKey(allCols[selectedColIdx]?.k);
   }, [selectedId, selectedColIdx, tasks]);
 
   // While reviewing, scroll the proposed/target row into view whenever the active target changes.
@@ -14293,7 +14428,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                 // Predecessor editor shows a live hint below the input — let it escape the clipped 24px cell.
                 const predEditing = c.k==="predecessors" && edit?.taskId===task.id && edit?.col===c.k;
                 return (
-                  <div key={c.k} data-col-key={c.k} className={pinCls(c.k) || undefined} style={{
+                  <div key={c.k} data-col-key={c.k} data-cell-active={active ? "1" : undefined} data-cell-in-range={(selected && hasRange) ? "1" : undefined} className={pinCls(c.k) || undefined} style={{
                     width:dispW[c.k], flexShrink:0,
                     overflow: (c.k==="health" || predEditing) ? "visible" : "hidden",
                     height:ROW_H,
