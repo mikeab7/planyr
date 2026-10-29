@@ -160,7 +160,7 @@ export function esriPrintFeatures(gj, cfg, leafStyle) {
   out.push(...esriLineFeatures(g, lineStyle));
   if (cfg.printGeometry === false) return out;
   if (g.type === "Point" || g.type === "MultiPoint") {
-    const o = pointSymbolOptions(cfg, 1);
+    const o = pointSymbolOptions(cfg, 1, gj.properties); // NEW-1 (Mississippi): a row's per-marker colour prints as it draws
     for (const c of (g.type === "Point" ? [g.coordinates] : g.coordinates)) {
       out.push({ kind: "point", coords: c, style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor, fillOpacity: o.fillOpacity, radius: o.radius } });
     }

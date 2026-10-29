@@ -84,10 +84,14 @@ export function overlayExportRequest(cfg, { proxy = false } = {}) {
  * `fillOpacity` tracks `opacity` so the panel's slider dims the whole symbol together, and a
  * `radius` a registry row may override (`cfg.pointRadius`) keeps a dense national point layer
  * from turning the view into confetti. */
-export function pointSymbolOptions(cfg = {}, opacity = 1) {
-  const color = cfg.color || "#b91c1c";
+export function pointSymbolOptions(cfg = {}, opacity = 1, props = null) {
+  /* NEW-1 (Mississippi): a POINT row may colour each marker by its attributes through `pointStyleFn(props) → { color, radius? }` (an open-release tank is red, a plugged well grey). The
+   * flat `cfg.color` stays the fallback and the colour of a row that declares no function, so every existing row draws exactly as before. Screen, hover restyle, the opacity setter and
+   * the print path all pass the feature's properties here — one rule, so the legend and the map cannot disagree. */
+  const ps = props && typeof cfg.pointStyleFn === "function" ? (cfg.pointStyleFn(props) || {}) : {};
+  const color = ps.color || cfg.color || "#b91c1c";
   return {
-    radius: cfg.pointRadius || 4,
+    radius: ps.radius || cfg.pointRadius || 4,
     color,
     weight: cfg.weight || 2,
     opacity,
