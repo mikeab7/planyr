@@ -6,7 +6,7 @@
  * feature has nothing worth a card (the one-line tooltip wording then stands in). */
 
 const clean = (v) => {
-  const s = v == null ? "" : String(v).trim();
+  const s = v == null ? "" : String(v).replace(/\s+/g, " ").trim(); // the State's text is fixed-width: padded, and sometimes double-spaced inside
   return !s || /^(null|none|n\/?a|unknown|undetermined|0|-{1,2})$/i.test(s) ? "" : s;
 };
 const row = (label, text, href) => (clean(text) ? { label, text: clean(text), ...(href ? { href } : {}) } : null);
@@ -15,7 +15,7 @@ const httpHref = (u) => (/^https?:\/\//i.test(String(u || "").trim()) ? String(u
 
 /* SHOUTED federal / state text → sentence-ish case, without butchering short acronyms or small words. */
 const SMALL = new Set(["of", "and", "the", "at", "in", "on", "for"]);
-const ACRONYM = new Set(["LLC", "LP", "INC", "TN", "MLGW", "WWTP", "STP", "PWSID"]);
+const ACRONYM = new Set(["LLC", "LP", "INC", "TN", "MLGW", "WWTP", "STP", "PWSID", "TVA", "DOE", "DOD", "UD", "PUD", "WSD", "US", "USA", "II", "III", "IV", "NPL", "EPA", "TDEC", "HWRA"]);
 export function titleCase(raw) {
   const s = clean(raw);
   if (!s || /[a-z]/.test(s)) return s;
@@ -26,7 +26,10 @@ export function titleCase(raw) {
     const lower = tok.toLowerCase();
     if (i > 0 && SMALL.has(lower)) return lower;
     // capitalise a word start, and after an apostrophe only for an O'/D'-style prefix (O'Brien) — never the possessive s (Joy's)
-    return lower.replace(/(^|[\s\-/.(])([a-z])/g, (_m, pre, c) => pre + c.toUpperCase()).replace(/\b([od])'([a-z])/g, (_m, a, b) => `${a.toUpperCase()}'${b.toUpperCase()}`);
+    let out = lower.replace(/(^|[\s\-/.(])([a-z])/g, (_m, pre, c) => pre + c.toUpperCase()).replace(/\b([od])'([a-z])/g, (_m, a, b) => `${a.toUpperCase()}'${b.toUpperCase()}`);
+    out = out.replace(/\b(Mc)([a-z])/g, (_m, a, b) => a + b.toUpperCase());          // McMinnville, McKenzie
+    if (/^Dekalb\b/.test(out)) out = out.replace(/^Dekalb/, "DeKalb");
+    return out;
   }).join("");
 }
 
@@ -44,6 +47,7 @@ export function drycleanerCard(props) {
     title: `${name} — known drycleaner`,
     rows: rowsOf(
       row("Status", drycleanerStatus(p.COMMENTS)),
+      drycleanerStatus(p.COMMENTS) ? null : row("TDEC note", clean(p.COMMENTS).slice(0, 160)), // a note TDEC wrote that is neither of the two standard ones (e.g. "Site ID issued in error") is shown as TDEC wrote it
       row("Address", [titleCase(p.FACILITY_A), titleCase(p.CITY)].filter(Boolean).join(", ")),
       row("County", p.COUNTY_NAM),
       row("DCERP ID", p.DCERP_ID),
@@ -79,7 +83,7 @@ export function wqaCard(props) {
     title: `${titleCase(p.ASSESSMENT_UNIT_NAME) || "Stream"} — water quality`,
     rows: rowsOf(
       row("Status (2026)", ATTAINMENT_WORDS[clean(p.ATTAINMENT)] || clean(p.ATTAINMENT)),
-      row("Reach", p.LOCATION_DESCRIPTION),
+      row("Reach", clean(p.LOCATION_DESCRIPTION).replace(/\s*Ecoregion\s+\S+.*$/i, "").trim()),   // the trailing "Ecoregion 71i …" is TDEC's bookkeeping, not part of the reach
       row("Watershed", p.NAME8),
     ),
     note: "TDEC's 2026 assessment. An impaired stream can carry tighter stormwater and buffer requirements — the cause (siltation, habitat alteration…) decides which; ask TDEC's Division of Water Resources.",
@@ -87,7 +91,7 @@ export function wqaCard(props) {
 }
 
 /* ---- TDEC public water system service areas ---- */
-const WATER_SOURCES = { SW: "Surface water", SWP: "Purchased surface water", GW: "Groundwater", GWP: "Purchased groundwater", GU: "Groundwater under the influence of surface water" };
+const WATER_SOURCES = { SW: "Surface water", SWP: "Purchased surface water", GW: "Groundwater", GWP: "Purchased groundwater", GU: "Groundwater under the influence of surface water", GUP: "Purchased groundwater under the influence of surface water" };
 const OWNER_TYPES = { L: "Local government / utility district", P: "Private", F: "Federal", S: "State", M: "Public/private", N: "Native American" };
 export function pwsCard(props) {
   const p = props || {};
@@ -144,11 +148,11 @@ export function critHabitatCard(props) {
 }
 
 /* ---- TDEC permitted landfills ---- */
-const romanClass = (v) => clean(v).replace(/\bclass\s+(i{1,3}|iv)\b/i, (_m, r) => `Class ${r.toUpperCase()}`);
+const romanClass = (v) => clean(v).replace(/\bclass\s+(i{1,3}|iv)\b/gi, (_m, r) => `Class ${r.toUpperCase()}`);
 export function landfillCard(props) {
   const p = props || {};
   return {
-    title: `${clean(p.PRIMARY_NAME) || "Landfill"} — permitted landfill`,
+    title: `${romanClass(clean(p.PRIMARY_NAME)) || "Landfill"} — permitted landfill`,
     rows: rowsOf(
       row("Class", romanClass(p.LANDFILL_CLASS)),
       row("Status", p.STATUS),
@@ -199,5 +203,39 @@ export function nrhpBoundaryCard(props) {
       row("Listed as part of", p.Multiple_Name),
     ),
     note: "The boundary of a property or district listed on the National Register of Historic Places (State Historic Preservation Office). A listing triggers federal Section 106 review where a federal permit or funding is involved.",
+  };
+}
+
+/* ---- TDEC Division of Remediation (DOR sites) ---- */
+export const DOR_PROGRAMS = Object.freeze({
+  "VOLUNTARY": "Voluntary cleanup",
+  "STATE (HWRA FUNDED)": "State Superfund — state-funded (Hazardous Waste Remedial Action fund)",
+  "LIABLE PARTY FUNDED": "State Superfund — paid for by the responsible party",
+  "PRE-REMEDIAL": "Pre-remedial — being evaluated",
+  "DCERP": "Drycleaner program",
+  "EPA NON-NPL": "EPA site (not on the National Priorities List)",
+  "EPA NPL": "Federal Superfund (National Priorities List)",
+  "DOD": "Department of Defense site",
+});
+export function dorProgramWords(v) {
+  const k = clean(v).toUpperCase();
+  return DOR_PROGRAMS[k] || titleCase(clean(v));
+}
+export function dorSiteCard(props) {
+  const p = props || {};
+  const ac = Number(p.Acres);
+  const prom = Number(p.Promulgated);
+  return {
+    title: `${titleCase(p.DOR_Site_Name) || "Remediation site"} — remediation site`,
+    rows: rowsOf(
+      row("Program", dorProgramWords(p.Program)),
+      row("Status", titleCase(p.Status)),
+      Number.isFinite(ac) && ac > 0 ? { label: "Site area", text: `${ac} acres` } : null,
+      row("Address", [titleCase(p.Address), titleCase(p.City)].filter(Boolean).join(", ")),
+      row("County", titleCase(p.County)),
+      Number.isFinite(prom) && prom > 0 ? { label: "Listed", text: new Date(prom).getUTCFullYear().toString() } : null,
+      row("TDEC site ID", p.DOR_Site_Id),
+    ),
+    note: "TDEC's Division of Remediation register (last edited June 2024 — a site opened since is not on it). A flag for a Phase I ESA: pull TDEC's file for the cleanup status and any land-use controls. A neighbouring site is not a finding about this one.",
   };
 }

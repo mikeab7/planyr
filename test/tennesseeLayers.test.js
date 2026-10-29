@@ -23,6 +23,7 @@ import { TN_LAYERS, TN_LAYER_IDS, wqaStyle } from "../src/workspaces/site-planne
 import { VECTOR_SOURCES, buildQueryUrl } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
+import { SOURCE_FIXTURES } from "../src/shared/gis/sourceFixtures.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 import { siteState } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { PANEL_GROUPS, groupEntriesFor, availableEntries } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
@@ -91,6 +92,22 @@ describe("every Tennessee row is Tennessee-only and registered whole", () => {
   });
   it("sits in a weight tier (reference recedes; county / city lines are context)", () => {
     for (const id of TN_LAYER_IDS) expect(LAYER_TIER[id], id).toBeTruthy();
+  });
+  it("every polygon row that the service returns WHOLE asks the server to simplify (the draw budget declines a 500k-vertex batch, and zooming in cannot help)", () => {
+    for (const id of ["tn_crit_habitat", "tn_nrhp_bounds", "tn_ms4"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThanOrEqual(3);
+  });
+  it("the 186,000-record THC layer asks only for the fields its card reads", () => {
+    expect(ALL_LAYERS.tn_thc_sites.fields).toEqual(expect.arrayContaining(["COMNAME", "PROPADDR", "DATECONST"]));
+    expect(ALL_LAYERS.tn_thc_sites.fields.length).toBeLessThan(15);
+  });
+  it("no coverage fixture of a Tennessee row sits outside Tennessee (a North Carolina polygon once passed as one)", () => {
+    for (const [k, fx] of Object.entries(SOURCE_FIXTURES)) {
+      if (!/Tn$/.test(k) && !["countyTn", "cityTn", "roadTn"].includes(k)) continue;
+      for (const f of fx.fixtures || []) {
+        const pt = f.point || (f.bbox && [(f.bbox[0] + f.bbox[2]) / 2, (f.bbox[1] + f.bbox[3]) / 2]);
+        expect(siteState({ lat: pt[1], lng: pt[0] }), `${k}: ${f.label}`).toBe("TN");
+      }
+    }
   });
   it("never offers a hover-only popup it cannot click (constraint #43): a row that identifies also opts into the click card", () => {
     for (const id of TN_LAYER_IDS) { const c = ALL_LAYERS[id]; if (c.hoverIdentify) expect(c.canvasIdentify, id).toBe(true); }
@@ -231,6 +248,33 @@ describe("click cards are clean (constraint #45)", () => {
     expect(cards.ymd("20021345")).toBe("20021345"); // an impossible month is shown as published, not invented
     expect(cards.ymd("")).toBe("");
   });
+  it("remediation site — the real DOR record: program in plain words, no raw field names, the edit date said", () => {
+    const c = cards.dorSiteCard({ ObjectId: 78, DOR_Site_Id: "19567A", DOR_Site_Name: "FRM OLD NASHVILLE GAS CO.", Program: "STATE (HWRA FUNDED)", Status: "OPEN", TDEC_Field_Office: "NASHVILLE", Development_District: "GREATER NASHVILLE REGIONAL COUNCIL", Address: "800 2ND AVENUE NORTH", City: "NASHVILLE", County: "DAVIDSON", Acres: 4.49, Promulgated: 485654400000, Delisted: null, Latitude: 36.17, Longitude: -86.78 });
+    noJunk(c);
+    expect(c.title).toBe("Frm Old Nashville Gas Co. — remediation site");
+    expect(c.rows.find((r) => r.label === "Program").text).toMatch(/^State Superfund — state-funded/);
+    expect(c.rows.find((r) => r.label === "Site area").text).toBe("4.49 acres");
+    expect(c.rows.find((r) => r.label === "Listed").text).toBe("1985");
+    expect(c.note).toMatch(/June 2024/);
+    for (const prog of ["VOLUNTARY", "LIABLE PARTY FUNDED", "PRE-REMEDIAL", "DCERP", "EPA NON-NPL", "EPA NPL", "DOD"]) expect(cards.dorProgramWords(prog), prog).not.toBe(prog);
+    expect(cards.dorProgramWords("TN CLEAN")).toBe("TN Clean"); // an unmapped program is shown as published, never invented
+  });
+  it("drycleaner — a TDEC note that is neither standard status is shown as written, not dropped", () => {
+    const c = cards.drycleanerCard({ FACILITY_N: "X CLEANERS", COMMENTS: "Site ID Issued in Error" });
+    noJunk(c);
+    expect(c.rows.find((r) => r.label === "TDEC note").text).toBe("Site ID Issued in Error");
+    expect(cards.drycleanerCard({ FACILITY_N: "X", COMMENTS: "DCERP Response Site" }).rows.some((r) => r.label === "TDEC note")).toBe(false);
+  });
+  it("the State's padded and double-spaced text reads cleanly; the landfill class is Roman in the title too; Mc names and agencies keep their form", () => {
+    expect(cards.landfillCard({ PRIMARY_NAME: "Bi-County Solid Waste Class Iii Landfill", LANDFILL_CLASS: "Class Iii", ADDRESS: "1921  1/2 Brookside Lane", CITY: "Scepter,  Inc." }).title).toBe("Bi-County Solid Waste Class III Landfill — permitted landfill");
+    expect(cards.landfillCard({ PRIMARY_NAME: "X", ADDRESS: "Andersonville Highway  3454", CITY: "Y" }).rows.find((r) => r.label === "Address").text).toBe("Andersonville Highway 3454, Y");
+    expect(cards.titleCase("MCMINNVILLE WATER AND SEWER")).toBe("McMinnville Water and Sewer");
+    expect(cards.titleCase("DEKALB UTILITY DISTRICT")).toBe("DeKalb Utility District");
+    expect(cards.titleCase("TVA - SEQUOYAH")).toBe("TVA - Sequoyah");
+    expect(cards.titleCase("OAK RIDGE (DOE)")).toBe("Oak Ridge (DOE)");
+    expect(cards.wqaCard({ ASSESSMENT_UNIT_NAME: "Lytle Creek", ATTAINMENT: "Fully Supporting", LOCATION_DESCRIPTION: "Lytle Creek from Dilton Road to headwaters.   Ecoregion 71i " }).rows.find((r) => r.label === "Reach").text).toBe("Lytle Creek from Dilton Road to headwaters.");
+    expect(cards.pwsCard({ MA_NAME: "X", PL_PSRC: "GUP" }).rows.find((r) => r.label === "Water source").text).toMatch(/^Purchased groundwater/);
+  });
   it("titleCase leaves mixed-case text alone and keeps acronyms", () => {
     expect(cards.titleCase("Harpeth River")).toBe("Harpeth River");
     expect(cards.titleCase("MEMPHIS LIGHT GAS & WATER")).toBe("Memphis Light Gas & Water");
@@ -248,8 +292,8 @@ describe("a state server rides the same-origin relay — the vector query builde
 });
 
 describe("Site Analysis stays trusted-only: Tennessee gets a map pill, never a verdict card", () => {
-  it("the Contamination pill on a Tennessee site turns on the EPA layer AND TDEC drycleaners and permitted landfills", () => {
+  it("the Contamination pill on a Tennessee site turns on the EPA layer AND TDEC remediation sites, drycleaners and permitted landfills", () => {
     const p = pillsFor({ regions: ["TN"], untrusted: [], layers: ALL_LAYERS }).find((x) => x.id === "contamination");
-    expect(p.layers).toEqual(["env_cleanups", "tn_drycleaners", "tn_landfills"]);
+    expect(p.layers).toEqual(["env_cleanups", "tn_remediation", "tn_drycleaners", "tn_landfills"]);
   });
 });

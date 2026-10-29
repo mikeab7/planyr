@@ -13,7 +13,7 @@
  * PURE: no network, no React. */
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import {
-  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, landfillCard, thcSiteCard, nrhpBoundaryCard, isImpairedAttainment, isThreatenedAttainment,
+  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, landfillCard, thcSiteCard, nrhpBoundaryCard, dorSiteCard, isImpairedAttainment, isThreatenedAttainment,
 } from "./tennesseeCards.js";
 
 const TN = { states: ["TN"] };
@@ -42,7 +42,7 @@ export const TN_LAYERS = {
   tn_ms4: {
     kind: "esriFeature", label: "Stormwater (MS4) Permit Areas", source: `${TDEC} — Division of Water Resources`,
     url: GIS_SOURCES.ms4Tn.serviceUrl, ...TN,
-    minZoom: 9, color: "#475569", weight: 1.6, opacity: 0.45,
+    minZoom: 9, color: "#475569", weight: 1.6, opacity: 0.45, simplifyFactor: 6,
     styleFn: (_p, opacity) => ({ color: "#475569", weight: 1.6, opacity, dashArray: "6 4", fillColor: "#475569", fillOpacity: opacity * 0.12 }), // design-exempt: map ink for a drawn jurisdiction area
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "MS4 permit area", hoverSource: "TDEC",
     hoverFields: [{ names: ["NAME"] }, { names: ["PERMIT_NUM"], label: "permit" }],
@@ -55,7 +55,7 @@ export const TN_LAYERS = {
 
   /* ---- Flood & Drainage: the state's water-quality assessment ---- */
   tn_wqa: {
-    kind: "esriFeature", label: "Impaired & Assessed Streams", source: `${TDEC} — Division of Water Resources, 2026 Water Quality Assessment`,
+    kind: "esriFeature", label: "Impaired & Assessed Waters", source: `${TDEC} — Division of Water Resources, 2026 Water Quality Assessment`,
     url: GIS_SOURCES.wqaTn.serviceUrl, ...TN,
     minZoom: 10, color: "#c2410c", weight: 2, opacity: 0.55, styleFn: wqaStyle,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Assessed stream", hoverSource: "TDEC",
@@ -77,7 +77,7 @@ export const TN_LAYERS = {
     minZoom: 12,
     opacity: 0.55,
     vintage: "Computed from USGS NHD under the Construction General Permit rule — not a surveyed buffer",
-    note: "Assumed 30 ft construction buffer each side of the USGS stream centreline: the natural riparian buffer the TDEC Construction General Permit (TNR100000) requires between a stream and the limits of disturbance — a required AVERAGE width, no point narrower than half of it. NOT drawn: the permit asks 60 ft on Exceptional Tennessee Waters and waters impaired for siltation / habitat, and TDEC's list of those reaches is not available to Planyr — check TDEC's Construction General Permit map. Measured from the CENTRELINE, not the top of bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered, and a wet-weather conveyance (TDEC hydrologic determination) carries none. Screening only — a surveyed top-of-bank governs.",
+    note: "Assumed 30 ft construction buffer each side of the USGS stream centreline: the natural riparian buffer the TDEC Construction General Permit (TNR100000) directs be preserved, to the maximum extent practicable, between a stream and the limits of disturbance — an AVERAGE width, no point narrower than half of it. NOT drawn: the permit asks 60 ft on Exceptional Tennessee Waters and waters impaired for siltation / habitat, and TDEC's list of those reaches is not available to Planyr — check TDEC's Construction General Permit map. Measured from the CENTRELINE, not the top of bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered, and a wet-weather conveyance (TDEC hydrologic determination) carries none. Screening only — a surveyed top-of-bank governs.",
     infoCaveat: "These are the STATE construction buffers (rule text is the 2021 permit; TDEC reissued the permit effective 2026-10-01 — confirm its buffer section). Cities add their own post-construction buffers on top — Murfreesboro's Water Quality Protection Area policy asks 35, 50 or 60 ft by stream size and health; Metro Nashville's Stormwater Manual (Vol. 1, §6.10) sets its own. Those widths depend on drainage area and stream class this map does not carry, so they are NOT drawn: get the city's. The MS4 permit-area layer shows whose rules apply.",
     role: "area", group: "flood", order: 5,
     floodTier: "hydrography", agency: "TDEC / USGS",
@@ -110,6 +110,18 @@ export const TN_LAYERS = {
     note: "Every drycleaner registered with TDEC's Drycleaner Environmental Response Program since 1996 (pick-up-only shops are not on it). Click for whether TDEC has worked a release there or only holds the registration.",
     infoCaveat: "A Phase I ESA pre-screen: chlorinated-solvent (PCE) plumes are the classic drycleaner contamination. A shop beside the site is a flag to pull TDEC's file — not a finding, and a missing shop is not proof of none.",
     role: "point", group: "environmental", order: 21,
+  },
+  tn_remediation: {
+    kind: "esriFeature", label: "Remediation Sites", source: `${TDEC} — Division of Remediation (DOR sites)`,
+    url: GIS_SOURCES.dorSitesTn.serviceUrl, ...TN,
+    minZoom: 10, color: "#9a3412", weight: 2, opacity: 0.55, pointRadius: 5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Remediation site", hoverSource: "TDEC",
+    hoverFields: [{ names: ["DOR_Site_Name"] }, { names: ["Program"] }, { names: ["City"] }],
+    identifyCard: (props) => dorSiteCard(props),
+    vintage: "TDEC Division of Remediation sites — layer last edited 2024-06-25",
+    note: "TDEC's register of sites in a remediation program — voluntary cleanup, State Superfund, EPA and Department of Defense sites (825 open sites). Click for the program, size, address and TDEC site ID.",
+    infoCaveat: "A Phase I ESA pre-screen: pull TDEC's file for cleanup status and land-use controls. The register was last edited June 2024, so a site opened since is not on it, and a missing site is not proof of none.",
+    role: "point", group: "environmental", order: 19,
   },
   tn_sna: {
     kind: "esriFeature", label: "State Natural Areas", source: `${TDEC} — Division of Natural Areas`,
@@ -160,7 +172,7 @@ export const TN_LAYERS = {
   tn_nrhp_bounds: {
     kind: "esriFeature", label: "National Register Boundaries", source: "Tennessee Historical Commission (SHPO) — National Register boundaries",
     url: viaRelay(GIS_SOURCES.nrhpBoundsTn.serviceUrl), ...TN,
-    minZoom: 12, color: "#6d28d9", weight: 1.5, opacity: 0.5,
+    minZoom: 12, color: "#6d28d9", weight: 1.5, opacity: 0.5, simplifyFactor: 6,
     styleFn: (_p, opacity) => ({ color: "#6d28d9", weight: 1.5, opacity, fillColor: "#6d28d9", fillOpacity: opacity * 0.2 }), // design-exempt: map ink for a drawn designated area
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "National Register property", hoverSource: "THC",
     hoverFields: [{ names: ["Resource_Name"] }, { names: ["City"] }],
@@ -174,6 +186,7 @@ export const TN_LAYERS = {
     kind: "esriFeature", label: "Recorded Historic Sites", source: "Tennessee Historical Commission — historic sites survey",
     url: viaRelay(GIS_SOURCES.thcSitesTn.serviceUrl), ...TN,
     minZoom: 16, color: "#7c3aed", weight: 1.5, opacity: 0.55, pointRadius: 3,
+    fields: ["COMNAME", "HISTNAME", "PROPADDR", "CITY", "COUNTY", "DATECONST", "ORIGUSE", "PRESUSE"], // ~100 fields exist; the card reads these (a dense view was 4–5 MB with all of them)
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Recorded historic site", hoverSource: "THC",
     hoverFields: [{ names: ["COMNAME", "HISTNAME"] }, { names: ["DATECONST"], label: "built" }],
     identifyCard: (props) => thcSiteCard(props),
@@ -197,7 +210,7 @@ export const TN_LAYERS = {
   tn_crit_habitat: {
     kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
     url: GIS_SOURCES.critHabitatTn.serviceUrl, ...TN,
-    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45,
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 6, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies to ~6 screen pixels, re-asked every 2 zoom levels (layers.js)
     styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // design-exempt: map ink for a drawn designated area
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
     hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["listing_status"], label: "status" }],
@@ -210,12 +223,3 @@ export const TN_LAYERS = {
 
 /* The ids, in panel order — the guards (test/tennesseeLayers.test.js, layerStateCoverage) read this. */
 export const TN_LAYER_IDS = Object.freeze(Object.keys(TN_LAYERS));
-
-/* Every Tennessee row sits in a weight tier (layerWeight.js): the county / city / MS4 lines are orientation furniture, everything
- * else is a look-up fact — a flag to pull a file, never louder than the plan. The buffer bands (when present) are the constraint. */
-export const TN_TIERS = Object.freeze({
-  tn_city: "context", tn_ms4: "reference",
-  tn_wqa: "reference", tn_pws: "reference", tn_stream_buffers: "constraint",
-  tn_drycleaners: "reference", tn_sna: "reference", tn_scenic: "reference",
-  tn_nrhp: "reference", tn_nrhp_bounds: "reference", tn_thc_sites: "reference", tn_landfills: "reference", tn_cemeteries: "reference", tn_crit_habitat: "reference",
-});

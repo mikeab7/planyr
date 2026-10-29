@@ -831,6 +831,25 @@ export const GIS_SOURCES = {
     lastVerified: "2026-10-29",
   },
 
+  /* TDEC Division of Remediation — the "DOR Sites" register: every site in a TDEC remediation program (voluntary cleanup, State Superfund funded by the
+   * state's Hazardous Waste Remedial Action fund or by the liable party, EPA NPL and non-NPL, Department of Defense, pre-remedial evaluation, the drycleaner
+   * program). 825 OPEN sites, one point each with acres, address, TDEC field office and — for listed Superfund sites — the promulgation date. TDEC's own
+   * ArcGIS Online org (the service behind its "TDEC Remediation Sites" viewer, whose layer on tdeconline.tn.gov refuses the relay), CORS-open. ⚠ Last edited
+   * 2024-06-25 — said on the row's tooltip; a site opened since is not on it. */
+  dorSitesTn: {
+    key: "dorSitesTn",
+    label: "Remediation sites (Tennessee TDEC DOR)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Remediation, DOR Sites",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/DOR_Sites/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { id: "DOR_Site_Id", name: "DOR_Site_Name", program: "Program", status: "Status", address: "Address", city: "City", county: "County", acres: "Acres", promulgated: "Promulgated" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2024-06-25",
+    lastVerified: "2026-10-29",
+  },
   /* ---- the State of Tennessee's own servers, reached through the same-origin /gis-proxy relay ----
    * `maps.tdec.tn.gov` (TDEC's hosting server) and `tnmap.tn.gov` (the State's GIS clearinghouse) answer the relay; MEASURED THROUGH planyr.io on
    * 2026-10-29 (build 88b0334). ⛔ `tdeconline.tn.gov` — TDEC's other server, home of its remediation-site, UST, oil & gas, Construction General

@@ -17,8 +17,9 @@ Site Analysis verdicts stay trusted-only (`siteChecks.TRUSTED_CHECKS`), so nothi
 | County Boundaries / City Limits (Jurisdictions, merged "Counties & Cities") | State of Tennessee (STS), 95 counties / 345 cities (the county row is main's `tn_county`, B2507065) | Whose jurisdiction; Tennessee has no ETJ |
 | Stormwater (MS4) Permit Areas (Jurisdictions) | TDEC DWR, 88 areas | Whose stormwater / post-construction / buffer rules apply on top of the state permit |
 | Stream Buffers (Flood & Drainage) | computed from USGS NHD | The 30 ft construction buffer — below |
-| Impaired & Assessed Streams (Flood & Drainage) | TDEC DWR 2026 Water Quality Assessment | Impaired / threatened / fully supporting / not assessed, per reach |
+| Impaired & Assessed Waters (Flood & Drainage) | TDEC DWR 2026 Water Quality Assessment | Impaired / threatened / fully supporting / not assessed, per reach |
 | Water Service Areas (Utilities, merged "Water & Sewer") | TDEC DWR, 447 public water systems | Which system's declared territory holds the point (+ Drinking Water Watch link) |
+| Remediation Sites (Environmental) | TDEC Division of Remediation DOR Sites (TDEC's ArcGIS Online org), 825 open sites; last edited 2024-06-25 | Voluntary cleanup, State Superfund, EPA / DoD sites — a Phase I flag, with the program in plain words |
 | Permitted Landfills (Environmental) | TDEC Solid Waste (maps.tdec.tn.gov, via the relay), 111 facilities | Gas / leachate / truck-traffic flag for a Phase I |
 | Known Drycleaners (Environmental) | TDEC Division of Remediation (DCERP) | Solvent-contamination flag for a Phase I |
 | State Natural Areas, State Scenic Rivers (Environmental) | TDEC Division of Natural Areas | Designated land — the Rutherford County cedar glades are here |
@@ -58,8 +59,8 @@ whose rules apply; the permittee's manual says what they are.
 
 | Candidate | Why not |
 |---|---|
-| **Sinkholes / karst** (Rutherford is heavily karst) | No authoritative LIVE service. USGS publishes the Tennessee depressions + sinking-streams dataset (Ladd 2025, DOI 10.5066/F74F1PZJ) and the national karst map (OFR 2014-1156) as **downloads only**; the only live copies are personal ArcGIS Online accounts (the "TN_Sinkholes" layer is built from a hobbyist database, tnlandforms.us). Metro Nashville, Rutherford County and TDEC's Division of Geology publish none that was found. The USGS hosts are not reachable from the build environment, so the download cannot be ingested as a static asset yet. **Top follow-up.** |
-| **TDEC remediation sites** (State Superfund, voluntary cleanup, brownfields), **underground storage tanks**, **oil & gas wells**, **dams** | Live only on `tdeconline.tn.gov` (DOR_Sites, UST_Facilities, Oil_and_Gas2, DWR_Public), which refuses the relay (403) and the build environment. The AGOL copies found are personal / university accounts or West-Tennessee-only. Needs a real-browser CORS probe from planyr.io (or TDEC allowing the relay). |
+| **Sinkholes / karst** (Rutherford is heavily karst) | No authoritative LIVE service. USGS publishes the Tennessee depressions + sinking-streams dataset (Ladd 2025, DOI 10.5066/F74F1PZJ) and the national karst map (OFR 2014-1156) as **downloads only**; the only live copies are personal ArcGIS Online accounts (the "TN_Sinkholes" layer is built from a hobbyist database, tnlandforms.us). Metro Nashville, Rutherford County and TDEC's Division of Geology publish none that was found. TDEC's ArcGIS Online org holds only a partial karst dye-trace / flow-indicator set (`Karst_Flow_Indicators`, 111 points; `KarstHydrologicInvenotry`) — not a sinkhole inventory, so not drawn. The USGS hosts are not reachable from the build environment, so the download cannot be ingested as a static asset yet. **Top follow-up.** |
+| **Underground storage tanks, oil & gas wells, dams** | Live only on `tdeconline.tn.gov` (UST_Facilities, Oil_and_Gas2, DWR_Public), which refuses the relay (403) and the build environment. The AGOL copies found are personal / university accounts or single-county. (Remediation sites ARE built: TDEC publishes the same register on its own ArcGIS Online org.) Needs a real-browser CORS probe from planyr.io, or TDEC allowing the relay. |
 | **Restricted waters (CGP Unavailable Waters), Exceptional Tennessee Waters, Hydrologic Determinations** (wet-weather conveyances) | Same server. Costs the 60 ft buffer tier (above). |
 | Wellhead / source-water protection areas | TDEC's Wellhead Protection Area service sits in the `internal` folder of gis.tdec.tn.gov — not public. |
 | TVA transmission | Already covered nationally by the Power lines (HIFLD) row; TVA publishes no separate public service. |
@@ -71,3 +72,11 @@ whose rules apply; the permittee's manual says what they are.
 | Rail, pipelines, wetlands, truck routes | National rows already offered (BTS, EIA, NWI). |
 | Aquifers (TDEC principal aquifers) | Informational, not a development constraint. |
 | Local stream buffers (Murfreesboro, Nashville, Franklin) | Width depends on drainage area / stream class — see above. |
+
+## Draw-budget notes (adversarial review, 2026-10-29)
+
+The USFWS critical-habitat service returns each mussel reach whole (up to 314,000 vertices a feature; one Duck River cell is 522,000), the National Register
+boundaries include a 363,000-vertex "Old Natchez Trace", and Nashville's MS4 areas total 309,000 vertices at the zoom they first draw. The app declines to draw a batch over
+its vertex budget (`layers.buildFeatureLayer`), and zooming in does not shrink a whole-feature answer — so those three rows ask the server to simplify
+(`simplifyFactor: 6`, ~6 screen pixels, re-asked every two zoom levels): measured 15,900–106,000 vertices per cell across z9–z17 (critical habitat), 1,500–3,200
+(National Register), 700–3,100 (MS4). The 186,000-record historic-sites layer requests only the eight fields its card reads.
