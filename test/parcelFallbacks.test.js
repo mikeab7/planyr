@@ -14,6 +14,7 @@ import {
 } from "../src/workspaces/site-planner/lib/parcelFallbacks.js";
 import { identifyWithLineFallback } from "../src/workspaces/site-planner/lib/identifyWithFallback.js";
 import { outlineKeysForView } from "../src/workspaces/site-planner/lib/parcelOutlineSet.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 beforeAll(async () => {
   await setCountyPolygons(JSON.parse(readFileSync(new URL("../public/geo/county-polygons.json", import.meta.url), "utf8")));
@@ -235,7 +236,7 @@ describe("wiring: every lot-click flow hands the identify its fallbacks", () => 
   });
   it("the planner and the Map both show the fallback's words rather than a hardcoded layer name", () => {
     const map = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
-    const planner = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const planner = plannerSource();
     expect(map).toMatch(/fallbackNoticeText\(/);
     expect(planner).toMatch(/fromFallback: fallbackNoticeText\(/);
   });

@@ -7,6 +7,7 @@ import {
 import { parcelMenuItems, isRenameable, combinedLotCount } from "../src/workspaces/site-planner/lib/parcelMenu.js";
 import { DELETE_ENTRIES } from "../src/workspaces/site-planner/lib/deletePlan.js";
 import { buildParcelRows } from "../src/workspaces/site-planner/lib/parcelOps.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 (2026-10-22) — parcel delete: ONE path, ONE menu, Undo everywhere.
  *
@@ -15,7 +16,7 @@ import { buildParcelRows } from "../src/workspaces/site-planner/lib/parcelOps.js
  * is exactly the bug — three of five doors used to delete silently with no Undo. */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const strip = (t) => t.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-const src = strip(read("../src/workspaces/site-planner/SitePlanner.jsx"));
+const src = strip(plannerSource());
 const panel = strip(read("../src/workspaces/site-planner/components/ParcelsPanel.jsx"));
 const menuUi = strip(read("../src/workspaces/site-planner/components/ParcelContextMenu.jsx"));
 

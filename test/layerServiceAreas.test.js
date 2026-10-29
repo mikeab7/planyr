@@ -21,6 +21,7 @@ import { _setServiceAreas, areaContains, PROBE_DEG } from "../src/workspaces/sit
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 import { REGION_ZONES, layerAvailableHere, availableEntries, groupEntriesFor, drawnOverlaysOf, inRegion } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
 import { floodRowRelevance, scopeFloodEntries } from "../src/workspaces/site-planner/lib/floodGroup.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const P = {
   grandPort: { lat: 29.807276, lng: -94.877079 },       // Chambers · Baytown ETJ (the owner's plan)
@@ -124,7 +125,7 @@ describe("one answer for the panel, the map and both surfaces", () => {
     }
   });
   it("both hosts hand the panel + draw filter the same two facts — state and location — and nothing county-shaped", () => {
-    const planner = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const planner = plannerSource();
     const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
     expect(planner).toMatch(/useDrawnOverlays\(overlaysEff, layerScopeState, origin \? \{ lat: origin\.lat, lng: origin\.lon \} : null\)/);
     expect(finder).toMatch(/useDrawnOverlays\(overlays, viewState, viewLoc\)/);

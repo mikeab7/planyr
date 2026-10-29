@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { serializeClip, parseClip, writeSystemClip, systemWriteFailed, resetBridge, CLIP_MARK } from "../src/workspaces/site-planner/lib/clipBridge.js";
 import { collectClipboard, pasteClipboard } from "../src/workspaces/site-planner/lib/planClipboard.js";
 import fs from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const KINDS = {
   el: { id: "b1", type: "building", cx: 10, cy: 20, w: 100, h: 50, rot: 12, dockSide: "x", name: "B1" },
@@ -39,7 +40,7 @@ describe("clipBridge", () => {
     expect(await writeSystemClip({ items: [{ kind: "el", obj: KINDS.el }] }, null, () => {})).toBe(false);
   });
   it("planner wiring: copy publishes, paste event parses the payload before images", () => {
-    const s = fs.readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const s = plannerSource();
     expect(s).toMatch(/publishClip\(setCanvasClip/);
     expect(s.indexOf("parseClip(")).toBeGreaterThan(0);
     expect(s.indexOf("parseClip(")).toBeLessThan(s.indexOf("imageFileFromClipboard(cd)"));

@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { FREE_ZOOM_OPTIONS, isPinchWheel, pinchLevels, notchLevels } from "../src/shared/map/freePinchZoom.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const src = (p) => readFileSync(new URL(`../src/workspaces/${p}`, import.meta.url), "utf8");
 
@@ -40,6 +41,6 @@ describe("freePinchZoom — wiring on the three browse maps", () => {
     });
   }
   it("the site-plan backdrop map is left alone (already zoomSnap 0, own gesture code)", () => {
-    expect(src("site-planner/SitePlanner.jsx")).not.toMatch(/FREE_ZOOM_OPTIONS/);
+    expect(plannerSource()).not.toMatch(/FREE_ZOOM_OPTIONS/);
   });
 });

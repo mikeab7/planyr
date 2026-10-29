@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { hatchPatternTransform, hatchAnchorFor } from "../src/workspaces/site-planner/lib/hatchAnchor.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("hatchAnchor (NEW-1) — every canvas hatch is pinned to the ground", () => {
   it("translate → rotate → scale; identity collapses to undefined (the old default)", () => {
@@ -21,7 +22,7 @@ describe("hatchAnchor (NEW-1) — every canvas hatch is pinned to the ground", (
     expect(Math.abs(a.x - 226.6205) * 1.25).toBeLessThanOrEqual(0.5);
   });
   it("wiring: every planner <pattern> goes through the anchored transform", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toMatch(/const hatchAnchor = hatchAnchorFor\(renderView, /);
     const defs = src.match(/<HatchPatternDef [^>]*\/>/gs) || [];
     expect(defs.length).toBeGreaterThan(3);

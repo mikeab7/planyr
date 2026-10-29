@@ -16,9 +16,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const SP = plannerSource();
 
 /* The handle layer's markup: the group, and the consts rendered into it.
  * ⛔ NEW-1 (2026-09-12, click-ownership audit) — the opening tag now also carries an

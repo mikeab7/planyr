@@ -25,6 +25,7 @@ import {
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 import { sideParkAlongRun } from "../src/workspaces/site-planner/lib/dogEar.js";
 import { normalizeBondedChildren } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const FIXTURE = JSON.parse(readFileSync(new URL("../ui-audit/fixtures/sylvestri-concept-d.json", import.meta.url), "utf8"));
 const byId = (id) => FIXTURE.els.find((e) => e.id === id);
@@ -395,7 +396,7 @@ describe("the load-time heals do not re-centre an anchored zone", () => {
 
 describe("source guard — the anchor reaches every layout site", () => {
   const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-  const PLANNER = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const PLANNER = plannerSource();
   const MODEL = read("../src/workspaces/site-planner/lib/siteModel.js");
 
   it("the canvas relayout passes anchors AND offsets, not just lengths", () => {

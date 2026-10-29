@@ -20,6 +20,7 @@ import {
 import { profileQuery, M_TO_FT } from "../src/workspaces/site-planner/lib/elevation.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* A cache with the two methods the leg uses, and counters so "did it hit the network" is a
  * measured fact rather than an inference. */
@@ -288,7 +289,7 @@ describe("the note travels WITH the state, so the render never needs this module
 });
 
 describe("neither module may rejoin the Site route's STATIC graph", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const src = plannerSource();
   it("groundElevation.js is reached only by a dynamic import", () => {
     expect(src).not.toMatch(/^import\s[^\n]*lib\/groundElevation\.js/m);
     expect(src).toMatch(/import\("\.\/lib\/groundElevation\.js"\)/);

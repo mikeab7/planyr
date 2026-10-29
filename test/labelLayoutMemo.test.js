@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { layoutLabels, layoutLabelsSolve, __labelLayoutProbe } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -252,7 +253,7 @@ describe("the wiring cannot be undone silently", () => {
   });
 
   it("both planner call sites still go through layoutLabels, not the solver", () => {
-    const sp = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const sp = plannerSource();
     expect(sp).not.toContain("layoutLabelsSolve");
     expect((sp.match(/= layoutLabels\(/g) || []).length).toBe(2);
   });

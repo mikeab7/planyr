@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { saveSite, loadSite, siteExistsLocally, readBackSite, sitesWriteStamp, sitesWriteStillCurrent } from "../src/workspaces/site-planner/lib/storage.js";
 import { loadSiteSummaries } from "../src/workspaces/site-planner/lib/siteListLight.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const KEY = "planarfit:sites:v1";
 const bld = (id, cx = 0) => ({ id, type: "building", cx, cy: 0, w: 100, h: 100, rot: 0 });
@@ -167,7 +168,7 @@ describe("wiring", () => {
   it("the autosave settle tick skips a write the mirror already made, and still writes when it cannot prove that", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     expect(src).toContain("mirrorStamp = ok ? sitesWriteStamp() : null;");
     // B2233521 — the same skip, with the verdict named so the duplicate-flush skip (lib/saveDedupe.js) can record the write it made
     expect(src).toContain("const mirrorHeld = !!(mirrorStamp && sitesWriteStillCurrent(mirrorStamp));");

@@ -17,6 +17,7 @@ import {
 } from "../src/workspaces/site-planner/lib/tileBudget.js";
 import { visibleTiles } from "../src/workspaces/site-planner/lib/ghostSnapshot.js";
 import { orderLayersByPriority, admittedAfter, LAYER_STAGE_SIZE } from "../src/workspaces/site-planner/lib/layerSchedule.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const BIG_VIEWPORT = { viewportW: 1600, viewportH: 1200 }; // roomy enough that the window clamp isn't what binds
 
@@ -199,7 +200,7 @@ describe("NEW-1 — the coarse backfill layer's ceiling", () => {
   });
 
   it("the planner binds a cap to BOTH tile layers (anti-drift source guard)", () => {
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     const caps = [...src.matchAll(/boundTileCache\(/g)];
     expect(caps.length, "detail AND backfill must each be capped").toBeGreaterThanOrEqual(2);
     expect(src).toMatch(/geoBfCapRef\.current = boundTileCache\(bf,/);

@@ -15,8 +15,9 @@ import {
   defaultRung, defaultRelation, reversal, orderedPairs,
 } from "../src/workspaces/site-planner/lib/paintOrder.js";
 import { ELEMENT_CAPABILITIES, verdict } from "../e2e/elementCapabilities.table.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const SRC = plannerSource();
 
 describe("the enumeration is COMPLETE — this is the whole point of the item", () => {
   it("states a relationship for every ordered pair of distinct families", () => {

@@ -25,9 +25,10 @@ import {
   SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, NUMEDIT_FLOAT,
   numEditBox, numEditFitsSpawn, nudgeNumEditValue,
 } from "../src/workspaces/site-planner/lib/numEditBox.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const plannerSrc = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const plannerSrc = plannerSource();
 const fieldSrc = read("../src/workspaces/site-planner/components/NumEditField.jsx");
 const cssSrc = read("../src/index.css");
 

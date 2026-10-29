@@ -26,11 +26,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 
-const PLANNER = read("src/workspaces/site-planner/SitePlanner.jsx");
+const PLANNER = plannerSource();
 const HELPERS = read("e2e/helpers.js");
 
 /* The specs that drive the pond inspector or the Yield panel through the shared helpers. */

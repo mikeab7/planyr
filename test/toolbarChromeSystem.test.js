@@ -17,11 +17,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync(
-  fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)),
-  "utf8",
-);
+const SRC = plannerSource();
 
 // Isolate the plannerToolbar render block (File → History → View) so a match elsewhere in this
 // 20k-line file can't produce a false pass.

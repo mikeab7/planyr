@@ -6,8 +6,9 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { gradingCfg } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { GradingPanel, OFF_LINE } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const sp = plannerSource();
 
 describe("grading is off per plan until switched on", () => {
   it("the stored switch defaults off and only a literal true turns it on", () => {

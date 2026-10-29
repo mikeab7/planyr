@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* Deed / Title (metes & bounds) tool placement — render-free anti-drift guard
  * (same shape as bugHuntGuards.test.js). SitePlanner.jsx is edited by many
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
  * deed row's copy + handler live in the inventory and in the render site's `run` map. The
  * `boundary-menu-mb` testid it is clicked by (two ui-audit harnesses) is unchanged. */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const src = plannerSource();
 const actions = read("../src/workspaces/site-planner/lib/parcelActions.js");
 const menuSrc = read("../src/workspaces/site-planner/components/RailMenus.jsx");
 
