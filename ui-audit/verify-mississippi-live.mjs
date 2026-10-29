@@ -109,6 +109,7 @@ async function openFinderAt(lat, lng, zoom) {
   return panel;
 }
 const selectGroup = async (panel, g) => {
+  if (!(await panel.isVisible().catch(() => false))) { await page.getByTestId("finder-layers-expand").click().catch(() => {}); await panel.waitFor({ state: "visible", timeout: 15000 }); await sleep(500); }
   const btn = panel.getByTestId(`layer-group-${g}`);
   if (await btn.count()) await btn.first().click(); else await panel.getByTestId("layer-group-select").selectOption(g);
   await sleep(300);
@@ -155,15 +156,16 @@ try {
     await sleep(7000);
     const seen = new Map();
     for (const e of log) if (!e.req && re.test(decodeURIComponent(e.url))) for (const q of e.pts || []) seen.set(`${q.x.toFixed(5)},${q.y.toFixed(5)}`, q);
-    const view = await page.evaluate(() => { const m = window.__mapFinderMap, b = m.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]; });
-    const inView = [...seen.values()].filter((q) => q.x > view[0] && q.x < view[2] && q.y > view[1] && q.y < view[3]);
+    // only points in the open middle of the map: the top toolbar and the right-hand Layers card cover the rest and would swallow the click
+    const mid = await page.evaluate((pts) => { const m = window.__mapFinderMap, sz = m.getSize(); return pts.map((q) => { const p = m.latLngToContainerPoint([q.y, q.x]); return p.x > 330 && p.x < sz.x - 480 && p.y > 130 && p.y < sz.y - 120; }); }, [...seen.values()]);
+    const inView = [...seen.values()].filter((_q, i) => mid[i]);
     const titles = [];
     for (const q of inView.slice(0, 2)) {
       const c = await page.evaluate(([a, b]) => { const m = window.__mapFinderMap, p = m.latLngToContainerPoint([a, b]), r = m.getContainer().getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y }; }, [q.y, q.x]);
       let text = "";
-      for (const [dx, dy] of [[0, 0], [2, 2], [-2, -2], [4, -3], [-4, 3]]) {
+      for (const [dx, dy] of [[0, 0], [2, 2], [-2, -2], [4, -3], [-4, 3], [0, -5], [5, 0], [0, 5], [-5, 0], [6, 6], [-6, -6]]) {
         await page.mouse.click(c.x + dx, c.y + dy);
-        await sleep(1300);
+        await sleep(1100);
         text = await page.locator(".leaflet-popup-content").first().innerText().catch(() => "");
         if (text) break;
       }
