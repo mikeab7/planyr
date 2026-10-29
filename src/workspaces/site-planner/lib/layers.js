@@ -27,6 +27,7 @@ const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import { setViewLegend, clearViewLegend } from "./viewLegendStore.js";
 import { BOUNDARY_FALLBACK_INK } from "./boundaryStyle.js";
+import { declutterBoxes } from "./boundaryLabels.js";
 // NEW-1 (Imagery & Layers) — the owner's contour interval (1/2/5/10 ft), a device pref; a tiny leaf, safe on the boot path.
 import { getContourInterval, subscribeContourInterval } from "./contourIntervalPref.js";
 import {
@@ -1673,9 +1674,19 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       labelsOn = want;
       try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) l.bindTooltip(l.__pfLabel, labelOpts()); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
     };
-    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); syncLabels(); } });
-    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); } catch (_) { /* map already gone */ } });
-    lyr.on("load", syncLabels);
+    /* A row that sets `lineLabel.declutter` (the municipal limits: one name per city) hides a name that would sit on top of a larger city's name — never two names piled up. */
+    let tick = null;
+    const declutter = () => {
+      if (!cfg.lineLabel.declutter || !labelsOn) return;
+      const items = [];
+      try { lyr.eachFeature((l) => { const t = l.getTooltip && l.getTooltip(), el = t && t.getElement && t.getElement(); if (!el) return; el.style.visibility = ""; const r = el.getBoundingClientRect(); const bb = l.getBounds && l.getBounds(); if (r.width) items.push({ el, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, rank: bb ? Math.abs((bb.getNorth() - bb.getSouth()) * (bb.getEast() - bb.getWest())) : 0 }); }); } catch (_) { return; }
+      const keep = new Set(declutterBoxes(items));
+      items.forEach((it, i) => { if (!keep.has(i)) it.el.style.visibility = "hidden"; });
+    };
+    const later = () => { if (tick) clearTimeout(tick); tick = setTimeout(declutter, 60); };
+    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); lyr._map.on("moveend", later); syncLabels(); later(); } });
+    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); lyr._map && lyr._map.off("moveend", later); } catch (_) { /* map already gone */ } if (tick) clearTimeout(tick); });
+    lyr.on("load", () => { syncLabels(); later(); });
   }
   if (canHover) {
     import("./featureHoverAttach.js").then((m) => {

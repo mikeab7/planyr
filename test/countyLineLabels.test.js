@@ -51,3 +51,14 @@ describe("countyLineLabels", () => {
     expect(countyLineLabels(null, opts)).toEqual([]);
   });
 });
+
+import { declutterBoxes } from "../src/workspaces/site-planner/lib/boundaryLabels.js";
+describe("declutterBoxes (two city names never pile up — B2507065)", () => {
+  it("keeps the higher-ranked label and drops the one that would sit on it", () => {
+    const boxes = [{ x: 100, y: 100, w: 60, h: 14, rank: 1 }, { x: 110, y: 104, w: 60, h: 14, rank: 5 }, { x: 400, y: 300, w: 60, h: 14, rank: 0 }];
+    expect(declutterBoxes(boxes)).toEqual([1, 2]);
+  });
+  it("keeps everything that is clear of everything else", () => {
+    expect(declutterBoxes([{ x: 0, y: 0, w: 20, h: 10, rank: 1 }, { x: 200, y: 0, w: 20, h: 10, rank: 1 }])).toEqual([0, 1]);
+  });
+});

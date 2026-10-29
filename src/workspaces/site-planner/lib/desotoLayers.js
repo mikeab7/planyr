@@ -259,7 +259,7 @@ Object.assign(DESOTO_LAYERS, {
     path: "BaseLayers/MapServer/4", label: "City Limits (DeSoto County)", mergeGroup: "counties_cities", role: "line", group: "jurisdiction", order: 5, minZoom: 8, opacity: 0.4,
     source: "DeSoto County GIS — Municipalities", color: "#1d4ed8", weight: 1.6,
     styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: CITY_LINE_MIN_WEIGHT, opacity, fill: true, fillColor: "#1d4ed8", fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit" }), // B2507065 — className: only the outline answers a click (index.css), so the tint never hides the zoning polygon under it; B2507065: bolder outline + a light tint inside, like every city limit
-    lineLabel: { field: "NAME", minZoom: 9, format: (v) => titleCase(v) || null },
+    lineLabel: { field: "NAME", minZoom: 9, declutter: true, format: (v) => titleCase(v) || null },
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "City limits", hoverSource: "DeSoto County GIS", hoverFields: [{ names: ["NAME"] }],
     note: "The five incorporated cities of DeSoto County — Olive Branch, Southaven, Horn Lake, Hernando and Walls. Outside them a site is in unincorporated DeSoto County. Mississippi has no ETJ.",
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
