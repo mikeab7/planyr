@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CALLOUT_LINE, CALLOUT_STD_KEYS, calloutStyle } from "../src/workspaces/site-planner/lib/calloutStyle.js";
 import { FAMILY_DEFAULT_INK, CALLOUT_DEFAULT_FILL } from "../src/shared/theme/familyInk.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
@@ -69,7 +70,7 @@ describe("NEW-1: THE LEADER LINE IS PART OF THE OUTLINE — the render reads ONE
   // `st.weight`/`leaderDash`(built from `st.dash`/`st.weight`)/`st.opacity`, never a second,
   // independently-hardcoded leader value (the pre-fix render hardcoded the box at 1.4 and the
   // leader at 1.6 — two different numbers for what is conceptually one outline).
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
   it("the box border reads st.weight/leaderDash/st.opacity/st.fillOpacity — not a hardcoded literal", () => {
     expect(src).toMatch(/fill=\{st\.fill\} fillOpacity=\{st\.fillOpacity\} stroke=\{border\} strokeWidth=\{st\.weight\} strokeDasharray=\{leaderDash\} strokeOpacity=\{st\.opacity\}/);
     expect(src).not.toMatch(/stroke=\{border\} strokeWidth=\{1\.4\}/);

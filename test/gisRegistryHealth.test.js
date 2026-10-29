@@ -286,12 +286,26 @@ describe("the Colorado family (NEW-2)", () => {
     expect(labels.some((l) => l.includes("denver"))).toBe(true);
   });
 
-  it("⛔ does NOT wire a Colorado oil & gas row — all three candidates were county clips", () => {
-    // Live 2026-08-05: Adams County's COGCC copy reports 6,319 wells statewide (711 in Weld) and
-    // Broomfield's 8,035 (3,668 in Weld), against a state with ~110k wells and tens of thousands
-    // in Weld alone. That is the Chambers-County-14-vs-8,014 trap. Wiring one would be worse than
-    // wiring none: a false all-clear on a Weld industrial site.
+  it("⛔ a Colorado oil & gas row is ECMC's OWN statewide service and carries an anti-clip fixture — never a county copy", () => {
+    // History (B242545 / B1422): live 2026-08-05 every REACHABLE candidate was a county clip — Adams County's COGCC copy reports 6,319 wells statewide (711 in Weld) and
+    // Broomfield's 8,035 (3,668 in Weld), against a state with ~124,000 well spots and tens of thousands in Weld alone. That is the Chambers-County-14-vs-8,014 trap, and it
+    // is why no Colorado oil & gas row was wired. B2528688 (2026-10-29) reached ECMC's own host (Colorado DNR, through the planyr.io relay): 124,462 well spots, 244,856
+    // flowline segments. So the rule is no longer "no row" — it is "only the authoritative service, and prove it is not a clip": the Greeley (Weld) box must carry a floor
+    // far above anything a county copy could hold there.
     const co = rows.filter(([, s]) => (statesFor(s) || []).includes("CO"));
-    expect(co.some(([k]) => /oilgas|wells|cogcc|ecmc/i.test(k))).toBe(false);
+    const og = co.filter(([k]) => /oilgas|wells|cogcc|ecmc/i.test(k));
+    // Weld County's own PERMIT register (WOGLA) is a different thing — a county land-use permit, not a well register — and says so in its provider line.
+    const countyPermits = og.filter(([k]) => k === "weldOilGasAssessment");
+    for (const [k, s] of countyPermits) expect(s.provider, k).toMatch(/County, Colorado.*Location Assessment permits/);
+    const ecmc = og.filter(([k]) => k !== "weldOilGasAssessment");
+    expect(ecmc.map(([k]) => k).sort()).toEqual(["ecmcFacilities", "ecmcFlowlines", "ecmcLocations", "ecmcWells"]);
+    for (const [k, s] of ecmc) {
+      expect(s.serviceUrl, k).toMatch(/^https:\/\/gisdnr\.state\.co\.us\/arcgis\/rest\/services\/ECMC_Public\//);
+      expect(s.provider, k).toMatch(/Energy and Carbon Management Commission/);
+      expect(s.serviceUrl, k).not.toMatch(/adamscountyco|broomfield|services\d*\.arcgis\.com/i);
+    }
+    const weldBox = fixturesFor("ecmcWells").fixtures.find((f) => /Greeley/.test(f.label));
+    expect(weldBox, "ecmcWells needs a Greeley (Weld) anti-clip fixture").toBeTruthy();
+    expect(weldBox.expectMinCount).toBeGreaterThanOrEqual(300);
   });
 });

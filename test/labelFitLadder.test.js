@@ -11,6 +11,7 @@ import { test, assert } from "vitest";
 import { readFileSync } from "node:fs";
 import { layoutLabels, boxOf } from "../src/workspaces/site-planner/lib/labelLayout.js";
 import { labelForms, inlineLines, interiorFitter, pointInRing, LADDER_RUNGS } from "../src/workspaces/site-planner/lib/labelFitLadder.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // ── the battery ────────────────────────────────────────────────────────────────────────────
 // Shapes chosen to be hostile to a fit test in different ways: a normal rect, a sliver, a
@@ -165,7 +166,7 @@ test("labelForms / inlineLines never return an empty or object-valued line", () 
 // pond `mustLabel`. Without this, somebody re-derives fit from the bounding box in a later edit
 // and the interior measurement quietly stops happening.
 test("SitePlanner feeds the shared ladder its ring, and marks ponds mustLabel", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   // B1449 — `rppf`, not `view.ppf`: the fit question is asked in FEET (labelLayout divides the
   // screen size by the ppf first), so it has to be asked at the ppf the geometry was EMITTED at or
   // a mid-gesture pond is fitted against an interior it does not have on screen. It is also what

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { trailingCrumbAllowed, trailingCrumbFor, crumbFloor, MODULES_WITH_TRAILING_CRUMB } from "../src/shared/ui/crumbScope.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -53,6 +54,6 @@ describe("the wiring, read off the real source", () => {
   });
   it("no crumb carries a flat min-width floor any more", () => {
     expect(read("src/shared/ui/ProjectBreadcrumb.jsx")).not.toMatch(/minWidth: CRUMB_MIN_W/);
-    expect(read("src/workspaces/site-planner/SitePlanner.jsx")).not.toMatch(/minWidth: CRUMB_MIN_W/);
+    expect(plannerSource()).not.toMatch(/minWidth: CRUMB_MIN_W/);
   });
 });

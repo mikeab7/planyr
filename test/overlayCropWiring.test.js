@@ -5,8 +5,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 
 describe("the drawn overlay image applies a crop clipPath, non-destructively", () => {
   const renderStart = src.indexOf("const renderSheetOverlay = (o) => {");

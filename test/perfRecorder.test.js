@@ -18,6 +18,7 @@ import {
   notePlanContext, noteViewScale, perfContext, requestPerfCapture, bindPerfRecorder,
   perfRecorderArmed, __resetPerfHandle,
 } from "../src/shared/telemetry/perfRecorderHandle.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(join(here, "..", "src", p), "utf8");
@@ -973,7 +974,7 @@ describe("the handle — safe to call before, or entirely without, the recorder"
 describe("wiring guards — the parts that only exist as a call site", () => {
   const recorder = src("shared/telemetry/perfRecorder.js");
   const main = src("main.jsx");
-  const planner = src("workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
   const helpControl = src("app/HelpReportControl.jsx");
   const census = src("shared/storage/storageCensus.js");
   const panel = src("shared/storage/StoragePanel.jsx");

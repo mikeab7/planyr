@@ -16,9 +16,10 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STALL_PITCH_MIN_PX, stallStripesExplicit, segmentsPath } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const planner = plannerSource();
 const labels = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/labelLayout.js"), "utf8");
 // site-metrics-extraction — the yield-panel stall count moved into lib/siteMetrics.js alongside the
 // rest of the yield/coverage math; `carStalls(...).count` itself is untouched.

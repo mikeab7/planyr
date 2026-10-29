@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { compRecordSections, compBadgeLabel, compFieldRows } from "../src/shared/comps/lib/comps.js";
 import { CompDetail } from "../src/shared/comps/components/CompsPanel.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const LEASE = {
   id: "l1", compType: "lease", title: "Core 5 – West Hardy", compDate: "2026-08-20", createdAt: "2026-09-01T12:00:00Z",
@@ -115,7 +116,7 @@ describe("SitePlansSection — the Documents block", () => {
     expect(src).not.toMatch(/showPlanTrash|trashBlock|fetchDeletedOverlays|restoreOverlay|permanentlyDeleteOverlay/);
     const mf = readFileSync("src/workspaces/site-planner/MapFinder.jsx", "utf8");
     expect(mf).not.toContain("showPlanTrash");
-    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const sp = plannerSource();
     expect(sp).toContain("listDeletedSitePlanFiles");
     expect(sp).toContain("restoreSitePlanFile");
     expect(sp).toContain("deleted-site-plan-file");

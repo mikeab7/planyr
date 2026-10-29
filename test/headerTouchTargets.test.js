@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -67,7 +68,7 @@ describe("the shared primitives carry the class, so a new control inherits the f
 describe("the header's own bespoke chips (not built from a shared primitive) carry the class too", () => {
   const header = read("src/shared/ui/AppHeader.jsx");
   const crumb = read("src/shared/ui/ProjectBreadcrumb.jsx");
-  const planner = read("src/workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
   const badge = read("src/shared/ui/CloudSyncBadge.jsx");
 
   it("the wordmark button (Row 1, left zone)", () => {

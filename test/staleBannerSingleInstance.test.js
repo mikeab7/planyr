@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { pushToastPure, countByDedupeKey, visibleToasts, TOAST_CAP } from "../src/shared/ui/Toast.jsx";
 import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* ROUND EIGHT, NEW-2 (B1482353) — THE STALE-TAB BANNER MUST NEVER STACK.
  *
@@ -20,7 +21,7 @@ import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictTo
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const read = (p) => readFileSync(HERE + p, "utf8");
-const PLANNER = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const PLANNER = plannerSource();
 const TOASTJS = read("../src/shared/ui/Toast.jsx");
 
 describe("a state notice replaces itself; an event notice still accumulates", () => {

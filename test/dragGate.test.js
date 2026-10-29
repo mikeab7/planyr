@@ -19,10 +19,10 @@ import { dirname, join } from "node:path";
 import {
   DRAG_SLOP_PX, makeDragGate, dragTravelPx, gatedPoint, stepDragGate, dragArmed,
 } from "../src/workspaces/site-planner/lib/dragGate.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP_PATH = join(here, "../src/workspaces/site-planner/SitePlanner.jsx");
-const SP = readFileSync(SP_PATH, "utf8");
+const SP = plannerSource();
 const GATE_SRC = readFileSync(join(here, "../src/workspaces/site-planner/lib/dragGate.js"), "utf8");
 
 /* A press at (100, 100) screen px == (50, 50) feet, at 2 px per foot. */

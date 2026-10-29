@@ -972,6 +972,188 @@ export const SOURCE_FIXTURES = {
     { label: "Aurora / east Denver metro (MHFD)", point: [-104.7781, 39.7587], expectMinCount: 1 }, // B209505 · live 2026-08-06: 88
   ],
   },
+  /* NEW-1 (B2528688, 2026-10-29) — the Colorado due-diligence family. Every count below was measured live 2026-10-29 (ECMC and Aurora through the planyr.io
+   * /gis-proxy relay, everything else straight from ArcGIS Online); `expectMinCount` is deliberately a floor well under the measured count so a normal edit never
+   * trips it, while a county-clipped or wrong service does. The ECMC floors are the ANTI-CLIP guard: Adams County's COGCC copy holds 711 wells in all of Weld,
+   * the Greeley box alone holds 768 here. */
+  ecmcWells: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 500 }, // live 2026-10-29: 768 wells (a county clip fails this)
+    { label: "Windsor (Weld/Larimer)", bbox: [-104.95, 40.45, -104.85, 40.52], expectMinCount: 300 }, // live 2026-10-29: 638
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 25
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  ecmcFlowlines: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 300 }, // live 2026-10-29: 692 segments
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 200 }, // live 2026-10-29: 596
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 300 }, // live 2026-10-29: 722
+  ],
+  },
+  ecmcLocations: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 200 }, // live 2026-10-29: 382 footprints
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 100 }, // live 2026-10-29: 205
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 5 }, // live 2026-10-29: 26
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  ecmcFacilities: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 40 }, // live 2026-10-29: 80 facilities (flowline points left off; 200 with them)
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 13 }, // live 2026-10-29: 26 (110 with flowline points)
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1 (2 with flowline points)
+  ],
+  },
+  cdpheRcraCa: {
+  fixtures: [
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 6 }, // live 2026-10-29: 12
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  cdpheInstControls: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 10 }, // live 2026-10-29: 26
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  cdpheClosedLandfills: {
+  fixtures: [
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Fort Collins (Larimer)", bbox: [-105.12, 40.55, -105.02, 40.62], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  cdpheSolidWaste: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 20 }, // live 2026-10-29: 44
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 8 }, // live 2026-10-29: 15
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  drmsUndermined: {
+  fixtures: [
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 6 }, // live 2026-10-29: 13 undermined-area polygons (Boulder–Weld coal field)
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 6 }, // live 2026-10-29: 13
+    { label: "Colorado Springs", bbox: [-104.88, 38.78, -104.78, 38.88], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  cpwPrairieDog: {
+  fixtures: [
+    { label: "Fort Collins (Larimer)", bbox: [-105.12, 40.55, -105.02, 40.62], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Pueblo", bbox: [-104.65, 38.22, -104.55, 38.30], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  cpwEagleNests: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 3 }, // live 2026-10-29: 6
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 2 }, // live 2026-10-29: 4
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  nrhpCo: {
+  fixtures: [
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 100 }, // live 2026-10-29: 232
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 3 }, // live 2026-10-29: 7
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 3 }, // live 2026-10-29: 7
+  ],
+  },
+  critHabitatCo: {
+  fixtures: [
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 3 (Colorado River fish designations)
+    { label: "Colorado Springs", bbox: [-104.88, 38.78, -104.78, 38.88], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  enterpriseZonesCo: {
+  fixtures: [
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldZoning: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 50 }, // live 2026-10-29: 101 districts
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 15 }, // live 2026-10-29: 36
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 5 }, // live 2026-10-29: 10
+  ],
+  },
+  weldGrowthBoundary: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldIga: {
+  fixtures: [
+    { label: "Windsor (Weld/Larimer)", bbox: [-104.95, 40.45, -104.85, 40.52], expectMinCount: 2 }, // live 2026-10-29: 4
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 1 }, // live 2026-10-29: 3
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldAirportOverlay: {
+  fixtures: [
+    { label: "Greeley-Weld airport overlay (south)", bbox: [-104.66, 40.32, -104.62, 40.36], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Greeley-Weld airport overlay (north)", bbox: [-104.66, 40.44, -104.62, 40.48], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldOilGasAssessment: {
+  fixtures: [
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 3 }, // live 2026-10-29: 7 county permit records
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  weldRoadRow: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 150 }, // live 2026-10-29: 357 right-of-way polygons
+    { label: "Windsor (Weld/Larimer)", bbox: [-104.95, 40.45, -104.85, 40.52], expectMinCount: 80 }, // live 2026-10-29: 207
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 30 }, // live 2026-10-29: 85
+  ],
+  },
+  adamsZoning: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 150 }, // live 2026-10-29: 336
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 20 }, // live 2026-10-29: 60
+    { label: "Aurora", bbox: [-104.78, 39.66, -104.68, 39.76], expectMinCount: 3 }, // live 2026-10-29: 10
+  ],
+  },
+  adamsAviation: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Aurora", bbox: [-104.78, 39.66, -104.68, 39.76], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  adamsLandfills: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 40 }, // live 2026-10-29: 101 landfill / fill polygons
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 4
+  ],
+  },
+  auroraAirportNoise: {
+  fixtures: [
+    { label: "Aurora — Buckley / DEN contours", bbox: [-104.78, 39.70, -104.70, 39.74], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Aurora — south (Centennial / Air and Space Port influence)", bbox: [-104.80, 39.58, -104.70, 39.64], expectMinCount: 1 }, // live 2026-10-29: 4
+  ],
+  },
+  auroraBuckleyApz: {
+  fixtures: [
+    { label: "Aurora — Buckley runway ends", bbox: [-104.78, 39.70, -104.70, 39.74], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Aurora — central (clear zone south end)", bbox: [-104.85, 39.68, -104.78, 39.73], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  auroraZoning: {
+  fixtures: [
+    { label: "Aurora — north", bbox: [-104.85, 39.76, -104.75, 39.82], expectMinCount: 50 }, // live 2026-10-29: 182
+    { label: "Aurora — south", bbox: [-104.80, 39.58, -104.70, 39.64], expectMinCount: 50 }, // live 2026-10-29: 225
+  ],
+  },
 };
 
 /* The fixtures for one registry key (both kinds), or an empty record. Pure. */
@@ -1530,6 +1712,110 @@ export const SOURCE_DOCS = {
   notes:
     "Existing storm outfall structures — the nearest one is where a site's release would " +
     "realistically tie in. The Colorado counterpart of the BKDD outfall row. Screening only.",
+  },
+  ecmcWells: {
+  notes:
+    "ECMC's own statewide well register (API spots) \u2014 NOT a county clip. Status is ECMC's two-letter code (PR producing, SI shut-in, TA temporarily abandoned, PA plugged and abandoned\u2026). A well record is a surface point, not the extent of its pad or flowlines.",
+  },
+  ecmcFlowlines: {
+  notes:
+    "Operator-submitted flowline registrations (Forms 12 / 44) \u2014 off-location flowlines, produced-water and crude transfer lines. Not every pipe is here (on-location lines and FERC/PHMSA gathering lines are not), so an empty map is never proof of none.",
+  },
+  ecmcLocations: {
+  notes:
+    "The surveyed footprint of each permitted oil-and-gas location (the pad, Form 2A), with ECMC's status. The footprint is what ECMC's setback rules are measured from.",
+  },
+  ecmcFacilities: {
+  notes:
+    "Tank batteries, compressor stations, gas plants, injection and disposal facilities, land-application sites registered with ECMC.",
+  },
+  cdpheRcraCa: {
+  notes:
+    "CDPHE's own tracking of RCRA corrective-action facilities: groundwater impact, off-site impact and plume length where known. A Phase I ESA pre-screen, not a clearance.",
+  },
+  cdpheInstControls: {
+  notes:
+    "Completed institutional controls (environmental covenants / notices of environmental use restrictions) filed with the county clerk \u2014 land-use restrictions that run with the land.",
+  },
+  cdpheClosedLandfills: {
+  notes:
+    "CDPHE's inventory of closed landfills; a flagged 'known or suspect release' is CDPHE's, not Planyr's.",
+  },
+  cdpheSolidWaste: {
+  notes:
+    "CDPHE Solid Waste Information System facilities: landfills, transfer stations, compost, recycling, asbestos, medical waste, impoundments.",
+  },
+  drmsUndermined: {
+  notes:
+    "DRMS Mine Subsidence Protection Program undermined areas with a 100 ft buffer (2023 statewide update). Hazard RATINGS exist only for parts of the Boulder\u2013Weld and Colorado Springs districts and are not on this row.",
+  },
+  cpwPrairieDog: {
+  notes:
+    "CPW's modelled probability (H / M / L) that black-tailed prairie dog colonies occur \u2014 a habitat screen, not a colony survey. Colonies drive burrowing-owl and black-footed-ferret survey requirements.",
+  },
+  cpwEagleNests: {
+  notes:
+    "CPW nest-site areas (active, inactive, destroyed, unknown). Bald and golden eagles are federally protected (Bald and Golden Eagle Protection Act); CPW and USFWS set the buffers and seasonal limits, not Planyr.",
+  },
+  nrhpCo: {
+  notes:
+    "The NPS National Register point layer (the same service as the Georgia row), shown in Colorado. A listing is one point; a district is one point, not its boundary.",
+  },
+  critHabitatCo: {
+  notes:
+    "USFWS final critical habitat (the same service as the Georgia row), shown in Colorado. Sparse in Colorado by nature.",
+  },
+  enterpriseZonesCo: {
+  notes:
+    "OEDIT's 19 Colorado Enterprise Zones for 2026-2035; a zone qualifies investment for state income-tax credits under C.R.S. 39-30-101 et seq. Eligibility is the program's, not the map's.",
+  },
+  weldZoning: {
+  notes:
+    "Weld County's zoning for unincorporated ground; municipalities zone their own ground.",
+  },
+  weldGrowthBoundary: {
+  notes:
+    "Weld County's urban growth boundaries for Brighton, Erie, Greeley, Lochbuie and Pierce.",
+  },
+  weldIga: {
+  notes:
+    "Municipal intergovernmental-agreement areas around 21 Weld towns, with the county's 'buffered' flag.",
+  },
+  weldAirportOverlay: {
+  notes:
+    "The county's Greeley-Weld airport overlay district.",
+  },
+  weldOilGasAssessment: {
+  notes:
+    "Weld County's own oil-and-gas location assessment permits (WOGLA) \u2014 a LOCAL land-use permit, separate from ECMC's well and location registers.",
+  },
+  weldRoadRow: {
+  notes:
+    "Weld County road right-of-way polygons with the status of how each was acquired and a width where recorded.",
+  },
+  adamsZoning: {
+  notes:
+    "Adams County's zoning districts; ground inside a city is labelled with the city's name, not a district.",
+  },
+  adamsAviation: {
+  notes:
+    "The county's aviation overlays: airport height, DIA 60 DNL noise, Front Range 60 DNL noise, airport influence zone.",
+  },
+  adamsLandfills: {
+  notes:
+    "The county's landfill and fill-site polygons: solid waste, inert fill, construction debris, sludge.",
+  },
+  auroraAirportNoise: {
+  notes:
+    "The city's published day-night-level contours and influence areas for Buckley SFB, Denver International, Centennial and Colorado Air and Space Port.",
+  },
+  auroraBuckleyApz: {
+  notes:
+    "Buckley Space Force Base clear zones and accident potential zones (APZ I / APZ II), north and south runway ends, as published by the city.",
+  },
+  auroraZoning: {
+  notes:
+    "Aurora's zoning districts as the city publishes them.",
   },
 };
 

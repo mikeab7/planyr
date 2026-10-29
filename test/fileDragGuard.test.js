@@ -17,6 +17,7 @@ import {
   installFileDragGuard, fileDragActive, clearFileDrag, isFileDrag, subscribeFileDrag,
   markDropHandled, dropWasHandled, DRAG_WATCHDOG_MS, LEAVE_GRACE_MS,
 } from "../src/shared/files/fileDrag.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -151,7 +152,7 @@ describe("wiring (the defect is a MISSING wire — a unit test of the module can
   });
   it("Library, Map, Site and Review read the shared tracker", () => {
     expect(read("src/workspaces/library/components/FileBrowser.jsx")).toMatch(/useFileDragActive\(isActive\)/);
-        expect(read("src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/useFileDragActive\(true\)/);
+        expect(plannerSource()).toMatch(/useFileDragActive\(true\)/);
     expect(read("src/workspaces/doc-review/DocReview.jsx")).toMatch(/useFileDragActive\(isActive && !narrow\)/);
   });
   it("the Library catches a drop ANYWHERE on its view (window level) and the home refuses out loud", () => {
@@ -162,6 +163,6 @@ describe("wiring (the defect is a MISSING wire — a unit test of the module can
     expect(read("src/workspaces/library/Library.jsx")).toMatch(/library-home-drop-notice/);
   });
   it("the Site canvas names a file it cannot take instead of letting the browser have it", () => {
-    expect(read("src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/Couldn't add “\$\{f\.name\}” — drop a PDF, DXF, DWG or image/);
+    expect(plannerSource()).toMatch(/Couldn't add “\$\{f\.name\}” — drop a PDF, DXF, DWG or image/);
   });
 });

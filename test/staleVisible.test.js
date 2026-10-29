@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 — IS A REFUSAL ACTUALLY VISIBLE? The question that found this was not "does the mapping
  * produce a warning" (it always did, and it was unit-tested) but "does the warning reach the
@@ -27,7 +28,7 @@ import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictTo
  * one — the signed-in pass is logged in `VERIFICATION.md`, and this exists so the two lines cannot
  * be deleted or reordered back into silence in the meantime.
  */
-const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const SRC = plannerSource();
 
 /** Drive the real engine until it gives up, and return every event it emitted. */
 function driveToStale() {
