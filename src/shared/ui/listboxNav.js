@@ -6,7 +6,7 @@
  * white in the light theme, so the highlight was drawn and was invisible. Every list rolled its own highlight and its own
  * arrow handling; this module is the one answer for both.
  *
- * Pure (no React, no DOM) so the rules are provable in a plain vitest run. `useListboxNav.js` is the hook over it.
+ * Pure (no React, no DOM) so the rules are provable in a plain vitest run. The hook over it, `useListboxNav`, lives in controls.jsx (see the note there).
  *
  * THE POLICY, applied everywhere: Down from the box (nothing highlighted) enters at row 1; Up from the box enters at the LAST
  * row; both WRAP at the ends (never a dead stop); Enter picks the highlighted row (nothing highlighted → the caller's own

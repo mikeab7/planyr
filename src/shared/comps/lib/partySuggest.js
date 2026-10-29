@@ -3,7 +3,7 @@
  *
  * The SOURCE of suggestions is independent from the map toolbar's PlaceSearchField (that one drives live, debounced, abortable
  * GEOCODING; this one suggests from data already held client-side — no fetch, no debounce, no abort). The LIST behaviour
- * (arrows, Enter, Escape, highlight, a11y) is the one shared hook, `shared/ui/useListboxNav.js`, used by both.
+ * (arrows, Enter, Escape, highlight, a11y) is the one shared hook, `shared/ui/controls.jsx (useListboxNav)`, used by both.
  *
  * NON-NEGOTIABLE (owner brief): suggestions only ever NARROW what to type, never FORCE or REWRITE
  * it. A brand-new name is always enterable with zero friction. Two spellings of the same company

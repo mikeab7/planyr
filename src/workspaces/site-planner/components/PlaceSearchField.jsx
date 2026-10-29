@@ -30,8 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import { RADIUS, nestedIn } from "../../../shared/ui/radius.js";
 import { suggestPlaces } from "../lib/placeSuggest.js";
 import { buildPlaceRows, resolvePlaceEnter, resolvePlaceRowCommit } from "../lib/placeSuggestRows.js";
-import { useListboxNav } from "../../../shared/ui/useListboxNav.js";
-import { listboxRowStyle } from "../../../shared/ui/listboxNav.js";
+import { useListboxNav, listboxRowStyle } from "../../../shared/ui/controls.jsx";
 
 const DEBOUNCE_MS = 250;
 
@@ -102,7 +101,7 @@ export default function PlaceSearchField({
     nav.reset();
   };
 
-  // ONE shared list behaviour (shared/ui/useListboxNav.js — the same hook every suggestion list uses): Up/Down move a
+  // ONE shared list behaviour (shared/ui/controls.jsx (useListboxNav) — the same hook every suggestion list uses): Up/Down move a
   // visible highlight, Enter on a highlighted row commits it exactly as a click would, Escape closes.
   const nav = useListboxNav({
     count: rows.length, open, setOpen, listboxId,

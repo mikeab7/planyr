@@ -72,7 +72,8 @@ describe("every suggestion list uses the shared hook (no list rolls its own arro
     });
   }
   it("the hook scrolls the highlighted row into view and shares hover with the keyboard highlight (mousemove, not mouseenter)", () => {
-    const h = read("src/shared/ui/useListboxNav.js");
+    const all = read("src/shared/ui/controls.jsx");
+    const h = all.slice(all.indexOf("export function useListboxNav"));
     expect(h).toContain("scrollIntoView");
     expect(h).toContain("onMouseMove");
     expect(h).not.toContain("onMouseEnter"); // a list scrolling under a still pointer must not steal the keyboard highlight

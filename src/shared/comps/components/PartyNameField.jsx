@@ -3,7 +3,7 @@
  * per /CLAUDE.md's LATE-BIND rule).
  *
  * The list behaviour (Up/Down highlight, Enter, Escape, the visible solid highlight, a11y props) is the app's ONE shared
- * suggestion-list hook (`shared/ui/useListboxNav.js`) — the same one the map toolbar's address field and Food's search use.
+ * suggestion-list hook (`shared/ui/controls.jsx (useListboxNav)`) — the same one the map toolbar's address field and Food's search use.
  * Only the SOURCE differs: this filters a small array already held in memory, synchronously, on every keystroke
  * (the map toolbar's field drives a debounced, abortable network geocode).
  *
@@ -16,8 +16,7 @@
  */
 import { useState } from "react";
 import { matchPartyNames } from "../lib/partySuggest.js";
-import { useListboxNav } from "../../ui/useListboxNav.js";
-import { listboxRowStyle } from "../../ui/listboxNav.js";
+import { useListboxNav, listboxRowStyle } from "../../ui/controls.jsx";
 
 const inputStyle = {
   width: "100%", padding: "6px 8px", fontSize: 12.5, borderRadius: 6, fontFamily: "inherit",
@@ -29,7 +28,7 @@ export default function PartyNameField({ label, value, onChange, candidates, lis
 
   const matches = matchPartyNames(value, candidates);
 
-  // ONE shared list behaviour (shared/ui/useListboxNav.js) — identical arrows / Enter / Escape / visible highlight everywhere.
+  // ONE shared list behaviour (shared/ui/controls.jsx (useListboxNav)) — identical arrows / Enter / Escape / visible highlight everywhere.
   const nav = useListboxNav({ count: matches.length, open, setOpen, listboxId, onCommit: (i) => commit(matches[i]) });
   const activeIndex = nav.activeIndex;
 

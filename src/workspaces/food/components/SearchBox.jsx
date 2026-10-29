@@ -35,9 +35,7 @@ import { mergeSearchRows, normalizeName } from "../lib/placeIdentity.js";
 import { rankByProximity } from "../lib/searchProximity.js";
 import { createSearchSession, carryOverRows } from "../lib/searchSession.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
-import { SIZE } from "../../../shared/ui/controls.jsx";
-import { useListboxNav } from "../../../shared/ui/useListboxNav.js";
-import { listboxRowStyle } from "../../../shared/ui/listboxNav.js";
+import { SIZE, useListboxNav, listboxRowStyle } from "../../../shared/ui/controls.jsx";
 
 const DEBOUNCE_MS = 120; // NEW-1: was 220 — the server answers in tens of ms now, so the wait should not be the slow part
 const MIN_QUERY_LEN = 2;
@@ -165,7 +163,7 @@ export default function SearchBox({
     onFlyTo({ lat: pin.lat, lon: pin.lon });
     setOpen(false);
   };
-  // Up/Down/Enter/Escape over the suggestion rows — the app's ONE shared list behaviour (shared/ui/useListboxNav.js).
+  // Up/Down/Enter/Escape over the suggestion rows — the app's ONE shared list behaviour (shared/ui/controls.jsx (useListboxNav)).
   // The two action buttons under the rows (live search, drop a pin) stay mouse/Tab-reachable and are not suggestions.
   const listboxId = useRef(`food-search-${Math.random().toString(36).slice(2)}`).current;
   const nav = useListboxNav({
