@@ -141,6 +141,19 @@ export const LAYER_TIER = {
   fl_wellfield_miamidade: "reference",
   fl_erp_sfwmd: "reference",         // permitted footprints around / on the site — look-up context
   fl_conservation_lands: "reference",
+  fl_contamination_sites: "reference", // a tracked cleanup — a pull-the-file flag (Phase I), like the Georgia HSI
+  fl_brownfield_areas: "reference",
+  fl_institutional_controls: "constraint", // a recorded use restriction on the land
+  fl_sinkhole_reports: "reference",
+  fl_sinkhole_areas: "reference",
+  fl_outstanding_florida_waters: "reference",
+  fl_panther_consultation: "reference",
+  fl_eagle_nesting: "reference",
+  fl_fll_noise: "reference",
+  fl_sfwmd_canals: "reference",
+  fl_sfwmd_row_permits: "constraint",   // a canal / levee right-of-way takes land off the site
+  fl_sfwmd_conservation_easements: "constraint", // an easement takes land off the site
+  fl_udb_miamidade: "reference",
   fl_sis_highways: "reference",      // a state designation to confirm with FDOT
   fl_evac_zones: "reference",        // an insurance / comp-plan flag, not the floodplain
   fl_natural_lands_broward: "reference",

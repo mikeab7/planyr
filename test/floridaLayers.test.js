@@ -36,6 +36,12 @@ import { LAYER_TIER, tierOf } from "../src/workspaces/site-planner/lib/layerWeig
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
 
 const IDS = Object.keys(FLORIDA_LAYERS);
+/* The declared Florida set, by name: a new Florida row must be added here on purpose. */
+const FLORIDA_IDS_DECLARED = [
+  "fl_brownfield_areas", "fl_city", "fl_conservation_lands", "fl_contamination_sites", "fl_county", "fl_drainage_districts_broward", "fl_eagle_nesting", "fl_erp_sfwmd", "fl_evac_zones",
+  "fl_fll_noise", "fl_institutional_controls", "fl_natural_lands_broward", "fl_outstanding_florida_waters", "fl_panther_consultation", "fl_sfwmd_canals", "fl_sfwmd_conservation_easements",
+  "fl_sfwmd_row_permits", "fl_sinkhole_areas", "fl_sinkhole_reports", "fl_sis_highways", "fl_udb_miamidade", "fl_wellfield_broward", "fl_wellfield_miamidade", "fl_wetlands_broward", "fl_wmd",
+].sort();
 const P = {
   sunriseHiatus: { lat: 26.1666, lng: -80.2554 },   // NW 44th St & Hiatus Rd — Broward, SFWMD
   miamiNw: { lat: 25.88, lng: -80.42 },             // Miami-Dade
@@ -49,7 +55,8 @@ beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
 describe("every Florida row is complete and reads the registry", () => {
   it("is registered in ALL_LAYERS and Florida-only", () => {
-    expect(IDS.length).toBeGreaterThanOrEqual(12);
+    expect([...IDS].sort()).toEqual(FLORIDA_IDS_DECLARED);
+    expect(IDS.length).toBeGreaterThanOrEqual(25);
     for (const id of IDS) {
       expect(ALL_LAYERS[id], id).toBe(FLORIDA_LAYERS[id]);
       expect(ALL_LAYERS[id].states, id).toEqual(["FL"]);
@@ -184,9 +191,10 @@ describe("the numbers on screen are the publisher's, and a legend is what the ma
   });
   it("no row prints a buffer, setback or distance the publisher does not publish", () => {
     const text = IDS.map((id) => ALL_LAYERS[id].note + " " + (ALL_LAYERS[id].infoCaveat || "")).join(" ");
-    // the only feet figures in any Florida note are Broward's three wellfield distances
+    // the only feet figures in any Florida note are Broward's three wellfield distances (the county's layer description) and the FGS's sinkhole cover thicknesses
+    // ("Cover is 30' to 200' thick" / "more than 200' thick" — the Survey's own DESC_1 text)
     const feet = [...text.matchAll(/(\d[\d,]*)\s*ft\b/g)].map((m) => m[1]);
-    expect(new Set(feet)).toEqual(new Set(["250", "500", "1,320"]));
+    expect(new Set(feet)).toEqual(new Set(["250", "500", "1,320", "200"]));
   });
 });
 
