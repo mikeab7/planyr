@@ -1,0 +1,5 @@
+	NORTH HOUSTON LEASE COMPS																					
+	Lease Executed	Lease Commenecement	Lease Expiration 	Submarket 	Property Name	Address	City	Tenant	Landlord	 Leased SF 	Total Building SF	Lease Transaction Type	Lease Term (months)	Free Rent (months)	Rent per SF/Month	Base Rent Increases %	 TI Allowance $/SF 	Clear Height Min (ft)	Year Built	Load Type	x	y
+	Jun-26	Aug-26	Jan-37	North Fwy/Tomball Pkwy	Example Logistics Park Bldg 2	1200 Example Pkwy	Houston	Acme Widgets LLC	Sample Industrial REIT	100,043	412,500	New Lease	126	6	$0.665	3.75%	$10.00	32'	2026	Front Load	-95.442043	29.927004
+	Mar-26	May-26	Apr-31	North Hardy Toll Rd	4400 Sample Rd	4400 Sample Rd	Houston	Fictional Freight Co	Placeholder Partners	52,800	52,800	Renewal	60	6 mo $0.37 NNN	$0.645	4.00%	-	28'	2008	Rear Load	-95.381200	29.958100
+	Jan-26	Apr-26	Jul-33	Northwest Near	Demo Commerce Center	880 Demo Blvd	Houston	Test Pallet Supply	Imaginary Capital	210,000	500,000	Expansion	87	9 (2 mo gross/ 7 mo net)	$0.595	3.50%	$4.50	36'	2024	Cross Dock	-95.512300	29.901700

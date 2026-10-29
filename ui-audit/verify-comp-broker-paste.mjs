@@ -20,13 +20,20 @@ const arg = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? proce
 const BASE = (arg("--live", "https://planyr.io")).replace(/\/$/, "");
 const EXPECT = arg("--expect", null);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURE = fs.readFileSync(path.join(here, "..", "test", "fixtures", "brokerLeaseComps", "nHoustonShape.tsv"), "utf8");
+// --fixture nHoustonRealHeader.tsv (B2345504 ×2) pastes the REAL header shape: a leading blank column,
+// padded headers and the misspelled "Lease Commenecement" — its first 3 rows are nHoustonShape's first 3.
+const FIXTURE_NAME = arg("--fixture", "nHoustonShape.tsv");
+const FIXTURE = fs.readFileSync(path.join(here, "..", "test", "fixtures", "brokerLeaseComps", FIXTURE_NAME), "utf8");
 const TITLES = [
   "Example Logistics Park Bldg 2 - Acme Widgets LLC", "4400 Sample Rd - Fictional Freight Co", "Demo Commerce Center - Test Pallet Supply",
   "Mock Distribution Ctr - Widget Holdings", "Example Gateway - Placeholder Foods",
 ];
+const COMMENCE = ["2026-08-01", "2026-05-01", "2026-04-01", "2026-02-01", "2025-12-01"];
+const RATES = [0.665, 0.645, 0.595, 0.575, 0.535];
 const KML_NAME = "zz-V1776033 KML promote";
 
+const N = FIXTURE.trim().split(/\r?\n/).length - 2; // minus the title row and the header row
+const EXPECT_TITLES = TITLES.slice(0, N);
 const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`  ${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`); };
 
@@ -91,18 +98,18 @@ try {
   await pacedWait(page, 1500);
   const dialogText = async () => (await page.locator('[role="grid"]').first().evaluate((el) => el.closest('[role="dialog"]')?.innerText || document.body.innerText));
   let txt = "";
-  for (let i = 0; i < 20; i++) { txt = await dialogText(); if (/5 comps ready/.test(txt)) break; await pacedWait(page, 500); }
-  check('footer reads "5 comps ready"', /5 comps ready/.test(txt), (txt.match(/\d+ comps?[^.\n]*/) || [""])[0]);
+  for (let i = 0; i < 20; i++) { txt = await dialogText(); if (new RegExp(`${N} comps ready`).test(txt)) break; await pacedWait(page, 500); }
+  check(`footer reads "${N} comps ready"`, new RegExp(`${N} comps ready`).test(txt), (txt.match(/\d+ comps?[^.\n]*/) || [""])[0]);
   check("no 'guessed' / 'has no period' warnings", !/guessed|no monthly\/annual period|Rate has no period/i.test(txt));
   // Give the county lookups a moment, then save.
   await pacedWait(page, 4000);
-  await page.getByRole("button", { name: /^Save 5 comps$/ }).click();
+  await page.getByRole("button", { name: new RegExp(`^Save ${N} comps$`) }).click();
   let saved = [];
-  for (let i = 0; i < 40; i++) { saved = await readSaved(); if (saved.length >= 5 && saved.every((r) => r.project_id)) break; await pacedWait(page, 500); }
+  for (let i = 0; i < 40; i++) { saved = await readSaved(); if (saved.length >= N && saved.every((r) => r.project_id)) break; await pacedWait(page, 500); }
   await page.reload({ waitUntil: "domcontentloaded" });
   await pacedWait(page, 4000);
   saved = await readSaved();
-  check("5 comps saved and still there after a reload", saved.length === 5, `${saved.length}`);
+  check(`${N} comps saved and still there after a reload`, saved.length === N, `${saved.length}`);
   const byTitle = Object.fromEntries(saved.map((r) => [r.title, r]));
   const a = byTitle[TITLES[0]] || {};
   check("row 1 fields", a.comp_type === "lease" && Number(a.lease_rate) === 0.665 && a.lease_rate_period === "monthly" && a.lease_rate_expense === "nnn" &&
@@ -112,7 +119,9 @@ try {
     JSON.stringify({ rate: a.lease_rate, per: a.lease_rate_period, date: a.comp_date, term: a.lease_term, ch: a.clear_height_ft, yb: a.year_built }));
   check("row 1 notes keep the non-field columns", ["Expires Jan-37", "Submarket:", "City: Houston", "Total Building SF: 412,500", "Lease Transaction Type: New Lease", "Load Type: Front Load"].every((b) => (a.notes || "").includes(b)), a.notes);
   check("row 1 pin at exactly x/y", Number(a.lat) === 29.927004 && Number(a.lon) === -95.442043, `${a.lat}, ${a.lon}`);
-  check("all 5 rates kept their precision", JSON.stringify(TITLES.map((t) => Number(byTitle[t]?.lease_rate))) === JSON.stringify([0.665, 0.645, 0.595, 0.575, 0.535]));
+  check(`all ${N} rates kept their precision`, JSON.stringify(EXPECT_TITLES.map((t) => Number(byTitle[t]?.lease_rate))) === JSON.stringify(RATES.slice(0, N)));
+  check(`Commence read on all ${N} rows`, JSON.stringify(EXPECT_TITLES.map((t) => byTitle[t]?.lease_commencement_date)) === JSON.stringify(COMMENCE.slice(0, N)),
+    EXPECT_TITLES.map((t) => byTitle[t]?.lease_commencement_date).join(","));
   check("every saved comp has a county", saved.every((r) => r.county), saved.map((r) => r.county).join(","));
   check("every saved comp is linked to a site", saved.every((r) => r.project_id));
   check("prose free rent: months + text in Notes", Number(byTitle[TITLES[1]]?.lease_free_rent_months) === 6 && (byTitle[TITLES[1]]?.notes || "").includes("Free rent: 6 mo $0.37 NNN"));
