@@ -138,6 +138,13 @@
    "lat": 42.62051,
    "lng": -77.01705,
    "id": "74.03-1-2"
+  },
+  {
+   "county": "Niagara County",
+   "lat": 43.13249,
+   "lng": -78.88224,
+   "id": "134.00-1-42.2",
+   "_note": "recorded from the Town of Cambria copy (same lot is in the county roll); re-record from the county host after deploy"
   }
  ]
 }

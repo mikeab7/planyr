@@ -489,8 +489,7 @@ export const PARCEL_GAPS = Object.freeze({
   id_twinfalls: ["locked", "403 permissions on the Tax Commission services"],
   id_clark: ["none"],
   id_custer: ["none"],
-  // New York
-  ny_niagara: ["unreachable", "county ArcGIS server down"],
+  // New York — (Niagara was a gap until 2026-10-28: its server had moved, now wired as ny_niagara)
   // Tennessee
   tn_knox: ["locked", "KGIS REST directory answers 401"],
 });

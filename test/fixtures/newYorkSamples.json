@@ -1290,6 +1290,21 @@
     "creationda": null,
     "objectid": 3039
    }
+  },
+  "Niagara": {
+   "_note": "Recorded 2026-10-28 from the Town of Cambria's public copy of the county Final Roll (same column schema as the county's own layer — the county host cannot be reached from the sandbox); replace with a row read through the relay once the deploy carries gis.niagaracounty.gov.",
+   "idField": "PrintKey",
+   "expectOwner": true,
+   "attrs": {
+    "PrintKey": "134.00-1-42.2",
+    "OwnrName": "Hoover Irrevocable Trust , Gerald & Jani",
+    "PrclStreet": "Raymond Rd",
+    "PrclNumb": "2993",
+    "PrclMuni": "Cambria",
+    "ACRES": 0.69,
+    "SBL": "1340000001042002",
+    "SwisCode": "292000"
+   }
   }
  }
 }
