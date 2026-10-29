@@ -1675,7 +1675,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) l.bindTooltip(l.__pfLabel, labelOpts()); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
     };
     /* A row that sets `lineLabel.declutter` (the municipal limits: one name per city) hides a name that would sit on top of a larger city's name — never two names piled up. */
-    let tick = null;
+    let ticks = [];
     const declutter = () => {
       if (!cfg.lineLabel.declutter || !labelsOn) return;
       const items = [];
@@ -1683,9 +1683,10 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       const keep = new Set(declutterBoxes(items));
       items.forEach((it, i) => { if (!keep.has(i)) it.el.style.visibility = "hidden"; });
     };
-    const later = () => { if (tick) clearTimeout(tick); tick = setTimeout(declutter, 60); };
-    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); lyr._map.on("moveend", later); syncLabels(); later(); } });
-    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); lyr._map && lyr._map.off("moveend", later); } catch (_) { /* map already gone */ } if (tick) clearTimeout(tick); });
+    // tooltips are opened and positioned a little after the features arrive / the zoom ends, so measure at three moments rather than guess one
+    const later = () => { ticks.forEach(clearTimeout); ticks = [200, 900, 2500].map((ms) => setTimeout(declutter, ms)); };
+    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); lyr._map.on("moveend", later); lyr._map.on("zoomend", later); syncLabels(); later(); } });
+    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); lyr._map && lyr._map.off("moveend", later); lyr._map && lyr._map.off("zoomend", later); } catch (_) { /* map already gone */ } ticks.forEach(clearTimeout); });
     lyr.on("load", () => { syncLabels(); later(); });
   }
   if (canHover) {
