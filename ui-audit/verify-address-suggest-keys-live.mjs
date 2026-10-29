@@ -14,7 +14,7 @@
  * options) — an empty list is a VOID run, never a pass. FOREGROUND-OR-VOID asserted first.
  * `--tap`: also WebKit (iPhone 15 descriptor) tap-to-pick on the Map search — emulated WebKit, not a real device. */
 import { openSignedIn } from "./lib/signedInSession.mjs";
-import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
 
 const args = process.argv.slice(2);
 const base = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
@@ -106,6 +106,10 @@ try {
     await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowUp");
     fs = await listState(page, FSEL);
     check("Food — Down, Down, Up → first row highlighted", fs.idx === 0 && fs.selectedTrue === 1, `idx ${fs.idx}`);
+    const fsNow = fs; // the same instant, for the record: a button's CSS colour transition has not started yet, so its computed fill still reads the OLD value
+    await pacedWait(page, 600); // settle: read the highlight AFTER the row's colour transition, as a person sees it
+    fs = await listState(page, FSEL);
+    console.log(`   (immediately after the key: ${fsNow.rowBg}; settled: ${fs.rowBg})`);
     check("Food — the highlight is VISIBLE (≥ 3:1 vs the panel, ink ≥ 4.5:1)", contrast(fs.rowBg, fs.listBg === "rgba(0, 0, 0, 0)" ? "rgb(255, 255, 255)" : fs.listBg) >= 3 && contrast(fs.rowInk, fs.rowBg) >= 4.5, `row ${fs.rowBg}, ink ${fs.rowInk}`);
     await page.keyboard.press("ArrowDown");
     fs = await listState(page, FSEL);
