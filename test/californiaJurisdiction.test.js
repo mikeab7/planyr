@@ -83,7 +83,10 @@ describe("routing — the envelope routes, and never overlaps TX / CO / GA", () 
       expect(lat >= CA_ENVELOPE.latMin && lat <= CA_ENVELOPE.latMax && lng >= CA_ENVELOPE.lonMin && lng <= CA_ENVELOPE.lonMax, `${name} is inside the box`).toBe(true);
       expect(inCaliforniaEnvelope(lat, lng), name).toBe(false);
       expect(countySourcesForPoint(lat, lng), name).toEqual([]);
-      expect(siteState({ lat, lng }), name).toBeNull();
+      // B2479568 amendment: Nevada answers by name now and is never CA. Laughlin sits on the Colorado River line, inside the ~1 km a
+      // 1:10m state boundary can be off (it reads AZ) — the assertion that matters here is "not California".
+      expect(siteState({ lat, lng }), name).not.toBe("CA");
+      if (name !== "Laughlin NV") expect(siteState({ lat, lng }), name).toBe("NV");
     }
   });
   it("...while real California ground along that same edge IS routed: Death Valley, Needles, Blythe, Truckee, South Lake Tahoe, Alturas, Calexico, Crescent City", () => {
@@ -157,7 +160,7 @@ describe("identify + badge — the California acceptance points", () => {
     for (const pt of [RENO_NV, YUMA_AZ]) {
       expect(countySourcesForPoint(pt[1], pt[0])).toEqual([]);
       expect(citySourcesForPoint(pt[1], pt[0])).not.toContain(JURISDICTION_SOURCES.cityCa);
-      expect(siteState({ lat: pt[1], lng: pt[0] })).toBeNull();
+      expect(siteState({ lat: pt[1], lng: pt[0] })).not.toBe("CA"); // NV / AZ by name since B2479568
       const j = await run(pt, {}); // any California fetch would throw "no route"
       expect(j.state).toBeUndefined();
       expect(j.notInCalifornia).toBeUndefined();
