@@ -23,7 +23,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 import { ALL_LAYERS, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import {
   FLORIDA_LAYERS, FLORIDA_VINTAGE, FLORIDA_RELAY, relayUrl, districtName, evacColor, EVAC_RAMP, evacStyle,
-  EVAC_OTHER, BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel, ERP_TYPES as ERP_TYPES_FOR_TEST, niceCase, restrictionWords, cleanupCategory, cleanupStatus, noiseLabel, sinkholeAreaStyle, SINKHOLE_AREA_RAMP, NOISE_RAMP, noiseStyle,
+  EVAC_OTHER, BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel, ERP_TYPES as ERP_TYPES_FOR_TEST, niceCase, restrictionWords, epochDate, cleanupCategory, cleanupStatus, noiseLabel, sinkholeAreaStyle, SINKHOLE_AREA_RAMP, NOISE_RAMP, noiseStyle,
 } from "../src/workspaces/site-planner/lib/floridaLayers.js";
 import { GIS_SOURCES, statesFor, auditRegistry } from "../src/shared/gis/sources.js";
 import { FLORIDA_SOURCES } from "../src/shared/gis/sourcesFlorida.js";
@@ -223,6 +223,9 @@ describe("review findings (adversarial pass 1) stay fixed", () => {
   });
   it("the evacuation layer opens only once a view's answer fits the draw budget (z9 measured 324k vertices over the 120k cap)", () => {
     expect(ALL_LAYERS.fl_evac_zones.minZoom).toBeGreaterThanOrEqual(11);
+    // St. Petersburg z11–13: with simplifyFactor 0.5 and the default 120k budget 16 of 30 tile batches were refused ("too detailed to draw"); the row asks the server for a much coarser copy and carries its own budget
+    expect(ALL_LAYERS.fl_evac_zones.simplifyFactor).toBeGreaterThanOrEqual(6);
+    expect(ALL_LAYERS.fl_evac_zones.vertexBudget).toBeGreaterThanOrEqual(400000);
   });
   it("Miami-Dade's helper polygons (AVG / MAX / INT / OUTER) are not drawn as a travel-time class", () => {
     expect(ALL_LAYERS.fl_wellfield_miamidade.where).toBe("TRAVELTIME IN ('010','030','100','210')");
@@ -266,5 +269,45 @@ describe("click-card wording", () => {
   it("the relayed rows' card text carries no raw field names", () => {
     const rows = ALL_LAYERS.fl_institutional_controls.identifyCard({ PRIMARY_SITE_NAME: "X", PRIMARY_SITE_ADDRESS_LINE_1: "1 MAIN ST", PRIMARY_SITE_CITY: "SUNRISE", DESCRIPTION: "GROUNDWATER USE RESTRICTION", BEGIN_DATE: 1377561600000 }).rows;
     for (const r of rows) expect(r.label, r.label).not.toMatch(/[A-Z]{3,}_|_[A-Z]/);
+  });
+});
+
+describe("review pass 2 stays fixed", () => {
+  it("the panther consultation row is scoped to its own area, not offered statewide", () => {
+    expect(ALL_LAYERS.fl_panther_consultation.regions).toEqual(["pantherconsult"]);
+    expect(shows("fl_panther_consultation", "FL", { lat: 26.42, lng: -81.42 })).toBe(true);   // Immokalee
+    expect(shows("fl_panther_consultation", "FL", { lat: 25.9, lng: -80.55 })).toBe(true);    // west Miami-Dade (Everglades side) — the area reaches it
+    expect(shows("fl_panther_consultation", "FL", P.tampa)).toBe(false);
+    expect(shows("fl_panther_consultation", "FL", P.jacksonville)).toBe(false);
+    expect(ALL_LAYERS.fl_panther_consultation.note).not.toMatch(/Nothing here for Broward/);
+  });
+  it("the right-of-way row asks only for FINAL permits and prints pre-1970 dates and tidy 'use' text", () => {
+    expect(ALL_LAYERS.fl_sfwmd_row_permits.where).toBe("reviewStatus = 'FINAL'");
+    expect(epochDate(-310608000000)).toMatch(/1960/);
+    expect(epochDate(null)).toBe("");
+    const long = "(CANCELLED) " + "FENCE ENCLOSURE ".repeat(30);
+    const card = ALL_LAYERS.fl_sfwmd_row_permits.identifyCard({ PERMIT_NO: "1", PERMITEE: "CARTER, GARY A.", PROJECT_WORKS: "C-42", AUTHORIZATION_: long, DATE_ISSUED: -310608000000 });
+    expect(card.rows.find((r) => r.label === "Use").text.length).toBeLessThanOrEqual(140);
+    expect(card.rows.find((r) => r.label === "Issued").text).toMatch(/1960/);
+    expect(card.rows.find((r) => r.label === "Permittee").text).toBe("Carter, Gary A.");
+  });
+  it("only the registry's own pipe-joined restriction vocabulary is re-worded; free text prints as written", () => {
+    expect(restrictionWords("GROUNDWATER USE RESTRICTION|LAND USE RESTRICTION")).toBe("Groundwater Use Restriction · Land Use Restriction");
+    expect(restrictionWords("SS086 LUC Boundary")).toBe("SS086 LUC Boundary");
+    expect(restrictionWords("Conditional Site Rehabilitation Completion Order")).toBe("Conditional Site Rehabilitation Completion Order");
+    expect(restrictionWords("DOD_4_513 GW")).toBe("DOD_4_513 GW");
+  });
+  it("the sinkhole-area ramp is a neutral thickness ramp, not a hazard scale, and its legend names no cover figure the data contradicts", () => {
+    for (const c of Object.values(SINKHOLE_AREA_RAMP)) expect(c).toMatch(/^#(33|64|94|cb)/);
+    for (const l of ALL_LAYERS.fl_sinkhole_areas.legend) expect(l.label).not.toMatch(/\d+\s*ft/);
+    expect(ALL_LAYERS.fl_sinkhole_areas.note).toMatch(/not a hazard scale/);
+  });
+  it("planned SIS corridors are dashed, existing ones solid", () => {
+    const f = ALL_LAYERS.fl_sis_highways.styleFn;
+    expect(f({ SISTYPE_DE: "Future Corridor" }, 0.5).dashArray).toBeTruthy();
+    expect(f({ SISTYPE_DE: "SIS Corridor" }, 0.5).dashArray).toBeFalsy();
+  });
+  it("a row that asks the server to simplify and carries its own draw budget says why", () => {
+    expect(ALL_LAYERS.fl_sinkhole_areas.vertexBudget).toBeGreaterThanOrEqual(300000);
   });
 });

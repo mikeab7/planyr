@@ -67,11 +67,26 @@ const codeWord = (table, v) => { const k = String(v == null ? "" : v).trim().toU
 export const cleanupCategory = (v) => codeWord(CLEANUP_CATEGORIES, v);
 export const cleanupStatus = (v) => codeWord(CLEANUP_STATUSES, v);
 /* The registry's restriction text arrives as "EC MAINTENANCE|GROUNDWATER USE RESTRICTION" — pipe-joined, shouted. */
-export const restrictionWords = (v) => String(v == null ? "" : v).split("|").map((t) => t.trim()).filter(Boolean)
-  .map((t) => t.toLowerCase().replace(/(^|\s)([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\bEc\b/, "EC")).join(" · ") || null;
+export const restrictionWords = (v) => {
+  const t = String(v == null ? "" : v).trim();
+  if (!t) return null;
+  // only the registry's own shouted, pipe-joined restriction vocabulary is re-worded; free text ("SS086 LUC Boundary", an order title, a recorded-book reference) prints exactly as written
+  if (!/^[A-Z][A-Z ]*(\|[A-Z][A-Z ]*)*$/.test(t)) return t;
+  return t.split("|").map((x) => x.trim()).filter(Boolean)
+    .map((x) => x.toLowerCase().replace(/(^|\s)([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\bEc\b/, "EC")).join(" · ");
+};
+/* An Esri epoch-ms date in words — including the pre-1970 dates a plain date formatter drops (SFWMD's 1959–60 right-of-way permits). */
+export const epochDate = (ms) => {
+  const n = Number(ms);
+  if (ms == null || ms === "" || !Number.isFinite(n)) return "";
+  const d = new Date(n);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+};
+const acres = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? (n >= 100 ? String(Math.round(n).toLocaleString("en-US")) : n.toFixed(2)) : ""; };
+const oneLine = (v, max = 140) => { const t = String(v == null ? "" : v).replace(/\s+/g, " ").trim(); return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t; };
 
 /* ── FGS sinkhole-type areas: I (bare / thin cover) darkest → IV (deep cover) lightest ────────────────────────────────────────────────────────── */
-export const SINKHOLE_AREA_RAMP = { "Area I": "#7c2d12", "Area II": "#c2410c", "Area III": "#f59e0b", "Area IV": "#fde68a" };
+export const SINKHOLE_AREA_RAMP = { "Area I": "#334155", "Area II": "#64748b", "Area III": "#94a3b8", "Area IV": "#cbd5e1" }; // a neutral ramp by cover thickness — NOT a hazard scale (the Survey says Area I's sinkholes are few and gradual)
 export const sinkholeAreaStyle = (props, opacity) => {
   const c = SINKHOLE_AREA_RAMP[String(props && props.AREA_DESC || "").trim()] || "#fde68a";
   return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: Math.min(0.4, opacity * 0.55) };
@@ -133,7 +148,7 @@ export const FLORIDA_LAYERS = {
     kind: "esriFeature", label: "Hurricane Evacuation Zones", source: "Florida Division of Emergency Management — Know Your Zone",
     url: GIS_SOURCES.evacZonesFl.serviceUrl, ...FL,
     minZoom: 11, color: "#c2410c", weight: 1, opacity: 0.4,
-    styleFn: evacStyle, simplifyFactor: 0.5,
+    styleFn: evacStyle, simplifyFactor: 6, vertexBudget: 400000, // Pinellas's coastline polygons are 30k+ vertices each and AGOL re-delivers whole polygons per tile: measured at St. Petersburg z11–13 the default budget refused 16 of 30 batches (2026-10-29)
     legend: [
       { label: "Zone A — usually the Category 1 surge area", color: EVAC_RAMP.A }, { label: "Zone B", color: EVAC_RAMP.B }, { label: "Zone C", color: EVAC_RAMP.C },
       { label: "Zone D", color: EVAC_RAMP.D }, { label: "Zone E", color: EVAC_RAMP.E }, { label: "Other county-defined zones (F–M, lake, …)", color: EVAC_OTHER },
@@ -141,7 +156,7 @@ export const FLORIDA_LAYERS = {
     ...hoverCommon, hoverTitle: "Evacuation zone", hoverSource: "FDEM",
     hoverFields: [{ names: ["EZone"], label: "Zone" }, { names: ["County_Nam"], label: "County" }],
     note: "Statewide hurricane evacuation zones from the state's storm-surge (SLOSH) modelling: A floods first (Category 1), then B, C … as the storm grows. Zone A is generally the Category-1 surge area that Florida law uses to define the Coastal High Hazard Area (s. 163.3178, F.S.), but zone letters are set county by county and a county's adopted CHHA map is what governs a plan amendment or rezoning. Inland sites are in no zone.",
-    infoCaveat: "Evacuation zones, not flood zones and not the FEMA floodplain — a site can be in a zone and outside the SFHA, or the reverse. A flag for insurance, lender and comp-plan review; confirm the adopted CHHA with the county.",
+    infoCaveat: "Evacuation zones, not flood zones and not the FEMA floodplain — a site can be in a zone and outside the SFHA, or the reverse. Zones are drawn county by county and some counties' zones were last edited as long ago as 2013. A flag for insurance, lender and comp-plan review; confirm the adopted CHHA and the current zone map with the county.",
     role: "area", group: "flood", order: 4,
     floodTier: "advisory", agency: "FDEM",
   },
@@ -174,14 +189,21 @@ export const FLORIDA_LAYERS = {
     floodTier: "local", agency: "SFWMD",
   },
   fl_sfwmd_row_permits: {
-    kind: "esriFeature", label: "Canal & Levee Rights-of-Way", source: "South Florida Water Management District — Regulation",
+    kind: "esriFeature", label: "Canal Right-of-Way Permits", source: "South Florida Water Management District — Regulation",
     url: relayUrl(GIS_SOURCES.rowPermitsSfwmd.serviceUrl), ...FL, regions: ["sfwmd"],
-    minZoom: 13, color: "#0e7490", weight: 1.2, opacity: 0.4, fetchAll: true,
+    minZoom: 13, color: "#0e7490", weight: 1.2, opacity: 0.4, fetchAll: true, where: "reviewStatus = 'FINAL'",
     styleFn: areaStyle("#0e7490", 0.2, 1.2),
     ...hoverCommon, hoverTitle: "Right-of-way permit", hoverSource: "SFWMD",
-    hoverFields: [{ names: ["PERMIT_NO"], label: "Permit no." }, { names: ["PERMITEE"], label: "Permittee" }, { names: ["PROJECT_WORKS"], label: "Canal or works" }, { names: ["AUTHORIZATION_"], label: "Use" }, { names: ["DATE_ISSUED"], label: "Issued", date: true }],
-    note: "Right-of-Way and Right-of-Way Occupancy permits SFWMD has issued on its canal and levee rights-of-way. Per SFWMD, an occupancy permit is required before connecting with, placing structures in or across, or discharging into the canal and levee system (the 'Works of the District') and certain other canals, and it conveys no property rights. A permit beside your site shows what the District has allowed on that canal bank.",
-    infoCaveat: "Shows permitted occupancies, not the right-of-way line itself and not every canal the District's rules reach. Confirm the right-of-way width and any needed permit with SFWMD.",
+    hoverFields: [{ names: ["PERMIT_NO"], label: "Permit no." }, { names: ["PERMITEE"], label: "Permittee" }, { names: ["PROJECT_WORKS"], label: "Canal or works" }],
+    identifyCard: (props) => ({
+      title: "Right-of-way permit",
+      rows: [
+        { label: "Permit no.", text: props.PERMIT_NO }, { label: "Permittee", text: niceCase(props.PERMITEE) }, { label: "Canal or works", text: props.PROJECT_WORKS },
+        { label: "Use", text: oneLine(niceCase(props.AUTHORIZATION_)) }, { label: "Issued", text: epochDate(props.DATE_ISSUED) }, { label: "Expires", text: epochDate(props.PERMIT_EXP_DATE) },
+      ],
+    }),
+    note: "Final Right-of-Way and Right-of-Way Occupancy permits SFWMD has issued on its canal and levee rights-of-way (drafts, permits in review and cancelled or rejected ones are left out; some final permits have since expired — the card shows the expiry). Per SFWMD, an occupancy permit is required before connecting with, placing structures in or across, or discharging into the canal and levee system (the 'Works of the District') and certain other canals, and it conveys no property rights. A permit beside your site shows what the District allowed on that canal bank.",
+    infoCaveat: "These are permitted occupancies, NOT the right-of-way line itself, and not every canal the District's rules reach. Confirm the right-of-way width and any needed permit with SFWMD.",
     role: "area", group: "flood", order: 7,
     floodTier: "local", agency: "SFWMD",
   },
@@ -209,7 +231,7 @@ export const FLORIDA_LAYERS = {
         { label: "Program", text: cleanupCategory(props.CLCC_CLEANUP_CATEGORY_KEY) }, { label: "Status", text: cleanupStatus(props.RSC2_REMEDIATION_STATUS_KEY) },
       ],
     }),
-    note: "Sites in FDEP's cleanup programs with an active or open cleanup — petroleum tank discharges, dry-cleaning and other cleanups, brownfield sites, Superfund and PFAS sites — at DEP's own coordinates. A Phase I ESA PRE-SCREEN: a site on or beside yours is a flag to pull DEP's file (the Contamination Locator Map links each site's documents). It is not a list of every registered tank or historic release.",
+    note: "Sites in FDEP's cleanup programs with an active, open or on-hold cleanup — petroleum tank discharges, dry-cleaning and other cleanups, brownfield sites, Superfund and PFAS sites — at DEP's own coordinates. A Phase I ESA PRE-SCREEN: a site on or beside yours is a flag to pull DEP's file (the Contamination Locator Map links each site's documents). It is not a list of every registered tank or historic release.",
     infoCaveat: "A map of known, tracked cleanups. A clear map is NOT a clean bill: unreported releases and sites DEP has closed are not here. A Phase I ESA is the real check.",
     role: "point", group: "environmental", order: 21,
   },
@@ -264,14 +286,14 @@ export const FLORIDA_LAYERS = {
     kind: "esriFeature", label: "Sinkhole Type Areas", source: "Florida Geological Survey",
     url: relayUrl(GIS_SOURCES.sinkholeAreasFl.serviceUrl), ...FL,
     minZoom: 9, color: "#c2410c", weight: 1, opacity: 0.4,
-    styleFn: sinkholeAreaStyle, simplifyFactor: 0.75,
+    styleFn: sinkholeAreaStyle, simplifyFactor: 4, vertexBudget: 300000, // FGS polygons are 10k+ vertices each and re-delivered per tile (Tampa z14 on a wide window refused a batch at the default)
     legend: [
-      { label: "Area I — bare or thinly covered limestone", color: SINKHOLE_AREA_RAMP["Area I"] }, { label: "Area II — 30–200 ft of sandy cover", color: SINKHOLE_AREA_RAMP["Area II"] },
-      { label: "Area III — 30–200 ft of clayey cover", color: SINKHOLE_AREA_RAMP["Area III"] }, { label: "Area IV — more than 200 ft of cover", color: SINKHOLE_AREA_RAMP["Area IV"] },
+      { label: "Area I — thinnest cover", color: SINKHOLE_AREA_RAMP["Area I"] }, { label: "Area II", color: SINKHOLE_AREA_RAMP["Area II"] },
+      { label: "Area III", color: SINKHOLE_AREA_RAMP["Area III"] }, { label: "Area IV — deepest cover", color: SINKHOLE_AREA_RAMP["Area IV"] },
     ],
     ...hoverCommon, hoverTitle: "Sinkhole type area", hoverSource: "Florida Geological Survey",
     hoverFields: [{ names: ["AREA_DESC"], label: "Area" }, { names: ["DESC_1"], label: "Cover" }, { names: ["DESC_2"], label: "Sinkholes" }],
-    note: "The Florida Geological Survey's map of where sinkholes form and what kind. Area I is bare or thinly covered limestone; Areas II and III are 30–200 ft of cover (sandy, or clayey); Area IV is more than 200 ft. Click for the Survey's own description of the sinkholes each area produces (cover-collapse can develop abruptly). Ground outside every area is simply not mapped for sinkhole type.",
+    note: "The Florida Geological Survey's map of where sinkholes form and what kind: Area I is generally bare or thinly covered limestone, Areas II and III are generally 30–200 ft of sandy or clayey cover and Area IV is generally more than 200 ft. The shading runs by cover thickness only — it is not a hazard scale. Click for the Survey's own description of the sinkholes each area produces (cover-collapse can develop abruptly). Ground outside every area is simply not mapped for sinkhole type.",
     infoCaveat: "A regional screening map, not a site investigation: it says what is likely in the area, not what is under your slab. Order a geotechnical report before committing to a building pad.",
     role: "area", group: "environmental", order: 28,
   },
@@ -288,12 +310,13 @@ export const FLORIDA_LAYERS = {
   },
   fl_panther_consultation: {
     kind: "esriFeature", label: "Panther Consultation Area", source: "U.S. Fish & Wildlife Service (hosted by Florida DEP)",
-    url: relayUrl(GIS_SOURCES.pantherFl.serviceUrl), ...FL,
+    url: relayUrl(GIS_SOURCES.pantherFl.serviceUrl), ...FL, regions: ["pantherconsult"],
     minZoom: 8, color: "#b45309", weight: 1.2, opacity: 0.4,
     styleFn: areaStyle("#b45309", 0.2, 1.2, "6 3"), simplifyFactor: 1,
     ...hoverCommon, hoverTitle: "Panther consultation area", hoverSource: "USFWS",
-    hoverFields: [{ names: ["ACRES"], label: "Acres" }],
-    note: "The area in USFWS's South Florida Ecological Services Office territory (southwest Florida) where consultation on possible impacts to the endangered Florida panther should be made if suitable habitat is present. It matters for a project needing a federal action — a Corps wetlands permit, say — that touches panther habitat. Nothing here for Broward, Miami-Dade or Palm Beach sites.",
+    hoverFields: [],
+    identifyCard: () => ({ title: "Panther consultation area", rows: [], note: "Consult USFWS if suitable panther habitat is present and a federal action is involved." }),
+    note: "The area in USFWS's South Florida Ecological Services Office territory (southwest Florida) where consultation on possible impacts to the endangered Florida panther should be made if suitable habitat is present. It matters for a project needing a federal action — a Corps wetlands permit, say — that touches panther habitat. The mapped area spans southwest Florida and reaches the western edges of Broward and Miami-Dade (the Everglades side); sites elsewhere are outside it.",
     infoCaveat: "A consultation trigger, not a habitat map or a permit determination. USFWS (IPaC) decides whether consultation is required.",
     role: "area", group: "environmental", order: 30,
   },
@@ -331,7 +354,7 @@ export const FLORIDA_LAYERS = {
     kind: "esriFeature", label: "SIS Highways (FDOT)", source: "Florida Department of Transportation",
     url: GIS_SOURCES.sisHighwaysFl.serviceUrl, ...FL,
     minZoom: 8, color: "#0369a1", weight: 2, opacity: 0.55,
-    styleFn: (_p, opacity) => ({ color: "#0369a1", weight: 2, opacity, fill: false }),
+    styleFn: (props, opacity) => ({ color: "#0369a1", weight: 2, opacity, fill: false, dashArray: /future/i.test(String(props && props.SISTYPE_DE || "")) ? "8 5" : null }), // planned ("Future") corridors are dashed
     ...hoverCommon, hoverTitle: "SIS highway", hoverSource: "FDOT",
     hoverFields: [{ names: ["FACILITY"], label: "Facility" }, { names: ["SISTYPE_DE"], label: "Type" }, { names: ["COUNTY"], label: "County" }],
     note: "The highways on FDOT's Strategic Intermodal System — the state's designated high-priority freight and passenger corridors (interstates, the Turnpike, major connectors). Freight-oriented industrial sites cluster on them; a driveway or median opening onto a state road needs an FDOT connection permit, and FDOT's access-management rules apply on state roads.",
@@ -401,6 +424,7 @@ export const FLORIDA_LAYERS = {
     styleFn: areaStyle("#0d9488", 0.3, 1), simplifyFactor: 0.5,
     ...hoverCommon, hoverTitle: "Wetland", hoverSource: "Broward County",
     hoverFields: [{ names: ["ACRESGIS"], label: "Acres" }],
+    identifyCard: (props) => ({ title: "Wetland", rows: [{ label: "Acres", text: acres(props.ACRESGIS) }] }),
     note: "Broward County's own wetland map, kept by its Aquatic and Wetland Resources program for planning and environmental review. In Broward, work in wetlands generally needs the county's Environmental Resource License in addition to the state / federal permits (its license numbers are in this layer's data) — this map shows where to expect it. Turn on National Wetlands for the federal inventory.",
     infoCaveat: "A planning map, not a jurisdictional delineation: edges are approximate and some mapped areas are already permitted for impact or mitigation. A wetland delineation by a consultant is the real check.",
     role: "area", group: "environmental", order: 24,
@@ -411,7 +435,7 @@ export const FLORIDA_LAYERS = {
     minZoom: 10, color: "#4d7c0f", weight: 1.2, opacity: 0.4,
     styleFn: areaStyle("#4d7c0f", 0.25, 1.2), simplifyFactor: 0.5,
     ...hoverCommon, hoverTitle: "Protected natural land", hoverSource: "Broward County",
-    hoverFields: [{ names: ["NAME"], label: "Name" }, { names: ["OWNER"], label: "Owner" }, { names: ["MNGMTAUTHO"], label: "Managed by" }, { names: ["PRESMECHAN"], label: "Protected by" }],
+    hoverFields: [{ names: ["NAME"], label: "Name" }, { names: ["OWNER"], label: "Owner" }, { names: ["MNGMTAUTHO"], label: "Managed by" }],
     note: "Broward's inventory of protected natural lands — forested uplands and wetlands protected by ownership, easement or a land-use designation. Next to one, expect buffer, habitat and stormwater-quality questions; on one, the protection mechanism decides what is possible.",
     infoCaveat: "County inventory last edited 2018. Confirm the mechanism and boundary against the recorded instrument.",
     role: "area", group: "environmental", order: 25,
@@ -428,7 +452,7 @@ export const FLORIDA_VINTAGE = {
   fl_city: "UF GeoPlan city limits from the 2021 county tax rolls — layer edited 2024-05-03; later annexations are not in it",
   fl_udb_miamidade: "Miami-Dade Urban Development Boundary — layer edited 2025-08-19",
   fl_wmd: "FDEP water management district boundaries (SFWMD-hosted copy) — layer edited 2021-10-31",
-  fl_evac_zones: "FDEM Know Your Zone evacuation zones — layer edited 2026-09-19 (zone data dated 2026-07-24)",
+  fl_evac_zones: "FDEM Know Your Zone evacuation zones — statewide layer edited 2026-09-19; each county's zones carry their own edit date (some Broward / Miami-Dade zones date from 2013)",
   fl_drainage_districts_broward: "Broward County drainage districts — layer edited 2021-06-10",
   fl_wellfield_broward: "Broward County wellfield zones — map approved 2001-02-16, ordinance revised June 2013; layer edited 2021-06-10",
   fl_wellfield_miamidade: "Miami-Dade County wellfield protection areas — layer edited 2025-11-03",

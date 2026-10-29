@@ -14,9 +14,9 @@ import { buildIndex } from "../src/workspaces/site-planner/lib/countyPolygonsCor
 
 const OUT = new URL("../src/workspaces/site-planner/lib/serviceAreaData.js", import.meta.url);
 const round = (n) => Math.round(n * 1e4) / 1e4;
-const q = async (url, params) => {
+const q = async (url, params, headers = {}) => {
   const u = new URL(url); for (const [k, v] of Object.entries({ f: "geojson", outSR: 4326, outFields: "*", ...params })) u.searchParams.set(k, v);
-  const r = await fetch(u); if (!r.ok) throw new Error(`${url} → ${r.status}`);
+  const r = await fetch(u, { headers }); if (!r.ok) throw new Error(`${url} → ${r.status}`);
   const j = await r.json(); if (j.error) throw new Error(`${url} → ${JSON.stringify(j.error)}`);
   return j;
 };
@@ -54,11 +54,11 @@ if (want("desoto")) {
   areas.desoto = { label: "DeSoto County, MS", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
 /* NEW-1 (Florida, B2452976): the county- and district-scoped Florida rows.
- *   broward / miamidade / palmbeach   the county, from the SAME bundled county polygons as `harris` (no network).
+ *   broward / miamidade               the county, from the SAME bundled county polygons as `harris` (no network).
  *   sfwmd                             the South Florida Water Management District, from its own published boundary (SFWMD's hosted
  *                                     "Water Management District Boundaries", WMDNAME='SFWMD'); the ERP permit layer, canals and rights of way are
  *                                     SFWMD's own and carry nothing outside it. */
-for (const [key, name, label] of [["broward", "Broward", "Broward County, FL"], ["miamidade", "Miami-Dade", "Miami-Dade County, FL"], ["palmbeach", "Palm Beach", "Palm Beach County, FL"]]) {
+for (const [key, name, label] of [["broward", "Broward", "Broward County, FL"], ["miamidade", "Miami-Dade", "Miami-Dade County, FL"]]) {
   if (!want(key)) continue;
   const rec = index.counties.find((c) => c.state === "FL" && c.name.replace(/ county$/i, "") === name);
   if (!rec) throw new Error(`${label} not found in the county polygon asset`);
@@ -67,6 +67,18 @@ for (const [key, name, label] of [["broward", "Broward", "Broward County, FL"], 
 if (want("sfwmd")) {
   const wmd = await q("https://services1.arcgis.com/sDAPyc2rGRn7vf9B/arcgis/rest/services/BDWMD_Boundary_Area/FeatureServer/0/query", { where: "WMDNAME='SFWMD'", maxAllowableOffset: 0.004 });
   areas.sfwmd = { label: "South Florida Water Management District", source: "SFWMD Water Management District Boundaries (services1.arcgis.com/sDAPyc2rGRn7vf9B), WMDNAME='SFWMD'", polys: polysOf(wmd) };
+}
+if (want("pantherconsult")) {
+  /* USFWS's South Florida panther consultation area (one multipart polygon), as FDEP hosts it. FDEP's server is not reachable from every build sandbox, so it is read through planyr.io's same-origin relay
+   * (a browser-style User-Agent is needed: Cloudflare refuses a bare script one). PLANYR_RELAY_BASE overrides the origin (a branch preview works before the relay is on the apex). */
+  const base = process.env.PLANYR_RELAY_BASE || "https://planyr.io";
+  /* FDEP's MapServer answers f=geojson only with a token, so read Esri JSON and take every ring as its own polygon (a hole is therefore filled — an area may only ever err toward SHOWING a layer). */
+  const u = new URL(`${base}/gis-proxy/ca.dep.state.fl.us/arcgis/rest/services/OpenData/PANTHER_CONSULT_AREA/MapServer/0/query`);
+  for (const [k, v] of Object.entries({ f: "json", where: "1=1", outSR: 4326, returnGeometry: "true", maxAllowableOffset: 0.004 })) u.searchParams.set(k, v);
+  const r = await fetch(u, { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } }); if (!r.ok) throw new Error(`${u} → ${r.status}`);
+  const j = await r.json(); if (j.error) throw new Error(`${u} → ${JSON.stringify(j.error)}`);
+  const polys = j.features.flatMap((f) => f.geometry.rings.map((ring) => [ring.map(([x, y]) => [round(x), round(y)])]));
+  areas.pantherconsult = { label: "USFWS Florida panther consultation area", source: "USFWS South Florida Ecological Services consultation area (FDEP OpenData PANTHER_CONSULT_AREA)", polys };
 }
 if (want("olivebranch")) {
   /* The city's PLANNING AREA is the ground AROUND the city (it excludes the city proper — measured: downtown Olive Branch is outside it), so it cannot stand for

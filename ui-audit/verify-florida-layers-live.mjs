@@ -24,6 +24,7 @@ const RELAY = flag("--relay");
 const SHOTS = flag("--shots");
 const EXPECT_SHA = flag("--expect-sha");
 const BUDGET = Number(flag("--budget-ms", "2500"));
+const VP = (flag("--viewport", "1400x900")).split("x").map(Number);
 const ONLY = (flag("--only", "") || "").split(",").filter(Boolean);
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 let failed = 0, voided = 0, reached = 0, goodRows = 0;
@@ -36,6 +37,12 @@ const CASES = {
   fl_city: [SITE[0], SITE[1], 11, /par_citylm_2021/],
   fl_wmd: [SITE[0], SITE[1], 8, /BDWMD_Boundary_Area/],
   fl_evac_zones: [-80.13, 25.79, 13, /KYZ_ZL_Vector/],
+  "fl_evac_zones#stpete": [-82.64, 27.77, 12, /KYZ_ZL_Vector/], // the densest coastline in the state (Pinellas): the draw budget must not refuse it
+  "fl_evac_zones#stpete13": [-82.64, 27.77, 13, /KYZ_ZL_Vector/],
+  "fl_evac_zones#stpete11": [-82.64, 27.77, 11, /KYZ_ZL_Vector/],
+  "fl_evac_zones#naples": [-81.8, 26.14, 11, /KYZ_ZL_Vector/],
+  "fl_sinkhole_areas#tampa12": [-82.46, 28.0, 12, /FGS_PUBLIC\/MapServer\/5/],
+  "fl_sinkhole_areas#tampa": [-82.46, 28.0, 14, /FGS_PUBLIC\/MapServer\/5/],
   fl_drainage_districts_broward: [-80.25, 26.27, 12, /DrainageDistricts/],
   fl_sfwmd_canals: [SITE[0], SITE[1], 14, /Canals\/FeatureServer\/5/],
   fl_sfwmd_row_permits: [SITE[0], SITE[1], 14, /Rights_of_Way_Permits/],
@@ -65,7 +72,7 @@ const FL_HOSTS = /ca\.dep\.state\.fl\.us|geoweb\.sfwmd\.gov|gis\.myfwc\.com|bcgi
 let browser, page, close = async () => {};
 if (RELAY) {
   browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
-  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const ctx = await browser.newContext({ viewport: { width: VP[0], height: VP[1] } });
   page = await ctx.newPage();
   // the Pages Function relay lives on the preview, not on a local server: answer /gis-proxy/* from it
   await page.route(/\/gis-proxy\//, async (route) => {
@@ -82,9 +89,19 @@ if (RELAY) {
   page = s.page;
   console.log(`signed in as ${s.proof.email}`);
 }
-await page.addInitScript(() => { window.__PLANYR_E2E = true; });
+await page.addInitScript(() => {
+  window.__PLANYR_E2E = true;
+  /* count every draw-budget refusal ("too detailed to draw"): the layer's status dot is overwritten by the next 'load' (so it can read "loaded" after a refusal) — the EVENT is the truth */
+  const t = setInterval(() => {
+    if (window.L && window.L.Evented && !window.__obWrapped) {
+      window.__obWrapped = true; clearInterval(t);
+      const f = window.L.Evented.prototype.fire;
+      window.L.Evented.prototype.fire = function (type) { if (type === "overbudget") (window.__overbudget = window.__overbudget || []).push(1); return f.apply(this, arguments); };
+    }
+  }, 2);
+});
 await assertMeasurable(page, "verify-florida-layers-live");
-await page.setViewportSize({ width: 1400, height: 900 });
+await page.setViewportSize({ width: VP[0], height: VP[1] });
 if (!RELAY) {
   const served = await page.evaluate(async () => (await fetch("/version.json", { cache: "no-store" }).then((r) => r.json())).build);
   console.log(`served build ${served}`);
@@ -97,8 +114,8 @@ page.on("request", (r) => { if (FL_HOSTS.test(r.url()) || /gis-proxy/.test(r.url
 page.on("response", async (res) => {
   const u = res.url();
   if (!(FL_HOSTS.test(u) || /gis-proxy/.test(u)) || !/\/query/.test(u)) return;
-  const e = { url: u, status: res.status(), features: null, error: null };
-  try { const j = await res.json(); e.features = Array.isArray(j.features) ? j.features.length : null; if (j.error) e.error = JSON.stringify(j.error).slice(0, 120); } catch (_) { /* not json */ }
+  const e = { url: u, status: res.status(), features: null, error: null, ids: [] };
+  try { const j = await res.json(); e.features = Array.isArray(j.features) ? j.features.length : null; if (Array.isArray(j.features)) e.ids = j.features.map((f) => { const a = f.attributes || f.properties || {}; return String(a.OBJECTID ?? a.FID ?? a.objectid ?? Object.values(a)[0]); }); if (j.error) e.error = JSON.stringify(j.error).slice(0, 120); } catch (_) { /* not json */ }
   log.push(e);
 });
 
@@ -146,25 +163,37 @@ async function settle(re, ms = 20000) {
 }
 
 const ids = Object.keys(CASES).filter((id) => !ONLY.length || ONLY.includes(id));
-for (const id of ids) {
-  const [lng, lat, z, re] = CASES[id];
+for (const key of ids) {
+  const id = key.split("#")[0];
+  const [lng, lat, z, re] = CASES[key];
   log = [];
   await freshMap(lng, lat, z);
   const row = ROW_OF[id] || id;
   const offered = await rowOffered(row);
-  check(`${id} · offered on a Florida view`, offered);
+  check(`${key} · offered on a Florida view`, offered);
   if (!offered) continue;
   reached++;
   const ok = await turnOn(row);
-  if (!ok) { check(`${id} · turned on`, false, "no checkbox"); continue; }
+  if (!ok) { check(`${key} · turned on`, false, "no checkbox"); continue; }
   await settle(re);
   const mine = log.filter((e) => !e.sent && re.test(e.url));
   const good = mine.filter((e) => e.status === 200 && !e.error && e.features > 0);
   const bad = mine.filter((e) => e.status !== 200 || e.error);
   if (good.length && !bad.length) goodRows++;
-  check(`${id} · its service was asked and answered with features at the known point`, good.length > 0 && !bad.length, `asked ${mine.length}, ≥1 feature in ${good.length}${bad.length ? `, ${bad.length} FAILED ${bad[0].status} ${bad[0].error || ""}` : ""}`);
+  check(`${key} · its service was asked and answered with features at the known point`, good.length > 0 && !bad.length, `asked ${mine.length}, ≥1 feature in ${good.length}${bad.length ? `, ${bad.length} FAILED ${bad[0].status} ${bad[0].error || ""}` : ""}`);
+  /* WHAT WAS DRAWN vs WHAT ARRIVED: the layer's own drawn-feature count (esri-leaflet keeps one entry per drawn feature) against the distinct features its service delivered. A draw-budget
+   * refusal ("too detailed to draw"), a dropped page or a failed paint all show up as drawn < arrived — a service that answers 200 can still leave an empty map. */
+  const arrived = new Set(mine.flatMap((e) => e.ids || [])).size;
+  const vector = key.startsWith("fl_county") || key.startsWith("fl_city");
+  const drawn = vector ? null : await page.evaluate((src) => {
+    let n = 0; const re = new RegExp(src);
+    window.__mapFinderMap.eachLayer((l) => { if (l.options && l.options.url && re.test(l.options.url) && l._layers) n += Object.keys(l._layers).length; });
+    return n;
+  }, re.source);
+  const refused = await page.evaluate(() => (window.__overbudget || []).length);
+  if (!vector) check(`${key} · the layer DREW what its service delivered (nothing refused as "too detailed to draw")`, drawn >= 1 && refused === 0, `drew ${drawn} of ${arrived} features delivered (more arrive than are in view); ${refused} draw-budget refusals`);
   const stall = await page.evaluate(() => Math.round(window.__stall.max));
-  check(`${id} · no main-thread stall past ${BUDGET} ms`, stall <= BUDGET, `${stall} ms`);
+  check(`${key} · no main-thread stall past ${BUDGET} ms`, stall <= BUDGET, `${stall} ms`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${id}.png` });
 }
 
@@ -175,6 +204,17 @@ let leaked = [];
 for (const id of Object.keys(CASES)) if (await rowOffered(id)) leaked.push(id);
 check("scope · a Houston view offers none of the Florida rows", leaked.length === 0, leaked.join(", "));
 check("scope · a Houston view sent ZERO requests to a Florida host", log.filter((e) => e.sent && FL_HOSTS.test(e.url)).length === 0, `${log.filter((e) => e.sent && FL_HOSTS.test(e.url)).length} sent`);
+
+/* ── region scope INSIDE Florida: a Tampa view (SWFWMD, Hillsborough) is offered the statewide rows and none of the county / district rows ────────────── */
+const REGIONAL = ["fl_drainage_districts_broward", "fl_wellfield_broward", "fl_wellfield_miamidade", "fl_wetlands_broward", "fl_natural_lands_broward", "fl_erp_sfwmd", "fl_sfwmd_canals", "fl_sfwmd_row_permits",
+  "fl_sfwmd_conservation_easements", "fl_fll_noise", "fl_udb_miamidade", "fl_panther_consultation"];
+await freshMap(-82.46, 27.95, 10);
+const tampaLeaks = [];
+for (const id of REGIONAL) if (await rowOffered(id)) tampaLeaks.push(id);
+check("scope · a Tampa view is offered none of the Broward / Miami-Dade / SFWMD / panther-area rows", tampaLeaks.length === 0, tampaLeaks.join(", "));
+const tampaHas = [];
+for (const id of ["fl_evac_zones", "fl_conservation_lands", "fl_sinkhole_areas", "fl_contamination_sites"]) if (await rowOffered(id)) tampaHas.push(id);
+check("scope · …but IS offered the statewide rows (known-good arm for the scope check)", tampaHas.length === 4, tampaHas.join(", "));
 
 /* ── known-good: at least one Florida row really answered with features through this very flow (else the flow itself is broken → VOID, never green) ───── */
 if (!goodRows) { console.log("VOID: no Florida row returned a feature — the flow itself may be broken"); voided++; }
