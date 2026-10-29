@@ -5,7 +5,10 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-27._
+_Last updated: 2026-10-29._
+
+## 🗺 A decision: Montgomery County, Texas — keep it on South Central, or move it to its legally defined zone? (B2478961)
+- [ ] **Decide (one word is enough: "keep" or "switch").** Every state now runs on its own legally defined State Plane zone. One county disagrees with the government's own list: the official zone tables put **Montgomery County (Conroe) in Texas Central**, but Planyr has always treated it like the rest of the Houston area (Texas South Central), and you told me Houston/Texas South Central must not change. So I **kept** South Central for Montgomery and marked it as a deliberate exception. Keeping costs a tiny measurement difference (far below what a screening tool resolves); switching is a one-line change but would shift existing Montgomery overlays slightly the next time they open. Nothing breaks either way.
 
 ## 📅 A decision: should a freshly inserted blank schedule row stay visible after a reload? (B2428272) — ✅ DECIDED 2026-10-27, nothing for you here
 - [x] ~~**Decide.**~~ **Decided 2026-10-27: Option A — leave it as is.** A Focus filter hiding a not-started row after a reload is correct; naming the row and giving it a status is the normal flow. Nothing changed in the app. Recorded on B2428272.

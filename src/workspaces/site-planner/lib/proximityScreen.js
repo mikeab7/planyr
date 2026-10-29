@@ -9,16 +9,38 @@
  * INSIDE the footprint reads as 0 ft (on/under the site). Everything here is pure and
  * Node-tested; the fetch + interpretation live in siteAnalysis.js.
  */
-import { projectToGrid } from "../../../shared/coordinates/index.js";
+import { resolveZone, projectToZone, localFrameZone, unitInUsFt } from "../../../shared/coordinates/statePlane.js";
 
-// A [lng,lat] pair → project-grid feet {x,y}. NB projectToGrid takes (lat, lon).
-export function toGrid([lng, lat]) {
-  return projectToGrid(lat, lng);
+/* ⛔ NEW-1 (STATE-PLANE-AUDIT) — A SCREENING DISTANCE IS MEASURED ON THE SITE'S OWN STATE PLANE ZONE, NOT ON TEXAS SOUTH CENTRAL.
+ * This module used to project every point through the hardcoded EPSG:2278 cone, so a Tennessee / Georgia / Colorado site was
+ * measured on a cone centred on 99°W (B290247 measured Colorado over-reporting by 1.93%). One PLANE per measurement: the zone
+ * resolved from the site's first vertex (or the point itself when no plane is given), shared by the rings AND the features so the
+ * two can never sit on different grids. A Houston site resolves to tx_sc — the same arithmetic as before, bit for bit. Where no
+ * zone resolves, an explicit site-local frame is used (never Texas). Coordinates are US SURVEY feet whatever the zone's own unit. */
+const firstVertex = (rings) => {
+  for (const r of rings || []) for (const v of r || []) if (Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[1])) return v;
+  return null;
+};
+export function planeFor(lng, lat) {
+  return resolveZone({ lat, lon: lng }) || localFrameZone(lat, lng);
+}
+export function planeForRings(rings) {
+  const v = firstVertex(rings);
+  return v ? planeFor(v[0], v[1]) : null;
 }
 
-// A WGS84 ring → grid-feet points.
-export function ringToGridFt(ring) {
-  return (ring || []).map(toGrid);
+// A [lng,lat] pair → plane feet {x,y} (US survey feet). NB the projection takes (lat, lon). `plane` = the measurement's zone.
+export function toGrid([lng, lat], plane) {
+  const z = plane && typeof plane === "object" ? plane : planeFor(lng, lat);   // (a bare `.map(toGrid)` passes an index here — ignored)
+  const p = projectToZone(z, lat, lng);
+  const k = unitInUsFt(z);
+  return k === 1 ? p : { x: p.x * k, y: p.y * k };
+}
+
+// A WGS84 ring → plane-feet points (the plane defaults to the ring's own first vertex).
+export function ringToGridFt(ring, plane) {
+  const z = plane && typeof plane === "object" && plane.unit ? plane : planeForRings([ring]);
+  return (ring || []).map((q) => toGrid(q, z || undefined));
 }
 
 // Ray-casting point-in-polygon on a feet ring. Pure.
@@ -103,20 +125,20 @@ export function distPathToRingsFt(pathFt, ringsFt) {
 
 // Feet distance from one feature to the parcel: point (lngLat) OR polyline (paths). Null if no
 // usable geometry. Pure — projection via toGrid (guards non-finite / throws).
-export function featureDistFt(f, ringsFt) {
+export function featureDistFt(f, ringsFt, plane) {
   if (!ringsFt.length) return Infinity;
   const finite2 = (a) => Array.isArray(a) && Number.isFinite(a[0]) && Number.isFinite(a[1]);
   try {
     if (Array.isArray(f && f.paths) && f.paths.length) {
       let best = Infinity;
       for (const path of f.paths) {
-        const pf = (path || []).filter(finite2).map(toGrid).filter((g) => Number.isFinite(g.x) && Number.isFinite(g.y));
+        const pf = (path || []).filter(finite2).map((q) => toGrid(q, plane)).filter((g) => Number.isFinite(g.x) && Number.isFinite(g.y));
         if (pf.length) best = Math.min(best, distPathToRingsFt(pf, ringsFt));
       }
       return Number.isFinite(best) ? best : null;
     }
     if (finite2(f && f.lngLat)) {
-      const g = toGrid(f.lngLat);
+      const g = toGrid(f.lngLat, plane);
       return Number.isFinite(g.x) && Number.isFinite(g.y) ? distPointToRingsFt(g, ringsFt) : null;
     }
   } catch (_) { return null; }
@@ -127,10 +149,11 @@ export function featureDistFt(f, ringsFt) {
  * attrs }]. Returns { count, nearestFt, nearest, ranked } where `ranked` is the features
  * sorted nearest-first with a `distFt` each (bad/missing coords are skipped, never 0). Pure. */
 export function screenProximity(rings, features = []) {
-  const ringsFt = (rings || []).map(ringToGridFt).filter((r) => r.length >= 3);
+  const plane = planeForRings(rings);   // ONE plane for the rings and every feature
+  const ringsFt = (rings || []).map((r) => ringToGridFt(r, plane || undefined)).filter((r) => r.length >= 3);
   const ranked = [];
   for (const f of features) {
-    const distFt = featureDistFt(f, ringsFt); // point OR polyline; null = no usable geometry
+    const distFt = featureDistFt(f, ringsFt, plane || undefined); // point OR polyline; null = no usable geometry
     if (distFt == null) continue;
     ranked.push({ ...f, distFt });
   }

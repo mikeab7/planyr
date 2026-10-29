@@ -1,4 +1,10 @@
-/* Shared real-world coordinate system (minimal interface).
+/* ⛔ LEGACY — TEXAS SOUTH CENTRAL ONLY (NEW-1 STATE-PLANE-AUDIT, B2478960). This file is the ORIGINAL hardcoded EPSG:2278 projection and is
+ * kept byte-for-byte because Texas South Central is pinned bit-for-bit against it (test/statePlane.test.js). It is the right tool
+ * ONLY for data published in SR 2278 (the Houston-area service extents in coverage.js / fbcdWse.js, the City of Houston
+ * thoroughfare ingest). For ANY site, overlay or screening distance use `./statePlane.js` — `resolveZone` finds the site's own
+ * zone in all 50 states and never defaults to Texas. Calling `projectToGrid` for a non-Texas point was the bug.
+ *
+ * Shared real-world coordinate system (minimal interface).
  *
  * The common ground between workspaces: the Site Planner works in feet about a
  * per-site origin (see workspaces/site-planner/lib/arcgis.js), and the Document

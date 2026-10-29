@@ -31,7 +31,21 @@
  * Pure. No DOM, no network, Node-testable.
  */
 
+import { GEN_ZONES, COUNTY_TABLE, COUNTY_ALIASES, DECIDED_COUNTIES, SPLIT_COUNTIES } from "./statePlaneData.js";
+
+/* NEW-1 (STATE-PLANE-AUDIT) — EVERY NAD83 SPCS ZONE, ALL 50 STATES. The three hand-written zones below (TX South Central,
+ * CO North, CO Central) are UNCHANGED and still win over the generated table; the other 118 zones come from
+ * ./statePlaneData.js, which scripts/gen-state-plane-zones.py reads out of the EPSG database (never typed from memory).
+ * Three projections are implemented here, all validated against PROJ to well under 0.01 ft (test/statePlaneAllZones.test.js):
+ *   • Lambert Conformal Conic (2SP) — the original engine, byte-for-byte unchanged for the three original zones;
+ *   • Transverse Mercator — Karney's n⁶ series (the same series PROJ uses), accurate to nanometres inside a zone;
+ *   • Hotine Oblique Mercator variant A (EPSG 9812) — Alaska zone 1 only.
+ * UNITS: a zone's grid is in ITS legislated foot (`unit`: "us-ft" | "ft" (international) | "m"); projectToZone/zoneToProject speak
+ * that unit. Everything that treats the grid as the app's US-survey-foot plane converts with `unitInUsFt(zone)`.
+ * NEVER FALL BACK TO TEXAS: where no zone resolves the answer is null (or, for overlay placement, an explicit site-local frame). */
 const US_FT_M = 1200 / 3937;          // 1 US survey foot in metres (exact)
+const INTL_FT_M = 0.3048;
+const UNIT_M = { "us-ft": US_FT_M, ft: INTL_FT_M, m: 1 };
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 
 // NAD83 / GRS80 ellipsoid — the datum every zone below is on.
@@ -82,6 +96,18 @@ export const SP_ZONES = {
   },
 };
 
+/* The generated zones. Hand-written ids above win; a test pins their constants to EPSG's. */
+for (const [id, g] of Object.entries(GEN_ZONES)) {
+  if (SP_ZONES[id]) continue;
+  const qualifier = id.slice(g.state.length + 1).split("_").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+  SP_ZONES[id] = {
+    ...g, id,
+    name: `NAD83 / ${g.label}${g.unit === "us-ft" ? " (ftUS)" : g.unit === "ft" ? " (ft)" : ""}`,
+    short: qualifier ? `${g.state} ${qualifier}` : g.state,
+    falseEastingM: g.feM, falseNorthingM: g.fnM,
+  };
+}
+
 /* Per-county zone assignment for the nine Colorado counties Planyr targets, plus the Texas
  * counties it already serves. `decided:true` marks an assignment this project MADE rather than
  * read off the statute — today that is Broomfield alone, and it carries its reasoning. */
@@ -91,7 +117,19 @@ export const COUNTY_ZONE = {
   "TX:fortbend": { zone: "tx_sc" },
   "TX:chambers": { zone: "tx_sc" },
   "TX:waller": { zone: "tx_sc" },
-  "TX:montgomery": { zone: "tx_sc" },
+  /* ⛔ A KNOWN DISAGREEMENT WITH EPSG/NGS, kept on purpose and SAID. EPSG's own county list puts Montgomery County in Texas CENTRAL
+   * (EPSG:2277), not South Central. The app has always projected Montgomery sites on tx_sc, test/statePlane.test.js pins that
+   * ("keeps every Texas county on the app's original zone"), and the brief for the all-states work was that Texas South Central
+   * stays bit-for-bit identical — so the assignment is kept and marked decided. Flipping it is the one line below plus that test;
+   * it is an OWNER DECISION (docs/incidents/STATE-PLANE-AUDIT.md §4). */
+  "TX:montgomery": {
+    zone: "tx_sc",
+    decided: true,
+    decisionNote:
+      "EPSG/NGS lists Montgomery County in Texas CENTRAL (EPSG:2277). Planyr has always placed Montgomery sites on Texas South " +
+      "Central (EPSG:2278) like the rest of its Houston-area counties, and keeps doing so until the owner decides otherwise; " +
+      "the difference is a small scale/convergence effect at screening grade. Confirm against the survey for anything else.",
+  },
   // Colorado NORTH (C.R.S. 38-52-101).
   "CO:larimer": { zone: "co_north" },
   "CO:weld": { zone: "co_north" },
@@ -121,7 +159,10 @@ export const COUNTY_ZONE = {
  * COUNTY LINES, not parallels, and along the Front Range those lines interleave: Jefferson
  * (CENTRAL) reaches north to 39.91, while Boulder and Broomfield (NORTH) reach south to 39.89.
  * No latitude split can separate them. So this is a genuine last resort — a county answer always
- * wins, and a caller showing a coarse answer should show that it is one. */
+ * wins, and a caller showing a coarse answer should show that it is one.
+ *
+ * These two LEGACY envelopes are asked FIRST so the Houston / Front Range answers are exactly what they were. Every other zone
+ * is then found from its EPSG area-of-use box (`GEN_ZONES[id].bounds`); see zoneForPoint. */
 const ZONE_EXTENTS = [
   // North/Central split taken at the Adams south / Arapahoe north line (~39.74). The overlap
   // band above it is the interleave described above.
@@ -132,122 +173,383 @@ const ZONE_EXTENTS = [
 ];
 
 /* County names arrive from several sources in several shapes — "Adams", "ADAMS COUNTY",
- * "City and County of Denver", "El Paso County". Colorado's two consolidated city-and-counties
- * (Denver, Broomfield) are the reason the connective words are stripped rather than just the
- * trailing "County": none of the counties this project serves has city/and/county/of in its
- * actual name, so removing those tokens is safe and makes every spelling land on one key.
+ * "City and County of Denver", "El Paso County", "Orleans Parish", "Doña Ana". The slug is letters only, with the designation
+ * words removed, accents folded and the state ROUTING PREFIX stripped.
  *
  * ⛔ NEW-2 — THE `co_` ROUTING PREFIX IS STRIPPED FIRST, and leaving it out was a silent
- * wrong-zone bug. The app PERSISTS a Colorado county as its routing key (`co_denver`, `co_weld`,
- * `co_elpaso` — `counties.js`, prefixed because Texas and Colorado both have an El Paso and a
- * Jefferson), and that is the value a plan's `county` field carries. Without this strip
- * `zoneForCounty("CO", "co_denver")` slugs to `codenver`, matches nothing, returns null, and
- * `resolveZone` falls through to the COARSE point envelope — which this file's own comment says
- * cannot separate the interleaved Front Range counties. Measured: Denver then resolved to
- * **Colorado NORTH (2231)** instead of Central (2232). `coloradoRegions.js`'s own slug already
- * strips the prefix; the two must agree, or a county resolves to a regime and to no zone. */
+ * wrong-zone bug. The app PERSISTS a non-Texas county as its routing key (`co_denver`, `ga_gwinnett`, `fl_stjohns` —
+ * `counties.js`, prefixed because states share county names) and that is the value a plan's `county` field carries. Without the
+ * strip `zoneForCounty("CO", "co_denver")` slugs to `codenver`, matches nothing, returns null, and `resolveZone` falls through to
+ * the COARSE point envelope. Measured: Denver then resolved to **Colorado NORTH (2231)** instead of Central (2232). Generalised
+ * from `co_` to any two-letter state prefix when the other 47 states were added. MUST stay identical to `slug()` in
+ * scripts/gen-state-plane-zones.py (test/statePlaneAllZones.test.js pins every county in the nationwide polygons asset). */
 const slugCounty = (c) =>
-  String(c || "").toLowerCase().replace(/^co_/, "").replace(/\b(city|and|county|of)\b/g, "").replace(/[^a-z]/g, "");
+  String(c || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/^[a-z]{2}_/, "")
+    .replace(/\b(city|and|county|parish|borough|census area|municipality|of)\b/g, "")
+    .replace(/[^a-z]/g, "");
 
-/* The zone for a county, when the app knows one. `state` is "TX"/"CO" (case-insensitive).
- * Returns null for a county this project has not assigned — an HONEST null, never a guess:
- * a caller must render "state plane zone not established here", not a plausible wrong zone. */
-export function zoneForCounty(state, county) {
-  const key = `${String(state || "").toUpperCase()}:${slugCounty(county)}`;
-  const rec = COUNTY_ZONE[key];
-  if (!rec) return null;
-  return { ...SP_ZONES[rec.zone], decided: rec.decided === true, decisionNote: rec.decisionNote || null, via: "county" };
+/* The nationwide table, folded once (lazily) into "ST:slug" -> zone id. */
+let COUNTY_INDEX = null;
+const countyIndex = () => {
+  if (COUNTY_INDEX) return COUNTY_INDEX;
+  const m = new Map();
+  for (const [st, zones] of Object.entries(COUNTY_TABLE)) {
+    for (const [zid, list] of Object.entries(zones)) for (const k of list.split(",")) m.set(`${st}:${k}`, zid);
+  }
+  COUNTY_INDEX = m;
+  return m;
+};
+
+/* States served by exactly one zone: the state alone settles it (no county needed). DC rides Maryland's zone (NGS). */
+const STATE_ALIAS = { DC: "MD" };
+const stateCode = (s) => { const u = String(s || "").trim().toUpperCase(); return STATE_ALIAS[u] || u; };
+const ZONES_OF_STATE = {};
+for (const z of Object.values(SP_ZONES)) (ZONES_OF_STATE[z.state] = ZONES_OF_STATE[z.state] || []).push(z.id);
+export const SINGLE_ZONE_STATE = Object.fromEntries(Object.entries(ZONES_OF_STATE).filter(([, v]) => v.length === 1).map(([k, v]) => [k, v[0]]));
+// Louisiana Offshore is registered but never resolves from a county / point (it is federal water, not a parish); Alaska resolves by
+// position; Hawaii by island.
+const OFFSHORE = new Set(["la_offshore"]);
+export const WA_GRANT_SPLIT_LAT = 47.5;  // "Grant north / south of approximately 47°30'N" — EPSG area text
+
+const withZone = (id, extra) => ({ ...SP_ZONES[id], decided: false, decisionNote: null, ...extra });
+
+/* Alaska is NOT county-bounded: zones 2–9 are 4°-wide meridian bands (the EPSG area text names the meridians), zone 1 is the
+ * panhandle east of 141°W, zone 10 the Aleutians south of 54°30'N. Positional, exact at the statutory meridians. */
+function alaskaZoneId(lat, lon) {
+  if (lon >= -141 && lon <= -129) return "ak_1";
+  if (lat < 54.5 && (lon <= -164 || lon > 0)) return "ak_10";
+  if (lon > 0) return null;  // west-hemisphere-crossing slivers north of 54°30' are zone 9 below; east longitudes there are ocean
+  if (lon >= -144) return "ak_2";
+  if (lon >= -148) return "ak_3";
+  if (lon >= -152) return "ak_4";
+  if (lon >= -156) return "ak_5";
+  if (lon >= -160) return "ak_6";
+  if (lon >= -164) return "ak_7";
+  if (lon >= -168) return "ak_8";
+  return "ak_9";
 }
 
-/* The zone for a bare point, when no county has been identified. Coarse by design (see
- * ZONE_EXTENTS) and null outside every modeled envelope — Planyr covers two states, not fifty. */
-export function zoneForPoint(lat, lon) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  for (const e of ZONE_EXTENTS) {
-    if (lat >= e.latMin && lat <= e.latMax && lon >= e.lonMin && lon <= e.lonMax) {
-      return { ...SP_ZONES[e.zone], decided: false, decisionNote: null, via: "extent", coarse: true };
-    }
+function hawaiiZoneId(lat, lon) {
+  for (const id of ["hi_1", "hi_2", "hi_3", "hi_4", "hi_5"]) {
+    const b = GEN_ZONES[id].bounds;
+    if (lat >= b[1] && lat <= b[3] && lon >= b[0] && lon <= b[2]) return id;
   }
   return null;
 }
 
-/* THE resolver every consumer should call: county first (authoritative — Colorado's zone
- * boundaries ARE county lines), point envelope second, honest null last. */
+/* The zone for a county, when the app knows one. `state` is a USPS code (case-insensitive). `point` ({lat}) is only needed for
+ * the one county a parallel splits (Grant, WA). Returns null for a county this project has not assigned — an HONEST null,
+ * never a guess: a caller must render "state plane zone not established here", not a plausible wrong zone. */
+export function zoneForCounty(state, county, point = null) {
+  const st = stateCode(state);
+  const k = slugCounty(county);
+  const key = `${st}:${k}`;
+  const rec = COUNTY_ZONE[key];                    // hand-written: Texas's original five, Colorado's nine, Broomfield
+  if (rec) return { ...SP_ZONES[rec.zone], decided: rec.decided === true, decisionNote: rec.decisionNote || null, via: "county" };
+  if (SINGLE_ZONE_STATE[st]) return withZone(SINGLE_ZONE_STATE[st], { via: "state" });
+  if (st === "AK") return null;                    // boroughs straddle the meridian bands — position decides
+  const canon = COUNTY_ALIASES[key] ? `${st}:${COUNTY_ALIASES[key]}` : key;
+  const split = SPLIT_COUNTIES[canon];
+  if (split) {
+    const la = point && Number.isFinite(Number(point.lat)) ? Number(point.lat) : null;
+    if (la == null) return null;                   // a split county cannot be answered without a latitude — honest null
+    return withZone(la >= WA_GRANT_SPLIT_LAT ? split.north : split.south, {
+      via: "county", decided: true,
+      decisionNote: `${county} County is split by ${WA_GRANT_SPLIT_LAT}°N (EPSG: north of approximately 47°30'N is the North zone, south is the South zone); assigned from the site's latitude.`,
+    });
+  }
+  const dec = DECIDED_COUNTIES[canon];
+  if (dec) {
+    return withZone(dec.zone, {
+      via: "county", decided: true,
+      decisionNote: dec.note || (dec.surroundedBy
+        ? `Independent city: EPSG's zone list does not name it, so it takes the zone of the county that surrounds it (${dec.surroundedBy}).`
+        : null),
+    });
+  }
+  const zid = countyIndex().get(canon);
+  return zid ? withZone(zid, { via: "county" }) : null;
+}
+
+/* The zone for a bare point, when no county has been identified. Coarse by design and flagged `coarse:true`.
+ * Order: the two legacy envelopes (Houston / Front Range, unchanged) → Alaska's meridian bands → each zone's EPSG area-of-use
+ * box, the one the point sits DEEPEST inside winning where several contain it (`ambiguous:true` says more than one did; measured over the
+ * 3,144 county centres: 89.7% the exact zone, 3.2% a neighbouring zone of the right state, 7.2% a neighbour state — docs/incidents/STATE-PLANE-AUDIT.md §5). Near a state line a
+ * box can hold the neighbour's ground — that is exactly what `coarse` warns about; a county answer always beats it.
+ * `state` (optional) restricts the search to that state's zones. */
+export function zoneForPoint(lat, lon, state = null) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const st = state ? stateCode(state) : null;
+  for (const e of ZONE_EXTENTS) {
+    if (st && SP_ZONES[e.zone].state !== st) continue;
+    if (lat >= e.latMin && lat <= e.latMax && lon >= e.lonMin && lon <= e.lonMax) {
+      return { ...SP_ZONES[e.zone], decided: false, decisionNote: null, via: "extent", coarse: true };
+    }
+  }
+  const cands = [];
+  for (const z of Object.values(SP_ZONES)) {
+    if (OFFSHORE.has(z.id) || (st && z.state !== st)) continue;
+    const b = GEN_ZONES[z.id].bounds;
+    if (lat >= b[1] && lat <= b[3] && lon >= b[0] && lon <= b[2]) {
+      // how far INTO its box the point sits (0 = centre, 1 = on the edge): a point near a zone's edge is likelier its neighbour's
+      const depth = Math.max(Math.abs(lon - (b[0] + b[2]) / 2) / ((b[2] - b[0]) / 2 || 1), Math.abs(lat - (b[1] + b[3]) / 2) / ((b[3] - b[1]) / 2 || 1));
+      cands.push({ z, area: depth });
+    }
+  }
+  if (!cands.length) return null;
+  cands.sort((a, b) => a.area - b.area);
+  return { ...cands[0].z, decided: false, decisionNote: null, via: "extent", coarse: true, ambiguous: cands.length > 1 || undefined };
+}
+
+/* THE resolver every consumer should call: county first (authoritative — zone boundaries ARE county lines), a single-zone state
+ * on its own, Alaska by meridian / Hawaii by island, the point envelope last, honest null after that. NEVER Texas by default. */
 export function resolveZone({ state = null, county = null, lat = null, lon = null } = {}) {
-  const byCounty = state && county ? zoneForCounty(state, county) : null;
+  const st = state ? stateCode(state) : null;
+  const la = lat == null ? NaN : Number(lat), lo = lon == null ? NaN : Number(lon);
+  const havePoint = Number.isFinite(la) && Number.isFinite(lo);
+  if (st === "AK") {
+    const id = havePoint ? alaskaZoneId(la, lo) : null;
+    return id ? withZone(id, { via: "position" }) : null;
+  }
+  if (st === "HI" && havePoint) {
+    const id = hawaiiZoneId(la, lo);
+    if (id) return withZone(id, { via: "position" });
+  }
+  const byCounty = st && (county || SINGLE_ZONE_STATE[st]) ? zoneForCounty(st, county, havePoint ? { lat: la } : null) : null;
   if (byCounty) return byCounty;
   // A county with no assignment is a KNOWN gap, not an excuse to fall through to a coarse
   // envelope that would answer confidently for a county we deliberately never assigned.
-  if (state && county) {
-    const inState = zoneForPoint(lat, lon);
-    if (inState && inState.state === String(state).toUpperCase()) return { ...inState, unassignedCounty: String(county) };
+  if (st && county) {
+    const inState = havePoint ? zoneForPoint(la, lo, st) : null;
+    if (inState && inState.state === st) return { ...inState, unassignedCounty: String(county) };
     return null;
   }
-  return zoneForPoint(lat, lon);
+  if (st) return havePoint ? zoneForPoint(la, lo, st) : null;
+  return havePoint ? zoneForPoint(la, lo) : null;
 }
 
-/* Per-zone cone constants, computed once. Same expressions, same order as the hardcoded
- * EPSG:2278 implementation in ./index.js — that is what makes the Texas zone bit-identical. */
+/* A SITE-LOCAL frame: a transverse Mercator centred on an anchor point, scale 1 at the anchor. This is what a caller that MUST
+ * have some projection (overlay placement) uses when no zone resolves — explicit, labelled `local:true`, and never a Texas grid.
+ * Ground-true at the anchor; it has no state-plane meaning, so a caller shows "zone unknown". */
+export function localFrameZone(lat, lon) {
+  return { id: `local`, local: true, state: null, epsg: null, name: "Site-local transverse Mercator", short: "local grid",
+    unit: "us-ft", proj: "tm", lat0: lat, lon0: lon, k0: 1, falseEastingM: 0, falseNorthingM: 0, via: "local" };
+}
+
+/* Feet-per-grid-unit for callers that treat the grid as US survey feet (overlay placement): 1 for a ftUS zone, ≈1.000002 for an
+ * international-foot zone, 3.2808… for a metre zone. */
+export const unitInUsFt = (zone) => (zone.unit === "us-ft" ? 1 : UNIT_M[zone.unit] / US_FT_M);
+
+/* ---------------------------------------------------------------------------------------------------------------------
+ * PROJECTION MATH. Each zone is reduced once to a constants record (`cone`), keyed on its id (the site-local frame is built
+ * per call). `forwardM`/`inverseM` work in METRES; projectToZone/zoneToProject convert to and from the zone's grid unit.
+ * The LCC arm is the original expression-for-expression code, so the three original zones are bit-identical to before.
+ * ------------------------------------------------------------------------------------------------------------------ */
 const CONE = new Map();
 function cone(zone) {
   const z = typeof zone === "string" ? SP_ZONES[zone] : zone;
   if (!z) throw new Error("statePlane: unknown zone");
-  const hit = CONE.get(z.id);
+  const hit = z.local ? null : CONE.get(z.id);
   if (hit) return hit;
-  const LAT0 = z.lat0 * D2R, LON0 = z.lon0 * D2R, LAT1 = z.lat1 * D2R, LAT2 = z.lat2 * D2R;
+  const proj = z.proj || "lcc";
+  const LAT0 = z.lat0 * D2R, LON0 = z.lon0 * D2R;
   const FE_M = z.falseEastingM != null ? z.falseEastingM : z.falseEastingFt * US_FT_M;
   const FN_M = z.falseNorthingM != null ? z.falseNorthingM : z.falseNorthingFt * US_FT_M;
-  const _m1 = lccM(LAT1), _m2 = lccM(LAT2);
-  const _t0 = lccT(LAT0), _t1 = lccT(LAT1), _t2 = lccT(LAT2);
-  const n = (Math.log(_m1) - Math.log(_m2)) / (Math.log(_t1) - Math.log(_t2));
-  const F = _m1 / (n * _t1 ** n);
-  const R0 = GRS80_A * F * _t0 ** n;
-  const c = { z, LAT0, LON0, FE_M, FN_M, n, F, R0 };
-  CONE.set(z.id, c);
+  const UNIT = UNIT_M[z.unit];
+  let c;
+  if (proj === "lcc") {
+    const LAT1 = z.lat1 * D2R, LAT2 = z.lat2 * D2R;
+    const _m1 = lccM(LAT1), _m2 = lccM(LAT2);
+    const _t0 = lccT(LAT0), _t1 = lccT(LAT1), _t2 = lccT(LAT2);
+    const n = (Math.log(_m1) - Math.log(_m2)) / (Math.log(_t1) - Math.log(_t2));
+    const F = _m1 / (n * _t1 ** n);
+    const R0 = GRS80_A * F * _t0 ** n;
+    c = { proj, z, LAT0, LON0, FE_M, FN_M, UNIT, n, F, R0 };
+  } else if (proj === "tm") {
+    c = tmConstants(z, LAT0, LON0, FE_M, FN_M, UNIT);
+  } else if (proj === "hom") {
+    c = homConstants(z, LAT0, LON0, FE_M, FN_M, UNIT);
+  } else {
+    throw new Error(`statePlane: unsupported projection ${proj}`);
+  }
+  if (!z.local) CONE.set(z.id, c);
   return c;
 }
 
-/* WGS84 (lat, lon degrees) → the zone's grid {x, y} in US survey feet. */
+/* --- Transverse Mercator: Karney (2011) n⁶ series, the same series PROJ's `etmerc` uses. ------------------------------- */
+const TM_N = GRS80_F / (2 - GRS80_F);
+const poly = (cs, n) => cs.reduce((acc, k, i) => acc + k * n ** (i + 1), 0);
+const TM_ALPHA = [
+  [1 / 2, -2 / 3, 5 / 16, 41 / 180, -127 / 288, 7891 / 37800],
+  [0, 13 / 48, -3 / 5, 557 / 1440, 281 / 630, -1983433 / 1935360],
+  [0, 0, 61 / 240, -103 / 140, 15061 / 26880, 167603 / 181440],
+  [0, 0, 0, 49561 / 161280, -179 / 168, 6601661 / 7257600],
+  [0, 0, 0, 0, 34729 / 80640, -3418889 / 1995840],
+  [0, 0, 0, 0, 0, 212378941 / 319334400],
+].map((cs) => poly(cs, TM_N));
+const TM_BETA = [
+  [1 / 2, -2 / 3, 37 / 96, -1 / 360, -81 / 512, 96199 / 604800],
+  [0, 1 / 48, 1 / 15, -437 / 1440, 46 / 105, -1118711 / 3870720],
+  [0, 0, 17 / 480, -37 / 840, -209 / 4480, 5569 / 90720],
+  [0, 0, 0, 4397 / 161280, -11 / 504, -830251 / 7257600],
+  [0, 0, 0, 0, 4583 / 161280, -108847 / 3991680],
+  [0, 0, 0, 0, 0, 20648693 / 638668800],
+].map((cs) => poly(cs, TM_N));
+const TM_A = (GRS80_A / (1 + TM_N)) * (1 + TM_N ** 2 / 4 + TM_N ** 4 / 64 + TM_N ** 6 / 256);
+// tan(conformal latitude) of geodetic latitude φ.
+const confTan = (phi) => Math.sinh(Math.asinh(Math.tan(phi)) - ECC * Math.atanh(ECC * Math.sin(phi)));
+// geodetic latitude from tan(conformal latitude): fixed-point on the isometric latitude (e² ≈ 0.0067 per pass).
+function latFromConfTan(tau) {
+  const psi = Math.asinh(tau);
+  let phi = Math.atan(tau);
+  for (let i = 0; i < 12; i++) phi = Math.atan(Math.sinh(psi + ECC * Math.atanh(ECC * Math.sin(phi))));
+  return phi;
+}
+function tmConstants(z, LAT0, LON0, FE_M, FN_M, UNIT) {
+  const xi0p = Math.atan(confTan(LAT0));
+  let xi0 = xi0p;
+  for (let j = 1; j <= 6; j++) xi0 += TM_ALPHA[j - 1] * Math.sin(2 * j * xi0p);
+  return { proj: "tm", z, LAT0, LON0, FE_M, FN_M, UNIT, K0: z.k0, XI0: xi0 };
+}
+function tmForward(c, lat, lon) {
+  const dl = dLon(lon, c.LON0);
+  const tau = confTan(lat);
+  const xip = Math.atan2(tau, Math.cos(dl));
+  const etap = Math.asinh(Math.sin(dl) / Math.hypot(tau, Math.cos(dl)));
+  let xi = xip, eta = etap;
+  for (let j = 1; j <= 6; j++) {
+    xi += TM_ALPHA[j - 1] * Math.sin(2 * j * xip) * Math.cosh(2 * j * etap);
+    eta += TM_ALPHA[j - 1] * Math.cos(2 * j * xip) * Math.sinh(2 * j * etap);
+  }
+  return { E: c.FE_M + c.K0 * TM_A * eta, N: c.FN_M + c.K0 * TM_A * (xi - c.XI0) };
+}
+function tmInverse(c, E, N) {
+  const eta = (E - c.FE_M) / (c.K0 * TM_A);
+  const xi = (N - c.FN_M) / (c.K0 * TM_A) + c.XI0;
+  let xip = xi, etap = eta;
+  for (let j = 1; j <= 6; j++) {
+    xip -= TM_BETA[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+    etap -= TM_BETA[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+  }
+  const lon = c.LON0 + Math.atan2(Math.sinh(etap), Math.cos(xip));
+  const tau = Math.sin(xip) / Math.hypot(Math.sinh(etap), Math.cos(xip));
+  return { lat: latFromConfTan(tau), lon };
+}
+
+/* --- Hotine Oblique Mercator, variant A (EPSG method 9812; EPSG Guidance Note 7-2). Alaska zone 1 only. -------------- */
+function homConstants(z, LAT0, LON0, FE_M, FN_M, UNIT) {
+  const AZ = z.alpha * D2R, GAMMA_C = z.gamma * D2R, KC = z.k0;
+  const sinp = Math.sin(LAT0), cosp = Math.cos(LAT0);
+  const B = Math.sqrt(1 + (E2 * cosp ** 4) / (1 - E2));
+  const A = (GRS80_A * B * KC * Math.sqrt(1 - E2)) / (1 - E2 * sinp ** 2);
+  const t0 = lccT(LAT0);
+  const D0 = (B * Math.sqrt(1 - E2)) / (cosp * Math.sqrt(1 - E2 * sinp ** 2));
+  const D = Math.max(D0, 1);
+  const Fv = D + Math.sqrt(D * D - 1) * Math.sign(LAT0);
+  const H = Fv * t0 ** B;
+  const G = (Fv - 1 / Fv) / 2;
+  const GAMMA0 = Math.asin(Math.sin(AZ) / D);
+  const LAMBDA0 = LON0 - Math.asin(G * Math.tan(GAMMA0)) / B;
+  return { proj: "hom", z, LAT0, LON0, FE_M, FN_M, UNIT, B, A, H, GAMMA0, LAMBDA0, GAMMA_C };
+}
+function homForward(c, lat, lon) {
+  const t = lccT(lat);
+  const Q = c.H / t ** c.B;
+  const S = (Q - 1 / Q) / 2, T = (Q + 1 / Q) / 2;
+  const dl = c.B * (lon - c.LAMBDA0);
+  const V = Math.sin(dl);
+  const U = (-V * Math.cos(c.GAMMA0) + S * Math.sin(c.GAMMA0)) / T;
+  const v = (c.A * Math.log((1 - U) / (1 + U))) / (2 * c.B);
+  const u = (c.A * Math.atan2(S * Math.cos(c.GAMMA0) + V * Math.sin(c.GAMMA0), Math.cos(dl))) / c.B;
+  return {
+    E: v * Math.cos(c.GAMMA_C) + u * Math.sin(c.GAMMA_C) + c.FE_M,
+    N: u * Math.cos(c.GAMMA_C) - v * Math.sin(c.GAMMA_C) + c.FN_M,
+  };
+}
+function homInverse(c, E, N) {
+  const dE = E - c.FE_M, dN = N - c.FN_M;
+  const vp = dE * Math.cos(c.GAMMA_C) - dN * Math.sin(c.GAMMA_C);
+  const up = dN * Math.cos(c.GAMMA_C) + dE * Math.sin(c.GAMMA_C);
+  const Qp = Math.exp((-c.B * vp) / c.A);
+  const Sp = (Qp - 1 / Qp) / 2, Tp = (Qp + 1 / Qp) / 2;
+  const Vp = Math.sin((c.B * up) / c.A);
+  const Up = (Vp * Math.cos(c.GAMMA0) + Sp * Math.sin(c.GAMMA0)) / Tp;
+  const tp = (c.H / Math.sqrt((1 + Up) / (1 - Up))) ** (1 / c.B);
+  const lon = c.LAMBDA0 - Math.atan2(Sp * Math.cos(c.GAMMA0) - Vp * Math.sin(c.GAMMA0), Math.cos((c.B * up) / c.A)) / c.B;
+  let lat = Math.PI / 2 - 2 * Math.atan(tp);
+  for (let i = 0; i < 12; i++) {
+    const es = ECC * Math.sin(lat);
+    lat = Math.PI / 2 - 2 * Math.atan(tp * ((1 - es) / (1 + es)) ** (ECC / 2));
+  }
+  return { lat, lon };
+}
+
+// Longitude difference wrapped into [-π, π] — only Alaska zone 10 (the Aleutians cross the antimeridian) ever triggers it, so every
+// other zone's arithmetic is untouched.
+const dLon = (lonR, lon0R) => { let d = lonR - lon0R; if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI; return d; };
+const wrapLon = (deg) => (deg > 180 ? deg - 360 : deg < -180 ? deg + 360 : deg);
+
+/* WGS84 (lat, lon degrees) → the zone's grid {x, y} in the ZONE'S OWN unit (z.unit: us-ft, ft or m). */
 export function projectToZone(zone, lat, lon) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error("statePlane: projectToZone needs finite lat, lon");
   const c = cone(zone);
   const latR = lat * D2R, lonR = lon * D2R;
-  const r = GRS80_A * c.F * lccT(latR) ** c.n;
-  const theta = c.n * (lonR - c.LON0);
-  const E_m = c.FE_M + r * Math.sin(theta);
-  const N_m = c.FN_M + c.R0 - r * Math.cos(theta);
-  return { x: E_m / US_FT_M, y: N_m / US_FT_M };
+  if (c.proj === "lcc") {
+    const r = GRS80_A * c.F * lccT(latR) ** c.n;
+    const theta = c.n * dLon(lonR, c.LON0);
+    const E_m = c.FE_M + r * Math.sin(theta);
+    const N_m = c.FN_M + c.R0 - r * Math.cos(theta);
+    return { x: E_m / c.UNIT, y: N_m / c.UNIT };
+  }
+  const p = c.proj === "tm" ? tmForward(c, latR, lonR) : homForward(c, latR, lonR);
+  return { x: p.E / c.UNIT, y: p.N / c.UNIT };
 }
 
-/* The zone's grid {x, y} in US survey feet → WGS84 {lat, lon} in degrees. */
+/* The zone's grid {x, y} in its own unit → WGS84 {lat, lon} in degrees. */
 export function zoneToProject(zone, { x, y } = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("statePlane: zoneToProject needs finite {x, y}");
   const c = cone(zone);
-  const E_m = x * US_FT_M, N_m = y * US_FT_M;
-  const dE = E_m - c.FE_M, dN = c.R0 - (N_m - c.FN_M);
-  const rho = Math.sign(c.n) * Math.sqrt(dE * dE + dN * dN);
-  const t = (rho / (GRS80_A * c.F)) ** (1 / c.n);
-  const lon = Math.atan2(dE, dN) / c.n + c.LON0;
-  let lat = Math.PI / 2 - 2 * Math.atan(t);
-  for (let i = 0; i < 8; i++) {
-    const es = ECC * Math.sin(lat);
-    lat = Math.PI / 2 - 2 * Math.atan(t * ((1 - es) / (1 + es)) ** (ECC / 2));
+  const E_m = x * c.UNIT, N_m = y * c.UNIT;
+  if (c.proj === "lcc") {
+    const dE = E_m - c.FE_M, dN = c.R0 - (N_m - c.FN_M);
+    const rho = Math.sign(c.n) * Math.sqrt(dE * dE + dN * dN);
+    const t = (rho / (GRS80_A * c.F)) ** (1 / c.n);
+    const lon = Math.atan2(dE, dN) / c.n + c.LON0;
+    let lat = Math.PI / 2 - 2 * Math.atan(t);
+    for (let i = 0; i < 8; i++) {
+      const es = ECC * Math.sin(lat);
+      lat = Math.PI / 2 - 2 * Math.atan(t * ((1 - es) / (1 + es)) ** (ECC / 2));
+    }
+    return { lat: lat * R2D, lon: wrapLon(lon * R2D) };
   }
-  return { lat: lat * R2D, lon: lon * R2D };
+  const r = c.proj === "tm" ? tmInverse(c, E_m, N_m) : homInverse(c, E_m, N_m);
+  return { lat: r.lat * R2D, lon: r.lon * R2D };
 }
 
-/* NEW-4 input — the GRID SCALE FACTOR of a Lambert zone at a latitude.
+/* NEW-4 input — the GRID SCALE FACTOR of a zone at a latitude (and, for the non-Lambert zones, a longitude — the scale of a
+ * transverse / oblique Mercator varies with distance from its central line, not with latitude alone).
  *
  * On an LCC the grid scale is a function of latitude alone: exactly 1 on each standard parallel,
  * slightly under 1 between them, slightly over outside. k = n·F·t(φ)^n / m(φ), which is 1 at φ1 by
- * construction (F is defined as m1/(n·t1^n)). Pure, dimensionless. */
-export function gridScaleFactor(zone, lat) {
+ * construction (F is defined as m1/(n·t1^n)). TM / HOM zones: k = |d grid / d ground| along the meridian, by a symmetric difference
+ * of the projection itself (conformal, so the direction does not matter). Pure, dimensionless. */
+export function gridScaleFactor(zone, lat, lon = null) {
   if (!Number.isFinite(lat)) return null;
   const c = cone(zone);
   const latR = lat * D2R;
-  const m = lccM(latR);
-  if (!(m > 0)) return null;                       // undefined at the poles
-  return (c.n * c.F * lccT(latR) ** c.n) / m;
+  if (c.proj === "lcc") {
+    const m = lccM(latR);
+    if (!(m > 0)) return null;                       // undefined at the poles
+    return (c.n * c.F * lccT(latR) ** c.n) / m;
+  }
+  const lo = Number.isFinite(lon) ? lon : c.z.lon0;
+  const h = 1e-6, lonR = lo * D2R;
+  const f = c.proj === "tm" ? tmForward : homForward;
+  const a = f(c, latR - h, lonR), b = f(c, latR + h, lonR);
+  const sin2 = Math.sin(latR) ** 2;
+  const M = (GRS80_A * (1 - E2)) / (1 - E2 * sin2) ** 1.5;     // meridian radius of curvature
+  return Math.hypot(b.E - a.E, b.N - a.N) / (2 * h * M);
 }
 
 /* Grid-north-vs-true-north convergence at a point, in degrees. POSITIVE = the zone's State Plane
@@ -261,9 +563,9 @@ export function gridScaleFactor(zone, lat) {
  * Returns **null** — an honest unknown, never 0 — for non-finite input and for ground outside
  * every modelled zone. 0 is a real answer ("you are on the central meridian"), so a caller must
  * be able to tell the two apart before rotating anything by it. */
-export function gridConvergenceDeg(lat, lon, { state = null, county = null } = {}) {
+export function gridConvergenceDeg(lat, lon, { state = null, county = null, zone: given = null } = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const zone = resolveZone({ state, county, lat, lon });
+  const zone = given || resolveZone({ state, county, lat, lon });
   if (!zone) return null; // no modelled zone here — refuse, never guess
   const p = projectToZone(zone, lat, lon);
   const up = zoneToProject(zone, { x: p.x, y: p.y + 1000 }); // a point 1000 ft due GRID-north
