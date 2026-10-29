@@ -201,6 +201,7 @@ export const PARCEL_COPIES = {
   la_allen: ["DesireLine LLC", "2023-01"],
   la_ascension: ["Westwood (CSRS)", "2026-06"],
   la_assumption: ["Westwood (CSRS)", "2026-05"],
+  la_bienville: [null, "2021-05"],
   la_bossier: ["Northwest Louisiana Council of Governments", null],
   la_caddo: ["Northwest Louisiana Council of Governments", null],
   la_cameron: [null, "2023-03"],
@@ -220,6 +221,7 @@ export const PARCEL_COPIES = {
   la_stmary: ["St. Mary Parish levee district", null],
   la_tangipahoa: ["DesireLine LLC", "2026-09"],
   la_terrebonne: ["DesireLine LLC", "2026-03"],
+  la_vermilion: ["ES2", "2025-12"],
   la_webster: ["Northwest Louisiana Council of Governments", null],
   la_westcarroll: ["1803 Electric Cooperative", "2025-12"],
 
