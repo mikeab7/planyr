@@ -108,7 +108,7 @@ export const roadClassKeyOf = (p) => (String((p && p.MAINTENANCERESPONSIBILITY) 
 /* A street name that is really a route code ("U059") is no name. */
 const roadNameOf = (p) => { const n = clean(p && p.STREETNAME); return /^[A-Z]\d{3,4}$/.test(n) ? "" : n; };
 const roadStyle = (props, opacity) => { const c = ROAD_CLASSES.find((r) => r.key === roadClassKeyOf(props)) || ROAD_CLASSES[2]; return stroke(c.color, c.weight, c.dash ? "10 5" : null)(opacity); };
-const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T: "Turnpike Authority", U: "State, urban (interstate ramps and frontage roads)", Z: "State responsibility, maintained by another" };
+const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T: "Turnpike Authority", };
 
 /* =============================================================== Tribal areas =============================================================== */
 const TRIBAL = {
@@ -141,15 +141,16 @@ export const RELEASE_CLOSED = { label: "Petroleum tank release — closed case (
 export const RELEASE_OTHER = { label: "Petroleum tank release — other status (see the card)", color: "#818cf8", radius: 3.5 };
 const WASTE = {
   solid: { label: "Landfill / solid-waste facility", color: "#78350f", radius: 5 },
-  haz: { label: "Hazardous-waste permit site", color: "#6d28d9", radius: 5 },
+  haz: { label: "Hazardous-waste permit site", color: "#9d174d", radius: 5 },
 };
 const SOLID_TYPE = { "C/D": "Construction & demolition landfill", "C&D": "Construction & demolition landfill", CCR: "Coal combustion residual", COMP: "Compost facility", INCR: "Incinerator", MDP: "Medical waste", MDTS: "Medical transfer station", MSW: "Municipal solid-waste landfill", NHIW: "Non-hazardous industrial waste", P: "Processing", T: "Tire", TS: "Transfer station" };
 const IC_PROGRAM = { SCAP: "Site Cleanup Assistance", VCP: "Voluntary Cleanup", RCRA: "RCRA", Superfund: "Superfund", "Solid Waste": "Solid waste", Brownfields: "Brownfields", "Brownfields Land Use Change": "Brownfields land-use change" };
 
 /* =============================================================== Water =============================================================== */
 const SRC_WATER = { whpa: { label: "Wellhead protection area (DEQ-modelled)", color: "#0891b2" }, buffer: { label: "Public well 300-ft buffer", color: "#0e7490" }, intake: { label: "Surface-water intake", color: "#1d4ed8" } };
+export const SPECIAL_WS_OTHER = { key: "other", label: "Special watershed — other type (see the card)", color: "#6b7280" };
 export const SPECIAL_WS = [
-  { key: "SR", label: "Scenic River watershed (OWRB)", color: "#0e7490" },
+  { key: "SR", label: "Scenic River watershed (OWRB)", color: "#0d9488" },
   { key: "ORW", label: "Outstanding Resource Waters watershed", color: "#047857" },
   { key: "HQW", label: "High Quality Waters watershed", color: "#65a30d" },
   { key: "NLW", label: "Nutrient-Limited watershed", color: "#ca8a04" },
@@ -163,7 +164,8 @@ export const IMPAIRED = [
   { key: "5c", label: "Impaired — more data needed (5c)", color: "#ca8a04" },
   { key: "4a", label: "Impaired — TMDL complete (4a)", color: "#9ca3af" },
 ];
-const impairedStyle = (props, opacity) => { const c = IMPAIRED.find((i) => i.key === String((props && props.Category) || "").trim().toLowerCase()); return stroke(c ? c.color : "#9ca3af", c && c.key !== "4a" ? 2 : 1.4)(opacity); };
+export const IMPAIRED_OTHER = { key: "other", label: "Impaired — other category (see the card)", color: "#6b7280" };
+const impairedStyle = (props, opacity) => { const c = IMPAIRED.find((i) => i.key === String((props && props.Category) || "").trim().toLowerCase()); return stroke(c ? c.color : IMPAIRED_OTHER.color, c && c.key !== "4a" ? 2 : 1.4)(opacity); };
 
 /* The volume tier of every Oklahoma row (layerWeight.js LAYER_TIER — declared per layer, never inferred). Nothing here STOPS a build on its own: wells, tanks, cleanup
  * sites, dams and the protected-water layers are look-up facts (reference); the county / city lines are orientation (context). */
@@ -195,7 +197,7 @@ export const OK_MERGE_GROUPS = {
 const CLEANUP_LEGEND = legendOf([...Object.values(CLEANUP), RELEASE_OTHER, RELEASE_CLOSED].map((c) => ({ label: c.label, color: c.color })));
 const TRIBAL_LEGEND = legendOf([TRIBAL.otsa, TRIBAL.osage, TRIBAL.trust, TRIBAL.cherokee, TRIBAL.land]);
 const WATER_LEGEND = legendOf([SRC_WATER.whpa, SRC_WATER.buffer, SRC_WATER.intake]);
-const PROTECTED_LEGEND = legendOf([PROTECTED.areaT1, PROTECTED.areaT2, PROTECTED.stream, PROTECTED.sens, PROTECTED.scenic, ...SPECIAL_WS]);
+const PROTECTED_LEGEND = legendOf([PROTECTED.areaT1, PROTECTED.areaT2, PROTECTED.stream, PROTECTED.sens, PROTECTED.scenic, ...SPECIAL_WS, SPECIAL_WS_OTHER]);
 
 const OCC_NOTE_SRC = "Oklahoma Corporation Commission";
 const DEQ = "Oklahoma DEQ";
@@ -250,7 +252,7 @@ export const OK_LAYERS = {
   }),
   ok_cherokee_res: areaRow({
     label: "Cherokee Nation Reservation", mergeGroup: "ok_tribal", source: "Cherokee Nation",
-    url: GIS_SOURCES.okCherokeeRes.serviceUrl, minZoom: 6, color: TRIBAL.cherokee.color, weight: 2,
+    url: GIS_SOURCES.okCherokeeRes.serviceUrl, simplifyFactor: 0.5, minZoom: 6, color: TRIBAL.cherokee.color, weight: 2,
     styleFn: (_p, opacity) => stroke(TRIBAL.cherokee.color, 2, "9 5")(opacity),
     hoverTitle: "Cherokee Nation reservation", hoverSource: "Cherokee Nation",
     identifyCard: card("Cherokee Nation reservation", (p) => [rowOf("Area", acres(p.Acres), { raw: true })],
@@ -336,7 +338,7 @@ export const OK_LAYERS = {
       rowOf("County", p.County),
       /^https?:/i.test(String(p.Link_to_Do || "").trim()) ? rowOf("Filed notice", "", { href: p.Link_to_Do }) : null,
     ].filter(Boolean)),
-    note: "Cleanup sites where DEQ has a land-use restriction on file (900) — typically a recorded deed notice or covenant that can bar residential use, groundwater use or digging. The restriction runs with the land.",
+    note: "Cleanup sites where DEQ has a land-use restriction on file (900) — typically a recorded deed notice or covenant that can bar residential use, groundwater use or digging.",
     infoCaveat: "The point is DEQ's site coordinate; the restriction applies to the affected property described in the filed notice.",
     group: "environmental", order: 25,
   }),
@@ -418,11 +420,11 @@ export const OK_LAYERS = {
   ok_deq_whpa: areaRow({
     label: "Wellhead Protection Areas", mergeGroup: "ok_source_water", source: DEQ + " — Water Quality",
     url: urlFor("okWhpa"), fields: ["ZONE"], simplifyFactor: 0.5, minZoom: 11, color: SRC_WATER.whpa.color, weight: 1.2,
-    styleFn: (p, opacity) => area(SRC_WATER.whpa.color, { A: 0.35, B: 0.22, C: 0.12 }[String(p && p.ZONE || "").trim().toUpperCase()] || 0.15, 1.2)(opacity),
+    styleFn: (_p, opacity) => area(SRC_WATER.whpa.color, 0.2, 1.2)(opacity),
     legend: WATER_LEGEND, hoverTitle: "Wellhead protection area", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Wellhead protection area", (p) => [rowOf("Zone", p.ZONE, { raw: true })],
       "DEQ's modelled area around a public water-supply well; the zone letters are DEQ's. Ask DEQ Water Quality what each zone restricts."),
-    note: "DEQ's modelled wellhead protection areas around public water-supply wells (5,900 zones). Land use inside is limited to protect the drinking-water source.",
+    note: "DEQ's modelled wellhead protection areas around public water-supply wells (5,900 zones). Ask DEQ Water Quality what applies inside one.",
     infoCaveat: "Modelled by DEQ per well; where a well has no modelled area, only its fixed well buffer is drawn.",
     group: "environmental", order: 32,
   }),
@@ -453,7 +455,7 @@ export const OK_LAYERS = {
     identifyCard: card("Appendix B protected area", (p) => [
       rowOf("Name", p.NAME), rowOf("Kind", p.TYPE, { raw: true }),
       rowOf("Table", Number(p.AB_TABLE) === 2 ? "Table 2 — federally listed species" : Number(p.AB_TABLE) === 1 ? "Table 1 — parks, forests, wildlife areas" : "", { raw: true }),
-    ].filter(Boolean), "Waters in Appendix B areas carry extra protection under the Oklahoma Water Quality Standards; DEQ's general discharge permits can exclude them. Confirm with DEQ Water Quality."),
+    ].filter(Boolean), "Waters in Appendix B areas carry extra protection under the Oklahoma Water Quality Standards; confirm with DEQ Water Quality what that means for a discharge from this site."),
     note: "Areas listed in Appendix B of the Oklahoma Water Quality Standards — Table 1: waters in national and state parks, forests, wildlife areas and refuges; Table 2: areas with federally listed threatened or endangered species.",
     group: "environmental", order: 35,
   }),
@@ -474,7 +476,7 @@ export const OK_LAYERS = {
     identifyCard: card("Stormwater sensitive area", (p) => [rowOf("Area", p.NAME), rowOf("HUC-11", p.HUC11, { raw: true })].filter(Boolean),
       "DEQ lists these watersheds as sensitive waters harboring endangered and threatened species and their critical habitats, as set forth in the OKR10 Construction General Stormwater Permit. Read the permit's eligibility terms before relying on the general permit."),
     note: "Sensitive waters and watersheds harboring threatened and endangered species that DEQ's OKR10 Construction General Stormwater Permit singles out (52 areas: HUC-11 watersheds and river corridors; DEQ's layer is named \"OKR05 Stormwater Sensitive Areas\" and its description cites OKR10).",
-    infoCaveat: "DEQ's own description of the layer; the permit text governs. A site inside one needs the permit's endangered-species review.",
+    infoCaveat: "DEQ's own description of the layer; the permit text governs.",
     group: "environmental", order: 37,
   }),
   ok_owrb_scenic: lineRow({
@@ -483,7 +485,7 @@ export const OK_LAYERS = {
     styleFn: flat(stroke(PROTECTED.scenic.color, 2)),
     hoverTitle: "Scenic River", hoverSource: "OWRB",
     identifyCard: card("Scenic River", (p) => [rowOf("River", pick(p, "name")), rowOf("Reach", pick(p, "wqs_name"), { raw: true })].filter(Boolean),
-      "Oklahoma's Scenic Rivers carry the strictest protection in the state's water-quality standards. The Scenic Rivers Commission and OWRB say what applies on the land beside one."),
+      "Oklahoma's Scenic Rivers are named in the state's water-quality standards. Ask OWRB what applies on the land beside one."),
     note: "The Scenic Rivers named in the Oklahoma Water Quality Standards (including the Illinois River, Barren Fork, Flint Creek, Lee Creek and the Upper Mountain Fork; 182 segments, OWRB).",
     infoCaveat: "The stream line only. The watershed above it is in the Special-Provision Watersheds row.",
     group: "environmental", order: 36.5,
@@ -491,18 +493,18 @@ export const OK_LAYERS = {
   ok_owrb_special_ws: areaRow({
     label: "Special-Provision Watersheds", mergeGroup: "ok_protected_waters", source: "Oklahoma Water Resources Board — Water Quality Standards",
     url: urlFor("okSpecialWatersheds"), fields: ["name", "type", "type_def"], simplifyFactor: 0.5, minZoom: 8, color: "#0e7490", weight: 1.2,
-    styleFn: (p, opacity) => { const w = specialWsOf(p && p.type); return area(w ? w.color : "#6b7280", 0.14, 1.2)(opacity); },
+    styleFn: (p, opacity) => { const w = specialWsOf(p && p.type); return area(w ? w.color : SPECIAL_WS_OTHER.color, 0.14, 1.2)(opacity); },
     hoverTitle: "Special-provision watershed", hoverSource: "OWRB",
     identifyCard: card("Special-provision watershed", (p) => [rowOf("Name", p.name), rowOf("Kind", pick(p, "type_def"), { raw: true })].filter(Boolean),
       "Where the Oklahoma Water Quality Standards add a special provision for the watershed (scenic river, outstanding resource, high quality, nutrient-limited or sensitive water supply). Ask OWRB and DEQ what it means for a new discharge, including stormwater."),
     note: "Watersheds where the Oklahoma Water Quality Standards add a special provision: Scenic River, Outstanding Resource Waters, High Quality Waters, Nutrient-Limited Watershed, and Sensitive Public and Private Water Supply (190 polygons, OWRB's own types).",
-    infoCaveat: "Nutrient-limited and scenic-river watersheds cover much of northeast Oklahoma's Illinois River basin.",
+    infoCaveat: "Each watershed's type is on its card; ask OWRB what that type means for a site.",
     group: "environmental", order: 36.6,
   }),
   ok_deq_303d: lineRow({
     label: "Impaired Waters (303(d))", source: DEQ + " — 2024 Integrated Report",
     url: urlFor("ok303d"), fields: ["Name", "Category"], simplifyFactor: 0.5, minZoom: 9, color: "#c2410c", weight: 2,
-    styleFn: impairedStyle, legend: legendOf(IMPAIRED),
+    styleFn: impairedStyle, legend: legendOf([...IMPAIRED, IMPAIRED_OTHER]),
     hoverTitle: "Impaired waterbody", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Impaired waterbody", (p) => [rowOf("Name", p.Name), rowOf("Category", (IMPAIRED.find((i) => i.key === String(p.Category || "").trim().toLowerCase()) || {}).label || p.Category, { raw: true })].filter(Boolean),
       "A stream on DEQ's 303(d) list fails a water-quality standard; a new discharge to it (including stormwater) can face tighter limits. Ask DEQ Water Quality."),
@@ -520,11 +522,11 @@ export const OK_LAYERS = {
       rowOf("Hazard class", ({ High: "High", Significant: "Significant", Low: "Low", Other: "Drained, decommissioned, non-jurisdictional or unclassified" })[damHazardOf(p.hazard)], { raw: true }),
       rowOf("Owner", p.owner_name), rowOf("Owner type", damOwnerType(p.owner_type), { raw: true }),
       rowOf("Stream", p.river), rowOf("County", p.county), rowOf("Built", p.year_completed, { raw: true }),
-      Number(p.dam_height) > 0 ? rowOf("Height", `${Number(p.dam_height).toLocaleString("en-US", { maximumFractionDigits: 1 })} ft`, { raw: true }) : null,
+      Number(p.dam_height) > 0 ? rowOf("Height", Number(p.dam_height).toLocaleString("en-US", { maximumFractionDigits: 1 }), { raw: true }) : null,
       /^y(es)?$/i.test(String(p.inundation_map_created || "").trim()) ? rowOf("Inundation map", "On file with OWRB — ask for it", { raw: true }) : null,
     ].filter(Boolean), "The hazard class describes the consequence of a failure downstream, not the dam's condition."),
     note: "The Oklahoma Dam Inventory (OWRB; 4,900+ dams, including NRCS flood-control and federal dams) by hazard class. OWRB describes a High hazard dam as one with occupied dwellings immediately downstream.",
-    infoCaveat: "The inventory flags the 107 dams that have an inundation map on file with OWRB (the map itself is OWRB's to give); for any other dam none is published. A site downstream of a high or significant hazard dam is a question for the dam's owner and OWRB.",
+    infoCaveat: "The inventory flags the 107 dams that have an inundation map on file with OWRB (the map itself is OWRB's to give). A site downstream of a high or significant hazard dam is a question for the dam's owner and OWRB.",
     group: "environmental", order: 39,
   }),
 
@@ -533,7 +535,7 @@ export const OK_LAYERS = {
     url: GIS_SOURCES.okNrhp.serviceUrl, minZoom: 11, color: "#6d28d9", weight: 2, pointRadius: 4,
     hoverTitle: "Historic place", hoverSource: "NPS National Register",
     identifyCard: card("Historic place", (p) => [rowOf("Name", pick(p, "RESNAME")), rowOf("Type", String(pick(p, "ResType") || "").replace(/^./, (c) => c.toUpperCase()), { raw: true }), rowOf("City", pick(p, "City")), rowOf("County", pick(p, "County"))].filter(Boolean)),
-    note: "National Register listings — one point per listing (a district is one point, not its boundary). The State Historic Preservation Office's own inventory is not public, so recorded-but-unlisted sites are NOT here. A flag to check with the Oklahoma SHPO.",
+    note: "National Register listings — one point per listing (a district is one point, not its boundary). The State Historic Preservation Office keeps its own inventory, which is not in this layer, so recorded-but-unlisted sites are NOT here. A flag to check with the Oklahoma SHPO.",
     group: "environmental", order: 40,
   }),
   ok_cemeteries: pointRow({
@@ -557,7 +559,7 @@ export const OK_LAYERS = {
   /* ---------------------------------------------------------------- Utilities ---------------------------------------------------------------- */
   ok_water_systems: areaRow({
     label: "Water System Service Areas", mergeGroup: "water_sewer", source: "Oklahoma Water Resources Board",
-    url: urlFor("okWaterSystems"), fields: ["name", "pwsid", "county"], minZoom: 8, color: "#0369a1", weight: 1.2,
+    url: urlFor("okWaterSystems"), fields: ["name", "pwsid", "county"], simplifyFactor: 0.5, minZoom: 8, color: "#0369a1", weight: 1.2,
     styleFn: flat(area("#0369a1", 0.1, 1.2)),
     hoverTitle: "Water system service area", hoverSource: "OWRB",
     identifyCard: card("Public water system", (p) => [rowOf("System", p.name), rowOf("ID", p.pwsid, { raw: true }), rowOf("County", p.county)].filter(Boolean),

@@ -333,7 +333,8 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
       const c = ALL_LAYERS[id];
       const text = [c.note, c.infoCaveat, c.identifyNote].join(" ");
       expect(text, id).not.toMatch(/has no ETJ|zoning and permitting authority|review pending/i);
-      expect(text, id).not.toMatch(/McGirt|Osage Wind|\bBIA\b|sign-off/i); // legal conclusions about reservations / mineral estates are never typed from memory
+      expect(text, id).not.toMatch(/McGirt|Osage Wind|\bBIA\b|sign-off/i);
+      expect(text, id).not.toMatch(/runs with the land|strictest protection|can exclude them|endangered-species review|Land use inside is limited|none is published|is not public/i); // statements no source in the registry supports // legal conclusions about reservations / mineral estates are never typed from memory
     }
     expect(OK_SOURCES.okCity.fullPurposeOnly).toBe(true);
   });

@@ -23,7 +23,7 @@
  *     third-party university copy, or absent; the Census OTSA layer in `okTribal` covers every Nation consistently.
  *   · (Scenic Rivers and the Outstanding Resource / High Quality / Nutrient-Limited / Sensitive Water Supply watersheds ARE built — OWRB's Water Quality Standards MapServer, found by the adversarial review; an earlier draft wrongly said they were unpublished.)
  *   · Fault lines (OWRB, 26,000 lines) — published, but a geologic-map fault is not a development constraint at screening scale (the Texas growth-fault layer exists because Houston faults move; Oklahoma's mapped faults are not that).
- *   · SHPO Landmarks Inventory / archaeological sites — restricted; the National Register points (okNrhp) are the public part.
+ *   · SHPO Landmarks Inventory / archaeological sites — not assessed this pass; the National Register points (okNrhp) are what the Historic Places row carries.
  *   · Karst / gypsum sinkholes, abandoned coal mines — the Geological Survey publishes no service; ODOT's "Coal_Mines" file states no provenance and is a 1979 vintage.
  *   · NFIP community participation (OWRB) — city POINTS only, not an area; FEMA's flood row already answers the question a site-wide lender asks.
  *   · Tier II chemical facilities, CAFOs, NPDES dischargers, biosolid sites — neighbour data of low day-one value; DEQ publishes them if a later pass wants them.
