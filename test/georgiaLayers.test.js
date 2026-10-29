@@ -199,12 +199,13 @@ describe("heavy-geometry rows ask the service for what the browser can draw", ()
   it("every polygon row with no simplification of its own would stall the draw budget: all polygon rows over ~100k vertices generalise server-side", () => {
     for (const id of ["ga_gw_susceptibility", "ga_protected_mountains", "ga_conservation", "ga_impaired_streams", "ga_opportunity_zones", "ga_spalding_zoning", "ga_jtc_tiers", "ga_recharge", "ga_karst", "ga_protected_rivers"]) expect(GEORGIA_LAYERS[id].simplifyFactor, id).toBeGreaterThan(0);
   });
-  it("protected mountains: ONE big cell per view and coarse coordinates, a budget above the measured worst case (535k vertices at parcel zoom), and it passes through to the request", () => {
+  it("protected mountains: a few huge cells per view, a budget above the measured worst case (535k vertices at parcel zoom, several cells), NO coordinate rounding (precision 3 snapped 58% of the rings into nothing), and it passes through to the request", () => {
     const c = GEORGIA_LAYERS.ga_protected_mountains;
-    expect(c.vertexBudget).toBeGreaterThanOrEqual(600000);
-    expect(c.cellSize).toBeGreaterThanOrEqual(2048);
+    expect(c.vertexBudget).toBeGreaterThanOrEqual(1200000);
+    expect(c.cellSize).toBeGreaterThanOrEqual(16384);
+    expect(c.precision, "geometryPrecision rounds the polygon edge by tens of metres").toBeUndefined();
     const o = featureLayerOptions(c, 1, "p");
-    expect(o.cellSize).toBe(c.cellSize); expect(o.precision).toBe(3); expect(o.simplifyFactor).toBe(2);
+    expect(o.cellSize).toBe(c.cellSize); expect(o.simplifyFactor).toBe(2); expect(o.precision).toBeUndefined();
   });
   it("Spalding zoning's whole layer is 124k vertices: its budget is raised above the per-batch default", () => { expect(GEORGIA_LAYERS.ga_spalding_zoning.vertexBudget).toBeGreaterThan(124444); });
 });

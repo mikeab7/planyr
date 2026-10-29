@@ -8,8 +8,8 @@
  *
  * EVERY ROW is an agency's own ArcGIS Online feature service, recorded in the GIS source registry (src/shared/gis/sources.js `ga*` rows) with its probe
  * date and live counts; the URL, and any `where`, are READ FROM THAT ROW — never typed twice. Every row declares `states: ["GA"]`, so a Texas or
- * Colorado view never lists it; the five rows whose source reaches only part of Georgia also declare a real boundary `regions` (serviceAreas.js:
- * `mngwpd` = the 15-county Metropolitan North Georgia Water Planning District, `spalding_ga` = Spalding County), so a Savannah site is not offered
+ * Colorado view never lists it; the eight rows whose source reaches only part of Georgia also declare a real boundary `regions` (serviceAreas.js:
+ * `mngwpd` = the 15-county Metropolitan North Georgia Water Planning District, `spalding_ga` = Spalding County, `ga_blue_ridge` = the north Georgia mountains, the protected-mountain data extent), so a Savannah site is not offered
  * a layer that can only ever read "nothing here".
  *
  * REGULATORY NUMBERS are each cited in the row's note (O.C.G.A. 12-2-8, Rules 391-3-16-.01…-.05, O.C.G.A. 12-5-440, the District's own item text);
@@ -180,7 +180,7 @@ export const GEORGIA_LAYERS = {
     infoCaveat: "DCA's compiled lines (2003) — a planning map, not a survey; the buffer is measured from the bank, not this line.",
   }),
   ga_protected_mountains: row("gaProtectedMountain", {
-    label: "Protected Mountains", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "area", order: 23, minZoom: 9, simplifyFactor: 2, precision: 3, cellSize: 4096, vertexBudget: 700000, regions: ["ga_blue_ridge"], color: "#166534", styleFn: washStyle("#166534", 0.4, 0.5), legend: [{ label: "Protected mountain", color: "#166534" }],
+    label: "Protected Mountains", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "area", order: 23, minZoom: 9, simplifyFactor: 2, cellSize: 16384, vertexBudget: 1500000, regions: ["ga_blue_ridge"], color: "#166534", styleFn: washStyle("#166534", 0.4, 0.5), legend: [{ label: "Protected mountain", color: "#166534" }],
     hoverTitle: "Protected mountain", hoverSource: "Georgia DCA", hoverFields: [],
     identifyCard: () => card("Protected mountain",
       [[{ label: "Definition", text: "Land at or above 2,200 ft elevation with a slope of 25% or more over at least 500 ft horizontally (O.C.G.A. 12-2-8)." }, { label: "Rule", text: "Local governments must adopt mountain-protection standards for it (Rule 391-3-16-.05); check the county ordinance before planning any grading." }]],

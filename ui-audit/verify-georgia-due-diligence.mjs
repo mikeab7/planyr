@@ -171,6 +171,14 @@ try {
       check(`${L.id}: wide view z${L.wide.zoom} — no "too detailed" refusal`, !/too detailed/i.test(w.text));
       check(`${L.id}: wide view z${L.wide.zoom} — no task over ${LONG_TASK_BUDGET_MS} ms`, lw.max < LONG_TASK_BUDGET_MS, `longest ${Math.round(lw.max)} ms`);
       check(`${L.id}: wide view — page still answers`, await rafAlive());
+      if (L.id === "ga_protected_mountains") { // the cumulative draw cap: ordinary panning and one zoom step at parcel scale must not flip an already-drawn layer to "too detailed"
+        for (const [dla, dlo, z] of [[0.15, 0.1, L.wide.zoom], [0.15, 0.1, L.wide.zoom + 1], [-0.3, 0.2, L.wide.zoom + 1]]) {
+          await page.evaluate(([la, lo, zz]) => window.__mapFinderMap.setView([la, lo], zz, { animate: false }), [L.wide.lat + dla, L.wide.lon + dlo, z]);
+          await page.waitForTimeout(9000);
+        }
+        const pn = await drawn();
+        check(`${L.id}: after panning and a zoom step at z${L.wide.zoom + 1} — still no "too detailed" refusal`, !/too detailed/i.test(pn.text));
+      }
     }
     await row.locator('input[type="checkbox"]').first().uncheck().catch(() => {});
   }
