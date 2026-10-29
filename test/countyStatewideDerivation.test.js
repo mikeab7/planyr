@@ -283,7 +283,7 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
   });
 
   it("a state with NO wired source at all resolves to NO candidates — never every candidate", () => {
-    // Pierre, SD — a real, geometry-resolvable county in a state with ZERO configured parcel
+    // Selby, Walworth County SD (was Pierre/Hughes until the 2026-10-29 second pass wired Hughes) — a real, geometry-resolvable county with ZERO configured parcel
     // sources (no statewide composite, no individual county). This is the case the old fallback
     // got backwards: "we don't know a source" became "try all of them" instead of the honest "we
     // have none to try".
@@ -293,7 +293,7 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
     // non-participating counties already rely on) — so the case moved to one of the only two
     // states (SD, WA) with no wired source at all, rather than deleting the case the fallback rule
     // is actually about.
-    const cand = candidateCountiesForPoint(44.3683, -100.3510);
+    const cand = candidateCountiesForPoint(45.51, -100.03);
     expect(cand).toEqual([]);
   });
 
