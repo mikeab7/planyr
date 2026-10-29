@@ -122,6 +122,7 @@ export function hoverDetails(cfg = {}, props = {}) {
     let text = "";
     if (f.clean && HOVER_CLEANERS[f.clean]) text = HOVER_CLEANERS[f.clean](props) || "";
     else if (f.date) text = fmtDate(pickAttr(props, f.names || [])) || ""; // NEW-1 (DeSoto zoning): an Esri date field arrives as epoch ms
+    else if (typeof f.format === "function") text = String(f.format(props) || "").trim(); // B2528688 (Colorado): a coded field decoded to words (ECMC well status), computed from the row's own table
     else text = titleCaseAgency(cleanAttr(pickAttr(props, f.names || [])));
     if (!text) continue;
     if (f.unit && /^[\d.,]+$/.test(text)) text = `${text} ${f.unit}`;

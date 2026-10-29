@@ -131,9 +131,37 @@ export const LAYER_TIER = {
   ms_psc_sewer: "reference",
   ms_dcrua_easements: "reference",
   ms_dcrua_service_area: "reference",
+  // Colorado due-diligence layers (B2528688): a legal restriction or a physical stop is a constraint; a look-up fact is reference; a boundary is context.
+  co_ecmc_flowlines: "constraint",  // a registered (or abandoned) line across the tract
+  co_undermined: "constraint",      // ground over old mine workings
+  co_inst_controls: "constraint",   // a recorded land-use restriction that runs with the land
+  co_superfund: "constraint",
+  co_ecmc_wells: "reference",
+  co_ecmc_locations: "reference",
+  co_ecmc_facilities: "reference",
+  co_rcra_ca: "reference",
+  co_closed_landfills: "reference",
+  co_solid_waste: "reference",
+  co_prairie_dog: "reference",
+  co_eagle_nests: "reference",
+  co_crit_habitat: "reference",
+  co_nrhp: "reference",
+  co_weld_ogla: "reference",
+  co_adams_landfills: "reference",
+  co_weld_zoning: "reference",
+  co_adams_zoning: "reference",
+  co_aurora_zoning: "reference",
+  co_weld_airport: "reference",
+  co_adams_aviation: "reference",
+  co_aurora_noise: "reference",
+  co_aurora_apz: "reference",
+  co_weld_row: "reference",
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
+  co_enterprise_zones: "context",   // B2528688
+  co_weld_ugb: "context",
+  co_weld_iga: "context",
   ms_ob_planning_area: "context",   // B2507059 — a planning line
   ms_desoto_city: "context",
   ms_desoto_flu: "context",
