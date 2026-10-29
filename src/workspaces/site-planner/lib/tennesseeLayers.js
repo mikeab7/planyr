@@ -1,0 +1,167 @@
+/* Tennessee — the industrial due-diligence layer rows (B2521584, 2026-10-29).
+ *
+ * Owner: "in all the states that our users have planned sites … think of the stuff that's really obvious that developers check for, or that
+ * industrial developers check for. Like Georgia, you did a great job calling out stream buffers." This is Tennessee's set. Every row:
+ *   · declares `states: ["TN"]`, so a Texas, Georgia or Mississippi view never lists it (layerLocationScope / layerStateCoverage);
+ *   · reads a `GIS_SOURCES` row (src/shared/gis/sources.js) — the agency that owns the fact, live-probed with its date — and never a
+ *     third-party copy; the click card wording is the pure `tennesseeCards.js` (owner constraint #45: plain labels, no raw field names);
+ *   · is a MAP LAYER only. Site Analysis verdicts stay TRUSTED-ONLY (siteChecks.TRUSTED_CHECKS); nothing here adds a verdict card.
+ *
+ * The registry spreads TN_LAYERS into ALL_LAYERS (layers.js). The two `kind:"vector"` rows (county / city lines) have their
+ * `VECTOR_SOURCES` entries in vectorLayers.js in the SAME commit — without one a vector row draws nothing (the Georgia lesson).
+ *
+ * PURE: no network, no React. */
+import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import {
+  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, isImpairedAttainment, isThreatenedAttainment,
+} from "./tennesseeCards.js";
+
+const TN = { states: ["TN"] };
+const TDEC = "Tennessee Dept. of Environment & Conservation (TDEC)";
+
+/* Water-quality assessment colouring: impaired (the EPA-approved 303(d)-style list) is the loud class; threatened next; the rest recede. */
+export const wqaStyle = (props, opacity) => {
+  const a = props && props.ATTAINMENT;
+  const impaired = isImpairedAttainment(a), threatened = isThreatenedAttainment(a);
+  const c = impaired ? "#c2410c" : threatened ? "#d97706" : /^fully/i.test(String(a || "")) ? "#2563eb" : "#9ca3af"; // design-exempt: map ink for a drawn assessment class (cartography, not UI chrome)
+  return { color: c, weight: impaired ? 2 : threatened ? 2 : 1.4, opacity, fill: false };
+};
+
+export const TN_LAYERS = {
+  /* ---- Jurisdictions: City limits (State of Tennessee STS; no ETJ in Tennessee — the county governs outside city limits). The county-line row `tn_county` is main's own (B2507065), offered in TN and, at DeSoto's feet, MS. ---- */
+  tn_city: {
+    kind: "vector", label: "City Limits (Tennessee)", mergeGroup: "counties_cities", source: "State of Tennessee (STS)",
+    url: GIS_SOURCES.cityTn.serviceUrl, ...TN,
+    minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "Tennessee municipal boundaries (State of Tennessee, 345 cities; layer last edited 2026-03-18 — annexations since are not shown). Inside = in the city; outside = unincorporated county. NOT proof of utility service.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
+  tn_ms4: {
+    kind: "esriFeature", label: "Stormwater (MS4) Permit Areas", source: `${TDEC} — Division of Water Resources`,
+    url: GIS_SOURCES.ms4Tn.serviceUrl, ...TN,
+    minZoom: 9, color: "#475569", weight: 1.6, opacity: 0.45,
+    styleFn: (_p, opacity) => ({ color: "#475569", weight: 1.6, opacity, dashArray: "6 4", fillColor: "#475569", fillOpacity: opacity * 0.12 }), // design-exempt: map ink for a drawn jurisdiction area
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "MS4 permit area", hoverSource: "TDEC",
+    hoverFields: [{ names: ["NAME"] }, { names: ["PERMIT_NUM"], label: "permit" }],
+    identifyCard: (props) => ms4Card(props),
+    vintage: "TDEC MS4 permit areas — layer edited 2026-08-18",
+    note: "The cities and counties that hold a Municipal Separate Storm Sewer System (MS4) permit. Inside one, that government's own stormwater, post-construction and stream-buffer rules apply on top of the state Construction General Permit; outside, the state permit governs alone. Click for the permittee and permit number.",
+    infoCaveat: "A permit area says WHOSE stormwater rules apply, not what they are — buffer widths and detention criteria differ by city (Nashville, Murfreesboro and Franklin each publish their own). Get the design manual from the permittee.",
+    role: "area", group: "jurisdiction", order: 6,
+  },
+
+  /* ---- Flood & Drainage: the state's water-quality assessment ---- */
+  tn_wqa: {
+    kind: "esriFeature", label: "Impaired & Assessed Streams", source: `${TDEC} — Division of Water Resources, 2026 Water Quality Assessment`,
+    url: GIS_SOURCES.wqaTn.serviceUrl, ...TN,
+    minZoom: 10, color: "#c2410c", weight: 2, opacity: 0.55, styleFn: wqaStyle,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Assessed stream", hoverSource: "TDEC",
+    hoverFields: [{ names: ["ASSESSMENT_UNIT_NAME"] }, { names: ["ATTAINMENT"] }],
+    identifyCard: (props) => wqaCard(props),
+    vintage: "TDEC 2026 Water Quality Assessment — layer edited 2026-08-13",
+    note: "TDEC's 2026 stream assessment: orange = impaired (not supporting its uses), amber = threatened, blue = fully supporting, grey = not assessed. It is the spatial companion of the EPA-approved 2026 List of Impaired and Threatened Streams. Click a stream for its status and reach.",
+    infoCaveat: "Impairment can tighten the state's construction buffer (60 ft average instead of 30 ft, TNR100000) and discharge rules, but only for some causes — see \"Restricted Waters\" for TDEC's own list and ask TDEC's Division of Water Resources.",
+    role: "line", group: "flood", order: 4,
+    floodTier: "hydrography", agency: "TDEC",
+  },
+
+  /* ---- Utilities: who serves water ---- */
+  tn_pws: {
+    kind: "esriFeature", label: "Water Service Areas", mergeGroup: "water_sewer", source: `${TDEC} — Division of Water Resources, public water systems`,
+    url: GIS_SOURCES.pwsTn.serviceUrl, ...TN,
+    minZoom: 9, color: "#0369a1", weight: 1.4, opacity: 0.4,
+    styleFn: (_p, opacity) => ({ color: "#0369a1", weight: 1.4, opacity, fillColor: "#0369a1", fillOpacity: opacity * 0.1 }), // design-exempt: map ink for a drawn service territory
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Water service area", hoverSource: "TDEC",
+    hoverFields: [{ names: ["MA_NAME"] }, { names: ["PWSID"], label: "ID" }],
+    identifyCard: (props) => pwsCard(props),
+    vintage: "TDEC public water system service areas — layer edited 2024-10-01",
+    note: "The permitted public water system whose declared service territory holds the point (447 systems). Click for the system, its owner type, population served and a link to its TDEC Drinking Water Watch record.",
+    infoCaveat: "A service territory is not a will-serve letter and not proof of a main at the property line — confirm size, pressure and capacity with the system. System names are TDEC's abbreviations.",
+    role: "area", group: "utilities", order: 40,
+  },
+
+  /* ---- Environmental: contamination, natural areas, historic, habitat ---- */
+  tn_drycleaners: {
+    kind: "esriFeature", label: "Known Drycleaners", source: `${TDEC} — Division of Remediation (DCERP)`,
+    url: GIS_SOURCES.drycleanersTn.serviceUrl, ...TN,
+    minZoom: 11, color: "#a21caf", weight: 2, opacity: 0.55, pointRadius: 4,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Drycleaner", hoverSource: "TDEC",
+    hoverFields: [{ names: ["FACILITY_N"] }, { names: ["CITY"] }],
+    identifyCard: (props) => drycleanerCard(props),
+    vintage: "TDEC DCERP drycleaner list — layer edited 2026-02-26",
+    note: "Every drycleaner registered with TDEC's Drycleaner Environmental Response Program since 1996 (pick-up-only shops are not on it). Click for whether TDEC has worked a release there or only holds the registration.",
+    infoCaveat: "A Phase I ESA pre-screen: chlorinated-solvent (PCE) plumes are the classic drycleaner contamination. A shop beside the site is a flag to pull TDEC's file — not a finding, and a missing shop is not proof of none.",
+    role: "point", group: "environmental", order: 21,
+  },
+  tn_sna: {
+    kind: "esriFeature", label: "State Natural Areas", source: `${TDEC} — Division of Natural Areas`,
+    url: GIS_SOURCES.snaTn.serviceUrl, ...TN,
+    minZoom: 9, color: "#15803d", weight: 1.6, opacity: 0.5,
+    styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.6, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.35 }), // design-exempt: map ink for a drawn designated area
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "State Natural Area", hoverSource: "TDEC",
+    hoverFields: [{ names: ["SNA_NAME"] }],
+    identifyCard: (props) => snaCard(props),
+    vintage: "TDEC Division of Natural Areas — layer edited 2026-10-13",
+    note: "The 93 State Natural Areas designated under the Natural Areas Preservation Act of 1971. In Middle Tennessee these are chiefly the cedar glades around Murfreesboro and Christiana, home to federally listed plants. Click for the area's name and size.",
+    infoCaveat: "A designated area is a constraint on the land itself, and a neighbouring tract often carries the same rare species. Boundaries are TDEC's public view; talk to the Division of Natural Areas before planning near one.",
+    role: "area", group: "environmental", order: 22,
+  },
+  tn_scenic: {
+    kind: "esriFeature", label: "State Scenic Rivers", source: `${TDEC} — Division of Natural Areas`,
+    url: GIS_SOURCES.scenicTn.serviceUrl, ...TN,
+    minZoom: 9, color: "#0e7490", weight: 1.6, opacity: 0.5,
+    styleFn: (_p, opacity) => ({ color: "#0e7490", weight: 1.6, opacity, fillColor: "#0e7490", fillOpacity: opacity * 0.3 }), // design-exempt: map ink for a drawn designated corridor
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Scenic river", hoverSource: "TDEC",
+    hoverFields: [{ names: ["Site_name"] }, { names: ["DESIGNATIO"] }],
+    identifyCard: (props) => scenicCard(props),
+    vintage: "TDEC Tennessee Scenic Rivers — layer edited 2023-09-13",
+    note: "River corridors designated under the Tennessee Scenic Rivers Act of 1968 (25 corridors), with the Act's class. Click for the river, class and reach.",
+    infoCaveat: "The corridor is a planning designation; the river's management plan governs what is allowed inside it. Confirm with TDEC's Division of Natural Areas.",
+    role: "area", group: "environmental", order: 23,
+  },
+  tn_nrhp: {
+    kind: "esriFeature", label: "Historic Places", source: "National Park Service — National Register of Historic Places",
+    url: GIS_SOURCES.nrhpTn.serviceUrl, ...TN,
+    minZoom: 11, color: "#6d28d9", weight: 2, opacity: 0.55, pointRadius: 4,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Historic place", hoverSource: "NPS National Register",
+    hoverFields: [{ names: ["RESNAME"] }, { names: ["ResType"], label: "type" }, { names: ["City"] }],
+    vintage: "NPS National Register — Esri Federal Data copy, edited 2026-10-28",
+    note: "National Register listings — one point per listing (a district is one point, not its boundary). The Tennessee Historical Commission's inventory of recorded-but-unlisted sites is not public GIS, so an empty map is never proof of none. A flag to check with the Commission, not a clearance.",
+    role: "point", group: "environmental", order: 24,
+  },
+  tn_cemeteries: {
+    kind: "esriFeature", label: "Cemeteries", source: "USGS — GNIS cemeteries",
+    url: GIS_SOURCES.cemeteriesTn.serviceUrl, ...TN,
+    minZoom: 12, color: "#475569", weight: 2, opacity: 0.55, pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cemetery", hoverSource: "USGS GNIS",
+    hoverFields: [{ names: ["NAME"] }, { names: ["CITY"] }],
+    vintage: "USGS GNIS cemeteries — recorded sites only; no single edition date",
+    note: "INCOMPLETE: recorded cemeteries only. Unrecorded family burial grounds — common on old Middle Tennessee farmland — are NOT on this layer, so an empty map is never proof of none. Tennessee law protects every known burial site; ask the county and have the property surveyed.",
+    role: "point", group: "environmental", order: 25,
+  },
+  tn_crit_habitat: {
+    kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
+    url: GIS_SOURCES.critHabitatTn.serviceUrl, ...TN,
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45,
+    styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // design-exempt: map ink for a drawn designated area
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
+    hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["listing_status"], label: "status" }],
+    identifyCard: (props) => critHabitatCard(props),
+    vintage: "USFWS final critical habitat — layer edited 2026-10-21",
+    note: "USFWS final critical habitat — in Tennessee mostly freshwater mussels and fish (the Stones, Duck, Clinch and Holston systems) and the cedar-glade plants. It binds FEDERAL actions, not private land directly — but a Corps stream or wetland permit is a federal action. A screen; USFWS IPaC is the authoritative species list.",
+    role: "area", group: "environmental", order: 26,
+  },
+};
+
+/* The ids, in panel order — the guards (test/tennesseeLayers.test.js, layerStateCoverage) read this. */
+export const TN_LAYER_IDS = Object.freeze(Object.keys(TN_LAYERS));
+
+/* Every Tennessee row sits in a weight tier (layerWeight.js): the county / city / MS4 lines are orientation furniture, everything
+ * else is a look-up fact — a flag to pull a file, never louder than the plan. The buffer bands (when present) are the constraint. */
+export const TN_TIERS = Object.freeze({
+  tn_city: "context", tn_ms4: "reference",
+  tn_wqa: "reference", tn_pws: "reference",
+  tn_drycleaners: "reference", tn_sna: "reference", tn_scenic: "reference",
+  tn_nrhp: "reference", tn_cemeteries: "reference", tn_crit_habitat: "reference",
+});

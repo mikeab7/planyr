@@ -15,7 +15,7 @@ export const PILL_DEFS = Object.freeze([
   { id: "power", label: "Power lines", layers: ["hifld_tx"] },
   { id: "rail", label: "Rail", layers: ["bts_rail"] },
   { id: "traffic", label: "Traffic counts", byRegion: { TX: ["txdot_aadt"], CO: ["co_aadt"] } },
-  { id: "contamination", label: "Contamination sites", byRegion: { TX: ["env_lpst", "env_cleanups"], CO: ["co_env_cleanups"] }, fallback: ["env_cleanups"] },
+  { id: "contamination", label: "Contamination sites", byRegion: { TX: ["env_lpst", "env_cleanups"], CO: ["co_env_cleanups"], TN: ["env_cleanups", "tn_drycleaners"] }, fallback: ["env_cleanups"] }, // B2521584: Tennessee adds TDEC's drycleaner list (state remediation sites / USTs join once measured)
   { id: "faults", label: "Faults", byRegion: { TX: ["faults"] } },
 ]);
 
