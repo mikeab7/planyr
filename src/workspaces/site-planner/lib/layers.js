@@ -1578,16 +1578,18 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // setTimeout can't fire refresh() on a detached layer. Wrap onRemove (Leaflet calls it on
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;
-  lyr.onRemove = function (map) { clearTimeout(timer); if (origOnRemove) return origOnRemove.call(this, map); };
+  lyr.onRemove = function (map) { clearTimeout(timer); clearTimeout(resetTimer); if (origOnRemove) return origOnRemove.call(this, map); };
   /* B2521584 — a draw-budget refusal must SURVIVE the `load` that esri-leaflet fires right after it: the handler below reset the status to "loaded", or to "empty / No
    * features in this view" when nothing was drawn, so a layer that REFUSED to draw read as "no data here" (reproduced against esri-leaflet 3.0.19: failed ×4, then empty).
    * `refused` is raised by `overbudget` and cleared when the next request cycle starts ("loading"). */
-  let refused = false, lastErrAt = 0;
+  let refused = false, resetTimer = null;
   lyr.on("loading", () => { refused = false; });
   lyr.on("load", () => {
-    /* esri-leaflet fires `load` BEFORE `requesterror` for a failed request (Service.js calls the callback first), so resetting `tries` here wiped the count on every cycle and a
-     * persistently failing service retried forever (simulated: 1,801 refreshes in 12 minutes, "failed" never reached). A load within 10 s of an error is the same cycle's — keep the count. */
-    if (Date.now() - lastErrAt > 10000) tries = 0;
+    /* esri-leaflet fires `load` BEFORE `requesterror` for a failed request (Service.js calls the callback first, then fires the error in the same tick), so resetting `tries` here wiped
+     * the count on every cycle and a persistently failing service retried forever (simulated: 1,801 refreshes in 12 minutes, "failed" never reached). The reset is DEFERRED one
+     * tick and cancelled by the `requesterror` of the same cycle — no wall-clock window, so a service that hangs 30 s and then answers 504 counts too. */
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => { tries = 0; }, 0);
     if (refused) return; // the "too detailed to draw" failure stays on the row
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
@@ -1599,8 +1601,9 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
     onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
   });
   lyr.on("requesterror", (e) => {
-    lastErrAt = Date.now();
-    const code = e && e.error && (e.error.code ?? e.error.httpStatus);
+    clearTimeout(resetTimer);   // the `load` that just fired belonged to this failed cycle
+    // esri-leaflet 3.x fires { url, params, message, code, method }; older callers wrapped it in `error`
+    const code = e && (e.code ?? (e.error && (e.error.code ?? e.error.httpStatus)));
     const { retry, delayMs } = featureRetryDecision(code, tries, max);
     if (retry) {
       tries += 1;
@@ -1641,18 +1644,30 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     const origCreate = lyr.createLayers;
     let drawn = 0;
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
+    /* B2521584 — what is already on the map, by feature id → the vertex count of the geometry held now. esri-leaflet re-delivers a feature it already holds (every pan / grid cell that
+     * touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
+     * copy under the same id, and `setLatLngs` replaces the old one). So a held id is charged only for the vertices it GROWS by; a refused batch leaves the old geometry in place. */
+    const held = new Map();
     lyr.createLayers = function (features) {
-      // esri-leaflet re-delivers a feature it already holds (every pan / grid cell that touches it) and only updates it — never count that twice against the total
-      const fresh = (features || []).filter((f) => !(f && f.id != null && this._layers && this._layers[f.id]));
-      const v = countVertices(fresh, Math.max(cap, total));
+      let v = 0;
+      const mine = [];
+      for (const f of features || []) {
+        const fv = countVertices([f], Math.max(cap, total));
+        const id = f && f.id != null ? f.id : null;
+        if (id != null && held.has(id)) v += Math.max(0, fv - held.get(id));
+        else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
+        else v += fv;
+        if (id != null) mine.push([id, fv]);
+      }
       if (v > cap || drawn + v > total) {
         try { this.fire("overbudget", { vertices: v, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
         return undefined;
       }
       drawn += v;
+      for (const [id, fv] of mine) held.set(id, fv);
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { drawn = 0; });
+    lyr.on("remove", () => { drawn = 0; held.clear(); });
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;

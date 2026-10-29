@@ -100,7 +100,7 @@ try {
   const JOHNSON = { lat: 36.38, lng: -82.9, label: "Greeneville / Johnson City" };
   const BUDGET_ROWS = ["tn_pws", "tn_crit_habitat", "tn_wqa", "tn_ms4"];
   const HATCHIE = { lat: 35.05, lng: -88.785, label: "Hatchie Scenic River (west TN)" };      // one 143,521-vertex MultiPolygon, returned whole
-  const HIWASSEE = { lat: 35.0125, lng: -84.719, label: "Hiwassee mussel reach (Cleveland)" };   // critical habitat: 222k vertices in one cell at z17
+  const HOLSTON = { lat: 36.463, lng: -83.318, label: "Holston mussel reaches (Hawkins / Hancock)" };   // critical habitat: the worst Tennessee cell (reviewed: 258–382k vertices at z17 unsimplified)
   const statusText = (panel, id) => panel.locator(`[data-testid="layer-row-${id}"]`).first().innerText().catch(() => "");
   async function oneRow(id, place, zoom) {
     log = [];
@@ -129,7 +129,17 @@ try {
   }
   for (const id of BUDGET_ROWS) for (const dz of [0, 2]) await oneRow(id, JOHNSON, Math.min(17, Math.max(Number(TN_LAYERS[id].minZoom) || 12, 9) + dz));
   for (const dz of [0, 2]) await oneRow("tn_scenic", HATCHIE, Math.max(Number(TN_LAYERS.tn_scenic.minZoom) || 9, 9) + dz);
-  await oneRow("tn_crit_habitat", HIWASSEE, 17);   // the deepest zoom the row is sized to draw; closer in it must say "too detailed", never "empty"
+  await oneRow("tn_crit_habitat", HOLSTON, 17.25);   // the deepest zoom the row is sized to draw
+  { // closer in it must REFUSE honestly ("too detailed"), never read "empty"/"loaded"
+    log = [];
+    const fp = await openFinder(HOLSTON, 19);
+    await rowsIn(fp, "env");
+    const cb = fp.locator('[data-testid="layer-row-tn_crit_habitat"] input[type="checkbox"]').first();
+    if (await cb.count() && !(await cb.isChecked())) await cb.check();
+    await sleep(9000);
+    const st = await stateOf(fp, "tn_crit_habitat");
+    check("A · tn_crit_habitat @ Holston z19: refused as too detailed (failed), never empty", st === "failed", `state=${st}`);
+  }
 
   /* ── B + C. located throwaway plans ─────────────────────────────────────────────── */
   const mk = (id, p, label) => ({ ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });

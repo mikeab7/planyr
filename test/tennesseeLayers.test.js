@@ -96,8 +96,9 @@ describe("every Tennessee row is Tennessee-only and registered whole", () => {
   it("every polygon row that the service returns WHOLE asks the server to simplify (the draw budget declines a 500k-vertex batch, and zooming in cannot help)", () => {
     for (const id of ["tn_crit_habitat", "tn_nrhp_bounds", "tn_ms4", "tn_pws", "tn_wqa", "tn_scenic"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThanOrEqual(3);
   });
-  it("critical habitat is drawn up to the zoom measured safe (222k vertices at z17, under its own budget) and, closer in, says it is too detailed — not 'zoom in'", () => {
-    expect(ALL_LAYERS.tn_crit_habitat.vertexBudget).toBeGreaterThan(220000);
+  it("critical habitat is drawn up to the zoom measured safe (the worst Tennessee cell is under its own budget through about z17.25) and, closer in, says it is too detailed — not 'zoom in'", () => {
+    expect(ALL_LAYERS.tn_crit_habitat.vertexBudget).toBeGreaterThan(200000);
+    expect(ALL_LAYERS.tn_crit_habitat.simplifyFactor).toBeGreaterThanOrEqual(16);
     expect(ALL_LAYERS.tn_crit_habitat.vertexBudget).toBeLessThan(300000);   // never the 700k that froze a tab
     expect(ALL_LAYERS.tn_crit_habitat.overbudgetMsg).toMatch(/zoom out/i);
     expect(ALL_LAYERS.tn_crit_habitat.overbudgetMsg).not.toMatch(/zoom in\b/i);

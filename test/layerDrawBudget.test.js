@@ -131,7 +131,7 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     expect(out).toHaveLength(2);
     expect(out[1][1]).not.toBe("failed");                                // …and reports what it found, not the old refusal
   });
-  it("attachFeatureRetry gives up: esri-leaflet fires `load` BEFORE `requesterror` for a failed request, which used to wipe the retry count every cycle (1,801 refreshes in 12 minutes, 'failed' never reached)", async () => {
+  it("attachFeatureRetry gives up on a persistently failing service — including a SLOW one (esri-leaflet fires `load` BEFORE `requesterror`, which used to wipe the retry count every cycle)", async () => {
     vi.resetModules(); mocks();
     vi.useFakeTimers();
     try {
@@ -141,12 +141,37 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
       const out = [];
       attachFeatureRetry(lyr, "k", { label: "Layer" }, (...a) => out.push(a[1]));
       const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
-      for (let cycle = 0; cycle < 12; cycle++) {
-        fire("loading"); fire("load"); fire("requesterror", { error: { code: 503 } });   // the real order: load, then the error
-        vi.advanceTimersByTime(5000);
+      for (const waitMs of [5000, 30000]) {   // a quick failure and a service that hangs 30 s then answers 504
+        refreshes = 0; out.length = 0;
+        for (let cycle = 0; cycle < 12; cycle++) {
+          fire("loading"); vi.advanceTimersByTime(waitMs);
+          fire("load"); fire("requesterror", { url: "https://x/FeatureServer/0/query", params: {}, message: "Gateway Timeout", code: 504, method: "get" });   // esri-leaflet 3.x shape, in its real order
+          vi.advanceTimersByTime(5000);
+        }
+        expect(refreshes, `wait ${waitMs}`).toBeLessThanOrEqual(3);   // bounded by `max`
+        expect(out, `wait ${waitMs}`).toContain("failed");
+        fire("loading"); fire("load"); vi.advanceTimersByTime(1);      // a later healthy cycle starts the count over
       }
-      expect(refreshes).toBeLessThanOrEqual(3);                 // bounded by `max`
-      expect(out).toContain("failed");                          // …and it ends on "failed", not "loaded"/"retrying" forever
+      // a non-transient answer (403) does not retry at all
+      refreshes = 0; fire("loading"); fire("load"); fire("requesterror", { code: 403 }); vi.advanceTimersByTime(5000);
+      expect(refreshes).toBe(0);
     } finally { vi.useRealTimers(); }
+  });
+  it("a heavier geometry re-delivered under a held id is charged for what it GROWS by (a simplified layer re-asked after a zoom sends the finer copy under the same id)", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Re-asked", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    const refused = [];
+    lyr.on("overbudget", (e) => refused.push(e));
+    lyr.createLayers([{ id: 1, ...poly(15000) }]);
+    expect(refused).toHaveLength(0);
+    lyr.createLayers([{ id: 1, ...poly(15000) }]);                 // a plain repeat: free
+    expect(refused).toHaveLength(0);
+    const before = lyr.created;
+    lyr.createLayers([{ id: 1, ...poly(509000) }]);                // the finer copy: +494k over the 250k cap
+    expect(refused).toHaveLength(1);
+    expect(lyr.created).toBe(before);                              // refused → the old geometry stays on the map
+    lyr.createLayers([{ id: 1, ...poly(12000) }]);                 // a LIGHTER copy is free and becomes the held size
+    expect(refused).toHaveLength(1);
   });
 });

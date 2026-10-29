@@ -211,7 +211,7 @@ export const TN_LAYERS = {
   tn_crit_habitat: {
     kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
     url: GIS_SOURCES.critHabitatTn.serviceUrl, ...TN,
-    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 6, vertexBudget: 250000, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies to ~6 screen pixels, re-asked every 2 zoom levels (layers.js); measured 222k vertices in a 512 px cell at z17 beside a reach — drawn under this budget; closer in (z18+) it is refused, and says so
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 16, vertexBudget: 250000, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies to ~16 screen pixels (a screening-grade outline — the layer's own unit field says 'check the species shapefile'), re-asked every 2 zoom levels (layers.js); the worst Tennessee cell (Holston, 36.46 N −83.32 W; esri-leaflet's offset is width/height × factor, so it varies with the window's shape) measures roughly 105–215k vertices from z17 to z17.25 — under this budget; closer in (about z17.5+) it is refused, and says so
     overbudgetMsg: "Critical habitat is mapped as whole river reaches and is too detailed to draw this close in — zoom out a level or two.",
     styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // design-exempt: map ink for a drawn designated area
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
