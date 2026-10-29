@@ -98,7 +98,7 @@ export const FLORIDA_LAYERS = {
     role: "line", group: "jurisdiction", order: 2,
   },
   fl_udb_miamidade: {
-    kind: "esriFeature", label: "Urban Development Boundary (Miami-Dade)", source: "Miami-Dade County — Regulatory & Economic Resources",
+    kind: "esriFeature", label: "Urban Development Boundary", source: "Miami-Dade County — Regulatory & Economic Resources",
     url: GIS_SOURCES.udbMdc.serviceUrl, ...FL, regions: ["miamidade"],
     minZoom: 8, color: "#b45309", weight: 2, opacity: 0.55,
     styleFn: (_p, opacity) => ({ color: "#b45309", weight: 2, opacity, fill: false, dashArray: "10 5" }),
@@ -167,7 +167,7 @@ export const FLORIDA_LAYERS = {
     floodTier: "local", agency: "SFWMD",
   },
   fl_sfwmd_row_permits: {
-    kind: "esriFeature", label: "Canal & Levee Rights-of-Way (SFWMD)", source: "South Florida Water Management District — Regulation",
+    kind: "esriFeature", label: "Canal & Levee Rights-of-Way", source: "South Florida Water Management District — Regulation",
     url: relayUrl(GIS_SOURCES.rowPermitsSfwmd.serviceUrl), ...FL, regions: ["sfwmd"],
     minZoom: 13, color: "#0e7490", weight: 1.2, opacity: 0.4, fetchAll: true,
     styleFn: areaStyle("#0e7490", 0.2, 1.2),
@@ -179,7 +179,7 @@ export const FLORIDA_LAYERS = {
     floodTier: "local", agency: "SFWMD",
   },
   fl_sfwmd_conservation_easements: {
-    kind: "esriFeature", label: "Conservation Easements (SFWMD)", source: "South Florida Water Management District — Regulation",
+    kind: "esriFeature", label: "SFWMD Easements", source: "South Florida Water Management District — Regulation",
     url: relayUrl(GIS_SOURCES.conEasementsSfwmd.serviceUrl), ...FL, regions: ["sfwmd"],
     minZoom: 12, color: "#15803d", weight: 1.2, opacity: 0.4, fetchAll: true,
     styleFn: areaStyle("#15803d", 0.3, 1.2, "6 3"),
@@ -280,7 +280,7 @@ export const FLORIDA_LAYERS = {
     role: "area", group: "environmental", order: 29,
   },
   fl_panther_consultation: {
-    kind: "esriFeature", label: "Florida Panther Consultation Area", source: "U.S. Fish & Wildlife Service (hosted by Florida DEP)",
+    kind: "esriFeature", label: "Panther Consultation Area", source: "U.S. Fish & Wildlife Service (hosted by Florida DEP)",
     url: relayUrl(GIS_SOURCES.pantherFl.serviceUrl), ...FL,
     minZoom: 8, color: "#b45309", weight: 1.2, opacity: 0.4,
     styleFn: areaStyle("#b45309", 0.2, 1.2, "6 3"), simplifyFactor: 1,
@@ -291,7 +291,7 @@ export const FLORIDA_LAYERS = {
     role: "area", group: "environmental", order: 30,
   },
   fl_eagle_nesting: {
-    kind: "esriFeature", label: "Bald Eagle Nesting Areas (1998–2017)", source: "Florida Fish and Wildlife Conservation Commission",
+    kind: "esriFeature", label: "Eagle Nesting (1998–2017)", source: "Florida Fish and Wildlife Conservation Commission",
     url: relayUrl(GIS_SOURCES.eagleFl.serviceUrl), ...FL,
     minZoom: 11, color: "#ca8a04", weight: 1.2, opacity: 0.4,
     styleFn: areaStyle("#ca8a04", 0.3, 1.2),
@@ -321,7 +321,7 @@ export const FLORIDA_LAYERS = {
 
   /* ── Access ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
   fl_sis_highways: {
-    kind: "esriFeature", label: "Strategic Intermodal System Highways", source: "Florida Department of Transportation",
+    kind: "esriFeature", label: "SIS Highways (FDOT)", source: "Florida Department of Transportation",
     url: GIS_SOURCES.sisHighwaysFl.serviceUrl, ...FL,
     minZoom: 8, color: "#0369a1", weight: 2, opacity: 0.55,
     styleFn: (_p, opacity) => ({ color: "#0369a1", weight: 2, opacity, fill: false }),
@@ -334,7 +334,7 @@ export const FLORIDA_LAYERS = {
 
   /* ── Environmental & hazards ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
   fl_wellfield_broward: {
-    kind: "esriFeature", label: "Wellfield Protection Zones (Broward)", source: "Broward County — Pollution Prevention, Remediation & Air Quality",
+    kind: "esriFeature", label: "Wellfield Zones (Broward)", source: "Broward County — Pollution Prevention, Remediation & Air Quality",
     url: GIS_SOURCES.wellfieldBroward.serviceUrl, ...FL, regions: ["broward"],
     minZoom: 11, color: "#7c3aed", weight: 1, opacity: 0.4,
     styleFn: browardWellfieldStyle, simplifyFactor: 0.5, fetchAll: true,
@@ -346,7 +346,7 @@ export const FLORIDA_LAYERS = {
     role: "area", group: "environmental", order: 20,
   },
   fl_wellfield_miamidade: {
-    kind: "esriFeature", label: "Wellfield Protection Areas (Miami-Dade)", source: "Miami-Dade County — Regulatory & Economic Resources",
+    kind: "esriFeature", label: "Wellfield Areas (Miami-Dade)", source: "Miami-Dade County — Regulatory & Economic Resources",
     url: GIS_SOURCES.wellfieldMdc.serviceUrl, ...FL, regions: ["miamidade"],
     minZoom: 9, color: "#7c3aed", weight: 1, opacity: 0.4,
     styleFn: mdcWellfieldStyle, simplifyFactor: 0.5, where: "TRAVELTIME IN ('010','030','100','210')",
@@ -359,7 +359,7 @@ export const FLORIDA_LAYERS = {
     role: "area", group: "environmental", order: 21,
   },
   fl_erp_sfwmd: {
-    kind: "esriFeature", label: "Approved Environmental Resource Permits", source: "South Florida Water Management District",
+    kind: "esriFeature", label: "ERP Permits (SFWMD)", source: "South Florida Water Management District",
     url: GIS_SOURCES.erpSfwmd.serviceUrl, ...FL, regions: ["sfwmd"],
     minZoom: 12, color: "#0f766e", weight: 1.2, opacity: 0.4,
     styleFn: areaStyle("#0f766e", 0.12, 1.2), simplifyFactor: 0.5, fetchAll: true, where: "PermitStatus <> 'Pending-Expired'",
@@ -399,7 +399,7 @@ export const FLORIDA_LAYERS = {
     role: "area", group: "environmental", order: 24,
   },
   fl_natural_lands_broward: {
-    kind: "esriFeature", label: "Protected Natural Lands (Broward)", source: "Broward County — Land Stewardship Program",
+    kind: "esriFeature", label: "Natural Lands (Broward)", source: "Broward County — Land Stewardship Program",
     url: GIS_SOURCES.naturalLandsBroward.serviceUrl, ...FL, regions: ["broward"],
     minZoom: 10, color: "#4d7c0f", weight: 1.2, opacity: 0.4,
     styleFn: areaStyle("#4d7c0f", 0.25, 1.2), simplifyFactor: 0.5,

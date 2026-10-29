@@ -65,7 +65,7 @@ describe("every Florida row is complete and reads the registry", () => {
   it("carries a label, a source, a note, a role, a group, an order and a way to answer a click", () => {
     for (const id of IDS) {
       const c = ALL_LAYERS[id];
-      expect(c.label && c.label.length > 3, `${id} label`).toBe(true);
+      expect(c.label && c.label.length > 3 && c.label.length <= 30, `${id} label "${c.label}" (the Layers panel row cuts a name past ~30 characters)`).toBe(true);
       expect(c.source, `${id} source`).toBeTruthy();
       expect(c.note && c.note.length > 40, `${id} note`).toBe(true);
       expect(["area", "line", "point"], `${id} role`).toContain(c.role);
