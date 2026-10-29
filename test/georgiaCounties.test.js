@@ -84,7 +84,7 @@ describe("the new Georgia rows (gaParcels.js)", () => {
     for (const [, n, , , , , , la, ln, bb] of GA_ROWS) expect(la >= bb[0] && la <= bb[2] && ln >= bb[1] && ln <= bb[3], n).toBe(true);
   });
   it("every row carries a dated verification record", () => {
-    for (const [k, n] of GA_ROWS) { const v = GEORGIA_VERIFICATION["ga_" + k]; expect(v, n).toBeTruthy(); expect(v.verifiedOn, n).toBe("2026-10-19"); expect(v.verifiedNote, n).toMatch(/MEASURED/); }
+    for (const [k, n] of GA_ROWS) { const v = GEORGIA_VERIFICATION["ga_" + k]; expect(v, n).toBeTruthy(); expect(v.verifiedOn, n).toMatch(/^2026-10-(19|29)$/); expect(v.verifiedNote, n).toMatch(/MEASURED/); }
   });
 });
 

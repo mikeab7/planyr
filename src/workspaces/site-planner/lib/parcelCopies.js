@@ -58,6 +58,7 @@ export const PARCEL_COPIES = {
   ga_decatur: [null, "2026-05"],
   ga_dodge: ["Heart of Georgia Altamaha Regional Commission", "2026-06"],
   ga_dougherty: [null, "2026-10"],
+  ga_early: ["Southwest Georgia Regional Commission", "2024-01"],
   ga_effingham: [null, "2024-10"],
   ga_elbert: ["Northeast Georgia Regional Commission", "2026-10"],
   ga_emanuel: [null, "2026-08"],

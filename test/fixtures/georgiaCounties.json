@@ -2077,10 +2077,8 @@
   "Burke",
   "Calhoun",
   "Carroll",
-  "Catoosa",
   "Clinch",
   "Colquitt",
-  "Early",
   "Fannin",
   "Gilmer",
   "Habersham",
@@ -2407,6 +2405,18 @@
    "county": "Worth County",
    "lat": 31.6185,
    "lng": -83.9894
+  },
+  {
+   "name": "Early — just inside its own line",
+   "county": "Early County",
+   "lat": 31.14,
+   "lng": -85.0357
+  },
+  {
+   "name": "Catoosa — just inside its own line",
+   "county": "Catoosa County",
+   "lat": 34.9591,
+   "lng": -85.2247
   }
  ]
 }

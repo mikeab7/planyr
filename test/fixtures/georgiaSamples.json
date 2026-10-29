@@ -1,5 +1,5 @@
 {
- "_note": "One REAL attribute bag per new Georgia source, recorded 2026-10-19 from the live layer (planyr.io/gis-proxy for non-arcgis hosts; AGOL direct) at a spread interior point. expectOwner = whether the layer carries an owner name for this lot. Strings trimmed to 80 chars.",
+ "_note": "One REAL attribute bag per new Georgia source, recorded 2026-10-19 (Early, Catoosa: 2026-10-29) from the live layer (planyr.io/gis-proxy for non-arcgis hosts; AGOL direct) at a spread interior point. expectOwner = whether the layer carries an owner name for this lot. Strings trimmed to 80 chars.",
  "rows": {
   "Union": {
    "url": "https://services.arcgis.com/ISpzx3B5ZsVA6e1Z/arcgis/rest/services/Union_Web_Map_2026_WFL1/FeatureServer/24",
@@ -3419,6 +3419,53 @@
     "last_edi_1": 1628726400000,
     "Shape__Area": 23014621.59375,
     "Shape__Length": 48150.07481172975
+   }
+  },
+  "Early": {
+   "url": "https://services3.arcgis.com/aYlIod9kh71mtnDG/arcgis/rest/services/Parcels/FeatureServer/0",
+   "point": [
+    31.3,
+    -84.866
+   ],
+   "idField": "Parcel_No",
+   "addrField": null,
+   "expectOwner": false,
+   "attrs": {
+    "FID": 3406,
+    "REALKEY": "1253",
+    "MAP_NUMBER": "0061",
+    "PARCEL_NUM": "013",
+    "Parcel_No": "0061   013",
+    "CALC_ACRES": 280.080776518,
+    "HOUSE_NO": "0",
+    "LEGAL_DESC": "LL 16/17/25-28TH LD 286.05 ACRES",
+    "TAX_DISTRI": "01",
+    "DISTRICT_D": "COUNTY",
+    "DIG_CLASS": "V",
+    "PIN": "61-13",
+    "OWNKEY": 12001,
+    "DIGEST_ACR": 286.05,
+    "TOTAL_ACRE": 286.05
+   }
+  },
+  "Catoosa": {
+   "url": "https://services5.arcgis.com/UWegEIVn0JwnAZjA/arcgis/rest/services/ZoningFeatureLayer_withDescriptions_Feb2026_view/FeatureServer/83",
+   "point": [
+    34.876,
+    -85.118
+   ],
+   "idField": "Parcel_No",
+   "addrField": null,
+   "expectOwner": false,
+   "attrs": {
+    "FID": 20585,
+    "Parcel_No": "00570021",
+    "house_no": 0,
+    "street_nam": "CRAVEN ROAD",
+    "zoningcode": "A-1",
+    "descriptio": "Agricultural District",
+    "Shape__Area": 4859839.881591797,
+    "Shape__Length": 13329.195731992288
    }
   }
  }

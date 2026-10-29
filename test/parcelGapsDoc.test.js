@@ -18,7 +18,7 @@ describe("docs/STATEWIDE-PARCELS.md gap rows ↔ parcelGaps.js", () => {
   it("the parser still finds every state's gap table (a renamed heading must not quietly empty this test)", () => {
     const by = {};
     rows.forEach((r) => { by[r.state] = (by[r.state] || 0) + 1; });
-    expect(by).toEqual({ KY: 83, GA: 48, IA: 43, MI: 29, MO: 42, WA: 5, OR: 3, OK: 61, KS: 55, IL: 36, LA: 26, ID: 10, TN: 1, SD: 49 });
+    expect(by).toEqual({ KY: 83, GA: 46, IA: 43, MI: 29, MO: 42, WA: 5, OR: 3, OK: 61, KS: 55, IL: 36, LA: 26, ID: 10, TN: 1, SD: 49 });
   });
 
   it("every gap row in the doc has an explicit entry in the table (even `none` is a decision, not an omission)", () => {
@@ -92,7 +92,7 @@ describe("docs/STATEWIDE-PARCELS.md gap rows ↔ parcelGaps.js", () => {
   it("NEW-2: the measured Schneider counties are filed paywall / locked, and the unmeasured ones are left alone", () => {
     for (const k of ["ga_taliaferro", "ga_randolph", "ga_quitman", "sd_clay", "sd_mccook", "sd_hughes"]) expect(PARCEL_GAPS[k][0], k).toBe("paywall");
     for (const k of ["ga_bacon", "ga_wilkes", "ia_adams", "ia_union", "mi_houghton", "mo_pettis", "ks_miami", "ks_wilson", "il_ogle", "sd_brookings", "sd_custer"]) expect(PARCEL_GAPS[k][0], k).toBe("locked");
-    for (const k of ["ga_early", "ky_martin", "ky_menifee"]) expect(PARCEL_GAPS[k]).toEqual(["none"]);
+    for (const k of ["ky_martin", "ky_menifee"]) expect(PARCEL_GAPS[k]).toEqual(["none"]);
     const counts = { paywall: 0, locked: 0 };
     for (const e of Object.values(PARCEL_GAPS)) if (/^Schneider map/.test(e[1] || "")) counts[e[0]]++;
     expect(counts).toEqual({ paywall: 6, locked: 62 });
