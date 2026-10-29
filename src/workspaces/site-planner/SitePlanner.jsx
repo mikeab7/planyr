@@ -258,6 +258,7 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
+import { fallbackSpecsFor, fallbackCandidates, fallbackNoticeText, stateLayerCoversCounty } from "./lib/parcelFallbacks.js"; // NEW-2 (2026-10-28) — the county did not answer: its state's layer (when it holds the county), then a town layer
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
@@ -11558,7 +11559,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // match a like-named parcel elsewhere (B244/B245).
       const r = await lookupParcels({ county, lookupUrl: lookupUrl.trim(), mode: searchMode, value: v });
       if (!r.feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
-      if (r.backup) setLookupErr(`Using the statewide backup (TxGIO) for ${r.backupCounty} — the county’s own server is unavailable; results may lag county updates.`);
+      if (r.backup) setLookupErr(`Using the ${String(r.backupLabel || "Statewide backup (TxGIO)").replace(/^S/, "s")} for ${r.backupCounty} — the county’s own server is unavailable; results may lag county updates.`);
       setLookupRes(r.feats.map((ft) => ({ ft, layerUrl: r.layerUrl, idField: r.idField, addrField: r.addrField })));
     } catch (err) {
       setLookupErr(humanizeError(err));
@@ -17147,6 +17148,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       const res = await identifyWithLineFallback({
         primary: candidates, lng, lat, neighbours: () => nearSources, skipped: () => skippedCandidatesAt(lat, lng),
+        fallbacks: async ({ silent }) => filterHealthyCandidates(await fallbackCandidates(fallbackSpecsFor({ failed: silent, lat, lng }), resolveOneCountyLayer), STATEWIDE_KEYS), // NEW-2 — the county did not answer: its state's layer (where it holds the county), then a town layer
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
       if (tok !== identifyTok.current) return; // superseded by a newer click
@@ -17193,7 +17195,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setIdentAdded(identifyAddedRef.current.size);
       setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
+      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
     } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
   };
   // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
@@ -17254,6 +17256,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
       isStatewideUrl: isStatewideLayerUrl,
       scopeFor: statewideBackupScope, // a failed county's statewide backup draws only that county, not the whole view
+      coversCounty: stateLayerCoversCounty, // NEW-2 — a state layer that declares the failed county missing is never pulled in for it
       onChange: () => setOutlinePhase(set.status().phase),
     });
     outlineLayersRef.current = set;
@@ -23096,6 +23099,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span style={{ color: "#15803d", fontWeight: 800, fontSize: 13, lineHeight: 1 }}>✓</span>
                             <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
                           </div>
+                          {identifyRes.fromFallback && <div data-testid="identify-from-fallback" style={{ color: PAL.warn, marginBottom: 5 }}>{identifyRes.fromFallback}</div>}
                           {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
                             <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
                               <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>

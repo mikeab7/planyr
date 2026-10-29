@@ -133,7 +133,7 @@ export default function ParcelInfoCard({
         <div style={{ padding: "8px 11px 10px" }}>
           {info.backup && (
             <div style={noticeStyle}>
-              Statewide backup — {info.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.
+              {info.backupNote || <>Statewide backup — {info.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.</>}
             </div>
           )}
           {info.cached && (

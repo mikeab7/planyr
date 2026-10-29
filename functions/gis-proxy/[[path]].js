@@ -188,7 +188,9 @@ export const ALLOWED_HOSTS = new Set([
   "spatial.vhb.com", // VHB spatial viewers — Delaware County COMIT, Schoharie, Schenectady (consultant-run, county-owned)
   "spatialags.vhb.com", // VHB ArcGIS Server behind those viewers
   "maps.dancgis.org", // Development Authority of the North Country — Franklin County parcel model
-  "gis.niagaracounty.com", // Niagara County GIS
+  "gis.niagaracounty.com", // Niagara County GIS (retired host: its parcel service is "not started" as of 2026-10-28 — kept, harmless)
+  "gis.niagaracounty.gov", // Niagara County GIS — the county's CURRENT server (its 2026 viewer's web map points parcels here, /server/…/PublicViewer/Public_Viewer layer 4)
+  "gisservices.its.ny.gov", // NYS ITS ShareGIS — measured for the ORPTS Tax Parcel Centroid Points (statewide, points) when a county's own server is down
   "gisportal.yatescounty.org", // Yates County GIS portal
   "maps.monroecounty.gov", // Monroe County DES GIS (current parcel roll)
   "maps.watertown-ny.gov", // City of Watertown (Jefferson County) parcels

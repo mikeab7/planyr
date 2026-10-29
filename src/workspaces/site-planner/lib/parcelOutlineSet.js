@@ -22,10 +22,11 @@ export const OUTLINE_LOAD_TIMEOUT_MS = 8000;
 
 /** The sources to draw for a view: the view's own sources, plus the statewide composite(s) backing
  *  any of those whose live layer is down. Pure. */
-export function outlineKeysForView({ bounds, down = new Set(), sourcesForView, statewideKeysForState, stateOf }) {
+export function outlineKeysForView({ bounds, down = new Set(), sourcesForView, statewideKeysForState, stateOf, coversCounty = () => true }) {
   const want = new Set(sourcesForView(bounds));
   down.forEach((k) => {
-    if (want.has(k)) statewideKeysForState(stateOf(k)).forEach((sk) => want.add(sk));
+    // NEW-2 (2026-10-28) — only a state layer that really holds the failed county stands in for it (New York's and Tennessee's declare the counties they lack).
+    if (want.has(k)) statewideKeysForState(stateOf(k)).filter((sk) => coversCounty(sk, k)).forEach((sk) => want.add(sk));
   });
   return want;
 }
@@ -43,6 +44,7 @@ export function createOutlineSet({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   onDown = () => {},
+  coversCounty = () => true, // (statewideKey, failedCountyKey) => bool — does that state layer hold the failed county? (parcelFallbacks.stateLayerCoversCounty)
   scopeFor = null,   // (statewideKey, baseSources, downKeys) => county names | null — what a statewide BACKUP draws
   onChange = () => {}, // () => void — the set's status() may have changed (a layer started/finished loading, the view moved)
   now = Date.now,
@@ -168,7 +170,7 @@ export function createOutlineSet({
     if (disposed) return false;
     const map = getMap();
     if (!map) return false;
-    const want = outlineKeysForView({ bounds: boundsOf(map), down, sourcesForView, statewideKeysForState, stateOf });
+    const want = outlineKeysForView({ bounds: boundsOf(map), down, sourcesForView, statewideKeysForState, stateOf, coversCounty });
     Object.keys(keyUrl).forEach((k) => { if (!want.has(k) || down.has(k)) release(k); });
     want.forEach((k) => {
       if (keyUrl[k] != null || down.has(k)) return;
