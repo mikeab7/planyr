@@ -8,3 +8,6 @@ export const COUNTY_LINE_WEIGHT = 2.8;
 export const COUNTY_LINE_DASH = "10 6";
 export const CITY_LINE_MIN_WEIGHT = 3;
 export const CITY_TINT_OPACITY = 0.12;
+export const BOUNDARY_FALLBACK_INK = "#374151"; // design-exempt: map ink — a boundary row with no colour of its own
+export const STATE_LINE_CASING = "#000"; // design-exempt: map ink — the state line's dark casing
+export const STATE_LINE_CORE = "#fff"; // design-exempt: map ink — the state line's light core

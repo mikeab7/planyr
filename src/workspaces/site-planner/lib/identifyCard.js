@@ -9,6 +9,7 @@
  *   • a raw URL as text — a short labelled link ("Ordinance", "Plat", "Deed", "Record") instead.
  * The source / vintage never prints on the card: it is `about`, shown behind the card's (i). */
 import { approvalDate } from "./desotoZoning.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 /* Labels that are database bookkeeping, never a fact about the thing clicked. */
 const BOOKKEEPING = /^(objectid|fid|oid|globalid|global_id|gis_id|shape[._ ]?(st)?(area|length|len)|shape|st_area|st_length|created_(user|date)|last_edited_(user|date)|created|edited|editor|creator|editdate|creationdate|ordinal)$/i;
@@ -102,7 +103,8 @@ export function cardNode(item, doc = document) {
   let about = null;
   if (c.about) {
     const b = doc.createElement("button"); b.type = "button"; b.textContent = "i"; b.title = "About this layer"; b.setAttribute("aria-label", "About this layer");
-    b.style.cssText = "flex:none;width:16px;height:16px;border-radius:50%;border:1px solid currentColor;background:transparent;color:inherit;font:600 10px/1 inherit;cursor:pointer;padding:0;";
+    b.style.cssText = "flex:none;width:16px;height:16px;border:1px solid currentColor;background:transparent;color:inherit;font:600 10px/1 inherit;cursor:pointer;padding:0;";
+    b.style.borderRadius = `${RADIUS.pill}px`;
     about = doc.createElement("div"); about.style.cssText = "display:none;opacity:0.8;font-size:10.5px;margin-top:4px;white-space:pre-line;"; about.textContent = c.about;
     b.addEventListener("click", (e) => { e.stopPropagation(); about.style.display = about.style.display === "none" ? "block" : "none"; });
     t.append(b);

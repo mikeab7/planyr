@@ -3,6 +3,7 @@
  * sits behind a small (i), never on the card face. Colours come in as props so the card follows the planner's palette without importing it. */
 import { useState } from "react";
 import { cleanCard } from "../lib/identifyCard.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 function CardItem({ item, first, ink, muted, accent }) {
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -12,7 +13,7 @@ function CardItem({ item, first, ink, muted, accent }) {
         <span>{item.title}</span>
         {item.about && (
           <button type="button" onClick={() => setAboutOpen((v) => !v)} title="About this layer" aria-label="About this layer" aria-expanded={aboutOpen} data-testid="gis-identify-about"
-            style={{ flex: "none", width: 16, height: 16, borderRadius: "50%", border: `1px solid ${muted}`, background: "transparent", color: muted, cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 600, lineHeight: 1, padding: 0 }}>i</button>
+            style={{ flex: "none", width: 16, height: 16, borderRadius: RADIUS.pill, border: `1px solid ${muted}`, background: "transparent", color: muted, cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 600, lineHeight: 1, padding: 0 }}>i</button>
         )}
       </div>
       {item.rows.map((r, j) => (
@@ -38,7 +39,7 @@ export default function GisIdentifyCard({ hit, size, onClose, ink, muted, accent
         left: Math.max(6, Math.min(hit.x + 10, (size.w || 0) - 268)),
         top: Math.max(6, Math.min(hit.y + 10, (size.h || 0) - 120)),
         background: "var(--surface-overlay)", color: ink, border: `1px solid ${line}`,
-        borderRadius: 9, boxShadow: "0 8px 26px rgba(28,25,20,0.24)", padding: "9px 11px",
+        borderRadius: RADIUS.md, boxShadow: "0 8px 26px rgba(28,25,20,0.24)", padding: "9px 11px",
         fontSize: 11.5, lineHeight: 1.45 }}>
       <button onClick={onClose} title="Close" aria-label="Close feature details"
         style={{ float: "right", marginLeft: 8, background: "transparent", border: "none", color: muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, lineHeight: 1, padding: 0 }}>✕</button>

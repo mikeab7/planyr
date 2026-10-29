@@ -26,6 +26,7 @@ import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layer
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import { setViewLegend, clearViewLegend } from "./viewLegendStore.js";
+import { BOUNDARY_FALLBACK_INK } from "./boundaryStyle.js";
 // NEW-1 (Imagery & Layers) — the owner's contour interval (1/2/5/10 ft), a device pref; a tiny leaf, safe on the boot path.
 import { getContourInterval, subscribeContourInterval } from "./contourIntervalPref.js";
 import {
@@ -1026,14 +1027,14 @@ export const AHJ_LAYERS = {
   tn_county: {
     kind: "vector", label: "County Boundaries (Tennessee)", mergeGroup: "counties_cities", source: "State of Tennessee (STS)",
     url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"],
-    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
     note: "Tennessee county lines (State of Tennessee, all 95 counties). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
   ms_county: {
     kind: "vector", label: "County Boundary (DeSoto County, MS)", mergeGroup: "counties_cities", source: "DeSoto County GIS — County Outline",
     url: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/8", states: ["MS"], regions: ["desoto"],
-    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
     note: "DeSoto County's own outline (the county server publishes only DeSoto in this layer). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },

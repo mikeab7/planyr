@@ -50,7 +50,7 @@ import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
-import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
 import { siteState } from "./siteRegion.js";
 import { gisCache } from "./gisCache.js";
@@ -914,8 +914,8 @@ export function createExportSheet(ctx) {
       const style = isCountyLinesId(id)
         ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
         : isCityLimitsId(id)
-          ? { stroke: cfg.color || "#374151", strokeWidth: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), strokeOpacity: 1, fill: cfg.color || "#374151", fillOpacity: CITY_TINT_OPACITY }
-          : { stroke: cfg.color || "#374151", strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+          ? { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), strokeOpacity: 1, fill: cfg.color || BOUNDARY_FALLBACK_INK, fillOpacity: CITY_TINT_OPACITY }
+          : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
       const features = [];
       for (const f of fc.features) features.push(...esriPolygonFeatures(f.geometry, style));
       let labels = [];
