@@ -272,13 +272,13 @@ describe("6c · decided assignments (judgment calls) carry their reasoning", () 
     expect(z.decided).toBe(true);
     expect(z.decisionNote).toMatch(/2876/);
   });
-  it("Montgomery County, TX stays on South Central (the app's long-standing assignment) and SAYS EPSG disagrees", () => {
+  it("Montgomery County, TX is Texas CENTRAL — the statute's answer, no legacy exception (B2478961, owner decision 2026-10-29)", () => {
     const z = zoneForCounty("TX", "Montgomery");
-    expect(z.id).toBe("tx_sc");
-    expect(z.decided).toBe(true);
-    expect(z.decisionNote).toMatch(/Central/);
-    expect(GEN_ZONES.tx_central).toBeTruthy();
-    expect(COUNTY_TABLE.TX.tx_central.split(",")).toContain("montgomery");   // EPSG's own list, the reason for the note
+    expect(z.id).toBe("tx_central");
+    expect(z.epsg).toBe(2277);
+    expect(z.decided).toBe(false);            // a statute READ, not a decision
+    expect(COUNTY_ZONE["TX:montgomery"]).toBeUndefined();   // the override is gone
+    expect(COUNTY_TABLE.TX.tx_central.split(",")).toContain("montgomery");
   });
   it("an independent Virginia city takes the zone of the county around it, and says so", () => {
     const z = zoneForCounty("VA", "Alexandria city");

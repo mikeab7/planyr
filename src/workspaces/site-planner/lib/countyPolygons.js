@@ -101,6 +101,13 @@ export function countyRoster() {
   }));
 }
 
+/* NEW-2 — once the geometry is resident a bare point can be answered by COUNTY, so hand the state-plane core its locator (dynamic: the
+ * locator pulls in the county table, which stays off the boot path). A failure here must not lose the polygons themselves. */
+async function installZoneLocator() {
+  try { (await import("./pointZoneLocator.js")).installPointZoneLocator(); }
+  catch (err) { if (typeof console !== "undefined") console.error("[countyPolygons] state-plane point locator unavailable — bare points use the coarse boxes:", err); }
+}
+
 /**
  * Fetch the asset, load the engine, decode. Idempotent and cached: concurrent callers share one
  * request, and a failure is NOT latched (a later call retries) — a transient boot-time blip must
@@ -117,7 +124,7 @@ export function loadCountyPolygons(fetchImpl) {
     Promise.resolve(f(url)).then((r) => (r && r.ok ? r.json() : Promise.reject(new Error(`county-polygons ${r && r.status}`)))),
     import("./countyPolygonsCore.js"),
   ])
-    .then(([payload, core]) => { CORE = core; INDEX = core.buildIndex(payload); return INDEX; })
+    .then(async ([payload, core]) => { CORE = core; INDEX = core.buildIndex(payload); await installZoneLocator(); return INDEX; })
     .catch((err) => {
       // LOUD-FAILURE: the app keeps working on the bbox pre-filter, but the fact that the
       // authoritative geometry is missing must never be silent — that is the whole class of bug
@@ -143,8 +150,9 @@ export async function setCountyPolygons(payload) {
   const ring = payload && payload.counties && payload.counties[0] && payload.counties[0].rings && payload.counties[0].rings[0];
   const isRaw = Array.isArray(ring) && typeof ring[0] === "number";
   INDEX = isRaw ? CORE.buildIndex(payload) : payload;
+  await installZoneLocator();
   return INDEX;
 }
 
 /* Test seam: forget everything. Never called by the app. */
-export function __resetCountyPolygons() { INDEX = null; CORE = null; loading = null; }
+export function __resetCountyPolygons() { INDEX = null; CORE = null; loading = null; }   // an installed zone locator stays: with no index it answers null, so bare points fall to the boxes

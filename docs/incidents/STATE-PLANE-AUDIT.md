@@ -169,16 +169,23 @@ South Central — a Dallas or Austin site was wrong too. `proximityScreen.js` (e
 4. **Single-zone states** resolve from the state alone — CT, DE, MD (+DC), MT, NE, NH, NJ, NC, RI, SC, TN, VT.
 5. **A county that is not in the table** is a *known gap*: only the state's own coarse boxes may answer, flagged `unassignedCounty` — never the
    neighbour's zone, never Texas.
-6. **No state** (a bare lat/lon — Map/Comps overlay anchors carry no county): the two legacy envelopes first (Houston area → `tx_sc`; Front Range →
-   `co_north`/`co_central`, both unchanged), then each zone's EPSG area-of-use box, **the box the point sits deepest inside winning**. Always
-   `coarse: true`, plus `ambiguous: true` when more than one box held it. Outside every box → `null`.
+6. **No state** (a bare lat/lon — Map/Comps overlay anchors carry no county): **the county the point is in comes first** (B2494336, 2026-10-29).
+   `public/geo/county-polygons.json` is point-in-polygon tested and the county's zone read from the county table
+   (`site-planner/lib/pointZoneLocator.js`, installed into the lean core by `countyPolygons.js` the moment the polygons are resident; answer
+   `via: "county-point"`, not coarse, `nearEdge: true` within ~150 m of a county line). Only when no county answer exists — the polygons
+   have not loaded yet, the point is outside every county, or the state in the call disagrees with the county found — do the coarse boxes
+   answer: the two legacy envelopes (Houston area → `tx_sc`; Front Range → `co_north`/`co_central`, both unchanged), then each zone's EPSG
+   area-of-use box, **the box the point sits deepest inside winning**. Always `coarse: true`, plus `ambiguous: true` when more than one
+   box held it. Outside every box → `null`. Why: the Houston box (27.0–31.2 N, −99.8 – −93.5 W) swallows Conroe, Liberty and Beaumont-area
+   Texas Central counties; measured over eleven points the old boxes were wrong at Conroe, Liberty (→ `tx_sc`), Yonkers (→ Long Island),
+   Anaheim (→ CA 5) and Memphis (→ Arkansas North).
 
 ## 4 · Decided assignments (judgment calls — `decided: true` + `decisionNote`, same pattern as Broomfield)
 
 | Assignment | Decision | Why |
 |---|---|---|
-| **Broomfield, CO** | `co_north` | Unchanged (COLORADO-AUDIT.md). |
-| **Montgomery, TX** | **`tx_sc` — kept, but EPSG/NGS says Texas CENTRAL (2277)** | ⚠ **OWNER DECISION.** The app has always put Montgomery on South Central; `test/statePlane.test.js` pins it and the brief said South Central stays bit-for-bit. Flip = one line in `COUNTY_ZONE` + that test. Effect is a small scale/convergence difference at screening grade. Filed as B2478961. |
+| **Broomfield, CO** | `co_north` | Unchanged (COLORADO-AUDIT.md). Statute genuinely silent (C.R.S. 38-52-101 predates the 2001 county). |
+| ~~Montgomery, TX~~ | **removed 2026-10-29 (B2478961)** | Was `tx_sc` kept as a legacy exception. **Owner decision: SWITCH** — Tex. Nat. Res. Code §21.074(c) names Montgomery in Texas CENTRAL (EPSG:2277). Standing rule: in every state that splits into zones, every county sits in the zone its statute assigns; no legacy exceptions; a `decided:true` row is allowed only where the statute is genuinely silent (Broomfield is the model). Harris, Fort Bend, Waller, Chambers stay `tx_sc`, bit-for-bit. |
 | Carson City, NV | `nv_west` | Not in EPSG's Nevada lists (formerly Ormsby); surrounded by Douglas, Lyon, Storey, Washoe — all West. |
 | Grant County, WA | `wa_north` / `wa_south` by latitude 47°30′N | EPSG splits it "north / south of approximately 47°30′N"; a point is required, else null. |
 | Kauai County, HI | `hi_4`, Niihau → `hi_5` by position | Kauai County holds two zones. |
@@ -186,6 +193,8 @@ South Central — a Dallas or Austin site was wrong too. `proximityScreen.js` (e
 | Utah | **ftUS** (EPSG 3560/3566/3567), not the international-foot codes (2280–2282) | Utah Code §57-10-3 gives 1983 values in metres and survey feet for 1927; 2026 HB 512 adopts SPCS 2022 (international foot). Unit affects only the native grid numbers, never lat/lon. |
 | Hawaii | metres for all five | NGS/EPSG define Hawaii in metres (EPSG 3759 ftUS for zone 3 is an alternate). |
 | Old / mistyped county names | aliases: `dade`→`miamidade`, `shannon`→`oglalalakota`, `mountrial`→`mountrail` (EPSG typo) | Renames / typo in the EPSG text. |
+
+**Re-review of the remaining decided rows against the owner's rule (2026-10-29).** `test/statePlaneStatute.test.js` now fails the build for any `decided:true` row without a note naming the gap, and pins the exact set (Broomfield, Carson City, Grant WA, 23 Virginia cities, the Hawaii county→island rows). What this session could and could not establish — said plainly, per §10: **none of these has been re-read against its statute**, because the sandbox could not reach the legislature sites. Their notes say "EPSG does not name it", which is a statement about EPSG, not about the statute: the statute may well name Carson City (formerly Ormsby) or the independent cities, in which case the row stops being a decision and becomes a read. Grant WA is probably not a decision either (RCW 58.20.130 reportedly splits Grant at 47°30′N itself). Utah's unit (ftUS vs international foot) is a unit, not a county zone, and is unaffected. All of this is filed as B2494337.
 
 Independent Virginia cities (zone = the county that surrounds them):
 
@@ -258,7 +267,7 @@ the foot as 0.3048 m. The six international-foot states are asserted by a test.
 * **Alaska zone 8/9/10 offshore edges** follow the meridians/latitude in EPSG's area text; the 54°30′N line and the −164.84° eastern limit of zone 10 are as published, not surveyed here.
 * **Territories** (Puerto Rico, USVI, Guam, American Samoa) are not in the 50-state ask and are not registered.
 * **Alaska boroughs** do not resolve to a zone without a point (by design).
-* **Open follow-ups**: B2478961 (Montgomery County decision), B2478962 (convergence ellipsoid factor), B2478963 (thread state/county into overlay placements so the coarse fallback is rarely used).
+* **Open follow-ups**: B2478962 (convergence ellipsoid factor). B2478961 (Montgomery) and B2478963 (coarse bare-point zone) are CLOSED by the 2026-10-29 owner decision and B2494336 — see §3 step 6 and §4. B2494337: the statute cross-check is only partly done (§10).
 
 ## 9 · Regenerating
 
@@ -267,3 +276,18 @@ python3 -m venv /tmp/pv && /tmp/pv/bin/pip install pyproj
 /tmp/pv/bin/python scripts/gen-state-plane-zones.py      # rewrites statePlaneZones.js + statePlaneCounties.js + test/fixtures/statePlaneGolden.json
 npx vitest run test/statePlaneAllZones.test.js test/statePlane.test.js
 ```
+
+## 10 · Statute cross-check of the county tables (B2494337, 2026-10-29) — PARTIAL, and why
+
+The generated tables come from EPSG's area-of-use lists. Owner rule: the **statute** wins wherever it disagrees. All 36 multi-zone states were put to six research agents with one instruction — read the statute text itself, never fill a list from memory; record `unreachable` rather than guess. **The sandbox's network policy blocked every state-legislature and legal-publisher host** (403 on the proxy tunnel), so most states could not be read. Result:
+
+| State | Status | Source actually read | Disagreements |
+|---|---|---|---|
+| **TX** | ✅ verified | Tex. Nat. Res. Code §21.074(a)–(e), `tcss.legis.texas.gov` (§21.071/.073 apply the same five zones to NAD27 and NAD83). 254 counties, each once; zone sizes 26/88/77/49/14 | **none** |
+| **KY** | ✅ verified (not statutory text) | KRS 1.020 (2020) delegates to the Commonwealth Office of Technology; the lists are in the KSPCS Standards (rev. 2023-04-04, App. C.2), incorporated by 200 KAR 41:010 — read in NGS's `ExampleLegislation` copy | **none** (40 north / 80 south) |
+| CA | ⚠ matches a PROVISIONAL mirror only | Cal. Pub. Res. Code §8802 as copied in a GitHub mirror labelled "published before review" — **not** counted as verified. Statute also assigns the offshore islands (San Clemente, Catalina, Santa Barbara, San Nicolas) to Zone 6 while their counties are mainland Zone 5/…: a county-name table cannot express that | none seen |
+| AL AZ AR CO FL GA ID IL IN IA KS LA ME MA MI MN MS MO NV NM NY ND OH OK OR PA SD UT VA WA WV WI WY | ❌ **not verified — statute unreachable** | citations found, text not read | unknown |
+
+Unverified leads (search-engine summaries, **not** statute text — recorded so the next reader knows where to look first, never as evidence): GA O.C.G.A. 44-4-20 may list 58 East counties against our 57 · ND N.D.C.C. 47-20.2-01 summary omits Billings from the South zone (ours has it) · KS defines its zones by county-line boundary description, not a list · ID, SD, WV, OR, FL and (since 2025) IL may have moved to "as defined by NGS" — those become `defers-ngs` and the NGS table is then the authority · VA's statute is Va. Code 1-601/1-605, not Title 55.1 · Carson City NV (summary: west zone) and the Virginia independent cities need the real text.
+
+**To finish (B2494337):** add these hosts to the environment's allowed domains, then re-run the six-agent read (briefs are in the B2494337 item): `law.justia.com`, `www.legis.ga.gov`, `legislature.idaho.gov`, `ilga.gov`, `iga.in.gov`, `www.legis.iowa.gov`, `www.kslegislature.gov`, `legis.la.gov`, `legislature.maine.gov`, `malegislature.gov`, `legislature.mi.gov`, `revisor.mn.gov`, `sos.ms.gov`, `revisor.mo.gov`, `www.leg.state.nv.us`, `nmonesource.com`, `www.nysenate.gov`, `ndlegis.gov`, `codes.ohio.gov`, `oscn.net`, `www.oregonlegislature.gov`, `www.legis.state.pa.us`, `sdlegislature.gov`, `le.utah.gov`, `law.lis.virginia.gov`, `app.leg.wa.gov`, `code.wvlegislature.gov`, `docs.legis.wisconsin.gov`, `wyoleg.gov`, `www.flsenate.gov`, `www.azleg.gov`, `leg.colorado.gov`, `www.arkleg.state.ar.us`, `alisondb.legislature.state.al.us`, `leginfo.legislature.ca.gov`. Any disagreement → the statute wins, the generator's output is corrected (`scripts/gen-state-plane-zones.py`'s override list, never a hand edit of the generated files) and the row recorded here.
