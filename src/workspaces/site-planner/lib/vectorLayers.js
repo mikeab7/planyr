@@ -791,6 +791,27 @@ export const VECTOR_SOURCES = {
     },
     note: "Georgia DNR trout streams — compute-only source for the stream-buffer layer.",
   },
+  /* NEW-1 (Georgia due-diligence gaps) — DCA's PROTECTED RIVERS (257 segments statewide), the fourth compute-only source of the stream-buffer layer: a
+   * protected river carries a 100-ft natural vegetative buffer each side (O.C.G.A. 12-2-8, Rule 391-3-16-.04). The drawn "Protected Rivers" row is a plain
+   * `esriFeature` line layer (georgiaLayers.js) over the same GIS_SOURCES row. */
+  ga_protected_rivers: {
+    id: "ga_protected_rivers",
+    label: "Protected rivers (Georgia DCA)",
+    style: "river",
+    geometryType: "line",
+    sourceName: GIS_SOURCES.gaProtectedRiver.provider,
+    query: {
+      url: GIS_SOURCES.gaProtectedRiver.serviceUrl + "/query",
+      outFields: Object.values(GIS_SOURCES.gaProtectedRiver.fields), // FENAME
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 90 * 24 * 3600 * 1000, // DCA's map is a 2003 compilation; it changes by rulemaking, not weekly
+      minVectorZoom: 10,
+      maxAreaDeg: 0.35,
+    },
+    note: "Georgia DCA protected rivers — compute-only source for the stream-buffer layer.",
+  },
   ga_mngwpd: {
     id: "ga_mngwpd",
     label: "Metro North Georgia Water Planning District",
@@ -1206,6 +1227,10 @@ export function styleFor(source, props) {
     const ft = Number(p.ftype ?? p.FTYPE);
     const engineered = ft === 336 || ft === 420 || ft === 428;
     return { color: "#0e7490", weight: engineered ? 2.4 : 1.8, dashArray: ft === 420 ? "5 4" : null, fillOpacity: 0 };
+  }
+  if (style === "river") {
+    // A protected river (DCA) — the deeper river blue of the 100 ft buffer tier (georgiaStreamBuffers.js).
+    return { color: "#0369a1", weight: 2.4, fillOpacity: 0 };
   }
   if (style === "trout") {
     // Designated trout water — the cold-water teal the buffer tier uses (georgiaStreamBuffers.js).

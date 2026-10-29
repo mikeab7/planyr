@@ -229,14 +229,29 @@ export function migrateSheet(raw) {
   return createSheet();
 }
 
-/** Two ALREADY-MIGRATED sheets carry meaningfully different content (B891184-FOLLOWUP-2).
- *  Used to detect a cross-device divergence at load: "local always wins on load" (ModelApp.jsx)
- *  means a device with its own older local copy never shows what the cloud actually holds, so
- *  without this check its next edit saves cleanly (no CAS conflict — nothing raced) and
- *  silently overwrites another device's work. Both inputs are the same post-migration shape, so
- *  a plain structural compare is exact and needs no semantic diff. */
+/** JSON text with every object's keys in sorted order (arrays keep theirs — array order IS content).
+ *  ⛔ B2450528 — `model_sheets.data` is jsonb, and Postgres jsonb does NOT keep an object's key order
+ *  (it re-orders by key length, then bytewise), while the device copy keeps typing order. A plain
+ *  `JSON.stringify` compare therefore read IDENTICAL content as different the moment a cell key was
+ *  added anywhere but last in jsonb order — the false "different copy in the cloud" bar. Compare
+ *  through this, never through raw stringify, whenever either side may have been through jsonb. */
+export function canonicalJson(value) {
+  return JSON.stringify(value, (_k, v) => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const out = {};
+      for (const key of Object.keys(v).sort()) out[key] = v[key];
+      return out;
+    }
+    return v;
+  });
+}
+
+/** Two ALREADY-MIGRATED sheets/workbooks carry meaningfully different content (B891184-FOLLOWUP-2).
+ *  Used to detect a cross-device divergence at load. Key-ORDER independent (see `canonicalJson`):
+ *  only a real content difference counts. Both inputs are the same post-migration shape, so a
+ *  structural compare is exact and needs no semantic diff. */
 export function sheetsDiverge(a, b) {
-  return JSON.stringify(a) !== JSON.stringify(b);
+  return canonicalJson(a) !== canonicalJson(b);
 }
 
 export const cellKey = (colId, rowIndex) => `${colId}:${rowIndex}`;
@@ -496,6 +511,22 @@ function walkAndPatchStyles(sheet, r1, r2, c1, c2, patchFor) {
  *  can't express. */
 export function setCellStyle(sheet, r1, r2, c1, c2, patch) {
   return walkAndPatchStyles(sheet, r1, r2, c1, c2, () => patch);
+}
+
+/** Excel's own ceiling for a cell's indent level. */
+export const MAX_INDENT = 15;
+
+/** Increase / Decrease Indent — each cell in the range steps from ITS OWN level (Excel's rule), not from
+ *  the active cell's: a selection of an indented and an unindented label keeps their difference. 0 is stored
+ *  as "unset" (the same null-means-unset convention every other style key uses), and the level is capped at
+ *  MAX_INDENT. A cell already at the limit is a no-op, so a range that cannot move mints no history entry. */
+export function adjustIndent(sheet, r1, r2, c1, c2, delta) {
+  return walkAndPatchStyles(sheet, r1, r2, c1, c2, (r, c) => {
+    const col = sheet.columns[c];
+    const cur = (col && sheet.styles[cellKey(col.id, r)]?.indent) || 0;
+    const next = Math.max(0, Math.min(MAX_INDENT, cur + delta));
+    return next === cur ? null : { indent: next || null };
+  });
 }
 
 /** Border — the Borders group. `edges` is the subset of top/right/bottom/left to touch;
