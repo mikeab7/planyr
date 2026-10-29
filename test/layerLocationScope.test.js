@@ -37,7 +37,8 @@ const POINTS = {
   ca: { st: "CA", lat: 34.0522, lng: -118.2437 },
   nj: { st: "NJ", lat: 40.7357, lng: -74.1724 },
   ny: { st: "NY", lat: 42.6526, lng: -73.7562 },
-  ky: { st: null, lat: 38.2527, lng: -85.7585 }, // Louisville — siteState() has no answer for it
+  ky: { st: "KY", lat: 38.2527, lng: -85.7585 }, // Louisville — a state with NO registry rows of its own (siteState named it only from B2479568 on; it used to answer null)
+  offUs: { st: null, lat: 43.6532, lng: -79.3832 }, // Toronto — a LOCATED point no state holds: positively "somewhere else", never "unknown, show everything"
 };
 const EIA = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
 
@@ -49,7 +50,7 @@ const plannerScope = (p) => ({ state: siteState({ lat: p.lat, lng: p.lng }), loc
 const finderScope = (p) => ({ state: siteState({ lat: p.lat, lng: p.lng }), loc: { lat: Math.round(p.lat * 20) / 20, lng: Math.round(p.lng * 20) / 20 } });
 
 describe("the points are what this test says they are", () => {
-  it("siteState resolves each known point, and has no answer for Kentucky (the case that used to fail open)", () => {
+  it("siteState resolves each known point, Kentucky by name, and has no answer for a point off the US (the case that used to fail open)", () => {
     for (const [k, p] of Object.entries(POINTS)) expect(siteState({ lat: p.lat, lng: p.lng }), k).toBe(p.st);
   });
 });
@@ -113,7 +114,7 @@ describe("a layer saved ON where its source does not serve is not drawn there, a
   const saved = { txrrc_pipe: { on: true }, txrrc_pipe_easement: { on: true }, eia_gas: { on: true }, fema: { on: true } };
   const drawn = (p) => drawnOverlaysOf(saved, { layers: ALL_LAYERS, scope: plannerScope(p) });
   it("Tennessee and Kentucky: the RRC lines and corridor are off, the EIA line and FEMA stay on", () => {
-    for (const k of ["tn", "ky"]) {
+    for (const k of ["tn", "ky", "offUs"]) {
       const d = drawn(POINTS[k]);
       expect(d.txrrc_pipe.on, k).toBe(false);
       expect(d.txrrc_pipe_easement.on, k).toBe(false);

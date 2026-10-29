@@ -32,8 +32,9 @@
  * never placed in a Web Mercator pixel frame; it is placed in real State Plane feet the whole way through. Until this change the
  * resolver knew three zones (TX South Central, CO North/Central) and everything else fell back to the hardcoded EPSG:2278 grid —
  * a Tennessee site's placement AND its grid convergence ran on Texas South Central (a Dallas one was measurably wrong too: Texas
- * has five zones). Now `placementZone` resolves any zone in any state from the anchor point (county-less, so the coarse box
- * answer — `statePlane.zoneForPoint` — near a state line), and where nothing resolves it uses an explicit site-local frame
+ * has five zones). Now `placementZone` resolves any zone in any state from the anchor point (county-less: `statePlane.zoneForPoint`
+ * answers by the COUNTY the point is in once the county polygons are resident — B2494336 — and by the coarse boxes only before that),
+ * and where nothing resolves it uses an explicit site-local frame
  * (`localFrameZone`, `zone.local === true`) so a surface can say "zone unknown". Texas South Central and Colorado placements are
  * byte-identical to before (the statePlane suite pins that). International-foot / metre zones are rescaled to US survey feet
  * (`unitInUsFt`), the unit the overlay math has always spoken.

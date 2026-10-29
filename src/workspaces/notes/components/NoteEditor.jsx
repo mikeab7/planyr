@@ -56,7 +56,13 @@ import {
   VIEW_ZOOM_DEFAULT, visibleBand, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
-import { PASTE_MODES } from "../lib/notesPastePlain.js";
+import { PASTE_MODES, textOfNode, plainTextToContent } from "../lib/notesPastePlain.js";
+import {
+  PASTE_MODE_META, pasteSetFor, modeForKey, analyzePaste, applyPasteModeToTr, revertToBase, withSourceFills,
+} from "../lib/notesPasteModes.js";
+import { prepareTablePicture } from "../lib/notesTablePicture.js";
+import { newId } from "../lib/notesModel.js";
+import { PasteGlyph, ClipboardGlyph, PASTE_ICON_CSS } from "./PasteIcons.jsx";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import {
@@ -70,7 +76,7 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView, applyExternalToOpenNote,
+  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage,
 } from "../lib/notesStore.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -240,6 +246,20 @@ function wheelOwnerUnder(target, boundary, axis) {
 }
 
 const EDITOR_CSS = `
+${PASTE_ICON_CSS}
+/* ⛔ THE PASTE-OPTIONS FLYOUT (NEW-1, Office-style): square corners, a thin grey border, a small shadow; square icon
+   buttons that go light blue when applied; a tooltip that names the option the way Word does. The halo behind each
+   mark follows the button's own background (--paste-halo), so a hover or the pressed blue never leaves a white
+   ring. Thumb-sized targets on a touch screen. No backticks in this comment. */
+.planyr-paste-tab { display: flex; align-items: center; gap: 3px; padding: 1px 5px 1px 3px; border: none; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; --paste-halo: var(--surface-raised); }
+.planyr-paste-head { font-size: 12px; font-weight: 600; color: var(--text-primary); padding: 0 0 5px; }
+.planyr-paste-group { font-size: 10.5px; font-weight: 700; color: var(--text-primary); padding: 5px 0 3px; }
+.planyr-paste-row { display: flex; gap: 2px; flex-wrap: nowrap; }
+.planyr-paste-btn { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid transparent; background: transparent; color: var(--text-primary); cursor: pointer; --paste-halo: var(--surface-raised); }
+.planyr-paste-btn:hover, .planyr-paste-btn:focus-visible { background: var(--surface-page); border-color: var(--border-strong); outline: none; --paste-halo: var(--surface-page); }
+.planyr-paste-btn[aria-pressed="true"] { background: var(--info-bg); border-color: var(--info-text); --paste-halo: var(--info-bg); }
+.planyr-paste-tip { position: absolute; margin-top: 4px; padding: 3px 7px; background: var(--surface-raised); border: 1px solid var(--border-strong); color: var(--text-primary); font-size: 12px; white-space: nowrap; pointer-events: none; z-index: 41; }
+@media (pointer: coarse) { .planyr-paste-btn { width: 44px; height: 44px; } }
 /* ⛔ THE NOTE'S DENSITY, AND IT IS THE ONE PLACE THE NUMBER LIVES (NEW-SPACING-1/3).
    It was a hard-coded 1.65 here — which measured as 15px text in a 24.75px line box, while
    Word and OneNote call ~1.15 single. So the loosest setting in the spacing control's own
@@ -936,22 +956,6 @@ function FindReplaceBar({ editor, find, onClose }) {
  * `docs/NOTES-CARRY-FORWARD.md` §5 family 19 and trap 33 for the history — kept there as
  * a record, not as a design this file still has to honour. */
 
-/* ⛔ OUR OWN GLYPHS, WORD'S SILHOUETTE LANGUAGE (B36051, amendment 3). The owner asked for
- * "the same little insignias… it doesn't have to be the exact same one if that's a copyright
- * issue, but something that shows the exact same thing almost." So these are drawn here, from
- * scratch — no Microsoft asset is copied — while keeping the shape anyone who has used Word
- * reads instantly: a clipboard, plus the one mark that says which mode it is.
- *   Keep source formatting  clipboard + PAINTBRUSH
- *   Merge formatting        clipboard + two CHEVRONS meeting
- *   Keep text only          clipboard + a plain letter A
- * Inline SVG on `currentColor`, at the same 16-box and 1.7 stroke as the toolbar's own. */
-const CLIPBOARD_BODY = (
-  <>
-    <rect x="3.2" y="2.6" width="7.6" height="10.6" rx="1.4" />
-    <path d="M5.6 2.6V2a1 1 0 0 1 1-1h0.8a1 1 0 0 1 1 1v0.6" />
-  </>
-);
-
 /** ⛔ A BOX THAT HOLDS A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1, owner report 2026-10-11).
  *  Run after ANY paste that lands a table — blank paper, a selected box, an existing narrow box, the caret
  *  inside a box (all four reach here through the one "paste" transaction hook below). It finds the box the
@@ -1012,120 +1016,108 @@ function boxHasContent(node) {
   return any;
 }
 
-const PASTE_ICONS = {
-  source: (
-    <>
-      {CLIPBOARD_BODY}
-      <path d="M11.4 8.6c1.3-1.3 2.4-0.6 2.4-0.6s0.7 1.1-0.6 2.4l-1.9 1.9-1.8-1.8z" />
-      <path d="M11.3 12.3l-1.6 2.2 2.2-1.6" />
-    </>
-  ),
-  merge: (
-    <>
-      {CLIPBOARD_BODY}
-      <path d="M10.2 8.2l2 2-2 2" />
-      <path d="M15 8.2l-2 2 2 2" />
-    </>
-  ),
-  text: (
-    <>
-      {CLIPBOARD_BODY}
-      <path d="M10.1 13.4l2.1-5 2.1 5" />
-      <path d="M10.9 11.7h2.6" />
-    </>
-  ),
-};
-
-/** Name + access key, exactly the way Word labels them. */
-export const PASTE_MODE_META = {
-  source: { label: "Keep source formatting", key: "K" },
-  merge: { label: "Merge formatting", key: "M" },
-  text: { label: "Keep text only", key: "T" },
-};
-
-function PasteIcon({ mode }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
-      {PASTE_ICONS[mode]}
-    </svg>
-  );
-}
-
-/** ⛔ WORD'S PASTE-OPTIONS CONTROL, and it is NOT a dialog (house rule) — B36051.
+/** ⛔ WORD'S AND EXCEL'S PASTE OPTIONS, and it is NOT a dialog (house rule) — B36051, then NEW-1 (Office-style).
  *
- *  A small clipboard BADGE appears at the end of a paste that carried formatting. Clicking it
- *  — or pressing Ctrl once, which is what Word does — expands the three icon buttons. Picking
- *  one RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as a single undo step: nothing is
- *  re-pasted from the clipboard and nothing outside that range is touched.
+ *  After a paste that carried formatting a small bordered TAB — a clipboard, "(Ctrl)", a caret — sits at the end of the
+ *  pasted range, exactly where Word puts it. Clicking it, or pressing Ctrl once, opens the FLYOUT: a square-cornered
+ *  panel headed "Paste Options:" with one square icon button per option. Hovering or focusing a button names it the
+ *  way Word does ("Keep Text Only (T)"); the option currently applied shows a light-blue pressed state; the letter in
+ *  the bracket picks it while the flyout is open. Picking one RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as a single
+ *  undo step, and may be done again — each pick starts from the paste as it first landed (notesPasteModes.js).
  *
- *  Module scope (MODULE-SCOPE-COMPONENTS): a component declared inside a render body is a new
- *  type every render, so React would remount it out from under its own click. */
-function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
+ *  A paste that landed a TABLE shows Excel's set, grouped under small bold headings (Paste · Paste Values · Other Paste
+ *  Options); anything else shows Word's three. Which set is the pure `pasteSetFor(offer)`.
+ *
+ *  Module scope (MODULE-SCOPE-COMPONENTS): a component declared inside a render body is a new type every render, so
+ *  React would remount it out from under its own click. The flyout is clamped into the visible mat in a LAYOUT effect
+ *  (measured before paint, so it never shows at an unclamped spot) and flips above the line when it would run off the
+ *  bottom — it has to fit a phone, where the buttons also grow to a thumb-sized target. */
+function PasteOptions({ offer, expanded, onExpand, onPick }) {
+  const rootRef = useRef(null);
+  const [tip, setTip] = useState(null);
+  const [place, setPlace] = useState(null);
+  const x = offer?.x; const y = offer?.y; const yTop = offer?.yTop;
+  const kind = offer?.kind;
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    const host = el?.offsetParent;
+    if (!el || !host) { setPlace(null); return; }
+    const w = el.offsetWidth; const h = el.offsetHeight;
+    const hw = host.clientWidth; const hh = host.clientHeight;
+    const left = Math.max(6, Math.min(x, hw - w - 6));
+    let top = y + 4;
+    if (top + h > hh - 6) top = Math.max(6, (yTop ?? y) - h - 4);
+    const tipRight = left + 250 > hw;
+    setPlace((prev) => (prev && prev.left === left && prev.top === top && prev.tipRight === tipRight ? prev : { left, top, tipRight }));
+  }, [x, y, yTop, expanded, kind]);
   if (!offer) return null;
   const box = {
-    position: "absolute", left: Math.max(6, offer.x), top: offer.y + 4, zIndex: 40,
-    display: "flex", alignItems: "center", gap: 3, padding: 3, cursor: "default",   // chrome: the arrow, not the mat's open hand
-    borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
-    background: "var(--surface-raised)", boxShadow: "0 8px 22px rgba(0,0,0,0.18)",
+    position: "absolute", left: place ? place.left : Math.max(6, x), top: place ? place.top : y + 4, zIndex: 40,
+    cursor: "default",   // chrome: the arrow, not the mat's open hand
+    background: "var(--surface-raised)", border: "1px solid var(--border-strong)",
+    boxShadow: "0 3px 10px rgba(0,0,0,0.18)",
   };
   if (!expanded) {
     return (
-      <div data-testid="note-paste-options" style={box}>
+      <div ref={rootRef} data-testid="note-paste-options" className="planyr-paste-ctx" style={box}>
         <button
           type="button"
           data-testid="note-paste-badge"
-          title="Paste options (Ctrl)"
-          aria-label="Paste options"
+          title="Paste Options (Ctrl)"
+          aria-label="Paste Options (Ctrl)"
           aria-expanded={false}
           onMouseDown={(e) => e.preventDefault()}
           onClick={onExpand}
-          style={{
-            display: "flex", alignItems: "center", gap: 4, padding: "2px 6px",
-            border: "none", borderRadius: RADIUS.control, background: "transparent",
-            color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 700, cursor: "pointer",
-          }}
+          className="planyr-paste-tab"
         >
-          <PasteIcon mode="source" />
-          <span style={{ opacity: 0.7 }}>▾</span>
+          <ClipboardGlyph size={22} />
+          <span style={{ fontSize: 10.5, fontWeight: 700 }}>(Ctrl)</span>
+          <span aria-hidden="true" style={{ fontSize: 10.5 }}>▾</span>
         </button>
       </div>
     );
   }
+  const set = pasteSetFor(offer);
   return (
-    <div data-testid="note-paste-options" role="group" aria-label="Paste options" style={box}>
-      {PASTE_MODES.map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          data-testid={`note-paste-${mode}`}
-          title={`${PASTE_MODE_META[mode].label} (${PASTE_MODE_META[mode].key})`}
-          aria-label={PASTE_MODE_META[mode].label}
-          aria-keyshortcuts={PASTE_MODE_META[mode].key}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPick(mode)}
-          style={{
-            display: "grid", placeItems: "center", width: 26, height: 24,
-            border: "1px solid transparent", borderRadius: RADIUS.control,
-            background: "transparent", color: "var(--text-primary)", cursor: "pointer",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-page)"; e.currentTarget.style.borderColor = "var(--border-default)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}
-        >
-          <PasteIcon mode={mode} />
-        </button>
+    <div ref={rootRef} data-testid="note-paste-options" data-paste-kind={offer.kind} role="group" aria-label="Paste Options"
+      className="planyr-paste-ctx" style={{ ...box, padding: "6px 8px 8px" }}>
+      <div className="planyr-paste-head">Paste Options:</div>
+      {set.map((g) => (
+        <div key={g.title || "main"} role="group" aria-label={g.title || "Paste"} data-paste-group={g.title || ""}>
+          {g.title ? <div className="planyr-paste-group">{g.title}</div> : null}
+          <div className="planyr-paste-row">
+            {g.modes.map((mode) => {
+              const meta = PASTE_MODE_META[mode];
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  data-testid={`note-paste-${mode}`}
+                  data-tip={`${meta.label} (${meta.key})`}
+                  aria-label={`${meta.label} (${meta.key})`}
+                  aria-keyshortcuts={meta.key}
+                  aria-pressed={offer.applied === mode}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onPick(mode)}
+                  onMouseEnter={(e) => setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight })}
+                  onMouseLeave={() => setTip((t) => (t && t.mode === mode ? null : t))}
+                  onFocus={(e) => setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight })}
+                  onBlur={() => setTip((t) => (t && t.mode === mode ? null : t))}
+                  className="planyr-paste-btn"
+                >
+                  <PasteGlyph mode={mode} size={28} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
       ))}
-      <button
-        type="button"
-        data-testid="note-paste-options-dismiss"
-        aria-label="Dismiss"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={onDismiss}
-        style={{
-          border: "none", background: "transparent", color: "var(--text-tertiary)",
-          font: "inherit", fontSize: 12, padding: "0 4px", cursor: "pointer",
-        }}
-      >✕</button>
+      {tip ? (
+        <div role="tooltip" data-testid="note-paste-tip" className="planyr-paste-tip"
+          style={{ top: tip.top, ...(place?.tipRight ? { right: 0 } : { left: tip.left }) }}>
+          {PASTE_MODE_META[tip.mode].label} ({PASTE_MODE_META[tip.mode].key})
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1370,6 +1362,7 @@ function MenuRow({ item, onClose }) {
           <div
             role="menu"
             data-testid={`note-menu-${item.id}-sub`}
+            className="planyr-paste-ctx"
             style={{
               position: "absolute", left: "100%", top: -4, minWidth: 208, padding: "5px 0", zIndex: 1,
               background: "var(--surface-raised)", border: "1px solid var(--border-default)",
@@ -1402,6 +1395,7 @@ function MenuRow({ item, onClose }) {
       {item.chip !== undefined ? (
         <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 3, border: "1px solid var(--border-strong)", flex: "0 0 auto", background: item.chip || "var(--surface-page)", color: "var(--text-tertiary)", fontSize: 10, lineHeight: "12px", textAlign: "center" }}>{item.chip ? "" : "✕"}</span>
       ) : null}
+      {item.icon ? <span aria-hidden="true" className="planyr-paste-ctx" style={{ width: 20, height: 20, display: "grid", placeItems: "center", flex: "0 0 auto" }}>{item.icon}</span> : null}
       <span style={{ flex: 1 }}>{item.label}</span>
       {item.accel ? <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>{item.accel}</span> : null}
     </button>
@@ -1535,6 +1529,7 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
       sub: PASTE_MODES.map((mode) => ({
         id: mode === "text" ? "paste-plain" : `paste-${mode}`,
         label: PASTE_MODE_META[mode].label,
+        icon: <PasteGlyph mode={mode} size={20} />,
         accel: mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key,
         run: () => onPlainPaste(mode),
       })),
@@ -1732,6 +1727,15 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [pasteOffer, setPasteOffer] = useState(null);
   const pasteRef = useRef(null);
   pasteRef.current = pasteOffer;
+  /* The extension list must stay stable (rebuilding it rebuilds the editor), so the paste announcement reaches this
+   * component through a ref filled in below, once `editor` exists — the same shape as `runSlashRef`. */
+  const offerPasteOptionsRef = useRef(null);
+  /* Set while a pick is dispatching its own transaction, so the "any further editing retires the offer" listener
+   * does not mistake the option the person just chose for an edit that made the offer stale. */
+  const applyingPasteModeRef = useRef(false);
+  /* Released a tick LATER, not at the end of the pick: a pick that widens its box (Transpose, Keep Source Column Widths)
+   * has the width change land in a microtask after it, as its own update, and that one is the pick's too. */
+  const releasePasteApply = () => { setTimeout(() => { applyingPasteModeRef.current = false; }, 0); };
 
   /* THE SLASH MENU (NEW-1). All of the decision — whether it is open, what is in it, which
    * row is highlighted — lives in the plugin (lib/notesSlashMenu.js) reading the document.
@@ -1752,7 +1756,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     () => noteExtensions({
       imageContext,
       onSearchMatches: (m) => setFind(m),
-      onPasted: ({ from, to, text }) => setPasteOffer({ from, to, text, at: Date.now() }),
+      onPasted: (facts) => offerPasteOptionsRef.current?.(facts),
       onSlash: (s) => setSlash(s),
       onSlashRun: (id, range) => runSlashRef.current?.(id, range),
     }),
@@ -5253,57 +5257,185 @@ const NoteEditor = forwardRef(function NoteEditor({
     };
   }, [editor, readOnly, openDocMenuAt]);
 
+  /* THE PASTE ANNOUNCEMENT → AN OFFER. The extension hands over the documents either side of the paste; `analyzePaste`
+   * decides what it landed (text · new table(s) · cells of an existing table · a table that grew) and so which SET of
+   * options the flyout shows. `baseDoc` is the paste exactly as it landed: every pick puts the paste back to it first. */
+  useEffect(() => {
+    offerPasteOptionsRef.current = (facts) => {
+      if (!editor || editor.isDestroyed) return;
+      const found = analyzePaste(facts);
+      let { from, to } = facts;
+      if (found.kind === "cells") {
+        from = Math.min(...found.cells.map((c) => c.pos));
+        to = Math.max(...found.cells.map((c) => c.pos + (facts.postDoc.nodeAt(c.pos)?.nodeSize || 0)));
+      }
+      setPasteOffer({
+        from, to, curTo: to, baseDoc: facts.postDoc, kind: found.kind,
+        tables: found.tables, cells: found.cells, preTable: found.preTable || null,
+        meta: facts.meta || { tables: [] }, applied: "source", at: Date.now(),
+      });
+      setPasteExpanded(false);
+    };
+    return () => { offerPasteOptionsRef.current = null; };
+  }, [editor]);
+
   useEffect(() => {
     if (!pasteOffer || !editor || editor.isDestroyed) { setPasteAt(null); return undefined; }
-    let live = true;
     try {
-      const coords = editor.view.coordsAtPos(Math.min(pasteOffer.to, editor.state.doc.content.size));
       const host = editor.view.dom.closest("[data-testid='note-mat']")?.getBoundingClientRect();
-      if (host) setPasteAt({ x: coords.left - host.left, y: coords.bottom - host.top });
+      /* Text: just below the caret at the end of the pasted range. A picture: just below the picture's own box. */
+      const el = pasteOffer.dom != null ? editor.view.nodeDOM(pasteOffer.dom) : null;
+      const r = el?.getBoundingClientRect?.();
+      const coords = r ? { left: r.left, bottom: r.bottom, top: r.top } : editor.view.coordsAtPos(Math.min(pasteOffer.curTo ?? pasteOffer.to, editor.state.doc.content.size));
+      if (host) setPasteAt({ x: coords.left - host.left, y: coords.bottom - host.top, yTop: coords.top - host.top });
       else setPasteAt(null);
     } catch (_) { setPasteAt(null); }
-    // Word's chip goes away on its own rather than sitting there for the rest of the session.
-    const t = setTimeout(() => { if (live) setPasteOffer(null); }, 12000);
-    return () => { live = false; clearTimeout(t); };
+    return undefined;
   }, [pasteOffer, editor]);
 
+  /* Word's tab goes away on its own rather than sitting there for the rest of the session — but never while the flyout
+   * is open under somebody's pointer. */
+  const [pasteExpanded, setPasteExpanded] = useState(false);
+  useEffect(() => {
+    if (!pasteOffer || pasteExpanded) return undefined;
+    const t = setTimeout(() => setPasteOffer(null), 12000);
+    return () => clearTimeout(t);
+  }, [pasteOffer, pasteExpanded]);
+
   /* Any further editing retires the offer — its range would be stale, and an option that
-   * would silently act on the wrong text is worse than no option. */
+   * would silently act on the wrong text is worse than no option. (Not the edit a pick makes itself.) */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    const retire = () => { if (pasteRef.current) setPasteOffer(null); };
+    const retire = () => { if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
     editor.on("update", retire);
     return () => { editor.off("update", retire); };
   }, [editor]);
 
-  /* ⛔ PICKING A MODE RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as ONE undo step — it
-   * never re-pastes from the clipboard and never touches anything outside that range. */
-  const [pasteExpanded, setPasteExpanded] = useState(false);
-  const applyPasteMode = useCallback((mode) => {
+  /* ⛔ PICKING AN OPTION RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as ONE undo step — it never re-pastes from the
+   * clipboard and never touches anything outside the paste. It puts the paste back to how it landed (`baseDoc`) and
+   * applies the option to THAT, in the same transaction, so choosing twice (Keep Text Only, then Merge Formatting, then
+   * back to Keep Source Formatting) never compounds a loss. Picture is the one async option: it draws the table first. */
+  const applyPasteMode = useCallback(async (mode) => {
     const offer = pasteRef.current;
-    setPasteOffer(null);
     setPasteExpanded(false);
     if (!offer || !editor || editor.isDestroyed) return;
-    if (mode === "source") return;                       // already what is on the page
-    const to = Math.min(offer.to, editor.state.doc.content.size);
-    if (to <= offer.from) return;
-    if (mode === "text") editor.commands.keepTextOnly({ from: offer.from, to });
-    else editor.commands.mergeFormatting({ from: offer.from, to });
-  }, [editor]);
+    if (mode === offer.applied) return;
+    const sizeUp = (txt) => onPrintNotice?.(txt);
+    const run = (build) => {
+      applyingPasteModeRef.current = true;
+      let end = null;
+      let ok = false;
+      try {
+        ok = editor.chain().command(({ tr }) => {
+          tr.setMeta("uiEvent", "paste");              // the same "a paste landed a table" hook widens its box
+          const r = build(tr);
+          if (r && r.end != null) end = r.end;
+          return !!(r && r.ok);
+        }).run();
+        if (end == null) end = editor.state.selection.to;
+      } finally { releasePasteApply(); }
+      return { ok, end };
+    };
 
-  /* Ctrl on its own expands the badge — Word's shortcut, and the reason the badge can be a
-   * badge rather than three buttons permanently in the way. */
+    if (mode === "picture") {
+      const sources = (offer.tables || []).map((t) => ({ pos: t.pos, node: offer.baseDoc.nodeAt(t.pos) })).filter((t) => t.node);
+      if (!sources.length) return;
+      const drawn = [];
+      for (const [i, src] of sources.entries()) {
+        const r = await prepareTablePicture(withSourceFills(src.node, offer.meta?.tables?.[i]?.fills), editor.schema);
+        if (!r.ok) { sizeUp(r.error); return; }
+        const ctx = imageCtxRef.current || {};
+        const imageId = newId("img");
+        const stored = await putNoteImage({
+          id: imageId, pageId: ctx.pageId || null, dataUrl: r.prepared.dataUrl, mime: r.prepared.mime,
+          w: r.prepared.w, h: r.prepared.h, notebookPageIds: Array.isArray(ctx.notebookPageIds) ? ctx.notebookPageIds : null,
+        });
+        if (!stored.ok) return;                    // putNoteImage has already named the failure in the banner
+        drawn.push({ ...src, imageId, prepared: r.prepared, cssW: r.cssW, cssH: r.cssH });
+      }
+      // The picture took a moment; if the paste has been edited or dismissed meanwhile, its range is stale — say so, do nothing.
+      if (pasteRef.current !== offer || editor.isDestroyed) { sizeUp("The paste changed while its picture was being made, so the picture was not placed."); return; }
+      let pictureAnchor = null;
+      const { ok } = run((tr) => {
+        revertToBase(tr, offer.baseDoc);
+        const schema = tr.doc.type.schema;
+        const mark = tr.steps.length;
+        let anchor = null;
+        for (const d of [...drawn].sort((a, b) => b.pos - a.pos)) {
+          const table = tr.doc.nodeAt(d.pos);
+          if (!table || table.type.name !== "table") continue;
+          const image = schema.nodes.noteImage.create({
+            imageId: d.imageId, alt: "Pasted table", mime: d.prepared.mime, w: d.prepared.w || null, h: d.prepared.h || null,
+          });
+          const $at = tr.doc.resolve(d.pos);
+          const parent = $at.parent;
+          /* A box that held only the table (any empty lines beside it are litter, not content) becomes a PICTURE box:
+           * its whole content is the picture, sized to the picture, no longer self-sizing. Anywhere else the picture
+           * simply takes the table's place in the text around it. */
+          const alone = parent.type.name === "noteAnchor"
+            && (() => { let others = 0; parent.forEach((c) => { if (c !== table && !(c.type.name === "paragraph" && c.content.size === 0)) others += 1; }); return others === 0; })();
+          if (alone) {
+            const boxPos = $at.before($at.depth);
+            const box = tr.doc.nodeAt(boxPos);
+            tr.replaceWith(boxPos, boxPos + box.nodeSize, box.type.create({ ...box.attrs, w: d.cssW, h: d.cssH, fit: false }, image));
+            anchor = boxPos;
+          } else {
+            tr.replaceWith(d.pos, d.pos + table.nodeSize, image);
+            anchor = d.pos;
+          }
+        }
+        const end = Math.min(tr.doc.content.size, tr.mapping.slice(mark).map(Math.min(offer.to, offer.baseDoc.content.size), 1));
+        pictureAnchor = anchor;
+        return { ok: true, end };
+      });
+      if (!ok) { sizeUp("Planyr couldn't place the picture of that table."); return; }
+      /* A picture has no text position inside it, so the tab follows the PICTURE's own box on screen (`dom`), not a caret. */
+      setPasteOffer((cur) => (cur === offer ? { ...offer, applied: "picture", curTo: editor.state.selection.to, dom: pictureAnchor } : cur));
+      return;
+    }
+
+    if (mode === "text") {
+      const text = textOfNode(offer.baseDoc.slice(offer.from, Math.min(offer.to, offer.baseDoc.content.size)).content);
+      applyingPasteModeRef.current = true;
+      let ok = false;
+      try {
+        ok = editor.chain()
+          .command(({ tr }) => { tr.setMeta("uiEvent", "paste"); revertToBase(tr, offer.baseDoc); return true; })
+          .insertContentAt({ from: offer.from, to: Math.min(offer.to, offer.baseDoc.content.size) }, plainTextToContent(text))
+          .run();
+      } finally { releasePasteApply(); }
+      if (!ok) { sizeUp("Planyr couldn't apply Keep Text Only to that paste."); return; }
+      setPasteOffer((cur) => (cur === offer ? { ...offer, applied: "text", curTo: editor.state.selection.to, dom: null } : cur));
+      return;
+    }
+
+    const { ok, end } = run((tr) => applyPasteModeToTr(tr, mode, offer));
+    if (!ok) { sizeUp(`Planyr couldn't apply ${PASTE_MODE_META[mode].label} to that paste.`); return; }
+    setPasteOffer((cur) => (cur === offer ? { ...offer, applied: mode, curTo: end, dom: null } : cur));
+  }, [editor, onPrintNotice]);
+
+  /* Ctrl on its own opens the flyout — Word's shortcut, and the reason the tab can be a tab rather than a row of buttons
+   * permanently in the way. While it is open each option's letter picks it (the same letter means Keep Text Only in the
+   * text set and Transpose in the table set — `modeForKey` reads the set on screen); Escape closes it, then the tab; a
+   * press outside it closes it. */
   useEffect(() => {
     if (!pasteOffer) { setPasteExpanded(false); return undefined; }
+    const set = pasteSetFor(pasteOffer);
     const onKey = (e) => {
-      if (e.key === "Control") { setPasteExpanded(true); return; }
-      if (e.key === "Escape") { setPasteOffer(null); return; }
+      if (e.key === "Control") { if (!e.repeat) setPasteExpanded(true); return; }
+      if (e.key === "Escape") { if (pasteExpanded) setPasteExpanded(false); else setPasteOffer(null); return; }
+      if (!pasteExpanded || e.ctrlKey || e.metaKey || e.altKey) return;
+      const hit = modeForKey(set, e.key);
+      if (hit) { e.preventDefault(); e.stopPropagation(); applyPasteMode(hit); }
+    };
+    const onDown = (e) => {
       if (!pasteExpanded) return;
-      const hit = PASTE_MODES.find((m) => PASTE_MODE_META[m].key.toLowerCase() === e.key.toLowerCase());
-      if (hit) { e.preventDefault(); applyPasteMode(hit); }
+      if (e.target instanceof Element && e.target.closest("[data-testid='note-paste-options']")) return;
+      setPasteExpanded(false);
     };
     document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onDown, true);
+    return () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("mousedown", onDown, true); };
   }, [pasteOffer, pasteExpanded, applyPasteMode]);
 
   /** Ctrl/Cmd+Shift+V, and the right-click menu's item, land here. LOUD-FAILURE: a browser
@@ -5677,7 +5809,6 @@ const NoteEditor = forwardRef(function NoteEditor({
           expanded={pasteExpanded}
           onExpand={() => setPasteExpanded(true)}
           onPick={applyPasteMode}
-          onDismiss={() => setPasteOffer(null)}
         />
         {/* THE SLASH MENU (NEW-1). Drawn over the mat at the `/` itself; every decision
             about it is the plugin's — see lib/notesSlashMenu.js. */}

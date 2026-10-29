@@ -2457,11 +2457,11 @@ ok("⛔ ...and it opens THREE icon buttons, one per mode",
   await tb("note-paste-source").count() === 1
   && await tb("note-paste-merge").count() === 1
   && await tb("note-paste-text").count() === 1);
-const modeTitles = await page.evaluate(() => ["source", "merge", "text"].map((m) => document.querySelector(`[data-testid="note-paste-${m}"]`)?.getAttribute("title")));
-ok("⛔ ...each named, with its access key, exactly the way Word labels them",
-  /Keep source formatting \(K\)/.test(modeTitles[0] || "")
-  && /Merge formatting \(M\)/.test(modeTitles[1] || "")
-  && /Keep text only \(T\)/.test(modeTitles[2] || ""), modeTitles.join(" · "));
+const modeTitles = await page.evaluate(() => ["source", "merge", "text"].map((m) => document.querySelector(`[data-testid="note-paste-${m}"]`)?.getAttribute("data-tip")));
+ok("⛔ ...each named, with its access key, exactly the way Word labels them (Word's capitalisation — NEW-1, 2026-10-29)",
+  /Keep Source Formatting \(K\)/.test(modeTitles[0] || "")
+  && /Merge Formatting \(M\)/.test(modeTitles[1] || "")
+  && /Keep Text Only \(T\)/.test(modeTitles[2] || ""), modeTitles.join(" · "));
 const iconShapes = await page.evaluate(() => ["source", "merge", "text"].map((m) => document.querySelector(`[data-testid="note-paste-${m}"] svg`)?.innerHTML || ""));
 ok("⛔ ...and the three glyphs are genuinely DIFFERENT drawings, not one icon three times",
   new Set(iconShapes).size === 3 && iconShapes.every((h) => h.includes("<rect")),
@@ -2519,7 +2519,7 @@ ok("⛔ ...AND THE LINE BREAKS SURVIVE — a multi-line paste must not collapse 
 ok("...with every word still present — stripping style must never cost content",
   ["Simon Sequeira", "CEO", "1234 Grand Pkwy", "Kandice Cabets", "k@quadvest.com"].every((t) => textOf(textDoc).includes(t)),
   textOf(textDoc).replace(/\n/g, " · ").slice(0, 90));
-ok("...and the option retires once it has been taken", await tb("note-paste-options").count() === 0);
+ok("...and the flyout closes once an option is taken, leaving the tab (so the choice can be changed — NEW-1)", await tb("note-paste-badge").count() === 1 && await tb("note-paste-text").count() === 0);
 
 /* A PLAIN paste must NOT raise the badge — an affordance that can do nothing is noise. */
 await clearBody();
