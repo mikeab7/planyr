@@ -113,6 +113,26 @@ export function anchorTransformAttr(t) {
   return `translate(${tx} ${ty}) scale(${q(t.k)})`;
 }
 
+/** The CSS transform that CANCELS an anchored group's own transform (and the SVG's registration shift) for content that is
+ *  hosted INSIDE that group but must follow the BASEMAP instead — the lifted GIS band and the Parcels-in-front pick host
+ *  (NEW-1, FEMA slid at twice the pan speed). Those hosts carry the basemap wrapper's live gesture transform on their own
+ *  (mirrored in the same statement), so the group's `translate(tx ty) scale(k)` on top of it moved them TWICE.
+ *
+ *  Composition, outermost first: svg regShift translate → group `translate(tx ty) scale(k)` → THIS → mirrored wrap transform.
+ *  The target is `reg + group(this(p)) = p`, so this = group⁻¹ ∘ translate(-reg): CSS `scale(1/k) translate(-t) translate(-reg)`
+ *  (right-most applies first). Uses the SAME 4-decimal rounding `anchorTransformAttr` writes, so it cancels what is on screen,
+ *  not the unrounded model value. `undefined` when there is nothing to cancel (rest, export). Needs `transform-origin: 0 0`. */
+export function anchorInverseCss(t, regDx = 0, regDy = 0) {
+  const parts = [];
+  if (t) {
+    const k = q(t.k), tx = q(t.tx), ty = q(t.ty);
+    if (Math.abs(t.k - 1) >= ANCHOR_K_EPS && k > 0) parts.push(`scale(${1 / k})`);
+    if (tx || ty) parts.push(`translate(${-tx}px, ${-ty}px)`);
+  }
+  if (regDx || regDy) parts.push(`translate(${-regDx}px, ${-regDy}px)`);
+  return parts.length ? parts.join(" ") : undefined;
+}
+
 /** The exactness property, exposed so the test suite proves it on the shipped code rather than on a
  *  restatement of it: where does world coordinate `p` (one axis) land under the anchored render,
  *  and where would a direct render at the live view have put it? */
