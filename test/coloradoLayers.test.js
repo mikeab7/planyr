@@ -187,7 +187,7 @@ describe("ECMC wells — the status table is the map AND the legend", () => {
 
 describe("ECMC flowlines — an abandoned line is the hazard, so it is never hidden or drawn like an active one", () => {
   it("the free-text status classifier (≈70 real spellings, measured 2026-10-29)", () => {
-    for (const out of ["Abandoned", "Abandoned – Method Unknown", "Abandoned in Place", "Abandon", "Abaondoned", "REMOVED", "Out of Service", "Out-of-Service", "OutofService", "OOS", "OOSLAT", "Inactive", "IDLE", "Flushed and capped", "Decommissioned", "RETIRED", "PA", "ABiP", "AIP", "PreAbandonment", "Pre-Abandonment", "Discontinued", "Shut in", "SI", "TA"].filter((x) => !["SI", "TA"].includes(x))) expect(CL.flowlineIsOut(out), out).toBe(true);
+    for (const out of ["Abandoned", "Abandoned – Method Unknown", "Abandoned in Place", "Abandon", "Abaondoned", "REMOVED", "Out of Service", "Out-of-Service", "OutofService", "OOS", "OOSLAT", "Inactive", "IDLE", "Flushed and capped", "Decommissioned", "RETIRED", "PA", "ABiP", "AIP", "PreAbandonment", "Pre-Abandonment", "Discontinued", "Shut in", "SI", "TA", "In Active", "Temporarily abandoned"]) expect(CL.flowlineIsOut(out), out).toBe(true);
     for (const live of ["Active", "In Service", "ACTIVE/IN-SERVICE", "New Construction", "Pre-Commissioned", "PLANNED", "Injection", "", null, undefined, "Unknown"]) expect(CL.flowlineIsOut(live), String(live)).toBe(false);
   });
   it("out-of-service lines are dashed red, live and blank-status lines solid purple, and the legend says so", () => {
@@ -295,7 +295,7 @@ describe("the other style tables stay consistent with their legends", () => {
   it("Aurora noise bands and Buckley zones classify as published", () => {
     expect(CL.noiseBand("55 LDN")).toBe("55"); expect(CL.noiseBand("60 LDN")).toBe("60"); expect(CL.noiseBand("65-80 LDN")).toBe("65"); expect(CL.noiseBand("65+ LDN")).toBe("65"); expect(CL.noiseBand("65 LDN")).toBe("65"); expect(CL.noiseBand("Influence")).toBe("INF");
     expect(CL.apzKind("APZ II - N")).toBe("APZ II"); expect(CL.apzKind("APZ I - S")).toBe("APZ I"); expect(CL.apzKind("CZ - N")).toBe("CZ"); expect(CL.apzKind(" ")).toBeNull();
-    expect(CL.auroraZoningClass("Business/Tech District")).toBe("I"); expect(CL.auroraZoningClass("Airport District")).toBe("I"); expect(CL.auroraZoningClass("Mixed-Use Regional District")).toBe("M"); expect(CL.auroraZoningClass("Medium-Density Residential District")).toBe("R");
+    expect(CL.auroraZoningClass("Industrial District")).toBe("I"); expect(CL.auroraZoningClass("Business/Tech District")).toBe("I"); expect(CL.auroraZoningClass("Airport District")).toBe("I"); expect(CL.auroraZoningClass("Mixed-Use Regional District")).toBe("M"); expect(CL.auroraZoningClass("Medium-Density Residential District")).toBe("R");
   });
   it("Adams zoning draws a city-labelled polygon faint, never as a county district", () => {
     expect(CL.adamsZoneKind("I-2")).toBe("I"); expect(CL.adamsZoneKind("C-3")).toBe("C"); expect(CL.adamsZoneKind("A-1")).toBe("A"); expect(CL.adamsZoneKind("R-1-C")).toBe("R"); expect(CL.adamsZoneKind("P-U-D")).toBe("PUD");
@@ -323,5 +323,44 @@ describe("Site Analysis pills (siteLayerPills) — the way in for a layer the pa
     for (const p of pills) for (const k of p.layers) expect(k.startsWith("co_"), `${p.id}/${k}`).toBe(false);
     expect(OFF_REGION_PILLS.wells.byRegion.TX).toBeUndefined();
     expect(PILL_DEFS.length).toBeGreaterThan(3);
+  });
+});
+
+describe("adversarial review round 1 (B2528688) — each confirmed finding stays fixed", () => {
+  const L = COLORADO_LAYERS;
+  const cardOf = (id, props) => L[id].identifyCard(props, { lat: 40, lng: -105 });
+  it("heavy rows ask the server to generalise (measured vertices per 512 px cell: Weld ROW 301k at z13, Enterprise Zones 175k at z7, ECMC pads 67k at z13, Critical Habitat 85k–614k) and Aurora zoning starts above the service's 2,000-record cap", () => {
+    for (const id of ["co_weld_row", "co_enterprise_zones", "co_ecmc_locations", "co_crit_habitat"]) expect(L[id].simplifyFactor, id).toBeGreaterThan(0);
+    expect(L.co_crit_habitat.minZoom).toBeGreaterThanOrEqual(11);
+    expect(L.co_aurora_zoning.minZoom).toBeGreaterThanOrEqual(13);
+  });
+  it("Aurora's Industrial District is the industrial colour, not grey", () => {
+    expect(CL.auroraZoningStyle({ Dist_Name: "Industrial District" }, 1).color).toBe(CL.AURORA_ZONE_COLORS.I);
+    expect(CL.auroraZoningStyle({ Dist_Name: "Something Else" }, 1).color).toBe(CL.AURORA_ZONE_COLORS.other);
+  });
+  it("Facilities leaves off the flowline points, draws active vs closed differently and says so in a legend", () => {
+    expect(L.co_ecmc_facilities.where).toMatch(/Off-location flowline/);
+    expect(CL.facilityStyle({ facility_status: "AC" }, 1).fillColor).not.toBe(CL.facilityStyle({ facility_status: "CL" }, 1).fillColor);
+    expect(L.co_ecmc_facilities.legend.map((l) => l.color)).toEqual([CL.facilityStyle({ facility_status: "AC" }, 1).fillColor, CL.facilityStyle({ facility_status: "CL" }, 1).fillColor]);
+  });
+  it("no click card prints a raw code: facility, Adams fill, Superfund, flowline registration", () => {
+    const t = (c) => c.rows.map((r) => `${r.label}: ${r.text}`).join("\n");
+    expect(t(cardOf("co_ecmc_facilities", { facility_name: "X", facility_type: "Tank battery", facility_status: "CL" }))).toMatch(/Status: Closed/);
+    expect(t(cardOf("co_ecmc_facilities", { facility_name: "X", facility_type: "Tank battery", facility_status: "PD" }))).not.toMatch(/Status/);
+    expect(t(cardOf("co_adams_landfills", { CASENAME: "A", DISP_SITE_TYPE: "CD" }))).toMatch(/Type: Construction debris/);
+    expect(t(cardOf("co_adams_landfills", { CASENAME: "A", DISP_SITE_TYPE: "UNK" }))).not.toMatch(/Type/);
+    expect(t(cardOf("co_superfund", { NAME: "Site", SiteStatus: "F" }))).not.toMatch(/Status/);
+    expect(t(cardOf("co_ecmc_flowlines", { Status: "Active", Form_Type: "Form 44 OLFL" }))).not.toMatch(/OLFL/);
+    expect(t(cardOf("co_crit_habitat", { comname: "Fish", unitname: "Please check current species specific shapefile" }))).not.toMatch(/Unit/);
+  });
+  it("a Weld assessment that is plugged and abandoned is drawn as finished, not as an active location", () => {
+    expect(CL.weldOglaStyle({ B1_APPL_STATUS: "Plugged and Abandoned" }, 1).color).toBe(CL.weldOglaStyle({ B1_APPL_STATUS: "Closed" }, 1).color);
+  });
+  it("every well-status code stays in its class (a remapped code would recolour tens of thousands of wells)", () => {
+    expect(Object.fromEntries(Object.entries(CL.WELL_STATUS).map(([c, [, k]]) => [c, k]))).toEqual({ PR: "live", AC: "live", DG: "live", WO: "live", IJ: "live", SI: "idle", TA: "idle", SO: "idle", PA: "plugged", AP: "never", EP: "never", AL: "never" });
+  });
+  it("the Rule 604 note states the 500–2,000 ft band; the Buckley note gives no industrial verdict", () => {
+    expect(L.co_ecmc_wells.note).toMatch(/500 and 2,000 ft/);
+    expect(L.co_aurora_apz.note).not.toMatch(/generally allows/);
   });
 });

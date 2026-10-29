@@ -59,11 +59,14 @@ export function nice(v) {
   });
 }
 const link = (label, href, hosts) => {
-  const h = tidy(href);
+  let h = tidy(href);
+  if (hosts && /^http:\/\//i.test(h)) h = h.replace(/^http:/i, "https:"); // a listed agency host that still publishes http:// opens over https
   if (!/^https:\/\//i.test(h)) return null;
   if (hosts && !hosts.some((x) => new RegExp("^https://([^/]*\\.)?" + x.replace(/\./g, "\\.") + "(/|$)", "i").test(h))) return null;
   return { label, text: label, href: h };
 };
+/* A coded field value no table decodes (a 1-3 letter code) is dropped from a card rather than printed raw (constraint #45); longer text is the publisher's own words and stays. */
+const codeWords = (v, table) => { const s = tidy(v); if (!s) return ""; const hit = table && table[s.toUpperCase()]; if (hit) return hit; return /^[A-Za-z]{1,3}$/.test(s) ? "" : s; };
 /* rows: [[label, value | null], …] → [{label,text}] with empty values dropped (a card never shows a blank row). */
 const rowsFrom = (spec) => spec.filter(([, v]) => v && (typeof v !== "string" || tidy(v))).map(([label, v]) => ({ label, text: typeof v === "string" ? tidy(v) : v }));
 const card = (title, spec, links = []) => ({ title, rows: [...rowsFrom(spec), ...links.filter(Boolean).map((l) => ({ label: l.label, text: "Open", href: l.href }))] });
@@ -99,18 +102,19 @@ const wellCard = (p) => card(
 /* ── ECMC flowlines ─────────────────────────────────────────────────────────────────────────── */
 /* ECMC's flowline Status is free text (≈70 spellings, 28% blank). A line is "out" — drawn dashed red, because an abandoned or unmarked line is the hazard — when its text says so;
  * everything else, including a blank, is drawn solid (blank is said in the note, never silently "active"). */
-export const FLOWLINE_OUT = /aban|abaon|abnd|abip|\baip\b|remov|out.?of.?service|\boos|inactive|idle|decomm|decomis|retire|flushed|capped|plugged|^pa$|^ab$|shut.?in|discontinu|not in service/i;
+export const FLOWLINE_OUT = /aban|abaon|abnd|abip|\baip\b|remov|out.?of.?service|\boos|inactive|idle|decomm|decomis|retire|flushed|capped|plugged|^pa$|^ab$|shut.?in|discontinu|not in service|^ta$|^si$|in.?active|temporar/i;
 export const flowlineIsOut = (status) => FLOWLINE_OUT.test(String(status == null ? "" : status).trim());
 export const FLOWLINE_COLORS = { live: "#6d28d9", out: "#dc2626" };
 export function flowlineStyle(props, opacity) {
   const out = flowlineIsOut(props && props.Status);
   return { color: out ? FLOWLINE_COLORS.out : FLOWLINE_COLORS.live, weight: out ? 2 : 1.8, opacity, fill: false, ...(out ? { dashArray: "6 4" } : {}) };
 }
+const FLOWLINE_FORMS = { "Form 44 OLFL": "Form 44 (off-location flowline)", "Form 44 COPWTL": "Form 44 (crude oil / produced-water transfer line)", "Form 12": "Form 12" };
 const FLUID_TIDY = (v) => { const s = tidy(v); if (!s) return ""; return /^[A-Z0-9\s/,&()-]+$/.test(s) ? nice(s) : s; };
 const flowlineCard = (p) => card(
   "Oil & gas flowline",
   [["Status", tidy(p.Status) || "Not stated"], ["Fluid", FLUID_TIDY(p.FluidType)], ["Pipe size", Number(p.PipeSize) > 0 ? `${p.PipeSize} in` : ""], ["Material", tidy(p.MatType)],
-    ["Operator", nice(p.Company)], ["Length", Number(p.Length_ft) > 0 ? `${Math.round(p.Length_ft).toLocaleString("en-US")} ft` : ""], ["Registration", tidy(p.Form_Type)]],
+    ["Operator", nice(p.Company)], ["Length", Number(p.Length_ft) > 0 ? `${Math.round(p.Length_ft).toLocaleString("en-US")} ft` : ""], ["Registration", FLOWLINE_FORMS[tidy(p.Form_Type)] || tidy(p.Form_Type).replace(/\s+[A-Z]{3,8}$/, "")]],
 );
 
 /* ── ECMC locations (pads) and facilities ──────────────────────────────────────────────────── */
@@ -126,15 +130,23 @@ const locationCard = (p) => card(
   `Oil & gas location · ${nice(p.location_name) || "unnamed"}`,
   [["Status", locationStatusLabel(p.facility_status)], ["Operator", nice(p.operator_name)], ["Permit form", tidy(p.form_type)], ["Permit expires", approvalDate(p.expire_date)]],
 );
+/* ECMC facility_status codes on the 5,506 facilities the row draws (measured 2026-10-29): AC, CL, AB, AL, SI, TA are decoded; AP, EP, PD and PR occur on one record each and are not (a card drops a code it cannot decode). Active is drawn solid; everything else is grey. */
+export const FACILITY_STATUS = { AC: "Active", CL: "Closed", AB: "Abandoned", AL: "Abandoned location (never built)", SI: "Shut in", TA: "Temporarily abandoned" };
+export const facilityStatusLabel = (c) => codeWords(c, FACILITY_STATUS);
+export function facilityStyle(props, opacity) {
+  const active = String(props && props.facility_status || "").trim().toUpperCase() === "AC";
+  const c = active ? "#92400e" : "#6b7280";
+  return { color: c, weight: 1.2, opacity, fillColor: c, fillOpacity: opacity * (active ? 0.85 : 0.45), radius: active ? 4 : 3 };
+}
 const facilityCard = (p) => card(
   `Oil & gas facility · ${nice(p.facility_name) || "unnamed"}`,
-  [["Type", nice(p.facility_type)], ["Status", tidy(p.facility_status) === "AC" ? "Active" : tidy(p.facility_status)], ["Operator", nice(p.operator_name)], ["Status date", approvalDate(p.status_date)]],
+  [["Type", nice(p.facility_type)], ["Status", facilityStatusLabel(p.facility_status)], ["Operator", nice(p.operator_name)], ["Status date", approvalDate(p.status_date)]],
   [link("ECMC facility record", p.LLink, ["ecmc.state.co.us", "ecmc.colorado.gov"])],
 );
 
 /* ── CDPHE ──────────────────────────────────────────────────────────────────────────────────── */
 export const SUPERFUND_STATUS = { "NPL ACTIVE": "On the National Priorities List", "NPL DELETED": "Deleted from the National Priorities List", PROPOSED: "Proposed for the National Priorities List", NRD: "Natural-resource-damage site", "NRD / PROPOSED": "Natural-resource-damage site, proposed for listing" };
-export const superfundStatusLabel = (s) => SUPERFUND_STATUS[String(s || "").trim().toUpperCase()] || tidy(s);
+export const superfundStatusLabel = (s) => codeWords(s, SUPERFUND_STATUS);
 const superfundCard = (p) => card(
   `Superfund site · ${nice(String(p.NAME || p.Site || "").replace(/\/[A-Z]{2,4}$/, "")) || "unnamed"}`,
   [["Status", superfundStatusLabel(p.SiteStatus)], ["City", nice(p.CITY)], ["Contaminants", tidy(p.POLLUTANTS)]],
@@ -149,7 +161,7 @@ const yn = (v) => { const s = String(v == null ? "" : v).trim().toUpperCase(); r
 const plume = (v) => { const s = tidy(v); if (!s || /^null$/i.test(s)) return ""; return /^\d+(\.\d+)?$/.test(s) ? `${s} ft` : s; };
 const rcraCard = (p) => card(
   `RCRA corrective action · ${nice(p.facility_names) || "unnamed"}`,
-  [["Status", nice(p.status)], ["Groundwater impacted", yn(p.gw_impacts_Y_or_N)], ["Impact beyond the property line", yn(p.offsite_impacts_Y_or_N)], ["Plume length", plume(p.plume_dist_ft)]],
+  [["Status", (nice(p.status) || "").replace(/^./, (c) => c.toUpperCase())], ["Groundwater impacted", yn(p.gw_impacts_Y_or_N)], ["Impact beyond the property line", yn(p.offsite_impacts_Y_or_N)], ["Plume length", plume(p.plume_dist_ft)]],
 );
 const icCard = (p) => card(
   `Institutional control · ${nice(String(p.Site || "").replace(/\/[A-Z]{2,4}$/, "")) || "unnamed"}`,
@@ -194,7 +206,7 @@ const eagleCard = (p) => card("Bald eagle nest site", [["Nest status", (EAGLE_ST
 
 /* ── shared small card builders for the plain polygon rows ─────────────────────────────────── */
 const nrhpCard = (p) => card(`Historic place · ${tidy(p.RESNAME) || "unnamed"}`, [["Type", tidy(p.ResType)], ["Address", [tidy(p.Address), nice(p.City)].filter(Boolean).join(", ")], ["County", nice(p.County)], ["Listed", approvalDate(p.CertDate)]]);
-const critCard = (p) => card(`Critical habitat · ${nice(p.comname) || "species"}`, [["Species", tidy(p.sciname)], ["Unit", tidy(p.unitname)], ["Status", tidy(p.status)]]);
+const critCard = (p) => card(`Critical habitat · ${nice(p.comname) || "species"}`, [["Species", tidy(p.sciname)], ["Unit", /^please check/i.test(tidy(p.unitname)) ? "" : tidy(p.unitname)], ["Status", tidy(p.status)]]);
 const enterpriseCard = (p) => card(`Enterprise Zone · ${tidy(p.Admin_Zone) || "zone"}`, [["Statutory zone", tidy(p.Statutory_Zone)]]);
 
 /* ── county / city rows ────────────────────────────────────────────────────────────────────── */
@@ -229,14 +241,14 @@ const adamsZoneCard = (p) => card(
   [link("Adams County development standards", p.LINK, ["adamscountyco.gov"])],
 );
 export const AVIATION_COLORS = { "DIA Noise": "#dc2626", "Front Range Noise": "#ea580c", AIZ: "#2563eb", Height: "#7c3aed" };
-export const AVIATION_LABEL = { "DIA Noise": "Denver International noise (60 DNL)", "Front Range Noise": "Front Range Airport noise (60 DNL)", AIZ: "Airport influence zone", Height: "Airport height overlay" };
+export const AVIATION_LABEL = { "DIA Noise": "Denver International noise (60 DNL)", "Front Range Noise": "Front Range Airport noise (60 DNL)", AIZ: "Airport influence zone (AIZ, county label)", Height: "Airport height overlay" };
 export function adamsAviationStyle(props, opacity) {
   const c = AVIATION_COLORS[tidy(props && props.Name)] || "#6b7280";
   return { color: c, weight: 1.6, opacity, fill: true, fillColor: c, fillOpacity: opacity * 0.12, dashArray: "6 4" };
 }
 const adamsAviationCard = (p) => card(AVIATION_LABEL[tidy(p.Name)] || `Aviation overlay · ${tidy(p.Name)}`, [["Note", tidy(p.Comments)]]);
-export const ADAMS_FILL = { SW: "Solid waste", "SW/Sludge": "Solid waste and sludge", "SW/CD": "Solid waste and construction debris", "Inert Fill": "Inert fill", IF: "Inert fill" };
-export const adamsFillLabel = (t) => { const s = tidy(t); return s ? (ADAMS_FILL[s] || s) : ""; }; // blank → "" (a card drops it; never "unknown")
+export const ADAMS_FILL = { SW: "Solid waste", "SW/Sludge": "Solid waste and sludge", "SW/CD": "Solid waste and construction debris", "Inert Fill": "Inert fill", IF: "Inert fill", CD: "Construction debris", UNK: "" };
+export const adamsFillLabel = (t) => { const s = tidy(t); return s ? (s in ADAMS_FILL ? ADAMS_FILL[s] : s) : ""; }; // blank → "" (a card drops it; never "unknown")
 export const adamsLandfillStyle = (props, opacity) => {
   const solid = /^SW/i.test(tidy(props && (props.DISP_SITE_TYPE || props.TYPE)));
   const c = solid ? "#78350f" : "#a16207";
@@ -248,7 +260,7 @@ const adamsLandfillCard = (p) => card(
 );
 export const weldOglaStyle = (props, opacity) => {
   const st = tidy(props && props.B1_APPL_STATUS);
-  const done = /closed|expired|rescinded|withdrawn|denied|reclaimed|superseded/i.test(st);
+  const done = /closed|expired|rescinded|withdrawn|denied|reclaimed|superseded|abandon|plugged/i.test(st);
   const c = done ? "#94a3b8" : "#b91c1c";
   return { color: c, weight: 1.2, opacity, fillColor: c, fillOpacity: opacity * (done ? 0.5 : 0.9), radius: done ? 3 : 5 };
 };
@@ -275,7 +287,7 @@ export function auroraApzStyle(props, opacity) {
 const auroraApzCard = (p) => card(`Buckley SFB ${({ CZ: "clear zone", "APZ I": "accident potential zone I", "APZ II": "accident potential zone II" })[apzKind(p.CRASH_ZONE)] || "crash zone"}`, [["Zone", tidy(p.CRASH_ZONE)]]);
 export function auroraZoningClass(distName) {
   const d = String(distName == null ? "" : distName).toLowerCase();
-  if (/business\/?\s*tech|airport district|mixed use- airport/.test(d)) return "I";   // Aurora has no separate industrial district: the Business/Tech and Airport districts carry industrial / employment use
+  if (/industrial district|business\/?\s*tech|airport district|mixed use- airport/.test(d)) return "I";   // the Industrial District itself (41 polygons, the north Aurora / DIA belt, measured 2026-10-29) plus the Business/Tech and Airport districts that carry employment use
   if (/mixed-use/.test(d)) return "M";
   if (/residential/.test(d)) return "R";
   if (/accident potential|apz/.test(d)) return "APZ";
@@ -293,7 +305,7 @@ const auroraZoningCard = (p) => card(`Aurora zoning · ${tidy(p.Dist_Name) || "d
  * test/coloradoLayers.test.js pins it. */
 /* ── the registry rows ─────────────────────────────────────────────────────────────────────── */
 const ECMC_SOURCE = "Colorado Energy & Carbon Management Commission (ECMC)";
-const ECMC_RULE604 = "Setback context: ECMC Rule 604 (2 CCR 404-1, adopted under SB 19-181) sets how close a NEW oil-and-gas working pad may be to homes, schools and child-care centers — 2,000 ft, with exceptions such as owner consent or an approved plan. It governs where an operator may put a NEW pad; it does not stop anyone building near an existing well, which is set by the local government, your lender and your insurer. ECMC amends its rules — confirm the current text.";
+const ECMC_RULE604 = "Setback context: ECMC Rule 604 (2 CCR 404-1-604, adopted under SB 19-181) keeps a NEW oil-and-gas working pad surface from sitting between 500 and 2,000 ft of a home or other high-occupancy building unless the owners and tenants within 2,000 ft give informed consent, the location is in an approved comprehensive area or drilling plan, or all equipment is beyond 2,000 ft; closer than 500 ft takes its own informed-consent agreement or waiver. It governs where an operator may put a NEW pad; it does not stop anyone building near an existing well, which is set by the local government, your lender and your insurer. ECMC amends its rules — confirm the current text.";
 
 const R = (o) => ({ kind: "esriFeature", states: ["CO"], hoverIdentify: true, canvasIdentify: true, ...o });
 const legendOf = (table, order) => order.map((k) => ({ label: table[k].label, color: table[k].color }));
@@ -327,24 +339,25 @@ export const COLORADO_LAYERS = {
   co_ecmc_locations: R({
     label: "Oil & Gas Well Pads", source: ECMC_SOURCE + " — oil and gas locations (Form 2A)", hoverSource: "ECMC",
     url: viaRelay("ecmcLocations"), fields: ["OBJECTID", "location_name", "operator_name", "facility_status", "form_type", "expire_date"],
-    minZoom: 13, color: "#b91c1c", weight: 1.2, opacity: 0.55, styleFn: locationStyle,
+    minZoom: 13, color: "#b91c1c", weight: 1.2, opacity: 0.55, simplifyFactor: 1.5, styleFn: locationStyle,
     legend: [{ label: "Active location", color: LOCATION_STATUS.AC[1] }, { label: "Closed location", color: LOCATION_STATUS.CL[1] }, { label: "Abandoned location (never built)", color: LOCATION_STATUS.AL[1], dash: true }],
     hoverTitle: "Oil & gas location",
     hoverFields: [{ names: ["location_name"] }, { format: (p) => locationStatusLabel(p.facility_status) }, { names: ["operator_name"] }],
     identifyCard: locationCard,
-    note: `The permitted footprint of each oil-and-gas location (the pad) with ECMC's status. This is the footprint ECMC measures setbacks from. ${ECMC_RULE604}`,
+    note: `The permitted footprint of each oil-and-gas location (the pad) with ECMC's status. The rule is written against the working pad surface inside the location, not the whole permitted footprint. ${ECMC_RULE604}`,
     infoCaveat: "A footprint is the permitted disturbance, not a clearance contour. A closed location can still hold a plugged wellbore and buried lines.",
     role: "area", group: "environmental", order: 22,
   }),
   co_ecmc_facilities: R({
     label: "Oil & Gas Facilities", source: ECMC_SOURCE + " — facilities", hoverSource: "ECMC",
-    url: viaRelay("ecmcFacilities"), where: "facility_type NOT IN ('Nonfacility','Domestic tap')", fields: ["OBJECTID", "facility_name", "facility_type", "facility_status", "operator_name", "status_date", "LLink"],
-    minZoom: 13, color: "#92400e", weight: 1.2, opacity: 0.55, pointRadius: 4,
+    url: viaRelay("ecmcFacilities"), where: "facility_type NOT IN ('Nonfacility','Domestic tap','Off-location flowline')", fields: ["OBJECTID", "facility_name", "facility_type", "facility_status", "operator_name", "status_date", "LLink"],
+    minZoom: 13, color: "#92400e", weight: 1.2, opacity: 0.55, pointRadius: 4, styleFn: facilityStyle,
+    legend: [{ label: "Active facility", color: "#92400e" }, { label: "Closed, abandoned, shut in or temporarily abandoned", color: "#6b7280" }],
     hoverTitle: "Oil & gas facility",
-    hoverFields: [{ names: ["facility_name"] }, { names: ["facility_type"] }, { names: ["operator_name"] }],
+    hoverFields: [{ names: ["facility_name"] }, { names: ["facility_type"] }, { format: (p) => facilityStatusLabel(p.facility_status) }, { names: ["operator_name"] }],
     identifyCard: facilityCard,
-    note: "Tank batteries, gas compressor stations, gas processing plants, injection and disposal facilities, land-application sites and flowline systems registered with ECMC. Compressors and plants are the facilities that bring odor, noise and air-permit questions to a neighbouring site.",
-    infoCaveat: "A registered facility, at the operator's reported point. Domestic gas taps and non-facility records are left off.",
+    note: "Tank batteries, gas compressor stations, gas processing plants, injection and disposal facilities, land-application sites and flowline systems registered with ECMC (about 5,500 points). Registered flowline segments are on the Flowlines row, not here. Compressors and plants are the facilities that bring odor, noise and air-permit questions to a neighbouring site.",
+    infoCaveat: "A registered facility, at the operator's reported point. Domestic gas taps, non-facility records and off-location flowline points (which duplicate the Flowlines row) are left off.",
     role: "point", group: "environmental", order: 23,
   }),
 
@@ -441,7 +454,7 @@ export const COLORADO_LAYERS = {
   }),
   co_crit_habitat: R({
     label: "Critical Habitat", source: "U.S. Fish & Wildlife Service", hoverSource: "USFWS",
-    url: src("critHabitatCo"), minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 1.5,
+    url: src("critHabitatCo"), minZoom: 11, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 4,
     styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }),
     hoverTitle: "Critical habitat",
     hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["status"] }],
@@ -486,7 +499,7 @@ export const COLORADO_LAYERS = {
   /* ---- Jurisdictions ---- */
   co_enterprise_zones: R({
     label: "Enterprise Zones", source: "Colorado Office of Economic Development and International Trade (OEDIT)", hoverSource: "OEDIT",
-    url: src("enterpriseZonesCo"), minZoom: 7, color: "#0e7490", weight: 1.4, opacity: 0.4,
+    url: src("enterpriseZonesCo"), minZoom: 7, color: "#0e7490", weight: 1.4, opacity: 0.4, simplifyFactor: 1.5,
     styleFn: (_p, opacity) => ({ color: "#0e7490", weight: 1.4, opacity, fill: true, fillColor: "#0e7490", fillOpacity: opacity * 0.12, dashArray: "6 4" }),
     hoverTitle: "Enterprise Zone",
     hoverFields: [{ names: ["Admin_Zone"] }],
@@ -548,14 +561,14 @@ export const COLORADO_LAYERS = {
   }),
   co_aurora_zoning: R({
     label: "Aurora Zoning", source: "City of Aurora, Colorado — zoning", hoverSource: "City of Aurora",
-    url: relayUrl(src("auroraZoning")), fields: ["OBJECTID", "Dist_Name", "NAME", "Zone_Subzone", "EFFECTIVE_DATE"], minZoom: 11, color: "#6b7280", weight: 0.8, opacity: 0.4, simplifyFactor: 1.5, styleFn: auroraZoningStyle,
+    url: relayUrl(src("auroraZoning")), fields: ["OBJECTID", "Dist_Name", "NAME", "Zone_Subzone", "EFFECTIVE_DATE"], minZoom: 13, color: "#6b7280", weight: 0.8, opacity: 0.4, simplifyFactor: 1.5, styleFn: auroraZoningStyle,
     regions: ["co_aurora"],
-    legend: [{ label: "Business/Tech or Airport district (employment / industrial)", color: AURORA_ZONE_COLORS.I }, { label: "Mixed-use district", color: AURORA_ZONE_COLORS.M }, { label: "Residential district", color: AURORA_ZONE_COLORS.R }, { label: "Buckley accident potential zone", color: AURORA_ZONE_COLORS.APZ }, { label: "Other", color: AURORA_ZONE_COLORS.other }],
+    legend: [{ label: "Industrial, Business/Tech or Airport district (employment / industrial)", color: AURORA_ZONE_COLORS.I }, { label: "Mixed-use district", color: AURORA_ZONE_COLORS.M }, { label: "Residential district", color: AURORA_ZONE_COLORS.R }, { label: "Buckley accident potential zone", color: AURORA_ZONE_COLORS.APZ }, { label: "Other", color: AURORA_ZONE_COLORS.other }],
     hoverTitle: "Aurora zoning",
     hoverFields: [{ names: ["Dist_Name"] }, { names: ["NAME"], label: "case" }],
     identifyCard: auroraZoningCard,
     note: "Aurora's zoning districts as the city publishes them (Aurora's code names districts, e.g. Business/Tech, Airport, Mixed-Use Regional, rather than using letter codes). Colour is a grouping for the eye; the district name is the city's.",
-    infoCaveat: "Aurora uses a unified development ordinance with overlays and rezoning cases not all shown here — confirm with Aurora Planning.",
+    infoCaveat: "Aurora uses a unified development ordinance with overlays and rezoning cases not all shown here — confirm with Aurora Planning. Only ground inside the City of Aurora is drawn: Parker, Centennial and Denver keep their own zoning, so a blank map there is not 'unzoned'. Appears from a closer zoom than most rows because the city's answer is capped per request.",
     role: "area", group: "jurisdiction", order: 34,
   }),
 
@@ -580,7 +593,7 @@ export const COLORADO_LAYERS = {
     hoverTitle: "Airport overlay",
     hoverFields: [{ format: (p) => AVIATION_LABEL[tidy(p.Name)] || tidy(p.Name) }],
     identifyCard: adamsAviationCard,
-    note: "Adams County's aviation overlays: the airport height area, the 60 DNL noise contours of Denver International and Front Range airports, and the airport influence zone (AIZ). Noise and height limits layered on the base zoning matter to housing and office uses far more than to a warehouse.",
+    note: "Adams County's aviation overlays: the airport height area, the 60 DNL noise contours of Denver International and Front Range airports, and the area the county labels \"AIZ\" (taken to be the airport influence zone; the county's own layer says its source is unverified). Noise and height limits layered on the base zoning matter to housing and office uses far more than to a warehouse.",
     infoCaveat: "The county's overlay boundaries; the county's note on this data says its source is under verification. Confirm with Adams County Planning.",
     role: "area", group: "access", order: 21,
   }),
@@ -604,13 +617,13 @@ export const COLORADO_LAYERS = {
     hoverTitle: "Buckley crash zone",
     hoverFields: [{ names: ["CRASH_ZONE"] }],
     identifyCard: auroraApzCard,
-    note: "The clear zones and accident potential zones off the ends of Buckley Space Force Base's runway, as Aurora publishes them. Military land-use compatibility guidance limits people-intensive uses (housing, schools, large assembly) inside them; uses with few people on site, such as warehouse and light industrial, are the ones it generally allows.",
+    note: "The clear zones and accident potential zones off the ends of Buckley Space Force Base's runway, as Aurora publishes them. Military land-use compatibility guidance restricts people-intensive uses (housing, schools, large assembly) inside them, most strictly in the clear zone and less so in APZ I and II. Whether a warehouse or light-industrial building is allowed in a given zone is for Buckley SFB and Aurora to say — this layer does not give a verdict.",
     infoCaveat: "The city's rendering of the zones; Buckley SFB and the city's zoning (Aurora has an accident-potential overlay) govern.",
     role: "area", group: "access", order: 23,
   }),
   co_weld_row: R({
     label: "Weld Road Right-of-Way", source: "Weld County, Colorado — road right-of-way", hoverSource: "Weld County",
-    url: src("weldRoadRow"), fields: ["OBJECTID", "ROADNAME", "ROW_STAT", "ROW_WIDTH", "DOC_NUM", "COMMENTS"], minZoom: 13, color: "#92400e", weight: 1, opacity: 0.5,
+    url: src("weldRoadRow"), fields: ["OBJECTID", "ROADNAME", "ROW_STAT", "ROW_WIDTH", "DOC_NUM", "COMMENTS"], minZoom: 13, color: "#92400e", weight: 1, opacity: 0.5, simplifyFactor: 1.5,
     styleFn: (_p, opacity) => ({ color: "#92400e", weight: 1, opacity, fill: true, fillColor: "#b45309", fillOpacity: opacity * 0.22 }),
     regions: ["co_weld"],
     hoverTitle: "County road right-of-way",
@@ -627,7 +640,7 @@ export const COLORADO_VINTAGE = {
   co_ecmc_wells: "ECMC well register — continuously updated; probed 2026-10-29 (124,462 well spots)",
   co_ecmc_flowlines: "ECMC flowline registrations — operator-submitted, continuously updated; probed 2026-10-29 (244,856 segments)",
   co_ecmc_locations: "ECMC oil and gas locations — continuously updated; probed 2026-10-29 (95,486 footprints)",
-  co_ecmc_facilities: "ECMC facilities — continuously updated; probed 2026-10-29 (18,633 facilities)",
+  co_ecmc_facilities: "ECMC facilities — continuously updated; probed 2026-10-29 (5,506 facilities drawn of 18,633 records; off-location flowline points, domestic taps and non-facility records left off)",
   co_superfund: "CDPHE Superfund sites — layer edited 2026-08-10",
   co_rcra_ca: "CDPHE RCRA corrective action — layer edited 2026-08-27",
   co_inst_controls: "CDPHE institutional controls — layer edited 2026-08-24",

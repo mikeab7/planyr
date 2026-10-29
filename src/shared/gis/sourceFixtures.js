@@ -868,9 +868,9 @@ export const SOURCE_FIXTURES = {
   },
   ecmcFacilities: {
   fixtures: [
-    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 100 }, // live 2026-10-29: 200 facilities
-    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 50 }, // live 2026-10-29: 110
-    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 40 }, // live 2026-10-29: 80 facilities (flowline points left off; 200 with them)
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 13 }, // live 2026-10-29: 26 (110 with flowline points)
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1 (2 with flowline points)
   ],
   },
   cdpheRcraCa: {

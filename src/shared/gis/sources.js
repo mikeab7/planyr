@@ -2434,7 +2434,7 @@ export const GIS_SOURCES = {
     states: ["CO"],
     tier: "production",
     lastVerified: "2026-10-29",
-    // Live 2026-10-29 (through the relay): 18,633 facilities · Greeley box 200 · Windsor 119 · Erie 110 · Brighton 30 · Durango 2.
+    // Live 2026-10-29 (through the relay): 18,633 records, 5,506 once the layer row leaves off Nonfacility, Domestic tap and Off-location flowline points (12,726 of the rest duplicate the Flowlines row) · Greeley box 80 · Erie 26 · Durango 1.
   },
   cdpheRcraCa: {
     key: "cdpheRcraCa",
