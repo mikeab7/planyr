@@ -210,7 +210,7 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
   });
   it("Appendix B and the OKR10 layer cite the Water Quality Standards / the permit (no chapter number from memory); no invented distance anywhere", () => {
     expect(ALL_LAYERS.ok_deq_appb_areas.source).toMatch(/Water Quality Standards/);
-    expect(ALL_LAYERS.ok_deq_appb_areas.source).not.toMatch(/OAC \d/);
+    expect(ALL_LAYERS.ok_deq_appb_areas.source).toMatch(/OAC 252:730, as DEQ's layer text cites it/);
     expect(ALL_LAYERS.ok_deq_sensitive.source).toMatch(/OKR10/);
     // A "ft" / "feet" / "mile" figure may appear only on the cited 300-ft buffer row.
     for (const id of ids) {
@@ -262,10 +262,10 @@ describe("click cards are clean (constraint #45) — plain labels, no empty rows
     expect(rows.find((r) => r.label === "Operator").text).toBe("Hill Resources INC");
     expect(rows.find((r) => r.label === "Well").text).toBe("Smith 1-A");
   });
-  it("a dam card decodes the one-letter hazard code; an undecoded one-letter owner type is absent, never guessed", () => {
+  it("a dam card decodes the one-letter hazard and owner codes (the inventory holds both spellings)", () => {
     const rows = ALL_LAYERS.ok_dams.identifyCard(samples.ok_dams).rows;
     expect(rows.find((r) => r.label === "Hazard class").text).toMatch(/^High/);
-    expect(rows.find((r) => r.label === "Owner type")).toBeUndefined();
+    expect(rows.find((r) => r.label === "Owner type").text).toBe("Federal");
     expect(rows.find((r) => r.label === "Owner")).toBeUndefined();
   });
   it("a road card decodes the maintainer and prints traffic as words", () => {
@@ -394,7 +394,7 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
     expect(ALL_LAYERS.ok_deq_whpa.simplifyFactor).toBeGreaterThan(0);
     expect(ALL_LAYERS.ok_crit_habitat.vertexBudget).toBeGreaterThanOrEqual(135479);
     for (const id of ids) expect(ALL_LAYERS[id].vintage || (await import("../src/workspaces/site-planner/lib/layers.js")).LAYER_VINTAGE[id], id).toBeTruthy();
-    expect(Object.keys(OK_VINTAGE).sort()).toEqual([...ids].filter((i) => !["ok_county_x"].includes(i)).sort());
+    expect(Object.keys(OK_VINTAGE).sort()).toEqual([...ids].sort());
     expect(tc2("DON'S SERVICE")).toBe("Don's Service");
     expect(tc2("O'BRIEN")).toBe("O'Brien");
   });
