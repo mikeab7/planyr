@@ -36,7 +36,8 @@ export const GC_MAPS = {
     fields: ["parcel_num", "parcel", "legal", "s_t_r", "siteaddres", "deedholder", "mailing_ad", "mailing__1", "mailing__2", "mailing__3", "mailing__4", "city", "state", "subdivdesc", "deeded_acr", "sale_date"],
   },
   hickory: {
-    county: "Hickory", layerId: "2619197", mapId: "505668", id: "parcel", addr: "address_1", owner: "name", acres: "acres",
+    county: "Hickory", layerId: "2619197", mapId: "505668", id: "parcel", addr: null, owner: "name", acres: "acres", // address_1/_3 are the OWNER'S MAILING address (a lot shows an Albuquerque street) — there is no site address column
+    mailing: ["address_1", "address_3"],
     fields: ["parcel", "name", "address_1", "address_3", "acres", "twp", "range", "sect"],
   },
 };

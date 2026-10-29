@@ -14,6 +14,7 @@ import { idAttrFor } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { MO_ROWS } from "../src/workspaces/site-planner/lib/moParcels.js";
 import { MISSOURI_VERIFICATION } from "../src/workspaces/site-planner/lib/moProvenance.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
+import { GC_MAPS } from "../src/shared/gis/giscloudAdapter.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/moCounties.json", import.meta.url), "utf8"));
 const SAMPLES = JSON.parse(readFileSync(new URL("./fixtures/moSamples.json", import.meta.url), "utf8")).rows;
@@ -102,12 +103,13 @@ describe("the wired Missouri rows", () => {
   const ROW_KEYS = MO_ROWS.map(([k]) => "mo_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(MO_ROWS).toHaveLength(73);
+    expect(MO_ROWS).toHaveLength(75);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
       const u = COUNTIES[k].layerUrl;
       if (/^https:\/\/[^/]*arcgis\.com\//.test(u)) continue;
+      if (u.startsWith("/gc/")) { expect(u, k).toBe(`/gc/${k.slice(3)}/FeatureServer/0`); expect(Object.keys(GC_MAPS), k).toContain(k.slice(3)); continue; } // the GIS Cloud adapter (functions/gc), a fixed table — no relay host
       expect(u, k).toMatch(/^\/gis-proxy\//);
       expect(ALLOWED_HOSTS.has(u.split("/")[2]), `${k} → ${u.split("/")[2]}`).toBe(true);
     }

@@ -37,7 +37,7 @@ export const MO_ROWS = [
   ["greene","Greene","/gis-proxy/greenecountyassessor.org/arcgis/rest/services/CountyParcelsNEW/MapServer/0","PIN","PropAdr",1,37.2615,-93.3525,[37.062,-93.662,37.454,-93.037]],
   ["grundy","Grundy","/gis-proxy/adairgis.integritygis.com/Geocortex/Essentials/REST/sites/Grundy_County_MO/map/mapservices/0/rest/services/x/MapServer/4","PID","SITUSADDRESS",1,40.106,-93.5735,[39.926,-93.803,40.293,-93.339]],
   ["henry","Henry","/gis-proxy/audraingis.integritygis.com/Geocortex/Essentials/REST/sites/Henry_County_MO/map/mapservices/1/rest/services/x/MapServer/5","PID","SITUS_STRA",1,38.381,-93.799,[38.171,-94.109,38.596,-93.484]],
-  ["hickory","Hickory","/gc/hickory/FeatureServer/0","parcel","address_1",1,37.937,-93.323,[37.767,-93.613,38.102,-93.037]],
+  ["hickory","Hickory","/gc/hickory/FeatureServer/0","parcel",null,1,37.937,-93.323,[37.767,-93.613,38.102,-93.037]],
   ["holt","Holt","/gis-proxy/bentongis.integritygis.com/Geocortex/Essentials/REST/sites/Holt_County_MO/map/mapservices/3/rest/services/x/MapServer/20","PARCEL_PID","site_address",1,40.0665,-95.257,[39.837,-95.577,40.297,-94.935]],
   ["iron","Iron","/gis-proxy/maps.semogis.com/server/rest/services/Iron_CO/IronCo_Assessment/MapServer/0","PID","ADDRESS",1,37.502,-90.755,[37.242,-91.195,37.769,-90.51]],
   ["jackson","Jackson","https://services3.arcgis.com/4LOAHoFXfea6Y3Et/arcgis/rest/services/Parcel_Viewer_Parcels/FeatureServer/0","parcel_id",null,0,39.031,-94.3625,[38.801,-94.642,39.265,-94.082]],
