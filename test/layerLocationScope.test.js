@@ -37,6 +37,7 @@ const POINTS = {
   ca: { st: "CA", lat: 34.0522, lng: -118.2437 },
   nj: { st: "NJ", lat: 40.7357, lng: -74.1724 },
   ny: { st: "NY", lat: 42.6526, lng: -73.7562 },
+  msOliveBranch: { st: "MS", lat: 34.9618, lng: -89.8295 }, // Olive Branch, DeSoto County MS — the DeSoto / Olive Branch rows (B2507057) are offered HERE and nowhere else
   ky: { st: "KY", lat: 38.2527, lng: -85.7585 }, // Louisville — a state with NO registry rows of its own (siteState named it only from B2479568 on; it used to answer null)
   offUs: { st: null, lat: 43.6532, lng: -79.3832 }, // Toronto — a LOCATED point no state holds: positively "somewhere else", never "unknown, show everything"
 };

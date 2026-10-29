@@ -149,7 +149,7 @@ describe("panels render (static markup)", () => {
     expect(html).toContain("Balances the dirt: 54k CY cut on the north");
     expect(html).toContain("Or sit it on the most level ground: FFE 795 (38 AC stays level, 71k CY import)");
     expect(html).toContain("Cut 53,600 · Fill 54,200 · 600 CY import");
-    expect(html).toContain("Slopes daylight inside the setback.");
+    expect(html).toContain("Slopes daylight inside the property line.");
     for (const gone of ["Balanced dirt", "Least dirt", "Most room", "Pick a chip", "Pick a finish elevation", "role=\"tab\"", "Walls", "data-ffe-basis"]) expect(html).not.toContain(gone);
   });
   it("the settings are NOT in the card: the pavement slope, dock drop, depth and ratio live behind the gear", () => {
@@ -186,7 +186,7 @@ describe("panels render (static markup)", () => {
     expect(html).toContain("Lower FFE to 791.0 ft");
     expect(html).toContain("Move building 35 ft north");
     expect(html).toMatch(/<button disabled[^>]*data-fix="wall"/);
-    expect(html).not.toContain("Slopes daylight inside the setback.");
+    expect(html).not.toContain("Slopes daylight inside the property line.");
   });
   it("with no clearing fix, the buttons are disabled and say so", () => {
     const html = group([card({ flag: { text: { title: "t", body: "b" } }, fixes: { id: "b1", status: "done", ffe: null, move: null } })]);

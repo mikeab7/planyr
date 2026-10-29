@@ -24,7 +24,16 @@ const CASES_SD = [
   ["Adams County", "IA", 41.0114, -94.7377, /Adams County has a parcel map, but it isn't open to the public/],
   ["Harding County", "SD", 45.5886, -103.5463, /Planyr hasn't found a public parcel map it can use for Harding County/],
 ];
-const CASES = process.argv[4] === "sd" ? CASES_SD : CASES_B2428112;
+/* B2507104 (V1956912): the Michigan second pass. `… https://planyr.io <build> mi`. Pike KY stays the known-good arm; Arenac (wired) is the control that must show NO gap notice. */
+const CASES_MI = [
+  CASES_B2428112[0],
+  ["Chippewa County", "MI", 46.3158, -84.9095, /Chippewa County has a parcel map, but it isn't open to the public/],
+  ["Washtenaw County", "MI", 42.2567, -83.9002, /Washtenaw County has a parcel map, but it isn't open to the public/],
+  ["Clare County", "MI", 43.9923, -84.9152, /Clare County has a parcel map, but it isn't open to the public/],
+  ["Alpena County", "MI", 45.0345, -83.6392, /Planyr hasn't found a public parcel map it can use for Alpena County/],
+];
+const MI_CONTROL = ["Arenac County", "MI", 44.0564, -83.9474]; // wired (mi_arenac): a click is a lot, never a gap notice
+const CASES = process.argv[4] === "sd" ? CASES_SD : process.argv[4] === "mi" ? CASES_MI : CASES_B2428112;
 const rows = [];
 const rec = (r) => { rows.push(r); console.log(`  [${r.pass ? "PASS" : "FAIL"}] ${r.name} — ${r.detail}`); };
 
@@ -58,6 +67,15 @@ try {
     }
     const linkText = ok ? await page.getByTestId("map-gap-request").innerText().catch(() => "") : "";
     rec({ name: `${name}, ${st}`, pass: ok && linkText === "Email Michael to request it" && subjectOk && bodyOk && !/wired here yet/.test(text), detail: ok ? `"${text.replace(/\n/g, " | ").slice(0, 150)}" · link ${linkText ? "✓" : "✗"} · mailto ${subjectOk && bodyOk ? "✓" : "✗"}` : `sentence missing — toast: ${text.slice(0, 160)}` });
+  }
+  if (CASES === CASES_MI) {
+    const [name, st, lat, lng] = MI_CONTROL;
+    await clickAt(lat, lng);
+    await page.waitForTimeout(9000);
+    const gapLinks = await page.getByTestId("map-gap-request").count();
+    const toastText = await page.getByTestId("map-status-toast").innerText().catch(() => "");
+    const gapWords = /isn't open to the public|hasn't found a public parcel map|keeps its parcel map behind|isn't reachable from Planyr/.test(toastText);
+    rec({ name: `${name}, ${st} (wired control)`, pass: gapLinks === 0 && !gapWords, detail: `gap links ${gapLinks} · toast "${toastText.replace(/\n/g, " | ").slice(0, 120)}"` });
   }
   await page.screenshot({ path: process.env.GAP_SHOT || "/tmp/parcel-gap-live.png" });
   const failed = rows.filter((r) => !r.pass);

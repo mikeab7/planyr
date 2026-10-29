@@ -76,6 +76,13 @@ export function attachFeatureCanvasIdentify(lyr, cfg) {
     if (!features.length) return null;
     const hit = hitFeature({ type: "FeatureCollection", features }, at);
     if (!hit) return null;
+    // A row may opt into a fuller card with `identifyCard(props, at)` → { title, rows:[{label,text,href?}], note? } (NEW-1, DeSoto zoning: a zone needs its case,
+    // approval date and ordinance LINK, and a label for the jurisdiction the site falls in — none of which fit one tooltip line). Everything else keeps the
+    // one-line wording below.
+    if (typeof cfg.identifyCard === "function") {
+      const card = cfg.identifyCard(hit.properties || {}, at);
+      if (card) return { title: card.title || hoverText(cfg, hit.properties || {}), rows: card.rows || [], note: card.note || null, sourceName: cfg.source || null };
+    }
     // The SAME one-line wording the map finder's tooltip shows, so the two surfaces cannot drift and
     // neither restates a fact the other omits. No `rows`: everything worth saying is already in that
     // line, and a second copy below it would be the accumulation PANEL-BREVITY exists to prevent.
