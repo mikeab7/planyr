@@ -41,7 +41,7 @@ const KEEP_UPPER = /\b(Llc|Inc|Llp|Lp|Pws|Rwd|Okc|Usa|Us|Ok|Occ|Deq|Pst|Nrhp|Ii|
 export const tc = (raw) => {
   const s = raw == null ? "" : String(raw).trim();
   if (!s || /[a-z]/.test(s)) return s;
-  return s.toLowerCase().replace(/(^|[\s\-/.(])([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\b([ODLodl]')([a-z])/g, (_m, a, b) => a.toUpperCase() + b.toUpperCase()).replace(KEEP_UPPER, (w) => w.toUpperCase()); // "DON'S" → "Don's" (not "Don'S"), "O'BRIEN" → "O'Brien"
+  return s.toLowerCase().replace(/(^|[\s\-/.(])([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\b([ODLodl]')([a-z])/g, (_m, a, b) => a.toUpperCase() + b.toUpperCase()).replace(KEEP_UPPER, (w) => w.toUpperCase()).replace(/\bMc([a-z])/g, (_m, a) => "Mc" + a.toUpperCase()); // McCurtain, McClain; // "DON'S" → "Don's" (not "Don'S"), "O'BRIEN" → "O'Brien"
 };
 const EMPTY = /^(|null|<null>|none|n\/a|undefined|unknown|0|0\.0+)$/i;
 export const clean = (v) => { const s = v == null ? "" : String(v).replace(/_x000d_/gi, "").replace(/\s+/g, " ").trim(); return EMPTY.test(s) ? "" : s; };
@@ -83,7 +83,7 @@ export const DAM_CLASSES = [
   { key: "High", label: "High hazard", color: "#b91c1c", radius: 6 },
   { key: "Significant", label: "Significant hazard", color: "#d97706", radius: 5 },
   { key: "Low", label: "Low hazard", color: "#6b7280", radius: 4 },
-  { key: "Other", label: "Drained, decommissioned or unclassified", color: "#9ca3af", radius: 3.5 },
+  { key: "Other", label: "Drained, decommissioned, non-jurisdictional or unclassified", color: "#9ca3af", radius: 3.5 },
 ];
 export const damHazardOf = (raw) => {
   const s = String(raw == null ? "" : raw).trim().toLowerCase();
@@ -138,6 +138,7 @@ export const CLEANUP = {
   release: { label: "Petroleum tank release — open case (OCC)", color: "#4338ca", radius: 5.5 },
 };
 export const RELEASE_CLOSED = { label: "Petroleum tank release — closed case (OCC)", color: "#a5b4fc", radius: 3.5 };
+export const RELEASE_OTHER = { label: "Petroleum tank release — other status (see the card)", color: "#818cf8", radius: 3.5 };
 const WASTE = {
   solid: { label: "Landfill / solid-waste facility", color: "#78350f", radius: 5 },
   haz: { label: "Hazardous-waste permit site", color: "#6d28d9", radius: 5 },
@@ -191,7 +192,7 @@ export const OK_MERGE_GROUPS = {
   ok_protected_waters: { label: "Protected Waters", note: "Waters Oklahoma protects beyond the ordinary: Water Quality Standards Appendix B areas and streams, Scenic Rivers and the special-provision watersheds, and the sensitive watersheds the OKR10 construction stormwater permit singles out." },
 };
 
-const CLEANUP_LEGEND = legendOf([...Object.values(CLEANUP), RELEASE_CLOSED].map((c) => ({ label: c.label, color: c.color })));
+const CLEANUP_LEGEND = legendOf([...Object.values(CLEANUP), RELEASE_OTHER, RELEASE_CLOSED].map((c) => ({ label: c.label, color: c.color })));
 const TRIBAL_LEGEND = legendOf([TRIBAL.otsa, TRIBAL.osage, TRIBAL.trust, TRIBAL.cherokee, TRIBAL.land]);
 const WATER_LEGEND = legendOf([SRC_WATER.whpa, SRC_WATER.buffer, SRC_WATER.intake]);
 const PROTECTED_LEGEND = legendOf([PROTECTED.areaT1, PROTECTED.areaT2, PROTECTED.stream, PROTECTED.sens, PROTECTED.scenic, ...SPECIAL_WS]);
@@ -244,7 +245,7 @@ export const OK_LAYERS = {
     identifyCard: card("Tribal area", (p) => [rowOf("Name", String(p.NAME || "").replace(/\s+OTSA$/i, " (statistical area)"), { raw: true })],
       "Census Oklahoma Tribal Statistical Areas are statistical areas the Bureau draws with each tribe — they are not legal boundaries and not a ruling on jurisdiction. Whether a parcel is 'Indian country' for a criminal, civil, tax or regulatory purpose is a legal question; ask counsel and the tribal government early."),
     note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — statistical, NOT legal boundaries; they overlap where tribes share ground), the Osage Reservation and the Shawnee trust land.",
-    infoCaveat: "Since McGirt v. Oklahoma (2020) several Nations' historic reservations are recognized for some purposes. What that means for a given parcel — criminal, civil, tax, regulatory — is a legal question no map answers. In Osage County the Osage Nation also owns the minerals below the ground (the Osage Mineral Estate); excavation there can need the Nation's and the BIA's sign-off (U.S. v. Osage Wind, 10th Cir. 2017).",
+    infoCaveat: "What a tribal area or a reservation boundary means for a given parcel — criminal, civil, tax, regulatory — is a legal question no map answers. Ask counsel and the tribal government early.",
     group: "jurisdiction", order: 21,
   }),
   ok_cherokee_res: areaRow({
@@ -275,10 +276,11 @@ export const OK_LAYERS = {
     minZoom: 13, color: "#1f2937", weight: 1.5, pointRadius: 4, styleFn: wellStyle, legend: legendOf(WELL_CLASSES),
     hoverTitle: "Oil & gas well", hoverSource: "OCC",
     identifyCard: card("Oil & gas well", (p) => {
-      const w = wellClassOf(p.symbol_class);
+      const code = clean(p.symbol_class).toUpperCase();
+      const w = WELL_CLASSES.find((x) => x.classes.includes(code));
       return [
         rowOf("Well", [clean(p.well_name), clean(p.well_num)].filter(Boolean).join(" ")),
-        clean(p.symbol_class) ? rowOf("Status", w.label, { raw: true }) : null,
+        code ? rowOf("Status", w ? w.label : tc(code.replace(/_/g, " ")), { raw: true }) : null,
         /not assigned/i.test(String(p.operator || "")) ? rowOf("Operator", "None assigned", { raw: true }) : rowOf("Operator", p.operator),
         rowOf("County", p.county),
       ];
@@ -378,7 +380,7 @@ export const OK_LAYERS = {
     label: "Petroleum Tank Releases", mergeGroup: "ok_cleanup", source: OCC_NOTE_SRC + " — Petroleum Storage Tank Division",
     url: urlFor("okPstReleases"), fields: ["facility_name", "case_status", "case_type", "release_date", "close_date", "release_cause_type", "tank_type", "address1", "city", "county", "case_number"],
     minZoom: 11, color: CLEANUP.release.color, weight: 1.5, pointRadius: CLEANUP.release.radius,
-    styleFn: (p, opacity) => (String((p && p.case_status) || "").trim().toLowerCase() === "open" ? dot(CLEANUP.release.color, CLEANUP.release.radius) : dot(RELEASE_CLOSED.color, RELEASE_CLOSED.radius))(opacity),
+    styleFn: (p, opacity) => { const st = String((p && p.case_status) || "").trim().toLowerCase(); const c = st === "open" ? CLEANUP.release : st === "closed" ? RELEASE_CLOSED : RELEASE_OTHER; return dot(c.color, c.radius)(opacity); },
     hoverTitle: "Petroleum tank release", hoverSource: "OCC",
     identifyCard: card("Petroleum tank release (leaking tank)", (p) => [
       rowOf("Facility", p.facility_name),
@@ -444,19 +446,19 @@ export const OK_LAYERS = {
   }),
 
   ok_deq_appb_areas: areaRow({
-    label: "Appendix B Protected Areas", mergeGroup: "ok_protected_waters", source: DEQ + " — Water Quality Standards (OAC 252:730)",
+    label: "Appendix B Protected Areas", mergeGroup: "ok_protected_waters", source: DEQ + " — Water Quality Standards",
     url: urlFor("okAppendixBArea"), fields: ["NAME", "TYPE", "AB_TABLE"], simplifyFactor: 0.5, minZoom: 8, color: PROTECTED.areaT1.color, weight: 1.4,
     styleFn: (p, opacity) => (Number(p && p.AB_TABLE) === 2 ? area(PROTECTED.areaT2.color, 0.18, 1.4, "6 4") : area(PROTECTED.areaT1.color, 0.14, 1.4))(opacity),
     legend: PROTECTED_LEGEND, hoverTitle: "Appendix B protected area", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Appendix B protected area", (p) => [
       rowOf("Name", p.NAME), rowOf("Kind", p.TYPE, { raw: true }),
       rowOf("Table", Number(p.AB_TABLE) === 2 ? "Table 2 — federally listed species" : Number(p.AB_TABLE) === 1 ? "Table 1 — parks, forests, wildlife areas" : "", { raw: true }),
-    ].filter(Boolean), "Waters in Appendix B areas carry extra protection under the Oklahoma Water Quality Standards (OAC 252:730); DEQ's general discharge permits can exclude them. Confirm with DEQ Water Quality."),
-    note: "Areas listed in Appendix B of the Oklahoma Water Quality Standards (OAC 252:730) — Table 1: waters in national and state parks, forests, wildlife areas and refuges; Table 2: areas with federally listed threatened or endangered species.",
+    ].filter(Boolean), "Waters in Appendix B areas carry extra protection under the Oklahoma Water Quality Standards; DEQ's general discharge permits can exclude them. Confirm with DEQ Water Quality."),
+    note: "Areas listed in Appendix B of the Oklahoma Water Quality Standards — Table 1: waters in national and state parks, forests, wildlife areas and refuges; Table 2: areas with federally listed threatened or endangered species.",
     group: "environmental", order: 35,
   }),
   ok_deq_appb_streams: lineRow({
-    label: "Appendix B Protected Streams", mergeGroup: "ok_protected_waters", source: DEQ + " — Water Quality Standards (OAC 252:730)",
+    label: "Appendix B Protected Streams", mergeGroup: "ok_protected_waters", source: DEQ + " — Water Quality Standards",
     url: urlFor("okAppendixBLine"), fields: ["NAME", "APXB_NAME", "AB_TABLE", "SPECIES"], minZoom: 8, color: PROTECTED.stream.color, weight: 2,
     styleFn: flat(stroke(PROTECTED.stream.color, 2)),
     hoverTitle: "Appendix B protected stream", hoverSource: "Oklahoma DEQ",
@@ -515,7 +517,7 @@ export const OK_LAYERS = {
     hoverTitle: "Dam", hoverSource: "OWRB",
     identifyCard: card("Dam", (p) => [
       rowOf("Name", p.dam_name),
-      rowOf("Hazard class", ({ High: "High", Significant: "Significant", Low: "Low", Other: "Drained, decommissioned or unclassified" })[damHazardOf(p.hazard)], { raw: true }),
+      rowOf("Hazard class", ({ High: "High", Significant: "Significant", Low: "Low", Other: "Drained, decommissioned, non-jurisdictional or unclassified" })[damHazardOf(p.hazard)], { raw: true }),
       rowOf("Owner", p.owner_name), rowOf("Owner type", damOwnerType(p.owner_type), { raw: true }),
       rowOf("Stream", p.river), rowOf("County", p.county), rowOf("Built", p.year_completed, { raw: true }),
       Number(p.dam_height) > 0 ? rowOf("Height", `${Number(p.dam_height).toLocaleString("en-US", { maximumFractionDigits: 1 })} ft`, { raw: true }) : null,
@@ -591,6 +593,7 @@ export const OK_VECTOR_SOURCES = {
     labelField: GIS_SOURCES.okCounty.fields.name,
     labelZoom: { min: 6, max: 11 },
     nameTemplate: "{name} County",
+    stateAbbr: "OK", // the county label adds ", OK" only when the view is centred in a different state (B2507065)
     titleCaseLabel: true,
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits, ask it what land-use rules apply; Oklahoma counties vary. A boundary is not a utility service area. Screening only.",
     sourceName: "Oklahoma DOT",

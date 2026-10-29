@@ -98,7 +98,7 @@ describe("every row is complete and drawn from the registry", () => {
       const lead = ms.find((id) => Array.isArray(ALL_LAYERS[id].legend));
       expect(lead, `${g} has a legend`).toBeTruthy();
       const colors = new Set(ALL_LAYERS[lead].legend.map((e) => e.color));
-      for (const id of ms) expect(colors.has(ALL_LAYERS[id].color) || (ALL_LAYERS[id].styleFn && true), `${id} colour in ${g}'s legend`).toBeTruthy();
+      for (const id of ms) expect(colors.has(ALL_LAYERS[id].color), `${id} base colour is in ${g}'s legend`).toBe(true);
     }
     // the cleanup row: each of the seven members' own colour is in the lead's key
     const cleanup = ids.filter((id) => ALL_LAYERS[id].mergeGroup === "ok_cleanup");
@@ -201,8 +201,9 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
     expect(SOURCE_DOCS.okWellBuffer.notes).toMatch(/OAC 252:626-7-4/);
     expect(c.note).toMatch(/300-ft/);
   });
-  it("Appendix B and the OKR10 layer cite OAC 252:730 / the permit; no invented distance anywhere", () => {
-    expect(ALL_LAYERS.ok_deq_appb_areas.source).toMatch(/OAC 252:730/);
+  it("Appendix B and the OKR10 layer cite the Water Quality Standards / the permit (no chapter number from memory); no invented distance anywhere", () => {
+    expect(ALL_LAYERS.ok_deq_appb_areas.source).toMatch(/Water Quality Standards/);
+    expect(ALL_LAYERS.ok_deq_appb_areas.source).not.toMatch(/OAC \d/);
     expect(ALL_LAYERS.ok_deq_sensitive.source).toMatch(/OKR10/);
     // A "ft" / "feet" / "mile" figure may appear only on the cited 300-ft buffer row.
     for (const id of ids) {
@@ -332,8 +333,27 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
       const c = ALL_LAYERS[id];
       const text = [c.note, c.infoCaveat, c.identifyNote].join(" ");
       expect(text, id).not.toMatch(/has no ETJ|zoning and permitting authority|review pending/i);
+      expect(text, id).not.toMatch(/McGirt|Osage Wind|\bBIA\b|sign-off/i); // legal conclusions about reservations / mineral estates are never typed from memory
     }
     expect(OK_SOURCES.okCity.fullPurposeOnly).toBe(true);
+  });
+  it("a well with a status code the table does not know prints that code, not 'Dry, terminated, water supply, other'", () => {
+    const c = ALL_LAYERS.ok_wells.identifyCard({ symbol_class: "INACTIVE", well_name: "X", well_num: "1" });
+    expect(c.rows.find((x) => x.label === "Status").text).toBe("Inactive");
+    expect(ALL_LAYERS.ok_wells.identifyCard({ symbol_class: "PLUGGED" }).rows.find((x) => x.label === "Status").text).toBe("Plugged");
+  });
+  it("a tank release whose status is neither Open nor Closed has its own ink, in the legend", () => {
+    const r = ALL_LAYERS.ok_pst_releases;
+    const other = r.styleFn({ case_status: "Municipal" }, 1).fillColor;
+    expect([ "#4338ca", "#a5b4fc" ]).not.toContain(other);
+    expect(ALL_LAYERS.ok_deq_superfund.legend.map((e) => e.color)).toContain(other);
+  });
+  it("the county line labels name Oklahoma and keep the Mc prefix", async () => {
+    const { countyLabelText } = await import("../src/workspaces/site-planner/lib/countyLineLabels.js");
+    expect(OK_VECTOR_SOURCES.ok_county.stateAbbr).toBe("OK");
+    expect(countyLabelText("MCCURTAIN", "OK", "TX")).toBe("McCurtain Co., OK");
+    expect(countyLabelText("MCCLAIN", "OK", "OK")).toBe("McClain Co.");
+    expect(tc("MCINTOSH")).toBe("McIntosh");
   });
   it("the quoted tribal counts say 25 areas plus four joint-use areas", () => {
     expect(ALL_LAYERS.ok_tribal.note).toMatch(/25 Oklahoma Tribal Statistical Areas plus four joint-use areas/);

@@ -156,11 +156,11 @@ export const OK_SOURCES = {
     serviceUrl: DEQ_WATER, layerId: 5, geometryType: "point", fields: { system: "SYSTEM", facility: "FACILITY" },
   }),
   okAppendixBArea: OK("okAppendixBArea", {
-    label: "Appendix B protected-water areas (Oklahoma DEQ)", provider: "Oklahoma Department of Environmental Quality — Water Quality Standards, Appendix B Areas (OAC 252:730)",
+    label: "Appendix B protected-water areas (Oklahoma DEQ)", provider: "Oklahoma Department of Environmental Quality — Water Quality Standards, Appendix B Areas",
     serviceUrl: DEQ_WATER, layerId: 15, geometryType: "polygon", fields: { name: "NAME", sub: "SUBNAME", table: "AB_TABLE", owner: "OWNER", type: "TYPE" },
   }),
   okAppendixBLine: OK("okAppendixBLine", {
-    label: "Appendix B protected streams (Oklahoma DEQ)", provider: "Oklahoma Department of Environmental Quality — Water Quality Standards, Appendix B Lines (OAC 252:730)",
+    label: "Appendix B protected streams (Oklahoma DEQ)", provider: "Oklahoma Department of Environmental Quality — Water Quality Standards, Appendix B Lines",
     serviceUrl: DEQ_WATER, layerId: 16, geometryType: "line", fields: { name: "NAME", appb: "APXB_NAME", table: "AB_TABLE", species: "SPECIES" },
   }),
   okSensitiveWaters: OK("okSensitiveWaters", {

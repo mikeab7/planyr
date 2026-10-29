@@ -10,7 +10,7 @@
 export function countyLabelText(name, stateAbbr, homeState) {
   let n = String(name == null ? "" : name).trim().replace(/\s+(county|co\.?)$/i, "");
   if (!n) return "";
-  n = n.replace(/\b([A-Z])([A-Z]+)\b/g, (_m, a, b) => a + b.toLowerCase()); // "HARRIS" → "Harris" (publishers shout)
+  n = n.replace(/\b([A-Z])([A-Z]+)\b/g, (_m, a, b) => a + b.toLowerCase()).replace(/\bMc([a-z])/g, (_m, a) => "Mc" + a.toUpperCase()); // "HARRIS" → "Harris", "MCCLAIN" → "McClain" (publishers shout)
   const suffix = stateAbbr && homeState && String(stateAbbr).toUpperCase() !== String(homeState).toUpperCase() ? `, ${String(stateAbbr).toUpperCase()}` : "";
   return `${n} Co.${suffix}`;
 }
