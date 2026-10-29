@@ -151,6 +151,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   colour). The recents list is ONE shared, persisted MRU across every picker, and records exactly
   ONE entry per picking SESSION (`notePick`/`commitPick`) — the live wheel fires per shade, so
   recording each one used to fill the row with intermediates.
+  `ui/listboxNav.js` + `ui/useListboxNav.js` (B2499520) — **THE one behaviour of every typeahead suggestion list** (map address search, comp party names, Food restaurant search): Down enters at row 1 / Up at the last, both wrap, Enter commits a highlighted row, Escape closes, scroll-into-view, hover and keyboard share ONE highlight, `aria-activedescendant`. The highlight is a SOLID `--accent` fill + `--on-accent` ink (`listboxRowStyle`) — never a surface token on a surface (the owner's "I can't see it": white on white). A new suggestion list uses the hook; it never rolls its own arrows or highlight (repo-root `test/` **listboxNav**; e2e **address-suggest-keyboard**, red on the old highlight). Suggestions belong only where they obviously belong (addresses, contact info) — never on unique-value fields.
   `ui/AnchoredMenu.jsx` — the portal-to-body clamped flyout (placement math is pure, unit-tested
   `ui/anchoredMenuPlacement.js` — `placeMenu`, which hides rather than corner-pins a
   zero-sized/`display:none` anchor, B734). `ui/FloatingPanel.jsx` +
@@ -332,9 +333,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `lib/partySuggest.js` is the pure party-name suggestion logic
   (`collectPartyNames`/`matchPartyNames` — loose substring match, suggests only, never forces or
   merges near-spellings) behind `components/PartyNameField.jsx`'s accessible combobox (B832391) —
-  a DELIBERATE second, independent combobox implementation from the map toolbar's
-  `PlaceSearchField` (that one drives a debounced network geocode; this one filters an in-memory
-  array synchronously — reusing its plumbing would import complexity with no use here). `db/test/comps_rls.test.sql` is a self-rolling-back RLS proof, run live via the
+  a separate SOURCE from the map toolbar's `PlaceSearchField` (that one drives a debounced
+  network geocode; this one filters an in-memory array synchronously) over the SAME list behaviour,
+  `ui/useListboxNav.js` (B2499520 — below). `db/test/comps_rls.test.sql` is a self-rolling-back RLS proof, run live via the
   Supabase MCP.
   **Entry (B849232/B849233, 2026-09-01) — paste-into-the-grid, drafts reserved for import.**
   `lib/compParse.js` is the pure parser behind the create surface: one pasted prose line or a

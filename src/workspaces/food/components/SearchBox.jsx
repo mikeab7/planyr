@@ -36,6 +36,8 @@ import { rankByProximity } from "../lib/searchProximity.js";
 import { createSearchSession, carryOverRows } from "../lib/searchSession.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { SIZE } from "../../../shared/ui/controls.jsx";
+import { useListboxNav } from "../../../shared/ui/useListboxNav.js";
+import { listboxRowStyle } from "../../../shared/ui/listboxNav.js";
 
 const DEBOUNCE_MS = 120; // NEW-1: was 220 — the server answers in tens of ms now, so the wait should not be the slow part
 const MIN_QUERY_LEN = 2;
@@ -163,6 +165,14 @@ export default function SearchBox({
     onFlyTo({ lat: pin.lat, lon: pin.lon });
     setOpen(false);
   };
+  // Up/Down/Enter/Escape over the suggestion rows — the app's ONE shared list behaviour (shared/ui/useListboxNav.js).
+  // The two action buttons under the rows (live search, drop a pin) stay mouse/Tab-reachable and are not suggestions.
+  const listboxId = useRef(`food-search-${Math.random().toString(36).slice(2)}`).current;
+  const nav = useListboxNav({
+    count: showDropdown ? results.length : 0, open: showDropdown, setOpen, listboxId,
+    onCommit: (i) => { const p = results[i]; if (p) (p.kind === "manual" ? selectManual(p) : selectPlace(p)); },
+  });
+
   const runLiveSearch = () => {
     setLiveState("pending");
     onRequestLiveSearch().finally(() => setLiveState("done"));
@@ -173,7 +183,9 @@ export default function SearchBox({
       <input
         ref={inputRef}
         type="search" value={query} data-testid="food-search-box"
-        onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
+        onChange={(e) => { onQueryChange(e.target.value); setOpen(true); nav.reset(); }}
+        onKeyDown={(e) => { nav.onKeyDown(e); }}
+        {...nav.inputProps}
         onFocus={() => setOpen(true)}
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
         style={{ ...fieldStyle(), width: "100%" }}
@@ -192,27 +204,29 @@ export default function SearchBox({
           boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
         }}
       >
-        <div data-testid="food-search-results">
-          {results.map((p) => (
+        <div data-testid="food-search-results" id={listboxId} role="listbox" aria-label="Restaurant suggestions">
+          {results.map((p) => { const i = results.indexOf(p); return (
             <button
               key={`${p.kind}:${p.id || p.key || p.name}`} type="button"
+              {...nav.optionProps(i)}
               onClick={() => (p.kind === "manual" ? selectManual(p) : selectPlace(p))}
               style={{
                 display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, width: "100%",
-                textAlign: "left", border: "none", background: "transparent", borderRadius: RADIUS.sm, padding: "7px 8px",
+                textAlign: "left", border: "none", borderRadius: RADIUS.sm, padding: "7px 8px",
                 cursor: "pointer", font: "inherit", color: "var(--text-primary)",
+                ...listboxRowStyle(i === nav.activeIndex, "var(--accent-food)", "var(--on-accent-food)"),
               }}
             >
               <span style={{ overflow: "hidden", minWidth: 0 }}>
                 <span style={{ display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {p.name}{p.kind === "live" && <span style={{ color: "var(--text-tertiary)" }}> (live search)</span>}
+                  {p.name}{p.kind === "live" && <span style={{ color: i === nav.activeIndex ? "inherit" : "var(--text-tertiary)" }}> (live search)</span>}
                 </span>
                 {/* THE CITY, so a chain search ("Torchy's") reads as distinct branches, not fifteen
                     identical rows (owner, 2026-08-18) — the full address already carries the city
                     and enough street to disambiguate within it; no separate city field needed. */}
                 {p.address && (
                   <span style={{
-                    display: "block", fontSize: 11, color: "var(--text-tertiary)",
+                    display: "block", fontSize: 11, color: i === nav.activeIndex ? "inherit" : "var(--text-tertiary)",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>
                     {p.address}
@@ -222,7 +236,8 @@ export default function SearchBox({
               {p.mine && (
                 <span data-chip="" style={{
                   ...chipBox(18, 6), flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
-                  color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: 999,
+                  color: i === nav.activeIndex ? "var(--accent-food)" : "var(--on-accent-food)",
+                  background: i === nav.activeIndex ? "var(--on-accent-food)" : "var(--accent-food)", borderRadius: 999,
                 }}>
                   Been here
                 </span>
@@ -235,12 +250,14 @@ export default function SearchBox({
                   ...chipBox(18, 6), flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
                   color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
                   borderRadius: 999,
+                  // on the highlighted row (a solid accent fill) the outline chip flips to the on-accent ink so it never vanishes
+                  ...(i === nav.activeIndex ? { color: "var(--on-accent-food)", borderColor: "var(--on-accent-food)" } : null),
                 }}>
                   Want to try
                 </span>
               )}
             </button>
-          ))}
+          ); })}
 
           {/* NEW-1: BELOW the rows, so the arriving answer never shoves what he is looking at. */}
           {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}

@@ -2,11 +2,10 @@
  * form's two party fields (NEW-8; provisional label until the real B# is minted at push time,
  * per /CLAUDE.md's LATE-BIND rule).
  *
- * DELIBERATE SECOND IMPLEMENTATION of the accessible-combobox pattern — see partySuggest.js's
- * header for why this doesn't reuse the map toolbar's in-flight PlaceSearchField (B831779): that
- * one drives a debounced, abortable network geocode with provider-status states; this one
- * filters a small array already held in memory, synchronously, on every keystroke. Same a11y
- * shape (role="combobox" + a listbox, arrow keys, Enter, Escape), independent implementation.
+ * The list behaviour (Up/Down highlight, Enter, Escape, the visible solid highlight, a11y props) is the app's ONE shared
+ * suggestion-list hook (`shared/ui/useListboxNav.js`) — the same one the map toolbar's address field and Food's search use.
+ * Only the SOURCE differs: this filters a small array already held in memory, synchronously, on every keystroke
+ * (the map toolbar's field drives a debounced, abortable network geocode).
  *
  * NON-NEGOTIABLE: this NEVER forces a match. Selecting a suggestion just fills the input with
  * that exact stored string — it does not validate, normalize, or block anything else typed.
@@ -17,62 +16,40 @@
  */
 import { useState } from "react";
 import { matchPartyNames } from "../lib/partySuggest.js";
+import { useListboxNav } from "../../ui/useListboxNav.js";
+import { listboxRowStyle } from "../../ui/listboxNav.js";
 
 const inputStyle = {
   width: "100%", padding: "6px 8px", fontSize: 12.5, borderRadius: 6, fontFamily: "inherit",
   border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)",
 };
 
-function optionId(base, i) { return `${base}-opt-${i}`; }
-
 export default function PartyNameField({ label, value, onChange, candidates, listboxId, placeholder = "optional" }) {
   const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
 
   const matches = matchPartyNames(value, candidates);
 
-  const commit = (name) => { onChange(name); setOpen(false); setActiveIndex(-1); };
+  // ONE shared list behaviour (shared/ui/useListboxNav.js) — identical arrows / Enter / Escape / visible highlight everywhere.
+  const nav = useListboxNav({ count: matches.length, open, setOpen, listboxId, onCommit: (i) => commit(matches[i]) });
+  const activeIndex = nav.activeIndex;
+
+  const commit = (name) => { onChange(name); setOpen(false); nav.reset(); };
 
   const handleChange = (e) => {
     onChange(e.target.value);
-    setActiveIndex(-1);
+    nav.reset();
     setOpen(true); // matches recomputed from the new value on next render; harmless if empty
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === "ArrowDown") {
-      if (!matches.length) return;
-      e.preventDefault();
-      setOpen(true);
-      setActiveIndex((i) => (i + 1) % matches.length);
-    } else if (e.key === "ArrowUp") {
-      if (!matches.length) return;
-      e.preventDefault();
-      setOpen(true);
-      setActiveIndex((i) => (i <= 0 ? matches.length - 1 : i - 1));
-    } else if (e.key === "Enter") {
-      if (activeIndex >= 0 && activeIndex < matches.length) {
-        e.preventDefault();
-        commit(matches[activeIndex]);
-      } else {
-        setOpen(false); // whatever was typed stands as-is — never forced, never blocked
-      }
-    } else if (e.key === "Escape") {
-      setOpen(false);
-      setActiveIndex(-1);
-    }
+    if (nav.onKeyDown(e)) return;
+    if (e.key === "Enter") setOpen(false); // whatever was typed stands as-is — never forced, never blocked
   };
-
-  const activeId = activeIndex >= 0 && activeIndex < matches.length ? optionId(listboxId, activeIndex) : undefined;
 
   return (
     <div style={{ position: "relative", width: 220 }}>
       <input
-        role="combobox"
-        aria-expanded={open && matches.length > 0}
-        aria-controls={listboxId}
-        aria-activedescendant={activeId}
-        aria-autocomplete="list"
+        {...nav.inputProps}
         aria-label={label}
         autoComplete="off"
         value={value}
@@ -97,15 +74,11 @@ export default function PartyNameField({ label, value, onChange, candidates, lis
           {matches.map((name, i) => (
             <li
               key={name}
-              id={optionId(listboxId, i)}
-              role="option"
-              aria-selected={i === activeIndex}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setActiveIndex(i)}
+              {...nav.optionProps(i)}
               onClick={() => commit(name)}
               style={{
                 padding: "6px 8px", fontSize: 12.5, cursor: "pointer", borderRadius: 5,
-                color: "var(--text-primary)", background: i === activeIndex ? "var(--hover-menu)" : "transparent",
+                color: "var(--text-primary)", ...listboxRowStyle(i === activeIndex),
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}
             >

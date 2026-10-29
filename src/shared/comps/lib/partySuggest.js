@@ -1,14 +1,9 @@
 /* partySuggest — pure suggestion logic for the comp form's two party fields (NEW-8; provisional
  * label until the real B# is minted at push time, per /CLAUDE.md's LATE-BIND rule).
  *
- * DELIBERATELY a SECOND, independent implementation from the map toolbar's PlaceSearchField
- * combobox (in-flight on another branch as of this writing — B831779/NEW-4, `MapFinder.jsx`'s
- * `PlaceSearchField.jsx` + `placeSuggest.js`): that one is tightly coupled to live, debounced,
- * abortable GEOCODING (a network round trip per keystroke, provider idle/loading/ready/nomatch/
- * unavailable states, "search anyway"/"drop a pin" actions). This one suggests from data already
- * held client-side (the comps the viewer can already see — no fetch, no debounce, no abort), so
- * reusing that component's fetch/status plumbing would import complexity this has no use for. The
- * two share only the *shape* of an accessible combobox (see `PartyNameField.jsx`), not this logic.
+ * The SOURCE of suggestions is independent from the map toolbar's PlaceSearchField (that one drives live, debounced, abortable
+ * GEOCODING; this one suggests from data already held client-side — no fetch, no debounce, no abort). The LIST behaviour
+ * (arrows, Enter, Escape, highlight, a11y) is the one shared hook, `shared/ui/useListboxNav.js`, used by both.
  *
  * NON-NEGOTIABLE (owner brief): suggestions only ever NARROW what to type, never FORCE or REWRITE
  * it. A brand-new name is always enterable with zero friction. Two spellings of the same company
