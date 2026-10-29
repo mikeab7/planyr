@@ -14,9 +14,22 @@
  *
  * PURE: no network, no React — the style / label rules below unit-test standalone (test/desotoLayers.test.js). */
 
-import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate } from "./desotoZoning.js";
-import { jurisdictionAt, ensureMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
+import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate, zoneClass, ZONE_COLORS } from "./desotoZoning.js";
+import { zoningLegend } from "./desotoZoningNames.js";
+import { CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { jurisdictionAt, ensureMunicipalities, subscribeMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
 import { providerCardAt, ensureProviders } from "./desotoProviders.js";
+
+/* A point inside-ish a GeoJSON polygon feature (the vertex average of its first ring) — enough to ask which municipal limit a zoning polygon sits in. */
+function featureInterior(f) {
+  const g = f && f.geometry;
+  if (!g) return null;
+  const ring = g.type === "Polygon" ? g.coordinates[0] : g.type === "MultiPolygon" ? g.coordinates[0] && g.coordinates[0][0] : null;
+  if (!ring || !ring.length) return null;
+  let x = 0, y = 0;
+  for (const p of ring) { x += p[0]; y += p[1]; }
+  return [x / ring.length, y / ring.length];
+}
 
 export const OB_AGOL = "https://services9.arcgis.com/VGtdH6iTQlVulSnr/ArcGIS/rest/services";
 export const DESOTO_RELAY = RELAY;
@@ -231,6 +244,9 @@ Object.assign(DESOTO_LAYERS, {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Zoning",
     hoverFields: [{ names: ["ZONE"], label: "Zone" }, { names: ["CASE_NO"], label: "Case" }, { names: ["DATE_APPROVED"], label: "Approved", date: true }],
     warm: () => { ensureMunicipalities(); },
+    // the Zoning dropdown's legend: the zone codes on screen, each with its sourced district name (B2507063)
+    viewLegend: (features) => zoningLegend(features.map((f) => { const c = featureInterior(f); return { code: f.properties && f.properties.ZONE, jurisdiction: c ? jurisdictionAt(c[1], c[0]) : null, color: ZONE_COLORS[zoneClass(f.properties && f.properties.ZONE)] }; })),
+    onViewLegendReady: (publish) => subscribeMunicipalities(publish),
     identifyCard: (props, at) => {
       const j = at && Number.isFinite(at.lat) ? jurisdictionAt(at.lat, at.lng) : null;
       return { title: zoningTitle(j), rows: zoningRows(props, j) };
@@ -242,8 +258,8 @@ Object.assign(DESOTO_LAYERS, {
   ms_desoto_city: county({
     path: "BaseLayers/MapServer/4", label: "City Limits (DeSoto County)", mergeGroup: "counties_cities", role: "line", group: "jurisdiction", order: 5, minZoom: 8, opacity: 0.4,
     source: "DeSoto County GIS — Municipalities", color: "#1d4ed8", weight: 1.6,
-    styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: 1.6, opacity, fill: false }),
-    lineLabel: { field: "NAME", minZoom: 9, format: (v) => titleCase(v) || null },
+    styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: CITY_LINE_MIN_WEIGHT, opacity, fill: true, fillColor: "#1d4ed8", fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit" }), // B2507065 — className: only the outline answers a click (index.css), so the tint never hides the zoning polygon under it; B2507065: bolder outline + a light tint inside, like every city limit
+    lineLabel: { field: "NAME", minZoom: 9, declutter: true, format: (v) => titleCase(v) || null },
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "City limits", hoverSource: "DeSoto County GIS", hoverFields: [{ names: ["NAME"] }],
     note: "The five incorporated cities of DeSoto County — Olive Branch, Southaven, Horn Lake, Hernando and Walls. Outside them a site is in unincorporated DeSoto County. Mississippi has no ETJ.",
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
