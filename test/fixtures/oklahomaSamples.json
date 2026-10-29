@@ -1,6 +1,153 @@
 {
- "_note": "One real lot per wired Oklahoma county, recorded 2026-10-19 from the live service (NEW-1 Oklahoma). attrs are verbatim service columns; measured = polygons-with-id hits at 5 interior + 4 county-line points.",
+ "_note": "One real lot per wired Oklahoma county. The first 14 were recorded 2026-10-19 (NEW-1 Oklahoma); the second pass (B2497472, 2026-10-29) added the rest and replaced Garfield's row with the City of Enid layer. attrs are verbatim service columns; measured = polygons-with-id hits at 9 interior + 4 county-line points (5 + 4 on the first 14). 52 rows are the State of Oklahoma's statewide parcel layer read through GetFeatureInfo (attrs are the GeoJSON properties; `extent` is the county's own box, the layer itself is statewide).",
  "rows": {
+  "Adair": {
+   "idField": "account",
+   "expectOwner": true,
+   "attrs": {
+    "OBJECTID": 2472,
+    "account": "010000126",
+    "taxarea": 111,
+    "ownername": "CHOATE, RICHARD FELIX  MARY",
+    "address1": "463 E. 923 RD",
+    "citystate": "BUNCH OK",
+    "zipcode": "74931-0000",
+    "situs": " ",
+    "propclass": "RA",
+    "sizetype": "Acres",
+    "lotsize": 60,
+    "landvalue": 12886,
+    "imprvalue": 0,
+    "mobhvalue": 0,
+    "totalvalue": 12886,
+    "capflag": 0,
+    "capland": 9972,
+    "totalcap": 9972,
+    "taxable": 0,
+    "grantor": "CHOATE, RICHARD FELIX  M",
+    "saledate": "07/25/2017",
+    "legal": "MB BK 180 PG 584 ALL E OF HWY",
+    "label": "CHOATE,",
+    "nbhd": 1424,
+    "city": "BUNCH",
+    "Shape__Area": 365969.9609375,
+    "Shape__Length": 2851.105025318878
+   },
+   "measured": {
+    "hits": 7,
+    "edgeHits": 4,
+    "extent": [
+     -94.808,
+     35.638,
+     -94.473,
+     36.162
+    ]
+   }
+  },
+  "Alfalfa": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Alfalfa",
+    "accountnumber": 20093,
+    "parcelid": "020002308",
+    "owner": "U S A",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I93-Timberlake Rural",
+    "acres": 230,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Alfalfa_20093",
+    "trs": "026-009-29",
+    "dataupdate": "2026-10-03T05:00:00Z",
+    "shapeupdate": "2026-03-14T05:00:00Z",
+    "shape_length": 0.0462506946518635,
+    "shape_area": 0.0000928418948696157
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -98.54,
+     36.464,
+     -98.1,
+     36.999
+    ]
+   }
+  },
+  "Atoka": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Atoka",
+    "accountnumber": 2830321,
+    "parcelid": "030006234",
+    "owner": "CALLICOAT FAMILY TRUST",
+    "deedbook": "524",
+    "deedpage": "547",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 3,
+    "schooldistrict": "Harmony Rural",
+    "acres": 160,
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Atoka_2830321",
+    "trs": "03S-12E-17",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-07-26T05:00:00Z",
+    "shape_length": 0.0320060804747122,
+    "shape_area": 0.0000635033286684417
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -96.405,
+     34.164,
+     -95.668,
+     34.689
+    ]
+   }
+  },
+  "Beaver": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Beaver",
+    "accountnumber": 42425,
+    "parcelid": "040001991",
+    "owner": "BARTEL REV LV TR, RUTH %NORN B BARTEL, TRUSTEE",
+    "deedbook": "1317",
+    "deedpage": "498",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "75 BALKO",
+    "acres": 314,
+    "community": "BALKO",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Beaver_42425",
+    "trs": "02N-23E-6",
+    "dataupdate": "2026-05-17T05:00:00Z",
+    "shapeupdate": "2026-02-14T06:00:00Z",
+    "shape_length": 0.0492438127231747,
+    "shape_area": 0.000125637015252752
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -100.957,
+     36.49,
+     -99.999,
+     36.998
+    ]
+   }
+  },
   "Beckham": {
    "idField": "account",
    "expectOwner": true,
@@ -49,10 +196,115 @@
     "hits": 9,
     "edgeHits": 4,
     "extent": [
-     -100.0,
+     -100,
      35.03,
      -99.36,
      35.509
+    ]
+   }
+  },
+  "Blaine": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Blaine",
+    "accountnumber": 67131,
+    "parcelid": "060000395",
+    "owner": "MCKINLEY, WESTYN C",
+    "deedbook": "1526",
+    "deedpage": "278",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "80-R-Geary",
+    "acres": 80,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Blaine_67131",
+    "trs": "013-012-21",
+    "dataupdate": "2026-04-26T05:00:00Z",
+    "shapeupdate": "2026-01-24T06:00:00Z",
+    "shape_length": 0.0248887348988329,
+    "shape_area": 0.0000319730149572855
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 2,
+    "extent": [
+     -98.638,
+     35.555,
+     -98.198,
+     36.17
+    ]
+   }
+  },
+  "Bryan": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Bryan",
+    "accountnumber": 88687,
+    "parcelid": "070008730",
+    "owner": "KING, BRADLEY",
+    "deedbook": "915",
+    "deedpage": "585",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 28,
+    "schooldistrict": "I-2 ROCK CREEK",
+    "acres": 80,
+    "community": "BENNINGTON",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Bryan_88687",
+    "trs": "07S-12E-32",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-07-26T05:00:00Z",
+    "shape_length": 0.0276054717365984,
+    "shape_area": 0.0000316495864207506
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -96.614,
+     33.702,
+     -95.764,
+     34.166
+    ]
+   }
+  },
+  "Caddo": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Caddo",
+    "accountnumber": 113498,
+    "parcelid": "080003768",
+    "owner": "DYER,CARL D",
+    "deedbook": "1291",
+    "deedpage": "307",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 2,
+    "schooldistrict": "CARNEGIE-RURAL",
+    "acres": 160,
+    "community": "RURAL",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Caddo_113498",
+    "trs": "05N-13W-8",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-04-19T05:00:00Z",
+    "shape_length": 0.0320988610453091,
+    "shape_area": 0.0000638127735743427
+   },
+   "measured": {
+    "hits": 7,
+    "edgeHits": 4,
+    "extent": [
+     -98.62,
+     34.858,
+     -98.088,
+     35.555
     ]
    }
   },
@@ -112,6 +364,146 @@
      35.325,
      -97.67,
      35.726
+    ]
+   }
+  },
+  "Carter": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Carter",
+    "accountnumber": 211385,
+    "parcelid": "100061095",
+    "owner": "LIDE BRAWN AND JACLYN",
+    "deedbook": "7241",
+    "deedpage": "276",
+    "combldgcnt": 3,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 19,
+    "schooldistrict": "PLAINVIEW RURAL",
+    "acres": 38.35,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Carter_211385",
+    "trs": "05S-01E-4",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-04-19T05:00:00Z",
+    "shape_length": 0.0156476752782547,
+    "shape_area": 0.0000151755951199609
+   },
+   "measured": {
+    "hits": 7,
+    "edgeHits": 4,
+    "extent": [
+     -97.557,
+     34.072,
+     -96.928,
+     34.515
+    ]
+   }
+  },
+  "Cherokee": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Cherokee",
+    "accountnumber": 242995,
+    "parcelid": "110005974",
+    "owner": "CHAFFIN, LOUIS S & LUCINDA M",
+    "deedbook": "623",
+    "deedpage": "592",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-16 Rural",
+    "acres": 390,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Cherokee_242995",
+    "trs": "16N-21E-8",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-02-08T06:00:00Z",
+    "shape_length": 0.060333219924374,
+    "shape_area": 0.000158330083866784
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -95.287,
+     35.645,
+     -94.798,
+     36.173
+    ]
+   }
+  },
+  "Choctaw": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Choctaw",
+    "accountnumber": 275161,
+    "parcelid": "120003445",
+    "owner": "GRAVITT, STACEY & ELLEN",
+    "deedbook": "474",
+    "deedpage": "912",
+    "combldgcnt": 0,
+    "resibldgcnt": 2,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 3,
+    "schooldistrict": "I- 4",
+    "acres": 381.4,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Choctaw_275161",
+    "trs": "06S-15E-36",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-05-17T05:00:00Z",
+    "shape_length": 0.060259402988433,
+    "shape_area": 0.000148538636105839
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -96.003,
+     33.866,
+     -95.148,
+     34.165
+    ]
+   }
+  },
+  "Cimarron": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Cimarron",
+    "accountnumber": 290453,
+    "parcelid": "130004330",
+    "owner": "STATE",
+    "deedbook": "007",
+    "deedpage": "581",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-2 Rural",
+    "acres": 520.31,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Cimarron_290453",
+    "trs": "05N-06E-18",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-07-26T05:00:00Z",
+    "shape_length": 0.087146746335554,
+    "shape_area": 0.00021280134081742
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 2,
+    "extent": [
+     -102.997,
+     36.49,
+     -102.024,
+     36.999
     ]
    }
   },
@@ -175,6 +567,41 @@
     ]
    }
   },
+  "Coal": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Coal",
+    "accountnumber": 425688,
+    "parcelid": "150000309",
+    "owner": "THE PENNINGTON COMPANIES INC.",
+    "deedbook": "926",
+    "deedpage": "610",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "1-A Rural",
+    "acres": 591.26,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Coal_425688",
+    "trs": "01N-09E-2",
+    "dataupdate": "2026-02-01T06:00:00Z",
+    "shapeupdate": "2025-10-26T05:00:00Z",
+    "shape_length": 0.0641092433492061,
+    "shape_area": 0.000234538318628999
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -96.514,
+     34.425,
+     -96.087,
+     34.774
+    ]
+   }
+  },
   "Comanche": {
    "idField": "ACCOUNT",
    "expectOwner": true,
@@ -203,6 +630,75 @@
      34.406,
      -98.089,
      34.856
+    ]
+   }
+  },
+  "Cotton": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Cotton",
+    "accountnumber": 2585823,
+    "parcelid": "170003375",
+    "owner": "GOODE, DEBORAH ELLEN REVOCABLE TRUST",
+    "deedbook": "437",
+    "deedpage": "511",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 5,
+    "schooldistrict": "333-R RANDLETT",
+    "acres": 160,
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Cotton_2585823",
+    "trs": "04S-13W-13",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-05-17T05:00:00Z",
+    "shape_length": 0.0318692314891718,
+    "shape_area": 0.0000629068430295985
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -98.657,
+     34.055,
+     -98.137,
+     34.509
+    ]
+   }
+  },
+  "Craig": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Craig",
+    "accountnumber": 503594,
+    "parcelid": "180013669",
+    "owner": "BOZMAN, WAYNE D",
+    "deedbook": "603",
+    "deedpage": "123",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-17 Welch Rur",
+    "acres": 78.55,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Craig_503594",
+    "trs": "29N-18E-18",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-08-15T05:00:00Z",
+    "shape_length": 0.0244964588240245,
+    "shape_area": 0.0000293699129407997
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -95.431,
+     36.518,
+     -95.002,
+     37.002
     ]
    }
   },
@@ -240,26 +736,1010 @@
     ]
    }
   },
-  "Garfield": {
-   "idField": "PARCEL_1",
+  "Custer": {
+   "idField": "parcelid",
    "expectOwner": true,
    "attrs": {
-    "OBJECTID": 1702,
-    "LABEL": "100-00",
-    "PARCEL_1": "0000-18-22N-05W-3-100-00",
-    "PARCEL_12": "0000-18-22N-05W-3-100-00",
-    "NAME": "OVERSTREET, TERESA",
-    "Shape_Leng": 7368.08364688,
-    "Name_1": "OVERSTREET, TERESA"
+    "county": "Custer",
+    "accountnumber": 555921,
+    "parcelid": "200001535",
+    "owner": "BUSSEY BRANDON MICHAEL",
+    "deedbook": "1974",
+    "deedpage": "34",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "Rural But I-5",
+    "acres": 72.96,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Custer_555921",
+    "trs": "012-018-5",
+    "dataupdate": "2026-10-03T05:00:00Z",
+    "shapeupdate": "2025-07-12T05:00:00Z",
+    "shape_length": 0.0229079265764642,
+    "shape_area": 0.000031222773851683
    },
    "measured": {
     "hits": 9,
     "edgeHits": 4,
     "extent": [
+     -99.375,
+     35.468,
+     -98.619,
+     35.815
+    ]
+   }
+  },
+  "Delaware": {
+   "idField": "account",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 13868,
+    "OGR_FID": 14663,
+    "account": "210027089",
+    "accountsta": 1,
+    "source": "REAL",
+    "area": "0.832 ac",
+    "nameid": 1103584,
+    "ownersname": "FISHER, CECELIA JEAN",
+    "mailinginf": " ",
+    "address1": " ",
+    "address2": "2119 S EASTWOOD",
+    "city": "JOPLIN",
+    "state": "MO",
+    "zipcode": "64801-",
+    "subdivisio": 0,
+    "subdivis_1": " ",
+    "nbhd": 121,
+    "streettext": " ",
+    "situs": " ",
+    "situs_zipc": "74370",
+    "xcrossrefa": " ",
+    "reviewcode": "BLUE",
+    "apprgroup": " ",
+    "taxareacod": 21,
+    "propertycl": "RR",
+    "landvalue": 6000,
+    "imprvalue": 0,
+    "mobhvalue": 0,
+    "totalvalue": 6000,
+    "totalnewco": 0,
+    "tifdistric": 0,
+    "lotsize": 1,
+    "lotsizetyp": "Acres",
+    "removecapy": 0,
+    "homesteade": 0,
+    "lastrevald": " ",
+    "legal": "11-25-24 PT SW NE DESCRIBED AS: BEG 407 S  165 E OF NW COR SW NE; NE 42 DEG 211",
+    "inspect_yr": "2019",
+    "shape_leng": 329.099,
+    "shape_area": 5244.0789,
+    "anbhd": "121",
+    "Shape__Area": 5244.078125,
+    "Shape__Length": 329.0991227083304
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 2,
+    "extent": [
+     -95.011,
+     36.161,
+     -94.563,
+     36.671
+    ]
+   }
+  },
+  "Dewey": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Dewey",
+    "accountnumber": 624087,
+    "parcelid": "220000328",
+    "owner": "CRAVENS, GLENDA B 2004 REV LIV TRUST",
+    "deedbook": "1263",
+    "deedpage": "163",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 1,
+    "schooldistrict": "I-10",
+    "acres": 240,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Dewey_624087",
+    "trs": "16N-16W-1",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-08-15T05:00:00Z",
+    "shape_length": 0.0484590132582788,
+    "shape_area": 0.0000971055233005816
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -99.385,
+     35.815,
+     -98.631,
+     36.166
+    ]
+   }
+  },
+  "Ellis": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Ellis",
+    "accountnumber": 635603,
+    "parcelid": "230003977",
+    "owner": "W.H. BRAUM FAMILY L.P.",
+    "deedbook": "428",
+    "deedpage": "185",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 20,
+    "schooldistrict": "42B-Shattuck",
+    "acres": 640,
+    "community": "IVANHOE  42B",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Ellis_635603",
+    "trs": "21N-26W-9",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-05-17T05:00:00Z",
+    "shape_length": 0.0655837284902421,
+    "shape_area": 0.000265463992921108
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -100.007,
+     35.85,
+     -99.38,
+     36.595
+    ]
+   }
+  },
+  "Garfield": {
+   "idField": "account",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 2916,
+    "OGR_FID": 2950,
+    "parcelid": "0000-22-20N-08W-4-100-00",
+    "shape_leng": 0,
+    "cal_area": 0,
+    "account": "240034656",
+    "taxarea": 13,
+    "ownername": "MONSEES, PATRICIA C  TRUST",
+    "address1": " ",
+    "address2": "2215 W FORREST AVE",
+    "citystate": "ENID OK",
+    "zipcode": "73703-0000",
+    "situs": " ",
+    "propclass": "RA",
+    "sizetype": "Acres",
+    "lotsize": 80,
+    "landvalue": 18630,
+    "imprvalue": 0,
+    "mobhvalue": 0,
+    "totalvalue": 18630,
+    "capflag": 0,
+    "capland": 18630,
+    "capimpr": 0,
+    "capmobh": 0,
+    "totalcap": 18630,
+    "taxable": 0,
+    "bookpage": "2336-0588",
+    "grantor": "TAYLOR FAMILY TRUST",
+    "saledate": "05/04/2017",
+    "legal": "N/2 OF SE/4 22-20-8 Acres-80 sd-R85 COMB UNDIV INT 6-17",
+    "label": "MONSEES,",
+    "nbhd": "1085.2",
+    "viarea": "2",
+    "city": "ENID",
+    "state": "OK",
+    "Hyperlink": "https://property.spatialest.com/ok/garfield#/property/240034656",
+    "CreationDate": 1792071842318,
+    "Creator": "jnickel_Enid",
+    "EditDate": 1792071842318,
+    "Editor": "jnickel_Enid",
+    "Shape__Area": 3474666.3994140625,
+    "Shape__Length": 7901.998546130178
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
      -98.105,
      36.163,
      -97.458,
      36.595
+    ]
+   }
+  },
+  "Garvin": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Garvin",
+    "accountnumber": 688280,
+    "parcelid": "250012312",
+    "owner": "PARKER, TODD",
+    "deedbook": "1999",
+    "deedpage": "913",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 8,
+    "schooldistrict": "I9 Lindsay",
+    "acres": 468.24,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Garvin_688280",
+    "trs": "04N-04W-19",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-05-18T05:00:00Z",
+    "shape_length": 0.0738387463209605,
+    "shape_area": 0.000190272275064308
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -97.671,
+     34.513,
+     -96.925,
+     34.869
+    ]
+   }
+  },
+  "Grady": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Grady",
+    "accountnumber": 711591,
+    "parcelid": "0000-10-09N-05W-3-001-00",
+    "owner": "HILL, JEFF  A/K/A JEFFREY LYNN HILL",
+    "deedbook": "2817",
+    "deedpage": "314",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "95 BRDGCK RURAL",
+    "acres": 145.81,
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Grady_711591",
+    "trs": "09N-05W-10",
+    "dataupdate": "2026-08-02T05:00:00Z",
+    "shapeupdate": "2026-08-02T05:00:00Z",
+    "shape_length": 0.0379462868028095,
+    "shape_area": 0.00005841290571042
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -98.091,
+     34.684,
+     -97.669,
+     35.378
+    ]
+   }
+  },
+  "Grant": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Grant",
+    "accountnumber": 738878,
+    "parcelid": "270005541",
+    "owner": "MAXSON, M E FARMS, LLC",
+    "deedbook": "794",
+    "deedpage": "606",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "54B-Medford",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Grant_738878",
+    "trs": "29N-07W-36",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-04-19T05:00:00Z",
+    "shape_length": 0.0325754349779118,
+    "shape_area": 0.0000654732697561807
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -98.108,
+     36.592,
+     -97.459,
+     36.999
+    ]
+   }
+  },
+  "Greer": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Greer",
+    "accountnumber": 745125,
+    "parcelid": "280003070",
+    "owner": "HAMILTON, KENNETH DWAIN",
+    "deedbook": "217",
+    "deedpage": "767",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 4,
+    "schooldistrict": "Mangum Rural",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Greer_745125",
+    "trs": "007-024-22",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0319129659359516,
+    "shape_area": 0.0000630775995115211
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -99.888,
+     34.723,
+     -99.242,
+     35.117
+    ]
+   }
+  },
+  "Harmon": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Harmon",
+    "accountnumber": 2523284,
+    "parcelid": "290002883",
+    "owner": "EARLS, JOHN ALEXANDER (ETUX)",
+    "deedbook": "314",
+    "deedpage": "476",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "R-66-Hollis",
+    "acres": 120,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Harmon_2523284",
+    "trs": "06N-26W-35",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-04-19T05:00:00Z",
+    "shape_length": 0.0321496960458271,
+    "shape_area": 0.0000479566269093152
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -99.999,
+     34.502,
+     -99.658,
+     35.031
+    ]
+   }
+  },
+  "Harper": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Harper",
+    "accountnumber": 754577,
+    "parcelid": "300000947",
+    "owner": "HOFFMAN, DOROTHY SUE (TRUST) % BK OF OK ATTN: RPS",
+    "deedbook": "555",
+    "deedpage": "345",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "4R-BUFFALO",
+    "acres": 320,
+    "community": "BUFFALO",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Harper_754577",
+    "trs": "26N-20W-8",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-07-26T05:00:00Z",
+    "shape_length": 0.0500889226599483,
+    "shape_area": 0.000129706414794167
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -100.006,
+     36.594,
+     -99.286,
+     36.996
+    ]
+   }
+  },
+  "Haskell": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Haskell",
+    "accountnumber": 767607,
+    "parcelid": "310006486",
+    "owner": "SHORT, DEBORAH F",
+    "deedbook": "678",
+    "deedpage": "160",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "SD43 Rural",
+    "acres": 20,
+    "community": "KEOTA",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Haskell_767607",
+    "trs": "10N-22E-34",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0116844167425886,
+    "shape_area": 0.00000804264544554304
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -95.454,
+     35.066,
+     -94.807,
+     35.469
+    ]
+   }
+  },
+  "Hughes": {
+   "idField": "PARCEL_ID",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 22702,
+    "PARCEL_ID": "320002114",
+    "OWNER": "HF1 LANDCO LLC",
+    "STATUS": "NO INFORMATION",
+    "CALC_ACREA": 268.7068275,
+    "NOTES": " ",
+    "SITUS": "3925 N 372 RD",
+    "SITUS_CITY": "HOLDENVILLE",
+    "ZIP_CODE": "74848",
+    "COUNTY_NAM": "Hughes",
+    "M_STATENM": "TN",
+    "LEGAL_DSC1": "0000-07-006-009-0-005-01 -  SENE & SW LYING S & E OF LITTLE RIVER & SE LESS 1.93A SECTION 7-6-9 767-763 786-411 962-83 1107-740 1393-529 1393-531 1556-647 7/25/23\t",
+    "ALT_ID_2": "0000-07-006-009-0-005-01",
+    "SEC_TWP_RA": "7-6N-9E",
+    "GlobalID": "8760a2e3-7055-4f67-bb51-2557508bfed1",
+    "CreationDa": 1721606400000,
+    "Creator": "lori_mendoza",
+    "EditDate": 1721606400000,
+    "Editor": "lori_mendoza",
+    "Shape__Area": 1624456.10546875,
+    "Shape__Length": 7634.8062052742025,
+    "GlobalID_2": "e02ba57b-9790-4f52-9474-c4ad727ad108"
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -96.491,
+     34.767,
+     -95.981,
+     35.29
+    ]
+   }
+  },
+  "Jackson": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Jackson",
+    "accountnumber": 787378,
+    "parcelid": "330001120",
+    "owner": "HUNTER,METTIE A. TRUSTEE",
+    "deedbook": "263",
+    "deedpage": "196",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "18 Altus",
+    "acres": 95,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Jackson_787378",
+    "trs": "01S-20W-1",
+    "dataupdate": "2026-07-03T05:00:00Z",
+    "shapeupdate": "2025-10-07T05:00:00Z",
+    "shape_length": 0.02477246073537,
+    "shape_area": 0.0000374071069490637
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -99.83,
+     34.332,
+     -99.045,
+     34.856
+    ]
+   }
+  },
+  "Jefferson": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Jefferson",
+    "accountnumber": 806918,
+    "parcelid": "340001230",
+    "owner": "JONES THOMAS H ETUX",
+    "deedbook": "698",
+    "deedpage": "649",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "14B Ringling",
+    "acres": 119.27,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Jefferson_806918",
+    "trs": "004-005-34",
+    "dataupdate": "2025-02-02T06:00:00Z",
+    "shapeupdate": "2024-10-13T05:00:00Z",
+    "shape_length": 0.0302156243659053,
+    "shape_area": 0.0000469484540631974
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 2,
+    "extent": [
+     -98.138,
+     33.855,
+     -97.523,
+     34.294
+    ]
+   }
+  },
+  "Johnston": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Johnston",
+    "accountnumber": 816151,
+    "parcelid": "350001959",
+    "owner": "HAT 6 RANCH, L.L.C. ",
+    "deedbook": "169",
+    "deedpage": "910",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 1,
+    "miscbldgcnt": 12,
+    "schooldistrict": "I-20 Rural ",
+    "acres": 467.73,
+    "community": "I-20 Rural ",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Johnston_816151",
+    "trs": "03S-06E-9",
+    "dataupdate": "2026-08-02T05:00:00Z",
+    "shapeupdate": "2026-08-02T05:00:00Z",
+    "shape_length": 0.0720856342565076,
+    "shape_area": 0.000186761296495642
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -96.928,
+     34.122,
+     -96.404,
+     34.516
+    ]
+   }
+  },
+  "Kay": {
+   "idField": "account",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 9948,
+    "OGR_FID": 10037,
+    "parcelid": "8600-30-026-02W-1-002-00",
+    "account": "360027248",
+    "taxarea": 112,
+    "ownername": "HOHMANN, KYLE J  NANCY D",
+    "address1": " ",
+    "address2": "2917 KELLY RD",
+    "citystate": "ENID OK",
+    "zipcode": "73703-0000",
+    "situs": " ",
+    "propclass": "RA",
+    "sizetype": "Acres",
+    "lotsize": 80,
+    "landvalue": 28183,
+    "imprvalue": 0,
+    "mobhvalue": 0,
+    "totalvalue": 28183,
+    "capflag": 0,
+    "capland": 28183,
+    "capimpr": 0,
+    "capmobh": 0,
+    "totalcap": 28183,
+    "taxable": 0,
+    "bookpage": "1954-0655",
+    "grantor": "HOHMANN, KYLE J  NANCY D",
+    "saledate": "01/15/2024",
+    "legal": "CARLISLE TWP 30- 26- 2W W/2 NE/4",
+    "label": "HOHMANN K",
+    "nbhd": 1005,
+    "nbhddes": "South",
+    "viarea": "1",
+    "city": "ENID",
+    "state": "OK",
+    "yearbuilt": 0,
+    "Shape__Area": 498986.50390625,
+    "Shape__Length": 2991.2397973532984
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -97.463,
+     36.594,
+     -96.75,
+     36.999
+    ]
+   }
+  },
+  "Kingfisher": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Kingfisher",
+    "accountnumber": 861980,
+    "parcelid": "370005468",
+    "owner": "COPELAND,VALLETA REVOCABLE GRANTOR TRUST",
+    "deedbook": "2496",
+    "deedpage": "28",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 1,
+    "schooldistrict": "I94-Mar-Cov",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Kingfisher_861980",
+    "trs": "19N-05W-13",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-01-24T06:00:00Z",
+    "shape_length": 0.0323544571624761,
+    "shape_area": 0.0000646776065136944
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -98.211,
+     35.728,
+     -97.669,
+     36.171
+    ]
+   }
+  },
+  "Kiowa": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Kiowa",
+    "accountnumber": 872854,
+    "parcelid": "380003801",
+    "owner": "LESTER, BARBARA",
+    "deedbook": "650",
+    "deedpage": "64",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 1,
+    "schooldistrict": "Mt View-R",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Kiowa_872854",
+    "trs": "06N-16W-30",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-07-26T05:00:00Z",
+    "shape_length": 0.0320412933641784,
+    "shape_area": 0.0000635234338340452
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -99.402,
+     34.594,
+     -98.614,
+     35.12
+    ]
+   }
+  },
+  "Latimer": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Latimer",
+    "accountnumber": 2747059,
+    "parcelid": "390004856",
+    "owner": "IVEY JR, HUBERT & RENA",
+    "deedbook": "600",
+    "deedpage": "466",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 1,
+    "schooldistrict": "C-4 PANOLA",
+    "acres": 297.7,
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Latimer_2747059",
+    "trs": "05N-20E-6",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.059505631361374,
+    "shape_area": 0.000118908196594959
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 2,
+    "extent": [
+     -95.514,
+     34.686,
+     -94.925,
+     35.067
+    ]
+   }
+  },
+  "Le Flore": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "LeFlore",
+    "accountnumber": 2548359,
+    "parcelid": "400062417",
+    "owner": "NICHOLS FAMILY TRUST & NICHOLS, PAUL",
+    "deedbook": "2238",
+    "deedpage": "20",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 6,
+    "schooldistrict": "I-29 Rural",
+    "acres": 100,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_LeFlore_2548359",
+    "trs": "07N-27E-31",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0292841124335401,
+    "shape_area": 0.0000398881803194667
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -95.055,
+     34.509,
+     -94.428,
+     35.401
+    ]
+   }
+  },
+  "Lincoln": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Lincoln",
+    "accountnumber": 2689808,
+    "parcelid": "0000-16-13N-03E-3-002-00",
+    "owner": "SCHOOL LAND",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "WHITEROCK RURAL",
+    "acres": 318.54,
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Lincoln_2689808",
+    "trs": "13N-03E-16",
+    "dataupdate": "2026-05-03T05:00:00Z",
+    "shapeupdate": "2025-12-29T06:00:00Z",
+    "shape_length": 0.0500243584099282,
+    "shape_area": 0.000128587326187604
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -97.141,
+     35.469,
+     -96.616,
+     35.948
+    ]
+   }
+  },
+  "Logan": {
+   "idField": "ACCOUNT",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 18994,
+    "PARCELNUM": "14128",
+    "AREA": 6721716.669125555,
+    "ACRES": 154.31,
+    "APARCELID": "a420014128",
+    "PARCELID": "251110-000000-000000",
+    "ACCOUNT": "420014128",
+    "OWNERNAME": "HARMAN, CHRIS DALE",
+    "TAXAREA": "17",
+    "LANDVALUE": "23089",
+    "IMPRVALUE": "16900",
+    "MOBHVALUE": "0",
+    "LOTMODELID": "0",
+    "LABEL": " ",
+    "SALEPRICE": "0",
+    "SALEDATE": "12/17/2018",
+    "Shape__Area": 957739.3359375,
+    "Shape__Length": 3972.2531849881702
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -97.676,
+     35.724,
+     -97.14,
+     36.165
+    ]
+   }
+  },
+  "Love": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Love",
+    "accountnumber": 989908,
+    "parcelid": "430001770",
+    "owner": "HOFFMANN, CARL WILLIAM III ETAL",
+    "deedbook": "553",
+    "deedpage": "574",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-14 Ringling",
+    "acres": 620,
+    "community": "ORR",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Love_989908",
+    "trs": "06S-03W-24",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0710160654446299,
+    "shape_area": 0.000244167129575766
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -97.556,
+     33.726,
+     -96.93,
+     34.075
+    ]
+   }
+  },
+  "Major": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Major",
+    "accountnumber": 1004826,
+    "parcelid": "470004205",
+    "owner": "HAWORTH, JOHN A.",
+    "deedbook": "427",
+    "deedpage": "383",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-1 Ringwood",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Major_1004826",
+    "trs": "22N-11W-12",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0324942053535639,
+    "shape_area": 0.0000652285350757831
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -98.957,
+     36.164,
+     -98.102,
+     36.506
+    ]
+   }
+  },
+  "Marshall": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Marshall",
+    "accountnumber": 1009493,
+    "parcelid": "480000071",
+    "owner": "LITTLE, DAN V. & PRUDENCE",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-2 Madill",
+    "acres": 320,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Marshall_1009493",
+    "trs": "04S-04E-34",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-05-18T05:00:00Z",
+    "shape_length": 0.0724419502629701,
+    "shape_area": 0.000126011946661898
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -96.97,
+     33.832,
+     -96.548,
+     34.184
+    ]
+   }
+  },
+  "Mayes": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Mayes",
+    "accountnumber": 1035667,
+    "parcelid": "490010509",
+    "owner": "GILMORE, JOE A & LINDA TRUST",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 5,
+    "schooldistrict": "Big Cabin Rural",
+    "acres": 39.29,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Mayes_1035667",
+    "trs": "23N-20E-3",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-05-18T05:00:00Z",
+    "shape_length": 0.016011346458489,
+    "shape_area": 0.0000158210603259155
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -95.441,
+     36.08,
+     -95.013,
+     36.519
     ]
    }
   },
@@ -318,6 +1798,111 @@
     ]
    }
   },
+  "McCurtain": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "McCurtain",
+    "accountnumber": 1095402,
+    "parcelid": "450017637",
+    "owner": "ADCOCK, MICHAEL",
+    "deedbook": "1267",
+    "deedpage": "546",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-6 Haworth Rural",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_McCurtain_1095402",
+    "trs": "10S-26E-12",
+    "dataupdate": "2026-10-03T05:00:00Z",
+    "shapeupdate": "2026-10-03T05:00:00Z",
+    "shape_length": 0.0405464634349166,
+    "shape_area": 0.0000629882135052558
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 2,
+    "extent": [
+     -95.158,
+     33.621,
+     -94.452,
+     34.511
+    ]
+   }
+  },
+  "McIntosh": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "McIntosh",
+    "accountnumber": 1118016,
+    "parcelid": "460034805",
+    "owner": "POTTS, ALVIN, DELORIS, CLINTON & LADONNA WARD",
+    "deedbook": "1177",
+    "deedpage": "418",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 1,
+    "miscbldgcnt": 2,
+    "schooldistrict": "CHECOTAH RURAL",
+    "acres": 30,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_McIntosh_1118016",
+    "trs": "12N-16E-21",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0154444788266049,
+    "shape_area": 0.0000122060380225928
+   },
+   "measured": {
+    "hits": 7,
+    "edgeHits": 4,
+    "extent": [
+     -95.977,
+     35.15,
+     -95.34,
+     35.563
+    ]
+   }
+  },
+  "Murray": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Murray",
+    "accountnumber": 1140311,
+    "parcelid": "500002928",
+    "owner": "PLATT NATIONAL PARK",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "1 SULPHUR-RURAL",
+    "acres": 261.75,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Murray_1140311",
+    "trs": "01S-03E-2",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-04-20T05:00:00Z",
+    "shape_length": 0.0721982947500321,
+    "shape_area": 0.000107458489804037
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -97.352,
+     34.336,
+     -96.82,
+     34.647
+    ]
+   }
+  },
   "Muskogee": {
    "idField": "ParcelId",
    "expectOwner": true,
@@ -361,7 +1946,7 @@
     "PubDate": 1707696000000,
     "NatCooSys": " ",
     "Shape_Leng": 0.0323528872227,
-    "Shape_Area": 4.8535710803e-05,
+    "Shape_Area": 0.000048535710803,
     "Shape__Area": 739902.9140625,
     "Shape__Length": 3972.9199228882035
    },
@@ -373,6 +1958,210 @@
      35.264,
      -95.051,
      35.857
+    ]
+   }
+  },
+  "Noble": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Noble",
+    "accountnumber": 1202993,
+    "parcelid": "520003240",
+    "owner": "HONEYWELL MARY S %KIRBY REIM",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 2,
+    "schooldistrict": "I-2 Billings RL",
+    "acres": 160,
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Noble_1202993",
+    "trs": "22N-02W-16",
+    "dataupdate": "2026-08-02T05:00:00Z",
+    "shapeupdate": "2025-01-05T06:00:00Z",
+    "shape_length": 0.0323432045086423,
+    "shape_area": 0.0000646755122111816
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -97.459,
+     36.165,
+     -96.885,
+     36.606
+    ]
+   }
+  },
+  "Nowata": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Nowata",
+    "accountnumber": 1213202,
+    "parcelid": "530003041",
+    "owner": "MCCLELLAN, M A JR",
+    "deedbook": "694",
+    "deedpage": "83",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-3 Rural",
+    "acres": 310,
+    "community": "ALLUWE",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Nowata_1213202",
+    "trs": "27N-17E-30",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-08-15T05:00:00Z",
+    "shape_length": 0.0515535430545915,
+    "shape_area": 0.000126700652123293
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -95.818,
+     36.603,
+     -95.406,
+     37.001
+    ]
+   }
+  },
+  "Okfuskee": {
+   "idField": "PARCEL_ID",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 40627,
+    "PARCEL_ID": "0000-20-013-008-0-007-00",
+    "OWNER": "SMITH HARRY ET AL",
+    "STATUS": "NO INFORMATION",
+    "CALC_ACREA": 39.9679806422,
+    "NOTES": " ",
+    "SITUS": "98121 N 3670 RD",
+    "SITUS_CITY": "BOLEY",
+    "ZIP_CODE": "74860",
+    "COUNTY_NAM": "Okfuskee",
+    "M_STATENM": "OK",
+    "LEGAL_DSC1": "0000-20-013-008-0-007-00 -  NE SE 20-13-8 CREEK TWP. 1997 SKYLIN 16 X 76 VIN#8D510127J OTC#210196284004C",
+    "ALT_ID_2": "0000-20-013-008-0-007-00",
+    "SEC_TWP_RA": "20-13N-8E",
+    "GlobalID": "54d7b212-50e7-4521-8b8f-01c07279d0c4",
+    "CreationDa": 1721606400000,
+    "Creator": "lori_mendoza",
+    "EditDate": 1721606400000,
+    "Editor": "lori_mendoza",
+    "Shape__Area": 245093.40625,
+    "Shape__Length": 1980.2946471044024,
+    "GlobalID_2": "ed99ccdf-c012-46c8-9cf5-0b0c9b37a02f"
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -96.625,
+     35.29,
+     -95.982,
+     35.639
+    ]
+   }
+  },
+  "Okmulgee": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Okmulgee",
+    "accountnumber": 1551797,
+    "parcelid": "560041034",
+    "owner": "EICHENBAUM, MARTHA DAVIS ETAL",
+    "deedbook": "2272",
+    "deedpage": "878",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-7 Rural Wilson",
+    "acres": 35.1,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Okmulgee_1551797",
+    "trs": "13N-12E-33",
+    "dataupdate": "2026-08-09T05:00:00Z",
+    "shapeupdate": "2026-08-09T05:00:00Z",
+    "shape_length": 0.0207674812323243,
+    "shape_area": 0.0000139822194745388
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -96.185,
+     35.384,
+     -95.707,
+     35.863
+    ]
+   }
+  },
+  "Osage": {
+   "idField": "ParcelId",
+   "expectOwner": true,
+   "attrs": {
+    "OBJECTID": 34764,
+    "FID_1": "34764",
+    "CountyFips": "40113",
+    "county_id": "113-35-24-10-00050",
+    "ParcelId": "35-24-10-00050",
+    "ParcelLgl": "35-24-10 NE NE & N/2 NW LESS 19.96AC USA, SE LESS 40.15AC USA,\r\nS/2 NE LESS 16.17AC, S/2 NW, NW NE LESS 2.09AC USA",
+    "SourceRef": "1447-704",
+    "SourceDate": 1302156000000,
+    "OwnerName": "DRUMMOND RANCH LLC",
+    "MailingAdd": "1409 S. MAIN ST.  TULSA OK 74119",
+    "MailingAd1": "1409 S. MAIN ST.",
+    "MailingAd2": " ",
+    "MailingCty": "TULSA",
+    "MailingSt": "OK",
+    "MailingZip": "74119",
+    "AdrNum": 0,
+    "PreDir": " ",
+    "PstrNam": " ",
+    "PstrType": " ",
+    "PsufDir": " ",
+    "AdrCity": " ",
+    "AdrZip5": 0,
+    "AdrLabel": " ",
+    "ParcelType": "AV",
+    "AssesValue": 2606,
+    "ImpValue": 0,
+    "LandValue": 21720,
+    "TotalValue": 21720,
+    "Subdivisio": "35-24-10 RURAL",
+    "NBHD": " ",
+    "Section": 35,
+    "Township": "24N",
+    "Range": "10E",
+    "STR": "35-24N-10E",
+    "TaxCode": "11329",
+    "TaxArea": 401.63,
+    "CAMAKey": 570033977,
+    "CAMAProv": "ACT",
+    "County": "Osage",
+    "DataProv": "DataScout OneMap",
+    "CAMADate": 1788933600000,
+    "PubDate": 1789365600000,
+    "NatCooSys": " ",
+    "Shape.STArea()": 0.00016085373865847464,
+    "Shape.STLength()": 0.06953235396585179,
+    "ParcelId2": " "
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -97.064,
+     36.161,
+     -95.969,
+     36.999
     ]
    }
   },
@@ -428,7 +2217,42 @@
      -95.037,
      36.668,
      -94.618,
-     37.0
+     37
+    ]
+   }
+  },
+  "Pawnee": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Pawnee",
+    "accountnumber": 1644817,
+    "parcelid": "590004278",
+    "owner": "STATE LAND",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-6 RURAL",
+    "acres": 158.44,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Pawnee_1644817",
+    "trs": "21N-07E-33",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-08-15T05:00:00Z",
+    "shape_length": 0.0337777559317194,
+    "shape_area": 0.0000636455779233096
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -97.032,
+     36.167,
+     -96.247,
+     36.564
     ]
    }
   },
@@ -562,6 +2386,146 @@
     ]
    }
   },
+  "Pontotoc": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Pontotoc",
+    "accountnumber": 1744354,
+    "parcelid": "620004846",
+    "owner": "HUNTER, JACKIE D. & CYNTHIA C.",
+    "deedbook": "3687",
+    "deedpage": "77",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-9 Vanoss Rural",
+    "acres": 80,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Pontotoc_1744354",
+    "trs": "004-004-17",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0234269346701547,
+    "shape_area": 0.0000323747744782609
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 2,
+    "extent": [
+     -96.929,
+     34.515,
+     -96.4,
+     34.969
+    ]
+   }
+  },
+  "Pottawatomie": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Pottawatomie",
+    "accountnumber": 1766536,
+    "parcelid": "630002660",
+    "owner": "TOOLEY JAMES E",
+    "deedbook": "2741",
+    "deedpage": "313",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "Jt-4S StLouis",
+    "acres": 80,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Pottawatomie_1766536",
+    "trs": "007-004-33",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-04-20T05:00:00Z",
+    "shape_length": 0.0231605328581799,
+    "shape_area": 0.0000315082033115756
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -97.141,
+     34.909,
+     -96.617,
+     35.47
+    ]
+   }
+  },
+  "Pushmataha": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Pushmataha",
+    "accountnumber": 1813422,
+    "parcelid": "640008049",
+    "owner": "JACKSON RANCH COMPANY LLC",
+    "deedbook": "349",
+    "deedpage": "152",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "#13 Antlers Rural",
+    "acres": 640,
+    "community": "BROKEN BOW",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Pushmataha_1813422",
+    "trs": "03S-17E-34",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-06-29T05:00:00Z",
+    "shape_length": 0.0639655566985849,
+    "shape_area": 0.000253349029301298
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -95.783,
+     34.159,
+     -94.937,
+     34.69
+    ]
+   }
+  },
+  "Roger Mills": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Roger Mills",
+    "accountnumber": 1822520,
+    "parcelid": "650001956",
+    "owner": "JAMES,M DARLENE REV TRS-TRSTE JAMES,JOHN P REV TRS-TRSTEE",
+    "deedbook": "2273",
+    "deedpage": "368",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I-7 CHEYENNE-RURAL",
+    "acres": 40,
+    "community": "RURAL",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Roger Mills_1822520",
+    "trs": "13N-23W-3",
+    "dataupdate": "2026-09-26T05:00:00Z",
+    "shapeupdate": "2026-09-26T05:00:00Z",
+    "shape_length": 0.0161517322024986,
+    "shape_area": 0.000016129265871781
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -100,
+     35.425,
+     -99.359,
+     36.015
+    ]
+   }
+  },
   "Rogers": {
    "idField": "ACCOUNT",
    "expectOwner": true,
@@ -594,6 +2558,183 @@
      36.07,
      -95.325,
      36.607
+    ]
+   }
+  },
+  "Seminole": {
+   "idField": "PARCEL_ID",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 10178,
+    "PARCEL_ID": "0000-11-008-006-2-085-00",
+    "OWNER": "DRUMWRIGHT DALE ETUX",
+    "STATUS": "NO INFORMATION",
+    "CALC_ACREA": 80.1536424961,
+    "NOTES": " ",
+    "SITUS": " ",
+    "SITUS_CITY": " ",
+    "ZIP_CODE": "74868",
+    "COUNTY_NAM": "Seminole",
+    "M_STATENM": "OK",
+    "LEGAL_DSC1": "0000-11-008-006-2-085-00 -  WOLF TWP 11-8-6 SW NW & SE NW TOTAL 80.00 AC M/L",
+    "ALT_ID_2": "0000-11-008-006-2-085-00",
+    "SEC_TWP_RA": "11-8N-6E",
+    "GlobalID": "003aae4c-84f9-49b6-9db8-336f94ba16a3",
+    "CreationDa": 1721606400000,
+    "Creator": "lori_mendoza",
+    "EditDate": 1721606400000,
+    "Editor": "lori_mendoza",
+    "Shape__Area": 486673.9765625,
+    "Shape__Length": 2956.056626789115,
+    "GlobalID_2": "88178774-c4c8-46eb-9ade-7334673d60a7"
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -96.777,
+     34.857,
+     -96.441,
+     35.467
+    ]
+   }
+  },
+  "Sequoyah": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Sequoyah",
+    "accountnumber": 1897035,
+    "parcelid": "680001239",
+    "owner": "U.S.A. GOVERNMENT LAND",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "I- 2 Rural",
+    "acres": 630,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Sequoyah_1897035",
+    "trs": "011-022-9",
+    "dataupdate": "2026-02-14T06:00:00Z",
+    "shapeupdate": "2025-01-01T06:00:00Z",
+    "shape_length": 0.0646575093849456,
+    "shape_area": 0.000254774838092242
+   },
+   "measured": {
+    "hits": 7,
+    "edgeHits": 3,
+    "extent": [
+     -95.129,
+     35.282,
+     -94.428,
+     35.648
+    ]
+   }
+  },
+  "Stephens": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Stephens",
+    "accountnumber": 1933416,
+    "parcelid": "690006048",
+    "owner": "MCCASLAND FARMS INC",
+    "deedbook": "",
+    "deedpage": "",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 2,
+    "acres": 230,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Stephens_1933416",
+    "trs": "02N-06W-17",
+    "dataupdate": "2026-08-15T05:00:00Z",
+    "shapeupdate": "2026-08-15T05:00:00Z",
+    "shape_length": 0.0444514422146627,
+    "shape_area": 0.0000914374637487254
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -98.146,
+     34.294,
+     -97.557,
+     34.687
+    ]
+   }
+  },
+  "Texas": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Texas",
+    "accountnumber": 1968947,
+    "parcelid": "700013189",
+    "owner": "ALBRIGHT, VELMA PLILEY IRR FAMILY TRUST DATED AUGUST 7, 1982 JAMES PLILEY",
+    "deedbook": "1515",
+    "deedpage": "23",
+    "combldgcnt": 0,
+    "resibldgcnt": 1,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 3,
+    "schooldistrict": "SD 23 RURAL",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Texas_1968947",
+    "trs": "05N-18E-28",
+    "dataupdate": "2026-05-03T05:00:00Z",
+    "shapeupdate": "2025-05-17T05:00:00Z",
+    "shape_length": 0.0325169291738522,
+    "shape_area": 0.000065297319947406
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 4,
+    "extent": [
+     -102.034,
+     36.488,
+     -100.95,
+     36.998
+    ]
+   }
+  },
+  "Tillman": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Tillman",
+    "accountnumber": 1978503,
+    "parcelid": "710003427",
+    "owner": "HASENMYER, DAVID MICHAEL & MARY ELIZABETH",
+    "deedbook": "1226",
+    "deedpage": "149",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "132-Chattanooga",
+    "acres": 160,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Tillman_1978503",
+    "trs": "03S-16W-23",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-08-02T05:00:00Z",
+    "shape_length": 0.0318374957860869,
+    "shape_area": 0.0000628687151645353
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -99.234,
+     34.131,
+     -98.605,
+     34.639
     ]
    }
   },
@@ -675,6 +2816,131 @@
      36.423,
      -95.787,
      36.999
+    ]
+   }
+  },
+  "Washita": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Washita",
+    "accountnumber": 2336709,
+    "parcelid": "750004015",
+    "owner": "JAVORSKY, KEITH & RACQUEL JOINT REV LIVING TRUST",
+    "deedbook": "1382",
+    "deedpage": "173",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "#78 Cordell",
+    "acres": 320,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Washita_2336709",
+    "trs": "010-017-8",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-07-26T05:00:00Z",
+    "shape_length": 0.0464039196686614,
+    "shape_area": 0.000126968343690097
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -99.358,
+     35.101,
+     -98.614,
+     35.47
+    ]
+   }
+  },
+  "Woods": {
+   "idField": "parcelid",
+   "expectOwner": true,
+   "attrs": {
+    "county": "Woods",
+    "accountnumber": 2345230,
+    "parcelid": "760000407",
+    "owner": "STAIRSTEP FARMS LLC",
+    "deedbook": "825",
+    "deedpage": "403",
+    "combldgcnt": 0,
+    "resibldgcnt": 0,
+    "mohobldgcnt": 0,
+    "miscbldgcnt": 0,
+    "schooldistrict": "DIST I-3",
+    "acres": 280,
+    "community": "",
+    "iproplogiclink": "https://www.iproplogic.com/#!/parcel/OK_Woods_2345230",
+    "trs": "23N-15W-15",
+    "dataupdate": "2026-07-26T05:00:00Z",
+    "shapeupdate": "2026-01-25T06:00:00Z",
+    "shape_length": 0.0470451090909931,
+    "shape_area": 0.000114451420506466
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 3,
+    "extent": [
+     -99.437,
+     36.393,
+     -98.528,
+     36.999
+    ]
+   }
+  },
+  "Woodward": {
+   "idField": "account",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 6622,
+    "OGR_FID": 6319,
+    "parcelid": "0000-22-23N-18W-1-100-00",
+    "shape_leng": 0,
+    "shape_area": 0,
+    "cal_area": 0,
+    "account": "770004007",
+    "taxarea": 8,
+    "ownername": "PATTON,ASHLEY NIKOLE",
+    "address1": " ",
+    "address2": "PO BOX 676",
+    "citystate": "MOORELAND OK",
+    "zipcode": "73852-0000",
+    "situs": "22231811",
+    "propclass": "RA",
+    "sizetype": "Acres",
+    "lotsize": 119,
+    "landvalue": 11094,
+    "imprvalue": 0,
+    "mobhvalue": 0,
+    "totalvalue": 11094,
+    "capflag": 0,
+    "capland": 11094,
+    "capimpr": 0,
+    "capmobh": 0,
+    "totalcap": 11094,
+    "taxable": 0,
+    "bookpage": "2598-0575",
+    "grantor": "PATTON,MARK",
+    "saledate": "09/05/2024",
+    "legal": "SEC. 22-23-18 119 AC N/2NE - NENW LESS 1 AC TRACT BEG AT PT ON SEC LINE 2531.01",
+    "label": "PATTON,A",
+    "nbhd": 802,
+    "viarea": "3",
+    "saleprice": " ",
+    "state": "OK",
+    "city": "MOORELAND",
+    "Shape__Area": 742705.49609375,
+    "Shape__Length": 4160.126374905372
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 2,
+    "extent": [
+     -99.606,
+     36.161,
+     -98.956,
+     36.805
     ]
    }
   }
