@@ -240,6 +240,9 @@ export const ALLOWED_HOSTS = new Set([
    * this relay before anything is wired to it (docs/STATEWIDE-PARCELS.md "Georgia counties"). Delete an entry whose county stays unwired. */
   "portal.segrass.org", // Coastal Regional Commission's newer server — Long County Property_Data / Long_Parcels (crcarcgis)
   "arcgis4.roktech.net", // ROK Technologies — Habersham County habersham_base (the AGOL 2014 items point here)
+  /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
+   * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
+  "gis.desotocountyms.gov", // DeSoto County MS GIS
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

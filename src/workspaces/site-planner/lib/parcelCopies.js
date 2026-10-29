@@ -146,8 +146,12 @@ export const PARCEL_COPIES = {
   ia_wright: ["Schneider Geospatial", null],
 
   // IL
+  il_alexander: ["U.S. Army Corps of Engineers", "2016"],
   il_bond: [null, "2026-10"],
   il_bureau: ["The Sidwell Company", "2024-07"],
+  il_cass: ["Menard Electric Cooperative", "2026-02"],
+  il_champaign: ["City of Champaign", "2025-01"],
+  il_clark: ["a county appraisal contractor", "2024-04"],
   il_clay: ["The Sidwell Company", "2024-02"],
   il_clinton: [null, "2025-02"],
   il_coles: [null, null],
@@ -164,6 +168,7 @@ export const PARCEL_COPIES = {
   il_henry: ["The Sidwell Company", "2026-10"],
   il_iroquois: [null, "2026-09"],
   il_jackson: [null, "2025-03"],
+  il_jasper: [null, "2026-10"],
   il_jefferson: ["The Sidwell Company", "2026-10"],
   il_johnson: [null, "2026-02"],
   il_knox: [null, null],
@@ -171,6 +176,7 @@ export const PARCEL_COPIES = {
   il_logan: ["Tri-County Regional Planning", "2026-10"],
   il_marion: [null, "2026-10"],
   il_marshall: ["The Sidwell Company", "2026-10"],
+  il_mason: ["Menard Electric Cooperative", "2026-02"],
   il_mcdonough: ["Western Illinois University GIS Center", null],
   il_mercer: [null, "2023-09"],
   il_moultrie: [null, null],
