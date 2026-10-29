@@ -1653,7 +1653,8 @@ export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
     if (!lyr || typeof lyr.identifyAt !== "function") continue;
     try {
       const hit = lyr.identifyAt(at);
-      if (hit) out.push({ id: k, layerLabel: cfg.label, ...hit });
+      // NEW-1 (DeSoto PSC): several layers may answer with the SAME card (one click → all four utility providers); a shared `dedupeKey` keeps one.
+      if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit });
     } catch (_) { /* one bad layer never breaks the identify */ }
     if (out.length >= limit) break;
   }

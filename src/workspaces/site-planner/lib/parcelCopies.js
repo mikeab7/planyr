@@ -43,12 +43,14 @@ export const PARCEL_COPIES = {
   ga_appling: ["Heart of Georgia Altamaha Regional Commission", "2026-07"],
   ga_atkinson: ["Southern Georgia Regional Commission", null],
   ga_benhill: ["Southern Georgia Regional Commission", null],
+  ga_berrien: ["Southern Georgia Regional Commission", null],
   ga_bleckley: ["Heart of Georgia Altamaha Regional Commission", "2025-09"],
   ga_brooks: ["Southern Georgia Regional Commission", null],
   ga_bulloch: [null, "2024-02"],
   ga_butts: [null, "2024-09"],
   ga_camden: [null, "2021-01"],
   ga_candler: ["Heart of Georgia Altamaha Regional Commission", "2026-01"],
+  ga_carroll: ["City of Carrollton", "2026-10"],
   ga_chattahoochee: ["River Valley Regional Commission", "2023-05"],
   ga_chattooga: ["a Georgia county appraisal contractor", "2025-09"],
   ga_coffee: ["Southern Georgia Regional Commission", null],
@@ -58,6 +60,7 @@ export const PARCEL_COPIES = {
   ga_decatur: [null, "2026-05"],
   ga_dodge: ["Heart of Georgia Altamaha Regional Commission", "2026-06"],
   ga_dougherty: [null, "2026-10"],
+  ga_early: ["Southwest Georgia Regional Commission", "2024-01"],
   ga_effingham: [null, "2024-10"],
   ga_elbert: ["Northeast Georgia Regional Commission", "2026-10"],
   ga_emanuel: [null, "2026-08"],
@@ -76,6 +79,7 @@ export const PARCEL_COPIES = {
   ga_lee: [null, "2022-07"],
   ga_lumpkin: [null, "2025-02"],
   ga_mcintosh: ["a Georgia county appraisal contractor", "2025-09"],
+  ga_macon: ["River Valley Regional Commission", "2018-12"],
   ga_montgomery: ["Heart of Georgia Altamaha Regional Commission", "2023-06"],
   ga_muscogee: [null, "2019-01"],
   ga_newton: ["a University of Maryland researcher", "2022-02"],
@@ -221,6 +225,7 @@ export const PARCEL_COPIES = {
   la_allen: ["DesireLine LLC", "2023-01"],
   la_ascension: ["Westwood (CSRS)", "2026-06"],
   la_assumption: ["Westwood (CSRS)", "2026-05"],
+  la_bienville: [null, "2021-05"],
   la_bossier: ["Northwest Louisiana Council of Governments", null],
   la_caddo: ["Northwest Louisiana Council of Governments", null],
   la_cameron: [null, "2023-03"],
@@ -240,6 +245,7 @@ export const PARCEL_COPIES = {
   la_stmary: ["St. Mary Parish levee district", null],
   la_tangipahoa: ["DesireLine LLC", "2026-09"],
   la_terrebonne: ["DesireLine LLC", "2026-03"],
+  la_vermilion: ["ES2", "2025-12"],
   la_webster: ["Northwest Louisiana Council of Governments", null],
   la_westcarroll: ["1803 Electric Cooperative", "2025-12"],
 
@@ -266,11 +272,11 @@ export const PARCEL_COPIES = {
   mi_vanburen: [null, "2026-06"],
 
   // MO
+  mo_cass: ["Mid-America Regional Council", "2025-09"],
   mo_platte: ["City of Parkville", "2026-09"],
   mo_taney: ["Taney County Regional Sewer District", "2026-10"],
 
   // MS
-  ms_desoto: ["ETR Business Development / Tristate Consulting", "2024-06"],
 
   // NM
   nm_bernalillo: ["City of Albuquerque AGIS", "2026-08"],
@@ -290,7 +296,9 @@ export const PARCEL_COPIES = {
 
   // OR
   or_lake: ["Klamath County GIS", "2021-07"],
+  or_sherman: ["Frontier Regional 911", "2026-07"],
   or_union: ["a shared eastern-Oregon county GIS org", "2022-09"],
+  or_wallowa: ["The Nature Conservancy", "2018"],
 
   // PA
   pa_armstrong: [null, "2026-10"],
@@ -298,6 +306,10 @@ export const PARCEL_COPIES = {
   pa_jefferson: ["North Central Pennsylvania regional planning commission", "2025-12"],
   pa_lehigh: [null, "2026-10"],
   pa_somerset: [null, "2026-10"],
+
+  // SD
+  sd_lake: ["Schneider Geospatial", null],
+  sd_meade: ["Schneider Geospatial", "2024"],
 
   // SC
   sc_greenville: [null, "2024-09"],

@@ -30,10 +30,9 @@ import { useEffect, useRef, useState } from "react";
 import { RADIUS, nestedIn } from "../../../shared/ui/radius.js";
 import { suggestPlaces } from "../lib/placeSuggest.js";
 import { buildPlaceRows, resolvePlaceEnter, resolvePlaceRowCommit } from "../lib/placeSuggestRows.js";
+import { useListboxNav, listboxRowStyle } from "../../../shared/ui/controls.jsx";
 
 const DEBOUNCE_MS = 250;
-
-function optionId(base, i) { return `${base}-opt-${i}`; }
 
 export default function PlaceSearchField({
   value, onChange, center, narrow, busy, placeholder, listboxZIndex = 1200,
@@ -43,7 +42,6 @@ export default function PlaceSearchField({
   const [results, setResults] = useState([]);
   // 'idle' (nothing fetched / empty box) | 'loading' | 'ready' (>=1 result) | 'nomatch' (reached, 0 hits) | 'unavailable' (reached nothing)
   const [status, setStatus] = useState("idle");
-  const [activeIndex, setActiveIndex] = useState(-1);
   const debounceRef = useRef(null);
   const abortRef = useRef(null);
   const reqTokRef = useRef(0);
@@ -67,14 +65,14 @@ export default function PlaceSearchField({
         if (tok !== reqTokRef.current) return; // superseded by a newer keystroke
         setResults(res.results);
         setStatus(res.results.length ? "ready" : (res.reachedAny ? "nomatch" : "unavailable"));
-        setActiveIndex(-1);
+        nav.reset();
       })
       .catch((e) => {
         if (e && e.name === "AbortError") return; // a newer request cancelled this one — not a failure
         if (tok !== reqTokRef.current) return;
         setResults([]);
         setStatus("unavailable");
-        setActiveIndex(-1);
+        nav.reset();
       });
   };
 
@@ -82,7 +80,7 @@ export default function PlaceSearchField({
     const v = e.target.value;
     onChange(v);
     cancelInFlight();
-    setActiveIndex(-1);
+    nav.reset();
     const q = v.trim();
     if (!q) { setOpen(false); setResults([]); setStatus("idle"); return; }
     setOpen(true);
@@ -100,44 +98,33 @@ export default function PlaceSearchField({
     else if (action.type === "raw") onCommitRaw && onCommitRaw(action.text);
     else if (action.type === "dropPin") onDropPinHere && onDropPinHere();
     setOpen(false);
-    setActiveIndex(-1);
+    nav.reset();
   };
+
+  // ONE shared list behaviour (shared/ui/controls.jsx (useListboxNav) — the same hook every suggestion list uses): Up/Down move a
+  // visible highlight, Enter on a highlighted row commits it exactly as a click would, Escape closes.
+  const nav = useListboxNav({
+    count: rows.length, open, setOpen, listboxId,
+    onCommit: (i) => { if (!busy) runAction(resolvePlaceRowCommit(rows[i])); },
+  });
+  const activeIndex = nav.activeIndex;
 
   const handleKeyDown = (e) => {
-    if (e.key === "ArrowDown") {
-      if (!rows.length) return;
-      e.preventDefault();
-      setOpen(true);
-      setActiveIndex((i) => (i + 1) % rows.length);
-    } else if (e.key === "ArrowUp") {
-      if (!rows.length) return;
-      e.preventDefault();
-      setOpen(true);
-      setActiveIndex((i) => (i <= 0 ? rows.length - 1 : i - 1));
-    } else if (e.key === "Enter") {
+    if (nav.onKeyDown(e)) return;
+    if (e.key === "Enter") {
       if (busy) return;
       e.preventDefault();
-      // (a) ENTER ALWAYS WORKS: an explicitly-highlighted row wins; otherwise it falls straight
-      // through to a raw-text commit, whether or not suggestions have arrived yet.
-      runAction(resolvePlaceEnter(rows, activeIndex, value));
-    } else if (e.key === "Escape") {
-      // The input's value is never rewritten by navigation, so closing IS restoring it.
-      setOpen(false);
-      setActiveIndex(-1);
+      // (a) ENTER ALWAYS WORKS: with nothing highlighted it falls straight through to a raw-text commit,
+      // whether or not suggestions have arrived yet.
+      runAction(resolvePlaceEnter(rows, -1, value));
     }
   };
-
-  const activeId = activeIndex >= 0 && activeIndex < rows.length ? optionId(listboxId, activeIndex) : undefined;
 
   return (
     <div style={{ position: "relative", flex: 1, minWidth: narrow ? 60 : 90, maxWidth: 300, height: "100%" }}>
       <input
         ref={inputRef}
-        role="combobox"
-        aria-expanded={open && rows.length > 0}
-        aria-controls={listboxId}
-        aria-activedescendant={activeId}
-        aria-autocomplete="list"
+        {...nav.inputProps}
         autoComplete="off"
         style={{
           width: "100%", height: "100%", boxSizing: "border-box",
@@ -180,19 +167,17 @@ export default function PlaceSearchField({
           )}
           {rows.map((row, i) => (
             <li key={row.kind === "result" ? `${row.hit.lat},${row.hit.lon},${row.hit.label}` : row.kind}
-              id={optionId(listboxId, i)} role="option" aria-selected={i === activeIndex}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setActiveIndex(i)}
+              {...nav.optionProps(i)}
               onClick={() => runAction(resolvePlaceRowCommit(row))}
               style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "7px 9px", cursor: "pointer",
                 borderRadius: nestedIn(RADIUS.lg, 4), fontSize: 12.5, color: "var(--chrome-text)",
-                background: i === activeIndex ? "var(--surface-raised)" : "transparent",
+                ...listboxRowStyle(i === activeIndex),
               }}
             >
               {row.kind === "result" && <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.hit.label}</span>}
               {row.kind === "parcelId" && <span style={{ flex: 1 }}>Find parcel ID <strong>{row.text}</strong> · Tennessee</span>}
-              {row.kind === "raw" && <span style={{ flex: 1, color: "var(--chrome-muted)" }}>Press ⏎ to search &ldquo;{row.text}&rdquo;</span>}
+              {row.kind === "raw" && <span style={{ flex: 1, color: i === activeIndex ? "inherit" : "var(--chrome-muted)" }}>Press ⏎ to search &ldquo;{row.text}&rdquo;</span>}
               {row.kind === "searchAnyway" && <span style={{ flex: 1 }}>Search anyway</span>}
               {row.kind === "dropPin" && <span style={{ flex: 1 }}>{dropPinLabel}</span>}
             </li>

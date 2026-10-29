@@ -1256,57 +1256,232 @@
    "county": "Ziebach County",
    "lat": 44.6605,
    "lng": -101.99994
+  },
+  {
+   "name": "Aurora County \u2014 a point near its county line",
+   "county": "Aurora County",
+   "lat": 43.87079,
+   "lng": -98.74179
+  },
+  {
+   "name": "Bennett County \u2014 a point near its county line",
+   "county": "Bennett County",
+   "lat": 43.04521,
+   "lng": -101.99171
+  },
+  {
+   "name": "Bon Homme County \u2014 a point near its county line",
+   "county": "Bon Homme County",
+   "lat": 42.82479,
+   "lng": -98.09186
+  },
+  {
+   "name": "Brule County \u2014 a point near its county line",
+   "county": "Brule County",
+   "lat": 43.56214,
+   "lng": -98.89371
+  },
+  {
+   "name": "Buffalo County \u2014 a point near its county line",
+   "county": "Buffalo County",
+   "lat": 44.16107,
+   "lng": -99.02221
+  },
+  {
+   "name": "Butte County \u2014 a point near its county line",
+   "county": "Butte County",
+   "lat": 44.66571,
+   "lng": -103.90314
+  },
+  {
+   "name": "Campbell County \u2014 a point near its county line",
+   "county": "Campbell County",
+   "lat": 45.89393,
+   "lng": -100.4015
+  },
+  {
+   "name": "Charles Mix County \u2014 a point near its county line",
+   "county": "Charles Mix County",
+   "lat": 42.93429,
+   "lng": -98.25214
+  },
+  {
+   "name": "Davison County \u2014 a point near its county line",
+   "county": "Davison County",
+   "lat": 43.54664,
+   "lng": -98.27886
+  },
+  {
+   "name": "Day County \u2014 a point near its county line",
+   "county": "Day County",
+   "lat": 45.2175,
+   "lng": -97.87743
+  },
+  {
+   "name": "Douglas County \u2014 a point near its county line",
+   "county": "Douglas County",
+   "lat": 43.45621,
+   "lng": -98.62743
+  },
+  {
+   "name": "Faulk County \u2014 a point near its county line",
+   "county": "Faulk County",
+   "lat": 44.943,
+   "lng": -99.45314
+  },
+  {
+   "name": "Gregory County \u2014 a point near its county line",
+   "county": "Gregory County",
+   "lat": 43.43086,
+   "lng": -99.38593
+  },
+  {
+   "name": "Haakon County \u2014 a point near its county line",
+   "county": "Haakon County",
+   "lat": 44.6415,
+   "lng": -101.18414
+  },
+  {
+   "name": "Hanson County \u2014 a point near its county line",
+   "county": "Hanson County",
+   "lat": 43.54664,
+   "lng": -97.91607
+  },
+  {
+   "name": "Hughes County \u2014 a point near its county line",
+   "county": "Hughes County",
+   "lat": 44.17071,
+   "lng": -99.74521
+  },
+  {
+   "name": "Hutchinson County \u2014 a point near its county line",
+   "county": "Hutchinson County",
+   "lat": 43.4505,
+   "lng": -97.5015
+  },
+  {
+   "name": "Jackson County \u2014 a point near its county line",
+   "county": "Jackson County",
+   "lat": 43.90943,
+   "lng": -101.22214
+  },
+  {
+   "name": "Jerauld County \u2014 a point near its county line",
+   "county": "Jerauld County",
+   "lat": 44.16107,
+   "lng": -98.84636
+  },
+  {
+   "name": "Jones County \u2014 a point near its county line",
+   "county": "Jones County",
+   "lat": 44.11129,
+   "lng": -100.96664
+  },
+  {
+   "name": "Lyman County \u2014 a point near its county line",
+   "county": "Lyman County",
+   "lat": 43.60564,
+   "lng": -99.44114
+  },
+  {
+   "name": "Marshall County \u2014 a point near its county line",
+   "county": "Marshall County",
+   "lat": 45.6125,
+   "lng": -97.87243
+  },
+  {
+   "name": "McPherson County \u2014 a point near its county line",
+   "county": "McPherson County",
+   "lat": 45.89343,
+   "lng": -98.8725
+  },
+  {
+   "name": "Mellette County \u2014 a point near its county line",
+   "county": "Mellette County",
+   "lat": 43.46129,
+   "lng": -101.0865
+  },
+  {
+   "name": "Potter County \u2014 a point near its county line",
+   "county": "Potter County",
+   "lat": 44.94743,
+   "lng": -99.69564
+  },
+  {
+   "name": "Sanborn County \u2014 a point near its county line",
+   "county": "Sanborn County",
+   "lat": 43.89457,
+   "lng": -98.26907
+  },
+  {
+   "name": "Stanley County \u2014 a point near its county line",
+   "county": "Stanley County",
+   "lat": 44.25993,
+   "lng": -100.99436
+  },
+  {
+   "name": "Sully County \u2014 a point near its county line",
+   "county": "Sully County",
+   "lat": 44.59836,
+   "lng": -99.82579
+  },
+  {
+   "name": "Todd County \u2014 a point near its county line",
+   "county": "Todd County",
+   "lat": 43.04521,
+   "lng": -101.08386
+  },
+  {
+   "name": "Tripp County \u2014 a point near its county line",
+   "county": "Tripp County",
+   "lat": 43.10121,
+   "lng": -100.13386
+  },
+  {
+   "name": "Turner County \u2014 a point near its county line",
+   "county": "Turner County",
+   "lat": 43.14536,
+   "lng": -96.98893
+  },
+  {
+   "name": "Ziebach County \u2014 a point near its county line",
+   "county": "Ziebach County",
+   "lat": 45.33936,
+   "lng": -101.87943
+  },
+  {
+   "name": "Yankton County \u2014 a point near its county line",
+   "county": "Yankton County",
+   "lat": 42.85171,
+   "lng": -97.56864
+  },
+  {
+   "name": "Lake County \u2014 a point near its county line",
+   "county": "Lake County",
+   "lat": 43.89421,
+   "lng": -97.3055
+  },
+  {
+   "name": "Meade County \u2014 a point near its county line",
+   "county": "Meade County",
+   "lat": 44.91521,
+   "lng": -102.22636
   }
  ],
  "gaps": [
-  "Aurora",
-  "Bennett",
-  "Bon Homme",
   "Brookings",
-  "Brule",
-  "Buffalo",
-  "Butte",
-  "Campbell",
-  "Charles Mix",
   "Clay",
   "Corson",
   "Custer",
-  "Davison",
-  "Day",
-  "Douglas",
   "Fall River",
-  "Faulk",
-  "Gregory",
-  "Haakon",
-  "Hanson",
   "Harding",
-  "Hughes",
-  "Hutchinson",
   "Hyde",
-  "Jackson",
-  "Jerauld",
-  "Jones",
-  "Lake",
   "Lincoln",
-  "Lyman",
-  "Marshall",
   "McCook",
-  "McPherson",
-  "Meade",
-  "Mellette",
   "Oglala Lakota",
   "Perkins",
-  "Potter",
-  "Sanborn",
   "Spink",
-  "Stanley",
-  "Sully",
-  "Todd",
-  "Tripp",
-  "Turner",
   "Union",
-  "Walworth",
-  "Yankton",
-  "Ziebach"
+  "Walworth"
  ]
 }

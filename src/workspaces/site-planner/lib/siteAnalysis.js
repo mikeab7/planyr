@@ -1011,7 +1011,7 @@ export function deriveZoning(j, state = null) {
   const src = ANALYSIS_SOURCES.find((s) => s.id === "zoning");
   const cities = (j.city || []).map((c) => String(c).toLowerCase());
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
-  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : state === "TN" ? "TN" : isNjNyState(state) ? state : null; // NEW-1 (California; NJ + NY) — a state we positively identify states its OWN doctrine
+  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : state === "TN" ? "TN" : state === "MS" ? "MS" : isNjNyState(state) ? state : null; // NEW-1 (California; NJ + NY) — a state we positively identify states its OWN doctrine
   let summary;
   // ⛔ NEW-5 (2026-09-05, owner-reported) — `j.unincorporated` used to be checked FIRST, so it won
   // on every non-Houston ETJ site (an ETJ IS unincorporated land by definition — jurisdictionLabel.js's
@@ -1041,7 +1041,7 @@ export function deriveZoning(j, state = null) {
   else if ((j.etjUndetermined || []).length) summary = "ETJ undetermined (disputed) — two cities' claims overlap here and the county has not resolved them; confirm platting authority with the county and both cities.";
   else if ((j.etjReleased || []).length) summary = "Inside an SB 2038 ETJ release area — the city's layer marks it as released or petitioned for release; confirm the current status and platting authority with the city.";
   else if (j.unincorporated && j.etjUnavailable) summary = "Outside city limits — a city's ETJ (platting authority) may still reach here; the ETJ data does not cover this area. Confirm with the county and the nearest city.";
-  else if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
+  else if (j.unincorporated) summary = (st === "MS" && (j.county || []).some((c) => /^de ?soto$/i.test(String(c).trim()))) ? UNINCORPORATED_ZONING.MS_DESOTO : (UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown);
   else summary = "Confirm zoning with the jurisdiction.";
   return {
     id: "zoning", category: "Zoning / entitlement", label: "Zoning & entitlement context",
@@ -1059,6 +1059,8 @@ const UNINCORPORATED_ZONING = {
   CO: "Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review.",
   CA: "Unincorporated — California counties DO zone, so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a conditional use permit.",
   TN: "Unincorporated — Tennessee counties MAY zone (T.C.A. title 13, ch. 7), and many do; some have no county zoning at all. Confirm with the county planning office whether this land is zoned before assuming it is not.",
+  // NEW-1 (DeSoto County MS, B2507059) — said ONLY for DeSoto County (the one Mississippi county wired): its zoning table covers the unincorporated county (A, A-R, C-x, M-x, PUD…).
+  MS_DESOTO: "Unincorporated DeSoto County — the county zones its unincorporated land (see Zoning on the Layers panel). Mississippi has no ETJ. Confirm the district and whether your use is by right, a rezone, or a conditional use.",
   unknown: "Unincorporated — county zoning authority varies by state. Confirm with the county before assuming the land is unzoned.",
 };
 

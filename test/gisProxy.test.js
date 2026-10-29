@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { onRequest, resolveUpstream, ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
+import { onRequest, resolveUpstream, ALLOWED_HOSTS, isTransientStatus } from "../functions/gis-proxy/[[path]].js";
 
 const SGRC_PATH = "www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0";
 
@@ -139,6 +139,47 @@ describe("onRequest — upstream failure / timeout", () => {
     const res = await call(`${SGRC_PATH}?f=json`);
     expect(res.status).toBe(502);
     expect((await res.json()).host).toBe("www.sgrcmaps.com");
+  });
+});
+
+describe("onRequest — one retry on a transient upstream status (B2507056)", () => {
+  it.each([502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527])("%i is transient", (c) => expect(isTransientStatus(c)).toBe(true));
+  it.each([200, 204, 301, 400, 401, 403, 404, 429, 500, 501, 519, 528])("%i is returned as it came, never retried", (c) => expect(isTransientStatus(c)).toBe(false));
+
+  it("a 525 from the upstream is asked again once, and the second answer is what the caller gets", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("error code: 525", { status: 525 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ count: 85494 }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await call(`${SGRC_PATH}?f=json`);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ count: 85494 });
+  });
+  it("a second transient failure is returned (never a third try), uncached", async () => {
+    const fetchMock = vi.fn(async () => new Response("error code: 525", { status: 525 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await call(`${SGRC_PATH}?f=json`);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(525);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+  it("a 404 / 403 / 500 is NOT retried — the upstream meant it", async () => {
+    for (const status of [404, 403, 500]) {
+      const fetchMock = vi.fn(async () => new Response("no", { status }));
+      vi.stubGlobal("fetch", fetchMock);
+      const res = await call(`${SGRC_PATH}?f=json`);
+      expect(fetchMock, String(status)).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(status);
+    }
+  });
+  it("a POST retries with its body intact", async () => {
+    const bodies = [];
+    const fetchMock = vi.fn(async (_u, opts) => { bodies.push(new TextDecoder().decode(opts.body)); return bodies.length === 1 ? new Response("x", { status: 503 }) : new Response("{}", { status: 200 }); });
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await onRequest({ request: new Request(`https://planyr.io/gis-proxy/${SGRC_PATH}`, { method: "POST", body: "where=1%3D1&f=json", headers: { "content-type": "application/x-www-form-urlencoded" } }), params: { path: segsFor(SGRC_PATH) } });
+    expect(res.status).toBe(200);
+    expect(bodies).toEqual(["where=1%3D1&f=json", "where=1%3D1&f=json"]);
   });
 });
 

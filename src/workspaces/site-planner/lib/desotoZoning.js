@@ -12,26 +12,28 @@
 export function zoneClass(code) {
   const z = String(code == null ? "" : code).trim().toUpperCase();
   if (!z) return "other";
-  if (/^M(-|\s|\d|$)/.test(z)) return "industrial";
+  if (/OVERLAY/.test(z)) return "overlay";                 // "R-15 OVERLAY", "HISTORIC DISTRICT OVERLAY", "PUD OVERLAY" — a layer on top of a base zone, never the base zone itself
+  if (/^M(-|\s|\d|$)/.test(z)) return "industrial";        // M-1, M-2
   if (/PUD/.test(z)) return "pud";
-  if (/^C(-|\s|\d|$)/.test(z)) return "commercial";
+  if (/^C(-|\s|\d|$)/.test(z) || /^(O|PO|RO|PB|PBP)$/.test(z)) return "commercial"; // commercial + the office / business-park districts (O, PO, RO, PB, PBP)
   if (/^(A-R|AR)\b/.test(z) || /^A(-|\s|$)/.test(z) || /^AG/.test(z)) return "agricultural";
-  if (/^R(-|\s|\d|$)/.test(z) || /^RM|^MH|^SF|^MF|^TH/.test(z)) return "residential";
+  if (/^(R(-|\s|\d|$)|RM|ER$|MH|SF|MF|TH)/.test(z)) return "residential"; // R-x, RM-x, ER (estate residential)
   return "other";
 }
 
 export const ZONE_COLORS = {
-  industrial: "#7c3aed", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", pud: "#0f766e", other: "#6b7280",
+  industrial: "#7c3aed", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", pud: "#0f766e", overlay: "#64748b", other: "#6b7280",
 };
 export const ZONE_CLASS_LABEL = {
-  industrial: "Industrial", commercial: "Commercial", residential: "Residential", agricultural: "Agricultural / rural", pud: "Planned unit development", other: "Other",
+  industrial: "Industrial", commercial: "Commercial / office", residential: "Residential", agricultural: "Agricultural / rural", pud: "Planned unit development", overlay: "Overlay district", other: "Other",
 };
 
 /* Layer style (esri-leaflet per-feature style function): a translucent fill in the class colour with a thin outline. The fill is deliberately
  * quiet (zoning is a reference wash under the plan, tier "reference" ≤ 0.55 default opacity; the row's slider scales it). */
 export function zoningStyle(props, opacity) {
   const c = ZONE_COLORS[zoneClass(props && props.ZONE)];
-  return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: Math.min(0.45, opacity * 0.6) };
+  const overlay = zoneClass(props && props.ZONE) === "overlay";
+  return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: Math.min(overlay ? 0.2 : 0.45, opacity * (overlay ? 0.3 : 0.6)), ...(overlay ? { dashArray: "4 3" } : {}) };
 }
 
 /* The one-line tooltip text a zone label prints at the polygon's centre. */
@@ -63,7 +65,7 @@ export function ordinanceRef(raw) {
     let host = "";
     try { host = new URL(url).hostname; } catch (_) { return { href: null, text: s }; }
     const municode = /municode\.com$/i.test(host);
-    return { href: url, text: municode ? "Municode — Olive Branch code" : (m && m[2] ? m[2].trim() : "Ordinance") };
+    return { href: url, text: municode ? "Zoning ordinance (Municode)" : (m && m[2] ? m[2].trim() : "Ordinance") };
   }
   return { href: null, text: s };
 }

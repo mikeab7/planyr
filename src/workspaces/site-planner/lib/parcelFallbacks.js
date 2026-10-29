@@ -25,6 +25,23 @@ import { COUNTIES, COUNTIES_MAP, statewideKeysForState, statewideExcludesCounty,
  * measured footprint — a point in the box but outside the town simply gets an empty answer, which is not a hit and costs one request).
  * Each is public, polygon, and carries the county's own column schema. Measured: docs/STATEWIDE-PARCELS.md "Niagara's fallbacks". */
 export const COUNTY_EXTRA_FALLBACKS = {
+  /* NEW-1 (B2507056, 2026-10-29) — DeSoto County MS: the county's own server is the primary; when it does not answer the click goes to Mississippi's statewide MARIS parcels
+   * (the same layer every other MS county rides; it holds DeSoto — 82,365 rows, measured B2298495), then to the 2024 Esri-hosted copy of the county roll this row used to point at.
+   * `cover` is the county's box (MARIS layer 1 = the West half of the state, where DeSoto sits). */
+  ms_desoto: [
+    {
+      key: "ms_desoto_maris",
+      label: "Mississippi statewide layer (MARIS)",
+      layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+      cover: [34.57, -90.37, 35.01, -89.62],
+    },
+    {
+      key: "ms_desoto_etr",
+      label: "June 2024 copy of the county roll (Tristate Consulting)",
+      layerUrl: "https://services5.arcgis.com/nbwtrV1EDhKfIQhm/arcgis/rest/services/DESOTO_PARCELS/FeatureServer/0",
+      cover: [34.57, -90.37, 35.01, -89.62],
+    },
+  ],
   ny_niagara: [
     {
       key: "ny_niagara_cambria",

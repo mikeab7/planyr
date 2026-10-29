@@ -837,12 +837,13 @@ const COUNTIES_RAW = {
     help: "Jefferson County (Louisville) PVA parcels (LOJIC open data). Search by parcel ID or a site address.",
   },
   ms_desoto: {
-    // VERIFIED LIVE 2026-09-10 from this sandbox: 80,950 parcel polygons, count query 830ms,
-    // 55 populated fields.
+    // NEW-1 (B2507056, 2026-10-29) — the COUNTY'S OWN server is the primary now ("Tax Parcels", BaseLayers/MapServer/1 on gis.desotocountyms.gov, relayed because the host
+    // is not reachable from the build sandbox); Mississippi's statewide MARIS layer stands in when it does not answer (parcelFallbacks.js COUNTY_EXTRA_FALLBACKS), then the
+    // 2024 Esri-hosted ETR / Tristate copy this row used to point at (kept as the last resort; it answered from anywhere with the old PARNO / SITEADD schema).
     state: "MS", label: "DeSoto County, MS",
-    layerUrl: "https://services5.arcgis.com/nbwtrV1EDhKfIQhm/arcgis/rest/services/DESOTO_PARCELS/FeatureServer/0",
-    idField: "PARNO", addrField: "SITEADD",
-    help: "DeSoto County parcels (county GIS, Esri-hosted). Search by parcel number or a site address.",
+    layerUrl: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/1",
+    idField: "PIN", addrField: "FULL_ADDR",
+    help: "DeSoto County parcels (the county's own GIS server). Search by parcel number (PIN) or a site address.",
   },
   /* NEW-1 (Memphis 100-mile radius, 2026-10-15) — the 24 Mississippi counties inside the radius other than DeSoto
    * (which keeps its own, fresher county service above). SOURCE: MARIS (Mississippi Automated Resource Information
@@ -3193,7 +3194,7 @@ const COUNTIES_MAP_RAW = {
   la_stmartin: { state: "LA", center: [30.1118, -91.5350], zoom: 10, bbox: [29.72, -91.99, 30.51, -91.08], mapServer: null, layerUrl: COUNTIES.la_stmartin.layerUrl },
   la_plaquemines: { state: "LA", center: [29.4260, -89.5443], zoom: 10, bbox: [28.93, -90.07, 29.92, -89.02], mapServer: null, layerUrl: COUNTIES.la_plaquemines.layerUrl },
   la_sttammany: { state: "LA", center: [30.4465, -89.9142], zoom: 10, bbox: [30.18, -90.26, 30.72, -89.57], mapServer: null, layerUrl: COUNTIES.la_sttammany.layerUrl },
-  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl },
+  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl, scopeWhere: COUNTIES.la_lafayette.scopeWhere }, // scopeWhere: the same layer also holds Vermilion (la_vermilion, 2026-10-29) — every row sharing a service carries its own scope
   la_acadia: { state: "LA", center: [30.2752, -92.3785], zoom: 10, bbox: [30.06, -92.63, 30.49, -92.13], mapServer: null, layerUrl: COUNTIES.la_acadia.layerUrl },
   la_eastfeliciana: { state: "LA", center: [30.8275, -91.0700], zoom: 10, bbox: [30.65, -91.32, 31.01, -90.82], mapServer: null, layerUrl: COUNTIES.la_eastfeliciana.layerUrl },
   la_caddo: { state: "LA", center: [32.6115, -93.7645], zoom: 10, bbox: [32.19, -94.05, 33.03, -93.48], mapServer: null, layerUrl: COUNTIES.la_caddo.layerUrl },
