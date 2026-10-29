@@ -318,3 +318,52 @@ The brief said the generated table put Pulaski in `ar_south` although "EPSG says
 
 ### What this does NOT establish
 Six states (ID OR PA SD UT, plus FL's missing county list, and NE/CT which defer) are matched to EPSG/NGS, which is the same source this generator reads — a real statutory check of those would need a statute that lists counties, and none does. Everything marked ✅ above other than TX and KY rests on the owner's reading, not on text this session fetched.
+
+## 11 · Units at the INPUT boundary — AL, MO, HI, AK (B2528672, 2026-10-29)
+
+**The risk.** All 20 zones of Alabama (2), Missouri (3), Hawaii (5) and Alaska (10) have `unit:"m"` in `statePlaneZones.js` (the other 102 zones are `us-ft`/`ft`). `zoneToProject(zone, {x,y})` reads its argument in the zone's own unit, so a value a surveyor wrote in US survey feet and that reached it unconverted would land ~3.28× too far from the grid origin — hundreds of km out, no error. The projection math is not in question (§5, PROJ goldens, all 122 zones); this section is about units at the boundary where a *person or a file* supplies a grid number.
+
+### Inventory — every place a grid coordinate could enter, and the unit each assumes
+
+**Result: no path takes a person-supplied or file-supplied state plane coordinate into `zoneToProject`/`gridToProject` today.** Every grid number in the app is generated from lat/lon and handed straight back, in a unit the code states explicitly.
+
+| # | Path | What enters | Unit handling | Verdict |
+|---|---|---|---|---|
+| 1 | `shared/overlay/overlayPlacement.js` (`projectorsFor`, corners, `alignOverlayGeo`) | lat/lon anchor + pixel math | `toGrid` = `projectToZone` × `unitInUsFt(zone)`; `toProject` divides by the same `k` before `zoneToProject`. Grid never leaves the file as a typed value | App-generated; explicit conversion both ways |
+| 2 | `site-planner/lib/proximityScreen.js`, `siteChecks.js` | lat/lon | `projectToZone` × `unitInUsFt` | App-generated |
+| 3 | `shared/coordinates/scaleFactor.js` `combinedScaleFactor` | lat/elevation | dimensionless factor | n/a |
+| 4 | `scaleFactor.js` `detectSurveyFrame` | pairs of *distances* (`surveyFt`, `gridFt`) | feet by field name; **no caller in `src/`** | **Fixed**: a survey÷grid ratio of ≈3.2808 (or ≈0.3048) now returns verdict `unit-mismatch` with a plain `unitHint`, instead of being passed off as `other-scale` |
+| 5 | Deed paste / PDF / OCR (`deedParse.js`, `metesAndBounds.js`, `SitePlanner.jsx` deed align) | bearings + distances from a point of beginning the user **clicks on the map** | no northing/easting is read from deed text (grepped); grid enters only as the convergence *angle* (`gridConvergenceDeg`), a unit-free number | No grid coordinate path |
+| 6 | DXF/DWG overlay (`dxf/dxfGeom.js` `insunitsToFeet`, `dxfRender.js`) | drawing-space geometry | `$INSUNITS` → feet per unit; absent/0 ⇒ assumed feet **and flagged** `known:false` ("Units assumed: feet — verify"). Placed by hand/scale/2-point match, **never georeferenced from the DXF's coordinates** | Declared unit used; unknown is flagged, not silent |
+| 7 | KML/KMZ import (`comps/lib/kmlImport.js`) | lon/lat | WGS84 by the KML spec | n/a |
+| 8 | CSV/Excel (Model workspace) | cells | no coordinate semantics | n/a |
+| 9 | ArcGIS / MapGuide / GISCloud geometry (`arcgis.js`, `mapguideAdapter.parseQueryGeometry`) | service geometry / query envelope | requested `outSR=4326` (default fixed in §7); `parseQueryGeometry` accepts only 4326/3857 and **refuses any other `inSR` loudly** | Never a state plane value |
+| 10 | `site-planner/lib/coverage.js` `srPointToLatLon` (service extents) | an extent in the service's wkid | decoded only for wkid 2278/102740 (Texas South Central, ftUS) via the legacy `gridToProject`; **every other wkid returns `null` and the layer fails open** — an AL/MO/HI/AK extent (e.g. 26929) is never decoded, so never misread | Texas-only by construction |
+| 11 | `shared/placement/placeOnMap.js` EMBEDDED rung | would be a file's embedded coordinates + `crs` | `facts.embeddedCoords.crs` is recorded; `ctx.canReproject` is **never set anywhere** and nothing in `src/` imports the module, so the rung never runs ("reprojection … isn't available yet"). **When that rung is built it must read the unit through `statePlaneInput.js`** | Dormant |
+| 12 | `parcelAreaFields.js` (service area columns) | an *area* in the service's native unit | each source carries an explicit probed unit tag (`m2wm`, …) | Explicit, not assumed |
+| 13 | `thoroughfare/ingestTransform.js`, `fbcdWse.js` | lat/lon → 2278 | Texas South Central only | Confirmed Texas-only (§7) |
+
+`functions/`, `server/` and `scripts/` call none of the zone functions.
+
+### What was built (the door and the guard)
+
+* **`src/shared/coordinates/statePlaneInput.js`** — the unit-explicit boundary a future path must use. `gridInputToLatLon(zone, xy, unit)` has **no default unit** (throws without `"us-ft" | "ft" | "m"`); `gridUnitFromPrj(wkt)` reads the unit a `.prj`/WKT declares for its projected CRS by *factor*, not by name (ESRI `Foot_US`, EPSG "US survey foot", WKT2 `LENGTHUNIT` all work; unrecognised ⇒ `null`); `detectGridUnit(zone, xy, site)` decodes under each candidate unit and keeps the ones that land within 50 km of the site — one survivor is confident, two or none is `ask:true` with **US survey feet preselected** (international feet only in a statutory-international-foot zone such as AZ), and a value that lands nowhere is flagged `fitsNeither`, never converted silently. Nothing imports it yet, so it adds no bundle.
+* **`test/stateplaneInputUnit.test.js`** — (a) red-proof for **all 20 metre zones**: the same ground point given as US survey feet tagged `us-ft` lands on the ground (< 1 cm), given as metres tagged `m` lands on the ground, and the feet value read through the zone's own unit (the bug) lands > 100 km away; the Alabama East / Birmingham case is named explicitly (> 300 km off). (b) **The guard:** any file in `src/` other than the audited five that calls `zoneToProject`/`gridToProject` fails the build, naming the file and the fix; the allow-list is itself checked for rot, and the scanner carries a known-bad arm (a synthetic offender must be flagged or the run is VOID). Teeth proof run 2026-10-29: planting `src/shared/coordinates/zzRogueImport.js` calling `zoneToProject` turned it red; removed.
+* `statePlaneCore.js` now exports `UNIT_M` (the metres-per-unit table that was already there) — no behaviour change; Texas South Central stays bit-identical (`statePlane` suite green).
+
+### What EPSG says about feet variants (pyproj 3.8.0 / EPSG v12.029, queried 2026-10-29)
+
+A distinct ftUS code exists for **Alabama East/West: EPSG 9748 / 9749** (NAD83(2011)) and **Hawaii zone 3: 3759 (NAD83), 3760 (HARN), 6633 (PA11)**. **None exists for Missouri or Alaska** (their NAD83 / HARN / NSRS2007 / 2011 codes are all metre). Because the Alabama codes are the NAD83(2011) realisation (a ~1 m datum shift from the NAD83 base the zone table uses) and a code-to-unit table would have to be generated and pinned like the zone table, this item did **not** add an EPSG-code→unit map; a future path that reads an EPSG code must treat an unrecognised code as "undeclared" (⇒ `detectGridUnit` ⇒ ask), never as metres or feet.
+
+### Statute lookup — what each state legislates as the grid unit (step 3). **NOT CONFIRMED; zone units unchanged.**
+
+This session's network blocks every legislature host (`law.justia.com`, `revisor.mo.gov`, `www.akleg.gov`, `www.capitol.hawaii.gov` all fail to resolve — the same wall §10 recorded), so no statute text was read. What a web search returned, with how far it can be trusted:
+
+| State | Citation asked for | What was found | Status |
+|---|---|---|---|
+| AL | Ala. Code 35-2-1 et seq. | Search returned only the structure of §35-2-1 (the system, East/West zones, counties by zone). The unit-of-length language (probably §35-2-3, "Plane coordinates used in system") was not retrieved | **Unconfirmed** |
+| MO | RSMo 60.401 et seq. | A secondary copy of the **2011** text of §60.431 says distances are US Survey Feet for the 1927 system and **metres for the 1983 system**. Newer bill drafts and a proposed rule (20 CSR 2030-17.070, citing 60.401 RSMo Supp. 2024) say that when feet are used **the international foot** is the standard foot — *proposed text, enactment not confirmed* | **Unconfirmed**; if the international-foot text is law, Missouri feet are international feet (2 ppm from US survey feet: about 1–2 ft at Missouri's easting magnitudes) and `preselectedFootUnit` would need MO to preselect `ft` |
+| HI | "HRS ch. 7?" | No Hawaii statute defining the state plane system was found by search; registry listings (ESRI/EPSG) define the zones, with an ftUS code for zone 3 | **Unconfirmed that a statute exists** |
+| AK | AS 34.80 | Search did not find the Alaska coordinate system under AS 34.80; the hits point to **AS 38.20** (a 2021 bill amending AS 38.20.010 refers to the "Alaska Coordinate System of 1983"). Unit language not retrieved | **Unconfirmed**; chapter citation in the brief looks wrong |
+
+Per the item, **the zone tables' `unit` is not changed** (nothing read says otherwise). To close this row someone must read the four sections with the legislature hosts reachable — added to `OWNER-TODO.md`.
