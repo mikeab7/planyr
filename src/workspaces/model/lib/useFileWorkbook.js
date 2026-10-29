@@ -55,7 +55,7 @@ export function useFileWorkbook({ fileId, userId, workbook, onLoaded, onFileChan
     const tok = ++loadTok.current;
     setError(null); setStatus("idle"); setSaveError(""); setCloudConfirmed(false);
     if (!fileId) { stateRef.current = null; baselineRef.current = null; setPhase("idle"); setNotes([]); setName(""); return undefined; }
-    if (adoptedRef.current === fileId && stateRef.current && stateRef.current.id === fileId) { adoptedRef.current = null; setPhase("ready"); return undefined; }
+    if (adoptedRef.current === fileId && stateRef.current && stateRef.current.id === fileId) { adoptedRef.current = null; setCloudConfirmed(true); setPhase("ready"); return undefined; }
     setPhase("loading");
     (async () => {
       try {

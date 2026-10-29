@@ -1255,7 +1255,7 @@ export default function ModelApp({
       {openWorkbook && fileMode && fw.phase === "error" ? (
         <FileProblem
           message={fw.error?.message || "This file couldn’t be opened."}
-          canRetry={fw.error?.code === "download" || fw.error?.code === "timeout" || fw.error?.code === "error"}
+          canRetry={["download", "timeout", "error", "worker"].includes(fw.error?.code)}
           onRetry={fw.retryOpen}
           onClose={() => setActiveFile(fileScopeRef.current, null)}
         />
