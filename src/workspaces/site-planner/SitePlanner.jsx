@@ -15621,7 +15621,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // only while its layer is ON (an explicit user act — the render layer already pulls
   // this source through the same SWR cache, so this is normally a cache hit). Keyed on
   // a COARSE quantised envelope so element drags inside it never refetch.
-  const corridorOverlaySt = overlays ? overlays.txrrc_pipe_easement : null;
+  const corridorOverlaySt = overlaysDrawn ? overlaysDrawn.txrrc_pipe_easement : null; // the DRAWN set: a corridor saved ON where the RRC does not serve is neither drawn nor screened
   const corridorOn = !!(corridorOverlaySt && corridorOverlaySt.on);
   const corridorWidthFt = (corridorOverlaySt && corridorOverlaySt.widthFt) || DEFAULT_CORRIDOR_WIDTH_FT;
   const [pondCorridor, setPondCorridor] = useState(null); // { state, rings (site feet), widthFt, ts } | null
