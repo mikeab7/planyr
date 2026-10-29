@@ -165,6 +165,13 @@ describe("click cards — recorded attribute bags, cleaned the way the app clean
     expect(soft("BAYOU LA TERRE")).toBe("Bayou La Terre");
     expect(soft("410 8TH STREET NE")).toBe("410 8th Street NE");
     expect(soft("HWY 51 ACME INC")).toBe("Hwy 51 Acme Inc");
+    expect(soft("U.S. HIGHWAY 11")).toBe("U.S. Highway 11");
+    expect(soft("T.E. LOTT PROPERTY")).toBe("T.E. Lott Property");
+    expect(soft("905 INDUSTRIAL PARK ROAD, N.E.")).toBe("905 Industrial Park Road, N.E.");
+    expect(soft("MARION STREET &AMP; HIGHWAY 51")).toBe("Marion Street & Highway 51");
+    expect(soft("Deer Creek &amp; Black Bayou")).toBe("Deer Creek & Black Bayou");
+    expect(soft("DESOTO COUNTY SCHOOL BUS LOT")).toBe("DeSoto County School Bus Lot");
+    expect(soft("1115 DESOTO AVENUE")).toBe("1115 DeSoto Avenue");
     expect(rowsOf(damCard({ DAMNAME: "X LAKE DAM", CONDITION: "SATISFACTORY" })).Condition).toBe("Satisfactory");
     expect(NRCS_PROGRAM.WRP).toMatch(/Wetlands Reserve/);
     expect(cleanCard(ALL_LAYERS.ms_303d.identifyCard({ WATER_BODY_NAME: "SAND CREEK", POLLUTANT: "202-BIOLOGICAL IMPAIRMENT", LOCATION: "NEAR CANTON", BASIN: "BIG BLACK RIVER" })).rows.map((r) => r.text)).toEqual(["Biological Impairment", "Near Canton", "Big Black River"]);
@@ -177,6 +184,7 @@ describe("click cards — recorded attribute bags, cleaned the way the app clean
     expect(ALL_LAYERS.ms_city.identifyCard({ Name: "Abbeville", Classifica: "Town" }).title).toBe("Abbeville town limits");
     expect(ALL_LAYERS.ms_city.identifyCard({ Name: "Jackson", Classifica: "City" }).title).toBe("Jackson city limits");
     expect(ALL_LAYERS.ms_crit_habitat.identifyCard({ comname: "No common name", sciname: "Pleurobema curtum" }).title).toBe("Pleurobema curtum");
+    expect(ALL_LAYERS.ms_crit_habitat.identifyCard({ comname: "[no common name]", sciname: "Rhadine exilis" }).title).toBe("Rhadine exilis");
   });
   it("FEMA letters: case numbers and links, no more than are there", () => {
     const lomr = cleanCard(lomrCard({ CASE_NO: "21-04-0112P", EFF_DATE: 1613088000000, LINK_1: "https://msc.fema.gov/a.pdf", LINK_2: null, LINK_3: " " }));

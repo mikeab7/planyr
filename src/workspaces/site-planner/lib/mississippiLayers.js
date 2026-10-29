@@ -28,12 +28,14 @@ const has = (v) => { const t = str(v); return !!t && !/^(null|none|n\/?a|<null>)
 /* A publisher's SHOUTED text ("MAYWOOD SUBDIVISION - SYLVAN LAKE DAM") reads as words; mixed-case text is left exactly as written. Corporate / place suffixes stay upper. */
 const KEEP_UP = new Set(["LLC", "LP", "LLP", "LTD", "USA", "US", "MS", "TN", "II", "III", "IV", "WWTP", "NRCS", "EPA", "MDEQ", "NE", "NW", "SE", "SW"]);
 export const soft = (v) => {
-  const t = str(v);
+  const t = str(v).replace(/&amp;/gi, "&"); // the source carries a literal HTML entity in a few names and addresses
   if (!t || /[a-z]/.test(t)) return t;
   return t.toLowerCase()
     .replace(/[a-z][a-z.']*/g, (w) => (KEEP_UP.has(w.toUpperCase().replace(/\.$/, "")) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
     .replace(/\b(\d+)(St|Nd|Rd|Th)\b/g, (_m, n, o) => n + o.toLowerCase()) // 4th, 25th — never "4Th"
     .replace(/\bMc([a-z])/g, (_m, c) => "Mc" + c.toUpperCase()) // McComb, McDowell
+    .replace(/\b(?:[A-Za-z]\.){2,}/g, (m) => m.toUpperCase()) // U.S., T.E., N.E., W.E. — dotted initials stay capitals
+    .replace(/\bDesoto\b/g, "DeSoto") // the home county's own spelling
     .replace(/\b([OD])'([a-z]{2,})/g, (_m, a, rest) => a + "'" + rest.charAt(0).toUpperCase() + rest.slice(1)); // O'Neal, D'Iberville (a possessive — McClinton's — keeps its lower s)
 };
 const row = (label, v, extra) => (has(v) ? { label, text: str(v), ...(extra || {}) } : null);
@@ -133,7 +135,7 @@ export function landfillCard(p) {
   p = p || {};
   return {
     title: str(p.Facility_N) || "Solid-waste facility",
-    rows: clean([row("Type", p.Facility_T), row("Status", p.Status), row("County", p.County), row("Acres", num1(p.Acres)), row("Permit", /^no permit$/i.test(str(p.Permit__)) ? null : p.Permit__)]),
+    rows: clean([row("Type", p.Facility_T), row("Status", p.Status), row("County", p.County), row("Acres", num1(p.Acres)), row("Permit", /^no permit$/i.test(str(p.Permit__)) ? null : (/^[A-Z ]+$/.test(str(p.Permit__)) ? soft(p.Permit__) : p.Permit__))]),
   };
 }
 export function wellCard(p) {
@@ -246,7 +248,7 @@ export const MISSISSIPPI_LAYERS = {
   ms_deq_mines: feature("msDeqMines", {
     ...MS, label: "Surface Mines", role: "area", group: "environmental", order: 34, minZoom: 11, source: "MDEQ — Surface Mining",
     color: "#a16207", weight: 1.4, simplifyFactor: 0.75, styleFn: outline("#a16207", 1.4, 0.22),
-    identifyCard: (p) => ({ title: "Surface mine permit", rows: clean([row("Permit", p && p.PermitNumber), row("Acres", num1(p && p.Acres)), row("Permitted", p && /^yes$/i.test(str(p.PERMITTED)) ? "Yes" : p && p.PERMITTED)]) }),
+    identifyCard: (p) => ({ title: "Surface mine permit", rows: clean([row("Permit", p && p.PermitNumber), row("Acres", num1(p && p.Acres)), row("Permitted", p && /^yes$/i.test(str(p.PERMITTED)) ? "Yes" : p && /^no$/i.test(str(p.PERMITTED)) ? "No" : p && p.PERMITTED)]) }),
     note: "MDEQ surface-mining permit boundaries — sand, gravel, clay and borrow pits, active and released. Mined or backfilled ground is a geotechnical flag.",
     infoCaveat: "Permit boundaries as MDEQ maps them; a released permit may be reclaimed. The polygons carry the permit number and acres only.",
   }),
@@ -296,8 +298,8 @@ export const MISSISSIPPI_LAYERS = {
   ms_crit_habitat: feature("msCritHabitat", {
     ...MS, label: "Critical Habitat", role: "area", group: "environmental", order: 42, minZoom: 9, source: "U.S. Fish & Wildlife Service",
     color: "#15803d", weight: 1.5, simplifyFactor: 10, vertexBudget: 150000, styleFn: outline("#15803d", 1.5, 0.5),
-    identifyCard: (p) => ({ title: (has(p && p.comname) && !/^no common name$/i.test(str(p.comname)) ? str(p.comname) : str(p && p.sciname)) || "Critical habitat", rows: clean([row("Species", p && p.sciname), row("Listing", p && p.listing_status)]) }),
-    note: "USFWS final critical habitat (Mississippi has the gopher frog, pearl darter, black pinesnake, sandhill crane and several mussels). It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. Drawn generalised (about 15 px off the true line on a laptop screen) — the Gulf sturgeon and piping plover units are whole-river and whole-coast polygons with over a million vertices, so on a phone held upright the Gulf coast says too detailed at the closest zooms. USFWS IPaC is the authoritative species list.",
+    identifyCard: (p) => ({ title: (has(p && p.comname) && !/^\[?no common name\]?\s*$/i.test(str(p.comname)) ? str(p.comname) : str(p && p.sciname)) || "Critical habitat", rows: clean([row("Species", p && p.sciname), row("Listing", p && p.listing_status)]) }),
+    note: "USFWS final critical habitat (Mississippi has the gopher frog, pearl darter, black pinesnake, sandhill crane and several mussels). It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. Drawn generalised (about 15 px off the true line on a laptop screen) — the Gulf sturgeon and piping plover units are whole-river and whole-coast polygons with over a million vertices, so on a phone held upright the Gulf coast says too detailed from zoom 17 (zoom 16 near Ship Island), and a laptop window at zoom 18 out on the islands. USFWS IPaC is the authoritative species list.",
     infoCaveat: "A screen, not a species survey.",
   }),
   ms_303d: feature("ms303d", {
