@@ -5,11 +5,11 @@
  * It proves, against the DEPLOYED build (read from /version.json in the same call as the assertions):
  *   A. THE MAP FINDER — moved over a real Tennessee point (Nashville, then Christiana / Epps Mill Rd), lists every Tennessee row in its group, and each row
  *      turned ON answers with REAL features from its own server (counted from the /query responses the page actually received — esri-leaflet AGOL rows
- *      directly, the tdeconline.tn.gov rows through the same-origin /gis-proxy relay). A row that legitimately has nothing in view says "empty", never "loaded".
+ *      directly, the maps.tdec.tn.gov / tnmap.tn.gov rows through the same-origin /gis-proxy relay). A row that legitimately has nothing in view says "empty", never "loaded".
  *   B. A LOCATED PLAN at Christiana — a throwaway plan with its origin there lists the same rows, and the computed Stream Buffers row paints real polygons
- *      (30 ft and, where TDEC lists the stream, 60 ft).
+ *      (the 30 ft construction buffer).
  *   C. NOTHING LEAKS — a Houston plan (known-good arm: it lists the Texas rows) and a Georgia plan offer NO Tennessee row and send ZERO requests to the
- *      Tennessee servers (TDEC's AGOL org, the tdeconline relay, the State of Tennessee org).
+ *      Tennessee servers (TDEC's AGOL org, the maps.tdec / tnmap relay, the State of Tennessee org).
  * FOREGROUND-OR-VOID first. Throwaway plans are deleted at the end and the deletion re-read (owner rule 15). */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -27,7 +27,7 @@ let failed = 0, voided = 0;
 const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${name}${detail ? "  — " + detail : ""}`); if (!ok) failed++; };
 
 /* every request to a Tennessee server: TDEC's AGOL org, the State of Tennessee org (counties / cities), the tdeconline relay */
-const TN_HOSTS = /bPacKTm9cauMXVfn|YuVBSS7Y1of2Qud1|\/gis-proxy\/(tdeconline|maps\.tdec)\.tn\.gov/;
+const TN_HOSTS = /bPacKTm9cauMXVfn|YuVBSS7Y1of2Qud1|\/gis-proxy\/(maps\.tdec|tnmap)\.tn\.gov/;
 const PLACES = {
   nashville: { lat: 36.1627, lng: -86.7816, label: "Nashville (Davidson)" },
   christiana: { lat: 35.7425, lng: -86.3436, label: "Christiana / Epps Mill Rd (Rutherford)" },
@@ -166,7 +166,7 @@ try {
   const tnRows = {};
   for (const g of Object.values(PANEL)) tnRows[g] = await rowsIn(tnPanel, g);
   console.log("Christiana plan · rows:", JSON.stringify(tnRows));
-  for (const id of TN_LAYER_IDS) { const want = SHOWN_AS[id] || id; check(`B · the located Christiana plan offers "${want}"`, tnRows[PANEL[TN_LAYERS[id].group]].includes(want)); }
+  for (const want of ["counties_cities", ...TN_LAYER_IDS.map((id) => SHOWN_AS[id] || id)]) { check(`B · the located Christiana plan offers "${want}"`, Object.values(tnRows).flat().includes(want)); }
   await rowsIn(tnPanel, "flood");
   const sb = tnPanel.locator('[data-testid="layer-row-tn_stream_buffers"] input[type="checkbox"]').first();
   if (await sb.count()) await sb.check();
@@ -175,8 +175,7 @@ try {
   const sbState = await stateOf(tnPanel, "tn_stream_buffers");
   console.log(`   stream buffers: row state=${sbState}, ${polys} map paths`);
   check("B · Stream Buffers paints (loaded, not failed or empty)", sbState === "loaded", `state=${sbState}`);
-  check("B · the NHD streams and TDEC's restricted list were both asked and answered", answered(/hydro\.nationalmap\.gov|nhd/i).length > 0 && answered(/DWR_CGP\/MapServer\/0\/query/).length > 0,
-    `NHD ${answered(/hydro\.nationalmap\.gov|nhd/i).length} · CGP ${answered(/DWR_CGP\/MapServer\/0\/query/).length}`);
+  check("B · the NHD stream lines were asked and answered", answered(/hydro\.nationalmap\.gov|nhd/i).length > 0, `NHD ${answered(/hydro\.nationalmap\.gov|nhd/i).length}`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-christiana-buffers.png` });
 
   // C · Houston and Atlanta offer none of it, and send nothing to Tennessee
@@ -188,7 +187,7 @@ try {
     const all = Object.values(rows).flat();
     console.log(`${name} plan · rows:`, JSON.stringify(rows));
     check(`C · KNOWN-GOOD arm: ${name} lists its own rows (so an empty answer is not an empty registry)`, name === "Houston" ? all.includes("water_sewer") && all.includes("counties_cities") : all.includes("ga_stream_buffers") || all.includes("counties_cities"), `${all.length} rows`);
-    const leaked = TN_LAYER_IDS.filter((id) => all.includes(id) || all.includes(SHOWN_AS[id]) && false);
+    const leaked = TN_LAYER_IDS.filter((id) => all.includes(id));
     check(`C · ${name} offers no Tennessee row`, leaked.length === 0, leaked.join(", "));
     await sleep(3000);
     check(`C · ${name} plan issues ZERO requests to the Tennessee servers`, log.filter((e) => e.req).length === 0, `${log.filter((e) => e.req).length} sent: ${log.filter((e) => e.req).slice(0, 2).map((e) => e.url.slice(0, 90)).join(" | ")}`);

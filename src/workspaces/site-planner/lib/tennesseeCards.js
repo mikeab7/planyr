@@ -25,7 +25,8 @@ export function titleCase(raw) {
     if (ACRONYM.has(bare)) return tok;
     const lower = tok.toLowerCase();
     if (i > 0 && SMALL.has(lower)) return lower;
-    return lower.replace(/(^|[\s'\-/.(])([a-z])/g, (_m, pre, c) => pre + c.toUpperCase());
+    // capitalise a word start, and after an apostrophe only for an O'/D'-style prefix (O'Brien) — never the possessive s (Joy's)
+    return lower.replace(/(^|[\s\-/.(])([a-z])/g, (_m, pre, c) => pre + c.toUpperCase()).replace(/\b([od])'([a-z])/g, (_m, a, b) => `${a.toUpperCase()}'${b.toUpperCase()}`);
   }).join("");
 }
 
@@ -139,5 +140,64 @@ export function critHabitatCard(props) {
     title: clean(p.comname) || "Critical habitat",
     rows: rowsOf(row("Species", p.sciname), row("Federal status", p.listing_status)),
     note: "Binds federal actions, not private land directly — but a Corps stream or wetland permit is a federal action. USFWS IPaC is the authoritative species list.",
+  };
+}
+
+/* ---- TDEC permitted landfills ---- */
+const romanClass = (v) => clean(v).replace(/\bclass\s+(i{1,3}|iv)\b/i, (_m, r) => `Class ${r.toUpperCase()}`);
+export function landfillCard(props) {
+  const p = props || {};
+  return {
+    title: `${clean(p.PRIMARY_NAME) || "Landfill"} — permitted landfill`,
+    rows: rowsOf(
+      row("Class", romanClass(p.LANDFILL_CLASS)),
+      row("Status", p.STATUS),
+      row("Address", [clean(p.ADDRESS), clean(p.CITY)].filter(Boolean).join(", ")),
+      row("County", p.COUNTY),
+      row("TDEC site ID", p.TDEC_SITE_ID),
+    ),
+    note: "TDEC classes permitted landfills I–IV by the kind of waste accepted. A landfill beside a site is a flag (gas, leachate, truck traffic, buffers) — ask TDEC's Division of Solid & Hazardous Waste Management. Closed and unpermitted dumps are not on this map.",
+  };
+}
+
+/* ---- Tennessee Historical Commission survey + State Historic Preservation Office boundaries ---- */
+/* The State's historic layers are fixed-width text (padded with spaces) and dates like 20020320; `clean` trims, this makes a date read as one. */
+export function ymd(raw) {
+  const m = clean(raw).match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!m) return clean(raw);
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const mo = months[Number(m[2]) - 1];
+  return mo ? `${mo} ${Number(m[3])}, ${m[1]}` : clean(raw);
+}
+export function thcSiteCard(props) {
+  const p = props || {};
+  const name = titleCase(p.COMNAME) || titleCase(p.HISTNAME) || "Recorded historic site";
+  const hist = titleCase(p.HISTNAME);
+  return {
+    title: `${name} — recorded historic site`,
+    rows: rowsOf(
+      hist && hist !== name ? row("Historic name", hist) : null,
+      row("Address", [titleCase(p.PROPADDR), titleCase(p.CITY)].filter(Boolean).join(", ")),
+      row("County", p.COUNTY),
+      row("Built", p.DATECONST),
+      row("Original use", p.ORIGUSE),
+      row("Present use", p.PRESUSE),
+    ),
+    note: "From the Tennessee Historical Commission's survey records — surveyed, not necessarily listed on the National Register, and the inventory is still being digitised statewide. A flag to check with the Commission, not a clearance.",
+  };
+}
+export function nrhpBoundaryCard(props) {
+  const p = props || {};
+  const where = [clean(p.City), clean(p.County) ? `${clean(p.County)} County` : ""].filter(Boolean).join(", ");
+  return {
+    title: `${clean(p.Resource_Name) || "National Register property"} — National Register`,
+    rows: rowsOf(
+      row("Address", p.Address),
+      row("Location", where),
+      row("Listed", ymd(p.Listed_Date)),
+      row("National Historic Landmark", ymd(p.NHL_Date)),
+      row("Listed as part of", p.Multiple_Name),
+    ),
+    note: "The boundary of a property or district listed on the National Register of Historic Places (State Historic Preservation Office). A listing triggers federal Section 106 review where a federal permit or funding is involved.",
   };
 }

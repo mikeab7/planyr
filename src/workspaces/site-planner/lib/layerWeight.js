@@ -169,6 +169,10 @@ export const LAYER_TIER = {
   tn_sna: "reference",
   tn_scenic: "reference",
   tn_nrhp: "reference",
+  tn_nrhp_bounds: "reference",
+  tn_thc_sites: "reference",
+  tn_landfills: "reference",
+  tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
   tn_cemeteries: "reference",
   tn_crit_habitat: "reference",
   co_isd: "context",

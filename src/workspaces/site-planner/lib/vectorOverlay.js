@@ -838,20 +838,18 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
 
 /* Tennessee STREAM BUFFER bands (B2521584) — the sibling of the Georgia builder above, with the same pane / status / export contract (the export
  * gatherer reads the polygons exactly as it reads a pipeline corridor — PDF-PARITY). The rule is `tennesseeStreamBuffers.streamBufferBandsTn`, pure
- * and unit-tested: NHD streams at 30 ft each side, and TDEC's own "CGP Unavailable Waters" lines (Exceptional Tennessee Waters + waters with
- * unavailable siltation / habitat parameters) at 60 ft. Both sources come through `fetchCached`, the same SWR cache entries the drawn "Streams"
- * and "Restricted Waters" layers use, so turning the buffer on beside them costs no second pull.
+ * and unit-tested: USGS NHD streams at 30 ft each side (the Construction General Permit's average natural riparian buffer). The NHD pull comes
+ * through `fetchCached`, the same SWR cache entry the drawn "Streams" layer uses, so turning the buffer on beside it costs no second pull.
  *
- * LOUD, never partial-and-silent: if TDEC's list cannot be loaded the bands shown are the 30 ft floor ONLY and the row says so — a missing list
- * must never draw 30 ft where the rule is 60. Vector-only: below the NHD source's vector gate there are no centrelines, so it says "zoom in". */
+ * LOUD, never partial-and-silent: the status line always carries what is NOT drawn (the 60 ft tier on TDEC-listed waters), and a failed NHD pull
+ * clears the bands and says so. Vector-only: below the NHD source's vector gate there are no centrelines, so it says "zoom in". */
 export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
-  const nhd = VECTOR_SOURCES.nhd_flowlines, restricted = VECTOR_SOURCES.tn_cgp_waters;
-  if (!nhd || !restricted) return null;
+  const nhd = VECTOR_SOURCES.nhd_flowlines;
+  if (!nhd) return null;
   const { cache = gisCache } = opts;
+  const NOT_DRAWN = "The 60 ft tier on TDEC-listed waters is not drawn.";
 
-  let map = null, opacity = initialOpacity, seq = 0;
-  const data = { nhd: null, restricted: null };
-  const failed = { nhd: false, restricted: false };
+  let map = null, opacity = initialOpacity, seq = 0, data = null;
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const group = L.layerGroup([], { pane });
   const bands = L.layerGroup([]);
@@ -859,10 +857,8 @@ export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus
 
   const paint = () => {
     bands.clearLayers();
-    if (!data.nhd) return;
-    const list = streamBufferBandsTn({ nhd: data.nhd, restricted: failed.restricted ? null : data.restricted });
-    // Widest first, so the narrower tier laid over a wider one stays legible instead of being buried by it.
-    list.sort((a, b) => b.tier.eachSideFt - a.tier.eachSideFt);
+    if (!data) return;
+    const list = streamBufferBandsTn({ nhd: data });
     for (const { ring, tier } of list) {
       bands.addLayer(L.polygon(ring.map(([lng, lat]) => [lat, lng]), {
         pane: CORRIDOR_PANE,
@@ -871,15 +867,9 @@ export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus
         interactive: false,
       }));
     }
-    if (failed.restricted) {
-      report("failed", `${cfg.label}: couldn't load TDEC's list of exceptional and impaired waters — the bands shown are the 30 ft standard only, NOT the 60 ft rule that applies to those streams (screening only).`);
-    } else if (!list.length) {
-      report("empty", "No streams in this view.");
-    } else if (data.nhd.truncated) {
-      report("loaded", `Partial — too many streams in this view to buffer them all; zoom in. Showing: ${bufferLegendTn(list).join(" · ")}.`);
-    } else {
-      report("loaded", bufferLegendTn(list).join(" · "));
-    }
+    if (!list.length) report("empty", "No streams in this view.");
+    else if (data.truncated) report("loaded", `Partial — too many streams in this view to buffer them all; zoom in. ${bufferLegendTn(list).join(" · ")}. ${NOT_DRAWN}`);
+    else report("loaded", `${bufferLegendTn(list).join(" · ")}. ${NOT_DRAWN}`);
   };
 
   const refresh = async () => {
@@ -889,24 +879,25 @@ export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus
     const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
     const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
     if (decideVectorOrImage(nhd, { zoom, bboxAreaDeg: areaDeg }) === "image") {
-      seq++; bands.clearLayers(); data.nhd = null;
+      seq++; bands.clearLayers(); data = null;
       report("empty", "Zoom in to about street level to see the stream buffers.");
       return;
     }
     const mySeq = ++seq;
-    const pull = (name, source) => fetchCached(source, bbox, {
-      cache, zoom,
-      onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data[name] = fr.data; failed[name] = false; paint(); } },
-    }).then((r) => { if (mySeq === seq) { data[name] = r.data; failed[name] = false; } })
-      .catch((e) => { if (mySeq === seq) { failed[name] = true; reportClientEvent("tn-stream-buffer-source-failed", String((e && e.message) || e), { source: name }); } });
-    await Promise.all([pull("nhd", nhd), pull("restricted", restricted)]);
-    if (mySeq !== seq || !map) return;
-    if (failed.nhd) {
+    try {
+      const r = await fetchCached(nhd, bbox, {
+        cache, zoom,
+        onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data = fr.data; paint(); } },
+      });
+      if (mySeq !== seq || !map) return;
+      data = r.data;
+      paint();
+    } catch (e) {
+      if (mySeq !== seq || !map) return;
       bands.clearLayers();
+      reportClientEvent("tn-stream-buffer-source-failed", String((e && e.message) || e), { source: "nhd" });
       report("failed", `${cfg.label}: couldn't load the USGS stream lines here — no buffers are shown (screening only).`);
-      return;
     }
-    paint();
   };
 
   group.onAdd = function (m) {
@@ -925,7 +916,7 @@ export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus
     seq++;
     m.off("moveend", refresh);
     L.LayerGroup.prototype.onRemove.call(this, m);
-    map = null; data.nhd = data.restricted = null;
+    map = null; data = null;
   };
   group.setOpacity = (o) => { opacity = o; paint(); };
   group.getExportMode = () => "vector";

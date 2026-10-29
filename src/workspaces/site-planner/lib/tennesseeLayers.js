@@ -13,10 +13,12 @@
  * PURE: no network, no React. */
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import {
-  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, isImpairedAttainment, isThreatenedAttainment,
+  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, landfillCard, thcSiteCard, nrhpBoundaryCard, isImpairedAttainment, isThreatenedAttainment,
 } from "./tennesseeCards.js";
 
 const TN = { states: ["TN"] };
+/* a state server the browser cannot read directly rides the same-origin relay (functions/gis-proxy); the registry records the server's own address */
+export const viaRelay = (u) => "/gis-proxy/" + String(u).replace(/^https:\/\//, "");
 const TDEC = "Tennessee Dept. of Environment & Conservation (TDEC)";
 
 /* Water-quality assessment colouring: impaired (the EPA-approved 303(d)-style list) is the loud class; threatened next; the rest recede. */
@@ -64,6 +66,21 @@ export const TN_LAYERS = {
     infoCaveat: "Impairment can tighten the state's construction buffer (60 ft average instead of 30 ft, TNR100000) and discharge rules, but only for some causes — see \"Restricted Waters\" for TDEC's own list and ask TDEC's Division of Water Resources.",
     role: "line", group: "flood", order: 4,
     floodTier: "hydrography", agency: "TDEC",
+  },
+
+  tn_stream_buffers: {
+    // Computed bands off the cached NHD geometry — vectorOverlay.cachedTnStreamBufferLayer and lib/tennesseeStreamBuffers.js, which holds the rule.
+    kind: "pipelineCorridor", label: "Stream Buffers", swatch: "#b45309", bufferRule: "tn_streams",
+    source: "USGS NHD + TDEC Construction General Permit rule (computed)",
+    ...TN,
+    // Vector-only: the bands exist only where the NHD centrelines came back as VECTORS, so the gate is the NHD source's own `query.minVectorZoom` (test/layerZoomGate pins the two together).
+    minZoom: 12,
+    opacity: 0.55,
+    vintage: "Computed from USGS NHD under the Construction General Permit rule — not a surveyed buffer",
+    note: "Assumed 30 ft construction buffer each side of the USGS stream centreline: the natural riparian buffer the TDEC Construction General Permit (TNR100000) requires between a stream and the limits of disturbance — a required AVERAGE width, no point narrower than half of it. NOT drawn: the permit asks 60 ft on Exceptional Tennessee Waters and waters impaired for siltation / habitat, and TDEC's list of those reaches is not available to Planyr — check TDEC's Construction General Permit map. Measured from the CENTRELINE, not the top of bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered, and a wet-weather conveyance (TDEC hydrologic determination) carries none. Screening only — a surveyed top-of-bank governs.",
+    infoCaveat: "These are the STATE construction buffers (rule text is the 2021 permit; TDEC reissued the permit effective 2026-10-01 — confirm its buffer section). Cities add their own post-construction buffers on top — Murfreesboro's Water Quality Protection Area policy asks 35, 50 or 60 ft by stream size and health; Metro Nashville's Stormwater Manual (Vol. 1, §6.10) sets its own. Those widths depend on drainage area and stream class this map does not carry, so they are NOT drawn: get the city's. The MS4 permit-area layer shows whose rules apply.",
+    role: "area", group: "flood", order: 5,
+    floodTier: "hydrography", agency: "TDEC / USGS",
   },
 
   /* ---- Utilities: who serves water ---- */
@@ -138,7 +155,44 @@ export const TN_LAYERS = {
     hoverFields: [{ names: ["NAME"] }, { names: ["CITY"] }],
     vintage: "USGS GNIS cemeteries — recorded sites only; no single edition date",
     note: "INCOMPLETE: recorded cemeteries only. Unrecorded family burial grounds — common on old Middle Tennessee farmland — are NOT on this layer, so an empty map is never proof of none. Tennessee law protects every known burial site; ask the county and have the property surveyed.",
-    role: "point", group: "environmental", order: 25,
+    role: "point", group: "environmental", order: 27,
+  },
+  tn_nrhp_bounds: {
+    kind: "esriFeature", label: "National Register Boundaries", source: "Tennessee Historical Commission (SHPO) — National Register boundaries",
+    url: viaRelay(GIS_SOURCES.nrhpBoundsTn.serviceUrl), ...TN,
+    minZoom: 12, color: "#6d28d9", weight: 1.5, opacity: 0.5,
+    styleFn: (_p, opacity) => ({ color: "#6d28d9", weight: 1.5, opacity, fillColor: "#6d28d9", fillOpacity: opacity * 0.2 }), // design-exempt: map ink for a drawn designated area
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "National Register property", hoverSource: "THC",
+    hoverFields: [{ names: ["Resource_Name"] }, { names: ["City"] }],
+    identifyCard: (props) => nrhpBoundaryCard(props),
+    vintage: "Tennessee Historical Commission National Register boundaries — current edition",
+    note: "The footprint of each National Register property and district in Tennessee (2,047), where the point layer gives one dot. Click for the name, address and listing date.",
+    infoCaveat: "A listing triggers federal Section 106 review where a federal permit or funding is involved. A property can be eligible without being listed — ask the Tennessee Historical Commission.",
+    role: "area", group: "environmental", order: 25,
+  },
+  tn_thc_sites: {
+    kind: "esriFeature", label: "Recorded Historic Sites", source: "Tennessee Historical Commission — historic sites survey",
+    url: viaRelay(GIS_SOURCES.thcSitesTn.serviceUrl), ...TN,
+    minZoom: 16, color: "#7c3aed", weight: 1.5, opacity: 0.55, pointRadius: 3,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Recorded historic site", hoverSource: "THC",
+    hoverFields: [{ names: ["COMNAME", "HISTNAME"] }, { names: ["DATECONST"], label: "built" }],
+    identifyCard: (props) => thcSiteCard(props),
+    vintage: "Tennessee Historical Commission survey records — decades of paper surveys, digitisation in progress",
+    note: "Buildings and sites recorded in the Tennessee Historical Commission's surveys (186,000 records) — most are NOT on the National Register. Shown close in only. The inventory is still being digitised, so an empty map is never proof of none.",
+    infoCaveat: "Surveyed is not listed, and a survey can be decades old. A flag to check with the Commission (Section 106 applies where a federal permit is involved), not a clearance.",
+    role: "point", group: "environmental", order: 26,
+  },
+  tn_landfills: {
+    kind: "esriFeature", label: "Permitted Landfills", source: `${TDEC} — Division of Solid & Hazardous Waste Management`,
+    url: viaRelay(GIS_SOURCES.landfillsTn.serviceUrl), ...TN,
+    minZoom: 9, color: "#78350f", weight: 2, opacity: 0.55, pointRadius: 5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Permitted landfill", hoverSource: "TDEC",
+    hoverFields: [{ names: ["PRIMARY_NAME"] }, { names: ["LANDFILL_CLASS"] }, { names: ["CITY"] }],
+    identifyCard: (props) => landfillCard(props),
+    vintage: "TDEC permitted landfills — current edition",
+    note: "TDEC's permitted landfills across Tennessee (111 facilities, Class I–IV by the kind of waste). Click for the name, class, address and TDEC site ID.",
+    infoCaveat: "A Phase I ESA pre-screen: a landfill nearby is a flag (gas migration, leachate, truck traffic). Closed and unpermitted dumps are not on this map, so an empty view is never proof of none.",
+    role: "point", group: "environmental", order: 20,
   },
   tn_crit_habitat: {
     kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
@@ -150,7 +204,7 @@ export const TN_LAYERS = {
     identifyCard: (props) => critHabitatCard(props),
     vintage: "USFWS final critical habitat — layer edited 2026-10-21",
     note: "USFWS final critical habitat — in Tennessee mostly freshwater mussels and fish (the Stones, Duck, Clinch and Holston systems) and the cedar-glade plants. It binds FEDERAL actions, not private land directly — but a Corps stream or wetland permit is a federal action. A screen; USFWS IPaC is the authoritative species list.",
-    role: "area", group: "environmental", order: 26,
+    role: "area", group: "environmental", order: 28,
   },
 };
 
@@ -161,7 +215,7 @@ export const TN_LAYER_IDS = Object.freeze(Object.keys(TN_LAYERS));
  * else is a look-up fact — a flag to pull a file, never louder than the plan. The buffer bands (when present) are the constraint. */
 export const TN_TIERS = Object.freeze({
   tn_city: "context", tn_ms4: "reference",
-  tn_wqa: "reference", tn_pws: "reference",
+  tn_wqa: "reference", tn_pws: "reference", tn_stream_buffers: "constraint",
   tn_drycleaners: "reference", tn_sna: "reference", tn_scenic: "reference",
-  tn_nrhp: "reference", tn_cemeteries: "reference", tn_crit_habitat: "reference",
+  tn_nrhp: "reference", tn_nrhp_bounds: "reference", tn_thc_sites: "reference", tn_landfills: "reference", tn_cemeteries: "reference", tn_crit_habitat: "reference",
 });

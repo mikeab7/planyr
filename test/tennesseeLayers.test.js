@@ -22,6 +22,7 @@ import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 import { TN_LAYERS, TN_LAYER_IDS, wqaStyle } from "../src/workspaces/site-planner/lib/tennesseeLayers.js";
 import { VECTOR_SOURCES, buildQueryUrl } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
+import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 import { siteState } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { PANEL_GROUPS, groupEntriesFor, availableEntries } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
@@ -71,6 +72,22 @@ describe("every Tennessee row is Tennessee-only and registered whole", () => {
       expect(src.tier, id).toBe("production");
       expect(src.lastVerified, id).toMatch(/^2026-10-/);
     }
+  });
+  it("the computed buffer row's source is registered (USGS NHD) and its status line carries what it does NOT draw", () => {
+    expect(ALL_LAYERS.tn_stream_buffers.bufferRule).toBe("tn_streams");
+    expect(VECTOR_SOURCES.nhd_flowlines).toBeTruthy();
+    expect(ALL_LAYERS.tn_stream_buffers.note).toMatch(/NOT drawn: the permit asks 60 ft/);
+    expect(ALL_LAYERS.tn_stream_buffers.note).toMatch(/CENTRELINE/);
+    expect(ALL_LAYERS.tn_stream_buffers.infoCaveat).toMatch(/2026-10-01/); // the 2021 rule text vs the reissued permit is said, not hidden
+  });
+  it("the rows on the State's servers ride the relay (the registry records the server's own address)", () => {
+    for (const id of ["tn_landfills", "tn_thc_sites", "tn_nrhp_bounds"]) {
+      expect(ALL_LAYERS[id].url, id).toMatch(/^\/gis-proxy\/(maps\.tdec|tnmap)\.tn\.gov\//);
+      expect(ALLOWED_HOSTS.has(ALL_LAYERS[id].url.split("/")[2]), id).toBe(true);
+    }
+  });
+  it("NO row reads tdeconline.tn.gov — it refuses the relay (HTTP 403), so a row on it would ship dead", () => {
+    for (const id of TN_LAYER_IDS) expect(String(ALL_LAYERS[id].url || ""), id).not.toMatch(/tdeconline/);
   });
   it("sits in a weight tier (reference recedes; county / city lines are context)", () => {
     for (const id of TN_LAYER_IDS) expect(LAYER_TIER[id], id).toBeTruthy();
@@ -191,6 +208,29 @@ describe("click cards are clean (constraint #45)", () => {
     noJunk(c);
     expect(c.rows).toEqual([{ label: "Species", text: "Pleuronaia dolabelloides" }, { label: "Federal status", text: "Endangered" }]);
   });
+  it("landfill — the real TDEC record, class written as a Roman numeral", () => {
+    const c = cards.landfillCard({ PRIMARY_NAME: "Milan Army Ammunition Plant Class Ii Landfill", LANDFILL_CLASS: "Class Ii", STATUS: "Operating", COUNTY: "Gibson", CITY: "Milan", ADDRESS: null, TDEC_SITE_ID: "27-0105", LATITUDE: 35.896768, LONGITUDE: -88.713215, GIS_ID: 1, FACILITY_ID: 9, EFO_NAME: "Jackson" });
+    noJunk(c);
+    expect(c.rows.find((r) => r.label === "Class").text).toBe("Class II");
+    expect(c.rows.find((r) => r.label === "Address").text).toBe("Milan");
+    expect(cards.landfillCard({ LANDFILL_CLASS: "Class Iv" }).rows[0].text).toBe("Class IV");
+    expect(cards.landfillCard({ LANDFILL_CLASS: "Class I" }).rows[0].text).toBe("Class I");
+  });
+  it("THC survey site — fixed-width padded text is trimmed and shouted names are title-cased", () => {
+    const c = cards.thcSiteCard({ OBJECTID: 5, COUNTY: "Davidson", HISTNAME: " ", COMNAME: "JOY'S FLOWERS", PROPADDR: "6TH AVE N 211", CITY: " ", DATECONST: "1925", ORIGUSE: "Other Commercial building", PRESUSE: "", DOCLINK: "", SURVEYDATE: 506304000000, SHAPE: null });
+    noJunk(c);
+    expect(c.title).toBe("Joy's Flowers — recorded historic site");
+    expect(c.rows.map((r) => r.label)).toEqual(["Address", "County", "Built", "Original use"]);
+  });
+  it("National Register boundary — padded strings trimmed, YYYYMMDD read as a date, no empty rows", () => {
+    const pad = (v, n) => v + " ".repeat(n);
+    const c = cards.nrhpBoundaryCard({ OBJECTID: 3, REFNUM: "98000330", Resource_Name: pad("Acme Farm Supply Building", 80), Address: pad("101 Broadway", 90), County: pad("Davidson", 16), City: pad("Nashville", 26), Listed_Date: "19980402", Multiple_Name: null, NHL_Date: null, FILENET: null, Shape_Area: 1.2 });
+    noJunk(c);
+    expect(c.title).toBe("Acme Farm Supply Building — National Register");
+    expect(c.rows).toEqual([{ label: "Address", text: "101 Broadway" }, { label: "Location", text: "Nashville, Davidson County" }, { label: "Listed", text: "April 2, 1998" }]);
+    expect(cards.ymd("20021345")).toBe("20021345"); // an impossible month is shown as published, not invented
+    expect(cards.ymd("")).toBe("");
+  });
   it("titleCase leaves mixed-case text alone and keeps acronyms", () => {
     expect(cards.titleCase("Harpeth River")).toBe("Harpeth River");
     expect(cards.titleCase("MEMPHIS LIGHT GAS & WATER")).toBe("Memphis Light Gas & Water");
@@ -208,8 +248,8 @@ describe("a state server rides the same-origin relay — the vector query builde
 });
 
 describe("Site Analysis stays trusted-only: Tennessee gets a map pill, never a verdict card", () => {
-  it("the Contamination pill on a Tennessee site turns on the EPA layer AND TDEC's drycleaner list", () => {
+  it("the Contamination pill on a Tennessee site turns on the EPA layer AND TDEC drycleaners and permitted landfills", () => {
     const p = pillsFor({ regions: ["TN"], untrusted: [], layers: ALL_LAYERS }).find((x) => x.id === "contamination");
-    expect(p.layers).toEqual(["env_cleanups", "tn_drycleaners"]);
+    expect(p.layers).toEqual(["env_cleanups", "tn_drycleaners", "tn_landfills"]);
   });
 });

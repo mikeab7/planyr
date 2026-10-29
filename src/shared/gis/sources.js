@@ -831,6 +831,58 @@ export const GIS_SOURCES = {
     lastVerified: "2026-10-29",
   },
 
+  /* ---- the State of Tennessee's own servers, reached through the same-origin /gis-proxy relay ----
+   * `maps.tdec.tn.gov` (TDEC's hosting server) and `tnmap.tn.gov` (the State's GIS clearinghouse) answer the relay; MEASURED THROUGH planyr.io on
+   * 2026-10-29 (build 88b0334). ⛔ `tdeconline.tn.gov` — TDEC's other server, home of its remediation-site, UST, oil & gas, Construction General
+   * Permit restricted-water, hydrologic-determination and dam layers — answers the relay with HTTP 403 (it refuses Cloudflare's addresses) and is
+   * unreachable from the build environment, so none of those layers is wired (docs/TENNESSEE-LAYERS.md). */
+  /* TDEC Solid Waste — permitted Tennessee landfills (111 operating facilities, Class I–IV by the kind of waste), one point per facility with its TDEC
+   * site id, county, city and status. maps.tdec.tn.gov hosts it; ArcGIS Online lists the same service as owned by TDEC's Bureau of Environment. */
+  landfillsTn: {
+    key: "landfillsTn",
+    label: "Permitted landfills (Tennessee TDEC)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Solid & Hazardous Waste Management, permitted landfills",
+    serviceUrl: "https://maps.tdec.tn.gov/hosting/rest/services/Permitted_Tennessee_Landfills/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "PRIMARY_NAME", cls: "LANDFILL_CLASS", status: "STATUS", county: "COUNTY", city: "CITY", address: "ADDRESS", id: "TDEC_SITE_ID" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* Tennessee Historical Commission — the recorded historic-sites SURVEY inventory (186,319 points; paper survey forms digitised, "conversion … is
+   * in progress so the whole state is not available yet" — the service's own words). Survey records, NOT National Register listings. State of
+   * Tennessee clearinghouse (tnmap.tn.gov), service HISTORICAL/HISTORICAL_COMMISSION layer 0. */
+  thcSitesTn: {
+    key: "thcSitesTn",
+    label: "Recorded historic sites (Tennessee Historical Commission)",
+    provider: "Tennessee Historical Commission (THC) — historic sites survey, via the State of Tennessee GIS clearinghouse",
+    serviceUrl: "https://tnmap.tn.gov/arcgis/rest/services/HISTORICAL/HISTORICAL_COMMISSION/MapServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "COMNAME", histName: "HISTNAME", address: "PROPADDR", city: "CITY", county: "COUNTY", built: "DATECONST", origUse: "ORIGUSE", presUse: "PRESUSE" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* THC / State Historic Preservation Office — National Register of Historic Places BOUNDARIES for Tennessee (2,047 polygons: a district's footprint,
+   * not a single point). The sibling of the NPS point layer `nrhpTn`; same State clearinghouse. */
+  nrhpBoundsTn: {
+    key: "nrhpBoundsTn",
+    label: "National Register boundaries (Tennessee)",
+    provider: "Tennessee Historical Commission (State Historic Preservation Office) — National Register boundaries, via the State of Tennessee GIS clearinghouse",
+    serviceUrl: "https://tnmap.tn.gov/arcgis/rest/services/HISTORICAL/NATIONAL_REGISTER_TN/MapServer/2",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Resource_Name", address: "Address", county: "County", city: "City", listed: "Listed_Date", multiple: "Multiple_Name", nhl: "NHL_Date" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+
   /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING ROWS. Every endpoint below was read and
    * queried live on 2026-10-04 from the build sandbox (reachable, answers `f=json`, `access-control-allow-origin: *`
    * so planyr.io can call it from the browser) and sits on a production host — no `/Test/` or staging path.

@@ -307,6 +307,31 @@ export const SOURCE_FIXTURES = {
     { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 3
   ],
   },
+  landfillsTn: {
+  fixtures: [
+    // measured THROUGH planyr.io's relay 2026-10-29 (maps.tdec.tn.gov is unreachable from the build environment): 111 facilities; each point is a real facility.
+    { label: "Milan Army Ammunition Plant landfill (Gibson, west TN)", point: [-88.713215, 35.896768], expectMinCount: 1 }, // live: 1
+    { label: "Mueller Company landfill (Hamilton)", point: [-85.254573, 35.086244], expectMinCount: 1 }, // live: 1
+    { label: "Volunteer Regional Landfill (Scott)", point: [-84.488425, 36.545536], expectMinCount: 1 }, // live: 1
+    { label: "Carter County / Elizabethton landfill (east TN)", point: [-82.194389, 36.371859], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  thcSitesTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 186,319 survey points; the inventory is partial (0 at Christiana), so the fixtures sit in surveyed towns.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 777
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 495
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 1534
+  ],
+  },
+  nrhpBoundsTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 2,047 boundary polygons.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 55
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 44
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 37
+  ],
+  },
   /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
    * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
    * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
@@ -1263,6 +1288,23 @@ export const SOURCE_DOCS = {
   notes:
     "USGS GNIS recorded cemeteries read at Tennessee sites — INCOMPLETE by construction: an unrecorded family burial ground is not on it, so an empty " +
     "map is never proof of none. Tennessee law protects every known burial site; have the property surveyed and ask the county.",
+  },
+  landfillsTn: {
+  notes:
+    "TDEC's permitted Tennessee landfills (111 operating facilities, Class I–IV by the kind of waste accepted) with the TDEC site id, county and status. " +
+    "A landfill beside the site is a flag (gas, leachate, truck traffic, a closed-cell buffer) — ask TDEC's Division of Solid & Hazardous Waste Management. " +
+    "Closed and unpermitted dumps are NOT on it, so an empty map is never proof of none.",
+  },
+  thcSitesTn: {
+  notes:
+    "The Tennessee Historical Commission's recorded historic-sites survey (186,319 points): buildings and sites surveyed over decades, most of them NOT on the " +
+    "National Register. The service says the paper-to-digital conversion is in progress, so the inventory is partial statewide — an empty map is never proof of " +
+    "none. A flag to check with the Commission (Section 106 review applies where a federal permit is involved).",
+  },
+  nrhpBoundsTn: {
+  notes:
+    "National Register of Historic Places boundaries for Tennessee from the State Historic Preservation Office (2,047 polygons): the footprint of a listed " +
+    "property or district, where the NPS point layer gives one point. Fixed-width padded text from the source is trimmed in the card.",
   },
   hsiGa: {
   notes:
