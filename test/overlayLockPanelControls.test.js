@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import OverlaysPanel from "../src/workspaces/site-planner/components/OverlaysPanel.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const noop = () => {};
 const handlers = new Proxy({}, { get: (_, k) => (k === "sliderHistory" ? () => ({}) : k === "pageReady" ? () => true : noop) });
@@ -34,7 +35,7 @@ describe("a LOCKED overlay's panel controls all work", () => {
 
 describe("the ⋯ menu and the writes no longer refuse a locked overlay", () => {
   const panel = readFileSync(new URL("../src/workspaces/site-planner/components/OverlaysPanel.jsx", import.meta.url), "utf8");
-  const planner = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const planner = plannerSource();
   it("Size to view / Align to parcel edge menu rows are not gated on lock", () => {
     const sz = panel.match(/it\("Size to view".*\n/)[0], al = panel.match(/it\("Align to parcel edge".*\n/)[0];
     expect(sz).not.toMatch(/locked/); expect(al).not.toMatch(/locked/);
@@ -49,7 +50,7 @@ describe("the ⋯ menu and the writes no longer refuse a locked overlay", () => 
 });
 
 describe("a DIRECT map drag on a locked overlay still does nothing", () => {
-  const planner = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const planner = plannerSource();
   const body = (name) => { const a = planner.indexOf(`const ${name} =`); return planner.slice(a, planner.indexOf("drag.current =", a)); };
   for (const fn of ["startMoveSheetOverlay", "startScaleOverlay", "startRotateOverlay"]) {
     it(`${fn} returns before arming a drag when locked`, () => { expect(body(fn)).toMatch(/o\.locked(\s\|\|[^)]*)?\) return/); });

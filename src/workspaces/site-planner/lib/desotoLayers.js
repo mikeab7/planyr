@@ -15,7 +15,7 @@
  * PURE: no network, no React — the style / label rules below unit-test standalone (test/desotoLayers.test.js). */
 
 import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate, zoneClass, ZONE_COLORS } from "./desotoZoning.js";
-import { zoningLegend } from "./desotoZoningNames.js";
+import { zoningLegend, ZONING_CITATIONS } from "./desotoZoningNames.js";
 import { CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { jurisdictionAt, ensureMunicipalities, subscribeMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
 import { providerCardAt, ensureProviders } from "./desotoProviders.js";
@@ -309,7 +309,7 @@ Object.assign(DESOTO_LAYERS, {
 });
 
 Object.assign(DESOTO_VINTAGE, {
-  ms_desoto_zoning: "DeSoto County zoning table — records through the most recent case approvals (latest seen 2026-08-18); updated by the planning departments",
+  ms_desoto_zoning: `DeSoto County zoning table — records through the most recent case approvals (latest seen 2026-08-18); updated by the planning departments. District names — Olive Branch: ${ZONING_CITATIONS["Olive Branch"]}. Unincorporated DeSoto County: ${ZONING_CITATIONS["Unincorporated DeSoto County"]}. A code not in its jurisdiction\'s ordinance list is shown as written.`,
   ms_desoto_city: "DeSoto County GIS municipal limits — current edition",
   ms_psc_electric: "Mississippi Public Service Commission certificated areas, as republished by DeSoto County GIS — edition date not published",
   ms_psc_gas: "Mississippi Public Service Commission certificated areas, as republished by DeSoto County GIS — edition date not published",

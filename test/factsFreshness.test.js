@@ -26,6 +26,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { factsFreshness, canonEnv, FRESHNESS_REASONS, ANCHOR_DRIFT_FT } from "../src/workspaces/site-planner/lib/factRevalidation.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const env = canonEnv({ mnX: 0, mnY: 0, mxX: 1000, mxY: 1000 });
 const lastCheck = (over = {}) => ({
@@ -164,7 +165,7 @@ describe("NEW-7 — editedSinceCheck: an element edit turns the light stale, kee
 describe("the source wiring — the light must not be gated on the auto pass", () => {
   it("the facts pass is OPT-IN, so nothing is fetched when a plan is opened", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     // `!== false` (opt-OUT) is what ran a GIS pull plus a DEM grid on every open.
     expect(src).toContain('const drainAutoEnabled = (settings.drainage?.autoFacts === true)');
     expect(src).not.toContain('settings.drainage?.autoFacts !== false');
@@ -174,14 +175,14 @@ describe("the source wiring — the light must not be gated on the auto pass", (
     // If the freshness inputs were gated on the auto flag they would be null on every plan, and the
     // light would be permanently grey — a silent failure that looks exactly like "nothing to say".
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toContain("if (!origin || !drainActive.length) return { bboxNow: null, anchorNow: null, groundNow: null };");
     expect(src).toContain("const drainFreshness = factsFreshness({");
   });
 
   it("NEW-7 — the light actually asks editedSinceCheck, off the undo-history counter, not a rewrite of the loose key", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toContain("editedSinceCheck: drainEditedSinceCheck,");
     expect(src).toContain("drainEditStampRef.current != null && histTick !== drainEditStampRef.current");
   });

@@ -21,6 +21,7 @@ import {
   ANCHOR_MAX_K, ZOOM_PER_NOTCH, WHEEL_MAX_NOTCHES,
   wheelNotches, wheelZoomFactor,
 } from "../src/shared/viewport/viewAnchor.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const src = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
@@ -183,7 +184,7 @@ describe("the wheel factor is proportional — and a mouse detent is numerically
 });
 
 describe("SOURCE GUARD — the planner actually uses this, and keeps the two frames apart", () => {
-  const planner = src("../src/workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
 
   it("imports the anchored transform rather than open-coding it", () => {
     expect(planner).toMatch(/from "\.\.\/\.\.\/shared\/viewport\/viewAnchor\.js"/);

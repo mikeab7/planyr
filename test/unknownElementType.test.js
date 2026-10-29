@@ -3,9 +3,10 @@
 // the whole Site Planner on open ("Cannot read properties of undefined (reading 'label')").
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("SitePlanner never reads TYPE[<element type>].label unguarded", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("every TYPE[el|selEl.type] label read is optional-chained", () => {
     const bad = src.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => /TYPE\[(?:el|selEl)\.type\]\.label/.test(l));
     expect(bad.map(([n]) => n)).toEqual([]);
@@ -13,7 +14,7 @@ describe("SitePlanner never reads TYPE[<element type>].label unguarded", () => {
 });
 
 describe("the draw list skips elements of an unknown type", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("drawEls filters on TYPE[el.type]", () => {
     const block = src.slice(src.indexOf("const drawEls = useMemo"), src.indexOf("/* ------------ grid lines"));
     expect(block).toMatch(/TYPE\[el\.type\]/);
@@ -22,7 +23,7 @@ describe("the draw list skips elements of an unknown type", () => {
 });
 
 describe("the callout pass skips a callout that has no placeable box", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("calloutBands filters on a finite c.box before sorting", () => {
     const block = src.slice(src.indexOf("const calloutBands = useMemo"), src.indexOf("one callout/text-box node, lifted out"));
     expect(block).toMatch(/c\.box && Number\.isFinite\(c\.box\.x\)/);

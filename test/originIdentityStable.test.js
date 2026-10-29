@@ -27,11 +27,9 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeOrigin } from "../src/workspaces/site-planner/lib/sitePlacement.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "workspaces", "site-planner", "SitePlanner.jsx"),
-  "utf8"
-);
+const SRC = plannerSource();
 
 describe("origin identity is stabilised at the source", () => {
   it("the raw state is held under a different name, so nothing can close over it by accident", () => {

@@ -67,7 +67,8 @@ import { defineName, renameName, retargetName, deleteName } from "./lib/namedRan
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
 import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
 import { findInconsistencies } from "./lib/formulaConsistency.js";
-import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
+import { copyRange, pasteRange, fillDown, fillTextToCells, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
+import { rangesOf, applyToRanges, isMulti, collapse, MULTI_SELECTION_MESSAGE } from "./lib/selectionModel.js";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
@@ -818,12 +819,25 @@ export default function ModelApp({
     [commit, activeSheetId],
   );
   const applyStructuralActive = useCallback(
-    (fn, ...args) => commit((wb) => fn(setActiveSheet(wb, activeSheetId), ...args)),
+    (fn, ...args) => {
+      // NEW-2 — insert/delete of rows or columns shifts every address, so the extra ranges (stored by index)
+      // would point at the wrong cells: keep the active range only.
+      setSelRange((s) => collapse(s));
+      commit((wb) => fn(setActiveSheet(wb, activeSheetId), ...args));
+    },
     [commit, activeSheetId],
   );
 
   const onCommitCell = useCallback((r, c, text) => applyActive(commitCellText, r, c, text), [applyActive]);
-  const onBlankRange = useCallback((r1, r2, c1, c2) => applyActive(blankRange, r1, r2, c1, c2), [applyActive]);
+  // NEW-2 — a command on a multi-range selection is ONE commit (one undo step) that threads the sheet through
+  // every selected range; `sel` is a selection ({r1..c2, extra?}) or an explicit list of ranges.
+  const applyActiveRanges = useCallback((sel, fn, ...args) => {
+    const rs = Array.isArray(sel) ? sel : rangesOf(sel);
+    commit((wb) => applyToActiveSheet(setActiveSheet(wb, activeSheetId), (s) => applyToRanges(s, rs, fn, ...args)));
+  }, [commit, activeSheetId]);
+  const onBlankRanges = useCallback((ranges) => applyActiveRanges(ranges, blankRange), [applyActiveRanges]);
+  const onFillDownRanges = useCallback((ranges) => applyActiveRanges(ranges, fillDown), [applyActiveRanges]);
+  const onFillText = useCallback((cells, text, fromR, fromC) => applyActive(fillTextToCells, cells, text, fromR, fromC), [applyActive]);
   const onRenameColumn = useCallback((c, name) => applyActive(renameColumn, c, name), [applyActive]);
   const onAddColumn = useCallback(() => applyActive(addColumn), [applyActive]);
 
@@ -831,7 +845,8 @@ export default function ModelApp({
   // `activeSheetId` state's own header above — never through `commit`); the other four are real
   // content edits and go through the undo stack like everything else, syncing the view's
   // `activeSheetId` afterward since add/duplicate/delete all pick a new active sheet themselves.
-  const onSelectSheetTab = useCallback((id) => setActiveSheetId(id), []);
+  // (NEW-2: a multi-range selection belongs to the sheet it was made on — switching tabs keeps the active cell only.)
+  const onSelectSheetTab = useCallback((id) => { setActiveSheetId(id); setSelRange((s) => collapse(s)); }, []);
   const onAddSheetTab = useCallback(() => {
     const next = addSheet(workbook);
     commit(next);
@@ -873,6 +888,8 @@ export default function ModelApp({
     const t = setTimeout(() => setFileNotice(null), 9000);
     return () => clearTimeout(t);
   }, [fileNotice]);
+  // NEW-2 — a short, visible message from the grid (Excel's "This action won't work on multiple selections").
+  const onNotice = useCallback((text) => setFileNotice({ kind: "warn", text }), []);
   // NEW-1 (owner chat block, 2026-09-05) — Import Excel replaces the WHOLE workbook, and used to
   // do it unconditionally: importing a two-sheet file into a workbook that already had a real
   // Sheet1 silently discarded it, with nothing in the label or the flow saying so (Ctrl+Z recovers
@@ -1110,8 +1127,8 @@ export default function ModelApp({
   // every dollar amount above it in the same column.
   const activeFormat = formatAt(sheet, selRange.r1, selRange.c1);
   const onApplyFormat = useCallback((token) => {
-    applyActive(setNumberFormat, selRange.r1, selRange.r2, selRange.c1, selRange.c2, token);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, setNumberFormat, token);
+  }, [applyActiveRanges, selRange]);
   const onDeleteColumn = useCallback(() => {
     if (sheet.columns.length <= 1) return;
     applyStructuralActive(workbookDeleteColumn, activeCol);
@@ -1125,21 +1142,21 @@ export default function ModelApp({
   const mergedHere = !!mergeAt(sheet, selRange.r1, selRange.c1);
 
   const onSetCellStyle = useCallback((patch) => {
-    applyActive(setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, setCellStyle, patch);
+  }, [applyActiveRanges, selRange]);
   const onAdjustIndent = useCallback((delta) => {
-    applyActive(adjustIndent, selRange.r1, selRange.r2, selRange.c1, selRange.c2, delta);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, adjustIndent, delta);
+  }, [applyActiveRanges, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
-    applyActive(applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode });
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, applyBorder, { edges, style, mode });
+  }, [applyActiveRanges, selRange]);
   const onClearFormattingCmd = useCallback(() => {
-    applyActive(clearFormatting, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, clearFormatting);
+  }, [applyActiveRanges, selRange]);
   const onNumberFormatOp = useCallback((op) => {
     const fn = op === "increaseDecimals" ? increaseDecimals : op === "decreaseDecimals" ? decreaseDecimals : toggleThousands;
-    applyActive(setNumberFormat, selRange.r1, selRange.r2, selRange.c1, selRange.c2, fn(activeFormat));
-  }, [applyActive, selRange, activeFormat]);
+    applyActiveRanges(selRange, setNumberFormat, fn(activeFormat));
+  }, [applyActiveRanges, selRange, activeFormat]);
 
   // Format Painter — arm/disarm on click (capturing the CURRENT active cell's format+style);
   // applying happens in onSelectionSettled below, fired by SheetView the moment the user's next
@@ -1150,25 +1167,26 @@ export default function ModelApp({
   const onSelectionSettled = useCallback(() => {
     setPainter((p) => {
       if (!p) return p;
-      const sr = selRangeRef.current;
-      applyActive(applyPaintedStyle, sr.r1, sr.r2, sr.c1, sr.c2, p.source);
+      applyActiveRanges(selRangeRef.current, applyPaintedStyle, p.source);
       return null;
     });
-  }, [applyActive]);
+  }, [applyActiveRanges]);
 
   const onMergeToggle = useCallback(() => {
+    if (isMulti(selRange)) { onNotice(MULTI_SELECTION_MESSAGE); return; }
     applyActive((s) => {
       const m = mergeAt(s, selRange.r1, selRange.c1);
       return m ? unmergeAt(s, selRange.r1, selRange.c1) : mergeRange(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
     });
-  }, [applyActive, selRange]);
+  }, [applyActive, selRange, onNotice]);
 
   // Insert/Delete (Cells group) act on the single active row/column — the right-click context
   // menu (SheetView.jsx) is the multi-row/column-aware path; the ribbon mirrors Excel's own
   // ribbon behavior for a plain cell selection.
-  const onRibbonInsertRow = useCallback(() => onInsertRowAt(selRange.r1), [onInsertRowAt, selRange]);
-  const onRibbonInsertColumn = useCallback(() => onInsertColumnAt(selRange.c1), [onInsertColumnAt, selRange]);
-  const onRibbonDeleteRow = useCallback(() => onDeleteRowAt(selRange.r1), [onDeleteRowAt, selRange]);
+  // (NEW-2: these act on ONE row/column, so a multi-range selection gets Excel's message instead of a guess.)
+  const onRibbonInsertRow = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onInsertRowAt(selRange.r1); }, [onInsertRowAt, selRange, onNotice]);
+  const onRibbonInsertColumn = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onInsertColumnAt(selRange.c1); }, [onInsertColumnAt, selRange, onNotice]);
+  const onRibbonDeleteRow = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onDeleteRowAt(selRange.r1); }, [onDeleteRowAt, selRange, onNotice]);
 
   const onSetFreezeTopRow = useCallback(() => onSetFreeze(1, sheet.freezeCols), [onSetFreeze, sheet.freezeCols]);
   const onSetFreezeFirstColumn = useCallback(() => onSetFreeze(sheet.freezeRows, 1), [onSetFreeze, sheet.freezeRows]);
@@ -1179,10 +1197,11 @@ export default function ModelApp({
   // the active column instead of no-op'ing — Excel's own "select one cell, hit Sort" behavior,
   // and far more useful on a real pro-forma than requiring an exact range be dragged first.
   const onSort = useCallback((direction) => {
+    if (isMulti(selRange)) { onNotice(MULTI_SELECTION_MESSAGE); return; }
     let r1 = selRange.r1, r2 = selRange.r2;
     if (r1 === r2) { const used = usedRangeEnd(sheet); r1 = 0; r2 = used ? used.row : 0; }
     applyActive(sortRange, r1, r2, selRange.c1, direction);
-  }, [applyActive, selRange, sheet]);
+  }, [applyActive, selRange, sheet, onNotice]);
 
   const onFilterToggle = useCallback(() => setFilterOn((v) => !v), []);
   const onSetColumnFilter = useCallback((colIndex, allowedOrNull) => {
@@ -1401,7 +1420,10 @@ export default function ModelApp({
             selRange={selRange}
             setSelRange={setSelRange}
             onCommit={onCommitCell}
-            onBlankRange={onBlankRange}
+            onBlankRanges={onBlankRanges}
+            onFillDownRanges={onFillDownRanges}
+            onFillText={onFillText}
+            onNotice={onNotice}
             onRenameColumn={onRenameColumn}
             onAddColumn={onAddColumn}
             onCopy={onCopy}

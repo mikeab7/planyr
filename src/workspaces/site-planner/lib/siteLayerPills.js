@@ -15,16 +15,16 @@ export const PILL_DEFS = Object.freeze([
   { id: "power", label: "Power lines", layers: ["hifld_tx"] },
   { id: "rail", label: "Rail", layers: ["bts_rail"] },
   { id: "traffic", label: "Traffic counts", byRegion: { TX: ["txdot_aadt"], CO: ["co_aadt"] } },
-  { id: "contamination", label: "Contamination sites", byRegion: { TX: ["env_lpst", "env_cleanups"], CO: ["co_env_cleanups"], FL: ["fl_contamination_sites", "env_cleanups"] }, fallback: ["env_cleanups"] },
+  { id: "contamination", label: "Contamination sites", byRegion: { TX: ["env_lpst", "env_cleanups"], CO: ["co_env_cleanups", "co_superfund", "co_rcra_ca", "co_inst_controls", "co_closed_landfills"], FL: ["fl_contamination_sites", "env_cleanups"] }, fallback: ["env_cleanups"] },
   { id: "faults", label: "Faults", byRegion: { TX: ["faults"] } },
 ]);
 
 /* Checks that drop out of the verdict list outside their regions come back here as pills, on whatever
- * layer that region has for the same thing (FL/GA pipelines are the EIA approximations). Oil & gas wells
- * have no non-Texas layer yet (Colorado's ECMC is unwired), so there is deliberately no pill there. */
+ * layer that region has for the same thing (FL/GA pipelines are the EIA approximations). Colorado's wells and flowlines
+ * are ECMC's own statewide registers (B2528688); other states have no wells layer yet, so no pill there. */
 export const OFF_REGION_PILLS = Object.freeze({
-  pipelines: { label: "Pipelines", byRegion: { FL: ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"], GA: ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"] } },
-  wells: { label: "Oil & gas wells", byRegion: {} },
+  pipelines: { label: "Pipelines", byRegion: { FL: ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"], GA: ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"], CO: ["co_ecmc_flowlines", "eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"] } },
+  wells: { label: "Oil & gas wells", byRegion: { CO: ["co_ecmc_wells", "co_ecmc_locations"] } },
 });
 
 const MUTED_LINE = "Tap one to turn it on. These come from public maps that are often off, so Planyr doesn't flag them for you.";

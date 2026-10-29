@@ -24,8 +24,9 @@ import {
   MATERIAL_LAND_AC,
   OPTIMIZE_BLOCKED,
 } from "../src/workspaces/site-planner/lib/pondOptimizeAffordance.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 // A pond whose ledgers all read green — the exact state that made the optimizer vanish.
 const ALL_GREEN = { hasRing: true, detRequiredAcFt: 76.7, mitRequiredAcFt: null, splitKnown: true, detShort: false, mitShort: false };

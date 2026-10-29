@@ -10,10 +10,11 @@ import { MEASURE_STD_KEYS } from "../src/workspaces/site-planner/lib/measureStyl
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 const EXPORT_SHEET = read("../src/workspaces/site-planner/lib/exportSheet.js");
 
 describe("NEW-1: measurements are styled through the ONE resolver, on every mode", () => {

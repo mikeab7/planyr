@@ -36,6 +36,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { DECLARATIONS, RAW_COLLECTIONS, VERDICT } from "../src/workspaces/site-planner/lib/hiddenContentReads.js";
+import { PLANNER_EXTRACTED } from "../test/helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DECLARED_NAMES = new Set(DECLARATIONS.map((d) => d.name));
@@ -43,6 +44,8 @@ const DECLARED_NAMES = new Set(DECLARATIONS.map((d) => d.name));
 /** The files a drawn/printed artefact can be produced from. */
 export const SWEPT_FILES = [
   "src/workspaces/site-planner/SitePlanner.jsx",
+  // B1064 — code extracted from SitePlanner.jsx is still swept: the element renderer is where a drawn artefact is produced.
+  ...PLANNER_EXTRACTED.map((f) => `src/workspaces/site-planner/${f}`),
   "src/workspaces/site-planner/lib/exportSheet.js",
 ];
 
@@ -179,7 +182,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (teethRef) {
     /* ⛔ PROVE THE SEARCH FINDS THE ONE WE KNOW ABOUT, before any clean result is reported. */
     const tmp = execFileSync("mktemp", ["-d"], { encoding: "utf8" }).trim();
-    execFileSync("git", ["--work-tree", tmp, "checkout", teethRef, "--", ...SWEPT_FILES], { cwd: ROOT });
+    // A file extracted from SitePlanner.jsx (B1064) does not exist at an older ref — its code was INSIDE SitePlanner.jsx there.
+    const atRef = SWEPT_FILES.filter((f) => { try { execFileSync("git", ["cat-file", "-e", `${teethRef}:${f}`], { cwd: ROOT, stdio: "ignore" }); return true; } catch { return false; } });
+    execFileSync("git", ["--work-tree", tmp, "checkout", teethRef, "--", ...atRef], { cwd: ROOT });
     const teeth = reconcile(sweep(tmp));
     const caught = teeth.unfiltered.find((u) => u.name === "roadNet");
     console.log(`\nTEETH CHECK against ${teethRef}:`);
