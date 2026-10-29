@@ -183,6 +183,8 @@ export const ALLOWED_HOSTS = new Set([
   "pikeil.wthgis.com", "masonil.wthgis.com", "gallatinil.wthgis.com", // WTH Technology county map viewers (Pike, Mason, Gallatin)
   "www.efsedge.com", // Saline County's listed GIS host
   "services.ccgisc.org", // Champaign County GIS Consortium's portal / server
+  "gisportal.champaignil.gov", "maps.ccgisc.org", "maps.piattcounty.org", // City of Champaign portal (its /ms/rest CCGISC folder holds the countywide tax-parcel service), CCGISC public viewer, Piatt County viewer
+  "richlandil.wthgis.com", // WTH Technology — Richland County
   "www.centralilmaps.com", // Central Illinois maps host (Logan / Woodford parcels; Mason unverified)
   /* NEW-1 (Kansas, 2026-10-19, B2348000) — the non-arcgis.com hosts the wired Kansas counties sit on; each was MEASURED through this relay on the PR preview before its county was wired. */
   "ww1.bucoks.com", // Butler County GIS
