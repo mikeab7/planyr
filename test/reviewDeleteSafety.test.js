@@ -135,8 +135,9 @@ describe("deleteReview — soft delete with hard-path degrade (NEW-F3)", () => {
     expect(r.removed).toBe(0);
   });
   it("missing deleted_at column (pre-migration DB) degrades to the HARD delete path", async () => {
-    h.exec = ({ ops }) => {
+    h.exec = ({ table, ops }) => {
       if (ops[0][0] === "update") return { data: null, error: { message: 'column "deleted_at" does not exist', code: "42703" } };
+      if (table === "site_plan_overlays") return { data: [], error: null }; // NEW-1 pre-check: no overlay uses it
       return { data: [{ id: "rv1" }], error: null }; // every purge-path query succeeds
     };
     const r = await deleteReview("rv1");
@@ -219,6 +220,90 @@ describe("purgeReview — shared-key guard + full cascade (NEW-F1/NEW-F7)", () =
     expect(facts).toHaveLength(1);
     expect(opNames(facts[0])).toBe("delete or");
     expect(facts[0].ops[1][1]).toBe("id.eq.rv1,review_id.eq.rv1");
+    delete global.fetch;
+  });
+});
+
+/* ------------------- NEW-1: purgeReview proves deletability BEFORE it destroys ------------------- */
+describe("purgeReview — prove-then-destroy ordering (NEW-1, 2026-10-29 data-risk block)", () => {
+  const rec = { id: "rv1", sources: [{ srcId: "s1", storageKey: "u1/s1.pdf", driveKey: "project-px/civil/s1__C-101.pdf" }] };
+  const FK = { code: "23503", message: 'update or delete on table "doc_reviews" violates foreign key constraint "site_plan_overlays_review_id_fkey" on table "site_plan_overlays"' };
+  function exec({ overlayRows = [], overlayError = null, deleteResult = { data: [{ id: "rv1" }], error: null } } = {}) {
+    return ({ table, ops }) => {
+      const names = ops.map((o) => o[0]).join(" ");
+      if (table === "doc_reviews" && names.includes("maybeSingle")) return { data: { data: rec, version: 1, team_id: null, deleted_at: "2026-09-01T00:00:00Z" }, error: null };
+      if (table === "site_plan_overlays") return { data: overlayRows, error: overlayError };
+      if (table === "doc_reviews" && names.startsWith("select neq")) return { data: [], error: null };
+      if (table === "doc_reviews" && names.startsWith("delete")) return deleteResult;
+      return { data: null, error: null };
+    };
+  }
+  const removeSpy = () => { const calls = []; h.storageRemove = (k) => { calls.push(k); return { error: null }; }; return calls; };
+
+  it("a live overlay on the review: NOTHING is destroyed (no Storage, no Drive, no facts) and the refusal is loud", async () => {
+    const removed = removeSpy();
+    global.fetch = vi.fn(async () => ({ ok: true }));
+    h.exec = exec({ overlayRows: [{ id: "ov1" }] });
+    const r = await purgeReview("rv1");
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/site_plan_overlays_review_id_fkey/);
+    expect(removed).toHaveLength(0);                       // Storage untouched
+    expect(global.fetch).not.toHaveBeenCalled();           // Drive untouched
+    expect(callsFor("file_facts")).toHaveLength(0);        // facts row untouched
+    expect(callsFor("doc_reviews").some((c) => opNames(c).startsWith("delete"))).toBe(false); // not even attempted
+    delete global.fetch;
+  });
+
+  it("the FK refusing the row delete (overlay hidden from the pre-check): bytes + facts still untouched", async () => {
+    const removed = removeSpy();
+    global.fetch = vi.fn(async () => ({ ok: true }));
+    h.exec = exec({ deleteResult: { data: null, error: FK } });
+    const r = await purgeReview("rv1");
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/site_plan_overlays_review_id_fkey/);
+    expect(removed).toHaveLength(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(callsFor("file_facts")).toHaveLength(0);
+    delete global.fetch;
+  });
+
+  it("a FAILED overlay pre-check fails safe: refuses, destroys nothing", async () => {
+    const removed = removeSpy();
+    global.fetch = vi.fn(async () => ({ ok: true }));
+    h.exec = exec({ overlayError: { message: "network sad" } });
+    const r = await purgeReview("rv1");
+    expect(r.ok).toBe(false);
+    expect(removed).toHaveLength(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(callsFor("file_facts")).toHaveLength(0);
+    delete global.fetch;
+  });
+
+  it("a 0-row delete on an existing cloud row (RLS no-op) proves nothing: bytes are NOT destroyed", async () => {
+    const removed = removeSpy();
+    global.fetch = vi.fn(async () => ({ ok: true }));
+    h.exec = exec({ deleteResult: { data: [], error: null } });
+    const r = await purgeReview("rv1");
+    expect(r).toMatchObject({ ok: true, removed: 0 });
+    expect(removed).toHaveLength(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+    delete global.fetch;
+  });
+
+  it("control: no overlay and the row really deleted → the row goes FIRST, then Storage, Drive, facts", async () => {
+    const removed = removeSpy();
+    global.fetch = vi.fn(async () => ({ ok: true }));
+    const order = [];
+    const base = exec();
+    h.exec = (a) => { if (a.table === "doc_reviews" && a.ops[0][0] === "delete") order.push("row"); if (a.table === "file_facts") order.push("facts"); return base(a); };
+    const origRemove = h.storageRemove; h.storageRemove = (k) => { order.push("storage"); return origRemove(k); };
+    const r = await purgeReview("rv1");
+    expect(r).toMatchObject({ ok: true, removed: 1 });
+    expect(order[0]).toBe("row");
+    expect(order).toContain("storage");
+    expect(order).toContain("facts");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual([["u1/s1.pdf"]]);
     delete global.fetch;
   });
 });

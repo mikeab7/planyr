@@ -14,6 +14,7 @@ import { normalizeRenameStampForWrite } from "./projectName.js";
 import { fetchParcelSummaries, fetchElementRecency } from "./elementApi.js";
 import { cloudSitesKey } from "./activeUser.js";
 import * as planStore from "./planStore.js";
+import { collectPurgeManifest } from "./projectPurgeRecord.js";
 import { headerSlice, mergeHeader, sameHeader } from "./headerMerge.js";
 import { createSiteModel } from "./siteModel.js";
 
@@ -579,6 +580,13 @@ export async function cloudRowsPresent(uid, ids) {
   } catch (e) {
     return { ok: false, present: [], error: (e && e.message) || "read threw" };
   }
+}
+
+/* NEW-4 — read-only snapshot of what a project holds, taken BEFORE a permanent delete so the purge can be
+ * recorded (projectPurgeRecord.js). Never throws; unreadable parts come back null. */
+export async function cloudPurgeManifest(uid, ids, groupId) {
+  if (!supabase || !uid) return { ids: [], groupId: groupId || null, rows: null, counts: null };
+  return collectPurgeManifest(supabase, { ids, groupId });
 }
 
 // PostgREST reports an unknown RPC as PGRST202 ("Could not find the function … in the schema

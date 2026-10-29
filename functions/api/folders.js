@@ -23,6 +23,7 @@ import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
 import { storageConfig, defaultDriveClientFactory } from "../../server/storage/index.js";
 import { folderStoreSupabase } from "../../server/storage/folderStoreSupabase.js";
 import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
+import { projectHasLivePlans } from "../../server/storage/projectLiveness.js";
 import { syncProjectFolders, planDelete, migrateFilesToTree, moveKeyToTree, purgeProjectDrive } from "../../server/storage/folderMirror.js";
 
 const json = (obj, status = 200) =>
@@ -89,7 +90,16 @@ export async function onRequestPost(context) {
     if (action === "purge-project") {
       // "Delete forever" / the 30-day expiry purge (B1235169) — trash the project's whole Drive
       // root. The caller (library/lib/folders.js's purgeProjectFolders) removes the
-      // project_folders rows itself once this returns, succeed or fail.
+      // project_folders rows itself once this returns — and ONLY when Drive was trashed or genuinely not in
+      // play (NEW-6: a failed trash leaves the rows so the cleanup can be retried).
+      // NEW-6 — never trash a Drive tree on the caller's say-so: ask the same question the DB guards ask
+      // (coalesce(data->>'groupId', id), not the group_id column) with the caller's own token. A live plan
+      // refuses (409, nothing touched); an unanswerable check refuses too (502) — only a clean "no live plan"
+      // lets the trash go ahead.
+      const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      const lv = await projectHasLivePlans({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token, projectId });
+      if (!lv.ok) return json({ ok: false, error: `Couldn't confirm the project is gone, so nothing was trashed. ${lv.error}` }, 502);
+      if (lv.live) return json({ ok: false, live: true, error: "This project still has a live plan, so its Drive folder was left alone." }, 409);
       const r = await purgeProjectDrive({ projectId, userId: c.user.id, client: c.client, store: c.store });
       return json(r, r.ok ? 200 : 502);
     }

@@ -13,12 +13,13 @@ import { plainCopy } from "./planStore.js";
 import { elsProven, recordElsProof } from "./elsProof.js";
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeManifest, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
 import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbPutVerified, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { buildPurgeEvent } from "./projectPurgeRecord.js";
 import { DELETED_RETENTION_DAYS, wasProjectFreshlyMinted } from "../../../shared/projects/projectModel.js";
 // B927105 — WHICH ACCOUNT the store is bound to is now a leaf module (activeUser.js) that a
 // caller who only needs to read/set it (the shell, the project breadcrumb) can import WITHOUT
@@ -1892,6 +1893,19 @@ async function purgeProjectFoldersFor(groupId) {
   }
 }
 
+// NEW-4 (data-risk 2026-10-29) — a permanently deleted project leaves a client_errors row saying which one, who
+// owned it, when it was trashed and what went with it. Observability ONLY: it runs after the purge is proven,
+// never changes the result, and can never throw into the purge (reportClientEvent is fire-and-forget).
+async function snapshotForPurge(ids, groupId) {
+  try { return await cloudPurgeManifest(activeUid(), ids, groupId); } catch (_) { return null; } // never blocks or fails a purge
+}
+function recordProjectPurge(manifest, outcome) {
+  try {
+    const ev = buildPurgeEvent(manifest, outcome);
+    if (ev) reportClientEvent("project-purged", "a project was permanently deleted", ev);
+  } catch (_) { /* observability must never affect the purge */ }
+}
+
 // "Delete forever" — the only user-facing HARD delete. The site_elements cascade firing here is
 // correct: this is the point at which permanent destruction was actually asked for. `groupId`
 // (the project id `project_folders` is keyed on) defaults to the first purged plan id — true for
@@ -1900,7 +1914,9 @@ async function purgeProjectFoldersFor(groupId) {
 export async function purgeDeletedProject(ids, groupId) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
+  const manifest = await snapshotForPurge(list, groupId || list[0]); // NEW-4 — read-only, before the rows are gone
   const v = await hardDeleteVerified(list);
+  recordProjectPurge(manifest, v);
   if (v.confirmedGone) await purgeProjectFoldersFor(groupId || list[0]);
   return { ok: v.ok, purged: v.gone.length, error: v.error };
 }
@@ -1997,7 +2013,9 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
       reportClientEvent("plan-purge-skipped-live-group", "a soft-deleted plan's project still has live plans in its group — it was left in place instead of being auto-purged, since it was never offered back through the account-wide bin", { id: row.id, groupId: gid });
       continue;
     }
+    const manifest = await snapshotForPurge([row.id], gid); // NEW-4 — read-only, before the row is gone
     const out = await hardDeleteVerified([row.id]).catch(() => ({ ok: false }));
+    recordProjectPurge(manifest, out);
     if (out && out.ok) {
       purged += 1;
       if (!purgedGroups.has(gid)) { purgedGroups.add(gid); await purgeProjectFoldersFor(gid); }
