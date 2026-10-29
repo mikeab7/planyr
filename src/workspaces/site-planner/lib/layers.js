@@ -1600,6 +1600,19 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       return origCreate.call(this, features);
     };
     lyr.on("remove", () => { drawn = 0; });
+    // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
+    if (cfg.simplifyFactor) {
+      let fetchedAt = null;
+      const onZoom = () => {
+        const z = lyr._map && lyr._map.getZoom();
+        if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
+        fetchedAt = z; drawn = 0;
+        try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
+      };
+      lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });
+      lyr.on("add", () => { if (lyr._map) lyr._map.on("zoomend", onZoom); });
+      lyr.on("remove", () => { fetchedAt = null; try { lyr._map && lyr._map.off("zoomend", onZoom); } catch (_) { /* map already gone */ } });
+    }
   }
   if (cfg.lineLabel) {
     const syncLabels = () => {

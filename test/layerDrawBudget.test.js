@@ -58,3 +58,15 @@ describe("the guard in buildFeatureLayer", () => {
     expect(fired[0][1].vertices).toBeGreaterThan(FEATURE_VERTEX_BUDGET);
   });
 });
+
+describe("opt-in server-side simplification (Future Land Use: 308 k vertices, ~2 s to draw)", () => {
+  it("featureLayerOptions asks esri-leaflet to simplify only for a row that declares simplifyFactor", async () => {
+    const { featureLayerOptions } = await import("../src/workspaces/site-planner/lib/layerRequest.js");
+    expect(featureLayerOptions({ url: "u", color: "#000" }, 1, "p").simplifyFactor).toBeUndefined();
+    expect(featureLayerOptions({ url: "u", color: "#000", simplifyFactor: 0.75 }, 1, "p").simplifyFactor).toBe(0.75);
+  });
+  it("the Future Land Use row declares it", async () => {
+    const { DESOTO_LAYERS } = await import("../src/workspaces/site-planner/lib/desotoLayers.js");
+    expect(DESOTO_LAYERS.ms_desoto_flu.simplifyFactor).toBeGreaterThan(0);
+  });
+});

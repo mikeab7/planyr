@@ -271,7 +271,7 @@ Object.assign(DESOTO_LAYERS, {
   }),
   /* ---- Planning context (off by default; vintage in each (i)) ---- */
   ms_desoto_flu: planning({
-    path: "CountyWebMap/County_Web_Map/MapServer/23", label: "Future Land Use (2004)", order: 40, minZoom: 9, styleFn: fluStyle,
+    path: "CountyWebMap/County_Web_Map/MapServer/23", label: "Future Land Use (2004)", order: 40, simplifyFactor: 0.75, minZoom: 9, styleFn: fluStyle,
     lineLabel: { field: "FLU", minZoom: 11, format: (v) => { const t = String(v == null ? "" : v).trim(); return t || null; } },
     hoverTitle: "Future land use", hoverFields: [{ names: ["FLU"], label: "Class" }],
     note: "DeSoto County's 2004 future land use plan, by class code as the county publishes it (LI/HI = light/heavy industrial, GC/HC/PC = commercial, SFR/RR = residential).",

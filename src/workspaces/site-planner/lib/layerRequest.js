@@ -149,6 +149,8 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   if (cfg.fields) o.fields = cfg.fields;
   // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
   if (cfg.where) o.where = cfg.where;
+  // B2507064 (NEW-9): a row whose polygons are far more detailed than any screen can show (Future Land Use: 14 polygons, 308 k vertices, a ~2 s stall to draw) asks the SERVER to generalise to ~`simplifyFactor` pixels; layers.buildFeatureLayer re-asks when the zoom moves 2 levels so a zoomed-in view never keeps the coarse copy.
+  if (cfg.simplifyFactor) o.simplifyFactor = cfg.simplifyFactor;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
   // NEW-1 (DeSoto / Olive Branch): a row's `lineLabel` ({ field, minZoom }) puts a short text (the pipe size) on each line; the Leaflet half (`layers.buildFeatureLayer`) binds it.
   if (cfg.lineLabel && typeof opts.onLabel === "function") {
