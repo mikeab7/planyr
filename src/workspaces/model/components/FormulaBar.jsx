@@ -5,6 +5,7 @@
  * commit contract as the in-cell editor — typing "=…" here and pressing Enter sets the cell's
  * formula exactly as it would in-cell.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
@@ -59,6 +60,7 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
     // background of its own any more, since the card supplies both.
     <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 10px" }}>
       <input
+        {...NO_AUTOFILL}
         ref={nameBoxRef}
         data-testid="model-name-box"
         data-invalid={invalid ? "true" : undefined}
@@ -87,6 +89,7 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
       />
       <span aria-hidden="true" style={{ flex: "none", fontSize: 12, fontWeight: 700, fontStyle: "italic", color: "var(--text-tertiary)" }}>fx</span>
       <input
+        {...NO_AUTOFILL}
         data-testid="model-formula-bar"
         value={value}
         onChange={(e) => setValue(e.target.value)}

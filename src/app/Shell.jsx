@@ -18,6 +18,8 @@ import { adminStatusStore } from "../workspaces/admin/lib/adminStatus.js";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
+import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
+import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
 import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
@@ -330,6 +332,16 @@ export default function Shell() {
   // `openAtPage` (B848848 — the comps "open source brochure" link) jumps to a specific page
   // once the review has loaded, instead of resuming wherever it was last left open.
   const openReviewInDocReview = (row, { page, history } = {}) => {
+    // NEW-1 (open an uploaded Excel in Spreadsheet) — a Library row that is an Excel/CSV file opens in
+    // the Spreadsheet tab of the project (or Organization) it is filed under, not in Review. The
+    // pointer is written BEFORE navigating so a Spreadsheet that mounts lazily (or is already open)
+    // lands on the file either way.
+    if (row && isSpreadsheetName(row.sfile || row.sourceFile)) {
+      const t = reviewOpenTarget(row);
+      setActiveFile(scopeKeyFor({ projectId: t.projectId, org: t.org }), row.id);
+      navigate({ module: "model", projectId: t.projectId || null, cross: false, org: t.org });
+      return;
+    }
     // ORG SCOPE (NEW-1) — `reviewOpenTarget` (route.js) reads the row's `orgScope` flag FIRST,
     // never falling back to a project id for an org-filed file (project_id is null for both an
     // org-filed and a genuinely unfiled row, and those are different destinations —
