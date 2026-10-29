@@ -51,6 +51,7 @@ export const ALLOWED_HOSTS = new Set([
   "crawfordgis.breezemaps.com", "dentgis.breezemaps.com", "hickorygis.breezemaps.com", "randolphgis.breezemaps.com", "reynoldsgis.breezemaps.com", "shannongis.breezemaps.com", "texasgis.breezemaps.com",
   "cass.missouriassessors.com", "clark.missouriassessors.com", "clinton.missouriassessors.com", "franklin.missouriassessors.com", "lewis.missouriassessors.com", "pike.missouriassessors.com", "scotland.missouriassessors.com", "stoddard.missouriassessors.com",
   "clintoncountymo.giscloud.com", "howellgis.breezemaps.com", "gis.equatorstudios.com", "www.franklinmo.org",
+  "gis2.marc2.org", "gis.marc2.org", "gis.casscounty.com", "maps.casscounty.com",
   "api.giscloud.com", "hickorycountymo.giscloud.com", "crawfordgis.countyportal.net", "dentgis.countyportal.net", "hickorygis.countyportal.net", "randolphgis.countyportal.net", "reynoldsgis.countyportal.net", "shannongis.countyportal.net", "texasgis.countyportal.net",
   "www.carrollcountymo.gov", "clintoncomo.org", "www.casscounty.com", "hickorycomo.net", "howellcountyassessor.com", "randolphcounty-mo.com", "www.rcao.com", "www.scotlandcountymo.org", "pikecountymo.net", "www.texascountymissouri.gov", "www.ozarkcountyassessor.com", "www.salemmo.com", "www.knoxcountymo.org", "knoxcountymo.org", "shelbycountymo.com", "www.shelbycountymo.com", "www.lancastermo.com",
   /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
