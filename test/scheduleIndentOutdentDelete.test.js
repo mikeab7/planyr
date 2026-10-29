@@ -550,13 +550,13 @@ describe("wiring in public/sequence/index.html", () => {
     expect(startRowDragBody, "startRowDrag not found in index.html").not.toBeNull();
     // computeAndPaint is the per-frame function; onUp is the drop handler. Isolate computeAndPaint's
     // OWN body (up to onUp's declaration) and assert it never calls moveRows/setData itself.
-    const computeAndPaintOnly = startRowDragBody.slice(0, startRowDragBody.indexOf("const onMove = "));
+    const computeAndPaintOnly = startRowDragBody.slice(0, startRowDragBody.indexOf("function onMove("));
     expect(computeAndPaintOnly).not.toMatch(/\bmoveRows\(/);
     expect(computeAndPaintOnly).not.toMatch(/\bsetData\(/);
     // Every moveRows( call site in the whole gesture lives INSIDE onUp (one per before/after/into
     // branch — only one branch runs per actual drop, but all three are legitimately in source) —
     // and NONE come from computeAndPaint/tick/onMove, which run continuously during the drag.
-    const onUpBody = startRowDragBody.slice(startRowDragBody.indexOf("const onUp = "));
+    const onUpBody = startRowDragBody.slice(startRowDragBody.indexOf("function onUp("));
     const totalCalls = (startRowDragBody.match(/\bmoveRows\(/g) || []).length;
     const onUpCalls = (onUpBody.match(/\bmoveRows\(/g) || []).length;
     expect(totalCalls, "moveRows must not be called anywhere in startRowDrag outside onUp").toBe(onUpCalls);

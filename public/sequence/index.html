@@ -5875,6 +5875,22 @@ const idPressMovesRows = (selRange, ri, colCount) => {
   return r2 > r1 && ri >= r1 && ri <= r2 && c1 === 0 && c2 >= colCount - 1;
 };
 
+// NEW-1 (2026-10-28) — "I'll just click a row by the left cell that selects the whole row, and it'll just
+// automatically jump to move it." A press on a row's ID cell / grip used to ARM the move the instant the
+// button went down (rows dimmed with a dashed outline, the page cursor pinned to "grabbing", a live drop
+// target painted) and any release after 4 px of travel committed wherever the pointer then sat. A click
+// is now a click until the held pointer has travelled a clear distance, and the distance depends on WHO is
+// pressing: a finger or a pen wobbles far more than a mouse. Distances are SCREEN pixels (the travel of the
+// hand, not of the zoomed grid). Pure, so test/scheduleIdClickNoMove.test.js runs the real function.
+const ROW_DRAG_THRESHOLD = { mouse: 6, pen: 10, touch: 16 };
+const rowDragThreshold = pointerType => ROW_DRAG_THRESHOLD[pointerType] || ROW_DRAG_THRESHOLD.mouse;
+const rowDragArmed = (pointerType, dx, dy) => Math.hypot(dx, dy) >= rowDragThreshold(pointerType);
+// Which kind of pointer made the press that is being handled: React's onMouseDown cannot say (a MouseEvent has
+// no pointerType), but the pointerdown that precedes every mousedown — a tap's compatibility mouse events
+// included — can.
+let lastRowPointerType = "mouse";
+window.addEventListener("pointerdown", ev => { lastRowPointerType = ev.pointerType || "mouse"; }, true);
+
 // ── Delete-with-children: "keep subtasks" path — promote survivors to the nearest ancestor NOT
 // being deleted. Handles a whole deleted CHAIN transitively (delete a parent and its own selected
 // child together, and the child's own children promote past both, straight to the grandparent) —
@@ -13471,7 +13487,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // ZERO re-renders of the row list for however long the gesture lasts — moveRows (passed down
   // from App, see `shared`) is called EXACTLY ONCE, on drop, which is the one setData/undo-step/
   // recompute (and the one render) the whole gesture produces.
-  const rowDragRef  = useRef(null); // {ids, blocked, overIdx, overPos, overTaskId, lastClientY, rafId} while active
+  const rowDragRef  = useRef(null); // {ids, blocked, overIdx, overPos, overTaskId, lastClientY, rafId} while ARMED (past the drag threshold)
+  const rowDragCancelRef = useRef(null); // tears down the press/drag in flight — a release that was never seen must not outlive the next press
+  useEffect(() => () => { rowDragCancelRef.current?.(); }, []);
   const dragLineRef = useRef(null);   // insertion-line indicator DOM node
   const dragNestRef = useRef(null);   // NEW-ROWNEST — nest-under / blocked-target box DOM node
 
@@ -13489,9 +13507,20 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     return ids.includes(anchorId) ? ids : [anchorId];
   };
 
+  // NEW-1 (2026-10-28) — A PRESS IS A CLICK UNTIL THE POINTER HAS REALLY TRAVELLED. The drag used to arm on
+  // mousedown: rows dimmed, the page cursor pinned to "grabbing", the drop target painted, and the per-frame
+  // loop below auto-scrolling the grid whenever the pointer sat near its top/bottom edge — all with a motionless
+  // mouse. A plain click near the edge therefore slid other rows under the stationary pointer, and because a
+  // grip press has no click path, its release committed the drop wherever the rows had slid to ("I've barely
+  // moved or maybe not even moved by the time I've clicked, and it still moves it"). Now the press only RECORDS
+  // where it started; nothing is painted, pinned, scrolled or committed until the held pointer has travelled
+  // past rowDragThreshold (mouse < pen < touch). A release before that is a click (opts.onClick, if any); a
+  // release back within the threshold of the press point writes nothing; a context menu, focus loss, Escape or a
+  // button released out of sight cancels instead of leaving a half-armed drag to be dropped by the next click.
   const startRowDrag = (e, anchorTaskId, opts = null) => {
     if (review || e.button !== 0) return;
-    const onClick = opts && opts.onClick;   // a press that never moves (an ID-cell press inside the selection) is a click
+    const onClick = opts && opts.onClick;   // a press that never travels (an ID-cell press inside the selection, a grip click) is a click
+    if (rowDragCancelRef.current) rowDragCancelRef.current();
     const ids = dragTargetIds(anchorTaskId);
     // Full blocked set (dragged rows + every descendant, from the FULL project tree so a
     // COLLAPSED descendant still blocks a drop into its own ancestor being dragged).
@@ -13500,32 +13529,17 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     let grew = true;
     while (grew) { grew = false; allTasks.forEach(t => { if (t.parentId != null && blocked.has(t.parentId) && !blocked.has(t.id)) { blocked.add(t.id); grew = true; } }); }
 
-    const state = { ids, blocked, lastClientY: e.clientY, rafId: null, overGapIndex: null, intent: null, moved: false };
-    rowDragRef.current = state;
-    // The cursor stays the grab hand for the WHOLE drag (pinned at the root: every cell, header and Gantt row paints its own
-    // inline cursor, which a body-level cursor loses to). Escape / blur / pointercancel CANCEL the drop (no move).
-    const releaseCursor = window.pinSchedCursor("grabbing", { onExit: () => { state.overGapIndex = null; state.intent = null; onUp(); } });
-    document.body.style.userSelect = "none";
-    // Dim the dragged rows once, at drag start — not a per-frame cost, just marks what's moving
-    // (matters most for a multi-row block, so it's visibly the WHOLE selection, not just the
-    // grabbed row). Only currently-rendered (virtualized) rows are found; that's fine, this is a
-    // cosmetic cue, not the source of truth for what moves.
+    const startX = e.clientX, startY = e.clientY;
+    const state = { ids, blocked, lastClientX: startX, lastClientY: startY, rafId: null, overGapIndex: null, intent: null, moved: false };
+    const pointerType = lastRowPointerType;
+    let releaseCursor = null, finished = false;
     const el0 = ref.current;
-    // Mark the dragged row(s) as IN-FLIGHT, once, at drag start — a dashed outline (reads as
-    // "lifted out") layered on the existing dim, not per-frame cost. The row's slot can't
-    // actually vacate (removing it would reflow every row below it — the exact per-mousemove
-    // re-render check I below exists to forbid), so a faded, dashed ghost in place is the
-    // stand-in, the same convention a lot of drag-and-drop tree UIs (Trello, Notion) use for the
-    // same reason. Grip visibility-before-press (`.rowgrip` opacity, index.css) and the grabbing
-    // cursor (below) are both pre-existing — this only adds the missing "row is airborne" cue.
-    if (el0) ids.forEach(id => { const r = el0.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = "0.45"; r.style.outline = "1.5px dashed var(--blue)"; r.style.outlineOffset = "-1.5px"; } });
     // Cached ONCE (not per animation frame) — the x-offset where the Task Name column's own text
     // starts, so the insertion-line indicator can be drawn at that same x. Uniform across every
     // row (fixed column widths), so any currently-rendered row's cell answers for all of them.
     const nameCellEl = el0 ? el0.querySelector('[data-col-key="name"]') : null;
     const nameIndentBase = nameCellEl ? nameCellEl.offsetLeft : 0;
     const nameCellW = nameCellEl ? nameCellEl.offsetWidth : 0;
-    const startX = e.clientX, startY = e.clientY;
 
     // The drop decision itself (gap vs nest vs blocked, and the depth rule) is the module-level
     // rowDropIntent / resolveDropParent above — pure, so the unit tests exercise the real code. This
@@ -13600,25 +13614,66 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       state.rafId = requestAnimationFrame(tick);
     };
 
-    const onMove = (ev) => { state.lastClientY = ev.clientY; if (!state.moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 4) state.moved = true; };
-    const onUp = () => {
+    // ARM — the held pointer has travelled past the threshold: only now does anything pick up, paint, pin or scroll.
+    const arm = () => {
+      state.moved = true;
+      rowDragRef.current = state;
+      // The cursor stays the grab hand for the WHOLE drag (pinned at the root: every cell, header and Gantt row paints its own
+      // inline cursor, which a body-level cursor loses to). Escape / blur / pointercancel CANCEL the drop (no move).
+      releaseCursor = window.pinSchedCursor("grabbing", { onExit: () => cancel() });
+      document.body.style.userSelect = "none";
+      // Mark the dragged row(s) as IN-FLIGHT, once — dimmed with a dashed outline (reads as "lifted out"; the row's slot
+      // can't vacate without reflowing every row below it, the per-mousemove re-render this design forbids). Only
+      // currently-rendered (virtualized) rows are found; cosmetic cue, not the source of truth for what moves.
+      if (el0) ids.forEach(id => { const r = el0.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = "0.45"; r.style.outline = "1.5px dashed var(--blue)"; r.style.outlineOffset = "-1.5px"; } });
+      computeAndPaint(); // paint at the pointer's current position before the first frame
+      state.rafId = requestAnimationFrame(tick);
+    };
+    // Everything the gesture installed comes off here — pressed-and-never-armed, armed, committed or cancelled alike.
+    const teardown = () => {
+      if (finished) return false;
+      finished = true;
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("contextmenu", cancel, true);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", cancel);
+      if (rowDragCancelRef.current === cancel) rowDragCancelRef.current = null;
       if (state.rafId != null) cancelAnimationFrame(state.rafId);
-      releaseCursor();
-      document.body.style.userSelect = "";
-      if (dragLineRef.current) dragLineRef.current.style.display = "none";
-      if (dragNestRef.current) dragNestRef.current.style.display = "none";
-      // Clear the dim + in-flight outline applied at drag start. A SUCCESSFUL move re-renders
-      // every row from scratch (fresh inline styles) anyway; this matters for the no-op/
-      // cancelled-drop case, where no setData fires and these exact DOM nodes would otherwise
-      // stay dimmed/outlined forever.
-      const elEnd = ref.current;
-      if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = ""; r.style.outline = ""; r.style.outlineOffset = ""; } });
+      if (releaseCursor) releaseCursor();
+      if (state.moved) {
+        document.body.style.userSelect = "";
+        if (dragLineRef.current) dragLineRef.current.style.display = "none";
+        if (dragNestRef.current) dragNestRef.current.style.display = "none";
+        // Clear the dim + in-flight outline. A SUCCESSFUL move re-renders every row from scratch (fresh inline styles)
+        // anyway; this matters for the no-op/cancelled-drop case, where no setData fires and these exact DOM nodes
+        // would otherwise stay dimmed/outlined forever.
+        const elEnd = ref.current;
+        if (elEnd) ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = ""; r.style.outline = ""; r.style.outlineOffset = ""; } });
+      }
       rowDragRef.current = null;
-      // A press that never moved is a click, not a drag (an ID-cell press inside the selection).
-      if (!state.moved && onClick) { onClick(); return; }
-      const intent = state.intent;
+      return true;
+    };
+    // Abandon the press/drag with NO click and NO drop.
+    function cancel() { teardown(); }
+    function onKey(ev) { if (ev.key === "Escape") cancel(); }
+    function onMove(ev) {
+      if (ev.buttons === 0) { cancel(); return; }   // the button came up where we could not see it (context menu, another window)
+      state.lastClientX = ev.clientX; state.lastClientY = ev.clientY;
+      if (!state.moved && rowDragArmed(pointerType, ev.clientX - startX, ev.clientY - startY)) arm();
+    }
+    function onUp(ev) {
+      if (finished) return;
+      if (ev && typeof ev.clientX === "number") { state.lastClientX = ev.clientX; state.lastClientY = ev.clientY; }
+      const wasArmed = state.moved;
+      // Read the drop where the pointer ACTUALLY is at release (the last frame's paint can be a frame stale).
+      const intent = wasArmed ? intentAt() : null;
+      teardown();
+      // A press that never travelled is a click, not a drag (an ID-cell press inside the selection; a grip click).
+      if (!wasArmed) { if (onClick) onClick(); return; }
+      // Armed, but let go back at the press point: nothing was asked for, so nothing is written (no reorder, no
+      // parent/date change, no undo entry, no sync).
+      if (!rowDragArmed(pointerType, state.lastClientX - startX, state.lastClientY - startY)) return;
       if (intent && intent.kind === "gap" && moveRows) {
         moveRows(anchorTaskId, intent.destParentId, intent.insertAfterId);
       } else if (intent && intent.kind === "into" && moveRows) {
@@ -13629,14 +13684,16 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         const wasLeaf = target && !allTasks.some(t => t.parentId === target.id);
         moveRows(anchorTaskId, intent.destParentId, intent.insertAfterId);
         if (wasLeaf && target) showToast(`"${target.name || "Untitled"}" is now a summary row — its dates and duration roll up from the rows under it. Ctrl+Z undoes the move.`, { type: "success", duration: 5000 });
-      } else if (intent && intent.kind === "blocked" && state.moved) {
+      } else if (intent && intent.kind === "blocked") {
         showToast("A row can't be moved into itself or its own sub-rows.", { type: "error", duration: 3500 });
       }
-    };
-    computeAndPaint(); // paint immediately at the mousedown position, before any move
-    state.rafId = requestAnimationFrame(tick);
+    }
+    rowDragCancelRef.current = cancel;
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
+    document.addEventListener("contextmenu", cancel, true);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", cancel);
   };
 
   useEffect(() => {
@@ -13729,7 +13786,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     if (c.k === "id") {
       // B2445008 (×2) — the ID cell of a row inside a multi-row selection is a pick-up handle for the
       // whole selection (the 8px grip was the only way in, and the owner drags by the ID he selected by).
-      if (!review && idPressMovesRows(selRange, ri, allCols.length)) {
+      if (!review && !e.ctrlKey && !e.metaKey && !e.altKey && idPressMovesRows(selRange, ri, allCols.length)) {
         e.preventDefault();
         startRowDrag(e, task.id, { onClick: () => { setSelectedId(task.id); setSelectedColIdx(0); setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1}); } });
         return;
@@ -14544,7 +14601,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     }}>
                     {c.k === "id" && !review && (
                       <span className="rowgrip" data-row-drag-handle={task.id} title="Drag to move"
-                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); startRowDrag(e, task.id); }}
+                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); startRowDrag(e, task.id, { onClick: () => { setSelectedId(task.id); setSelectedColIdx(0); setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1}); } }); }}
                         style={{position:"absolute", left:0, top:0, bottom:0, width:8, display:"flex", alignItems:"center", justifyContent:"center", zIndex:3}}>
                         <i className="ti ti-grip-vertical" style={{fontSize:10, color:"var(--mut)"}} />
                       </span>
