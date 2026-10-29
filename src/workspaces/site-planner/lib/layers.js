@@ -1043,7 +1043,7 @@ export const AHJ_LAYERS = {
     role: "line", group: "jurisdiction", order: 1,
   },
   /* NEW-1 (Mississippi) — the rest of Mississippi's county lines. The DeSoto row above is the county server's own outline of ONE county; this is MDEQ's statewide county layer
-   * (82 counties) with DeSoto left out (`where` in its VECTOR_SOURCES entry), so the line is never drawn twice. */
+   * (82 counties) with DeSoto left out (`where` in its VECTOR_SOURCES entry), so DeSoto's own outline is not drawn twice (the neighbours' copies of the shared border still are — two digitisations of one line). */
   ms_county_state: {
     kind: "vector", label: "County Boundaries (Mississippi)", mergeGroup: "counties_cities", source: "MDEQ — Office of Land and Water Resources",
     url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/"), states: ["MS"],

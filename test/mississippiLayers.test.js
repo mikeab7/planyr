@@ -23,7 +23,7 @@ import { _setServiceAreas } from "../src/workspaces/site-planner/lib/serviceArea
 import { ALL_LAYERS, defaultOverlayState, syncOverlayLayers, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import { siteState } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { layerAvailableHere, drawnOverlaysOf } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
-import { pointSymbolOptions } from "../src/workspaces/site-planner/lib/layerRequest.js";
+import { pointSymbolOptions, featureLayerOptions } from "../src/workspaces/site-planner/lib/layerRequest.js";
 import { esriPrintFeatures } from "../src/workspaces/site-planner/lib/overlayVectorSvg.js";
 import { LAYER_TIER, hierarchyProblems } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import { cleanCard } from "../src/workspaces/site-planner/lib/identifyCard.js";
@@ -31,7 +31,7 @@ import { VECTOR_SOURCES, isCountyLinesId } from "../src/workspaces/site-planner/
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 import {
   MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE, relayed, ustClass, UST_CLASSES, gardClass, GARD_CLASSES, wellClass, WELL_CLASSES, landfillClass, LANDFILL_CLASSES,
-  damClass, DAM_CLASSES, gardCard, ustCard, wellCard, damCard, lomrCard, lomaCard, landfillCard,
+  damClass, DAM_CLASSES, gardCard, ustCard, wellCard, damCard, lomrCard, lomaCard, landfillCard, soft, NRCS_PROGRAM,
 } from "../src/workspaces/site-planner/lib/mississippiLayers.js";
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
@@ -146,8 +146,19 @@ describe("click cards — recorded attribute bags, cleaned the way the app clean
     expect(rowsOf2({ HAZRDCLASS: "BREACHED" })["Hazard class"]).toBe("Breached");
     expect(rowsOf2({ Dam_Height: "0" })).not.toHaveProperty("Height");
     expect(rowsOf2({ CONDITION: "Test" })).not.toHaveProperty("Condition");
-    expect(rowsOf2({ CONDITION: "SATISFACTORY" }).Condition).toBe("SATISFACTORY");
+    expect(rowsOf2({ CONDITION: "SATISFACTORY" }).Condition).toBe("Satisfactory");
     expect(rowsOf2({ COUNTYNAME: "DESOTO" }).County).toBe("DeSoto");
+  });
+  it("shouted publisher text reads as words; mixed case and acronyms are left alone; 303(d) numeric prefixes and NRCS codes read plain", () => {
+    expect(soft("MAYWOOD SUBDIVISION - SYLVAN LAKE DAM")).toBe("Maywood Subdivision - Sylvan Lake Dam");
+    expect(soft("ACME FUEL LLC")).toBe("Acme Fuel LLC");
+    expect(soft("Watson Residence")).toBe("Watson Residence");
+    expect(soft("")).toBe("");
+    expect(rowsOf(damCard({ DAMNAME: "X LAKE DAM", CONDITION: "SATISFACTORY" })).Condition).toBe("Satisfactory");
+    expect(NRCS_PROGRAM.WRP).toMatch(/Wetlands Reserve/);
+    expect(cleanCard(ALL_LAYERS.ms_303d.identifyCard({ WATER_BODY_NAME: "SAND CREEK", POLLUTANT: "202-BIOLOGICAL IMPAIRMENT", LOCATION: "NEAR CANTON", BASIN: "BIG BLACK RIVER" })).rows.map((r) => r.text)).toEqual(["Biological Impairment", "Near Canton", "Big Black River"]);
+    expect(cleanCard(ALL_LAYERS.ms_nrcs_easements.identifyCard({ Program: "WRP", County: "DESOTO", CalcAcres: 40 })).rows.map((r) => r.text)).toEqual(["Wetlands Reserve Program", "DeSoto", "40"]);
+    expect(cleanCard(ALL_LAYERS.ms_desoto_drainage.identifyCard({ District: "Short Fork Drainage District" })).title).toBe("Short Fork Drainage District");
   });
   it("FEMA letters: case numbers and links, no more than are there", () => {
     const lomr = cleanCard(lomrCard({ CASE_NO: "21-04-0112P", EFF_DATE: 1613088000000, LINK_1: "https://msc.fema.gov/a.pdf", LINK_2: null, LINK_3: " " }));
@@ -240,6 +251,16 @@ describe("every Mississippi row is registered whole, sourced, and scoped", () =>
     expect(ALL_LAYERS.ms_cemeteries.where).toBe("STATE = 'MS'");
     expect(ALL_LAYERS.ms_city.where).toBe("County <> 'DeSoto'");
     expect(VECTOR_SOURCES.ms_county_state.query.where).toBe("UPPER(CONAME) <> 'DESOTO'"); // MDEQ stores the name as "Desoto"
+  });
+  it("MDEQ's pre-10.7 server is asked for plain JSON (its GeoJSON ignores the simplify offset and 400s on five dam polygons); no other host is forced", () => {
+    for (const id of IDS) expect(!!ALL_LAYERS[id].forceJson, id).toBe(/gis\.deq\.ms\.gov/.test(ALL_LAYERS[id].url));
+    expect(ALL_LAYERS.ms_dam_inundation.forceJson).toBe(true);
+    expect(featureLayerOptions(ALL_LAYERS.ms_dam_inundation, 1, "p").isModern).toBe(false);
+    expect(featureLayerOptions(ALL_LAYERS.ms_nrhp, 1, "p").isModern).toBeUndefined();
+  });
+  it("Critical habitat is generalised hard and has a budget that fits its measured coastal cells (~135k vertices at z16)", () => {
+    expect(ALL_LAYERS.ms_crit_habitat.simplifyFactor).toBeGreaterThanOrEqual(8);
+    expect(ALL_LAYERS.ms_crit_habitat.vertexBudget).toBeGreaterThanOrEqual(150000);
   });
   it("the heavy polygon rows ask the server to generalise and sit at a zoom where their cells fit the draw budget (live: Gulf sturgeon habitat alone is 725,409 vertices)", () => {
     for (const id of ["ms_crit_habitat", "ms_deq_og_fields", "ms_dam_inundation"]) {
