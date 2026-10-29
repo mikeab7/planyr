@@ -28,7 +28,8 @@ import { isShadedXSubtype } from "./floodZone.js";
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
 export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county" || id === "ms_county_state";
 export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city"
-  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
+  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village" // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
+  || id === "tn_city"; // B2521584 (Tennessee)
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
@@ -398,6 +399,37 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "Georgia city limits (DCA).",
+  },
+  /* B2521584 (Tennessee) — THE TENNESSEE ROWS' VECTOR SOURCES, registered in the SAME commit as their layers rows (the Georgia lesson;
+   * `vectorLayerRegistered` fails the build otherwise). Endpoints come from the GIS_SOURCES rows the jurisdiction identify uses (B176).
+   * Probed live 2026-10-29 with the loader's exact query: 95 counties in ONE statewide pull (250 KB at the statewide tier's tolerance — under
+   * the 512 KB entry cap); the 345-city roster is 474 KB statewide, too close to the cap for one entry, so cities take the same bbox-only
+   * tiering as the Texas / Georgia rows. Tennessee has no ETJ, so there is no ETJ source. */
+  tn_city: {
+    id: "tn_city",
+    label: "City limits (Tennessee)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. NOT proof of utility service. Screening only.",
+    sourceName: "State of Tennessee (STS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityTn.serviceUrl + "/query",
+      outFields: ["NAME"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Tennessee city limits (State of Tennessee).",
   },
   /* NEW-1 (California) — THE CALIFORNIA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.rows
    * (the Georgia rows shipped without this and drew nothing — B1990960 recurrence; `vectorLayerRegistered`

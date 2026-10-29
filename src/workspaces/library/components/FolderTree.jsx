@@ -8,6 +8,7 @@
  * removed from Drive (folders + files), which then mirrors as a recoverable Drive-trash move.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { runDriveSync } from "../lib/driveSyncRun.js";
 import {
   treeify, childrenOf, subtreeIds, wouldCreateCycle,
   validateFolderName, suggestNextNumberedName, liveRows, displayLabel, countTemplate,
@@ -99,6 +100,10 @@ export default function FolderTree({
   const dropTargetRef = useRef(undefined); // ref mirror — dragover/dragleave race without re-render lag
   const setDropTarget = (id, label) => { dropTargetRef.current = id; setDropTargetId(id); onDragTarget?.(label); };
   const syncTimer = useRef(null);
+  // NEW-5 — which project the rail is showing RIGHT NOW (updated every render, so an async result that
+  // lands after a switch can tell it belongs to the previous one).
+  const shownProjectRef = useRef(projectId);
+  shownProjectRef.current = projectId;
   // Which project's stored expansion has been restored — persistence must not fire before the
   // restore (the initial empty set would overwrite what the user had open last visit).
   const expandedLoadedFor = useRef(null);
@@ -117,6 +122,7 @@ export default function FolderTree({
   const reload = useCallback(async () => {
     if (!signedIn || !projectId) return null;
     const r = await listFolders(projectId);
+    if (shownProjectRef.current !== projectId) return null; // NEW-5 — another project is showing now
     const d = applyFolderRead(rowsRef.current, r);
     setLoadFailed(d.failed);
     if (d.failed) {
@@ -140,7 +146,10 @@ export default function FolderTree({
   useEffect(() => {
     let live = true;
     expandedLoadedFor.current = null;
-    setDrive({ state: "idle", msg: "", at: 0 }); // a project switch must not inherit the last project's status
+    // NEW-5 — a project switch must not inherit the last project's status, nor let its still-pending
+    // debounced sync fire (runDriveSync drops reports for a project that is no longer shown).
+    if (syncTimer.current) { clearTimeout(syncTimer.current); syncTimer.current = null; }
+    setDrive({ state: "idle", msg: "", at: 0 });
     if (!signedIn || !projectId) { setRows([]); setLoadFailed(false); return; }
     (async () => {
       setLoading(true); setError("");
@@ -189,19 +198,15 @@ export default function FolderTree({
   const scheduleSync = useCallback((delay = 800) => {
     if (!projectId) return;
     if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(async () => {
-      setDrive({ state: "syncing", msg: "Mirroring to Google Drive…" });
-      const r = await syncFoldersToDrive(projectId, {
-        onProgress: ({ done, total }) => setDrive({ state: "syncing", msg: `Mirroring to Google Drive… ${done} of ${total}` }),
+    syncTimer.current = setTimeout(() => {
+      // NEW-5 — the run is tagged with ITS project; reports for a project that is no longer shown are dropped.
+      runDriveSync({
+        projectId,
+        isShown: (id) => shownProjectRef.current === id,
+        setDrive,
+        sync: syncFoldersToDrive,
+        remember: (id, at) => { try { localStorage.setItem(driveSyncAtKey(id), String(at)); } catch (_) { /* footer still shows this session's time */ } },
       });
-      if (r.skipped) setDrive({ state: "off", msg: "Saved in Planyr — Google Drive isn't connected.", at: 0 });
-      else if (r.ok) {
-        // A CONFIRMED reconcile — the only thing that may claim "Synced" (LOUD-FAILURE:
-        // the label is driven by the real backend result, never a static checkmark).
-        const at = Date.now();
-        try { localStorage.setItem(driveSyncAtKey(projectId), String(at)); } catch (_) { /* footer still shows this session's time */ }
-        setDrive({ state: "ok", msg: "", at });
-      } else setDrive({ state: "error", msg: r.error || "Drive sync had a problem.", at: 0 });
     }, delay);
   }, [projectId]);
 

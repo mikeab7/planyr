@@ -133,6 +133,10 @@ export const LAYER_TIER = {
   ga_dams: "reference",
   ga_impaired_streams: "reference",
   ga_spalding_zoning: "reference",       // county zoning — a look-up, like the DeSoto zoning row
+  ga_road_ownership: "reference",        // who permits the driveway — a look-up
+  ga_rare_species: "reference",          // generalised ~4 mi records; DNR review is the check
+  ga_mineral: "reference",               // a 2005 register of pits and quarries
+  ga_bartow_zoning: "reference",         // county zoning — a look-up, like the DeSoto and Spalding rows
   ga_opportunity_zones: "context",       // a tax-incentive wash
   ga_jtc_tiers: "context",
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
@@ -155,9 +159,37 @@ export const LAYER_TIER = {
   ms_psc_sewer: "reference",
   ms_dcrua_easements: "reference",
   ms_dcrua_service_area: "reference",
+  // Colorado due-diligence layers (B2528688): a legal restriction or a physical stop is a constraint; a look-up fact is reference; a boundary is context.
+  co_ecmc_flowlines: "constraint",  // a registered (or abandoned) line across the tract
+  co_undermined: "constraint",      // ground over old mine workings
+  co_inst_controls: "constraint",   // a recorded land-use restriction that runs with the land
+  co_superfund: "constraint",
+  co_ecmc_wells: "reference",
+  co_ecmc_locations: "reference",
+  co_ecmc_facilities: "reference",
+  co_rcra_ca: "reference",
+  co_closed_landfills: "reference",
+  co_solid_waste: "reference",
+  co_prairie_dog: "reference",
+  co_eagle_nests: "reference",
+  co_crit_habitat: "reference",
+  co_nrhp: "reference",
+  co_weld_ogla: "reference",
+  co_adams_landfills: "reference",
+  co_weld_zoning: "reference",
+  co_adams_zoning: "reference",
+  co_aurora_zoning: "reference",
+  co_weld_airport: "reference",
+  co_adams_aviation: "reference",
+  co_aurora_noise: "reference",
+  co_aurora_apz: "reference",
+  co_weld_row: "reference",
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
+  co_enterprise_zones: "context",   // B2528688
+  co_weld_ugb: "context",
+  co_weld_iga: "context",
   ms_ob_planning_area: "context",   // B2507059 — a planning line
   ms_desoto_city: "context",
   ms_desoto_flu: "context",
@@ -203,6 +235,23 @@ export const LAYER_TIER = {
   ny_city: "context",
   ny_town: "context",
   ny_village: "context",
+  // Tennessee (B2521584): the county / city lines are orientation furniture; every other Tennessee row is a look-up fact — a flag to pull a file,
+  // never louder than the plan (the computed buffer bands, when present, are the constraint)
+  tn_city: "context",
+  tn_ms4: "reference",
+  tn_wqa: "reference",
+  tn_pws: "reference",
+  tn_drycleaners: "reference",
+  tn_sna: "reference",
+  tn_scenic: "reference",
+  tn_nrhp: "reference",
+  tn_nrhp_bounds: "reference",
+  tn_thc_sites: "reference",
+  tn_landfills: "reference",
+  tn_remediation: "reference",
+  tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
+  tn_cemeteries: "reference",
+  tn_crit_habitat: "reference",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",

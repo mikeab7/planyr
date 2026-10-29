@@ -31,6 +31,7 @@ import { RecordSectionHeader, RecordLink, RECORD_BODY } from "../../ui/RecordSec
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import { MAP_CHROME_Z, panelMaxHeight, SCALE_BAR_CLEARANCE_PX } from "../../../workspaces/site-planner/lib/mapChromeStack.js";
+import { writeOverlayPatch } from "../lib/overlayPatchWrite.js";
 import {
   fetchAllOverlays, insertOverlay, updateOverlay, deleteOverlay,
   fetchOverlayCompPoints, commitOverlayPlacementWithComps,
@@ -718,6 +719,18 @@ export default function SitePlansSection({
   const activeIdRef = useRef(activeOverlayId); // NEW-6: read by commitPlacement (stable ref, current at commit time)
   activeIdRef.current = activeOverlayId;
   overlaysRef.current = overlays;
+  // NEW-2 (2026-10-29) — the plan list's synchronous write path. `overlaysRef.current = overlays` above
+  // only catches up on the next RENDER, which React schedules after the current task; a queued write
+  // that starts in the same microtask chain (a rename right behind an eye toggle, a background site
+  // link right behind a drag) would otherwise read the plan as it was BEFORE that change and write it
+  // back. Every local change to the list goes through here, so the ref is always the newest copy.
+  const commitOverlays = (updater) => {
+    const next = typeof updater === "function" ? updater(overlaysRef.current) : updater;
+    overlaysRef.current = next;
+    setOverlays(next);
+    return next;
+  };
+  const latestOverlay = (id) => overlaysRef.current.find((x) => x.id === id);
   const compsChangedRef = useRef(onCompPositionsChanged);
   compsChangedRef.current = onCompPositionsChanged;
   // NEW-18 — "someone else changed this site plan" was firing for a single user editing alone.
@@ -777,7 +790,7 @@ export default function SitePlansSection({
     const { data, error } = await fetchAllOverlays();
     setLoading(false);
     if (!error) {
-      setOverlays(data);
+      commitOverlays(data);
       for (const o of data) noteVersion(o.id, o.version);
       notifiedRef.current?.(data);
       // "Both already exist independently. They join by location on the next resolve; the owner
@@ -835,7 +848,7 @@ export default function SitePlansSection({
     // (a scale change from the Adjust panel). A direct drag on the map never reaches here for a locked plan.
     if (existing.locked && !(opts && opts.explicit) && activeIdRef.current !== id) { console.warn("[sitePlanOverlays] commitPlacement refused — overlay is locked:", id); return; }
     const next = { ...existing, ...placement };
-    setOverlays((list) => { const l = list.map((o) => (o.id === id ? next : o)); notifiedRef.current?.(l); return l; });
+    { const l = commitOverlays((list) => list.map((o) => (o.id === id ? next : o))); notifiedRef.current?.(l); }
 
     const { data: points, error: pointsError } = await fetchOverlayCompPoints(id);
     if (pointsError) console.error("[sitePlanOverlays] fetching pinned comps for recompute failed:", pointsError);
@@ -884,7 +897,7 @@ export default function SitePlansSection({
       // drag in this same session would spuriously read as a conflict against itself).
       noteVersion(id, outcome.version);
       if (Number.isFinite(outcome.version)) {
-        setOverlays((list) => list.map((o) => (o.id === id ? { ...o, version: outcome.version } : o)));
+        commitOverlays((list) => list.map((o) => (o.id === id ? { ...o, version: outcome.version } : o)));
       }
       if (compPositions.length) {
         // Tell the comps panel/map markers to refetch — otherwise the mover sees their own and
@@ -1016,14 +1029,20 @@ export default function SitePlansSection({
       let overlay;
       if (f.overlayId) {
         const existing = overlaysRef.current.find((o) => o.id === f.overlayId);
-        const { data, error } = await updateOverlay(f.overlayId, {
-          ...existing, page: f.page, imgW: f.rasterW, imgH: f.rasterH, thumbDataUrl: f.thumbDataUrl,
+        // NEW-2 — the one write path: queued per plan, version from the cache, row built from the
+        // plan's LATEST copy with only this change laid over it (lib/overlayPatchWrite.js).
+        const { data, error } = await serialized(f.overlayId, () => writeOverlayPatch({
+          id: f.overlayId, captured: existing, getLatest: latestOverlay,
+          getVersion: (id) => overlayVersionsRef.current[id], noteVersion, update: updateOverlay, fetchAll: fetchAllOverlays,
+          patch: {
+          page: f.page, imgW: f.rasterW, imgH: f.rasterH, thumbDataUrl: f.thumbDataUrl,
           // B1134754 — a stored crop is a rect in the OLD raster's own pixel grid; a different
           // page/image invalidates it exactly like it invalidates the old placement fit below,
           // so this clears it too rather than silently applying a stale rect to new artwork.
           crop: f.crop || null,
           ...(placement || {}), // Change page clears the old placement's fit — re-place fresh
-        });
+          },
+        }));
         if (error) throw error;
         overlay = data;
       } else {
@@ -1070,10 +1089,14 @@ export default function SitePlansSection({
         // `raster_key: null`, and the plan sat on the map with no picture and "This plan doesn't
         // have an image yet — try Change page…" with nothing saying why. A conflict is retried
         // ONCE with the fresh version (patchAndReload's own shape); anything else is said.
-        const attached = await attachOverlayRaster({
-          overlay, rasterKey, updateOverlay, fetchAllOverlays,
-          expectedVersion: Number.isFinite(overlayVersionsRef.current[overlay.id]) ? overlayVersionsRef.current[overlay.id] : undefined,
-        });
+        // NEW-2 — queued per plan, and the row is the plan's LATEST copy (read inside the task, after
+        // the upload), not the one `insert`/`update` returned before it.
+        const attachId = overlay.id;
+        const attachBase = overlay;
+        const attached = await serialized(attachId, () => attachOverlayRaster({
+          overlay: latestOverlay(attachId) || attachBase, rasterKey, updateOverlay, fetchAllOverlays,
+          expectedVersion: Number.isFinite(overlayVersionsRef.current[attachId]) ? overlayVersionsRef.current[attachId] : undefined,
+        }));
         if (attached.data) {
           overlay = attached.data;
           if (Number.isFinite(overlay.version)) noteVersion(overlay.id, overlay.version);
@@ -1163,17 +1186,16 @@ export default function SitePlansSection({
   // NEW-18 — same version-race fix as the placement-drag committer above: queued per overlay id,
   // reads the synchronously-updated version cache rather than a possibly-stale prop, and retries
   // once on a reported conflict before treating it as a genuine foreign edit.
+  // NEW-2 (2026-10-29) — the row is built from the plan's LATEST copy at write time (see
+  // lib/overlayPatchWrite.js), never from the `o` the control captured: `o` is only the id and the
+  // fallback. Only `patch` is the intent of this action.
   const patchAndReload = (o, patch, { background = false } = {}) => serialized(o.id, async () => {
-    const expected0 = Number.isFinite(overlayVersionsRef.current[o.id]) ? overlayVersionsRef.current[o.id] : o.version;
-    let { error, data, conflict } = await updateOverlay(o.id, { ...o, ...patch, version: expected0 });
-    if (conflict) {
-      const { data: fresh } = await fetchAllOverlays();
-      const freshVersion = (fresh || []).find((x) => x.id === o.id)?.version;
-      if (Number.isFinite(freshVersion) && freshVersion !== expected0) {
-        noteVersion(o.id, freshVersion);
-        ({ error, data, conflict } = await updateOverlay(o.id, { ...o, ...patch, version: freshVersion }));
-      }
-    }
+    const { error, data, conflict } = await writeOverlayPatch({
+      id: o.id, captured: o, patch,
+      getLatest: latestOverlay,
+      getVersion: (id) => overlayVersionsRef.current[id],
+      noteVersion, update: updateOverlay, fetchAll: fetchAllOverlays,
+    });
     const verdict = classifyOverlayWriteFailure({ error, conflict, background });
     if (conflict) {
       console.warn("[sitePlanOverlays] update conflict survived retry — treating as a genuine concurrent edit:", o.id);
@@ -1203,7 +1225,7 @@ export default function SitePlansSection({
   // full debounce window for no reason.
   const OPACITY_DEBOUNCE_MS = 300;
   const setOpacityLive = (o, opacity) => {
-    setOverlays((list) => list.map((x) => (x.id === o.id ? { ...x, opacity } : x)));
+    commitOverlays((list) => list.map((x) => (x.id === o.id ? { ...x, opacity } : x)));
     const entry = opacityDebounceRef.current[o.id] || {};
     clearTimeout(entry.timer);
     entry.opacity = opacity;

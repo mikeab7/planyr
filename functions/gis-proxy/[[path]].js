@@ -248,6 +248,11 @@ export const ALLOWED_HOSTS = new Set([
   "tdeconline.tn.gov", // TDEC — DOR_Sites (remediation sites, drycleaners), Oil_and_Gas2, DWR_Public
   "maps.tdec.tn.gov", // TDEC — hosting server (Permitted_Tennessee_Landfills)
   "tnmap.tn.gov", // State of Tennessee Office of Information Resources — TNMap (state GIS clearinghouse)
+  /* NEW-1 (Colorado due-diligence layers, B2528688, 2026-10-29) — the two hosts the wired Colorado rows read through this relay. The build sandbox's egress refuses every state.co.us / colorado.gov / city host
+   * (CONNECT 403), so each was MEASURED through planyr.io (on the branch preview) before a layer was wired to it. Probe hosts that were measured and NOT used were pruned: dnrweb.state.co.us (no ArcGIS REST
+   * service — the DWR structure data is on gisdnr's Hosted folder as points of diversion only) and gis.denvergov.org (answers Cloudflare error 1016, origin unreachable). */
+  "gisdnr.state.co.us", // Colorado DNR GIS — ECMC_Public: wells, flowlines, oil and gas locations, facilities
+  "ags.auroragov.org", // City of Aurora open data — airport noise contours, Buckley accident potential zones, zoning
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

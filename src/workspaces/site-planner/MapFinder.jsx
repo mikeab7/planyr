@@ -15,7 +15,7 @@ import { decideTargetOf, escapeClearsDecideBar, orderVerbs, verbLabel } from "./
 import { addLocateControl } from "../../shared/map/locateControl.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, snapshotHitAt as snapshotHitAtLib, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
-import { syncOverlayLayers, liveRefOpacities, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
+import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
 import { isDiagArmed } from "./lib/diagArm.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
@@ -2293,7 +2293,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   /* E2E-only, read-only: the opacity each live layer on THIS map is really drawn at (the finder twin of `__plannerLayers().opacities`). */
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
-    const hook = () => ({ opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])) });
+    const hook = () => ({ opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])), features: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefFeatureCount(overlayRefs.current[k])])) }); // B2528688: + features painted per layer
     window.__finderLayers = hook;
     return () => { if (window.__finderLayers === hook) window.__finderLayers = null; };
   }, []);

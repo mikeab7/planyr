@@ -15,8 +15,13 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+<<<<<<< HEAD
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
+=======
+import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
+>>>>>>> origin/main
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
+import { TN_LAYERS } from "./tennesseeLayers.js"; // B2521584 (Tennessee industrial due-diligence layers)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -1315,7 +1320,11 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
+<<<<<<< HEAD
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...MISSISSIPPI_LAYERS };
+=======
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS };
+>>>>>>> origin/main
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1407,7 +1416,11 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+<<<<<<< HEAD
   ...MISSISSIPPI_VINTAGE,
+=======
+  ...COLORADO_VINTAGE,
+>>>>>>> origin/main
   ...GEORGIA_VINTAGE,
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
@@ -1588,25 +1601,43 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // setTimeout can't fire refresh() on a detached layer. Wrap onRemove (Leaflet calls it on
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;
-  lyr.onRemove = function (map) { clearTimeout(timer); if (origOnRemove) return origOnRemove.call(this, map); };
+  lyr.onRemove = function (map) { clearTimeout(timer); clearTimeout(resetTimer); retryPending = false; if (origOnRemove) return origOnRemove.call(this, map); };
+  /* B2521584 — a draw-budget refusal must SURVIVE the `load` that esri-leaflet fires right after it: the handler below reset the status to "loaded", or to "empty / No
+   * features in this view" when nothing was drawn, so a layer that REFUSED to draw read as "no data here" (reproduced against esri-leaflet 3.0.19: failed ×4, then empty).
+   * `refused` is raised by `overbudget` and cleared when the next request cycle starts ("loading"). */
+  let refused = false, resetTimer = null, cycleErr = false, gaveUp = false, retryPending = false;
+  lyr.on("loading", () => { refused = false; cycleErr = false; gaveUp = false; });
   lyr.on("load", () => {
-    tries = 0;
+    /* esri-leaflet fires `load` when the LAST of a cycle's parallel cell requests finishes, and for a request that failed it calls the callback (→ `load`) BEFORE firing `requesterror`
+     * in the same tick — so resetting `tries` here wiped the count every cycle and a persistently failing service retried forever (simulated: 1,801 refreshes in 12 minutes). Two
+     * orders exist: error-then-load (a fast cell failed, a slower one finished last) and load-then-error (the failing request was last). The reset is DEFERRED one tick and skipped if
+     * ANY error was seen in the cycle (`cycleErr`, cleared by the next "loading"), whichever order — no wall-clock window, so a service that hangs 30 s then 504s counts too. */
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => { if (!cycleErr) tries = 0; }, 0);
+    // a refusal, a retry-budget failure and a pending retry each OWN the row's status until the next request cycle: a slower cell finishing after a failed one must not flip it to "loaded"
+    if (refused || gaveUp || retryPending) return;
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
   // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
   lyr.on("overbudget", (e) => {
-    onStatus && onStatus(k, "failed", `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+    refused = true;
+    // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
   });
   lyr.on("requesterror", (e) => {
-    const code = e && e.error && (e.error.code ?? e.error.httpStatus);
+    cycleErr = true; clearTimeout(resetTimer);   // this cycle failed: no `load` of it may reset the count
+    // esri-leaflet 3.x fires { url, params, message, code, method }; older callers wrapped it in `error`
+    const code = e && (e.code ?? (e.error && (e.error.code ?? e.error.httpStatus)));
     const { retry, delayMs } = featureRetryDecision(code, tries, max);
     if (retry) {
       tries += 1;
       onStatus && onStatus(k, "loading", `${cfg.label}: service hiccup — retrying (${tries}/${max})…`);
       clearTimeout(timer);
-      timer = setTimeout(() => { try { lyr.refresh(); } catch (_) {} }, delayMs);
+      retryPending = true;
+      timer = setTimeout(() => { retryPending = false; gaveUp = false; refused = false; /* a re-issued request owns the status (a real refusal fires `overbudget` again); esri-leaflet fires no "loading" for a refresh that overlaps one still in flight */ try { lyr.refresh(); } catch (_) {} }, delayMs);
     } else {
+      gaveUp = true;
       onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
     }
   });
@@ -1640,25 +1671,41 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     const origCreate = lyr.createLayers;
     let drawn = 0;
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
+    /* B2521584 — what is already on the map, by feature id → the vertex count of the geometry held now. esri-leaflet re-delivers a feature it already holds (every pan / grid cell that
+     * touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
+     * copy under the same id, and `setLatLngs` replaces the old one). So a held id is charged only for the vertices it GROWS by; a refused batch leaves the old geometry in place. */
+    const held = new Map();
+    const heldSum = () => { let n = 0; for (const v of held.values()) n += v; return n; };
     lyr.createLayers = function (features) {
-      // esri-leaflet re-delivers a feature it already holds (every pan / grid cell that touches it) and only updates it — never count that twice against the total
-      const fresh = (features || []).filter((f) => !(f && f.id != null && this._layers && this._layers[f.id]));
-      const v = countVertices(fresh, Math.max(cap, total));
-      if (v > cap || drawn + v > total) {
-        try { this.fire("overbudget", { vertices: v, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
-        return undefined;
+      let grow = 0, net = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what is on the map (judged against the layer total)
+      const mine = [];
+      const inBatch = new Set();
+      for (const f of features || []) {
+        const fv = countVertices([f], Math.max(cap, total));
+        const id = f && f.id != null ? f.id : null;
+        if (id != null && inBatch.has(id)) continue;   // the same id twice in ONE batch is one feature on the map
+        if (id != null) inBatch.add(id);
+        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - held.get(id); }
+        else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
+        else { grow += fv; net += fv; }
+        if (id != null) mine.push([id, fv]);
       }
-      drawn += v;
+      if (grow > cap || drawn + net > total) {
+        try { this.fire("overbudget", { vertices: grow, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
+        return undefined;   // refused: nothing is recorded, the old geometry stays on the map
+      }
+      drawn = Math.max(0, drawn + net);   // signed: a feature that comes back LIGHTER credits the total (a layer re-asked at several zooms must not ratchet up to a refusal)
+      for (const [id, fv] of mine) held.set(id, fv);
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { drawn = 0; });
+    lyr.on("remove", () => { drawn = 0; held.clear(); });
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;
       const onZoom = () => {
         const z = lyr._map && lyr._map.getZoom();
         if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
-        fetchedAt = z; drawn = 0;
+        fetchedAt = z; drawn = heldSum();   // the total is what is still ON the map, not zero
         try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
       };
       lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });
@@ -1675,7 +1722,13 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       try { lyr.eachFeature((l) => { const f = l && l.feature; if (f && f.geometry && (!l.getBounds || b.intersects(l.getBounds()))) feats.push(f); }); } catch (_) { return; }
       try { setViewLegend(id, cfg.viewLegend(feats, map)); } catch (_) { /* a legend never breaks the layer */ }
     };
-    lyr.on("load", publish);
+    // esri-leaflet fires "load" a beat before its features can be asked about their bounds, so the first publish can read an empty view (the legend stayed blank until the map moved): re-read shortly after
+    const publishSoon = () => { publish(); setTimeout(publish, 600); setTimeout(publish, 2500); };
+    lyr.on("load", publishSoon);
+    // features keep arriving AFTER the first "load" (the layer is fetched in pieces), so a legend taken at load can be empty: re-read, debounced, as each one is created
+    let createdTimer = null;
+    lyr.on("createfeature", () => { if (createdTimer) clearTimeout(createdTimer); createdTimer = setTimeout(publish, 500); });
+    lyr.on("remove", () => { if (createdTimer) clearTimeout(createdTimer); createdTimer = null; });
     lyr.on("add", () => { if (lyr._map) lyr._map.on("moveend", publish); });
     // the municipal limits (which government a zone belongs to) may land after the zones: re-publish when they do
     let unsub = null;
@@ -1801,6 +1854,15 @@ export function liveRefOpacities(ref) {
   };
   visit(ref);
   return out;
+}
+
+/* B2528688 — how many features a live vector layer has PAINTED right now (read-only, null for a layer with no features to count — a raster). The e2e hooks on both
+ * hosts expose it so a harness can assert "this row really drew N real features here" against ground truth asked separately, instead of inferring it from the DOM. */
+export function liveRefFeatureCount(ref) {
+  if (!ref || ref === "pending" || typeof ref.eachFeature !== "function") return null;
+  let n = 0;
+  try { ref.eachFeature(() => { n += 1; }); } catch (_e) { return null; }
+  return n;
 }
 
 /* NEW-1 — per-surface memory of WHICH BAND each live layer was built into, so a "Show above

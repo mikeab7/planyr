@@ -678,6 +678,230 @@ export const GIS_SOURCES = {
     lastVerified: "2026-10-28",
   },
 
+  /* NEW-1 (Tennessee industrial due-diligence layers, B2521584, 2026-10-29) — THE TENNESSEE SCREENING ROWS.
+   * Every endpoint was read and queried live on 2026-10-29 from the build sandbox (reachable, answers `f=json` and a point query,
+   * `access-control-allow-origin: *`, production host — no /Test/ path) and each is published by the agency that owns the fact:
+   * TDEC (Tennessee Department of Environment & Conservation) through its own ArcGIS Online org (`bPacKTm9cauMXVfn`), NPS, USFWS
+   * and USGS. Third-party and personal-account copies of the same data were REJECTED on provenance (the "TN_Sinkholes" layer on a
+   * personal account is built from a hobbyist database; "CONUS Karst" is a personal re-host of USGS OFR 2014-1156).
+   * The tdeconline.tn.gov rows (remediation sites, USTs, landfills, oil & gas wells, the Construction General Permit's restricted
+   * waters, hydrologic determinations, dams) are the state's own ArcGIS Server — the build sandbox cannot reach any *.tn.gov host,
+   * so they ride the same-origin /gis-proxy relay and were MEASURED through planyr.io (see their rows below). */
+  /* TDEC Division of Remediation — Drycleaner Environmental Response Program (DCERP): every drycleaner registered with the program
+   * since 1996 (pick-up-only shops excluded). 761 facilities; "DCERP Response Site" in COMMENTS = TDEC has worked a release there,
+   * "Registration only" = on the program's list with no release work. Owner of record: TDEC-DOR (copyright line: Alison Hensley). */
+  drycleanersTn: {
+    key: "drycleanersTn",
+    label: "Known drycleaners (Tennessee DCERP)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Remediation, Drycleaner Environmental Response Program",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/Known_Tennessee_Drycleaners/FeatureServer/2",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "FACILITY_N", address: "FACILITY_A", city: "CITY", county: "COUNTY_NAM", id: "DCERP_ID", comments: "COMMENTS" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-02-26",
+    lastVerified: "2026-10-29",
+  },
+  /* TDEC DWR — Municipal Separate Storm Sewer System (MS4) NPDES permit areas: the cities/counties whose own stormwater and
+   * post-construction (including stream-buffer) rules apply on top of the state's Construction General Permit. 88 areas. */
+  ms4Tn: {
+    key: "ms4Tn",
+    label: "MS4 permit areas (Tennessee DWR)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Water Resources, MS4 permit areas",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/MS4_Areas/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", permit: "PERMIT_NUM", verified: "VERIFIED" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-08-18",
+    lastVerified: "2026-10-29",
+  },
+  /* TDEC DWR — 2026 Water Quality Assessment, STREAM assessment units (5,836 polylines): the spatial companion of the EPA-approved
+   * "Tennessee 2026 List of Impaired and Threatened Streams". ATTAINMENT = Fully Supporting / Not Supporting / Threatened / Not Assessed
+   * (and the "(Evaluated)" variants). The CAUSE of an impairment is in the separate Potential Sources table, not on the line. */
+  wqaTn: {
+    key: "wqaTn",
+    label: "Water quality assessment — streams (Tennessee DWR, 2026)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Water Resources, 2026 Water Quality Assessment",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/Water_Quality_Assessment_2026/FeatureServer/9",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "ASSESSMENT_UNIT_NAME", where: "LOCATION_DESCRIPTION", attainment: "ATTAINMENT", basin: "NAME8", type: "WATER_TYPE" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-08-13",
+    lastVerified: "2026-10-29",
+  },
+  /* TDEC DWR — Public Water System service area boundaries (447 systems): the system that is permitted to serve a point (PWSID,
+   * owner type, population served, link to the system's TDEC Drinking Water Watch page). A service-area line is the system's
+   * declared territory, NOT proof of a main at the property line. */
+  pwsTn: {
+    key: "pwsTn",
+    label: "Public water system service areas (Tennessee DWR)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Water Resources, public water system service areas",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/TN_Public_Water_System_Service_Area_Boundaries_WFL1/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { id: "PWSID", name: "MA_NAME", population: "PL_POPL", source: "PL_PSRC", link: "DWW_Link" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2024-10-01",
+    lastVerified: "2026-10-29",
+  },
+  /* TDEC Division of Natural Areas — State Natural Areas (Natural Areas Preservation Act of 1971): 93 designated areas, public view.
+   * Rutherford County's cedar glades (Vine, Flat Rock, Gattinger's, Lane) are the ones an industrial buyer in Middle Tennessee meets. */
+  snaTn: {
+    key: "snaTn",
+    label: "State Natural Areas (Tennessee DNA)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Natural Areas",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/DNA_SNA_Boundaries_view/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "SNA_NAME", acres: "CALC_ACRES", url: "URL" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-10-13",
+    lastVerified: "2026-10-29",
+  },
+  /* TDEC Division of Natural Areas — designated State Scenic Rivers (Tennessee Scenic Rivers Act of 1968): 25 river-corridor
+   * polygons with the Act's class (Class I Free-flowing … Class III Partially developed). Edited 2023-09-13. */
+  scenicTn: {
+    key: "scenicTn",
+    label: "State Scenic Rivers (Tennessee DNA)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Natural Areas, Tennessee Scenic Rivers Program",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/DNA_Scenic_Rivers_PolyEDIT_SEP23_view/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Site_name", designation: "DESIGNATIO", miles: "GISMILES", description: "DESCRIPTIO" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2023-09-13",
+    lastVerified: "2026-10-29",
+  },
+  /* The three federal Tennessee rows below read the SAME national services as the Georgia rows (`nrhp`, `critHabitat`,
+   * `cemeteries`) — their own registry keys because the state scope is part of the row (a Georgia site must not be offered
+   * the Tennessee copy and vice versa). Live 2026-10-29: Nashville box 41 NRHP points; Christiana bbox 4 critical-habitat units. */
+  nrhpTn: {
+    key: "nrhpTn",
+    label: "National Register of Historic Places (Tennessee)",
+    provider: "National Park Service — National Register of Historic Places (via Esri Federal Data)",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/nrhp_points_v1/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "RESNAME", type: "ResType", city: "City", county: "County", listed: "CertDate" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-10-28",
+    lastVerified: "2026-10-29",
+  },
+  critHabitatTn: {
+    key: "critHabitatTn",
+    label: "USFWS critical habitat (Tennessee)",
+    provider: "U.S. Fish & Wildlife Service — Final Critical Habitat",
+    serviceUrl: "https://services.arcgis.com/QVENGdaPbd4LUkLV/ArcGIS/rest/services/USFWS_Critical_Habitat/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "comname", sci: "sciname", status: "listing_status", unit: "unitname" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-10-21",
+    lastVerified: "2026-10-29",
+  },
+  cemeteriesTn: {
+    key: "cemeteriesTn",
+    label: "Cemeteries (USGS / GNIS, Tennessee)",
+    provider: "U.S. Geological Survey — National Map Structures (GNIS cemeteries)",
+    serviceUrl: "https://carto.nationalmap.gov/arcgis/rest/services/structures/MapServer/37",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "NAME", city: "CITY", state: "STATE" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+
+  /* TDEC Division of Remediation — the "DOR Sites" register: every site in a TDEC remediation program (voluntary cleanup, State Superfund funded by the
+   * state's Hazardous Waste Remedial Action fund or by the liable party, EPA NPL and non-NPL, Department of Defense, pre-remedial evaluation, the drycleaner
+   * program). 825 OPEN sites, one point each with acres, address, TDEC field office and — for listed Superfund sites — the promulgation date. TDEC's own
+   * ArcGIS Online org (the service behind its "TDEC Remediation Sites" viewer, whose layer on tdeconline.tn.gov refuses the relay), CORS-open. ⚠ Last edited
+   * 2024-06-25 — said on the row's tooltip; a site opened since is not on it. */
+  dorSitesTn: {
+    key: "dorSitesTn",
+    label: "Remediation sites (Tennessee TDEC DOR)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Remediation, DOR Sites",
+    serviceUrl: "https://services5.arcgis.com/bPacKTm9cauMXVfn/arcgis/rest/services/DOR_Sites/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { id: "DOR_Site_Id", name: "DOR_Site_Name", program: "Program", status: "Status", address: "Address", city: "City", county: "County", acres: "Acres", promulgated: "Promulgated" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2024-06-25",
+    lastVerified: "2026-10-29",
+  },
+  /* ---- the State of Tennessee's own servers, reached through the same-origin /gis-proxy relay ----
+   * `maps.tdec.tn.gov` (TDEC's hosting server) and `tnmap.tn.gov` (the State's GIS clearinghouse) answer the relay; MEASURED THROUGH planyr.io on
+   * 2026-10-29 (build 88b0334). ⛔ `tdeconline.tn.gov` — TDEC's other server, home of its remediation-site, UST, oil & gas, Construction General
+   * Permit restricted-water, hydrologic-determination and dam layers — answers the relay with HTTP 403 (it refuses Cloudflare's addresses) and is
+   * unreachable from the build environment, so none of those layers is wired (docs/TENNESSEE-LAYERS.md). */
+  /* TDEC Solid Waste — permitted Tennessee landfills (111 operating facilities, Class I–IV by the kind of waste), one point per facility with its TDEC
+   * site id, county, city and status. maps.tdec.tn.gov hosts it; ArcGIS Online lists the same service as owned by TDEC's Bureau of Environment. */
+  landfillsTn: {
+    key: "landfillsTn",
+    label: "Permitted landfills (Tennessee TDEC)",
+    provider: "Tennessee Department of Environment & Conservation (TDEC) — Division of Solid & Hazardous Waste Management, permitted landfills",
+    serviceUrl: "https://maps.tdec.tn.gov/hosting/rest/services/Permitted_Tennessee_Landfills/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "PRIMARY_NAME", cls: "LANDFILL_CLASS", status: "STATUS", county: "COUNTY", city: "CITY", address: "ADDRESS", id: "TDEC_SITE_ID" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* Tennessee Historical Commission — the recorded historic-sites SURVEY inventory (186,319 points; paper survey forms digitised, "conversion … is
+   * in progress so the whole state is not available yet" — the service's own words). Survey records, NOT National Register listings. State of
+   * Tennessee clearinghouse (tnmap.tn.gov), service HISTORICAL/HISTORICAL_COMMISSION layer 0. */
+  thcSitesTn: {
+    key: "thcSitesTn",
+    label: "Recorded historic sites (Tennessee Historical Commission)",
+    provider: "Tennessee Historical Commission (THC) — historic sites survey, via the State of Tennessee GIS clearinghouse",
+    serviceUrl: "https://tnmap.tn.gov/arcgis/rest/services/HISTORICAL/HISTORICAL_COMMISSION/MapServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "COMNAME", histName: "HISTNAME", address: "PROPADDR", city: "CITY", county: "COUNTY", built: "DATECONST", origUse: "ORIGUSE", presUse: "PRESUSE" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* THC / State Historic Preservation Office — National Register of Historic Places BOUNDARIES for Tennessee (2,047 polygons: a district's footprint,
+   * not a single point). The sibling of the NPS point layer `nrhpTn`; same State clearinghouse. */
+  nrhpBoundsTn: {
+    key: "nrhpBoundsTn",
+    label: "National Register boundaries (Tennessee)",
+    provider: "Tennessee Historical Commission (State Historic Preservation Office) — National Register boundaries, via the State of Tennessee GIS clearinghouse",
+    serviceUrl: "https://tnmap.tn.gov/arcgis/rest/services/HISTORICAL/NATIONAL_REGISTER_TN/MapServer/2",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Resource_Name", address: "Address", county: "County", city: "City", listed: "Listed_Date", multiple: "Multiple_Name", nhl: "NHL_Date" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+
   /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING ROWS. Every endpoint below was read and
    * queried live on 2026-10-04 from the build sandbox (reachable, answers `f=json`, `access-control-allow-origin: *`
    * so planyr.io can call it from the browser) and sits on a production host — no `/Test/` or staging path.
@@ -1394,6 +1618,68 @@ export const GIS_SOURCES = {
     layerId: null,
     geometryType: "polygon",
     fields: { code: "LABEL" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* ═══ NEW-1 follow-up (Georgia due-diligence, 2026-10-29) — four rows on hosts the build sandbox cannot reach (403 at its egress) but planyr.io's /gis-proxy relay CAN: the Georgia GIS Data Clearinghouse at UGA ITOS (`maps.itos.uga.edu`: GDOT's own functional-class / ownership service, DNR's rare-species and the USGS mineral-resource records) and Bartow County's own ArcGIS Server. Each was MEASURED through the relay from planyr.io (live 2026-10-29 counts on the fixtures). `relay: true` marks them; layers read `/gis-proxy/<host>/…`, never the upstream. ═══ */
+  /* GDOT's own statewide road-ownership layer (`GDOT/GDOT_FunctionalClass` layer 20 'Ownership', 'Ownership of roadways in Georgia, as of August 2022'): 210,656 segments, `Group_Name` = State Owned / County Owned / City Owned / Other (`OWNERSHIP` 1 = state, 2 = county, 3 = city, 24 = a unified / consolidated city-county government that GDOT files under County; every other code is 'Other' — parks, private, toll, airport, university, federal). `OWNERSHIP_ENTITY` is an unreadable numeric entity code and is never shown. The owner of the road fronting a site is who permits its driveway. Live 2026-10-29 (±0.01° box): Atlanta 141 · Savannah 181 · Albany 73 · Adairsville 85. */
+  gaRoadOwnership: {
+    key: "gaRoadOwnership",
+    label: "Road ownership (Georgia DOT)",
+    provider: "Georgia Department of Transportation — roadway ownership, as of August 2022 (published on the Georgia GIS Data Clearinghouse, UGA ITOS)",
+    serviceUrl: "https://maps.itos.uga.edu/arcgis/rest/services/GDOT/GDOT_FunctionalClass/MapServer/20",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "line",
+    fields: { route: "route_id", group: "Group_Name", ownership: "OWNERSHIP" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* DNR's generalised rare-species locations (`FrameWork/Conservation` layer 1): 11,964 records, each a quarter-quad cell (0.0625°, ~4 mi) — a RECORD OF OCCURRENCE in the cell, never a point or a habitat boundary, and several species share a cell. The row keeps only records with a federal status (`USESA` LE / LT / C) or state protection (`SPROT` E / T): 5,411. Live 2026-10-29 (point): Savannah 7 · Albany 12 · Rome 3 · Macon 2 · Adairsville 2. */
+  gaRareSpecies: {
+    key: "gaRareSpecies",
+    label: "Rare species — DNR Natural Heritage (generalised)",
+    provider: "Georgia Department of Natural Resources — Wildlife Resources Division, Georgia Natural Heritage Program rare-species locations (1:24,000 generalised; published on the Georgia GIS Data Clearinghouse)",
+    serviceUrl: "https://maps.itos.uga.edu/arcgis/rest/services/FrameWork/Conservation/MapServer/1",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "polygon",
+    fields: { species: "SNAME", common: "SCOMNAME", federal: "USESA", state: "SPROT", group: "GROUP_", gRank: "GRANK", sRank: "SRANK" },
+    where: "USESA IN ('LE','LT','C') OR SPROT IN ('E','T')",
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* USGS MRDS / MAS-MILS records for Georgia (`FrameWork/PhysicalGeography` layer 0, 2005 digest): 2,670 points — mines, quarries, pits, plants, prospects and occurrences, with `dev_stat` (Producer · Past Producer · Plant · Prospect · Occurrence · Unknown) and up to three commodities. A past quarry or pit on or beside a site means fill, voids, blast-vibration limits or a reclamation obligation. A 2005 register, point per record, no boundary. Live 2026-10-29 (±0.1° box): Cartersville 328 · Adairsville 57 · Rome 26 · Augusta 17. */
+  gaMineral: {
+    key: "gaMineral",
+    label: "Mineral resource sites (USGS MRDS via Georgia GIS Clearinghouse)",
+    provider: "U.S. Geological Survey — Mineral Resources Data System / MAS-MILS, Georgia digest (2005; published on the Georgia GIS Data Clearinghouse)",
+    serviceUrl: "https://maps.itos.uga.edu/arcgis/rest/services/FrameWork/PhysicalGeography/MapServer/0",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "site_name", county: "county", status: "dev_stat", commodity: "commod1", commodity2: "commod2", type: "oper_type" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* Bartow County's own zoning layer: 31,627 parcel-level polygons, `STZONECODE` the district and `REZONING` the county's rezoning case reference (2,327 records, e.g. CU-2162-17, RZ-2289-19) and `ZONINGTEXT` its free-text note (377 records: 'w/ conditions', ordinance numbers, approved uses). INCORPORATED land is carried as the code 'Incorporated' — the cities (Adairsville, Cartersville, Emerson…) zone themselves and their zoning is NOT in this layer; the row says so on the card. The server answers point-geometry queries 500 intermittently, so fixtures use envelopes (what the map and the verifier send). Live 2026-10-29 (±0.01° box): Adairsville 902 · rural Bartow 79 and 28. */
+  gaBartowZoning: {
+    key: "gaBartowZoning",
+    label: "Zoning — Bartow County (Bartow County GIS)",
+    provider: "Bartow County, GA — Zoning Districts (the county's own ArcGIS Server, AGOServices/BartowZoning)",
+    serviceUrl: "https://www.bartowgis.org/arcgis/rest/services/AGOServices/BartowZoning/MapServer/0",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "polygon",
+    fields: { code: "STZONECODE", notes: "ZONINGTEXT", rezoning: "REZONING" },
     coverage: "georgia",
     states: ["GA"],
     tier: "production",
@@ -2828,7 +3114,7 @@ export const GIS_SOURCES = {
     coverage: "colorado",
     states: ["CO"],
     tier: "production",
-    lastVerified: "2026-08-05",
+    lastVerified: "2026-10-29", // re-probed for B2528688: 31 polygons, same fields, edited 2026-08-10; now also drawn by the Superfund Sites layer row (co_superfund)
     /* Only 31 statewide — and that is the honest number, not a clip: Colorado has ~30 Superfund
      * sites. None of the seven probe points hit one (correct; they are rare and mostly rural),
      * so the fixtures use the sites' own BOUNDARIES rather than a city point. Unlike the point
@@ -2942,6 +3228,392 @@ export const GIS_SOURCES = {
     lastVerified: "2026-08-05",
     // Live 2026-08-05: 13,773 statewide · Commerce City 4. Sparse by nature (an outfall is a
     // structure, not a network), so the fixture sits where one genuinely is.
+  },
+
+  // ===========================================================================
+  // NEW-1 (B2528688, 2026-10-29) — THE COLORADO DUE-DILIGENCE FAMILY (industrial day-one checks).
+  //
+  // Every row below was LIVE-PROBED 2026-10-29: metadata read, statewide count taken, counts taken at the SEVEN-plus
+  // fixture boxes in sourceFixtures.js (Denver · Commerce City · Aurora · Greeley · Fort Collins · Windsor · Erie ·
+  // Colorado Springs · Pueblo · Grand Junction · Durango). Hosts and how each was reached:
+  //   · ECMC (gisdnr.state.co.us, Colorado DNR's own ArcGIS Server) — the build sandbox's egress refuses it, so it was
+  //     MEASURED through the planyr.io /gis-proxy relay on the branch preview, and the app reads it through the same relay.
+  //     ⛔ This is the authoritative statewide ECMC set B242545 / B1422 named and could not reach: 124,462 well spots,
+  //     244,856 flowline segments, 95,486 location footprints — NOT one of the county clips (Adams 6,319, Broomfield
+  //     8,035) that coloradoRegions refused. The anti-clip fixtures below (Greeley ≥ 500 wells in a 10 km box) fail on any clip.
+  //   · CDPHE, DRMS, CPW, OEDIT/OIT and the three counties' own orgs — ArcGIS Online, CORS-open (`*`), read directly.
+  //   · Aurora's open-data server — relayed, measured through the relay.
+  // State-wide rows declare `states: ["CO"]`; the county / city rows ALSO carry a `regions` area in their LAYER row
+  // (coloradoLayers.js) so they are offered only inside their own county.
+  // ===========================================================================
+  ecmcWells: {
+    key: "ecmcWells",
+    label: "Oil & gas wells (ECMC)",
+    provider: "Colorado Energy and Carbon Management Commission (ECMC; formerly COGCC) — via Colorado DNR GIS",
+    serviceUrl: "https://gisdnr.state.co.us/arcgis/rest/services/ECMC_Public/Wells_Public_ECMC/MapServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { api: "API_Label", status: "wellstat", cls: "well_class", operator: "Operator", county: "County", name: "WellName", spud: "spud_date", statusDate: "status_date", basin: "BASIN" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): 124,462 well spots statewide · 55,875 PA / 36,078 PR / 22,446 AL / 6,056 SI.
+    // Greeley box 768 · Windsor 638 · Erie 447 · Brighton 295 · Durango 25 · Commerce City 10 · Denver 2.
+  },
+  ecmcFlowlines: {
+    key: "ecmcFlowlines",
+    label: "Oil & gas flowlines (ECMC)",
+    provider: "Colorado Energy and Carbon Management Commission (ECMC) — flowline registrations (Forms 12 / 44), via Colorado DNR GIS",
+    serviceUrl: "https://gisdnr.state.co.us/arcgis/rest/services/ECMC_Public/ECMC_Pipes_Flow_Network_Public/MapServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { status: "Status", fluid: "FluidType", material: "MatType", size: "PipeSize", operator: "Company", form: "Form_Type", length: "Length_ft" },
+    coverage: "colorado (statewide; operator-submitted off-location flowlines, produced-water and crude transfer lines)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): 244,856 segments statewide · Greeley box 692 · Durango 722 · Erie 596 · Brighton 530 · Windsor 369.
+    // ⚠ Operator-submitted GIS, so position is as good as the operator's submission and a flowline that was never registered is NOT here:
+    // an empty map is never proof there is no flowline (the Firestone 2017 house explosion was an unmapped, severed abandoned flowline).
+  },
+  ecmcLocations: {
+    key: "ecmcLocations",
+    label: "Oil & gas locations (ECMC pads)",
+    provider: "Colorado Energy and Carbon Management Commission (ECMC) — Oil and Gas Location footprints (Form 2A), via Colorado DNR GIS",
+    serviceUrl: "https://gisdnr.state.co.us/arcgis/rest/services/ECMC_Public/ECMC_Locations_Public/MapServer/2",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "location_name", operator: "operator_name", status: "facility_status", form: "form_type", expires: "expire_date" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): 95,486 footprints · CL 49,721 / AC 33,059 / AL 12,702. Greeley box 382 · Windsor 243 · Erie 205 · Brighton 139 · Durango 26.
+  },
+  ecmcFacilities: {
+    key: "ecmcFacilities",
+    label: "Oil & gas facilities (ECMC)",
+    provider: "Colorado Energy and Carbon Management Commission (ECMC) — facilities (tank batteries, compressors, gas plants, injection), via Colorado DNR GIS",
+    serviceUrl: "https://gisdnr.state.co.us/arcgis/rest/services/ECMC_Public/Facilities_and_Pits_Public/MapServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "facility_name", type: "facility_type", status: "facility_status", operator: "operator_name", statusDate: "status_date" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): 18,633 records, 5,506 once the layer row leaves off Nonfacility, Domestic tap and Off-location flowline points (12,726 of the rest duplicate the Flowlines row) · Greeley box 80 · Erie 26 · Durango 1.
+  },
+  cdpheRcraCa: {
+    key: "cdpheRcraCa",
+    label: "RCRA corrective-action sites (Colorado)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — Hazardous Materials & Waste Management Division",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/RCRA_corrective_action/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "facility_names", status: "status", groundwater: "gw_impacts_Y_or_N", offsite: "offsite_impacts_Y_or_N", plume: "plume_dist_ft" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 188 statewide (layer edited 2026-08-27) · Denver box 12 · Commerce City 12 · Windsor 3 · Fort Collins 2 · Grand Junction 2 · Durango 2 · Pueblo 2.
+  },
+  cdpheInstControls: {
+    key: "cdpheInstControls",
+    label: "Institutional controls (Colorado)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — completed institutional controls filed with the county clerk",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/Institutional_Controls_PROD_local/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { site: "Site", type: "IC_Type", approved: "Approved", description: "Desc_", acres: "Acres" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 336 parcels statewide (layer edited 2026-08-24) · Commerce City box 26 · Denver 17 · Pueblo 9 · Colorado Springs 5 · Grand Junction 2 · Durango 1.
+  },
+  cdpheClosedLandfills: {
+    key: "cdpheClosedLandfills",
+    label: "Closed landfills (Colorado)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — Solid Waste, closed landfill inventory",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/ClosedLandfillsColorado/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "Facility_Name", city: "City", county: "County", suspectRelease: "Known_Suspect_Release" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 244 statewide (layer edited 2025-01-27) · Erie box 5 · Commerce City 2 · Aurora 2 · Denver 1 · Fort Collins 1 · Durango 1.
+  },
+  cdpheSolidWaste: {
+    key: "cdpheSolidWaste",
+    label: "Solid waste facilities (Colorado)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — Solid Waste Information System (SWIS)",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/Solid_Waste_Facilities/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "Facility", type: "Type", status: "Status", city: "City", county: "County", category: "Category" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 868 statewide (layer edited 2026-08-24) · Commerce City box 44 · Colorado Springs 24 · Grand Junction 15 · Greeley 14 · Fort Collins 12 · Denver 10.
+  },
+  drmsUndermined: {
+    key: "drmsUndermined",
+    label: "Undermined areas (Colorado DRMS)",
+    provider: "Colorado Division of Reclamation, Mining and Safety (DRMS) — Mine Subsidence Protection Program, statewide undermined areas with a 100 ft buffer",
+    serviceUrl: "https://services7.arcgis.com/ZZPO1K5xRbz1PSYQ/arcgis/rest/services/Undermined_Areas_Statewide_100ft_buffer_2023/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { mine: "MINE_NAME", type: "TYPE", description: "F_DESC", buffer: "BUFF_DIST" },
+    coverage: "colorado (statewide; coal and clay mining districts — Erie/Lafayette/Louisville, Colorado Springs, Durango)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 1,035 polygons statewide (layer edited 2026-02-24) · Erie box 13 · Durango 13 · Colorado Springs 1 · Aurora 1. Zero in Commerce City / Denver / Greeley is correct, not a clip.
+  },
+  cpwPrairieDog: {
+    key: "cpwPrairieDog",
+    label: "Black-tailed prairie dog colony potential (CPW)",
+    provider: "Colorado Parks and Wildlife (CPW) — species activity mapping (Black-tailed Prairie Dog Colony Potential Occurrence)",
+    serviceUrl: "https://services5.arcgis.com/ttNGmDvKQA7oeDQ3/arcgis/rest/services/CPWSpeciesData/FeatureServer/24",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { potential: "PotentialO" },
+    coverage: "colorado (eastern plains and Front Range within the species' range)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 18 polygons (H / M / L) · every Front Range box ≥ 1, Grand Junction and Durango 0 (outside the range — correct).
+  },
+  cpwEagleNests: {
+    key: "cpwEagleNests",
+    label: "Bald eagle nest sites (CPW)",
+    provider: "Colorado Parks and Wildlife (CPW) — species activity mapping (Bald Eagle Nest Sites)",
+    serviceUrl: "https://services5.arcgis.com/ttNGmDvKQA7oeDQ3/arcgis/rest/services/CPWSpeciesData/FeatureServer/1",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { status: "STATUS" },
+    coverage: "colorado (statewide)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 917 nest-site polygons (ACTIVE / INACTIVE / DESTROYED / UNKNOWN; edited 2026-05-07) · Brighton box 10 · Greeley 6 · Fort Collins 6 · Windsor 5 · Durango 4.
+  },
+  nrhpCo: {
+    key: "nrhpCo",
+    label: "National Register of Historic Places (Colorado)",
+    provider: "National Park Service — National Register of Historic Places (via Esri Federal Data)",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/nrhp_points_v1/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "RESNAME", type: "ResType", city: "City", county: "County", listed: "CertDate" },
+    coverage: "colorado (the national NPS layer; the Colorado row is the same service as the Georgia row)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 74,636 nationally (layer edited 2026-10-28) · Denver box 232 · Pueblo 52 · Colorado Springs 50 · Fort Collins 23 · Greeley 14.
+  },
+  critHabitatCo: {
+    key: "critHabitatCo",
+    label: "USFWS critical habitat (Colorado)",
+    provider: "U.S. Fish & Wildlife Service — Final Critical Habitat",
+    serviceUrl: "https://services.arcgis.com/QVENGdaPbd4LUkLV/ArcGIS/rest/services/USFWS_Critical_Habitat/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "comname", sci: "sciname", status: "status", unit: "unitname" },
+    coverage: "colorado (the national USFWS layer; the Colorado row is the same service as the Georgia row)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 803 final-designation features nationally (layer edited 2026-10-21). In Colorado it is sparse by nature: Grand Junction box 3 (Colorado River fish), Colorado Springs 1.
+  },
+  enterpriseZonesCo: {
+    key: "enterpriseZonesCo",
+    label: "Colorado Enterprise Zones",
+    provider: "Colorado Office of Economic Development and International Trade (OEDIT), via the State of Colorado OIT GIS org",
+    serviceUrl: "https://services3.arcgis.com/DgjqnJA1rgO92Soi/arcgis/rest/services/Enterprise_Zones_Current/FeatureServer/2",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { admin: "Admin_Zone", statutory: "Statutory_Zone", start: "start_date", end: "end_date" },
+    coverage: "colorado (statewide; 19 zones, 2026-2035 designation)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 19 zones (layer edited 2026-10-29) · Commerce City box 2 · Aurora 2 · Denver / Greeley / Fort Collins / Grand Junction / Durango / Pueblo / Colorado Springs 1 each.
+  },
+
+  // ---- County and city rows (offered only inside their own county / city; `regions` is on the LAYER row) ----
+  weldZoning: {
+    key: "weldZoning",
+    label: "Weld County zoning (unincorporated)",
+    provider: "Weld County, Colorado (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Zoning_open_data/FeatureServer/38",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { zoning: "ZONING", master: "MASTERZ", caseName: "CASE_NAME", year: "YEAR", asOf: "As_of_date" },
+    coverage: "Weld County, CO (unincorporated; cities zone their own ground)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 496 districts (layer edited 2026-10-28) · Greeley box 101 · Brighton 36 · Windsor 18 · Erie 10. One district is the county-wide "A" (Agricultural) base polygon.
+  },
+  weldGrowthBoundary: {
+    key: "weldGrowthBoundary",
+    label: "Weld County urban growth boundaries",
+    provider: "Weld County, Colorado (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Urban_Growth_Boundary_open_data/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { town: "TOWNNAME", district: "DISTRICT" },
+    coverage: "Weld County, CO",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 5 (Brighton · Erie · Greeley · Lochbuie · Pierce) · Greeley box 1 · Erie 1 · Brighton 1.
+  },
+  weldIga: {
+    key: "weldIga",
+    label: "Weld County intergovernmental agreement areas",
+    provider: "Weld County, Colorado (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Intergovernmental_Agreement_open_data/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { town: "TOWNNAME", buffered: "BUFFERED", date: "DATE_" },
+    coverage: "Weld County, CO",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 21 municipalities' IGA areas · Windsor box 4 · Greeley 3 · Brighton 1.
+  },
+  weldAirportOverlay: {
+    key: "weldAirportOverlay",
+    label: "Greeley-Weld airport overlay district",
+    provider: "Weld County, Colorado (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Airport_Overlay_open_data/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Airport_Ov" },
+    coverage: "Weld County, CO (one overlay district)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 1 polygon (layer edited 2020-12-02) · Greeley box 1.
+  },
+  weldOilGasAssessment: {
+    key: "weldOilGasAssessment",
+    label: "Weld County oil & gas location assessments (WOGLA)",
+    provider: "Weld County, Colorado — Oil and Gas Location Assessment permits (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Weld_Oil_and_Gas_Location_Assessment_open_data/FeatureServer/37",
+    layerId: null,
+    geometryType: "point",
+    fields: { id: "B1_ALT_ID", status: "B1_APPL_STATUS", type: "B1_PER_SUB_TYPE" },
+    coverage: "Weld County, CO",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 809 county permit records (layer edited 2026-10-28) · Brighton box 7 · Erie 5 · Greeley 3 · Windsor 2. LOCAL land-use permits — not ECMC's well register.
+  },
+  weldRoadRow: {
+    key: "weldRoadRow",
+    label: "Weld County road right-of-way",
+    provider: "Weld County, Colorado (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Road_Right_of_Ways_open_data/FeatureServer/23",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { road: "ROADNAME", status: "ROW_STAT", width: "ROW_WIDTH", doc: "DOC_NUM" },
+    coverage: "Weld County, CO (county roads)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 5,627 right-of-way polygons (layer edited 2026-10-28) · Greeley box 357 · Windsor 207 · Erie 85 · Brighton 66.
+  },
+  adamsZoning: {
+    key: "adamsZoning",
+    label: "Adams County zoning (unincorporated)",
+    provider: "Adams County, Colorado — county GIS (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services3.arcgis.com/4PNQOtAivErR7nbT/arcgis/rest/services/Zoning/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { zone: "ZONE_", city: "CITY_NAME", link: "LINK" },
+    coverage: "Adams County, CO (unincorporated zoning; incorporated cities are labelled by city name)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 1,265 polygons (layer edited 2026-08-30) · Commerce City box 336 (city-labelled) · Brighton 60 · Aurora 10.
+  },
+  adamsAviation: {
+    key: "adamsAviation",
+    label: "Adams County aviation overlays (DEN)",
+    provider: "Adams County, Colorado — county GIS (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services3.arcgis.com/4PNQOtAivErR7nbT/arcgis/rest/services/Aviation_Overlays/FeatureServer/1",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Name", comments: "Comments" },
+    coverage: "Adams County, CO (4 overlay areas: height, DIA noise, Front Range noise, airport influence)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 4 polygons (Height · DIA Noise 60 DNL · Front Range Noise 60 DNL · AIZ; edited 2026-10-25) · Commerce City box 1 · Aurora 1 · Brighton 1.
+  },
+  adamsLandfills: {
+    key: "adamsLandfills",
+    label: "Adams County landfills and fill sites",
+    provider: "Adams County, Colorado — county GIS (the county's own ArcGIS Online org)",
+    serviceUrl: "https://services3.arcgis.com/4PNQOtAivErR7nbT/arcgis/rest/services/Landfills/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { id: "LANDFILL", type: "TYPE", caseName: "CASENAME", opened: "OPENDATE", closed: "CLOSEDATE" },
+    coverage: "Adams County, CO",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29: 203 polygons (solid-waste, inert-fill, construction-debris and sludge sites; edited 2026-08-30) · Commerce City box 101 · Brighton 4.
+  },
+  auroraAirportNoise: {
+    key: "auroraAirportNoise",
+    label: "Airport noise contours (Aurora)",
+    provider: "City of Aurora, Colorado — GIS open data (Airport LDN: Buckley SFB, Denver International, Centennial, Colorado Air and Space Port)",
+    serviceUrl: "https://ags.auroragov.org/aurora/rest/services/OpenData/MapServer/25",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { airport: "NAME", contour: "LOUDNESS_I" },
+    coverage: "Aurora, CO and its airports' influence areas",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): 25 contour polygons · Aurora box 5.
+  },
+  auroraBuckleyApz: {
+    key: "auroraBuckleyApz",
+    label: "Buckley SFB accident potential zones (Aurora)",
+    provider: "City of Aurora, Colorado — GIS open data (Buckley APZ polygons)",
+    serviceUrl: "https://ags.auroragov.org/aurora/rest/services/OpenData/MapServer/26",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { zone: "CRASH_ZONE" },
+    coverage: "Aurora, CO (Buckley Space Force Base)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): polygons CZ / APZ I / APZ II, north and south runway ends · Aurora box 9.
+  },
+  auroraZoning: {
+    key: "auroraZoning",
+    label: "Aurora zoning districts",
+    provider: "City of Aurora, Colorado — GIS open data (Zoning)",
+    serviceUrl: "https://ags.auroragov.org/aurora/rest/services/OpenData/MapServer/20",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { district: "Dist_Name", name: "NAME", effective: "EFFECTIVE_DATE", case: "ZONING_CASE_NUMBER" },
+    coverage: "Aurora, CO (city limits)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+    // Live 2026-10-29 (through the relay): Aurora box 511.
   },
 };
 
@@ -3146,6 +3818,7 @@ export const SOURCE_FIXTURE_REACH = {
   troutGa: ["regional", "Designated trout waters exist only in the north Georgia mountains — probing a trout stream in Savannah would assert a guaranteed zero."],
   mngwpd: ["regional", "The Metropolitan North Georgia Water Planning District is 15 metro-Atlanta counties — one polygon about 100 km across."],
   // NEW-1 (Georgia due-diligence gaps, 2026-10-29) — rows whose real extent is a region, not the state.
+  gaBartowZoning: ["regional", "Bartow County's zoning polygons — one county by definition (and the incorporated cities inside it are marked 'Incorporated', not zoned)."],
   gaProtectedMountain: ["regional", "Protected mountains (2,200 ft + 25% slope) exist only in the north Georgia mountains — probing one in Savannah would assert a guaranteed zero."],
   gaMrpaCorridor: ["regional", "The Chattahoochee River Corridor under the Metropolitan River Protection Act — one river through metro Atlanta."],
   gaMrpaVegBuffer: ["regional", "The MRPA 50-ft river buffer — one river through metro Atlanta."],
@@ -3222,6 +3895,20 @@ export const SOURCE_FIXTURE_REACH = {
   // FEMA InFRM BLE is Region 6, and deliberately publishes NOTHING over studied areas, so its
   // fixtures are a mix of in-coverage values and by-design no-data points.
   femaEbfe: ["regional", "FEMA Region 6 Base Level Engineering — published only over UNSTUDIED reaches, so most of the state is no-data by design."],
+  // NEW-1 (B2528688, Colorado due-diligence layers) — county / city rows and one sparse federal row.
+  critHabitatCo: ["regional", "USFWS final critical habitat is sparse in Colorado (Colorado River fish reaches, a Colorado Springs unit); there is no designated habitat in most of the state to probe, so the fixtures prove the service answers on the two places it has any."],
+  weldZoning: ["regional", "Weld County's own zoning — one county."],
+  weldGrowthBoundary: ["regional", "Weld County urban growth boundaries — one county, five towns."],
+  weldIga: ["regional", "Weld County intergovernmental-agreement areas — one county."],
+  weldAirportOverlay: ["local", "One overlay district around the Greeley-Weld airport, ~25 km long — two separated boxes inside it is the most separation that exists."],
+  weldOilGasAssessment: ["regional", "Weld County's own oil-and-gas location permits — one county."],
+  weldRoadRow: ["regional", "Weld County's own road right-of-way — one county."],
+  adamsZoning: ["regional", "Adams County's own zoning — one county."],
+  adamsAviation: ["regional", "Four aviation overlay areas in Adams County (DIA / Front Range)."],
+  adamsLandfills: ["regional", "Adams County's own landfill and fill-site polygons — one county."],
+  auroraAirportNoise: ["local", "City of Aurora's published airport contours — one city, ~25 km across."],
+  auroraBuckleyApz: ["local", "Buckley SFB's runway-end zones — a few km across."],
+  auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
 };
 
 /* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.
