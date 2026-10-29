@@ -18,8 +18,11 @@
 import { dissolvedParcelSqft } from "./polyClip.js";
 import { detentionStorage } from "./pondGeom.js";
 import { DOGEAR_W, DOGEAR_D } from "./dogEar.js";
+import { driveJunctionsOf } from "./roadJunctions.js";
+import { fieldInsidesOf, effectiveStallCount, isRectParking } from "./parkingApproach.js";
+import { elHidden } from "./contentVisibility.js";
 import {
-  SQFT_PER_ACRE, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
+  SQFT_PER_ACRE, polyArea, ringOf, carStalls, roadStripRing, trailerStalls, estStalls, estTrailers,
   curbAreaOf, isCenterlineRoad, roadImperviousArea, roadJunctionVerticesOf, roundaboutsForSite,
 } from "./siteGeometry.js";
 
@@ -48,6 +51,17 @@ export function siteMetrics(elements, parcels, parcelOverlapPairs, settings) {
   // A strip may override the global standards (e.g. a single-row trailer lot with its own cfg).
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
 
+  /* NEW-1 (road → parking) — the stalls a drive takes out of a car field leave the count: the SAME answer the canvas draws from (lib/parkingApproach.js
+   * `fieldInsidesOf`, also what roadNetBuild reads), so the stalls on screen and the stalls in the Yield cannot disagree. Skipped when there is no rect car
+   * field or no road at all (the ordinary plan pays nothing). Hidden roads are not part of the picture, so they take no stalls. */
+  const visibleRoads = els.filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(settings && settings.hidden, x));
+  const fieldInside = visibleRoads.length && els.some(isRectParking)
+    ? fieldInsidesOf({
+      els, settings, junctions: driveJunctionsOf(els, settings).filter((dj) => visibleRoads.some((r) => r.id === dj.sideId)), roads: visibleRoads,
+      stripOf: (r) => roadStripRing(r, settings, sharpFor(r), roundTrim(r)), halfOf: (r) => Math.max(0, (+r.travelW || 0) / 2) + (Number.isFinite(r.curb) ? r.curb : 0.5), isHidden: () => false,
+    })
+    : null;
+
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // provided detention across ALL ponds (cubic feet)
@@ -66,7 +80,7 @@ export function siteMetrics(elements, parcels, parcelOverlapPairs, settings) {
       }
     }
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a + curb;
-    else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
+    else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : (effectiveStallCount(fieldInside, e, settings) ?? carStalls(e.w, e.h, cfgOf(e)).count); }
     else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, cfgOf(e)) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") {
       pondArea += a;

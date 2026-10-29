@@ -380,7 +380,8 @@ import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, ro
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
 import { regionPathD, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments, rectBandOutlineCutPolylines, curbBandPieces } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
-import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
+import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
+import { keptRuns, snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -6276,13 +6277,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // inside, exactly on, and 5 ft outside a freshly drawn polygon field, all four). `cx` is only ever
   // read on the RECT branch below (`rectEdges(x.cx, x.cy, ...)` in `driveTargetsOf`), so it only
   // needs to gate that branch.
-  const driveTargetKind = (el) => (el
-    && (Array.isArray(el.points) ? el.points.length >= 3 : typeof el.cx === "number" && el.w > 0 && el.h > 0)
-    ? (el.type === "parking" ? "parking" : el.type === "paving" ? "truckcourt" : null) : null);
+  // NEW-1 — the ONE predicate (lib/roadJunctions.js): the geometric fallback that rebuilds a junction from a stale `driveTee` asks the same question.
+  const driveTargetKind = driveTargetKindOf;
   // B494049's rule for road magnets applies here too — a hidden target is not a magnet: connecting
   // to a court you cannot see moves nothing but leaves a relationship you cannot explain.
   const driveTargetsOf = () => visibleEls(hiddenGroups, els).filter((x) => driveTargetKind(x)).map((x) => ({
-    id: x.id, kind: driveTargetKind(x), points: x.points,
+    id: x.id, kind: driveTargetKind(x), points: x.points, el: x,
     edges: x.points ? polygonEdges(x.points) : rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0),
   }));
   const DRIVE_RETURN = { parking: 15, truckcourt: 24 }; // B1005 — curb-return seed (ft): car ≈15, truck ≈24 (single fillet; teeGeometry caps the reach to R at any angle, so it stays a tidy rounded corner — dial up per-junction for a genuine WB-62 turn)
@@ -6317,7 +6317,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const x = fromInside ? null : roadEdgeCrossing(from, P, t.edges);
           if (x && x.pt) pt = { x: x.pt.x, y: x.pt.y };
         }
-        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt, dist: inside ? 0 : hit.dist };
+        /* NEW-1 — a landing on a car field's END face is centred on the aisle it is aimed at (lib/parkingApproach.js snapToAisle), so the drive and the aisle
+         * read as one corridor. The drag re-runs this every move, so sliding an endpoint along the face re-centres on each aisle it reaches. */
+        const parkEl = t.kind === "parking" && !t.points ? t.el : null;   // the (already visible) target element itself — no second read of the whole model
+        const aisleSnap = parkEl ? aisleSnapFor(parkEl, settings, pt, from) : null;
+        if (aisleSnap) pt = aisleSnap.pt;
+        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt, dist: inside ? 0 : hit.dist, aisle: aisleSnap ? aisleSnap.aisleIndex : null };
       }
     }
     return best;
@@ -6356,7 +6361,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls((a) => a.map((x) => {
       if (x.id !== movingId || !isCenterlineRoad(x)) return x;
       const keep = x.driveTee && x.driveTee.targetId === drive.targetId;
-      return { ...x, driveTee: {
+      // NEW-1 — a record naming a DIFFERENT field is the other end's: it moves to `driveTee2` instead of being overwritten (the road's two ends can meet two fields)
+      const other = x.driveTee && x.driveTee.targetId !== drive.targetId ? { driveTee2: x.driveTee } : (x.driveTee2 && x.driveTee2.targetId === drive.targetId ? {} : (x.driveTee2 ? { driveTee2: x.driveTee2 } : {}));
+      return { ...x, ...other, driveTee: {
         targetId: drive.targetId, kind: drive.targetKind,
         returnR: keep && x.driveTee.returnR > 0 ? x.driveTee.returnR : DRIVE_RETURN[drive.targetKind],
         flare: keep && x.driveTee.flare > 0 ? x.driveTee.flare : 0,
@@ -10513,18 +10520,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // when the final point found nothing on its own: the road's single `driveTee` field can name
     // one target, and the final point keeps the priority it already had (a named, reported
     // limitation — see findDriveConnect's header for "both ends to two different targets").
+    /* NEW-1 (road → parking) — BOTH ENDS CONNECT. The starting point is checked even when the final point already connected (to a road, or to a different field):
+     * a drive linking two parking fields, or a road tee'd to a road at one end and parked at the other, used to weld only the final one. The second field's
+     * record rides `driveTee2`; the same field at both ends keeps its single junction. A road-MERGE rewrites the road's geometry, so it stays the last word. */
     let startDrive = null;
-    if (!altSnapOffRef.current && !plan && !drive) {
+    if (!altSnapOffRef.current && !(plan && plan.action === "merge")) {
       const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 }, raw[1]);
-      if (c0 && c0.kind === "drive") startDrive = c0.drive;
+      if (c0 && c0.kind === "drive" && !(drive && drive.targetId === c0.drive.targetId)) startDrive = c0.drive;
     }
+    const weldStart = (e, key) => (startDrive
+      ? reRoad({ ...e, pts: e.pts.map((p, i) => (i === 0 ? { x: startDrive.pt.x, y: startDrive.pt.y } : p)), [key]: { targetId: startDrive.targetId, kind: startDrive.targetKind, returnR: DRIVE_RETURN[startDrive.targetKind], flare: 0 } })
+      : e);
     if (plan) {
       let mGeom = plan.moving;
       if (plan.action === "merge") { // round the fresh junction corner to the class min (NEW-2)
         const thr = classMinRadius(roadClassOf(settings, roadClass));
         if (thr > 0) { const fx = fixRoadRadii(plan.moving.pts, plan.moving.vtx, thr, { targetRadius: defR, maxNudgeFt: ROAD_FIX_MAX_NUDGE_FT }); if (fx.changed) mGeom = { pts: fx.pts, vtx: fx.vtx }; }
       }
-      el = reRoad({ ...el, pts: mGeom.pts, vtx: mGeom.vtx });
+      el = weldStart(reRoad({ ...el, pts: mGeom.pts, vtx: mGeom.vtx }), "driveTee");
       setEls((a) => {
         let next = a.map((x) => (plan.target && x.id === targetId && isCenterlineRoad(x)) ? reRoad({ ...x, pts: plan.target.pts, vtx: plan.target.vtx }) : x);
         if (plan.deleteTarget) next = next.filter((x) => x.id !== targetId);
@@ -10533,12 +10546,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (plan.deleteTarget) tombstone([targetId]);
     } else if (drive) { // weld the final point onto the drive edge + store the type-scaled junction
       const last = el.pts.length - 1;
-      el = reRoad({ ...el, pts: el.pts.map((p, i) => i === last ? { x: drive.pt.x, y: drive.pt.y } : p),
-        driveTee: { targetId: drive.targetId, kind: drive.targetKind, returnR: DRIVE_RETURN[drive.targetKind], flare: 0 } });
+      el = weldStart(reRoad({ ...el, pts: el.pts.map((p, i) => i === last ? { x: drive.pt.x, y: drive.pt.y } : p),
+        driveTee: { targetId: drive.targetId, kind: drive.targetKind, returnR: DRIVE_RETURN[drive.targetKind], flare: 0 } }), "driveTee2");
       setEls((a) => [...a, el]);
     } else if (startDrive) { // same, but the STARTING point welded (B1612608/NEW-2)
-      el = reRoad({ ...el, pts: el.pts.map((p, i) => i === 0 ? { x: startDrive.pt.x, y: startDrive.pt.y } : p),
-        driveTee: { targetId: startDrive.targetId, kind: startDrive.targetKind, returnR: DRIVE_RETURN[startDrive.targetKind], flare: 0 } });
+      el = weldStart(el, "driveTee");
       setEls((a) => [...a, el]);
     } else {
       setEls((a) => [...a, el]);
@@ -13301,6 +13313,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // meant this transient toast — same bottom-center spot, same 6s window — could sit ON TOP of
     // the real Done control right when the user needed to click it.
     flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go.`, 4000);
+  };
+  /* NEW-1 (road → parking) — "Add a road from here" on a CAR PARKING field's edge: the mirror of "Add a T-intersection here" on a road (#2510). A right-click
+   * within a few feet of the field's outline names the spot; the new road starts WELDED there — snapped to the nearest aisle mouth when the click is on an end
+   * face and close to one — and the draft then rides the ordinary road-drawing path, so the first point's own connect (`finishRoad` → `resolveEndpointConnect`
+   * → `driveTee`) makes the junction exactly as if the road had been drawn TO the field. Never on a locked field (the menu row is withheld). */
+  const FIELD_EDGE_CLICK_FT = 10;
+  const parkingEdgePointFor = (field, w) => {
+    if (!field || field.type !== "parking" || field.locked || !w || driveTargetKindOf(field) !== "parking") return null;
+    const edges = field.points ? polygonEdges(field.points) : rectEdges(field.cx, field.cy, field.w, field.h, field.rot || 0);
+    const hit = nearestRectEdge(w, edges, { facingOnly: false });
+    if (!hit || hit.dist > Math.max(FIELD_EDGE_CLICK_FT, 12 / (view.ppf || 1))) return null;
+    const sn = field.points ? null : snapToAisle(field, settings, hit.pt);
+    return { pt: sn ? { x: sn.pt.x, y: sn.pt.y } : { x: hit.pt.x, y: hit.pt.y }, aisle: sn ? sn.aisleIndex : null };
+  };
+  const startRoadFromField = (field, at) => {
+    const edge = parkingEdgePointFor(field, at);
+    if (!edge) return;
+    branchSeedRef.current = null;                      // the new road takes the road tool's own class and width, not a parent's
+    setSel(null);
+    setTool("road");
+    setDraftRoadPts([{ x: edge.pt.x, y: edge.pt.y }]);
+    flashWarn(edge.aisle != null ? "Starting a road at the aisle — click where it should go." : "Starting a road from this field — click where it should go.", 4000);
   };
   // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
   // `target` optionally focuses a sub-card ("assistant" | "purpose").
@@ -21598,9 +21632,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, tee: { throughId, ...(x.tee && x.tee.throughId === throughId ? x.tee : {}), ...patch } } : x));
   };
   // B955/NEW-1 — per-junction road→drive params (curb return radius + throat flare) on el.driveTee.
-  const setRoadDrive = (el, patch) => {
+  /* NEW-1 — a road's two ends can meet two fields, so the record is addressed BY TARGET: `driveTee` (the historic one) or `driveTee2` (the other end's). A
+   * junction found only geometrically had no record to edit and the old write — `{ returnR }` with no `targetId` — was ignored by `driveJunctionsOf`
+   * (it reads a record only when it names the target), so the Curb return box moved and the picture did not. The write now carries the target. */
+  const setRoadDrive = (el, patch, target) => {
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, driveTee: { ...(x.driveTee || {}), ...patch } } : x));
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id) return x;
+      const tid = target ? target.targetId : (x.driveTee && x.driveTee.targetId);
+      const key = !x.driveTee || x.driveTee.targetId === tid ? "driveTee" : "driveTee2";
+      return { ...x, [key]: { ...(x[key] && x[key].targetId === tid ? x[key] : {}), targetId: tid, kind: target ? target.kind : (x[key] && x[key].kind) || "parking", ...patch } };
+    }));
   };
   // Per-vertex curve treatment / radius (B597/NEW-2). Endpoints carry no corner; a new arc
   // seeds the class default radius. Re-syncs the strip bbox after the curve changes.
@@ -24181,6 +24223,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          trimmed face-of-curb stripes (`stripes`), against the dissolved `regions` above. */
       roads: (els || []).filter((e) => isCenterlineRoad(e) && !e.attachedTo).map((e) => ({ id: e.id, pts: e.pts.map((p) => ({ x: p.x, y: p.y })) })),   // AFTER the load-time cleanup — what the geometry is really built from
       deco: [...(roadNet.decoDomains || [])].map(([id, rings]) => ({ id, rings })),
+      /* NEW-1 (road → parking) — what each car field does about the roads around it: the stalls a drive took (`removed` = "band:column" cells, `count` = what the Yield
+         reads) and the openings in its outline (`mouths`, world feet). Read-only; same E2E gate. */
+      stallClips: [...(roadNet.stallClips || [])].map(([id, c]) => ({ id, base: c.base, count: c.count, removed: c.removed.map((r) => `${r.band}:${r.k}`) })),
+      mouths: [...(roadNet.mouths || [])].map(([id, m]) => ({ id, mouths: m.map((x) => ({ a: { x: x.a.x, y: x.a.y }, b: { x: x.b.x, y: x.b.y } })) })),
       stripes: [...(roadNet.stripes || [])].map(([id, lines]) => ({ id, lines })),
       // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
       // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
@@ -28259,6 +28305,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const pc = cfgOf(selEl);
                     const area = selEl.w * selEl.h;
                     const stallsInfo = carStalls(selEl.w, selEl.h, pc);
+                    const parkClipOf = roadNet.stallClips ? roadNet.stallClips.get(selEl.id) : null;   // NEW-1 — the stalls a drive takes (lib/parkingApproach.js) leave the count
                     const rows = parkRowsForDepth(selEl.h, pc.stallDepth, pc.aisle);
                     const mod = 2 * pc.stallDepth + pc.aisle;
                     const flipNoOp = parkFlipIsNoOp(selEl.h, pc.stallDepth, pc.aisle);
@@ -28300,7 +28347,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <>
                         <div style={{ paddingTop: 2, marginBottom: 2 }}>
                           <div style={{ display: "flex" }}>
-                            {statCol("Stalls", f0(stallsInfo.count))}
+                            {statCol("Stalls", f0(parkClipOf && parkClipOf.count != null ? parkClipOf.count : stallsInfo.count))}
                             {statCol("Footprint", `${f0(area)} SF`)}
                             {statCol("Acres", f2(area / SQFT_PER_ACRE))}
                           </div>
@@ -28425,7 +28472,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const vsel = radiusReviewOn && cl && roadVtxSel && roadVtxSel.id === selEl.id && roadVtxSel.idx > 0 && roadVtxSel.idx < selEl.pts.length - 1 ? roadVtxSel.idx : null;
                     const vtreat = vsel != null ? ((selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].treatment) || "arc") : null;
                     const myTees = cl ? teeJunctions.filter((tj) => tj.sideId === selEl.id) : [];
-                    const dj = cl ? driveJunctions.find((x) => x.sideId === selEl.id) : null;
+                    const myDrives = cl ? driveJunctions.filter((x) => x.sideId === selEl.id) : [];
                     const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
@@ -28485,7 +28532,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {/* B953/NEW-1 + B955/NEW-1 — clean-tee and road→drive params (curb return radius + throat flare),
                           shown ONLY when this road has a junction, collapsed by default. Seeded from the road class /
                           junction kind; the render re-solves live. */}
-                      {cl && (myTees.length > 0 || dj) && (
+                      {cl && (myTees.length > 0 || myDrives.length > 0) && (
                         <Collapse sectionId="road-intersection" title="Intersection">
                           {myTees.length > 0 && (() => {
                             const tj = myTees[0];
@@ -28501,20 +28548,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               </div>
                             );
                           })()}
-                          {dj && (() => {
+                          {myDrives.map((dj) => {
                             const kindLbl = dj.kind === "truckcourt" ? "truck court" : "parking drive";
                             const seedR = DRIVE_RETURN[dj.kind] ?? 20;
-                            const curR = selEl.driveTee && selEl.driveTee.returnR > 0 ? selEl.driveTee.returnR : seedR;
-                            const curFlare = selEl.driveTee && selEl.driveTee.flare > 0 ? selEl.driveTee.flare : 0;
+                            const rec = selEl.driveTee && selEl.driveTee.targetId === dj.targetId ? selEl.driveTee : (selEl.driveTee2 && selEl.driveTee2.targetId === dj.targetId ? selEl.driveTee2 : null);
+                            const curR = rec && rec.returnR > 0 ? rec.returnR : seedR;
+                            const curFlare = rec && rec.flare > 0 ? rec.flare : 0;
+                            const tgt = { targetId: dj.targetId, kind: dj.kind };
                             return (
-                              <div data-testid="road-drive-params">
+                              <div key={`${dj.targetId}:${dj.endIdx}`} data-testid="road-drive-params">
                                 <div style={{ ...subHead, marginTop: 0 }}>Drive intersection · {kindLbl}</div>
-                                <Field gutter={ROAD_GUTTER_W} oneLine label="Curb return">{stepBox({ ariaLabel: "Curb return", value: Math.round(curR), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { returnR: n }) })}</Field>
-                                <Field gutter={ROAD_GUTTER_W} oneLine label="Throat flare">{stepBox({ ariaLabel: "Throat flare", value: Math.round(curFlare), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { flare: n }) })}</Field>
+                                <Field gutter={ROAD_GUTTER_W} oneLine label="Curb return">{stepBox({ ariaLabel: "Curb return", value: Math.round(curR), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { returnR: n }, tgt) })}</Field>
+                                <Field gutter={ROAD_GUTTER_W} oneLine label="Throat flare">{stepBox({ ariaLabel: "Throat flare", value: Math.round(curFlare), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { flare: n }, tgt) })}</Field>
                                 <div style={{ ...muted, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
                               </div>
                             );
-                          })()}
+                          })}
                         </Collapse>
                       )}
                       {/* NEW-3 (road-panel redesign) — HIDDEN, NOT DELETED: the min-radius review (the warning + Fix radius,
@@ -28951,7 +29000,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
                       return <span style={{ color: PAL.purple }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} SF) → <b style={{ color: PAL.ink }}>{f0(area + ba)} SF</b> total<br /></span>;
                     })()}
-                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, cfgOf(selEl)).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
+                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || carStalls(selEl.w, selEl.h, cfgOf(selEl))).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws
@@ -31399,8 +31448,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {/* ── 0. AT THE POINT CLICKED (NEW-1, 2026-10-22) — a right-click along a line always opens THIS full menu, with the two
                          point actions leading: Add control point, then (a road only, unlocked) Add a T-intersection here. They act at
                          the exact spot (`typeMenu.edge.pt` — on the drawn centreline — else the raw click). ── */}
-                  {(typeMenu.edge || (isCenterlineRoad(t) && !t.locked)) && (
+                  {(typeMenu.edge || (isCenterlineRoad(t) && !t.locked) || parkingEdgePointFor(t, typeMenu.w)) && (
                     <>
+                      {parkingEdgePointFor(t, typeMenu.w) && miRow({
+                        icon: <RoadBranchIcon />, text: "Add a road from here", testId: "parking-road-from-here",
+                        title: "Start a new road at this spot on the field's edge, joined to it. It snaps to the nearest aisle when you click close to one; click where the road should go, then ✓ Done.",
+                        onClick: () => { const at = typeMenu.w; setTypeMenu(null); startRoadFromField(t, at); },
+                      })}
                       {typeMenu.edge && miRow({
                         icon: <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>＋</span>, text: "Add control point", testId: "el-menu-add-control-point",
                         title: "Drop a control point on the line at the spot you clicked",
@@ -32307,7 +32361,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
    * are world feet with the rotation baked in, so the group counter-rotates exactly like `rect-outline-cut`); otherwise it is the plain rect, byte for byte. */
   const bandOutline = (key, band, plain) => {
     if (!outlineCut) return plain;
-    const chains = rectBandOutlineCutPolylines(el, band, outlineCut, roadNet.mouths && roadNet.mouths.get(el.id));
+    const chains = rectBandOutlineCutPolylines(el, band, (roadNet.bandCuts && roadNet.bandCuts.get(el.id)) || outlineCut, roadNet.mouths && roadNet.mouths.get(el.id));
     return (
       <g key={`${key}cut`} transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="band-outline-cut" data-el-id={el.id}>
         {chains.map((ch, k) => (
@@ -32320,17 +32374,25 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const cs = carStalls(el.w, el.h, cfgOf(el));
     const collapse = !stallStripesExplicit(cs.pitch * ppf, lfK);
     const segs = [];
+    /* NEW-1 (road → parking) — the stalls a DRIVE takes (lib/parkingApproach.js: a road crossing a row to reach the aisle, a road crossing the field) are not drawn:
+     * each band is drawn as its KEPT runs, every run with its own outline and end walls, dividers only between two kept stalls. With nothing removed this is the
+     * whole band as one run — the exact nodes it always drew. */
+    const clipSet = roadNet && roadNet.stallClips && roadNet.stallClips.get(el.id) ? roadNet.stallClips.get(el.id).set : null;
     cs.bands.forEach((b, i) => {
-      const bandW = b.n * b.pitch;
-      parts.push(bandOutline(`b${i}`, { x: 0, y: b.y, w: bandW, h: b.depth },
-        <rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />));
       const lean = b.dir * b.slantDx; // angled stalls lean toward their aisle
-      for (let k = 1; k < b.n; k++) {
-        const x = tl.x + k * b.pitch * ppf;
-        const seg = [x, tl.y + b.y * ppf, x + lean * ppf, tl.y + (b.y + b.depth) * ppf];
-        if (collapse) segs.push(seg);
-        else parts.push(<line key={`b${i}d${k}`} x1={seg[0]} y1={seg[1]} x2={seg[2]} y2={seg[3]} stroke={st.stroke} strokeWidth={0.5} />);
-      }
+      const runs = clipSet && clipSet.size ? keptRuns(b.n, clipSet, i) : [{ k0: 0, k1: b.n - 1 }];
+      runs.forEach(({ k0, k1 }, ri) => {
+        const bandX = k0 * b.pitch, bandW = (k1 - k0 + 1) * b.pitch;
+        const key = runs.length === 1 && k0 === 0 ? `b${i}` : `b${i}r${ri}`;
+        parts.push(bandOutline(key, { x: bandX, y: b.y, w: bandW, h: b.depth },
+          <rect key={key} x={tl.x + bandX * ppf} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />));
+        for (let k = k0 + 1; k <= k1; k++) {
+          const x = tl.x + k * b.pitch * ppf;
+          const seg = [x, tl.y + b.y * ppf, x + lean * ppf, tl.y + (b.y + b.depth) * ppf];
+          if (collapse) segs.push(seg);
+          else parts.push(<line key={`b${i}d${k}`} x1={seg[0]} y1={seg[1]} x2={seg[2]} y2={seg[3]} stroke={st.stroke} strokeWidth={0.5} />);
+        }
+      });
     });
     if (segs.length) parts.push(<path key="bdiv" d={segmentsPath(segs)} fill="none" stroke={st.stroke} strokeWidth={0.5} />);
     cs.aisles.forEach((a, i) =>

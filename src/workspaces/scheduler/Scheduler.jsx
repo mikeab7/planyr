@@ -12,7 +12,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import { menuPanelStyle } from "../../shared/ui/controls.jsx";
 import {
-  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
+  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn, needsArrivalSelect,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, shouldNeutralizeToReports, isPickShowing,
   isGridMismatched, newProjectAction, resolveReportRowNavigation, scheduleListState, parseLoadState,
 } from "./lib/navState.js";
@@ -145,6 +145,7 @@ export default function Scheduler({
   // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the
   // very next nav-state (see the message handler), so it can never wedge the route permanently.
   const dashboardIntentRef = useRef(false);
+  const arrivalSelectRef = useRef(null);          // NEW-1 (V934064) — site id this mount already asked the embed to resolve (once per arrival)
   // NEW-1 — the boot-resume privilege (Shell's `resumeAllowed`), FROZEN at this component's own
   // first render via `useRef`'s initial-value argument (React ignores it on every later render).
   // Reading Shell's live `resumeAllowed` prop instead would reopen the exact bug this closes:
@@ -600,6 +601,18 @@ export default function Scheduler({
     }, 2500);
     return () => clearTimeout(t);
   }, [ready, projectId, projects, activeId, section, pickShowing]);
+
+  // NEW-1 (B1080547 ×3, V934064 FAIL 2026-10-29) — ONCE per arrival at a routed site with SEVERAL linked schedules, ask
+  // the embed to resolve the one it last had active (`lastActiveBySite`). The carry-in above is silent when ANY
+  // linked schedule is already active, and a FRESH tab boots on the oldest one — so the remembered preference was
+  // saved correctly and then never consulted. A separate effect (not folded into the one above) so that effect's
+  // single suppression, a deliberate pick, stays the only thing that can stop the carry-in.
+  useEffect(() => {
+    if (!ready || projectId == null || pickShowing) return;
+    if (!needsArrivalSelect(projects, projectId, arrivalSelectRef.current)) return;
+    arrivalSelectRef.current = projectId;
+    post({ type: "planar:nav-select-by-site", siteId: projectId });
+  }, [ready, projectId, projects, pickShowing]);
 
   // Carry the project the OTHER way ONLY when the route has no project yet (projectId == null):
   // adopt the iframe's active schedule's linked site into the empty route so the Site/Review tabs
