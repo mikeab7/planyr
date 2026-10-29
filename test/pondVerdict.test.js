@@ -15,8 +15,9 @@ import {
   OVERDUG_SLACK_FALLBACK,
 } from "../src/workspaces/site-planner/lib/pondVerdict.js";
 import { criteriaFor, CRITERIA_JUR_KEYS } from "../src/workspaces/site-planner/lib/detentionCriteria.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = fs.readFileSync(path.join(process.cwd(), "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const src = plannerSource();
 
 describe("NEW-1 — the detention heading names its ledger and its verdict", () => {
   it("reads 'Detention covered' when the requirement is met (never a bare 'Buildable')", () => {

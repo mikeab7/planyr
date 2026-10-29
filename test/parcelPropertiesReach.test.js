@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parcelAtPoint } from "../src/workspaces/site-planner/lib/parcelAtPoint.js";
 import { PARCEL_ACTIONS } from "../src/workspaces/site-planner/lib/parcelActions.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 (2026-10-14) — "I don't have a way to edit my parcels' properties right now … If I double-click the
  * parcel it doesn't really do anything. Same from the Parcels menu." The browser half is the e2e spec
@@ -46,7 +47,7 @@ describe("parcelAtPoint — the lot a double-click on empty land is about", () =
 });
 
 describe("every entry point opens the parcel's PAGE (source guards)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const src = plannerSource();
 
   it("one openParcelPage, and the list-only helper the entry points used is gone", () => {
     expect(src).toMatch(/const openParcelPage = \(id\) =>/);

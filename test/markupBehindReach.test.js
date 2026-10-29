@@ -15,8 +15,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { featureStack, featuresBeneath, stackHoldsFeature, stackEntries } from "../src/workspaces/site-planner/lib/featureTarget.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const SRC = plannerSource();
 
 // The stack the browser hands back over a markup that was sent behind a building: the building
 // paints later, so it is first; the markup is still there, underneath, unchanged.

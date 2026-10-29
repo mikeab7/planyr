@@ -22,9 +22,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const src = plannerSource();
 
 describe("the split between what is DRAWN at and what is TRUE", () => {
   it("f2p (world → screen) reads the ANCHOR, which is what lets memos bail mid-pan", () => {

@@ -24,8 +24,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 
 // Isolate the rehydrate-from-storage effect body so assertions can't accidentally match one of the
 // OTHER two idbPut call sites (create-time / page-change) elsewhere in the file.

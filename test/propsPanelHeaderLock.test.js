@@ -9,10 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { propsPanelTitle, kindTitle, measureTitle } from "../src/workspaces/site-planner/lib/propsPanelTitle.js";
 import { CLOUD_ARC_STEP_FT, clampCloudArcFt, CLOUD_ARC_MAX_FT } from "../src/workspaces/site-planner/lib/cloudGeometry.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const root = path.resolve(__dirname, "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
-const SP = read("src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 
 describe("NEW-1 — one title, the thing's own type name", () => {
   it("names each family in title case with no category prefix", () => {

@@ -5,6 +5,7 @@ import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/juri
 import { governingCityOf } from "../src/workspaces/site-planner/lib/jurisdictionLabel.js";
 import { administratorCandidates, resolveAdministrator } from "../src/workspaces/site-planner/lib/floodAdministrator.js";
 import { DEFAULT_BUILDABILITY_RULES } from "../src/workspaces/site-planner/lib/buildability.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* ═══ NEW-2 (B367297) — NOTHING DOWNSTREAM MAY KEY OFF THE FORMATTED JURISDICTION LABEL ══════════
  *
@@ -147,7 +148,7 @@ describe("NEW-2 — no source may recover a jurisdiction FACT from the jurisdict
   });
 
   it("SitePlanner's floodplain `cityLabel` reads the structured accessor, by name", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toContain("cityLabel: governingCityOf(jurBadge)");
     expect(src).toContain('import { governingCityOf } from "./lib/jurisdictionLabel.js"');
   });
@@ -155,7 +156,7 @@ describe("NEW-2 — no source may recover a jurisdiction FACT from the jurisdict
   /* The other three signals `assessAdministrator` receives were already structured. Pinned here so a
    * later "tidy" cannot quietly route one of them back through the label. */
   it("the ETJ, the split and the unresolved-role signals are structured too", () => {
-    const src = stripComments(readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8"));
+    const src = stripComments(plannerSource());
     expect(src).toContain("(jurBadge?.etjLabels || [])[0]");
     expect(src).toContain("unresolvedRoles: jurBadge?.unresolvedRoles || []");
     expect(src).toContain("city: jurBadge.partialCities[0]");

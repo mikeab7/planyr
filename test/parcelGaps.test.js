@@ -7,6 +7,7 @@ import {
   GAP_REASONS, PARCEL_GAPS, PARCEL_REQUEST_EMAIL, PARCEL_REQUEST_LABEL, gapKey, gapReasonFor, gapSentence, parcelGapNotice, parcelRequestHref,
 } from "../src/workspaces/site-planner/lib/parcelGaps.js";
 import { COUNTIES_MAP, noParcelSourceNote } from "../src/workspaces/site-planner/lib/counties.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const gapId = (name, state, extra = {}) => ({ status: "no-source", key: null, name, state, nearEdge: false, ...extra });
 const src = (p) => readFileSync(new URL(`../src/workspaces/site-planner/${p}`, import.meta.url), "utf8");
@@ -137,7 +138,7 @@ describe("the mailto", () => {
 });
 
 describe("the wiring — every place that said the bare sentence now carries the reason and the link", () => {
-  const mf = src("MapFinder.jsx"), sp = src("SitePlanner.jsx"), card = src("components/ParcelInfoCard.jsx");
+  const mf = src("MapFinder.jsx"), sp = plannerSource(), card = src("components/ParcelInfoCard.jsx");
   it("no UI string still says 'no parcel data wired here yet'", () => {
     for (const [n, text] of [["MapFinder", mf], ["SitePlanner", sp], ["ParcelInfoCard", card], ["counties.js", src("lib/counties.js")]]) {
       const live = text.split("\n").filter((l) => /wired here yet/.test(l) && !/^\s*(\/\/|\*|\/\*)/.test(l));

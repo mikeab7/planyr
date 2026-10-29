@@ -10,11 +10,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const CAP = 110;
 const PLACEHOLDER_BUDGET = 12;
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 // Slice the drainage readout region: from the B823 warnNote helper to the IIFE's return.
 // B895 — the end anchor used to be the trailing generic disclaimer keyedNote call; that

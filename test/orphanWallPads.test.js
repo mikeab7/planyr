@@ -28,10 +28,11 @@ import { HOST_ROLE_TAGS, carryHostRoleTags } from "../src/workspaces/site-planne
 import { sideParkStack } from "../src/workspaces/site-planner/lib/dogEar.js";
 import { createIdMinter } from "../src/shared/ids.js";
 import { loadSite } from "../src/workspaces/site-planner/lib/storage.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/orphanWallPads.json", import.meta.url), "utf8"));
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const SRC = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SRC = plannerSource();
 
 const clone = (els) => JSON.parse(JSON.stringify(els));
 const minter = () => createIdMinter("zztest");

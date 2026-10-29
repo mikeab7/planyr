@@ -18,9 +18,10 @@ import { fileURLToPath } from "node:url";
 import {
   ELEMENT_CAPABILITIES, PROP_CAPS, ACTION_CAPS, capabilityFor, verdict, FAMILIES, CANONICAL_LOCK_VERB,
 } from "../e2e/elementCapabilities.table.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 
 /* Strip comments before asserting about CODE — this file documents the wording it removed, and a
  * naive substring check would trip on its own documentation. (Same helper as clickContract.test.js;

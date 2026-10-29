@@ -16,6 +16,7 @@ import {
   groupsFor, hiddenSummary, normalizeRetiredToggles,
 } from "../src/workspaces/site-planner/lib/contentVisibility.js";
 import { floodMasterState } from "../src/workspaces/site-planner/lib/floodGroup.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Recursive source walk (js/jsx only) — used by the "nothing writes the retired toggle" guard.
@@ -242,7 +243,7 @@ describe("the retired dock-door toggle cannot strand a plan", () => {
   });
 
   it("the model still DEFAULTS it on, so a plan that never had the key shows its doors", () => {
-    const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const planner = plannerSource();
     expect(planner).toMatch(/showDocks:\s*true/);
     // …and the migration is actually wired into the settings initializer, not merely exported.
     expect(planner).toContain("normalizeRetiredToggles(stored)");
@@ -286,7 +287,7 @@ describe("⛔ THE INVARIANT: this module cannot touch the model", () => {
  * this one names the seams that exist today so a refactor cannot quietly drop one.
  */
 describe("⛔ every render pass that paints for an element asks the predicate", () => {
-  const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const planner = plannerSource();
   const roadNetBuild = readFileSync(resolve(here, "../src/workspaces/site-planner/lib/roadNetBuild.js"), "utf8");   // B2233521: where the dissolved network's steps now live
   /** The body of a `const <name> = useMemo(() => { … }, [deps]);` block. */
   const memoBody = (name) => {
@@ -350,7 +351,7 @@ describe("refHidden — the ONE gate every handle / selection chrome asks", () =
 });
 
 describe("NEW-1 — wiring: no handle group or hover path bypasses the gate", () => {
-  const src = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const src = plannerSource();
   it("the hover scan skips hidden elements and featActiveId is gated", () => {
     expect(src).toMatch(/if \(elHidden\(hiddenGroups, x\)\) continue;/);
     expect(src).toMatch(/refHidden\(hiddenGroups, els, \{ kind: "el", id \}\)/);

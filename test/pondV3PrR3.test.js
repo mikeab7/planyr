@@ -7,8 +7,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("NEW-19 — one flood-facts truth: header state == the facts the numbers use", () => {
   it("exposes a single floodChecked flag: a live fetch OR a remembered/restored check", () => {

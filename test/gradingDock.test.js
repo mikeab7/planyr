@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withGradingTab, panelIdAllowed, GRADING_TAB } from "../src/workspaces/site-planner/lib/gradingDock.js";
 import { gradingPanelView, EMPTY_LINE } from "../src/workspaces/site-planner/lib/gradingPanelModel.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const TABS = [{ id: "parcel", label: "Land" }, { id: "analysis", label: "Analysis" }, { id: "drainage", label: "Drainage" }, { id: "yield", label: "Yield" }, { id: "properties", label: "Properties" }];
@@ -31,7 +32,7 @@ describe("the Grading dock item (NEW-1, amends B2315856)", () => {
     for (const id of ["parcel", "analysis", "drainage", "yield"]) expect(panelIdAllowed(id, false)).toBe(true);
   });
   it("the planner wires it through the gate's answer, a header title and its own icon", () => {
-    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     expect(sp).toMatch(/grading: "Grading"/);
     expect(sp).toMatch(/\n  grading: <>/);
     expect(sp).toMatch(/panelIdAllowed\("grading", gradingOn\)/);

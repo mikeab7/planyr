@@ -21,10 +21,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(resolve(here, p), "utf8");
-const planner = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const planner = plannerSource();
 const app = read("../src/workspaces/site-planner/SitePlannerApp.jsx");
 const finder = read("../src/workspaces/site-planner/MapFinder.jsx");
 const layerPanel = read("../src/workspaces/site-planner/components/LayerPanel.jsx");

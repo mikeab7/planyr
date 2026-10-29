@@ -21,13 +21,14 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { jurisdictionSegments, abbreviateJurisdiction } from "../src/workspaces/site-planner/lib/jurisdictionBadgeFit.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const header = read("src/shared/ui/AppHeader.jsx");
 const crumb = read("src/shared/ui/ProjectBreadcrumb.jsx");
 const badgeSrc = read("src/workspaces/site-planner/components/JurisdictionBadge.jsx");
-const planner = read("src/workspaces/site-planner/SitePlanner.jsx");
+const planner = plannerSource();
 
 /* THE OWNER'S OWN PILL, built through the real formatter — not a hand-written fixture. A hand-made
  * badge object tests the shortener against a shape the app may never produce. */

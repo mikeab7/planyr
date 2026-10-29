@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import {
   dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS, REMOVED_COPY,
 } from "../src/workspaces/site-planner/lib/dockLayerPanel.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const chain3 = [{ truckCourt: { side: "left" }, type: "paving" }, { type: "trailer", forCourt: "c" }, { type: "landscape", buffer: true, forTrailer: "t" }];
 
@@ -84,7 +85,7 @@ describe("length + steps", () => {
 });
 
 describe("source guard — the redesigned panel stays redesigned", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   const branch = src.slice(src.indexOf(") : isDockLayerEl(selEl) ? (() => {"), src.indexOf(') : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? ('));
   const panel = src.slice(src.indexOf("function DockLayerPanel("), src.indexOf("// PercentField — compact"));
   it("the dock branch hands everything to DockLayerPanel", () => { expect(branch).toContain("<DockLayerPanel"); });

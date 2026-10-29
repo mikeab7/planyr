@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const SRC = readFileSync(
   fileURLToPath(new URL("../src/shared/ui/AppHeader.jsx", import.meta.url)),
@@ -42,10 +43,7 @@ describe("B1807200 amendment — header row clearance", () => {
   it("a control's own 30×30 size is untouched (this item converges the ROW, never the control)", () => {
     // dIcon/dGhost (SitePlanner.jsx) and CloudSyncBadge/PresenceChip (shared/ui) all still declare
     // 30, not a value derived from HEADER_ROW_H — the two are deliberately independent constants.
-    const planner = readFileSync(
-      fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)),
-      "utf8",
-    );
+    const planner = plannerSource();
     expect(planner).toMatch(/const dIcon = \{ \.\.\.dGhost, width: 30, height: 30,/);
   });
 });

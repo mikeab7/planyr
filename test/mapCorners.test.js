@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { paneInsetFor, cornerGroupWidth, cursorChipFit, rectInside, rectOverlap, MAP_CORNER_PX, CURSOR_CHIP_MIN_W_PX } from "../src/workspaces/site-planner/lib/mapCorners.js";
 import { NICE_FEET, scaleBarPlate, furnitureMetrics, labelWidthEm, SCALE_END_MARGIN_EM } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
 import fs from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("paneInsetFor (B2206704–B2206706 NEW-1)", () => {
   it("is the overlap only while a desktop docked column exists", () => {
@@ -44,7 +45,7 @@ describe("scale bar plate keeps right-hand room (NEW-3)", () => {
   }
 });
 describe("source guard: left-anchored furniture is inset", () => {
-  const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("north arrow frame, badge, chip and toast all read paneInset", () => {
     expect(src).toMatch(/map-furniture-frame" style=\{\{ position: "absolute", left: paneInset/);
     expect(src).toMatch(/left: calibPlace\.left \+ paneInset/);

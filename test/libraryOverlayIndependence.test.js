@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // B952 — a Cowork round-5 live report worried that uploading an image through the Library's
 // root drop-zone ALSO created a "reference/overlay" in the Site Planner's References panel, so
@@ -51,7 +52,7 @@ describe("B952 — Library filing and Site Planner map references are independen
     // the sole module that appends to it. If this ever stops being true, the independence claim
     // above needs re-checking. (We assert the field name still exists so the guard can't silently
     // pass against a renamed model.)
-    const planner = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const planner = plannerSource();
     expect(planner).toContain("addOverlayFile");
     expect(planner).toContain("setSheetOverlays");
     // And the Library never imports SitePlanner at all (belt-and-suspenders on the whole surface).

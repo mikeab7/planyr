@@ -14,9 +14,10 @@ import { calloutLayout } from "../src/workspaces/site-planner/lib/calloutLayout.
 import { measureTitle } from "../src/workspaces/site-planner/lib/propsPanelTitle.js";
 import { buildAnnotations } from "../src/workspaces/site-planner/lib/pdfAnnotations.js";
 import { T, g, M0, frame } from "./fixtures/pdfAnnotationsFixture.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 
 describe("calloutStyle — the new keys default so an old callout is unchanged", () => {
   it("a callout with none of the new keys resolves strike/caps off and valign top", () => {

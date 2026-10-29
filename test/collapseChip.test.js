@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { collapseStorageKey, readOpen } from "../src/workspaces/site-planner/components/Collapse.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const collapseSrc = read("../src/workspaces/site-planner/components/Collapse.jsx");
@@ -49,7 +50,7 @@ describe("Collapse — per-section persistence + keyboard accessibility", () => 
 });
 
 describe("PR-J — the 'Engineering assumptions' section starts CLOSED on every load (persist:false)", () => {
-  const planner = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
   it("the Engineering assumptions Collapse is defaultOpen={false} AND persist={false}", () => {
     expect(planner).toContain('<Collapse sectionId="pond-sizing" title="Engineering assumptions" defaultOpen={false} persist={false}');
   });
