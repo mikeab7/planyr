@@ -45,6 +45,8 @@ import {
   TN_ENVELOPE, inTennesseeEnvelope, inTennesseeOutline, tennesseeConsolidatedFor, tnRoadAuthority,
   TN_COUNTY_GOVERNS_NOTE, TN_CONSOLIDATED_NOTE, SHELBY_UDC_NOTE, shelbyUdcApplies,
 } from "./tennesseeJurisdiction.js";
+/* NEW-1 (DeSoto County MS, B2507059) — the pure Mississippi facts: the routing box, the relay URLs of the county's own County Outline + Municipalities layers. */
+import { inDeSotoEnvelope, MS_COUNTY_URL, MS_CITY_URL, MS_COUNTY_GOVERNS_NOTE } from "./mississippiJurisdiction.js";
 /* NEW-1 (California) — the California twin: envelope, the one consolidated city-county (San Francisco), the
  * county-governs note, and the three legal city names the CDT layer publishes. Same shape, same rules. */
 import { inCaliforniaEnvelope, CA_CITY_DISPLAY, californiaConsolidatedFor, CA_COUNTY_GOVERNS_NOTE, CA_CONSOLIDATED_NOTE } from "./californiaJurisdiction.js";
@@ -125,6 +127,28 @@ export const JURISDICTION_SOURCES = {
     ttl: 30 * 24 * 3600 * 1000,
     sourceName: "State of Tennessee county boundaries",
     note: "Tennessee county boundary (State of Tennessee, edited 2026-03-18). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (DeSoto County MS, B2507059) — the county's own County Outline and Municipalities layers (BaseLayers 8 and 4, through the relay). Same roles as Tennessee's, so every
+   * downstream consumer reads them identically. Routed to ONLY inside DeSoto County's box, where the Tennessee line makes the two states' routing boxes overlap: both state layers are
+   * asked there and the one that names a county decides the state. Mississippi has no ETJ, and outside the five cities the county governs. */
+  countyMs: {
+    id: "countyMs", role: "county", label: "County", kind: "polygon",
+    url: MS_COUNTY_URL,
+    fields: { name: "COUNTY" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "DeSoto County, MS GIS — County Outline",
+    note: "DeSoto County boundary (the county's own GIS). Screening only — verify with the jurisdiction.",
+  },
+  cityMs: {
+    id: "cityMs", role: "city", label: "City limits", kind: "polygon",
+    url: MS_CITY_URL,
+    fields: { name: "NAME" },
+    titleCaseName: true, // the layer publishes OLIVE BRANCH / HORN LAKE in capitals
+    fullPurposeOnly: true,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "DeSoto County, MS GIS — Municipalities",
+    note: "DeSoto County's five city limits (Olive Branch, Southaven, Horn Lake, Hernando, Walls). A point in none is unincorporated — the county governs (Mississippi has no ETJ). Screening only — verify with the city.",
   },
   cityTn: {
     id: "cityTn", role: "city", label: "City limits", kind: "polygon",
@@ -605,7 +629,9 @@ export function countySourcesForPoint(lat, lng) {
    * county layer answering with a polygon is what says "Tennessee". Tennessee's box and Georgia's overlap along the Georgia line
    * (Chattanooga is in both), so a point in both asks BOTH layers and whichever has a county wins. Overlaps none of TX / CO / CA / NJ / NY. */
   {
-    const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng);
+    const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng), ms = inDeSotoEnvelope(lat, lng);
+    /* NEW-1 (DeSoto MS) — DeSoto County's box overlaps Tennessee's along the state line (Southaven / Horn Lake sit within a mile of it): ask both, the one that names a county decides. */
+    if (ms) return [JURISDICTION_SOURCES.countyMs, tn ? JURISDICTION_SOURCES.countyTn : null].filter(Boolean);
     if (tn) return [JURISDICTION_SOURCES.countyTn, ga ? JURISDICTION_SOURCES.countyGa : null].filter(Boolean);
     if (ga) return [JURISDICTION_SOURCES.countyGa];
   }
@@ -663,6 +689,7 @@ export function citySourcesForPoint(lat, lng) {
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
   {
     const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng); // NEW-1 (Tennessee) — overlaps Georgia's box; both are asked there
+    if (inDeSotoEnvelope(lat, lng)) return [JURISDICTION_SOURCES.cityMs, tn ? JURISDICTION_SOURCES.cityTn : null].filter(Boolean); // NEW-1 (DeSoto MS) — likewise; the Tennessee layer answers empty on Mississippi ground
     if (tn) return [JURISDICTION_SOURCES.cityTn, ga ? JURISDICTION_SOURCES.cityGa : null].filter(Boolean);
     if (ga) return [JURISDICTION_SOURCES.cityGa];
   }
@@ -799,7 +826,10 @@ const trimUrl = (s) => String(s).replace(/\/+$/, "");
 const defaultFetchJson = (url, opts) => fetchArcgisJson(url, opts);
 
 function buildQueryUrl(base, params) {
-  const u = new URL(trimUrl(base) + "/query");
+  /* A source `url` may be ROOT-RELATIVE (the same-origin /gis-proxy relay — DeSoto County MS, B2507059); `new URL` with no base throws on it, so it resolves against the app's own
+   * origin (an absolute URL ignores the base). Outside a browser the fallback origin only keeps a unit test's query shape intact. */
+  const origin = typeof window !== "undefined" && window.location && window.location.origin ? window.location.origin : "https://planyr.io";
+  const u = new URL(trimUrl(base) + "/query", origin);
   u.searchParams.set("f", "json");
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
   return u.toString();
@@ -1464,7 +1494,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       /* NEW-1 (Georgia) — Georgia has NO ETJ, so "no ETJ layer for this area yet" would be a false
        * promise of a coming feature (and would put ETJ wording on a Georgia site). The role is simply
        * not applicable there: silent, like every other role with nothing to ask. */
-      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inTennesseeEnvelope(lat, lng) && !inCaliforniaEnvelope(lat, lng) && !inNjNyEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
+      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inTennesseeEnvelope(lat, lng) && !inDeSotoEnvelope(lat, lng) && !inCaliforniaEnvelope(lat, lng) && !inNjNyEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
       return;
     }
     opts.onStatus && opts.onStatus(role, "loading");
@@ -1693,14 +1723,15 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   /* ⛔ NEW-1 (Tennessee) — THE SAME RULE, AND THE ONE PLACE TWO STATES' BOXES MEET. Tennessee's routing box and Georgia's overlap along
    * the Georgia line (Chattanooga, Cleveland, Rossville), so a point there asks BOTH county layers and the state is whichever one named a
    * county — never the box. Neither naming one (an empty, error-free answer from every layer asked) means the point is in neither state. */
-  const gaTnCountySrcs = countySourcesForPoint(lat, lng).filter((sx) => sx === JURISDICTION_SOURCES.countyGa || sx === JURISDICTION_SOURCES.countyTn);
+  const gaTnCountySrcs = countySourcesForPoint(lat, lng).filter((sx) => sx === JURISDICTION_SOURCES.countyGa || sx === JURISDICTION_SOURCES.countyTn || sx === JURISDICTION_SOURCES.countyMs);
   if (gaTnCountySrcs.length && roles.includes("county")) {
     const cs = out.sources.find((x) => x && x.id === "county");
     const ids = out.countySourceIds || [];
-    if (out.county.length) out.state = ids.includes("countyTn") ? "TN" : "GA";
+    if (out.county.length) out.state = ids.includes("countyMs") ? "MS" : ids.includes("countyTn") ? "TN" : "GA"; // NEW-1 (DeSoto MS) — a DeSoto County polygon says Mississippi
     else if (cs && cs.state === "empty") {
       if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyGa)) out.notInGeorgia = true;
       if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyTn)) out.notInTennessee = true;
+      if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyMs)) out.notInMississippi = true;
       out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = [];
     }
   }
@@ -1872,6 +1903,7 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // ground): there is no Georgia jurisdiction to name, and guessing "Unincorporated" would be a fabrication.
   if (j.notInGeorgia && !j.state) return null; // NEW-1 (Tennessee) — a Tennessee point inside Georgia's box sets notInGeorgia AND state TN; it must keep its Tennessee answer
   if (j.notInTennessee && !j.state) return null; // NEW-1 (Tennessee) — the same, for KY / VA / NC / AL / MS / AR / MO ground inside the routing box (a GA point in the overlap sets notInTennessee and state GA — it keeps its Georgia answer)
+  if (j.notInMississippi && !j.state) return null; // NEW-1 (DeSoto MS) — the Tennessee line: a point the county layer does not hold is nothing to show here
   if (j.notInCalifornia) return null; // NEW-1 (California) — the same, for NV / OR / AZ / Baja ground inside the routing box
   if (j.notInNjNy) return null; // NEW-1 (New Jersey + New York) — the same, for PA / DE / CT / MA / VT ground inside a routing outline
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
@@ -2055,7 +2087,7 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const splitShare = partCities.length ? shareOfCity(partCities[0]) : null;
   /* NEW-1 (Georgia, California) — "GA" | "CA" on a point-in-polygon-confirmed site, else null. The field names
    * (`gaState`, `gaNote`) predate California and are kept: they are consumed by the badge component and tests. */
-  const gaState = ["GA", "CA", "TN", "NJ", "NY"].includes(j.state) ? j.state : null; // NEW-1 — NJ / NY / TN ride the same state-aware label model
+  const gaState = ["GA", "CA", "TN", "MS", "NJ", "NY"].includes(j.state) ? j.state : null; // NEW-1 — NJ / NY / TN ride the same state-aware label model
   const gaConsolidated = gaState === "GA" ? georgiaConsolidatedFor(counties, coreCities)
     : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities)
     : gaState === "TN" ? tennesseeConsolidatedFor(counties) : null; // NJ / NY: no consolidated city-county
@@ -2211,11 +2243,11 @@ export async function countyAtPoint(lng, lat, opts = {}) {
   }
   /* NEW-1 (Tennessee) — Tennessee's box overlaps Georgia's, so a point there has TWO candidate sources: ask them in turn (Tennessee
    * first) and let the one that names a county decide the state. Neither naming one falls through to the offline floor below. */
-  if (srcList.includes(JURISDICTION_SOURCES.countyTn)) {
+  if (srcList.includes(JURISDICTION_SOURCES.countyTn) || srcList.includes(JURISDICTION_SOURCES.countyMs)) {
     for (const tsrc of srcList) {
       const tr = await identifySource(tsrc, { lng, lat }, opts).fresh;
       const f = tr.items.map((it) => normalizeFeature(tsrc, it.attrs)).find((x) => x.name);
-      if (f) return { name: String(f.name), key: null, fips: f.fips ? String(f.fips) : null, state: tsrc === JURISDICTION_SOURCES.countyTn ? "TN" : "GA", ageMs: tr.ageMs, ts: tr.ts };
+      if (f) return { name: String(f.name), key: null, fips: f.fips ? String(f.fips) : null, state: tsrc === JURISDICTION_SOURCES.countyMs ? "MS" : tsrc === JURISDICTION_SOURCES.countyTn ? "TN" : "GA", ageMs: tr.ageMs, ts: tr.ts };
     }
   }
   /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all

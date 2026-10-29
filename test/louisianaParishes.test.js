@@ -235,8 +235,9 @@ describe("pinned id/address columns (NEW-1)", () => {
 
   it("only the shared service is scoped, and its scope names the parish's own FIPS code", () => {
     const scoped = LA_KEYS.filter((k) => COUNTIES[k].scopeWhere);
-    expect(scoped).toEqual(["la_lafayette"]);
+    expect(scoped.sort()).toEqual(["la_lafayette", "la_vermilion"]); // the ES2 Regrid-schema service holds exactly these two parishes
     expect(COUNTIES.la_lafayette.scopeWhere).toBe("geoid='22055'"); // Lafayette Parish FIPS 22055
+    expect(COUNTIES.la_vermilion.scopeWhere).toBe("geoid='22113'"); // Vermilion Parish FIPS 22113
   });
 });
 

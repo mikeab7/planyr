@@ -17,11 +17,11 @@ describe("the reason lookup — one sample of each code, across more than three 
     ["Pike County", "KY", "paywall"], ["Bath County", "KY", "paywall"], ["Lawrence County", "KY", "paywall"],
     ["Upson County", "GA", "paywall"], ["Oglethorpe County", "GA", "paywall"], ["Sioux County", "IA", "paywall"], ["Jo Daviess County", "IL", "paywall"],
     // NEW-2 (B2486193): Schneider Beacon, measured in the owner's Chrome 2026-10-29
-    ["Taliaferro County", "GA", "paywall"], ["Hughes County", "SD", "paywall"], ["Clay County", "SD", "paywall"],
+    ["Taliaferro County", "GA", "paywall"], ["Clay County", "SD", "paywall"],
     ["Adams County", "IA", "locked"], ["Bacon County", "GA", "locked"], ["Houghton County", "MI", "locked"], ["Ogle County", "IL", "locked"],
     // B2486192: South Dakota's 49 researched gaps, each with the reason the research recorded
-    ["Aurora County", "SD", "unreachable"], ["Bon Homme County", "SD", "unreachable"], ["Fall River County", "SD", "unreachable"], ["Meade County", "SD", "unreachable"],
-    ["Lincoln County", "SD", "locked"], ["Corson County", "SD", "paywall"], ["Perkins County", "SD", "paywall"], ["Spink County", "SD", "paywall"],
+    ["Fall River County", "SD", "unreachable"],
+    ["Lincoln County", "SD", "locked"], ["Harding County", "SD", "paywall"], ["Corson County", "SD", "paywall"], ["Perkins County", "SD", "paywall"], ["Spink County", "SD", "paywall"],
     // locked — a layer exists, the publisher has not opened it
     ["Breckinridge County", "KY", "locked"], ["Hart County", "KY", "locked"], ["Butler County", "MO", "locked"], ["Caldwell County", "MO", "locked"],
     ["Baraga County", "MI", "locked"], ["Calhoun County", "MI", "locked"], ["Johnson County", "KS", "locked"], ["Knox County", "TN", "locked"],
@@ -32,7 +32,7 @@ describe("the reason lookup — one sample of each code, across more than three 
     // none — owner-accepted gaps and the default
     ["Fulton County", "KY", "none"], ["New Madrid County", "MO", "none"], ["Pemiscot County", "MO", "none"],
     ["Alpena County", "MI", "none"], ["Bryan County", "OK", "none"], ["Early County", "GA", "none"],
-    ["Harding County", "SD", "none"], ["Lake County", "SD", "none"], ["Yankton County", "SD", "none"],
+    ["Hyde County", "SD", "none"], ["Walworth County", "SD", "none"],
   ])("%s, %s → %s", (name, st, reason) => { expect(gapReasonFor(name, st)).toBe(reason); });
 
   it("a county nobody has researched is `none` — Texas, Colorado, and a state with no table at all", () => {

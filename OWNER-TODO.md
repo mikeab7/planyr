@@ -7,6 +7,9 @@
 
 _Last updated: 2026-10-29._
 
+## 📱 Two-minute check on your iPhone: does a pasted-table picture show straight away? (B2515969 / V1960400)
+- [ ] **In Notes on your iPhone, paste a few rows from a spreadsheet, tap the little "(Ctrl) ▾" tab, then the last picture icon.** The table should turn into a picture of itself within about a second. In the phone test I can run here, the picture sometimes shows only as a small "Pasted table" label until you tap the page once — that test uses a stand-in for Safari, so I can't tell whether your phone does it. If yours shows the label, tell me; if it just shows the picture, say so and I'll close it. (The tab itself is now thumb-sized — that was fixed.)
+
 ## 🗺 A decision: Montgomery County, Texas — keep it on South Central, or move it to its legally defined zone? (B2478961)
 - [ ] **Decide (one word is enough: "keep" or "switch").** Every state now runs on its own legally defined State Plane zone. One county disagrees with the government's own list: the official zone tables put **Montgomery County (Conroe) in Texas Central**, but Planyr has always treated it like the rest of the Houston area (Texas South Central), and you told me Houston/Texas South Central must not change. So I **kept** South Central for Montgomery and marked it as a deliberate exception. Keeping costs a tiny measurement difference (far below what a screening tool resolves); switching is a one-line change but would shift existing Montgomery overlays slightly the next time they open. Nothing breaks either way.
 

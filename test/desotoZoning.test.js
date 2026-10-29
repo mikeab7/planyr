@@ -8,11 +8,13 @@ import { hoverDetails } from "../src/workspaces/site-planner/lib/featureHover.js
 describe("zoneClass", () => {
   it.each([
     ["M-1", "industrial"], ["M-2", "industrial"], ["M-3", "industrial"], ["m-1", "industrial"], ["M1", "industrial"],
+    ["O", "commercial"], ["PO", "commercial"], ["RO", "commercial"], ["PB", "commercial"], ["PBP", "commercial"], ["ER", "residential"], ["RM-6", "residential"], ["RM-8", "residential"],
+    ["R-15 OVERLAY", "overlay"], ["A-R OVERLAY", "overlay"], ["HISTORIC DISTRICT OVERLAY", "overlay"], ["PUD OVERLAY", "overlay"],
     ["C-1", "commercial"], ["C-5", "commercial"], ["C2", "commercial"],
     ["R-1", "residential"], ["R-10", "residential"], ["R-M", "residential"],
     ["A", "agricultural"], ["A-R", "agricultural"],
     ["PUD", "pud"], ["OB PUD", "pud"],
-    ["MU", "other"], ["", "other"], [null, "other"], ["???", "other"],
+    ["MU", "other"], ["PUD", "pud"], ["", "other"], [null, "other"], ["???", "other"],
   ])("%j → %s", (z, c) => expect(zoneClass(z)).toBe(c));
 });
 
@@ -43,7 +45,7 @@ describe("approvalDate", () => {
 
 describe("ordinanceRef — a link only when it is a real http(s) URL", () => {
   it("the Municode link becomes a labelled link", () => {
-    expect(ordinanceRef("https://library.municode.com/ms/olive_branch/codes")).toEqual({ href: "https://library.municode.com/ms/olive_branch/codes", text: "Municode — Olive Branch code" });
+    expect(ordinanceRef("https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR")).toEqual({ href: "https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR", text: "Zoning ordinance (Municode)" });
   });
   it("an anchor tag in the field is unwrapped to its href and text", () => {
     expect(ordinanceRef('<a href="https://example.gov/ord/12.pdf">Ordinance 12</a>')).toEqual({ href: "https://example.gov/ord/12.pdf", text: "Ordinance 12" });
@@ -60,7 +62,7 @@ describe("ordinanceRef — a link only when it is a real http(s) URL", () => {
 });
 
 describe("zoningRows — labelled by the jurisdiction the SITE falls in, never by the layer", () => {
-  const props = { ZONE: "M-1", PREV_ZONE: "A-R", CASE_NO: "RZN-26-0003", DATE_APPROVED: Date.UTC(2026, 7, 18, 12), ORDINANCE: "https://library.municode.com/ms/olive_branch/codes", NAME: "Hacks Cross Logistics" };
+  const props = { ZONE: "M-1", PREV_ZONE: "A-R", CASE_NO: "RZN-26-0003", DATE_APPROVED: Date.UTC(2026, 7, 18, 12), ORDINANCE: "https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR", NAME: "Hacks Cross Logistics" };
   it("shows zone, jurisdiction, previous zone, case, approval date, ordinance link and name", () => {
     expect(zoningRows(props, "Olive Branch")).toEqual([
       { label: "Zone", text: "M-1 (industrial)" },
@@ -68,7 +70,7 @@ describe("zoningRows — labelled by the jurisdiction the SITE falls in, never b
       { label: "Previously", text: "A-R" },
       { label: "Case", text: "RZN-26-0003" },
       { label: "Approved", text: "Aug 18, 2026" },
-      { label: "Ordinance", text: "Municode — Olive Branch code", href: "https://library.municode.com/ms/olive_branch/codes" },
+      { label: "Ordinance", text: "Zoning ordinance (Municode)", href: "https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR" },
       { label: "Name", text: "Hacks Cross Logistics" },
     ]);
   });

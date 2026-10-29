@@ -226,3 +226,13 @@ Things a future session would otherwise rediscover:
   0.35). `verify-food-rating-and-sheet.mjs` now sends the moves back-to-back and ASSERTS the speed the page actually saw.
 - **Commands:** `node ui-audit/verify-phone-typing.mjs --live` · `PW_CHROME=/opt/pw-browsers/chromium node
   ui-audit/verify-food-rating-and-sheet.mjs --live` (add `--shots=<dir>` for the keyboard-drawn pictures).
+
+## Notes paste options on a phone — Picture and the flyout (B2494096 / V1960400, 2026-10-29)
+
+`node ui-audit/verify-notes-paste-options-phone.mjs` (live, signed in; `DEVICES="iPhone 15,iPhone SE,iPhone 15 landscape"`, `SHOTS=<dir>`). One throwaway page per device, deleted and proven gone. Things a future session would otherwise rediscover:
+- **WebKit was installable here after all** (`npx playwright install webkit` ×2 + `install-deps`; an earlier session of the same day saw a 403 from the download host — a container policy, not a fact about WebKit).
+- **The iPhone SE descriptor's user-agent is iOS 10.3.** ProseMirror then ignores `text/html` on paste (broken-clipboard branch), so an Excel paste loses its widths and fills. Keep the SE *screen* and take iPhone 15's UA (the harness does; its header says why).
+- **A Playwright WebKit context reports `navigator.maxTouchPoints === 0`** even with `hasTouch`; `matchMedia("(pointer: coarse)")` is the reliable read.
+- **A deploy mid-run shows "Planyr is finishing a deploy / Importing a module script failed"** and every locator times out — check `/version.json` is stable for a minute before reading anything into a failure.
+- **Counting `complete` / `naturalWidth` does not prove a picture is on screen** — see NOTES-CARRY-FORWARD "Paste options", trap 4 (B2515969). Read pixels (`ui-audit/lib/pngDiff.mjs`'s `decodePng` on a clipped screenshot) and pick a colour only the picture has.
+- Result 2026-10-29: flyout layout clean on all three; every option applies and undoes by tap; Picture decodes and holds ink in WebKit; the collapsed tab was too short to tap (fixed, B2515968); Picture's paint is intermittent in this engine exactly as a plain image of the same weight is (B2515969, open — needs a real iPhone).

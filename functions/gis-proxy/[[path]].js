@@ -236,12 +236,22 @@ export const ALLOWED_HOSTS = new Set([
    * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
    * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
   "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
+  /* Second pass (Georgia, 2026-10-29) — hosts a "none" county's parcel layer was FOUND on by web-map layer URLs but that the sandbox cannot reach, relayed ONLY so the layer can be measured through
+   * this relay before anything is wired to it (docs/STATEWIDE-PARCELS.md "Georgia counties"). Delete an entry whose county stays unwired. */
+  "portal.segrass.org", // Coastal Regional Commission's newer server — Long County Property_Data / Long_Parcels (crcarcgis)
+  "arcgis4.roktech.net", // ROK Technologies — Habersham County habersham_base (the AGOL 2014 items point here)
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
+
+/* The upstream statuses worth exactly one more try: gateway errors and Cloudflare's own origin-failure family (520 unknown, 521 down, 522 connect timeout,
+ * 523 unreachable, 524 timeout, 525 SSL handshake failed, 526 invalid cert, 527 railgun). Pure — unit-tested. */
+export function isTransientStatus(status) {
+  return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 527);
+}
 const USER_AGENT = "planyr-gis-proxy";
 
 function jsonResponse(body, status) {
@@ -283,15 +293,24 @@ export async function onRequest(context) {
     headers["content-type"] = request.headers.get("content-type") || "application/x-www-form-urlencoded";
   }
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
+  /* ONE retry on a transient upstream failure (B2507056, 2026-10-29). Measured through planyr.io: gis.desotocountyms.gov (itself fronted by Cloudflare) answers
+   * ~10% of identical, idempotent queries with a 525 ("SSL handshake failed" to ITS origin) and the very next request succeeds (4 of 40). The relay carries only
+   * read-only ArcGIS queries, so asking once more is safe, and it turns a 10% outage into ~1% instead of leaving every caller to notice and retry. Only the
+   * transient classes retry (502/503/504 and Cloudflare's 520-527); a 4xx, a 500 with a body, or an abort is returned as it came. */
+  const attempt = async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
+    try { return await fetch(resolved.url, { method, headers, body, signal: ctrl.signal }); } finally { clearTimeout(timer); }
+  };
   let res;
   try {
-    res = await fetch(resolved.url, { method, headers, body, signal: ctrl.signal });
+    res = await attempt();
+    if (isTransientStatus(res.status)) {
+      try { await res.body?.cancel(); } catch (_e) { /* discarding the failed body */ }
+      res = await attempt();
+    }
   } catch (_e) {
     return jsonResponse({ error: `Upstream GIS request to ${resolved.host} failed or timed out.`, host: resolved.host }, 502);
-  } finally {
-    clearTimeout(timer);
   }
 
   // Pass through the body + Content-Type; deliberately copy NOTHING else from the upstream

@@ -296,7 +296,7 @@ export const OWNER_KEY_MI_RE = /^((bsaexport_)?onername\d|ownnm1|parcelmaster_ow
  * Christian), `Primary_Owner` (White), `OWN_FULL` (Madison's assessor layer) and `OwnerLastName` (Winnebago, whose first name sits in a sibling column). `TAXNAME` (LaSalle) is the tax-bill name.
  * Fallback pass only, so no existing source can change its answer. */
 /* New York (2026-10-20): `primary_ow` (the shapefile-truncated PRIMARY_OWNER — Nassau, Franklin and Jefferson via the north-country parcel model, Orleans, Seneca) Fallback pass only. */
-export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
+export const OWNER_KEY_ID_RE = /^(ownership|parcel_?owner|ml_ownr_nm|p[ms]_mail_nm|fee_?owner|owner_?line_?\d*|mailing_?name|party_?name|gis_owner1|taxpayer_name|current_ow|vcpayerlas|cama_ownername|tc_owner|owner\d_nam|owner\d_?name|tsc_owner\d|tsc_name\d|primary_?name|primary_?ow(?:ner)?|own_full|owner_?last_?name|tax_?name|cama_temp_name)$/i; // cama_temp_name: South Carolina — Lee County\'s polygon roll joined to its CAMA roll (NEW-1, 2026-10-19)
 /* Pennsylvania (NEW-1, 2026-10-19): the owner column of the county rolls beyond the common spellings — `SHORT_NAME` (Adams), `Owners_Nam` (Juniata), `Comb_Owner` (Mercer), `owndat_own1` (Washington),
  * `OWNER_FULL` (York), `FULL_OWNER` (Franklin), `PRIMARY_OWNER` (Lawrence), `Current_Owner` (Clarion), `COMBINED_NAME` (Susquehanna). Second-pass spellings only, so no source that already resolves can change its answer. */
 export const OWNER_KEY_PA_RE = /^(short_?name|owners_?nam|comb_?owner|owndat_?own1|owner_?full|full_?owner|primary_?owner|current_?owner|combined_?name)$/i;
@@ -450,6 +450,12 @@ export const APPR_FIELDS = [
   // untouched (only a "value"-labeled row gets $ formatting) and `InfoRow` (ParcelInfoCard.jsx)
   // renders an http(s) value as a link rather than plain text.
   [/^website$/i, "County record"],
+  // NEW-1 (DeSoto County MS, B2507056) — the county's own per-parcel document links (all http(s), so `InfoRow` renders each as a link): the recorded plat, the warranty deed, the FEMA flood map, the tax-info page and the tax map.
+  [/^plat_?link$/i, "Plat"],
+  [/^wd_?link$/i, "Warranty deed"],
+  [/^fema_?link$/i, "FEMA map"],
+  [/^tax_?info$/i, "Tax info"],
+  [/^tax_?map$/i, "Tax map"],
   // ...|^legal matches CCAD's Legal1–Legal4 (first match, Legal1, wins).
   [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
 ];

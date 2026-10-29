@@ -41,6 +41,10 @@ export const WA_ROWS = [
   ["whatcom","Whatcom","/gis-proxy/wcgis.whatcomcounty.us/arcgis/rest/services/EnterprisePublishing/WhatcomCo_Property/MapServer/1","geo_id","situs_street",1,48.8192,-121.7405,[48.619, -122.843, 49.02, -120.639]],
   ["whitman","Whitman","https://services3.arcgis.com/eoLFybJXLOtInQXJ/arcgis/rest/services/Parcel_Data___TaxSifter_Map_WFL1/FeatureServer/19","ParcelNumber",null,1,46.8383,-117.6407,[46.398, -118.263, 47.278, -117.018]],
   ["yakima","Yakima","https://services3.arcgis.com/9Qz94N8Zml9hnG84/arcgis/rest/services/Parcels/FeatureServer/1","PARC",null,0,46.5613,-120.6953,[46.018, -121.545, 47.105, -119.845]],
+  ["columbia","Columbia","https://services9.arcgis.com/zq1Ay6bxXC1T1CBk/arcgis/rest/services/TaxParcels/FeatureServer/0","geoidt",null,1,46.3088,-117.921,[45.9, -118.339, 46.718, -117.503]],
+  ["garfield","Garfield","https://services5.arcgis.com/1UmAlNNRc6UDVQ4y/arcgis/rest/services/Garfield_Online_gdb/FeatureServer/14","PARCEL_ID",null,1,46.3492,-117.5463,[45.9, -117.963, 46.799, -117.13]],
+  ["okanogan","Okanogan","https://services3.arcgis.com/p1XMcn4KWrkdZVeA/arcgis/rest/services/Parcels/FeatureServer/0","PIN","SITUS",1,48.4688,-119.8578,[47.837, -120.976, 49.1, -118.74]],
+  ["pacific","Pacific","https://services8.arcgis.com/45yC2apGKjdsqkev/arcgis/rest/services/Parcels/FeatureServer/0","ASSESSOR","SITUS",1,46.5168,-123.731,[46.14, -124.202, 46.893, -123.26]],
 ];
 export const waRaw = () => Object.fromEntries(WA_ROWS.map(([k, n, url, id, addr]) => ["wa_" + k, {
   state: "WA", label: n + " County, WA", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}),

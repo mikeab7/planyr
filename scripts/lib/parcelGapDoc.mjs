@@ -23,7 +23,7 @@ export const GAP_SOURCES = [
   { state: "OK", heading: /^### Gaps \(61\)/, kindCol: "Kind" },
   { state: "KS", heading: /^### Gaps — the /, kindCol: "Kind" },
   { state: "IL", heading: /^### The \d+ named gaps/, kindCol: "Kind" },
-  { state: "LA", heading: /^### The 26 parishes still named gaps/, kindCol: null },
+  { state: "LA", heading: /^### The parishes still named gaps/, kindCol: null },
   { state: "ID", heading: /^## Idaho counties \(2026-10-19\)/, kindCol: null, headerHas: "Why it is not wired", onlyPlainNames: true },
   { state: "NY", heading: /^## New York counties \(2026-10-20\)/, kindCol: null, rowOk: (_k, cells) => /named gap/.test(cells.join(" ")) },
   { state: "TN", heading: /^## Tennessee non-state counties/, kindCol: "Outcome", rowOk: (kind) => /^named gap/.test(kind) },

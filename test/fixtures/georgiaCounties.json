@@ -2073,14 +2073,10 @@
   "Bacon",
   "Baker",
   "Banks",
-  "Berrien",
   "Burke",
   "Calhoun",
-  "Carroll",
-  "Catoosa",
   "Clinch",
   "Colquitt",
-  "Early",
   "Fannin",
   "Gilmer",
   "Habersham",
@@ -2092,7 +2088,6 @@
   "Lamar",
   "Lincoln",
   "Long",
-  "Macon",
   "Madison",
   "Marion",
   "McDuffie",
@@ -2407,6 +2402,36 @@
    "county": "Worth County",
    "lat": 31.6185,
    "lng": -83.9894
+  },
+  {
+   "name": "Early — just inside its own line",
+   "county": "Early County",
+   "lat": 31.14,
+   "lng": -85.0357
+  },
+  {
+   "name": "Catoosa — just inside its own line",
+   "county": "Catoosa County",
+   "lat": 34.9591,
+   "lng": -85.2247
+  },
+  {
+   "name": "Berrien — just inside its own line",
+   "county": "Berrien County",
+   "lat": 31.41421,
+   "lng": -83.31629
+  },
+  {
+   "name": "Carroll — just inside its own line",
+   "county": "Carroll County",
+   "lat": 33.48093,
+   "lng": -85.261
+  },
+  {
+   "name": "Macon — just inside its own line",
+   "county": "Macon County",
+   "lat": 32.46814,
+   "lng": -83.88836
   }
  ]
 }
