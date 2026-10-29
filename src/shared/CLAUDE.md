@@ -12,13 +12,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   unbroken long word, `calloutBoxMetrics` sizes the box to the longest actual line; heuristic +
   real-`<canvas>` measurers, B909); renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`,
   `SelectionChrome.jsx`.
-- `coordinates/` — the shared coordinate spine. `index.js` is the original hardcoded EPSG:2278
-  projection — **leave it alone**; `statePlane.js` (NEW-3) is the multi-zone engine beside it
-  (TX South Central 2278 · CO North 2231 · CO Central 2232, per-county resolution incl. the
-  documented Broomfield decision) and reproduces `index.js` **bit-for-bit** for Texas, which is
-  what makes Colorado additive rather than a refactor — the statePlane suite asserts that with `Object.is`. `scaleFactor.js` (NEW-4) reports the grid × elevation combined factor and detects a
-  ground-coordinate survey; it deliberately never APPLIES the factor. Read-only screening use
-  today; grow additively, not a planner rewrite.
+- `coordinates/` — the shared coordinate spine. `index.js` is the original hardcoded EPSG:2278 projection — **leave it alone, and never reach for it from new code**; `statePlaneCore.js` is the LEAN half (zones, the three projections, units, the point resolver, the site-local frame — **no county table**; point-only callers such as `overlayPlacement.js` and the site-planner's proximity screen import it so the 2,600-name table stays off the Site route's boot path) and `statePlane.js` the full county-first resolver on top of it (re-exports the core). Together they are the multi-zone engine: **every NAD83 SPCS zone in all 50 states (122)**, constants generated from EPSG into `statePlaneZones.js` + `statePlaneCounties.js` by `scripts/gen-state-plane-zones.py` (dev-time pyproj; **never hand-edit the data, never type a constant from memory**). Three projections — Lambert (the original code, untouched), Transverse Mercator (Karney n⁶) and Hotine Oblique Mercator A (Alaska zone 1) — each zone in its own legislated unit (`unit`; `unitInUsFt` rescales). `resolveZone({state, county, lat, lon})`: Alaska by meridian band, Hawaii by island, county-first from each zone's EPSG county list, single-zone states from the state alone, a flagged-coarse point fallback last; **never Texas by default** — no zone is `null` (or, for overlay placement and screening distances, an explicit site-local frame, `zone.local`). It reproduces `index.js` **bit-for-bit** for Texas South Central (the statePlane suite asserts it with `Object.is`); Colorado's Broomfield and Texas's Montgomery are `decided` assignments with a `decisionNote`. Full account, per-state rules, decided assignments and the consumer audit: `docs/incidents/STATE-PLANE-AUDIT.md`. Guards: repo-root `test/` **statePlaneAllZones** (PROJ goldens for every zone, all 3,144 counties), **statePlane**, **proximityZone**. `scaleFactor.js` (NEW-4) reports the grid × elevation combined factor and detects a ground-coordinate survey; it deliberately never APPLIES the factor.
   **⛔ B290241/B290242 — `statePlane.js`'s FIRST production consumer is `deedAlign.gridConvergenceDeg`,
   and two things it learned the hard way.** (a) **A CONVERGENCE OR A DISTANCE MUST COME FROM THE
   SITE'S OWN ZONE** — γ = n·(λ − λ₀) is a function of the cone constant and central meridian, the two
@@ -32,8 +26,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   outside every modelled zone and callers must refuse rather than rotate — 0 is a real answer here
   ("on the central meridian"), so it may never double as a sentinel. **Still unconsumed and worth
   knowing before you cite them as working:** `scaleFactor.js` (B290250) and, outside the deed path,
-  the multi-zone engine — the site-planner's proximity screen still measures every screening distance
-  through the Texas cone, which over-reports Colorado by **1.93%** (B290247).
+  the multi-zone engine — (B290247 is CLOSED: the proximity screen now measures on the site's own zone — B2478960.)
 - `files/` — `fileDrag.js` (B2258464/B2258465) is THE file-drag tracker: armed once at app boot, it cancels the browser's default for any Files `dragover`/`drop` (so a dropped file is never opened/downloaded anywhere) and owns "is a file being dragged over the window" for every drop overlay (`useFileDragActive(visible)`; cleared by leave-window/drop/dragend/Esc/blur/mouse/pointer/hashchange/watchdog). Never add a per-pane enter/leave depth counter, and gate a window-level drop handler on the ACTIVE workspace, not just a mode (hidden workspaces stay mounted). Guard: repo-root `test/` **fileDragGuard**; ui-audit **verify-file-drag-overlays**. `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
   math + the retry/resume loop, B409 rework) + `uploadQueue.js` (the upload-tray queue model).
   `middleTruncate.js` — split a label into head + a PINNED tail, so a list of names that differ only

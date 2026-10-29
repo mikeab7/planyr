@@ -1228,8 +1228,8 @@ await runMutation("E",
 
 // F · MUTATION: wire moveRows into the per-frame paint loop too (the B1121-shaped regression).
 await runMutation("F",
-  "const onMove = (ev) => { state.lastClientY = ev.clientY; if (!state.moved",
-  "const onMove = (ev) => { state.lastClientY = ev.clientY; if (state.intent && state.intent.kind === \"gap\" && moveRows) { moveRows(anchorTaskId, state.intent.destParentId, state.intent.insertAfterId); } if (!state.moved",
+  "state.lastClientX = ev.clientX; state.lastClientY = ev.clientY;\n      if (!state.moved",   // NEW-1: onMove is now a hoisted function (the drag arms only past the threshold)
+  "state.lastClientX = ev.clientX; state.lastClientY = ev.clientY; if (state.intent && state.intent.kind === \"gap\" && moveRows) { moveRows(anchorTaskId, state.intent.destParentId, state.intent.insertAfterId); }\n      if (!state.moved",
   async (mpage) => {
     const snapshot = async () => (await rowsByName(mpage)).map(r => r.name).join("|");
     const beforeSnap = await snapshot();

@@ -245,7 +245,7 @@ describe("adjacent cases", () => {
 describe("wiring in public/sequence/index.html", () => {
   const body = extractFn("const startRowDrag = (e, anchorTaskId, opts = null) => {");
   it("the drop commits through the ONE moveRows call per outcome (one setData → one undo step), only from onUp", () => {
-    const upAt = body.indexOf("const onUp = ");
+    const upAt = body.indexOf("function onUp(");
     expect(upAt).toBeGreaterThan(0);
     expect((body.slice(0, upAt).match(/\bmoveRows\(/g) || []).length).toBe(0);
     const onUp = body.slice(upAt);
@@ -260,6 +260,8 @@ describe("wiring in public/sequence/index.html", () => {
     expect(body).not.toMatch(/(?<![.\w])set[A-Z]\w*\(/);   // bare setX(…) = React state; .setAttribute is DOM
   });
   it("Escape / blur cancels BOTH kinds of drop (the cancel path clears the intent, not just the gap)", () => {
-    expect(body).toMatch(/onExit: \(\) => \{ state\.overGapIndex = null; state\.intent = null; onUp\(\); \}/);
+    // NEW-1: a cancel tears the gesture down with NO commit at all (it no longer routes through onUp with a nulled intent)
+    expect(body).toMatch(/onExit: \(\) => cancel\(\)/);
+    expect(body).toMatch(/function cancel\(\) \{ teardown\(\); \}/);
   });
 });

@@ -10,21 +10,29 @@
  *   3. A SKIPPED SOURCE. A source whose circuit breaker is open is dropped from the click — but the breaker is also fed by the
  *      OUTLINE layer, so a county whose outlines kept failing (MARIS, 24 counties, asked for a column it does not have) was
  *      never asked about a click inside it, and its lot read "No lot here".
- * So a click is now up to four rounds, each only when the one before found NO lot:
- *   primary → retry the sources that never answered (once) → the counties across any line within reach → the sources the
- *   breaker skipped (asked once, last, because they are the ones most likely to be slow).
+ * So a click is now up to five rounds, each only when the one before found NO lot:
+ *   primary → (NEW-2, 2026-10-28) the FALLBACK for a county that did not answer: its state's statewide layer when that layer really
+ *   holds the county, then any town layer the county row declares (lib/parcelFallbacks.js) → retry the sources that never answered
+ *   (once) → the counties across any line within reach → the sources the breaker skipped (asked once, last, because they are the
+ *   ones most likely to be slow).
+ *   The fallback round comes BEFORE the slow retry on purpose (owner: "wire it to the county one, but then default it to the state one"):
+ *   a county that has already missed its quick round should not hold the click for another long wait when the state's layer can answer
+ *   now. It is asked ONLY when a county was SILENT (errored / timed out) — a county that answered "no lot here" is never second-guessed
+ *   by a layer that lags it — and a lot it finds is returned with `via: "fallback"` and `fallback: {kind, label, failed}` on the hit so
+ *   the surface says so. The failed county stays SILENT in the bookkeeping (its fallback's answer never counts as the county answering),
+ *   so a click nothing could answer still reads "couldn't reach the county server", never "No lot here".
  * A county's server holds only its own parcels, so a lot returned at the point is the lot there — the later rounds can find a
  * lot the first missed, never substitute a wrong one (which is why they are sequential, not one wider race).
  *
  * Pure orchestration: `identify` is injected (defaults to `identifyParcelEager`), so the round logic is unit-tested without a
  * network. Result is `identifyParcelEager`'s shape plus `queried` (every candidate asked, all rounds), `via`
- * ("primary" | "retry" | "neighbour" | "skipped" | null) and `silent` (county keys that never answered in any round). */
+ * ("primary" | "fallback" | "retry" | "neighbour" | "skipped" | null) and `silent` (county keys that never answered in any round). */
 import { identifyParcelEager } from "./arcgis.js";
 import { CLICK_RETRY_BUDGET_MS } from "./slowSource.js";
 
 const sameSource = (a, b) => a.county === b.county || (a.url && b.url && a.url === b.url);
 
-export async function identifyWithLineFallback({ primary = [], neighbours = null, skipped = null, lng, lat, identify = identifyParcelEager, onSettled, retryErrored = true, retryTimeoutMs = CLICK_RETRY_BUDGET_MS } = {}) {
+export async function identifyWithLineFallback({ primary = [], fallbacks = null, neighbours = null, skipped = null, lng, lat, identify = identifyParcelEager, onSettled, retryErrored = true, retryTimeoutMs = CLICK_RETRY_BUDGET_MS } = {}) {
   const queried = [];
   const answered = new Set(); // county keys that answered OK in some round
   const silent = new Set();   // county keys that have not (yet) answered OK
@@ -52,6 +60,25 @@ export async function identifyWithLineFallback({ primary = [], neighbours = null
 
   let hit = await round(primary, "primary");
   if (hit) return finish(hit);
+
+  /* NEW-2 — the county did not ANSWER (not "answered with nothing"): ask what stands in for it. Booked separately from `round` so the
+   * failed county stays silent and `last` (which the retry round indexes against `primary`) is not overwritten. */
+  if (typeof fallbacks === "function" && silent.size) {
+    let fb = [];
+    try { fb = (await fallbacks({ silent: [...silent] })) || []; } catch (_e) { fb = []; }
+    fb = fb.filter((c) => c && c.url && !queried.some((q) => q.county === c.county)); // never re-ask a source the primary round already asked (answered empty, or just failed)
+    if (fb.length) {
+      fb.forEach((c) => { if (!queried.some((q) => q.county === c.county)) queried.push(c); });
+      const res = await identify(fb, lng, lat, { onSettled });
+      if (res.hits && res.hits.length) {
+        const hits = res.hits.map((h) => {
+          const c = fb.find((x) => x.county === h.county) || {};
+          return { ...h, county: c.asCounty || h.county, fallback: { kind: c.kind || "state", label: c.label || null, failed: c.failedKey || null } };
+        });
+        return finish({ ...res, hits, via: "fallback" });
+      }
+    }
+  }
 
   if (retryErrored && last) {
     const again = primary.filter((c, i) => last.sources && last.sources[i] && !last.sources[i].ok);

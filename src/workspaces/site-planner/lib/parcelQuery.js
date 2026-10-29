@@ -152,7 +152,7 @@ export async function lookupParcels({ county, lookupUrl, mode, value, timeoutMs 
     const r = await queryOneLayer(fb.layerUrl, {
       mode, value, idHint: fb.idField, addrHint: fb.addrField, scopeWhere: fb.scopeWhere, timeoutMs,
     });
-    return { ...r, backup: true, backupCounty: fb.countyName };
+    return { ...r, backup: true, backupCounty: fb.countyName, backupLabel: fb.label };
   }
 }
 

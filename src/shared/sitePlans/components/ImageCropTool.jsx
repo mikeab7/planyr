@@ -68,6 +68,7 @@ import {
 import { worldToScreen, screenToWorld, zoomAround, panBy, fitView } from "../../viewport/viewportTransform.js";
 import { wheelZoomFactor } from "../../viewport/viewAnchor.js";
 import { armCropWatchdog } from "../lib/cropDiag.js";
+import { visibleRect, gripBox, dotCenter, clipSegment } from "../lib/cropChrome.js";
 
 const HANDLE_SIZE = 12;
 const EDGE_LONG = 24; // the four mid-edge grips share ONE footprint: EDGE_LONG along the edge ...
@@ -612,15 +613,24 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   // `view` every render, so pan/zoom can never leave the crop rendered out of step with the image.
   const rTL = toScreen(draft.x, draft.y), rBR = toScreen(draft.x + draft.w, draft.y + draft.h);
   const rx = rTL.x, ry = rTL.y, rw = rBR.x - rTL.x, rh = rBR.y - rTL.y;
+  // B2448816 — nothing the crop draws may exist outside the drawing area (cropChrome.js): the outline / move surface is cut to
+  // the part that is on screen, and a grip is shown only while its point is, slid inward so it is never half cut off.
+  const rectVis = visibleRect(rx, ry, rw, rh, VIEW_W, VIEW_H);
 
   // While the hand / Space pan is armed a press anywhere pans, so every grip shows grab(bing), not its resize / move arrow.
   const panCursor = (spaceDown || handTool) ? (isPanning ? "grabbing" : "grab") : null;
-  const handleEl = (type, style, cursor) => (
-    <div key={type} data-testid={`crop-handle-${type}`} onPointerDown={beginDrag(type)} style={{
-      position: "absolute", cursor: panCursor || cursor, touchAction: "none", pointerEvents: "auto", ...style,
-    }} />
-  );
+  const handleEl = (type, cx, cy, w, h, style, cursor) => {
+    const at = gripBox(cx, cy, w, h, VIEW_W, VIEW_H);
+    if (!at) return null;
+    return (
+      <div key={type} data-testid={`crop-handle-${type}`} onPointerDown={beginDrag(type)} style={{
+        position: "absolute", cursor: panCursor || cursor, touchAction: "none", pointerEvents: "auto",
+        left: at.left, top: at.top, width: w, height: h, ...style,
+      }} />
+    );
+  };
   const polyPtsScreen = polyPts.map(([x, y]) => { const s = toScreen(x, y); return [s.x, s.y]; });
+  const dotAt = (x, y, r) => dotCenter(x, y, r, VIEW_W, VIEW_H); // a vertex dot: null off screen, slid inward at the edge
   const polyPointsAttr = polyPtsScreen.map(([x, y]) => `${x},${y}`).join(" ");
   const zoomPct = Math.round(view.scale * 100);
 
@@ -681,9 +691,11 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
           }} />
         </div>
 
-        {/* chrome layer — deliberately NOT clipped (unlike B1134754's original single fit-sized
-            box, a handle sitting exactly at the crop's own edge must never lose half its grab area) */}
-        <div style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+        {/* chrome layer — CLIPPED to the drawing area (B2448816). It used to be left unclipped so a grip on the crop's own edge
+            never lost half its grab area; zoomed in, that let the crop's move surface cover the header, the shape switch and
+            the toolbar. Now every piece is already computed inside the area (lib/cropChrome.js) and a grip near the edge
+            slides inward instead, so the clip costs no grab area — and the clip is the backstop, not the mechanism. */}
+        <div data-testid="crop-chrome" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           {mode === "rect" ? (
             <>
               <svg width={VIEW_W} height={VIEW_H} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -694,44 +706,58 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
                 <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill={CROP_SCRIM} mask={`url(#${rectMaskId})`} />
               </svg>
 
-              {/* The crop rect itself — border, rule-of-thirds while dragging, and the move surface. */}
-              <div
-                onPointerDown={beginDrag("move")}
-                style={{
-                  position: "absolute", left: rx, top: ry, width: rw, height: rh, pointerEvents: "auto",
-                  border: `1.5px solid ${CROP_WHITE}`, boxShadow: CROP_RECT_SHADOW, cursor: panCursor || "move", touchAction: "none",
-                }}
-              >
-                {dragType && (
-                  <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                    <line x1="33.33%" y1="0" x2="33.33%" y2="100%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                    <line x1="66.67%" y1="0" x2="66.67%" y2="100%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                    <line x1="0" y1="33.33%" x2="100%" y2="33.33%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                    <line x1="0" y1="66.67%" x2="100%" y2="66.67%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                  </svg>
-                )}
-              </div>
+              {/* The crop rect itself — border, rule-of-thirds while dragging, and the move surface. Only the part that is
+                  on screen exists (B2448816): a side that ran off the drawing area is simply not drawn. */}
+              {rectVis && (
+                <div
+                  data-testid="crop-move"
+                  onPointerDown={beginDrag("move")}
+                  style={{
+                    position: "absolute", left: rectVis.x, top: rectVis.y, width: rectVis.w, height: rectVis.h, pointerEvents: "auto", boxSizing: "border-box",
+                    borderStyle: "solid", borderColor: CROP_WHITE,
+                    borderWidth: `${rectVis.top ? 1.5 : 0}px ${rectVis.right ? 1.5 : 0}px ${rectVis.bottom ? 1.5 : 0}px ${rectVis.left ? 1.5 : 0}px`,
+                    boxShadow: CROP_RECT_SHADOW, cursor: panCursor || "move", touchAction: "none",
+                  }}
+                >
+                  {dragType && (
+                    <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+                      {[1 / 3, 2 / 3].map((f) => {
+                        const gx = rx + rw * f - rectVis.x, gy = ry + rh * f - rectVis.y;
+                        return (
+                          <g key={f}>
+                            <line x1={gx} y1="0" x2={gx} y2="100%" stroke={CROP_GRID_LINE} strokeWidth="1" />
+                            <line x1="0" y1={gy} x2="100%" y2={gy} stroke={CROP_GRID_LINE} strokeWidth="1" />
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  )}
+                </div>
+              )}
 
-              {/* 4 corner handles */}
+              {/* 4 corner handles — shown only while the corner itself is on screen */}
               {[["tl", rx, ry], ["tr", rx + rw, ry], ["bl", rx, ry + rh], ["br", rx + rw, ry + rh]].map(([type, cx, cy]) =>
-                handleEl(type, {
-                  left: cx - HANDLE_SIZE / 2, top: cy - HANDLE_SIZE / 2, width: HANDLE_SIZE, height: HANDLE_SIZE,
+                handleEl(type, cx, cy, HANDLE_SIZE, HANDLE_SIZE, {
                   background: CROP_WHITE, border: "1.5px solid var(--accent)", borderRadius: CROP_HANDLE_RADIUS,
                 }, HANDLE_CURSOR[type])
               )}
-              {/* 4 edge-midpoint handles — one shared footprint (NEW-6): EDGE_LONG along the edge by the
-                  corner grips' own thickness, visible like the corners, so no side is a thinner target */}
-              {[["t", rx + rw / 2, ry], ["b", rx + rw / 2, ry + rh], ["l", rx, ry + rh / 2], ["r", rx + rw, ry + rh / 2]].map(([type, cx, cy]) => {
+              {/* 4 edge-midpoint handles — one shared footprint (NEW-6): EDGE_LONG along the edge by the corner grips' own
+                  thickness, visible like the corners, so no side is a thinner target. Zoomed in, an edge's midpoint is
+                  usually off screen, so the grip rides the middle of the part of that edge that IS on screen (and is not
+                  shown at all while the edge is off screen). */}
+              {rectVis && [
+                ["t", rectVis.top, rectVis.x + rectVis.w / 2, ry], ["b", rectVis.bottom, rectVis.x + rectVis.w / 2, ry + rh],
+                ["l", rectVis.left, rx, rectVis.y + rectVis.h / 2], ["r", rectVis.right, rx + rw, rectVis.y + rectVis.h / 2],
+              ].map(([type, edgeOn, cx, cy]) => {
+                if (!edgeOn) return null;
                 const horiz = type === "t" || type === "b";
-                const w = horiz ? EDGE_LONG : EDGE_THICK, h = horiz ? EDGE_THICK : EDGE_LONG;
-                return handleEl(type, {
-                  left: cx - w / 2, top: cy - h / 2, width: w, height: h,
+                return handleEl(type, cx, cy, horiz ? EDGE_LONG : EDGE_THICK, horiz ? EDGE_THICK : EDGE_LONG, {
                   background: CROP_WHITE, border: "1.5px solid var(--accent)", borderRadius: CROP_HANDLE_RADIUS,
                 }, HANDLE_CURSOR[type]);
               })}
             </>
           ) : (
-            <svg width={VIEW_W} height={VIEW_H} style={{ position: "absolute", inset: 0 }}>
+            <svg width={VIEW_W} height={VIEW_H} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
               <mask id={polyMaskId}>
                 <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="white" />
                 {/* NEW-2 (2026-09-23) — the hole is punched from the CURRENT points even before the
@@ -774,26 +800,34 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
                   always wins the hit test at an endpoint (CHROME-NEVER-EATS-A-PRESS: later paints on top) */}
               {polyClosed && polyPtsScreen.map(([x, y], i) => {
                 const [nx, ny] = polyPtsScreen[(i + 1) % polyPtsScreen.length];
+                const seg = clipSegment(x, y, nx, ny, VIEW_W, VIEW_H); // only the part of the edge that is on screen takes a press
+                if (!seg) return null;
                 return (
-                  <line key={`edge-${i}`} x1={x} y1={y} x2={nx} y2={ny}
+                  <line key={`edge-${i}`} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
                     stroke="transparent" strokeWidth={EDGE_HIT}
                     style={{ cursor: panCursor || "copy", touchAction: "none", pointerEvents: "auto" }}
                     onPointerDown={beginEdgeInsert(i)} onContextMenu={onCanvasContext} data-testid={`crop-poly-edge-${i}`} />
                 );
               })}
 
-              {!polyClosed && polyPtsScreen.map(([x, y], i) => (
-                <circle key={i} cx={x} cy={y} r={i === 0 ? VERTEX_R : 3}
-                  fill={i === 0 ? "var(--accent)" : CROP_WHITE} stroke={CROP_WHITE} strokeWidth={1}
-                  style={{ pointerEvents: "none" }} />
-              ))}
-              {polyClosed && polyPtsScreen.map(([x, y], i) => (
-                <circle key={i} cx={x} cy={y} r={VERTEX_R}
-                  fill={selectedVertex === i ? "var(--accent)" : CROP_WHITE}
-                  stroke="var(--accent)" strokeWidth={selectedVertex === i ? 2.5 : 1.5}
-                  style={{ cursor: panCursor || "move", touchAction: "none", pointerEvents: "auto" }}
-                  onPointerDown={beginVertexDrag(i)} onContextMenu={onVertexContext(i)} data-testid={`crop-poly-vertex-${i}`} />
-              ))}
+              {!polyClosed && polyPtsScreen.map(([x, y], i) => {
+                const c = dotAt(x, y, i === 0 ? VERTEX_R : 3);
+                return c && (
+                  <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? VERTEX_R : 3}
+                    fill={i === 0 ? "var(--accent)" : CROP_WHITE} stroke={CROP_WHITE} strokeWidth={1}
+                    style={{ pointerEvents: "none" }} />
+                );
+              })}
+              {polyClosed && polyPtsScreen.map(([x, y], i) => {
+                const c = dotAt(x, y, VERTEX_R); // a vertex that is off screen shows no handle until panned to; one at the edge slides in
+                return c && (
+                  <circle key={i} cx={c.x} cy={c.y} r={VERTEX_R}
+                    fill={selectedVertex === i ? "var(--accent)" : CROP_WHITE}
+                    stroke="var(--accent)" strokeWidth={selectedVertex === i ? 2.5 : 1.5}
+                    style={{ cursor: panCursor || "move", touchAction: "none", pointerEvents: "auto" }}
+                    onPointerDown={beginVertexDrag(i)} onContextMenu={onVertexContext(i)} data-testid={`crop-poly-vertex-${i}`} />
+                );
+              })}
             </svg>
           )}
         </div>

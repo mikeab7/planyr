@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   validPlacement, overlayCornersFromPlacement, latLonToImagePoint, imagePointToLatLon, suggestFtPerPx,
-  scalePlacement, rotatePlacement, OVERLAY_SUGGEST_MIN_WIDTH_FT, OVERLAY_SUGGEST_MAX_WIDTH_FT,
+  scalePlacement, rotatePlacement, OVERLAY_SUGGEST_MIN_WIDTH_FT, OVERLAY_SUGGEST_MAX_WIDTH_FT, placementZone,
 } from "../src/shared/overlay/overlayPlacement.js";
 import { projectToGrid, gridToProject } from "../src/shared/coordinates/index.js";
-import { projectToZone, gridConvergenceDeg } from "../src/shared/coordinates/statePlane.js";
+import { projectToZone, gridConvergenceDeg, SP_ZONES } from "../src/shared/coordinates/statePlane.js";
 
 // A synthetic placement near Katy, TX.
 const ORIGIN = { lat: 29.7858, lon: -95.8244 };
@@ -272,14 +272,32 @@ describe("overlayGeoref — zone-aware projection", () => {
     expect(zonedCenter.x).not.toBeCloseTo(legacyCenter.x, -1); // wildly different cone constants
   });
 
-  it("a point outside every modeled zone (e.g. Dallas) falls back to the legacy projection unchanged — no invented zone", () => {
+  it("Dallas is placed in Texas NORTH CENTRAL, not on the South Central grid it used to inherit (NEW-1 STATE-PLANE-AUDIT)", () => {
     const dallas = { centerLat: 32.7767, centerLon: -96.7970, ftPerPx: 1, rotationDeg: 0 };
+    expect(placementZone(dallas.centerLat, dallas.centerLon).id).toBe("tx_north_central");
     const c = overlayCornersFromPlacement(dallas, IMG_W, IMG_H);
+    // What the OLD code produced (everything outside TX-SC/CO on the hardcoded EPSG:2278 cone) — and must no longer.
     const legacyCenter = projectToGrid(dallas.centerLat, dallas.centerLon);
-    // Reconstruct what the OLD (pre-zone-aware) code would have produced, to prove this case is unchanged.
-    const halfW = IMG_W / 2, halfH = IMG_H / 2;
-    const legacyTopLeft = gridToProject({ x: legacyCenter.x - halfW, y: legacyCenter.y + halfH });
-    expect(c.topLeft.lat).toBeCloseTo(legacyTopLeft.lat, 9);
-    expect(c.topLeft.lon).toBeCloseTo(legacyTopLeft.lon, 9);
+    const legacyTopLeft = gridToProject({ x: legacyCenter.x - IMG_W / 2, y: legacyCenter.y + IMG_H / 2 });
+    expect(Math.abs(c.topLeft.lat - legacyTopLeft.lat)).toBeGreaterThan(1e-6);
+    // …and it is exact in the zone it is in: the corner is ftPerPx feet from the centre IN THAT ZONE's grid.
+    const zone = SP_ZONES.tx_north_central;
+    const ctr = projectToZone(zone, dallas.centerLat, dallas.centerLon);
+    const tl = projectToZone(zone, c.topLeft.lat, c.topLeft.lon);
+    // (rotationDeg 0 means true-north-up, so the corner is turned off the grid axes by the convergence — the DISTANCE is invariant)
+    expect(Math.abs(Math.hypot(tl.x - ctr.x, tl.y - ctr.y) - Math.hypot(IMG_W / 2, IMG_H / 2))).toBeLessThan(1e-3);
+  });
+
+  it("ground with NO state plane zone gets an explicit site-local frame, never the Texas grid", () => {
+    const winnipeg = { centerLat: 49.9, centerLon: -97.14, ftPerPx: 1, rotationDeg: 0 };
+    const z = placementZone(winnipeg.centerLat, winnipeg.centerLon);
+    expect(z.local).toBe(true);
+    const c = overlayCornersFromPlacement(winnipeg, IMG_W, IMG_H);
+    const back = imagePointToLatLon(winnipeg, IMG_W, IMG_H, 0, 0);
+    expect(Math.abs(back.lat - c.topLeft.lat)).toBeLessThan(1e-9);
+    // 500 ft east of centre really is ~500 ft (ground-true at the anchor), which the Texas cone could not promise at 49.9°N.
+    const east = overlayCornersFromPlacement({ ...winnipeg, ftPerPx: 1 }, 1000, 2);
+    const ftLon = (east.topRight.lon - east.topLeft.lon) * 111320 * Math.cos(49.9 * Math.PI / 180) * 3.28083333;
+    expect(Math.abs(ftLon - 1000)).toBeLessThan(2);
   });
 });

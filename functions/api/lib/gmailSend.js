@@ -44,10 +44,11 @@ export async function signJwt({ clientEmail, privateKey }, sub, nowSec) {
 }
 
 // RFC 2822 multipart/alternative (text + html), UTF-8 throughout.
-export function buildMime({ from, to, subject, text, html, boundary = "planyr-" + Math.random().toString(36).slice(2) }) {
+export function buildMime({ from, to, replyTo, subject, text, html, boundary = "planyr-" + Math.random().toString(36).slice(2) }) {
   return [
     `From: ${oneLine(from)}`,
     `To: ${oneLine(to)}`,
+    ...(replyTo ? [`Reply-To: ${oneLine(replyTo)}`] : []),
     `Subject: =?UTF-8?B?${btoa(String.fromCharCode(...enc.encode(oneLine(subject))))}?=`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
@@ -60,8 +61,8 @@ export function buildMime({ from, to, subject, text, html, boundary = "planyr-" 
 
 const tokenCache = new Map(); // sender -> { token, exp } (per isolate; tokens last an hour)
 
-/* Returns { ok:true } or { ok:false, error }. Never throws. */
-export async function sendViaGmail({ serviceAccountJson, sender, fromEmail, to, subject, html, text, fromName = "Planyr", fetchImpl = fetch, now = () => Math.floor(Date.now() / 1000) }) {
+/* Returns { ok:true, id } (Gmail's message id, so a send can be looked up in the Sent folder) or { ok:false, error }. Never throws. */
+export async function sendViaGmail({ serviceAccountJson, sender, fromEmail, replyTo, to, subject, html, text, fromName = "Planyr", fetchImpl = fetch, now = () => Math.floor(Date.now() / 1000) }) {
   const sa = parseServiceAccount(serviceAccountJson);
   if (!sa) return { ok: false, error: "GMAIL_SERVICE_ACCOUNT_JSON is not a valid service-account key." };
   try {
@@ -81,7 +82,7 @@ export async function sendViaGmail({ serviceAccountJson, sender, fromEmail, to, 
       tok = { token: tj.access_token, exp: now() + (tj.expires_in || 3600) };
       tokenCache.set(sender, tok);
     }
-    const raw = b64urlStr(buildMime({ from: `${fromName} <${fromEmail || sender}>`, to, subject, text, html }));
+    const raw = b64urlStr(buildMime({ from: `${fromName} <${fromEmail || sender}>`, to, replyTo, subject, text, html }));
     const res = await fetchImpl(SEND_URL, {
       method: "POST",
       headers: { authorization: `Bearer ${tok.token}`, "content-type": "application/json" },
@@ -92,7 +93,8 @@ export async function sendViaGmail({ serviceAccountJson, sender, fromEmail, to, 
       let d = ""; try { d = (await res.text()).slice(0, 200); } catch (_) { /* ignore */ }
       return { ok: false, error: `Gmail refused the send (${res.status}). ${d}`.trim() };
     }
-    return { ok: true };
+    let id = null; try { const j = await res.json(); id = (j && j.id) || null; } catch (_) { /* the send succeeded; the id is only for the caller's records */ }
+    return { ok: true, id };
   } catch (e) {
     return { ok: false, error: `Gmail send failed: ${e && e.message ? e.message : e}` };
   }

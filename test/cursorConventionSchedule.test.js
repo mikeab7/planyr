@@ -91,12 +91,12 @@ describe("the pin helper (the iframe's own pinDragCursor — it cannot import sr
 
 describe("row reorder pins grabbing for the WHOLE drag (every cell / header / Gantt row sets its own inline cursor)", () => {
   it("startRowDrag pins through the helper, not body.style.cursor", () => {
-    const s = slice("const startRowDrag = (e, anchorTaskId", 2600);
+    const s = slice("const startRowDrag = (e, anchorTaskId", 9000);   // NEW-1: the pin now happens in arm(), after the drag threshold
     expect(s).toMatch(/pinSchedCursor\("grabbing"[,)]/);
     expect(s).not.toMatch(/document\.body\.style\.cursor\s*=\s*"grabbing"/);
   });
   it("the drop / cancel path releases the pin", () => {
-    const s = slice("const onUp = () => {\n      document.removeEventListener(\"mousemove\", onMove);", 900);
+    const s = slice("const teardown = () => {\n      if (finished) return false;", 1500);   // NEW-1: commit, cancel and click all end in teardown()
     expect(s).toMatch(/releaseCursor\(\)|unpin\(\)/);
   });
   it("the grip keeps `grab` at rest and the .rowgrip:active rule cannot lose to it", () => {

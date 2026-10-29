@@ -34,14 +34,15 @@ const TEXAS_ONLY = [
   "coh_ww", "coh_storm", "coh_water", "bkdd_drainage", "bkdd_easements", "bkdd_dmp", "fb_contours",
 ];
 
-/* Shared by Florida AND Georgia (PR #1902): the EIA approximate pipeline layers. */
-const SHARED_FL_GA = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
+/* The EIA approximate pipeline layers (PR #1902, widened NEW-1 2026-10-29): offered in EVERY state except Texas — `statesNot: ["TX"]`,
+ * not a state list — because they are the only pipeline source that works outside Texas (the RRC row is Texas-only). */
+const EIA_NOT_TX = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
 const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_ust", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope"];
 const idsWhere = (pred) => Object.entries(ALL_LAYERS).filter(([, c]) => pred(c)).map(([k]) => k);
 
 describe("the layer registry's state coverage", () => {
   it("the set of layers with NO state scope is exactly the declared national list", () => {
-    expect(idsWhere((c) => !c.states).sort()).toEqual(NATIONAL);
+    expect(idsWhere((c) => !c.states && !c.statesNot).sort()).toEqual(NATIONAL);
   });
   it("every Texas institution's layer is Texas-only — hidden for a Georgia site", () => {
     for (const id of TEXAS_ONLY) expect(ALL_LAYERS[id].states, id).toEqual(["TX"]);
@@ -56,17 +57,19 @@ describe("the layer registry's state coverage", () => {
   });
   it("every Georgia layer is Georgia-only, and each is in the declared Georgia set", () => {
     for (const id of GEORGIA) expect(ALL_LAYERS[id].states, id).toEqual(["GA"]);
-    for (const id of SHARED_FL_GA) expect(ALL_LAYERS[id].states, id).toEqual(["FL", "GA"]);
-    expect(idsWhere((c) => (c.states || []).includes("GA")).sort()).toEqual([...GEORGIA, ...SHARED_FL_GA].sort());
+    for (const id of EIA_NOT_TX) { expect(ALL_LAYERS[id].states, id).toBeUndefined(); expect(ALL_LAYERS[id].statesNot, id).toEqual(["TX"]); }
+    expect(idsWhere((c) => (c.states || []).includes("GA")).sort()).toEqual([...GEORGIA].sort());
+    expect(idsWhere((c) => !!c.statesNot).sort()).toEqual([...EIA_NOT_TX].sort());
   });
   it("no layer is both national and scoped, and no row lists an empty scope (an empty list would hide it everywhere)", () => {
     for (const [id, c] of Object.entries(ALL_LAYERS)) if (c.states) expect(c.states.length, id).toBeGreaterThan(0);
   });
   it("Georgia gets no Texas layer and Texas gets no Georgia layer, by construction", () => {
-    const shownIn = (st) => Object.entries(ALL_LAYERS).filter(([, c]) => !c.states || c.states.includes(st)).map(([k]) => k);
+    const shownIn = (st) => Object.entries(ALL_LAYERS).filter(([, c]) => (!c.states || c.states.includes(st)) && !(c.statesNot || []).includes(st)).map(([k]) => k);
     const ga = shownIn("GA"), tx = shownIn("TX");
     for (const id of TEXAS_ONLY) expect(ga, id).not.toContain(id);
-    for (const id of [...GEORGIA, ...SHARED_FL_GA]) expect(tx, id).not.toContain(id);
+    for (const id of [...GEORGIA, ...EIA_NOT_TX]) expect(tx, id).not.toContain(id);
+    for (const id of EIA_NOT_TX) expect(ga, id).toContain(id);
     for (const id of NATIONAL) { expect(ga, id).toContain(id); expect(tx, id).toContain(id); }
   });
 });
