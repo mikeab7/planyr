@@ -57,7 +57,7 @@ describe("NEW-1 — the rebuilt panel", () => {
     expect(roadBranch).not.toContain("Design cross-section…");
   });
   it("intersection params sit in one collapsed-by-default section, only when the road has a junction", () => {
-    expect(roadBranch).toMatch(/\{cl && \(myTees\.length > 0 \|\| dj\) && \(\s*<Collapse sectionId="road-intersection" title="Intersection">/);
+    expect(roadBranch).toMatch(/\{cl && \(myTees\.length > 0 \|\| myDrives\.length > 0\) && \(\s*<Collapse sectionId="road-intersection" title="Intersection">/);
   });
   it("the label controls are shared and slider-free", () => {
     const a = SRC.indexOf("const inlineLabelControls = ");

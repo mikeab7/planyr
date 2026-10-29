@@ -1261,7 +1261,13 @@ export function teeGeometry(params) {
     // SHARP corner. The old code only applied the clamp when tMax > 0, so a zero reach silently fell
     // through and kept the FULL requested radius — the one case where "no room" produced the biggest
     // possible return.
-    if (!(tMax > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
+    /* NEW-1 (road → parking) — A SHARP CORNER IS NEVER BUILT PAST THE END OF THE EDGE IT SITS ON. When the drive's edge line meets the face line BEYOND where the face
+     * ends (`along` > the run available that way — a drive exactly as wide as the lane it enters, tilted a few degrees, so its edge line crosses the field's side edge
+     * a foot or two outside the field), the degenerate corner used to be that far point and the wedge a triangle poking out past the field's end. It is clamped to the
+     * face's own end: the pavement it adds still closes the gore the strip's flat cap leaves, and none of it lies outside the face. */
+    const availDir = awaySign > 0 ? availPos : availNeg;
+    const sharp = along > availDir + EPS && Number.isFinite(availDir) ? add(E0, mul(awayThrough, Math.max(0, availDir))) : corner;
+    if (!(tMax > EPS)) return { tan1: sharp, tan2: sharp, arc: [sharp], R: 0, t: 0, centre: null, u1: awayThrough };
     if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
     let Rc = R > 0 ? R : 0;
     let f = rayFillet(corner, awayThrough, d, Rc, tessDeg);
