@@ -263,6 +263,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
         <span>{label}</span>{opts.check && <span aria-hidden="true" style={{ color: PAL.accent, fontWeight: 700 }}>✓</span>}
       </button>
     );
+    if (row.kind === "invite" && row.declinedAt) return [item("Remove", () => doCancel(row.id), { danger: true })]; // NEW-1: they said no — nothing to resend
     if (row.kind === "invite") return [item("Resend invite", () => doResend(row), { disabled: cooldown(row) > 0 }), item("Cancel invite", () => doCancel(row.id), { danger: true })];
     return [
       item("Admin", () => row.role !== "admin" && doSetRole(row.id, "admin"), { check: row.role === "admin" }),
@@ -290,8 +291,8 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
               {r.email.split("@")[0]}{r.email.includes("@") && <>@<wbr />{r.email.split("@").slice(1).join("@")}</>}
             </div>
             <div style={{ fontSize: 12, color: PAL.muted, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 4 }}>
-              <span>{r.role === "admin" ? "Admin" : "Member"} · not joined yet</span>
-              {canManage(r, isAdmin) && !narrow && (
+              <span>{r.role === "admin" ? "Admin" : "Member"} · {r.declinedAt ? "declined" : "not joined yet"}</span>
+              {canManage(r, isAdmin) && !narrow && !r.declinedAt && (
                 <>
                   <span aria-hidden="true">·</span>
                   <button data-team-resend style={linkBtnStyle} disabled={busy || cooldown(r) > 0} onClick={() => doResend(r)}>Resend invite</button>

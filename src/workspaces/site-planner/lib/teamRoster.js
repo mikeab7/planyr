@@ -9,7 +9,7 @@ export function initialsOf(name, email) {
   return (base.slice(0, 2) || "?").toUpperCase();
 }
 
-/* members: [{userId, role, displayName, email}] · invites: [{id, email, role}] */
+/* members: [{userId, role, displayName, email}] · invites: [{id, email, role, lastSentAt?, declinedAt?}] */
 export function groupRoster(members, invites, myUid) {
   const rows = (members || []).map((m) => ({
     kind: "member", id: m.userId, role: m.role === "admin" ? "admin" : "member",
@@ -21,6 +21,9 @@ export function groupRoster(members, invites, myUid) {
   const invited = (invites || []).map((iv) => ({
     kind: "invite", id: iv.id, role: iv.role === "admin" ? "admin" : "member", email: iv.email, name: iv.email,
     lastSentAt: iv.lastSentAt || null,
+    // NEW-1 (invite inbox): set once the invitee declined. The row stays in "Invited" so the inviter
+    // SEES the answer instead of the invite silently vanishing; they can remove it or invite again.
+    declinedAt: iv.declinedAt || null,
   }));
   const sections = [
     { id: "admins", label: "Admins", rows: rows.filter((r) => r.role === "admin") },
