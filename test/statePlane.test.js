@@ -109,10 +109,12 @@ describe("NEW-3 · zone resolution is per site, not per app", () => {
     for (const c of ["Adams", "Denver", "Weld", "El Paso"]) expect(zoneForCounty("CO", c).decided).toBe(false);
   });
 
-  it("keeps every Texas county on the app's original zone", () => {
-    for (const c of ["Harris", "Fort Bend", "Chambers", "Waller", "Montgomery"]) {
-      expect(zoneForCounty("TX", c).epsg, c).toBe(2278);
-    }
+  it("keeps the Houston counties on the app's original zone — Montgomery follows the statute into Central", () => {
+    // Tex. Nat. Res. Code §21.074(d): Harris, Fort Bend, Waller, Chambers (and Austin, Jefferson, Galveston, Brazoria) are SOUTH CENTRAL.
+    for (const c of ["Harris", "Fort Bend", "Chambers", "Waller"]) expect(zoneForCounty("TX", c).epsg, c).toBe(2278);
+    // §21.074(c): Montgomery is CENTRAL (B2478961 — the one former legacy exception, removed on the owner's decision 2026-10-29).
+    expect(zoneForCounty("TX", "Montgomery").epsg).toBe(2277);
+    expect(zoneForCounty("TX", "Montgomery").id).toBe("tx_central");
   });
 
   it("normalises county spellings the app actually receives", () => {
