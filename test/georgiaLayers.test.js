@@ -108,10 +108,20 @@ describe("a row is never offered where its source cannot answer", () => {
     const regional = IDS.filter((id) => GEORGIA_LAYERS[id].regions);
     for (const id of IDS.filter((x) => !regional.includes(x))) { expect(shown(id, ATLANTA), id).toBe(true); expect(shown(id, SAVANNAH), id).toBe(true); }
   });
-  it("the metro-Atlanta rows (MRPA corridor, water-supply watersheds) are hidden at Savannah and Griffin, shown on the Chattahoochee", () => {
-    const metro = IDS.filter((id) => (GEORGIA_LAYERS[id].regions || []).includes("mngwpd"));
-    expect(metro.length).toBe(6);
-    for (const id of metro) { expect(shown(id, SAVANNAH), `${id} @ Savannah`).toBe(false); expect(shown(id, GRIFFIN), `${id} @ Griffin`).toBe(false); expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true); }
+  it("the Chattahoochee MRPA rows (corridor + 3 buffers) are offered on and near the river only — NOT at Adairsville / Cartersville (Bartow is a District county, 70 miles away), Griffin or Savannah", () => {
+    const mrpa = IDS.filter((id) => (GEORGIA_LAYERS[id].regions || []).includes("mrpa_corridor"));
+    expect(mrpa.length).toBe(4);
+    const ADAIRSVILLE = { lat: 34.37, lng: -84.93 }, CARTERSVILLE = { lat: 34.17, lng: -84.8 };
+    for (const id of mrpa) {
+      for (const p of [ADAIRSVILLE, CARTERSVILLE, GRIFFIN, SAVANNAH, HOUSTON]) expect(shown(id, p), `${id} @ ${JSON.stringify(p)}`).toBe(false);
+      expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true);
+      expect(shown(id, { lat: 33.5733, lng: -84.8021 }), `${id} @ the south Fulton reach`).toBe(true);
+    }
+  });
+  it("the water-supply watershed rows are offered across the District (Bartow's Adairsville included — a District county), not at Savannah or Griffin", () => {
+    const ws = IDS.filter((id) => (GEORGIA_LAYERS[id].regions || []).includes("mngwpd"));
+    expect(ws.length).toBe(2);
+    for (const id of ws) { expect(shown(id, SAVANNAH), `${id} @ Savannah`).toBe(false); expect(shown(id, GRIFFIN), `${id} @ Griffin`).toBe(false); expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true); expect(shown(id, { lat: 34.37, lng: -84.93 }), `${id} @ Adairsville`).toBe(true); }
   });
   it("protected mountains: offered in the north Georgia mountains only — not on a Savannah, Macon, Columbus, Augusta or Atlanta site", () => {
     expect(shown("ga_protected_mountains", DAHLONEGA)).toBe(true);

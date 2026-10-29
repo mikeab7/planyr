@@ -8,8 +8,8 @@
  *
  * EVERY ROW is an agency's own ArcGIS Online feature service, recorded in the GIS source registry (src/shared/gis/sources.js `ga*` rows) with its probe
  * date and live counts; the URL, and any `where`, are READ FROM THAT ROW — never typed twice. Every row declares `states: ["GA"]`, so a Texas or
- * Colorado view never lists it; the eight rows whose source reaches only part of Georgia also declare a real boundary `regions` (serviceAreas.js:
- * `mngwpd` = the 15-county Metropolitan North Georgia Water Planning District, `spalding_ga` = Spalding County, `ga_blue_ridge` = the north Georgia mountains, the protected-mountain data extent), so a Savannah site is not offered
+ * Colorado view never lists it; the twelve rows whose source reaches only part of Georgia also declare a real boundary `regions` (serviceAreas.js:
+ * `mngwpd` = the 15-county Metropolitan North Georgia Water Planning District and its water-supply watersheds, `mrpa_corridor` = the cells within a few miles of the Chattahoochee MRPA corridor, `spalding_ga` / `bartow_ga` = those counties, `ga_blue_ridge` = the north Georgia mountains, the protected-mountain data extent), so a Savannah site is not offered
  * a layer that can only ever read "nothing here".
  *
  * REGULATORY NUMBERS are each cited in the row's note (O.C.G.A. 12-2-8, Rules 391-3-16-.01…-.05, O.C.G.A. 12-5-440, the District's own item text);
@@ -334,7 +334,7 @@ export const GEORGIA_LAYERS = {
   }),
   /* ---- Jurisdictions & incentives ---- */
   ga_mrpa_corridor: row("gaMrpaCorridor", {
-    label: "Chattahoochee River Corridor (2,000 ft)", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee River Corridor (2,000 ft)", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 20, minZoom: 9, color: "#0e7490", styleFn: washStyle("#0e7490", 0.12, 1),
     legend: [{ label: "2,000-ft river corridor", color: "#0e7490" }, { label: "150-ft structure / impervious setback", color: "#c2410c" }, { label: "50-ft undisturbed river buffer", color: "#15803d" }, { label: "35-ft undisturbed tributary buffer", color: "#7c3aed" }],
     hoverTitle: "Chattahoochee corridor", hoverSource: "ARC", hoverFields: [],
@@ -345,21 +345,21 @@ export const GEORGIA_LAYERS = {
     infoCaveat: "Buffers are measured from the river bank (and from the stream bank on tributaries); the plan's exceptions and ARC's review govern a specific parcel.",
   }),
   ga_mrpa_buffer_150: row("gaMrpaImpBuffer", {
-    label: "Chattahoochee 150-ft Setback", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee 150-ft Setback", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 21, minZoom: 11, color: "#c2410c", styleFn: washStyle("#c2410c", 0.25, 0.8),
     hoverTitle: "Chattahoochee 150-ft setback", hoverSource: "ARC", hoverFields: [],
     identifyCard: () => card("Chattahoochee 150-ft setback", [[{ label: "Rule", text: "Structures and impervious surfaces are set back 150 ft from the river bank under the Chattahoochee Corridor Plan." }]], "ARC's published buffer — a survey of the bank governs."),
     note: "The corridor plan's 150-ft setback for structures and impervious surfaces from the Chattahoochee bank.",
   }),
   ga_mrpa_buffer_50: row("gaMrpaVegBuffer", {
-    label: "Chattahoochee 50-ft Undisturbed Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee 50-ft Undisturbed Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 22, minZoom: 11, color: "#15803d", styleFn: washStyle("#15803d", 0.35, 0.8),
     hoverTitle: "Chattahoochee 50-ft buffer", hoverSource: "ARC", hoverFields: [],
     identifyCard: () => card("Chattahoochee 50-ft undisturbed buffer", [[{ label: "Rule", text: "A natural vegetative buffer 50 ft wide along the river and its impoundments stays undisturbed under the Chattahoochee Corridor Plan." }]], "ARC's published buffer — a survey of the bank governs."),
     note: "The corridor plan's 50-ft natural (undisturbed) vegetative buffer along the Chattahoochee and its impoundments.",
   }),
   ga_mrpa_buffer_35: row("gaMrpaTributaryBuffer", {
-    label: "Chattahoochee 35-ft Tributary Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee 35-ft Tributary Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 23, minZoom: 11, color: "#7c3aed", styleFn: washStyle("#7c3aed", 0.35, 0.8),
     hoverTitle: "Tributary 35-ft buffer", hoverSource: "ARC", hoverFields: [],
     identifyCard: () => card("Tributary 35-ft undisturbed buffer", [[{ label: "Rule", text: "A 35-ft natural buffer stays undisturbed along tributary streams inside the Chattahoochee corridor." }]], "ARC's published buffer — a survey of the bank governs."),
