@@ -25,6 +25,7 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layerZoomGate.js";
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
+import { setViewLegend, clearViewLegend } from "./viewLegendStore.js";
 // NEW-1 (Imagery & Layers) — the owner's contour interval (1/2/5/10 ft), a device pref; a tiny leaf, safe on the boot path.
 import { getContourInterval, subscribeContourInterval } from "./contourIntervalPref.js";
 import {
@@ -1588,7 +1589,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
  * inline: it is only reachable once this layer is on, and keeping its wording engine off the boot
  * bundle is part of how this feature pays its bundle budget. The import is kicked off here, at
  * toggle-on — long before a cursor can rest on a feature. */
-function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null, about = null } = {}) {
+function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null, about = null, id = null } = {}) {
   const canHover = hoverIdentifyEnabled(cfg);
   /* NEW-1 (DeSoto / Olive Branch) — an optional per-line LABEL (`cfg.lineLabel`: the pipe size printed on the line). The text is decided by the pure
    * `lineLabelText`; the label is a permanent Leaflet tooltip bound ONLY while the map is at or past `lineLabel.minZoom` (a dense network labelled at
@@ -1629,6 +1630,23 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       lyr.on("add", () => { if (lyr._map) lyr._map.on("zoomend", onZoom); });
       lyr.on("remove", () => { fetchedAt = null; try { lyr._map && lyr._map.off("zoomend", onZoom); } catch (_) { /* map already gone */ } });
     }
+  }
+  // B2507063 (NEW-8): a row with `viewLegend(features, map)` publishes a legend of what is IN VIEW (the Zoning dropdown lists the zone codes on screen, each with its sourced name).
+  if (typeof cfg.viewLegend === "function" && id) {
+    const publish = () => {
+      const map = lyr._map;
+      if (!map) return;
+      const b = map.getBounds(), feats = [];
+      try { lyr.eachFeature((l) => { const f = l && l.feature; if (f && f.geometry && (!l.getBounds || b.intersects(l.getBounds()))) feats.push(f); }); } catch (_) { return; }
+      try { setViewLegend(id, cfg.viewLegend(feats, map)); } catch (_) { /* a legend never breaks the layer */ }
+    };
+    lyr.on("load", publish);
+    lyr.on("add", () => { if (lyr._map) lyr._map.on("moveend", publish); });
+    // the municipal limits (which government a zone belongs to) may land after the zones: re-publish when they do
+    let unsub = null;
+    if (typeof cfg.onViewLegendReady === "function") { try { unsub = cfg.onViewLegendReady(publish); } catch (_) { /* optional */ } }
+    lyr.on("remove", () => { try { lyr._map && lyr._map.off("moveend", publish); } catch (_) { /* map already gone */ } clearViewLegend(id); });
+    lyr.on("remove", () => { if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already gone */ } unsub = null; } });
   }
   if (cfg.lineLabel) {
     const syncLabels = () => {
@@ -1960,7 +1978,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // NEW-1 (DFW ETJ) — a multi-service layer has no single service to fall back to; a row that
           // says so (`noLiveFallback`) reports FAILED instead of repainting one publisher's slice.
           buildFallback: cfg.noLiveFallback ? null : () => {
-            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, about: layerAbout(k, cfg) });
+            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, about: layerAbout(k, cfg), id: k });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the
             // panel's opacity slider keeps working after a fallback engagement.
@@ -2010,7 +2028,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriFeature") {
-            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane, about: layerAbout(k, cfg) });
+            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane, about: layerAbout(k, cfg), id: k });
             // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
             // opacity change — re-applying the style function (not a flat {opacity}) so the
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled

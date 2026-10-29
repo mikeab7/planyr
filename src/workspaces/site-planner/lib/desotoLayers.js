@@ -14,9 +14,21 @@
  *
  * PURE: no network, no React — the style / label rules below unit-test standalone (test/desotoLayers.test.js). */
 
-import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate } from "./desotoZoning.js";
-import { jurisdictionAt, ensureMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
+import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate, zoneClass, ZONE_COLORS } from "./desotoZoning.js";
+import { zoningLegend } from "./desotoZoningNames.js";
+import { jurisdictionAt, ensureMunicipalities, subscribeMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
 import { providerCardAt, ensureProviders } from "./desotoProviders.js";
+
+/* A point inside-ish a GeoJSON polygon feature (the vertex average of its first ring) — enough to ask which municipal limit a zoning polygon sits in. */
+function featureInterior(f) {
+  const g = f && f.geometry;
+  if (!g) return null;
+  const ring = g.type === "Polygon" ? g.coordinates[0] : g.type === "MultiPolygon" ? g.coordinates[0] && g.coordinates[0][0] : null;
+  if (!ring || !ring.length) return null;
+  let x = 0, y = 0;
+  for (const p of ring) { x += p[0]; y += p[1]; }
+  return [x / ring.length, y / ring.length];
+}
 
 export const OB_AGOL = "https://services9.arcgis.com/VGtdH6iTQlVulSnr/ArcGIS/rest/services";
 export const DESOTO_RELAY = RELAY;
@@ -231,6 +243,9 @@ Object.assign(DESOTO_LAYERS, {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Zoning",
     hoverFields: [{ names: ["ZONE"], label: "Zone" }, { names: ["CASE_NO"], label: "Case" }, { names: ["DATE_APPROVED"], label: "Approved", date: true }],
     warm: () => { ensureMunicipalities(); },
+    // the Zoning dropdown's legend: the zone codes on screen, each with its sourced district name (B2507063)
+    viewLegend: (features) => zoningLegend(features.map((f) => { const c = featureInterior(f); return { code: f.properties && f.properties.ZONE, jurisdiction: c ? jurisdictionAt(c[1], c[0]) : null, color: ZONE_COLORS[zoneClass(f.properties && f.properties.ZONE)] }; })),
+    onViewLegendReady: (publish) => subscribeMunicipalities(publish),
     identifyCard: (props, at) => {
       const j = at && Number.isFinite(at.lat) ? jurisdictionAt(at.lat, at.lng) : null;
       return { title: zoningTitle(j), rows: zoningRows(props, j) };
