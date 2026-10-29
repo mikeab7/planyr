@@ -115,6 +115,26 @@ export const LAYER_TIER = {
   bts_truck_network: "reference",  // B2081249 — federal truck-route reference
   hpms_aadt: "reference",          // B2081249 — federal traffic volumes       // B2081251 — shallow rock is a cost flag (excavation, trenching), not a stop
   ga_stream_buffers: "constraint", // 25/50/75 ft of land taken off each side of a stream
+  // Georgia due-diligence gaps (NEW-1, 2026-10-29) — constraint = it takes land or binds the parcel; reference = a fact you look up; context = orientation / incentive wash
+  ga_protected_rivers: "constraint",     // the 100 ft protected-river buffer is land taken off each bank
+  ga_protected_mountains: "constraint",  // O.C.G.A. 12-2-8 mountain protection limits clearing and grading on the slope
+  ga_mrpa_corridor: "constraint",        // the Metropolitan River Protection Act corridor — ARC review of every land-disturbing proposal
+  ga_mrpa_buffer_150: "constraint",      // 150 ft structure / impervious setback
+  ga_mrpa_buffer_50: "constraint",       // 50 ft undisturbed river buffer
+  ga_mrpa_buffer_35: "constraint",       // 35 ft undisturbed tributary buffer
+  ga_conservation: "constraint",         // an easement or covenant binds the land; protected neighbours limit access and buffers
+  ga_recharge: "reference",              // a county ordinance, adopted locally, restricts some uses here
+  ga_gw_susceptibility: "reference",
+  ga_swsw: "reference",                  // the watershed; the buffers it triggers are the county's
+  ga_swsw_protected: "reference",
+  ga_karst: "reference",                 // a geologic-map proxy — a geotechnical boring is the real check
+  ga_solid_waste: "reference",           // a neighbouring landfill: Phase I, odour, methane
+  ga_brownfields: "reference",
+  ga_dams: "reference",
+  ga_impaired_streams: "reference",
+  ga_spalding_zoning: "reference",       // county zoning — a look-up, like the DeSoto zoning row
+  ga_opportunity_zones: "context",       // a tax-incentive wash
+  ga_jtc_tiers: "context",
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
   ms_ob_water_main: "reference",
   ms_ob_hydrants: "reference",

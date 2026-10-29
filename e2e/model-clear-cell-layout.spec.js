@@ -185,3 +185,187 @@ test.describe("Spreadsheet — clearing a cell moves nothing beside it (NEW-1)",
     }
   });
 });
+
+/* NEW-2 follow-up (owner, 2026-10-29 3:29 PM, his real project): after Increase indent on a label whose
+ * right neighbour is EMPTY (amount two columns over), the text did not move and the whole row from that cell
+ * rightward sat wider than the rows around it. The rule pinned here: an indent only insets the text INSIDE
+ * its cell. It never changes that cell's width or any other cell's position, so every cell edge in the
+ * indented row equals the header's column edge. */
+test.describe("Spreadsheet — an indent never changes a cell's width or any other cell's position (NEW-2)", () => {
+  /** Left + width of the row's cells and of the column headers, rounded to 0.01 px. */
+  async function edges(page, r, cols = 6) {
+    return page.evaluate(([row, n]) => {
+      const round = (x) => Math.round(x * 100) / 100;
+      const out = { cells: [], headers: [] };
+      for (let c = 0; c < n; c++) {
+        const el = document.querySelector(`[data-row="${row}"][data-col="${c}"]`).getBoundingClientRect();
+        const h = document.querySelector(`[data-testid="model-col-header-${c}"]`).getBoundingClientRect();
+        out.cells.push({ left: round(el.left), right: round(el.right) });
+        out.headers.push({ left: round(h.left), right: round(h.right) });
+      }
+      return out;
+    }, [r, cols]);
+  }
+  const aligned = (e) => e.cells.every((c, i) => c.left === e.headers[i].left && c.right === e.headers[i].right);
+  const ink = (page, r, c) => page.evaluate(([row, col]) => {
+    const el = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+    const node = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+    const rg = document.createRange(); rg.setStart(node, 0); rg.setEnd(node, 1);
+    return Math.round(rg.getBoundingClientRect().left * 100) / 100;
+  }, [r, c]);
+
+  /** Row 1: label B, C EMPTY, amount in D (the owner's Reimbursables row). Row 2: label B, amount in C. */
+  async function open(page, id) {
+    await openCostsSheet(page, id);
+    await put(page, 1, 1, "Reimbursables");
+    await cell(page, 1, 2).click(); await page.keyboard.press("Delete");
+    await put(page, 1, 3, "2000");
+    await cell(page, 1, 3).click(); await page.getByTestId("ribbon-currency").click();
+  }
+
+  for (const [label, row, steps] of [
+    ["empty right neighbour, one step", 1, 1],
+    ["empty right neighbour, several steps", 1, 5],
+    ["filled right neighbour, one step", 2, 1],
+    ["filled right neighbour, several steps", 2, 5],
+  ]) {
+    test(`${label}: every column edge still matches the header, only the text moves`, async ({ page }) => {
+      await open(page, `e2e-indent-geom-${row}-${steps}`);
+      const before = await edges(page, row);
+      expect(aligned(before), "row aligned with the header before any indent").toBe(true);
+      const inkBefore = await ink(page, row, 1);
+      await cell(page, row, 1).click();
+      for (let i = 0; i < steps; i++) await page.getByTestId("ribbon-indent-inc").click();
+      const after = await edges(page, row);
+      expect(aligned(after), "row aligned with the header after the indent").toBe(true);
+      expect(after).toEqual(before);
+      // …and the label really moved right by one step (14px) per press — the indent is drawn.
+      expect(await ink(page, row, 1) - inkBefore).toBe(14 * steps);
+    });
+  }
+
+  test("a row that is already indented stays aligned when its neighbour is later cleared and refilled", async ({ page }) => {
+    await open(page, "e2e-indent-geom-toggle");
+    await cell(page, 2, 1).click();
+    await page.getByTestId("ribbon-indent-inc").click();
+    await page.getByTestId("ribbon-indent-inc").click();
+    const base = await edges(page, 2);
+    const inkBase = await ink(page, 2, 1);
+    await cell(page, 2, 2).click(); await page.keyboard.press("Delete");
+    expect(aligned(await edges(page, 2))).toBe(true);
+    expect(await ink(page, 2, 1)).toBe(inkBase);
+    await put(page, 2, 2, "25000");
+    expect(await edges(page, 2)).toEqual(base);
+    expect(await ink(page, 2, 1)).toBe(inkBase);
+  });
+
+  /** The stored indent level of one cell, read from the sheet the app saved on this device. */
+  const stored = (page, id, r, c) => page.evaluate(([pid, row, col]) => {
+    const raw = localStorage.getItem(`planyr:model:sheet:v1:local:${pid}`);
+    const sh = JSON.parse(raw);
+    const wb = sh.sheets[0].sheet;
+    return wb.styles[`${wb.columns[col].id}:${row}`]?.indent ?? 0;
+  }, [id, r, c]);
+  const press = async (page, testid, n = 1) => { for (let i = 0; i < n; i++) await page.getByTestId(testid).click(); };
+
+  test("the stored indent level goes up one per press and back down; the drawn text follows (empty neighbour)", async ({ page }) => {
+    const id = "e2e-indent-store";
+    await open(page, id);
+    await cell(page, 1, 1).click();
+    const x0 = await ink(page, 1, 1);
+    await press(page, "ribbon-indent-inc", 3);
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(3);
+    expect(await ink(page, 1, 1) - x0).toBe(42);
+    await press(page, "ribbon-indent-dec", 2);
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(1);
+    expect(await ink(page, 1, 1) - x0).toBe(14);
+    await press(page, "ribbon-indent-dec", 5); // floors at 0
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(0);
+    expect(await ink(page, 1, 1)).toBe(x0);
+    expect(aligned(await edges(page, 1))).toBe(true);
+  });
+
+  test("undo and redo of an indent restore the exact geometry, and the indent survives a reload", async ({ page }) => {
+    const id = "e2e-indent-undo";
+    await open(page, id);
+    await cell(page, 1, 1).click();
+    const base = await edges(page, 1); const x0 = await ink(page, 1, 1);
+    await press(page, "ribbon-indent-inc", 2);
+    const x2 = await ink(page, 1, 1);
+    expect(x2 - x0).toBe(28);
+    await page.keyboard.press("Control+z"); await page.keyboard.press("Control+z");
+    expect(await ink(page, 1, 1)).toBe(x0);
+    expect(await edges(page, 1)).toEqual(base);
+    await page.keyboard.press("Control+y"); await page.keyboard.press("Control+y");
+    expect(await ink(page, 1, 1)).toBe(x2);
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(2);
+    await page.reload();
+    await expect(sheetEl(page)).toBeVisible();
+    expect(await ink(page, 1, 1)).toBe(x2);
+    expect(aligned(await edges(page, 1))).toBe(true);
+  });
+
+  test("a multi-cell selection spanning an empty-neighbour row and a filled-neighbour row steps EACH cell from its own level", async ({ page }) => {
+    const id = "e2e-indent-multi";
+    await open(page, id);
+    await cell(page, 2, 1).click();
+    await press(page, "ribbon-indent-inc", 3);                 // B3 already at 3
+    await cell(page, 1, 1).click();
+    await cell(page, 2, 1).click({ modifiers: ["Shift"] });    // select B2:B3 (B2 at 0, B3 at 3)
+    const x1 = await ink(page, 1, 1); const x2 = await ink(page, 2, 1);
+    await press(page, "ribbon-indent-inc", 1);
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(1);
+    await expect.poll(() => stored(page, id, 2, 1)).toBe(4);
+    expect(await ink(page, 1, 1) - x1).toBe(14);
+    expect(await ink(page, 2, 1) - x2).toBe(14);
+    for (const r of [1, 2]) expect(aligned(await edges(page, r)), `row ${r}`).toBe(true);
+  });
+
+  test("the command-palette route (the only keyboard route) indents and outdents the same way", async ({ page }) => {
+    const id = "e2e-indent-palette";
+    await open(page, id);
+    await cell(page, 1, 1).click();
+    const x0 = await ink(page, 1, 1);
+    for (const q of ["Increase Indent", "Increase Indent"]) {
+      await page.keyboard.press("Control+k");
+      await page.getByTestId("model-command-palette-input").fill(q);
+      await page.keyboard.press("Enter");
+    }
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(2);
+    expect(await ink(page, 1, 1) - x0).toBe(28);
+    await page.keyboard.press("Control+k");
+    await page.getByTestId("model-command-palette-input").fill("Decrease Indent");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => stored(page, id, 1, 1)).toBe(1);
+    expect(aligned(await edges(page, 1))).toBe(true);
+  });
+
+  for (const align of ["left", "center", "right"]) {
+    test(`${align}-aligned label with several indent steps keeps every edge on the header's grid`, async ({ page }) => {
+      await open(page, `e2e-indent-align-${align}`);
+      await cell(page, 1, 1).click();
+      await page.getByTestId(`ribbon-align-${align}`).click();
+      await press(page, "ribbon-indent-inc", 12);
+      expect(aligned(await edges(page, 1))).toBe(true);
+      // a different row, a different neighbour: untouched
+      expect(aligned(await edges(page, 2))).toBe(true);
+    });
+  }
+
+  test("an already-indented label is not disturbed when its neighbour is cleared or filled (both directions)", async ({ page }) => {
+    await open(page, "e2e-indent-neighbour");
+    await cell(page, 2, 1).click();
+    await press(page, "ribbon-indent-inc", 4);
+    const base = await edges(page, 2); const x0 = await ink(page, 2, 1);
+    await cell(page, 2, 2).click(); await page.keyboard.press("Delete");
+    expect(await ink(page, 2, 1)).toBe(x0);
+    await put(page, 2, 3, "999");
+    expect(await ink(page, 2, 1)).toBe(x0);
+    expect(aligned(await edges(page, 2))).toBe(true);
+    await cell(page, 2, 3).click(); await page.keyboard.press("Delete");
+    await put(page, 2, 2, "25000");
+    expect(await ink(page, 2, 1)).toBe(x0);
+    expect(aligned(await edges(page, 2))).toBe(true);
+    void base;
+  });
+});
