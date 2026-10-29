@@ -174,4 +174,71 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     lyr.createLayers([{ id: 1, ...poly(12000) }]);                 // a LIGHTER copy is free and becomes the held size
     expect(refused).toHaveLength(1);
   });
+  it("attachFeatureRetry: the OTHER event order too — a fast cell fails (requesterror) and a slower one finishes after it (load) — still gives up", async () => {
+    vi.resetModules(); mocks();
+    vi.useFakeTimers();
+    try {
+      const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+      const handlers = {}; let refreshes = 0;
+      const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, refresh() { refreshes++; }, _layers: {} };
+      const out = [];
+      attachFeatureRetry(lyr, "k", { label: "Layer" }, (...a) => out.push(a[1]));
+      const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
+      for (let cycle = 0; cycle < 20; cycle++) {
+        fire("loading"); fire("requesterror", { code: 503 }); vi.advanceTimersByTime(300); fire("load"); vi.advanceTimersByTime(5000);
+      }
+      expect(refreshes).toBeLessThanOrEqual(3);
+      expect(out).toContain("failed");
+    } finally { vi.useRealTimers(); }
+  });
+  it("attachFeatureRetry: removing the layer clears the pending reset timer", async () => {
+    vi.resetModules(); mocks();
+    vi.useFakeTimers();
+    try {
+      const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+      const handlers = {}; let removed = 0;
+      const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() { removed++; }, _layers: {} };
+      attachFeatureRetry(lyr, "k", { label: "Layer" }, () => {});
+      (handlers.load || []).forEach((h) => h());
+      expect(vi.getTimerCount()).toBe(1);        // the deferred reset
+      lyr.onRemove({});
+      expect(removed).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);        // cleared with the layer
+    } finally { vi.useRealTimers(); }
+  });
+  it("the budget: a REFUSED batch records nothing (the old geometry stays, so a second heavy copy is refused too); light/heavy alternation never ratchets up to a refusal; remove forgets", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const mk = () => buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Re-asked", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    // (a) refused → held unchanged
+    let lyr = mk(); let refused = 0; lyr.on("overbudget", () => { refused++; });
+    lyr.createLayers([{ id: 1, ...poly(15000) }]);
+    lyr.createLayers([{ id: 1, ...poly(509000) }]); lyr.createLayers([{ id: 1, ...poly(509000) }]);
+    expect(refused).toBe(2);
+    // (b) one id alternating 150k / 100k, 60 batches, budget 250k (total 500k): the real geometry never exceeds 150k, so it must never be refused
+    lyr = mk(); refused = 0; lyr.on("overbudget", () => { refused++; });
+    for (let i = 0; i < 60; i++) lyr.createLayers([{ id: 7, ...poly(i % 2 ? 100000 : 150000) }]);
+    expect(refused).toBe(0);
+    // (c) remove forgets what was held: the same id is charged afresh (a cold 200k copy after removal is a NEW 200k, still under the 250k cap), and a heavier one is judged from zero
+    lyr = mk(); refused = 0; lyr.on("overbudget", () => { refused++; });
+    lyr.createLayers([{ id: 3, ...poly(200000) }]);
+    (lyr.handlers.remove || []).forEach((h) => h());
+    lyr._layers = {};                                          // a layer object that is rebuilt after removal holds nothing
+    lyr.createLayers([{ id: 3, ...poly(240000) }]);          // held forgotten → charged 240k (< 250k cap), not "growth of 40k"
+    lyr.createLayers([{ id: 4, ...poly(240000) }]);          // total 480k < 500k
+    expect(refused).toBe(0);
+    lyr.createLayers([{ id: 5, ...poly(100000) }]);          // total 580k > 500k
+    expect(refused).toBe(1);
+  });
+  it("the budget: an id esri-leaflet already holds but the wrapper never saw is a free repeat (as before), then becomes tracked", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Pre-held", color: "#000" }, 1, "pane");
+    for (const id of [9, 10, 11, 12]) lyr._layers[id] = {};      // four 110k reaches held by esri-leaflet before the wrapper saw them
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    for (const id of [9, 10, 11, 12]) lyr.createLayers([{ id, ...poly(110000) }]);   // free repeats: 440k of already-drawn geometry must not trip the 300k layer total
+    expect(refused).toHaveLength(0);
+    lyr.createLayers([{ id: 9, ...poly(400000) }]);             // now tracked at 110k: +290k growth > the 120k cap
+    expect(refused).toHaveLength(1);
+  });
 });

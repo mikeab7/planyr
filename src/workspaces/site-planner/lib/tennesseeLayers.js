@@ -211,14 +211,14 @@ export const TN_LAYERS = {
   tn_crit_habitat: {
     kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
     url: GIS_SOURCES.critHabitatTn.serviceUrl, ...TN,
-    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 16, vertexBudget: 250000, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies to ~16 screen pixels (a screening-grade outline — the layer's own unit field says 'check the species shapefile'), re-asked every 2 zoom levels (layers.js); the worst Tennessee cell (Holston, 36.46 N −83.32 W; esri-leaflet's offset is width/height × factor, so it varies with the window's shape) measures roughly 105–215k vertices from z17 to z17.25 — under this budget; closer in (about z17.5+) it is refused, and says so
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 16, vertexBudget: 250000, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies at 16 × (map width ÷ map height) screen pixels (≈28 px on a 1400×800 window) and the row is re-asked every 2 zoom levels (layers.js). Worst Tennessee cell (the Holston reaches, 36.46 N −83.32 W), measured: 135k vertices at z17, 148k at z17.25, 208k at z18, 348k at z19 on a landscape 1400×800 window — so it draws through ≈z18.3 there and is refused from ≈z18.4; on a portrait 800×1000 window the same cell is 258k at z17.25, so it is refused from ≈z17.25. A screening-grade outline (see infoCaveat).
     overbudgetMsg: "Critical habitat is mapped as whole river reaches and is too detailed to draw this close in — zoom out a level or two.",
     styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // design-exempt: map ink for a drawn designated area
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
     hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["listing_status"], label: "status" }],
     identifyCard: (props) => critHabitatCard(props),
     vintage: "USFWS final critical habitat — layer edited 2026-10-21",
-    note: "USFWS final critical habitat — in Tennessee mostly freshwater mussels and fish (the Stones, Duck, Clinch and Holston systems) and the cedar-glade plants. It binds FEDERAL actions, not private land directly — but a Corps stream or wetland permit is a federal action. A screen; USFWS IPaC is the authoritative species list.",
+    note: "USFWS final critical habitat — in Tennessee mostly freshwater mussels and fish (the Stones, Duck, Clinch and Holston systems) and the cedar-glade plants. It binds FEDERAL actions, not private land directly — but a Corps stream or wetland permit is a federal action. A screen; USFWS IPaC is the authoritative species list. Drawn as a simplified outline — a reach can sit tens to a few hundred feet off its published line, more when zoomed far out — and not at all very close in (the whole reach is too detailed to draw there).",
     role: "area", group: "environmental", order: 28,
   },
 };

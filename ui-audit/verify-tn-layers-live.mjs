@@ -138,7 +138,9 @@ try {
     if (await cb.count() && !(await cb.isChecked())) await cb.check();
     await sleep(9000);
     const st = await stateOf(fp, "tn_crit_habitat");
+    const txt19 = await statusText(fp, "tn_crit_habitat");
     check("A · tn_crit_habitat @ Holston z19: refused as too detailed (failed), never empty", st === "failed", `state=${st}`);
+    console.log("   z19 row text:", JSON.stringify(txt19.slice(0, 160)), "(the refusal wording lives in the row's status line)");
   }
 
   /* ── B + C. located throwaway plans ─────────────────────────────────────────────── */
