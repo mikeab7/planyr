@@ -104,7 +104,7 @@ export const ROAD_CLASSES = [
   { key: "T", label: "Turnpike", color: "#b45309", weight: 2, dash: true },
 ];
 const roadStyle = (props, opacity) => { const c = ROAD_CLASSES.find((r) => r.key === (props && props.ODOTROUTECLASS)) || ROAD_CLASSES[2]; return stroke(c.color, c.weight, c.dash ? "10 5" : null)(opacity); };
-const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T: "Turnpike Authority", U: "State, urban (ramps and frontage roads)", Z: "State responsibility, maintained by another" };
+const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T: "Turnpike Authority", U: "State, urban (interstate ramps and frontage roads)", Z: "State responsibility, maintained by another" };
 
 /* =============================================================== Tribal areas =============================================================== */
 const TRIBAL = {
@@ -136,7 +136,7 @@ const WASTE = {
   solid: { label: "Landfill / solid-waste facility", color: "#78350f", radius: 5 },
   haz: { label: "Hazardous-waste permit site", color: "#6d28d9", radius: 5 },
 };
-const SOLID_TYPE = { "C/D": "Construction & demolition landfill", CCR: "Coal combustion residual", COMP: "Compost facility", INCR: "Incinerator", MDP: "Medical waste", MDTS: "Medical transfer station", MSW: "Municipal solid-waste landfill", NHIW: "Non-hazardous industrial waste", P: "Processing", T: "Tire", TS: "Transfer station" };
+const SOLID_TYPE = { "C/D": "Construction & demolition landfill", "C&D": "Construction & demolition landfill", CCR: "Coal combustion residual", COMP: "Compost facility", INCR: "Incinerator", MDP: "Medical waste", MDTS: "Medical transfer station", MSW: "Municipal solid-waste landfill", NHIW: "Non-hazardous industrial waste", P: "Processing", T: "Tire", TS: "Transfer station" };
 const IC_PROGRAM = { SCAP: "Site Cleanup Assistance", VCP: "Voluntary Cleanup", RCRA: "RCRA", Superfund: "Superfund", "Solid Waste": "Solid waste", Brownfields: "Brownfields", "Brownfields Land Use Change": "Brownfields land-use change" };
 
 /* =============================================================== Water =============================================================== */
@@ -224,7 +224,7 @@ export const OK_LAYERS = {
       rowOf("Traffic", Number(p.AADT) > 0 ? `${Number(p.AADT).toLocaleString("en-US")} vehicles a day` : "", { raw: true }),
       Number(p.TRUCKROUTE) === 1 ? rowOf("Truck route", "Yes", { raw: true }) : null,
     ].filter(Boolean)),
-    note: "ODOT's state system — Interstates, US highways, state highways and turnpikes. On one of these ODOT (or the Turnpike Authority) permits the access; off them the county or city does. An absent line is NOT 'unmaintained'.",
+    note: "ODOT's state system — Interstates, US highways, state highways and turnpikes. On a state-system road ODOT (or the Turnpike Authority) usually permits the access — the card's 'Maintained by' says when a city or county maintains it; off the state system the county or city does. An absent line is NOT 'unmaintained'.",
     infoCaveat: "Loads zoomed in. ODOT's linear-referencing inventory (edited 2026-10-26); a driveway permit decides the access, not this line.",
     group: "jurisdiction", order: 3,
   }),
@@ -455,7 +455,7 @@ export const OK_LAYERS = {
     hoverTitle: "Scenic River", hoverSource: "OWRB",
     identifyCard: card("Scenic River", (p) => [rowOf("River", pick(p, "name")), rowOf("Reach", pick(p, "wqs_name"), { raw: true })].filter(Boolean),
       "Oklahoma's Scenic Rivers carry the strictest protection in the state's water-quality standards. The Scenic Rivers Commission and OWRB say what applies on the land beside one."),
-    note: "The Scenic Rivers named in the Oklahoma Water Quality Standards (the Illinois River, Barren Fork, Flint Creek, Little Lee Creek and the Upper Mountain Fork; 182 segments, OWRB).",
+    note: "The Scenic Rivers named in the Oklahoma Water Quality Standards (including the Illinois River, Barren Fork, Flint Creek, Lee Creek and the Upper Mountain Fork; 182 segments, OWRB).",
     infoCaveat: "The stream line only. The watershed above it is in the Special-Provision Watersheds row.",
     group: "environmental", order: 36.5,
   }),
@@ -517,7 +517,7 @@ export const OK_LAYERS = {
   }),
   ok_crit_habitat: areaRow({
     label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
-    url: GIS_SOURCES.okCritHabitat.serviceUrl, minZoom: 8, color: "#15803d", weight: 1.5,
+    url: GIS_SOURCES.okCritHabitat.serviceUrl, simplifyFactor: 0.5, minZoom: 8, color: "#15803d", weight: 1.5,
     styleFn: flat(area("#15803d", 0.5, 1.5)),
     hoverTitle: "Critical habitat", hoverSource: "USFWS",
     identifyCard: card("Critical habitat", (p) => [rowOf("Species", pick(p, "comname")), rowOf("Scientific name", pick(p, "sciname"), { raw: true }), rowOf("Status", pick(p, "listing_status"), { raw: true })].filter(Boolean)),

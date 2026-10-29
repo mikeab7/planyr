@@ -1,7 +1,7 @@
 /* NEW-1 (Oklahoma screening, owner 2026-10-29) — the Oklahoma layer set, asserted against the REAL registry.
  *
  * What this pins, by name (the adversarial review's list): a row offered outside Oklahoma · a legend that does not match the map · a relay host missing from the
- * relay's allow-list · an endpoint that is not the registry's · a fixture point that is not in Oklahoma at all (the first critical-habitat probe landed in Kansas) ·
+ * relay's allow-list · an endpoint that is not the registry's · a fixture point that is not in Oklahoma at all (the first critical-habitat probes landed in Kansas and in Texas) ·
  * a click card that prints a raw column, an empty row or a bare URL · a regulatory number with no citation · a row missing its registry/tier/vector entry. */
 import { describe, it, expect, vi } from "vitest";
 
@@ -347,5 +347,14 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
   });
   it("the NRHP card capitalises the type", () => {
     expect(ALL_LAYERS.ok_nrhp.identifyCard({ RESNAME: "X", ResType: "building" }).rows.find((r) => r.label === "Type").text).toBe("Building");
+  });
+  it("critical habitat asks the server to generalise (a Canadian River view is 225,000 unsimplified vertices — over the 120,000 draw budget)", () => {
+    expect(ALL_LAYERS.ok_crit_habitat.simplifyFactor).toBeGreaterThan(0);
+    for (const id of ["ok_tribal", "ok_deq_sensitive", "ok_owrb_special_ws", "ok_deq_appb_areas", "ok_deq_303d"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThan(0);
+  });
+  it("the solid-waste card decodes both spellings of construction & demolition, and the state-highway note does not over-claim who permits access", () => {
+    for (const code of ["C/D", "C&D"]) expect(ALL_LAYERS.ok_deq_solid_waste.identifyCard({ Facility_Name: "X", Facility_Type: code }).rows.find((r) => r.label === "Kind").text).toBe("Construction & demolition landfill");
+    expect(ALL_LAYERS.ok_road.note).toMatch(/usually permits/);
+    expect(ALL_LAYERS.ok_road.note).not.toMatch(/On one of these ODOT/);
   });
 });

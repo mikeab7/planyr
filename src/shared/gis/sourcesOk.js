@@ -208,6 +208,6 @@ export const OK_FIXTURE_REACH = {
   okCherokeeRes: ["regional", "One polygon: the Cherokee Nation's reservation (northeast Oklahoma) — probing it in Guymon would assert a guaranteed zero."],
   okCherokeeLand: ["regional", "Cherokee Nation tribal land tracts — the Nation's fourteen-county area in northeast Oklahoma."],
   okAppendixBLine: ["regional", "Fourteen stream lines in all (DEQ Appendix B Table 1/2 streams), clustered in the Ouachita and Osage hills — there is no statewide spread to probe."],
-  okScenicRivers: ["regional", "OWRB's Scenic Rivers are the Illinois River, Barren Fork, Flint Creek, Little Lee Creek and the Upper Mountain Fork — all in the east of the state; there is no statewide spread to probe."],
+  okScenicRivers: ["regional", "OWRB's Scenic Rivers include the Illinois River, Barren Fork, Flint Creek, Lee Creek and the Upper Mountain Fork — all in the east of the state; there is no statewide spread to probe."],
   okSensitiveWaters: ["regional", "Fifty-two HUC-11 watersheds, all in the east-central half of the state — the fixtures sit on two of them, far apart."],
 };

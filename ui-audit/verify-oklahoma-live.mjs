@@ -61,6 +61,7 @@ const CASES = [
   R("env", "ok_nrhp", "Historic places", "nrhp_points_v1", 36.15338, -95.9928, 14),
   R("env", "ok_cemeteries", "Cemeteries", "structures/MapServer/37", 36.15225, -95.98717, 14),
   R("env", "ok_crit_habitat", "Critical habitat", "USFWS_Critical_Habitat", 34.372, -94.92, 12),
+  R("env", "ok_crit_habitat", "Critical habitat (Canadian River, wide view — 225,000 unsimplified vertices)", "USFWS_Critical_Habitat", 35.6, -97.5, 10),
   R("util", "water_sewer", "Water system service areas", "Water_Systems/MapServer/0", 36.25959, -95.98654, 13),
 ];
 const ROW_IDS = ["counties_cities", "ok_road", "ok_tribal", "ok_wells", "ok_pst", "ok_cleanup", "ok_waste", "ok_source_water", "ok_protected_waters", "ok_deq_303d", "ok_dams", "ok_nrhp", "ok_cemeteries", "ok_crit_habitat", "water_sewer"];
