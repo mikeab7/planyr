@@ -290,14 +290,6 @@ Object.assign(DESOTO_LAYERS, {
     note: "Subdivisions the county has approved that are not yet built out (lot count and approval date on hover).",
     infoCaveat: "County-maintained list; approval dates run from the earliest approvals to the latest — check the date.",
   }),
-  ms_desoto_discover: planning({
-    path: "CountyWebMap/County_Web_Map/MapServer/101", label: "Discover DeSoto — I-269 Corridor Study Areas", order: 43, minZoom: 9, color: "#7c3aed",
-    styleFn: (_p, opacity) => ({ color: "#7c3aed", weight: 1.2, opacity, fill: true, fillColor: "#7c3aed", fillOpacity: Math.min(0.12, opacity * 0.3) }),
-    lineLabel: { field: "DISTRICT_N", minZoom: 11, format: (v) => { const t = String(v == null ? "" : v).trim(); return t || null; } },
-    hoverTitle: "I-269 corridor study area", hoverFields: [{ names: ["DISTRICT_N"] }],
-    note: "The sectors of the Discover DeSoto I-269 Corridor Sectors Study.",
-    infoCaveat: "A planning study; the county does not publish its date in this layer. Not zoning.",
-  }),
 });
 
 Object.assign(DESOTO_VINTAGE, {
@@ -312,7 +304,6 @@ Object.assign(DESOTO_VINTAGE, {
   ms_desoto_flu: "DeSoto County future land use plan — 2004",
   ms_desoto_thoroughfare: "DeSoto County thoroughfare plan — 2004",
   ms_desoto_future_subd: "DeSoto County approved-subdivision list — approval dates run through the latest case",
-  ms_desoto_discover: "Discover DeSoto I-269 Corridor Sectors Study — date not published in the layer",
 });
 
 export { ID as OLIVE_BRANCH };

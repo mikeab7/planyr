@@ -71,6 +71,9 @@ async function parcelsOnMap(pt, expectDeSoto) {
   let held = [];
   for (let i = 0; i < 60 && !held.length; i++) { await sleep(500); held = await page.evaluate(() => (window.__mapSelectedParcels ? window.__mapSelectedParcels() : [])).catch(() => []); }
   await sleep(800);
+  // the card is one line ("1 parcel · 0.86 AC") until "Record info" is opened — open it so the owner / PIN text is on the page
+  const rec = page.getByRole("button", { name: /Record info/i }).first();
+  if (await rec.count()) { await rec.click().catch(() => {}); await sleep(900); }
   return { held, text: await page.evaluate(() => document.body.innerText) };
 }
 async function truth(pt) {
@@ -95,8 +98,26 @@ try {
     check("A · the record carries the acreage", Number(attrs.ACREAGE) > 0.8 && Number(attrs.ACREAGE) < 0.9, String(attrs.ACREAGE));
   }
   check("A · the county server was asked and answered with a parcel", hit(/BaseLayers\/MapServer\/1\/query/).some((e) => e.status === 200 && e.features > 0), JSON.stringify(hit(/BaseLayers\/MapServer\/1/).map((e) => [e.status, e.features])));
-  check("A · the parcel card shows owner, PIN and acreage as text", /GIANT OIL/i.test(a.text) && /106834002/.test(a.text) && /0\.8\d/.test(a.text), "");
+  check("A · the map labels the chosen lot's acreage and its neighbours by the county's own PINs", /0\.86 AC/.test(a.text) && /106834002\s+00\d{5}/.test(a.text), "");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/A-olive-branch-parcel.png` });
+
+  /* A2. the same lot by ADDRESS: the card under the search field carries owner, PIN, acreage and the county's own links (as labelled rows). */
+  await page.goto(BASE + "/?planyrDiag=1#/site", { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!window.__mapFinderMap && !!document.querySelector('input[placeholder^="Type an address"]'), null, { timeout: 45000 });
+  const inp = page.locator('input[placeholder^="Type an address"]').first();
+  await inp.fill("6973 Highway 305, Olive Branch, MS");
+  await sleep(600);
+  await inp.press("Enter");
+  let ctext = "";
+  for (let i = 0; i < 50; i++) { await sleep(1000); ctext = await page.evaluate(() => document.body.innerText); if (/GIANT OIL/i.test(ctext)) break; }
+  const more = page.getByText(/More details/i).first();
+  if (await more.count()) { await more.click().catch(() => {}); await sleep(1200); ctext = await page.evaluate(() => document.body.innerText); }
+  console.log("address card text (excerpt):", (ctext.match(/[^\n]*GIANT OIL[^\n]*(\n[^\n]*){0,14}/i) || ["(none)"])[0].replace(/\n/g, " | ").slice(0, 400));
+  check("A · address search: the card shows the owner (GIANT OIL CO)", /GIANT OIL/i.test(ctext), "");
+  check("A · address search: the card shows the PIN and acreage", /106834002\s+0003800/.test(ctext) && /0\.8\d/.test(ctext), "");
+  check("A · address search: the county's own links appear as labelled rows (Warranty deed / Tax info / Tax map / FEMA map)", /Warranty deed/i.test(ctext) && /Tax (info|map)/i.test(ctext), "");
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/A2-address-card.png` });
 
   // the control click must land on a real HCAD lot: try the west-Houston point and a few nudges (a click can land on a road)
   let h = { held: [] };
@@ -146,8 +167,11 @@ try {
   console.log("Olive Branch · Utilities rows:", util.join(", "));
   console.log("Olive Branch · Jurisdictions rows:", jur.join(", "));
   for (const id of ["ms_ob_gas_main", "ms_ob_water_service", "ms_ob_sewer_service", "ms_psc_gas", "water_sewer", "electric", "fire_hydrants"]) check(`B · Utilities offers "${id}" at Olive Branch`, util.includes(id));
-  for (const id of ["ms_desoto_zoning", "counties_cities", "ms_desoto_flu", "ms_desoto_thoroughfare", "ms_desoto_future_subd", "ms_desoto_discover", "ms_ob_planning_area"]) check(`B · Jurisdictions offers "${id}" at Olive Branch`, jur.includes(id));
-  check("B · nothing requested from the county or the city before a layer is switched on", sent(HOSTS).length === 0, `${sent(HOSTS).length} sent`);
+  for (const id of ["ms_desoto_zoning", "counties_cities", "ms_desoto_flu", "ms_desoto_thoroughfare", "ms_desoto_future_subd", "ms_ob_planning_area"]) check(`B · Jurisdictions offers "${id}" at Olive Branch`, jur.includes(id));
+  // the header chip's city / county lookup (BaseLayers 4 and 8) is a site-identify, not a layer: allowed. Nothing else may be asked before a layer is on.
+  const early = sent(HOSTS).filter((e) => !/BaseLayers\/MapServer\/(4|8)\/query/.test(e.url));
+  console.log("requests before any layer is on:", sent(HOSTS).map((e) => e.url.replace(/^https?:\/\/[^/]+/, "").slice(0, 110)).join(" | "));
+  check("B · nothing but the header chip's city/county lookup is requested before a layer is switched on", early.length === 0, `${early.length} other`);
 
   const turnOn = async (group, id) => {
     await panel.getByTestId(`layer-group-${group}`).click(); await sleep(250);
@@ -173,9 +197,16 @@ try {
   // click the canvas centre (the plan origin = the Olive Branch point): one card, four providers, and the zoning card names the jurisdiction
   const canvas = page.getByTestId("planner-canvas");
   const box = await canvas.boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await sleep(1500);
-  const card = await page.getByTestId("gis-identify").first().innerText().catch(() => "");
+  // a tap on EMPTY canvas beside the throwaway parcel (a tap on a parcel selects it, it does not identify); try several empty points so one road-gap in the zoning data cannot decide it
+  let card = "", tried = 0;
+  for (const [dx, dy] of [[260, 40], [-300, 60], [280, 200], [-280, 200], [320, -60], [0, 230], [-120, -150]]) {
+    await page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
+    await sleep(2500);
+    card = await page.getByTestId("gis-identify").first().innerText().catch(() => "");
+    tried++;
+    if (/Zoning/.test(card)) break;
+  }
+  console.log(`(zoning card found after ${tried} tap(s))`);
   console.log("identify card:\n" + card.split("\n").map((l) => "   " + l).join("\n"));
   check('B · the click card says "Who serves this site" once', (card.match(/Who serves this site/g) || []).length === 1);
   check("B · it names the water, sewer, gas and electric providers", /Water/.test(card) && /Sewer/.test(card) && /Gas/.test(card) && /Electric/.test(card) && /Olive Branch/.test(card) && /Northcentral|Entergy/.test(card), "");
@@ -187,8 +218,9 @@ try {
   const panelTx = await openPanel(txPlan.id);
   const utilTx = await rowsIn(panelTx, "util"), jurTx = await rowsIn(panelTx, "jur");
   console.log("Houston · Utilities rows:", utilTx.join(", "));
-  check("C · KNOWN-GOOD arm: Houston lists the Texas rows (so an empty answer is not an empty registry)", utilTx.includes("water_sewer") && jurTx.includes("jur_county") || jurTx.length > 3, `${utilTx.length} util, ${jurTx.length} jur`);
-  const DESOTO_IDS = ["ms_ob_gas_main", "ms_ob_water_service", "ms_ob_sewer_service", "ms_psc_gas", "ms_desoto_zoning", "ms_desoto_flu", "ms_desoto_thoroughfare", "ms_desoto_future_subd", "ms_desoto_discover", "ms_ob_planning_area", "ms_desoto_city"];
+  console.log("Houston · Jurisdictions rows:", jurTx.join(", "));
+  check("C · KNOWN-GOOD arm: Houston lists the Texas rows (so an empty answer is not an empty registry)", utilTx.includes("water_sewer") && jurTx.includes("counties_cities"), `${utilTx.length} util, ${jurTx.length} jur`);
+  const DESOTO_IDS = ["ms_ob_gas_main", "ms_ob_water_service", "ms_ob_sewer_service", "ms_psc_gas", "ms_desoto_zoning", "ms_desoto_flu", "ms_desoto_thoroughfare", "ms_desoto_future_subd", "ms_ob_planning_area", "ms_desoto_city"];
   const leaked = DESOTO_IDS.filter((id) => utilTx.includes(id) || jurTx.includes(id));
   check("C · Houston offers none of the DeSoto / Olive Branch rows", leaked.length === 0, leaked.join(", "));
   await sleep(3000);

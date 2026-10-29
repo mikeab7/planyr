@@ -111,6 +111,31 @@ export function pointSymbolOptions(cfg = {}, opacity = 1) {
  *   interactive  — enable pointer events so the hover identify can fire on the features. */
 /* The label printed on a line (NEW-1, DeSoto / Olive Branch): the row's `lineLabel.field` read through `lineLabel.format` (default `pipeSizeLabel`, which cleans the
  * city's hand-typed sizes), or null when there is nothing worth printing. Pure. */
+/* B2507064 (NEW-9) — THE DRAW BUDGET: no layer may freeze the tab. esri-leaflet asks a service for FULL-precision geometry and hands every vertex to Leaflet,
+ * which builds one SVG path per feature; the Discover DeSoto layer was 12 polygons holding 707,071 vertices (one polygon 634,514; a 28 MB answer), and turning it
+ * on zoomed out left Chrome on "Page Unresponsive" (measured live, ui-audit/verify-layer-no-freeze.mjs: the tab did not answer for the whole 160 s wait).
+ * Work that is already inside Leaflet cannot be interrupted, so the guard sits BEFORE it: `countVertices` is a cheap walk over the GeoJSON that stops at `cap`, and
+ * `layers.buildFeatureLayer` declines to draw a batch over `FEATURE_VERTEX_BUDGET` (and a layer whose batches together pass `FEATURE_VERTEX_TOTAL`) — the layer then
+ * reports a plain "too detailed to draw at this zoom" failure (status dot "failed") instead of hanging. A row that really needs more declares `vertexBudget`. */
+export const FEATURE_VERTEX_BUDGET = 120000;
+export const FEATURE_VERTEX_TOTAL = 300000;
+export function countVertices(features, cap = Infinity) {
+  let n = 0;
+  const walk = (c) => {
+    if (n > cap) return;
+    if (typeof c[0] === "number") { n += 1; return; }
+    for (let i = 0; i < c.length && n <= cap; i++) walk(c[i]);
+  };
+  for (const f of features || []) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === "GeometryCollection") { for (const gg of g.geometries || []) if (gg && gg.coordinates) walk(gg.coordinates); }
+    else if (g.coordinates) walk(g.coordinates);
+    if (n > cap) break;
+  }
+  return n;
+}
+
 export function lineLabelText(cfg, props) {
   const ll = cfg && cfg.lineLabel;
   if (!ll || !ll.field || !props) return null;
