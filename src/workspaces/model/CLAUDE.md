@@ -25,6 +25,8 @@ file…"). ONE source of truth: the Library file's stored bytes ARE the document
 - `lib/autofit.js` (column + wrapped-row autofit), `lib/editShortcuts.js` (F4, Alt+Enter, Ctrl+;), `components/ShortcutDialog.jsx`, hidden rows/columns (`sheet.hiddenRows`, `column.hidden`).
 - Guards: repo-root `test/` **modelKeymap**, **modelKeyTips**, **modelSelection**, **modelClipboardIO**, **modelAutofit**, **modelHiddenRowsCols**; real-keystroke harness (the repo-root ui-audit file named verify-spreadsheet-keyboard; run it against main to see what each check protects).
 
+**Drag-select autoscroll (NEW-1, B2452528).** Every range-extending gesture in `components/SheetView.jsx` (cell drag, column-header drag, row-header drag, fill handle) rides ONE session, `beginRangeDrag`: window pointer listeners + a rAF loop, the cell under the pointer found by coordinates against the full offset tables (a virtualised, un-rendered row is still reachable), the grid scrolling while the pointer sits at/past an edge even when held still. Pure geometry: `lib/dragAutoscroll.js`. Do not go back to per-cell `onMouseEnter` or ending the drag on `onMouseLeave`, and do not add `setPointerCapture` (it retargets the click and breaks double-click-to-edit). Guards: repo-root `test/` **modelDragAutoscroll**; e2e **model-drag-autoscroll**; live ui-audit **verify-spreadsheet-drag-autoscroll-live**. The Schedule grid and Notes tables do not share this code.
+
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the lines above in the same commit.
      The doc-pointer-audit check fails CI on a stale reference. -->
 
