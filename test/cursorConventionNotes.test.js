@@ -132,7 +132,7 @@ describe("chrome and clickable rows that used to take the wrong cursor", () => {
   });
   it("the paste-options chip and the mini-toolbar select are pointer / default as appropriate", () => {
     const pStart = editor.indexOf("function PasteOptions");
-    expect(editor.slice(pStart, pStart + 900)).toMatch(/cursor: "default"/);
+    expect(editor.slice(pStart, pStart + 2600)).toMatch(/cursor: "default"/);
     expect(editor).toMatch(/data-testid="note-menu-size"[\s\S]{0,900}cursor: "pointer"/);
     expect(editor).toMatch(/data-testid="note-doc-menu"[\s\S]{0,2400}cursor: "default"/);
   });

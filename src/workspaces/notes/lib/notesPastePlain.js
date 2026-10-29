@@ -30,7 +30,7 @@ import { Extension } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { pushDownInherited } from "./notesPasteInherit.js";
-import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml, repairTableFragment } from "./notesTablePaste.js";
+import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml, repairTableFragment, readSourceTables } from "./notesTablePaste.js";
 
 export const pastePlainKey = new PluginKey("notePastePlain");
 
@@ -180,6 +180,26 @@ export function tidyPastedFragment(fragment, schema, depth = 0) {
 
 let tsvReentry = false;
 
+/* ⛔ THE SOURCE TABLE'S OWN LOOK, CAPTURED BEFORE THE PARSE THROWS IT AWAY (NEW-1, Office-style paste options).
+ * `transformPastedHTML` sees the clipboard's table markup; the parse then drops its cell shading and column
+ * widths on purpose (the default paste is unchanged). The options that ask for them (W, E, R in
+ * notesPasteModes.js) need them later, so they are read here, parked in this one slot, and taken by the
+ * `handlePaste` of the SAME paste event (it runs a few microseconds later). A slot older than the paste that
+ * could have filled it is ignored, so a plain-text paste never inherits the last table's colours. */
+let sourceSlot = null;
+const SOURCE_SLOT_MS = 2000;
+function takeSourceTables() {
+  const slot = sourceSlot;
+  sourceSlot = null;
+  return slot && Date.now() - slot.at < SOURCE_SLOT_MS ? { tables: slot.tables } : { tables: [] };
+}
+
+/** Position (before the table node) of the table the position is inside — the innermost — or -1. */
+function enclosingTablePos($from) {
+  for (let d = $from.depth; d > 0; d -= 1) if ($from.node(d).type.name === "table") return $from.before(d);
+  return -1;
+}
+
 /** Does this slice hold a table anywhere? */
 function sliceHasTable(slice) {
   let found = false;
@@ -261,6 +281,25 @@ export const STYLE_MARKS = ["textStyle", "highlight"];
 /** An alignment worth clearing. `null` / `"left"` is the body default already. */
 export const MEANINGFUL_ALIGN = new Set(["center", "right", "justify"]);
 
+/** MERGE FORMATTING over a range of a transaction: the source's fonts, point sizes, colours, highlights and
+ *  alignment go; bold, italic, underline, links, lists and headings stay. The ONE implementation — the command
+ *  below, the badge's re-transform (notesPasteModes.js) and the right-click menu all call it. */
+export function mergeFormattingInRange(tr, from, to) {
+  const { schema } = tr.doc.type;
+  for (const name of STYLE_MARKS) {
+    const type = schema.marks[name];
+    if (type) tr.removeMark(from, to, type);
+  }
+  tr.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isTextblock) return true;
+    if (MEANINGFUL_ALIGN.has(node.attrs?.textAlign)) {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, textAlign: null });
+    }
+    return true;
+  });
+  return tr;
+}
+
 /* ---- the extension ------------------------------------------------------------------- */
 
 /** `onPasted({ from, to, text })` fires after a paste that CARRIED FORMATTING, so the host
@@ -286,19 +325,8 @@ const NotePastePlain = Extension.create({
        *  highlights and alignment all go) while staying recognisably STRUCTURED: bold,
        *  italic, underline, hyperlinks, lists and headings all survive. One transaction, so
        *  it is one press of undo. */
-      mergeFormatting: ({ from, to }) => ({ editor, state, tr, dispatch }) => {
-        const { schema } = state;
-        for (const name of STYLE_MARKS) {
-          const type = schema.marks[name];
-          if (type) tr.removeMark(from, to, type);
-        }
-        state.doc.nodesBetween(from, to, (node, pos) => {
-          if (!node.isTextblock) return true;
-          if (MEANINGFUL_ALIGN.has(node.attrs?.textAlign)) {
-            tr.setNodeMarkup(pos, undefined, { ...node.attrs, textAlign: null });
-          }
-          return true;
-        });
+      mergeFormatting: ({ from, to }) => ({ editor, tr, dispatch }) => {
+        mergeFormattingInRange(tr, from, to);
         if (dispatch) dispatch(tr.scrollIntoView());
         editor.commands.focus();
         return true;
@@ -331,6 +359,7 @@ const NotePastePlain = Extension.create({
             try {
               const doc2 = new DOMParser().parseFromString(repairTableFragment(html), "text/html");
               normalizeTableMarkup(doc2.body);
+              try { sourceSlot = { at: Date.now(), tables: readSourceTables(doc2.body, doc2.documentElement) }; } catch (_) { sourceSlot = null; }
               pushDownInherited(doc2.body);
               return doc2.body.innerHTML;
             } catch {
@@ -369,29 +398,32 @@ const NotePastePlain = Extension.create({
               }
             }
             const listDepth = enclosingListDepth(state.selection.$from);
+            /* What the badge needs to offer the right SET of options and to put the paste back to base later:
+             * the document as it was, whether the caret was in a table, whether the slice held one, and the
+             * source table's look. Read NOW — the paste has not been applied yet. */
+            const preDoc = state.doc;
+            const preTablePos = enclosingTablePos(state.selection.$from);
+            const sliceHadTable = sliceHasTable(slice);
+            const source = takeSourceTables();
+            const announce = (from, text) => setTimeout(() => {
+              try {
+                const to = view.state.selection.from;
+                const postDoc = view.state.doc;
+                if (postDoc === preDoc) return;
+                if (to > from || sliceHadTable) opts.onPasted?.({ from, to: Math.max(to, from), text, preDoc, postDoc, preTablePos, sliceHadTable, meta: source });
+              } catch (_) { /* the view can be gone by now; a missed chip is not an error */ }
+            }, 0);
             if (listDepth > 0 && slice.content.childCount > 1 && !sliceIsList(slice)) {
               const after = state.selection.$from.after(listDepth);
               const tr = state.tr.insert(after, slice.content);
               try { tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(after + 1, tr.doc.content.size)))); } catch (_) { /* the near() is a nicety */ }
               view.dispatch(tr.scrollIntoView());
-              if (sliceCarriesFormatting(slice)) {
-                const text = textOfNode(slice.content);
-                setTimeout(() => {
-                  try { opts.onPasted?.({ from: after, to: view.state.selection.from, text }); } catch (_) { /* no chip is not an error */ }
-                }, 0);
-              }
+              if (sliceCarriesFormatting(slice)) announce(after, textOfNode(slice.content));
               return true;                // handled: it went AFTER the list, not inside it
             }
             if (!sliceCarriesFormatting(slice)) return false;
-            const from = view.state.selection.from;
-            const text = textOfNode(slice.content);
             // The end position is only knowable once the paste has been applied.
-            setTimeout(() => {
-              try {
-                const to = view.state.selection.from;
-                if (to > from) opts.onPasted?.({ from, to, text });
-              } catch (_) { /* the view can be gone by now; a missed chip is not an error */ }
-            }, 0);
+            announce(view.state.selection.from, textOfNode(slice.content));
             return false;
           },
         },
