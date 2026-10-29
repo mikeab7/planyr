@@ -531,8 +531,9 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
     // realtime tombstone's removal via applyRemoteInstr) REPLACES it outright, discarding the
     // removal. The mutation check below replays the old bare-value shape and proves it is wrong.
     const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/setEls\(\(cur\) => /);
-    expect(block).not.toMatch(/setEls\(guarded\);/);
+    // (B2498961: the guard writes through `setElsRaw` — it RESTORES geometry and must never be re-interpreted by the drive-follow wrapper.)
+    expect(block).toMatch(/setEls(Raw)?\(\(cur\) => /);
+    expect(block).not.toMatch(/setEls(Raw)?\(guarded\);/);
   });
 
   it("MUTATION CHECK — a bare `setEls(guarded)` at the canvas seam would discard a same-batch functional update", () => {

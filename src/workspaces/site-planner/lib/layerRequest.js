@@ -151,6 +151,9 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   if (cfg.where) o.where = cfg.where;
   // B2507064 (NEW-9): a row whose polygons are far more detailed than any screen can show (Future Land Use: 14 polygons, 308 k vertices, a ~2 s stall to draw) asks the SERVER to generalise to ~`simplifyFactor` pixels; layers.buildFeatureLayer re-asks when the zoom moves 2 levels so a zoomed-in view never keeps the coarse copy.
   if (cfg.simplifyFactor) o.simplifyFactor = cfg.simplifyFactor;
+  // NEW-1 (Georgia): a layer whose service answers one HUGE feature for any cell (DCA's protected mountains: one multipolygon, 536k vertices) asks for ONE big cell per view instead of six 512 px ones (each re-downloaded the whole feature, 11 MB apiece) and coarser coordinate text.
+  if (cfg.cellSize) o.cellSize = cfg.cellSize;
+  if (cfg.precision != null) o.precision = cfg.precision;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
   // NEW-1 (DeSoto / Olive Branch): a row's `lineLabel` ({ field, minZoom }) puts a short text (the pipe size) on each line; the Leaflet half (`layers.buildFeatureLayer`) binds it.
   if (cfg.lineLabel && typeof opts.onLabel === "function") {

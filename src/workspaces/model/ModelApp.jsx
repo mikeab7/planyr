@@ -50,6 +50,8 @@ import Ribbon, { AuditGroup } from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
+import { undoKeyKind, undoKeyOwner, CELL_EDITING_ATTR } from "./lib/undoKeyScope.js";
+import { isTextControl } from "../../shared/keyboard/keyScope.js";
 import {
   createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet, setActiveSheet,
   addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
@@ -57,7 +59,7 @@ import {
   commitCellText, blankRange, renameColumn, setNumberFormat, addColumn,
   formatAt, padRowCount, sheetsDiverge, rawAt,
   setColumnWidth, setRowHeight, setFreeze,
-  styleAt, setCellStyle, applyBorder, clearFormatting,
+  styleAt, setCellStyle, adjustIndent, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
   isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
 } from "./lib/sheetModel.js";
@@ -694,6 +696,14 @@ export default function ModelApp({
       }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
+      // NEW-1 (2026-10-29) — undo/redo belong to the TEXT being typed (cell editor, formula bar,
+      // Name Box, column rename, Find bar…): leave the key to the field's own native undo, or to
+      // SheetView's editor history. Only with no text control owning the keyboard does the sheet's
+      // undo stack fire. See lib/undoKeyScope.js.
+      if (undoKeyKind(e) && undoKeyOwner({
+        textControl: isTextControl(e.target),
+        cellEditorOpen: !!(e.target instanceof Element && e.target.closest(`[${CELL_EDITING_ATTR}]`)),
+      }) === "text") return;
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
@@ -1044,6 +1054,9 @@ export default function ModelApp({
   const onSetCellStyle = useCallback((patch) => {
     applyActive(setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch);
   }, [applyActive, selRange]);
+  const onAdjustIndent = useCallback((delta) => {
+    applyActive(adjustIndent, selRange.r1, selRange.r2, selRange.c1, selRange.c2, delta);
+  }, [applyActive, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
     applyActive(applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode });
   }, [applyActive, selRange]);
@@ -1131,7 +1144,7 @@ export default function ModelApp({
     activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
     painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
     canUndo, canRedo, onUndo: undo, onRedo: redo,
-    onSetCellStyle, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
+    onSetCellStyle, onAdjustIndent, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
     onFormatPainterToggle, onMergeToggle,
     onInsertRow: onRibbonInsertRow, onInsertColumn: onRibbonInsertColumn, onDeleteRow: onRibbonDeleteRow, onDeleteColumn,
     canDeleteColumn: sheet.columns.length > 1,
