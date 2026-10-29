@@ -1076,7 +1076,9 @@ test.describe("Model workspace — B1107632 (explicit scroll-dismiss guard)", ()
   test("right-clicking a column header that requires auto-scrolling itself into view does not immediately self-dismiss the menu it just opened", async ({ page }) => {
     const id = "e2e-b1107632-colscroll";
     await seedProject(page, id);
-    await page.setViewportSize({ width: 300, height: 500 }); // narrow enough to cut a column header
+    // NEW-1 (flat chrome): the grid now runs to the window edge (it used to sit 8px inside it), so at 300 the cut column's
+    // whole visible sliver is the sheet's own vertical scrollbar. 340 still cuts a header, with ~30px of it clear of the scrollbar.
+    await page.setViewportSize({ width: 340, height: 500 }); // narrow enough to cut a column header
     await page.goto(`/#/project/${id}/model`);
     await expect(sheetEl(page)).toBeVisible();
 

@@ -1108,46 +1108,14 @@ const SheetView = forwardRef(function SheetView({
       onMouseLeave={stopDrag}
       onKeyDown={onKeyDown}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-      // Stage 2 visual pass (owner: "the whole thing floats edge to edge with no framing... it
-      // should read as a document inside the app"). A contained card: the panel radius + a
-      // border + a margin against the app's own page backdrop (ModelApp's root, `--surface-page`)
-      // — the sheet itself (and its chrome bands) sit on `--surface-raised`, one tier up.
-      // ⛔ Round 3 (B1087904) — MEASURED live that this alone did not read as a card: the
-      // page/raised surface pair (`--surface-page` vs `--surface-raised`) was only ~4% apart in
-      // lightness in the light theme, so an 8px
-      // margin + a 1px border in that same near-white-on-near-white range was genuinely
-      // imperceptible in a real screenshot at working zoom (confirmed via computed-style — the
-      // rules WERE applied, margin:8/radius:12/border all present — the owner's "everything is
-      // square" read was right anyway, because a rule nobody can see is no different from one
-      // that isn't there). A soft shadow gives it real depth the flat border alone can't at this
-      // contrast — the same "design-exempt, no shadow-color token yet repo-wide" language this
-      // file's own zoom control already uses below, at half its strength (a floating control
-      // needs to visibly separate from the page it's ON TOP of; a panel just needs to look SET
-      // INTO the page, not hover above it).
-      // ⛔ Round 4 — the token pair above is now separated further (index.css), so the card reads
-      // without a shadow assist alone. No top margin here — MEASURED live that Round 3's "one
-      // shared 8px gap" between this card and the toolbar card (ModelApp.jsx) was actually a
-      // real, visible 0px seam: these two cards are siblings in a flex column, and flex items
-      // never collapse margins the way ordinary block siblings do, so a 0 bottom margin up there
-      // plus this 0 top margin summed to a literal 0, not a shared 8. The gap is now carried
-      // entirely by the toolbar card's own bottom margin — this card's top margin stays 0 so the
-      // two contributions are never summed into a doubled gap.
-      // ⛔ Round 4 — this is now the STRONGER of the module's two card shadow levels (design-exempt:
-      // no shadow-color token yet repo-wide). Round 3 gave this card and the toolbar card
-      // (ModelApp.jsx) the identical shadow, which read as one flat weight everywhere rather than
-      // "the paper sits heavier than the tools held above it" — the toolbar card keeps the lighter
-      // of the two, unchanged.
-      // ⛔ B1157360 — the BOTTOM edge (margin/border/radius/shadow) moved to TabStrip.jsx, which is
-      // now this card's own bottom section (see that file's header). This element ends in a flat,
-      // square-bottomed edge on purpose — the strip supplies the rest of the card, flush beneath
-      // it, so the two together read as one continuous panel instead of a card floating above a
-      // separate strip.
+      // NEW-1 (2026-10-29) — the grid runs EDGE TO EDGE: no side margin, no side borders, no rounded
+      // top corners (the Stage 2 / Round 3-4 contained-card treatment is retired — the owner wanted the
+      // width and height back for rows). The toolbar + formula bar above it (ModelApp.jsx) and the
+      // sheet-tab strip below it (TabStrip.jsx) are flat full-width strips too; this element is the one
+      // band between them, so it carries no border of its own (the formula bar's bottom hairline is the seam).
       style={{
         flex: 1, minHeight: 0, overflow: "auto", position: "relative", outline: "none",
-        margin: "0 8px 0", // SPACE.md literal — see designTokens.js note above
         background: "var(--surface-raised)",
-        borderTop: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
-        borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg,
       }}
     >
       {/* Stage 2 visual pass — resize-handle hover affordance. A plain inline `style` prop can't
