@@ -1667,6 +1667,10 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     // esri-leaflet fires "load" a beat before its features can be asked about their bounds, so the first publish can read an empty view (the legend stayed blank until the map moved): re-read shortly after
     const publishSoon = () => { publish(); setTimeout(publish, 600); setTimeout(publish, 2500); };
     lyr.on("load", publishSoon);
+    // features keep arriving AFTER the first "load" (the layer is fetched in pieces), so a legend taken at load can be empty: re-read, debounced, as each one is created
+    let createdTimer = null;
+    lyr.on("createfeature", () => { if (createdTimer) clearTimeout(createdTimer); createdTimer = setTimeout(publish, 500); });
+    lyr.on("remove", () => { if (createdTimer) clearTimeout(createdTimer); createdTimer = null; });
     lyr.on("add", () => { if (lyr._map) lyr._map.on("moveend", publish); });
     // the municipal limits (which government a zone belongs to) may land after the zones: re-publish when they do
     let unsub = null;
