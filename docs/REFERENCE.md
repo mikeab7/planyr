@@ -260,7 +260,11 @@ exactly what B778/NEW-1 did.
   the linter but DELIBERATE~~ — **no longer true.** These policies are gone; see the CLOSED note above.
 - The `anon/authenticated can execute SECURITY DEFINER function` warnings on the team helpers
   (`is_team_member`, `list_my_teams`, `create_team`, `claim_team_invites`, …) are the working team
-  RPC surface — each is internally scoped to `auth.uid()`.
+  RPC surface — each is internally scoped to `auth.uid()`. **Team-invite inbox (B2451824):** a person who
+  already has an account answers a pending invite from the account menu — `list_my_invites()` /
+  `respond_to_invite(id, accept)` (`site-planner/db/team_invite_inbox.sql`, keyed on the caller's own auth
+  email; `team_invites` RLS is NOT widened; `declined_at` marks a decline). Brand-new signups are still
+  auto-claimed by the `handle_new_user` trigger; the client no longer calls `claim_team_invites()` on load.
 - The two `function_search_path_mutable` warnings were REAL and are fixed by
   `doc-review/db/advisor_hardening.sql` (pins `project_folders_guard_drive_cols` +
   re-applies the already-pinned `guard_team_rehome` to the live DB).
