@@ -17,6 +17,7 @@
  */
 
 import { areaContains } from "./serviceAreas.js";
+import { siteState } from "./siteRegion.js";
 
 /* ── Groups ─────────────────────────────────────────────────────────────────────────────────── */
 
@@ -77,13 +78,24 @@ export function inRegion(region, loc) {
   return distanceMiles(lat, lng, z.lat, z.lng) <= z.radiusMiles;
 }
 
-/* CAN THIS ROW'S SOURCE SERVE THIS SITE AT ALL? Fires on a POSITIVE mismatch only — an unknown
- * location (no state, no coordinates) shows everything, exactly as before the gate existed. A row
- * with neither `states` nor `regions` is national and always available. */
+/* CAN THIS ROW'S SOURCE SERVE THIS SITE AT ALL? A row declares where its source answers in one of two ways:
+ *   · `states: [...]`    — only these states (a state's own data: the Texas RRC, Georgia DCA …);
+ *   · `statesNot: [...]` — everywhere EXCEPT these states (the national EIA pipelines, which stand in wherever the RRC does not reach).
+ * A row with neither (and no `regions`) is national and always available.
+ *
+ * ⛔ THE STATE IS READ FROM THE POINT WHEN THE HOST DID NOT HAND ONE OVER, and a LOCATED point whose state the app has no region for
+ * (Kentucky, Ohio … — `siteState` answers null) is POSITIVELY "somewhere else", not "unknown": null used to fail open there, so a
+ * Kentucky site was offered every Texas row (the RRC Pipelines row among them) while the national row it needed was never offered.
+ * Only a point-less scope — no state AND no coordinates — is truly unknown and shows everything, exactly as before the gate existed.
+ * Because the answer is a function of the point alone, the planner (plan origin) and the finder (view centre) cannot disagree. */
 export function layerAvailableHere(cfg, scope = {}) {
   if (!cfg) return false;
-  const { state = null, loc = null } = scope || {};
-  if (state && Array.isArray(cfg.states) && cfg.states.length && !cfg.states.includes(state)) return false;
+  const { loc = null } = scope || {};
+  const hasLoc = !!loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng != null ? loc.lng : loc.lon));
+  const state = (scope && scope.state) || (hasLoc ? siteState({ lat: loc.lat, lng: loc.lng != null ? loc.lng : loc.lon }) : null);
+  const located = !!state || hasLoc;
+  if (Array.isArray(cfg.states) && cfg.states.length && located && !(state && cfg.states.includes(state))) return false; // an unresolved located point is in none of them
+  if (state && Array.isArray(cfg.statesNot) && cfg.statesNot.includes(state)) return false;
   if (Array.isArray(cfg.regions) && cfg.regions.length && loc) {
     // available when ANY declared region contains the site, or none of them can be told
     const answers = cfg.regions.map((r) => inRegion(r, loc));

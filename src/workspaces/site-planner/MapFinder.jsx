@@ -116,6 +116,7 @@ import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PA
 import { setMapCursor, installPlannerCursorStyle } from "./lib/plannerCursors.js";
 import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js";
 import { watchSlow, stillLookingMessage } from "./lib/slowSource.js"; // NEW-1 (2026-10-22) — one "still looking" + retry rule for a slow parcel server
+import { fallbackSpecsFor, fallbackCandidates, fallbackNoticeText, stateLayerCoversCounty } from "./lib/parcelFallbacks.js"; // NEW-2 (2026-10-28) — the county did not answer: its state's layer (when it holds the county), then a town layer
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line // NEW-1 — one rule for "may a parcel banner be raised right now"
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
@@ -3129,7 +3130,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // A county whose own live layer failed is backed by its state's statewide composite (the
     // composite is otherwise drawn only where no county source exists — one source per area).
     downDisplaysRef.current.forEach((k) => {
-      if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).forEach((sk) => want.add(sk));
+      if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).filter((sk) => stateLayerCoversCounty(sk, k)).forEach((sk) => want.add(sk)); // NEW-2 — only a state layer that holds the failed county
     });
     wantedDisplaysRef.current = want;
     /* B2092656 ×3 — warm a county's whole-county saved copy only when the view needs that county. It used to warm
@@ -3447,6 +3448,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
       .filter((c) => c.url);
   };
+  /* NEW-2 (2026-10-28) — COUNTY FIRST, THE STATE'S LAYER WHEN THE COUNTY DOES NOT ANSWER (owner: "wire it to the county one, but then default it
+     to the state one"). Asked by lib/identifyWithFallback.js right after a first round in which a county was SILENT; what it returns is decided
+     by the pure lib/parcelFallbacks.js (the state layer only where it really holds the county, then any town layer the county row declares). */
+  const fallbackSourcesFor = (latlng) => async ({ silent }) => {
+    const list = await fallbackCandidates(fallbackSpecsFor({ failed: silent, lat: latlng.lat, lng: latlng.lng }), (k) => layerUrlsRef.current[k]);
+    return filterHealthyCandidates(list, STATEWIDE_KEYS);
+  };
+  /* The notice for a lot that came from a fallback (or null): the words come from the fallback's own label, never a hardcoded "TxGIO". */
+  const fallbackBackup = (hit) => (hit && hit.fallback ? { kind: hit.fallback.kind, text: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : null);
   // A statewide-backup answer reports the parcel's true county in its `county` attr
   // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
   const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -3530,6 +3540,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // the slow ones we didn't wait for — so the next click skips a dead host (B244).
       const res = await identifyWithLineFallback({
         primary: candidates, lng: latlng.lng, lat: latlng.lat,
+        fallbacks: fallbackSourcesFor(latlng),
         neighbours: () => neighbourCandidates(latlng, [opt && opt.county]),
         skipped: () => skippedCandidates(latlng, [opt && opt.county]),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
@@ -3616,7 +3627,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
         addParcelHit(hit, latlng);
-        if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
+        const fbk = fallbackBackup(hit);
+        if (fbk) setBackupNotice({ county: null, ...fbk });
+        else if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
@@ -3684,7 +3697,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     let res;
     try {
       res = await identifyWithLineFallback({
-        primary: candidates, lng: latlng.lng, lat: latlng.lat, neighbours: () => nearSources, skipped: () => skippedCandidates(latlng),
+        primary: candidates, lng: latlng.lng, lat: latlng.lat, fallbacks: fallbackSourcesFor(latlng), neighbours: () => nearSources, skipped: () => skippedCandidates(latlng),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })), // feed the circuit breaker
       });
     } catch (_) {
@@ -3732,7 +3745,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     setParcelInfo({
       status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
       addr: situsAddress(added.attrs), acct: idAttrFor(hit.county, added.attrs), acres: ringsAcres(added.rings),
-      backup: viaBackup ? backupCountyLabel(hit.feature.attributes || {}) : null,
+      backup: viaBackup || hit.fallback ? backupCountyLabel(hit.feature.attributes || {}) : null,
+      ...(hit.fallback ? { backupNote: fallbackBackup(hit).text, backupKind: hit.fallback.kind } : {}),
     });
   };
 
@@ -5617,7 +5631,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
-              <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
+              {backupNotice.text
+                ? <><b>{backupNotice.kind === "town" ? "Backup source." : "Statewide backup source."}</b> {backupNotice.text}</>
+                : <><b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.</>}
             </div>
           </FloatingNotice>
         )}

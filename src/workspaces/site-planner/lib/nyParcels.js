@@ -2,6 +2,9 @@
  * The statewide layer holds 38 of 62 counties (the five NYC boroughs among them); NY_UNCOVERED is the other 24, MEASURED from its Footprint
  * layer and a per-county count. A county here with no row says so by name ("<County> — no parcel data wired here yet."); docs/STATEWIDE-PARCELS.md
  * "New York counties (2026-10-20)" has the per-county table and what was searched.
+ * Niagara (NEW-1, 2026-10-28) was a named gap only because its county server MOVED: the old host (gis.niagaracounty.com) answers "Service … not started", the
+ * county's current viewer reads parcels from gis.niagaracounty.gov/server (PublicViewer/Public_Viewer layer 4, "Parcels (Niagara County Final Roll, 2026)"). It is wired through
+ * the relay; the statewide layer holds none of Niagara (see NY_UNCOVERED), so its fallbacks are the extras in parcelFallbacks.js.
  * Row: [slug, county name, layer, idField, addrField, scopeWhere, owner column?, centre lat, lng, padded bbox, displayMinZoom?]. */
 export const NY_UNCOVERED = ["Allegany", "Cattaraugus", "Chemung", "Chenango", "Clinton", "Columbia", "Delaware", "Dutchess", "Essex", "Franklin", "Fulton", "Herkimer", "Jefferson", "Madison", "Monroe", "Nassau", "Niagara", "Orleans", "Saratoga", "Schenectady", "Schoharie", "Seneca", "Washington", "Yates"];
 export const NY_ROWS = [
@@ -21,6 +24,7 @@ export const NY_ROWS = [
   ["madison","Madison","https://services6.arcgis.com/yg1rUzGjBdSxKz2Z/arcgis/rest/services/2024_Tax_Parcels/FeatureServer/0","Print_Key","PARCEL_LOC",null,0,42.957,-75.616,[42.707, -76.008, 43.207, -75.224],16],
   ["monroe","Monroe","/gis-proxy/maps.monroecounty.gov/server/rest/services/Hosted/Parcels_Public/FeatureServer/0","printkey","parceladdress",null,0,43.154,-77.6785,[42.922, -78.012, 43.386, -77.345],17],
   ["nassau","Nassau","https://services6.arcgis.com/dptt3Slw4IV02m0l/arcgis/rest/services/Nassau_County_Parcels_v2/FeatureServer/0","SBL","PARCEL_ADD",null,1,40.7488,-73.5938,[40.574, -73.785, 40.923, -73.403],17],
+  ["niagara","Niagara","/gis-proxy/gis.niagaracounty.gov/server/rest/services/PublicViewer/Public_Viewer/FeatureServer/4","PrintKey","PrclStreet",null,1,43.19,-78.74,[42.99, -79.1, 43.4, -78.43],16],
   ["orleans","Orleans","https://services6.arcgis.com/AGRzZ0TKgr5syAM6/arcgis/rest/services/OrleansCountyParcels/FeatureServer/0","print_key","loc_st_nam",null,1,43.251,-78.2287,[43.11, -78.486, 43.392, -77.971],16],
   ["saratoga","Saratoga","https://services8.arcgis.com/L31p4Kvi5t2HjDqc/arcgis/rest/services/Parcels/FeatureServer/57","PRINT_KEY","PROP_ADDR",null,1,43.0812,-73.8697,[42.744, -74.179, 43.419, -73.56],16],
   ["schenectady","Schenectady","/gis-proxy/spatialags.vhb.com/arcgis/rest/services/29816_SIMS/SIMS_03262026/MapServer/6","PRINT_KEY","PROP_ADDRS",null,1,42.8308,-74.0627,[42.691, -74.323, 42.97, -73.802],16],

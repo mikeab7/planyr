@@ -123,9 +123,16 @@ describe("NEW-3 · zone resolution is per site, not per app", () => {
   });
 
   it("returns an honest null rather than a plausible wrong zone", () => {
-    expect(zoneForCounty("CO", "Mesa")).toBeNull();          // real county, not assigned here
-    expect(zoneForCounty("NM", "Bernalillo")).toBeNull();    // state we do not serve
-    expect(zoneForPoint(45.5, -122.6)).toBeNull();           // Portland
+    // NEW-1 (STATE-PLANE-AUDIT): every real county of every state now has a zone — Mesa (CO) and Bernalillo (NM) used to be the
+    // "not assigned here" examples. The honest null now belongs to what genuinely has no zone: a made-up county, a state that is
+    // not one, and ground outside the United States.
+    expect(zoneForCounty("CO", "Mesa").id).toBe("co_central");
+    expect(zoneForCounty("NM", "Bernalillo").id).toBe("nm_central");
+    expect(zoneForCounty("CO", "Narnia")).toBeNull();          // not a county
+    expect(zoneForCounty("ZZ", "Harris")).toBeNull();          // not a state
+    expect(zoneForPoint(50.5, -100)).toBeNull();               // Manitoba
+    expect(zoneForPoint(45.5, -122.6).state).toBe("OR");       // Portland — coarse, and says so
+    expect(zoneForPoint(45.5, -122.6).coarse).toBe(true);
     expect(resolveZone({ lat: NaN, lon: NaN })).toBeNull();
   });
 
@@ -145,13 +152,16 @@ describe("NEW-3 · zone resolution is per site, not per app", () => {
   });
 
   it("falls back to the state envelope for an unassigned county, and flags it", () => {
-    const r = resolveZone({ state: "CO", county: "Douglas", lat: 39.3, lon: -104.9 });
+    const r = resolveZone({ state: "CO", county: "Narnia", lat: 39.3, lon: -104.9 });
     expect(r.id).toBe("co_central");
-    expect(r.unassignedCounty).toBe("Douglas");
+    expect(r.unassignedCounty).toBe("Narnia");
+    // Douglas (CO) was this test's unassigned example until every county got a zone: now it resolves by county.
+    expect(resolveZone({ state: "CO", county: "Douglas", lat: 39.3, lon: -104.9 }).via).toBe("county");
   });
 
-  it("exposes exactly the three zones the product serves", () => {
-    expect(Object.keys(SP_ZONES).sort()).toEqual(["co_central", "co_north", "tx_sc"]);
+  it("keeps the three original zones intact inside the all-states registry", () => {
+    for (const id of ["co_central", "co_north", "tx_sc"]) expect(SP_ZONES[id], id).toBeTruthy();
+    expect(Object.keys(SP_ZONES).length).toBe(122);          // every NAD83 SPCS zone in the 50 states (statePlaneAllZones.test.js)
     expect(zoneById("tx_sc").epsg).toBe(2278);
     expect(zoneById("nope")).toBeNull();
     // Every county assignment points at a real zone.
@@ -186,7 +196,7 @@ describe("NEW-4 · combined scale factor", () => {
     expect(r.known).toBe(false);
     expect(r.combined).toBeNull();
     expect(r.missing).toContain("site elevation");
-    const noZone = combinedScaleFactor({ lat: 45.5, lon: -122.6, elevationFt: 50 });
+    const noZone = combinedScaleFactor({ lat: 50.5, lon: -100, elevationFt: 50 });   // Manitoba — Portland has a zone now
     expect(noZone.known).toBe(false);
     expect(noZone.missing).toContain("state plane zone");
   });

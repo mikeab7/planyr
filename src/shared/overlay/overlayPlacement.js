@@ -26,27 +26,21 @@
  * A direct rotation can never produce that: it is a proper rotation matrix applied to a known
  * center, not a fit that can flip.
  *
- * `projectToGrid`/`gridToProject` (shared/coordinates) is the app's one real-world coordinate
- * spine (EPSG:2278, Texas State Plane South Central, US survey feet).
+ * `shared/coordinates/statePlane.js` is the app's one real-world coordinate spine: every NAD83 State Plane zone in all 50 states.
  *
- * ⛔ B972512-HARDENING NEW-3 — THE PROJECTION IS ZONE-AWARE, NOT HARDCODED TO ONE ZONE. A site
- * plan is never placed in a Web Mercator pixel frame (that would be latitude-dependent in the
- * way the owner suspected); it is placed in real State Plane feet the whole way through — but
- * State Plane itself is only exact INSIDE the zone it was defined for, and `index.js` is
- * hardcoded to ONE zone (South Central, correct for Houston/Katy). Measured on a synthetic
- * Dallas placement (outside South Central, ~32.8°N — Dallas sits in a Texas North Central zone
- * this app has never modeled anywhere): the grid scale factor at that latitude, evaluated in
- * the South Central cone, is 1.00168 rather than 1 — a 500 ft distance draws as 498.67 ft, a
- * real but SMALL (~0.27%) distortion, not the owner's own worse "~4%, Mercator" estimate (the
- * placement math never touches Mercator at all). `resolveZone` below picks the CORRECT zone for
- * a placement's own anchor point when this app has one modeled — Texas South Central (unchanged,
- * proven bit-identical to `index.js`, `test/statePlane.test.js`) and Colorado North/Central
- * (correct, but never wired into this feature until now) — and falls back to the legacy
- * hardcoded projection, UNCHANGED from today, for anywhere neither zone covers (Dallas
- * included) rather than inventing an unverified new zone's survey constants from memory.
+ * ⛔ NEW-1 (STATE-PLANE-AUDIT) — THE PROJECTION IS RESOLVED FROM WHERE THE ANCHOR IS, AND NEVER DEFAULTS TO TEXAS. A site plan is
+ * never placed in a Web Mercator pixel frame; it is placed in real State Plane feet the whole way through. Until this change the
+ * resolver knew three zones (TX South Central, CO North/Central) and everything else fell back to the hardcoded EPSG:2278 grid —
+ * a Tennessee site's placement AND its grid convergence ran on Texas South Central (a Dallas one was measurably wrong too: Texas
+ * has five zones). Now `placementZone` resolves any zone in any state from the anchor point (county-less, so the coarse box
+ * answer — `statePlane.zoneForPoint` — near a state line), and where nothing resolves it uses an explicit site-local frame
+ * (`localFrameZone`, `zone.local === true`) so a surface can say "zone unknown". Texas South Central and Colorado placements are
+ * byte-identical to before (the statePlane suite pins that). International-foot / metre zones are rescaled to US survey feet
+ * (`unitInUsFt`), the unit the overlay math has always spoken.
  */
-import { projectToGrid, gridToProject } from "../coordinates/index.js";
-import { resolveZone, projectToZone, zoneToProject, gridConvergenceDeg } from "../coordinates/statePlane.js";
+// The LEAN core, not statePlane.js: a placement has only a point, so it never needs the 2,600-name county table (budget — the table
+// stays off the Site route's boot path; see statePlaneCore.js).
+import { zoneForPoint, projectToZone, zoneToProject, gridConvergenceDegIn, localFrameZone, unitInUsFt } from "../coordinates/statePlaneCore.js";
 import { solveSimilarityLSQ, similarityFromTwoPoints } from "../geometry/similarityTransform.js";
 import { effectiveCropRect } from "./overlayCrop.js";
 
@@ -54,13 +48,26 @@ import { effectiveCropRect } from "./overlayCrop.js";
  * land on the same stored range). */
 export function normalizeDeg(deg) { return ((deg % 360) + 360) % 360; }
 
-/** The projector pair to use for a placement anchored at (lat, lon): the resolved State Plane
- * zone's own math when this app has one modeled for that point, else the legacy hardcoded
- * (South Central) projection — UNCHANGED behavior for anywhere outside every modeled zone. */
+/** The zone a placement anchored at (lat, lon) is placed in: the resolved State Plane zone when one resolves (every NAD83 zone
+ * in all 50 states — statePlane.js), else an explicit SITE-LOCAL transverse Mercator centred on the anchor. NEVER the Texas grid:
+ * until NEW-1 (STATE-PLANE-AUDIT) anything outside TX/CO silently fell back to EPSG:2278, so a Tennessee or Georgia overlay was
+ * placed — and its grid convergence computed — on Texas South Central. `zone.local === true` tells a surface the zone is unknown
+ * (show "zone unknown"), it is never a state plane answer. */
+export function placementZone(lat, lon) {
+  return zoneForPoint(lat, lon) || localFrameZone(lat, lon);
+}
+
+/** The projector pair to use for a placement anchored at (lat, lon). The overlay math works in US SURVEY feet whatever the zone's
+ * own unit is (an international-foot or metre zone is rescaled by `unitInUsFt`, exactly 1 for the original ftUS zones). */
 function projectorsFor(lat, lon) {
-  const zone = resolveZone({ lat, lon });
-  if (!zone) return { toGrid: projectToGrid, toProject: gridToProject, zoneId: null };
-  return { toGrid: (la, lo) => projectToZone(zone, la, lo), toProject: (xy) => zoneToProject(zone, xy), zoneId: zone.id };
+  const zone = placementZone(lat, lon);
+  const k = unitInUsFt(zone);
+  if (k === 1) return { toGrid: (la, lo) => projectToZone(zone, la, lo), toProject: (xy) => zoneToProject(zone, xy), zoneId: zone.id, zone };
+  return {
+    toGrid: (la, lo) => { const p = projectToZone(zone, la, lo); return { x: p.x * k, y: p.y * k }; },
+    toProject: (xy) => zoneToProject(zone, { x: xy.x / k, y: xy.y / k }),
+    zoneId: zone.id, zone,
+  };
 }
 
 /* B1134752 — THE ROTATION APPLIED IN GRID SPACE IS NOT THE ROTATION THE USER SEES ON A
@@ -93,7 +100,7 @@ function projectorsFor(lat, lon) {
  * (verbatim grid rotation), matching every other zone-aware fallback in this module. */
 function gridRotationDeg(placement) {
   const rot = placement.rotationDeg || 0;
-  const conv = gridConvergenceDeg(placement.centerLat, placement.centerLon);
+  const conv = gridConvergenceDegIn(placement.centerLat, placement.centerLon, placementZone(placement.centerLat, placement.centerLon));
   return conv == null ? rot : rot - conv;
 }
 
@@ -350,7 +357,7 @@ export function anchorVisibleCentreGeo(o0, patch) {
  * Returns { centerLat, centerLon, ftPerPx, rotationDeg, residualFt } or null (fewer than 2 distinct points). */
 export function alignOverlayGeo(o, pairs) {
   if (!validPlacement(o) || !(o.imgW > 0) || !(o.imgH > 0) || !Array.isArray(pairs) || pairs.length < 2) return null;
-  const { toGrid, toProject } = projectorsFor(o.centerLat, o.centerLon);
+  const { toGrid, toProject, zone } = projectorsFor(o.centerLat, o.centerLon);
   const fit = solveSimilarityLSQ(pairs.map(({ img, ll }) => {
     const g = toGrid(ll.lat, ll.lon);
     return { from: { x: img.x - o.imgW / 2, y: img.y - o.imgH / 2 }, to: { x: g.x, y: -g.y } }; // both y-down
@@ -358,7 +365,7 @@ export function alignOverlayGeo(o, pairs) {
   if (!fit || !(fit.scale > 0)) return null;
   const T = fit.apply({ x: 0, y: 0 });                      // the image centre, in the y-down grid frame
   const centre = toProject({ x: T.x, y: -T.y });
-  const conv = gridConvergenceDeg(centre.lat, centre.lon);  // rotationDeg = gridRotation + convergence
+  const conv = gridConvergenceDegIn(centre.lat, centre.lon, zone);  // same zone as the fit; rotationDeg = gridRotation + convergence
   return {
     centerLat: centre.lat, centerLon: centre.lon, ftPerPx: fit.scale,
     rotationDeg: normalizeDeg(fit.rotDeg + (conv == null ? 0 : conv)), residualFt: fit.residual,

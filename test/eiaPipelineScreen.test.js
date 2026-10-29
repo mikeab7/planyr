@@ -307,18 +307,19 @@ describe("registry — one entry per layer, coverage + tier + lastVerified, scop
   });
 });
 
-describe("Layers panel — labels say approximate, transmission-only, FL/GA-scoped", () => {
+describe("Layers panel — labels say approximate, transmission-only, offered everywhere but Texas", () => {
   const rows = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"].map((id) => [id, ALL_LAYERS[id]]);
   it("all four layers exist", () => expect(rows.every(([, c]) => c && c.kind === "esriFeature")).toBe(true));
   for (const [id, cfg] of rows) {
-    it(`${id}: 'approx.' in the label; detail behind the info icon names transmission-only and no mains/gathering; FL/GA only`, () => {
+    it(`${id}: 'approx.' in the label; detail behind the info icon names transmission-only and no mains/gathering; every state but Texas`, () => {
       expect(cfg.label).toMatch(/approx/i);
       expect(cfg.sublabel).toMatch(/Approximate/);
       expect(cfg.sublabel).toMatch(/transmission/i);
       expect(cfg.sublabel).toMatch(/no local gas mains or gathering lines/i);
-      expect(cfg.infoCaveat).toMatch(/Sunshine 811/);
-      expect(cfg.infoCaveat).toMatch(/Georgia 811/);
-      expect(cfg.states).toEqual(["FL", "GA"]);
+      expect(cfg.infoCaveat).toMatch(/811 locate/); // state-neutral (NEW-1 2026-10-29): the row now serves every state but Texas; the FL/GA Analysis card still names its own one-call centre
+      expect(cfg.infoCaveat).not.toMatch(/Sunshine|Georgia 811/);
+      expect(cfg.statesNot).toEqual(["TX"]);
+      expect(cfg.states).toBeUndefined();
       expect(cfg.label.length).toBeLessThan(45); // short text in the row; the detail lives behind ⓘ
     });
   }

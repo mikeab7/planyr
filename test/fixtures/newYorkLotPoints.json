@@ -138,6 +138,13 @@
    "lat": 42.62051,
    "lng": -77.01705,
    "id": "74.03-1-2"
+  },
+  {
+   "county": "Niagara County",
+   "lat": 43.0959,
+   "lng": -79.0562,
+   "id": "144.77-2-49",
+   "_note": "750 Main St, Niagara Falls NY — read from the county's own layer through the relay (2026-10-28)"
   }
  ]
 }

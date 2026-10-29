@@ -18,7 +18,7 @@ import ClipperLib from "clipper-lib";
 import { siteState } from "./siteRegion.js";
 import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { classifyWell } from "./wellStatus.js";
-import { toGrid, screenProximity } from "./proximityScreen.js";
+import { toGrid, screenProximity, planeForRings } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
 import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
 
@@ -148,13 +148,15 @@ export function isTrustedFor(check, regions) {
 const SCALE = 100; // clipper works on integers: centi-feet, the same scale polyClip / pondOffset use
 const Clipper = ClipperLib.Clipper;
 
-function ringsToFt(rings) {
-  return (rings || []).map((r) => (r || []).map(toGrid).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).filter((r) => r.length >= 3);
+/* ⛔ NEW-1 (STATE-PLANE-AUDIT): `plane` is the SITE's state plane zone (proximityScreen.planeForRings of the site rings) and rides the
+ * frame, so the site, its holes and every feature polygon are projected on ONE grid — never on Texas South Central by default. */
+function ringsToFt(rings, plane) {
+  return (rings || []).map((r) => (r || []).map((q) => toGrid(q, plane)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).filter((r) => r.length >= 3);
 }
-function makeFrame(ringsFt) {
+function makeFrame(ringsFt, plane) {
   let ox = 0, oy = 0, n = 0;
   for (const r of ringsFt) for (const p of r) { ox += p.x; oy += p.y; n++; }
-  return n ? { ox: ox / n, oy: oy / n } : { ox: 0, oy: 0 };
+  return n ? { ox: ox / n, oy: oy / n, plane } : { ox: 0, oy: 0, plane };
 }
 const toPath = (ringFt, f) => ringFt.map((p) => ({ X: Math.round((p.x - f.ox) * SCALE), Y: Math.round((p.y - f.oy) * SCALE) }));
 const pathsArea = (paths) => {
@@ -177,9 +179,10 @@ const union = (paths) => exec(ClipperLib.ClipType.ctUnion, paths, null);
 /* The SITE as a solid: every active parcel unioned (all rings forced one orientation first, or two
  * oppositely-wound neighbours cancel to a hole), save-and-except HOLES subtracted. Returns clipper paths. */
 export function siteSolid(rings, holes, frame) {
-  const parts = ringsToFt(rings).map((r) => orient(toPath(r, frame)));
+  const plane = frame.plane || planeForRings(rings) || undefined;
+  const parts = ringsToFt(rings, plane).map((r) => orient(toPath(r, frame)));
   let solid = union(parts);
-  const holePaths = ringsToFt(holes || []).map((r) => orient(toPath(r, frame)));
+  const holePaths = ringsToFt(holes || [], plane).map((r) => orient(toPath(r, frame)));
   if (holePaths.length) solid = exec(ClipperLib.ClipType.ctDifference, solid, union(holePaths));
   return solid;
 }
@@ -188,7 +191,7 @@ export function siteSolid(rings, holes, frame) {
  * the feature so its INTERIOR rings stay holes; the normalised output is oriented for the cross-feature
  * union that follows. Never vertex sampling — real area. */
 function featurePaths(esriRings, frame) {
-  const paths = ringsToFt(esriRings).map((r) => toPath(r, frame));
+  const paths = ringsToFt(esriRings, frame.plane || undefined).map((r) => toPath(r, frame));
   if (!paths.length) return [];
   return exec(ClipperLib.ClipType.ctUnion, paths, null, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftEvenOdd);
 }
@@ -237,8 +240,9 @@ export { windowFeatures, WINDOW_PAD_M };
  * as polygons, so uncovered ground is unmapped, and a row may not read "None" over it. */
 /* `opts.windowPadM` exists ONLY so a test can replay the pre-fix whole-polygon measurement (Infinity) against the window. */
 export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOLDS, { windowPadM = WINDOW_PAD_M } = {}) {
-  const ringsFt = ringsToFt(rings);
-  const frame = makeFrame(ringsFt);
+  const plane = planeForRings(rings) || undefined;
+  const ringsFt = ringsToFt(rings, plane);
+  const frame = makeFrame(ringsFt, plane);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
   if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
@@ -272,8 +276,9 @@ export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOL
 /* WETLANDS. `features` = [{ rings, type }]. Acres is the area of the union ON the site; count is the
  * number of mapped wetlands that put real ground on it (a polygon merely touching the ring is not one). */
 export function measureWetlands(rings, holes, features, thresholds = CHECK_THRESHOLDS, { windowPadM = WINDOW_PAD_M } = {}) {
-  const ringsFt = ringsToFt(rings);
-  const frame = makeFrame(ringsFt);
+  const plane = planeForRings(rings) || undefined;
+  const ringsFt = ringsToFt(rings, plane);
+  const frame = makeFrame(ringsFt, plane);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
   if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
@@ -295,7 +300,8 @@ export function measureWetlands(rings, holes, features, thresholds = CHECK_THRES
  * plus the compass word for the nearest one. */
 export function measureProximity(rings, features, { keep = 60 } = {}) {
   const scr = screenProximity(rings, features || []);
-  const ringsFt = ringsToFt(rings);
+  const plane = planeForRings(rings) || undefined;   // the same plane screenProximity measured on
+  const ringsFt = ringsToFt(rings, plane);
   let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
   for (const r of ringsFt) for (const p of r) { if (p.x < a) a = p.x; if (p.y < b) b = p.y; if (p.x > c) c = p.x; if (p.y > d) d = p.y; }
   const cx = (a + c) / 2, cy = (b + d) / 2, spanX = (c - a) || 1, spanY = (d - b) || 1;
@@ -315,7 +321,7 @@ export function measureProximity(rings, features, { keep = 60 } = {}) {
     } else if (f.lngLat) pts.push(f.lngLat);
     let best = null, bd = Infinity;
     for (const q of pts) {
-      const g = toGrid(q);
+      const g = toGrid(q, plane);
       const dd = Math.hypot(g.x - cx, g.y - cy);
       if (Number.isFinite(dd) && dd < bd) { bd = dd; best = g; }
     }

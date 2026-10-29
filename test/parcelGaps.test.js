@@ -22,7 +22,7 @@ describe("the reason lookup — one sample of each code, across more than three 
     ["Pointe Coupee Parish", "LA", "locked"], ["Twin Falls County", "ID", "locked"], ["Ferry County", "WA", "locked"], ["Carroll County", "IL", "locked"],
     // unreachable — a real server Planyr could not reach
     ["Boyle County", "KY", "unreachable"], ["Clark County", "KY", "unreachable"], ["Edgar County", "IL", "unreachable"], ["Polk County", "OR", "unreachable"],
-    ["Dubuque County", "IA", "unreachable"], ["Niagara County", "NY", "unreachable"],
+    ["Dubuque County", "IA", "unreachable"],
     // none — owner-accepted gaps and the default
     ["Fulton County", "KY", "none"], ["New Madrid County", "MO", "none"], ["Pemiscot County", "MO", "none"], ["Adams County", "IA", "none"],
     ["Washtenaw County", "MI", "none"], ["Bryan County", "OK", "none"], ["Bacon County", "GA", "none"],
