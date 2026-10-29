@@ -102,7 +102,7 @@ describe("the wired Missouri rows", () => {
   const ROW_KEYS = MO_ROWS.map(([k]) => "mo_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(MO_ROWS).toHaveLength(72);
+    expect(MO_ROWS).toHaveLength(73);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
@@ -154,14 +154,14 @@ describe("a recorded real lot from each source reads back parcel id, address, ac
     expect(rec.account, `${name}: parcel id`).toBeTruthy();
     // the stored account (what the card/list stamps at identify time) is the county's DECLARED column, never a row number or a map-sheet fragment
     expect(idAttrFor(key, s.attrs), `${name}: stamped id`).toBe(String(s.attrs[s.idField]));
-    const hasOwner = !/^(Jackson|Boone) County$/.test(name);
+    const hasOwner = !/^(Jackson|Boone|Cass) County$/.test(name);
     if (hasOwner) {
       expect(rec.owner, `${name}: owner`).toBeTruthy();
       expect(rec.owner, `${name}: the owner is not the parcel number`).not.toMatch(/^[0-9][0-9.\-\s/]*$/);
     }
   });
-  it("Jackson (parcel fabric) and Boone (basemap linework) honestly carry no owner", () => {
-    for (const n of ["Jackson County", "Boone County"]) expect(ownerName(SAMPLES[n].attrs), n).toBeNull();
+  it("Jackson (parcel fabric), Boone (basemap linework) and Cass (MARC regional compilation) honestly carry no owner", () => {
+    for (const n of ["Jackson County", "Boone County", "Cass County"]) expect(ownerName(SAMPLES[n].attrs), n).toBeNull();
   });
   it("a county's declared parcel number replaces a map-sheet FRAGMENT the generic resolver caught (Henry PARCEL_NUM '11', Cole PARCELNUM '55', Livingston '05.00')", () => {
     for (const [n, frag] of [["Henry County", "11"], ["Cole County", "55"], ["Livingston County", "05.00"]]) {
