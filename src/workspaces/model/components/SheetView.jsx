@@ -1135,6 +1135,7 @@ const SheetView = forwardRef(function SheetView({
       tabIndex={0}
       data-testid="model-sheet"
       {...{ [CELL_EDITING_ATTR]: edit ? "true" : undefined }}
+      data-letters-are-text=""
       onMouseUp={stopDrag}
       onMouseLeave={stopDrag}
       onKeyDown={onKeyDown}
