@@ -77,6 +77,7 @@ export const PARCEL_COPIES = {
   ga_johnson: [null, "2026-10"],
   ga_laurens: ["a Georgia county appraisal contractor", "2025-09"],
   ga_lee: [null, "2022-07"],
+  ga_long: ["Coastal Regional Commission of Georgia", "2026-10"],
   ga_lumpkin: [null, "2025-02"],
   ga_mcintosh: ["a Georgia county appraisal contractor", "2025-09"],
   ga_macon: ["River Valley Regional Commission", "2018-12"],
