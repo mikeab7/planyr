@@ -296,6 +296,17 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
       expect(r.out[r.out.length - 1]).not.toBe("failed");
     } finally { vi.useRealTimers(); }
   });
+  it("status: a stale refusal does not outlive the retry that re-asks (no 'loading' fires for an overlapping refresh)", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      r.fire("loading"); r.fire("overbudget", {}); r.fire("requesterror", { code: 503 });
+      vi.advanceTimersByTime(8000);                                                  // the retry's refresh() overlaps a slow cell: no "loading"
+      r.fire("load");                                                                // the view has changed; everything answered cleanly
+      expect(r.out[r.out.length - 1]).not.toBe("loading");
+      expect(r.out[r.out.length - 1]).not.toBe("failed");
+    } finally { vi.useRealTimers(); }
+  });
   it("retries: a recovered blip + a healthy cycle start the count over (cycleErr is cleared by the next 'loading')", async () => {
     vi.useFakeTimers();
     try {
