@@ -152,9 +152,9 @@ try {
     check(`${L.id}: requested its service and got 200`, codes.some((c) => c === 200), JSON.stringify(codes.slice(0, 5)));
     check(`${L.id}: no failure / "too detailed" state`, !/failed|error/i.test(String(state)) && !/too detailed|layer failed|no vector source|couldn.t load/i.test(after.text), `state=${state}`);
     check(`${L.id}: DRAWS over its known feature`, after.paths + after.canvases + after.imgs > before.paths + before.canvases + before.imgs, `${before.paths}p/${before.canvases}c → ${after.paths}p/${after.canvases}c`);
-    /* the collapse trap: every feature the service returned must be a drawn path (a layer that draws ONE of fifty is broken) */
+    /* the collapse trap: a layer that draws ONE of fifty features is broken. A quarter is the floor, not half: esri-leaflet requests whole tile cells, so a statewide layer legitimately returns features beyond the viewport (measured: JTC counties, 159 returned / 73 in view) */
     const returned = uniqueFeatures(L.needle), grew = after.paths - before.paths;
-    check(`${L.id}: draws the features the service returned, not just one`, returned === 0 || grew >= Math.min(returned, 3) && grew >= Math.floor(returned * 0.5), `${returned} returned · ${grew} new paths`);
+    check(`${L.id}: draws the features the service returned, not just one`, returned === 0 || (grew >= Math.min(returned, 3) && grew >= Math.floor(returned * 0.25)), `${returned} returned · ${grew} new paths`);
     check(`${L.id}: page still answers (rAF alive)`, await rafAlive());
     const lt = await page.evaluate(() => window.__gaLong);
     check(`${L.id}: no task over ${LONG_TASK_BUDGET_MS} ms while drawing`, lt.max < LONG_TASK_BUDGET_MS, `longest ${Math.round(lt.max)} ms over ${lt.n} long task(s)`);
