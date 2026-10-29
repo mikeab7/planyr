@@ -25,6 +25,9 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layerZoomGate.js";
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
+import { setViewLegend, clearViewLegend } from "./viewLegendStore.js";
+import { BOUNDARY_FALLBACK_INK } from "./boundaryStyle.js";
+import { declutterBoxes } from "./boundaryLabels.js";
 // NEW-1 (Imagery & Layers) — the owner's contour interval (1/2/5/10 ft), a device pref; a tiny leaf, safe on the boot path.
 import { getContourInterval, subscribeContourInterval } from "./contourIntervalPref.js";
 import {
@@ -1019,6 +1022,23 @@ export const AHJ_LAYERS = {
     note: "Georgia county lines (DCA, all 159 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
+  /* B2507065 (NEW-10) — Tennessee's county lines and DeSoto County's own outline, so a view on the Mississippi / Tennessee line names BOTH counties along it
+   * ("DeSoto Co." / "Shelby Co., TN"). Tennessee is the State's statewide layer (95 counties), offered in TN and, because the line sits at DeSoto's feet, in MS; the
+   * Mississippi row is the county server's own County Outline (ONE county — DeSoto — so it is limited to the DeSoto area; the rest of Mississippi has no county-line row yet). */
+  tn_county: {
+    kind: "vector", label: "County Boundaries (Tennessee)", mergeGroup: "counties_cities", source: "State of Tennessee (STS)",
+    url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"],
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
+    note: "Tennessee county lines (State of Tennessee, all 95 counties). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ms_county: {
+    kind: "vector", label: "County Boundary (DeSoto County, MS)", mergeGroup: "counties_cities", source: "DeSoto County GIS — County Outline",
+    url: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/8", states: ["MS"], regions: ["desoto"],
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
+    note: "DeSoto County's own outline (the county server publishes only DeSoto in this layer). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
   ga_city: {
     kind: "vector", label: "City Limits (Georgia)", mergeGroup: "counties_cities", source: "Georgia DCA",
     url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
@@ -1285,6 +1305,14 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
 
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS };
 
+/* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
+ * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
+ * project-opacity rules in layerOpacity.js, the panel, the export) reads `cfg.opacity`, so normalising the registry here moves them all
+ * together. A value somebody already set is untouched (layerOpacity.js stores only values that differ from the default). The per-row
+ * numbers above survive as comments of intent only; the old tier CEILINGS (layerWeight.js) no longer bound a default. */
+export const DEFAULT_LAYER_OPACITY = 1;
+Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg) cfg.opacity = DEFAULT_LAYER_OPACITY; });
+
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
  * decision-relevant "current as of" stamp, and is DELIBERATELY DISTINCT from
@@ -1371,6 +1399,14 @@ export const LAYER_VINTAGE = {
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
 export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;
+/* The text behind a click card's (i) (B2507062): who published the layer and how current it is. Never printed on the card itself. */
+export const layerAbout = (id, cfg) => {
+  const lines = [];
+  if (cfg && cfg.source) lines.push(`Source: ${cfg.source}`);
+  const v = layerVintage(id, cfg);
+  if (v) lines.push(`Data: ${v}`);
+  return lines.length ? lines.join("\n") : null;
+};
 
 // Fresh per-layer UI state (all off, each at its default opacity). A corridor layer (B752)
 // also carries an editable `widthFt` (total assumed corridor width, feet).
@@ -1572,7 +1608,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
  * inline: it is only reachable once this layer is on, and keeping its wording engine off the boot
  * bundle is part of how this feature pays its bundle budget. The import is kicked off here, at
  * toggle-on — long before a cursor can rest on a feature. */
-function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null } = {}) {
+function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null, about = null, id = null } = {}) {
   const canHover = hoverIdentifyEnabled(cfg);
   /* NEW-1 (DeSoto / Olive Branch) — an optional per-line LABEL (`cfg.lineLabel`: the pipe size printed on the line). The text is decided by the pure
    * `lineLabelText`; the label is a permanent Leaflet tooltip bound ONLY while the map is at or past `lineLabel.minZoom` (a dense network labelled at
@@ -1614,6 +1650,23 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       lyr.on("remove", () => { fetchedAt = null; try { lyr._map && lyr._map.off("zoomend", onZoom); } catch (_) { /* map already gone */ } });
     }
   }
+  // B2507063 (NEW-8): a row with `viewLegend(features, map)` publishes a legend of what is IN VIEW (the Zoning dropdown lists the zone codes on screen, each with its sourced name).
+  if (typeof cfg.viewLegend === "function" && id) {
+    const publish = () => {
+      const map = lyr._map;
+      if (!map) return;
+      const b = map.getBounds(), feats = [];
+      try { lyr.eachFeature((l) => { const f = l && l.feature; if (f && f.geometry && (!l.getBounds || b.intersects(l.getBounds()))) feats.push(f); }); } catch (_) { return; }
+      try { setViewLegend(id, cfg.viewLegend(feats, map)); } catch (_) { /* a legend never breaks the layer */ }
+    };
+    lyr.on("load", publish);
+    lyr.on("add", () => { if (lyr._map) lyr._map.on("moveend", publish); });
+    // the municipal limits (which government a zone belongs to) may land after the zones: re-publish when they do
+    let unsub = null;
+    if (typeof cfg.onViewLegendReady === "function") { try { unsub = cfg.onViewLegendReady(publish); } catch (_) { /* optional */ } }
+    lyr.on("remove", () => { try { lyr._map && lyr._map.off("moveend", publish); } catch (_) { /* map already gone */ } clearViewLegend(id); });
+    lyr.on("remove", () => { if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already gone */ } unsub = null; } });
+  }
   if (cfg.lineLabel) {
     const syncLabels = () => {
       const want = wantLabels(lyr);
@@ -1621,13 +1674,25 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       labelsOn = want;
       try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) l.bindTooltip(l.__pfLabel, labelOpts()); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
     };
-    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); syncLabels(); } });
-    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); } catch (_) { /* map already gone */ } });
-    lyr.on("load", syncLabels);
+    /* A row that sets `lineLabel.declutter` (the municipal limits: one name per city) hides a name that would sit on top of a larger city's name — never two names piled up. */
+    let ticks = [];
+    const declutter = () => {
+      if (!cfg.lineLabel.declutter || !labelsOn) return;
+      const items = [];
+      try { lyr.eachFeature((l) => { const t = l.getTooltip && l.getTooltip(), el = t && t.getElement && t.getElement(); if (!el) return; el.style.visibility = ""; const r = el.getBoundingClientRect(); const bb = l.getBounds && l.getBounds(); if (r.width) items.push({ el, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, rank: bb ? Math.abs((bb.getNorth() - bb.getSouth()) * (bb.getEast() - bb.getWest())) : 0 }); }); } catch (_) { return; }
+      const keep = new Set(declutterBoxes(items));
+      items.forEach((it, i) => { if (!keep.has(i)) it.el.style.visibility = "hidden"; });
+    };
+    // tooltips are opened and positioned a little after the features arrive / the zoom ends, so measure at three moments rather than guess one
+    const later = () => { ticks.forEach(clearTimeout); ticks = [200, 900, 2500].map((ms) => setTimeout(declutter, ms)); };
+    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); lyr._map.on("moveend", later); lyr._map.on("zoomend", later); syncLabels(); later(); } });
+    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); lyr._map && lyr._map.off("moveend", later); lyr._map && lyr._map.off("zoomend", later); } catch (_) { /* map already gone */ } ticks.forEach(clearTimeout); });
+    lyr.on("load", () => { syncLabels(); later(); });
   }
   if (canHover) {
     import("./featureHoverAttach.js").then((m) => {
-      if (interactive) m.wireFeatureHover(lyr, cfg, identifyOk);
+      lyr.__pfAbout = about;
+      if (interactive) m.wireFeatureClick(lyr, cfg, identifyOk, about);
       m.attachFeatureCanvasIdentify(lyr, cfg);
     }, () => { /* the layer still paints; only its hover answer is unavailable */ });
   }
@@ -1689,7 +1754,7 @@ export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
     try {
       const hit = lyr.identifyAt(at);
       // NEW-1 (DeSoto PSC): several layers may answer with the SAME card (one click → all four utility providers); a shared `dedupeKey` keeps one.
-      if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit });
+      if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit, about: hit.about || layerAbout(k, cfg) });
     } catch (_) { /* one bad layer never breaks the identify */ }
     if (out.length >= limit) break;
   }
@@ -1943,7 +2008,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // NEW-1 (DFW ETJ) — a multi-service layer has no single service to fall back to; a row that
           // says so (`noLiveFallback`) reports FAILED instead of repainting one publisher's slice.
           buildFallback: cfg.noLiveFallback ? null : () => {
-            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
+            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, about: layerAbout(k, cfg), id: k });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the
             // panel's opacity slider keeps working after a fallback engagement.
@@ -1993,7 +2058,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriFeature") {
-            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane });
+            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane, about: layerAbout(k, cfg), id: k });
             // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
             // opacity change — re-applying the style function (not a flat {opacity}) so the
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled

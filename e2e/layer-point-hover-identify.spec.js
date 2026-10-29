@@ -1,4 +1,8 @@
-/* NEW-1 + NEW-2 — "the electric layer paints real symbols, and hovering one says what it is."
+/* B2507061 / B2507062 (owner constraints #43, #45, 2026-10-29) — THIS SPEC NOW PINS THE CLICK-ONLY CONTRACT. The file keeps its old name for history; what it proves:
+ * hovering ANY overlay layer opens NOTHING (no tooltip, no readout, no service request), and a CLICK opens the clean card (plain title, labelled rows, the source behind
+ * the (i), never a "(HIFLD)" parenthetical or a raw field name). Original brief follows (NEW-1 + NEW-2, 2026-07-29) for the point-symbol half, which is unchanged.
+ *
+ * NEW-1 + NEW-2 — "the electric layer paints real symbols, and hovering one says what it is."
  *
  * THE REPORT. The owner turned the Electric layer on (overhead lines, substations, poles) over an
  * aerial and got two things wrong at once:
@@ -213,6 +217,12 @@ async function lngLatToScreen(page, lat, lng) {
  * the rest costs nothing once the chunk has already landed — it is exactly the "real" rest the
  * test wants — and gives it several more chances when it hasn't. Re-measured the same way after
  * this change: 0 of 16. */
+/* A deliberate click at a screen point: rest first (warms the lazy raster chunk exactly as a real approach would), then press. */
+async function clickAt(page, x, y) {
+  await page.mouse.move(x, y);
+  await page.waitForTimeout(400);
+  await page.mouse.click(x, y);
+}
 async function hoverRasterAt(page, x, y) {
   for (let i = 0; i < 5; i++) {
     await page.mouse.move(x - 3 - i, y - 3 - i);
@@ -299,29 +309,31 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
     expect(errors, errors.join(" | ")).toHaveLength(0);
   });
 
-  test("hovering a SUBSTATION names it — and moving off dismisses the readout", async ({ page }) => {
+  test("hovering a SUBSTATION shows NOTHING; clicking it opens the clean card, with the source behind the (i)", async ({ page }) => {
     await stubElectric(page);
     await openPlanner(page);
     await toggleLayer(page, /^Electric/);
     await page.waitForTimeout(2500);
 
-    const readout = page.getByTestId("gis-identify-hover");
-    await expect(readout).toHaveCount(0); // nothing showing before the hover
-
     const at = await lngLatToScreen(page, LAT, LON);
     expect(at, "could not project the substation to screen").not.toBeNull();
     await page.mouse.move(at.x, at.y);
-    await expect(readout).toBeVisible({ timeout: 6000 });
-    // The wording matches the OSM tooltip beside it in the same merged row, and carries the
-    // facts the brief asks for: what it is, its voltage, and who published it.
-    await expect(readout).toContainText("Substation (HIFLD)");
-    await expect(readout).toContainText("Addicks");
-    await expect(readout).toContainText("138 kV");
+    await page.waitForTimeout(1500); // longer than the old rest delay: nothing may ever appear on hover
+    await expect(page.getByTestId("gis-identify-hover")).toHaveCount(0);
+    await expect(page.getByTestId("gis-identify")).toHaveCount(0);
 
-    // Moving well off the feature dismisses it — a hover readout, not a sticky card.
-    const off = await feetToScreen(page, 1250, 1250);
-    await page.mouse.move(off.x, off.y);
-    await expect(readout).toHaveCount(0, { timeout: 6000 });
+    await page.mouse.click(at.x, at.y);
+    const card = page.getByTestId("gis-identify");
+    await expect(card).toBeVisible({ timeout: 6000 });
+    await expect(card).toContainText("Substation");
+    await expect(card).toContainText("Addicks");
+    await expect(card).toContainText("138 kV");
+    // the source is behind the (i), never on the card face
+    await expect(card).not.toContainText("HIFLD");
+    await card.getByTestId("gis-identify-about").click();
+    await expect(card.getByTestId("gis-identify-source")).toContainText("HIFLD");
+    // no raw column names, no empty rows
+    await expect(card).not.toContainText(/OBJECTID|Shape\.|_NAME|null/i);
   });
 
   test("a REDACTED substation still says what KIND of thing it is", async ({ page }) => {
@@ -331,27 +343,27 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
     await page.waitForTimeout(2500);
 
     const at = await lngLatToScreen(page, LAT, LON);
-    await page.mouse.move(at.x, at.y);
-    const readout = page.getByTestId("gis-identify-hover");
+    await clickAt(page, at.x, at.y);
+    const readout = page.getByTestId("gis-identify");
     await expect(readout).toBeVisible({ timeout: 6000 });
-    await expect(readout).toContainText("Substation (HIFLD)");
+    await expect(readout).toContainText("Substation");
     // A withheld attribute is ABSENCE, never a fact: no anonymised code, no zero voltage.
     await expect(readout).not.toContainText("UNKNOWN");
     await expect(readout).not.toContainText("NOT AVAILABLE");
     await expect(readout).not.toContainText("0 kV");
   });
 
-  test("hovering a TRANSMISSION LINE names it with its voltage and owner", async ({ page }) => {
+  test("clicking a TRANSMISSION LINE names it with its voltage and owner", async ({ page }) => {
     await stubElectric(page);
     await openPlanner(page);
     await toggleLayer(page, /^Electric/);
     await page.waitForTimeout(2500);
 
     const at = await lngLatToScreen(page, LAT + SUB_B_DLAT, TX_LON);
-    await page.mouse.move(at.x, at.y);
-    const readout = page.getByTestId("gis-identify-hover");
+    await clickAt(page, at.x, at.y);
+    const readout = page.getByTestId("gis-identify");
     await expect(readout).toBeVisible({ timeout: 6000 });
-    await expect(readout).toContainText("Transmission line (HIFLD)");
+    await expect(readout).toContainText("Transmission line");
     await expect(readout).toContainText("138 kV");
     await expect(readout).toContainText("CenterPoint Energy");
   });
@@ -361,7 +373,7 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
    * used to be, until B1490144 opted the flood layer out of every cursor identify (see
    * the dedicated describe block below); this test now proves the RASTER MACHINERY ITSELF still
    * works for a layer that didn't opt out. */
-  test("hovering a RASTER-painted layer identifies it through the service", async ({ page }) => {
+  test("clicking a RASTER-painted layer identifies it through the service", async ({ page }) => {
     await stubElectric(page);
     let identifyCalls = 0;
     await page.route("**fwsprimary.wim.usgs.gov/**/MapServer/identify**", async (route) => {
@@ -378,8 +390,8 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
     await page.waitForTimeout(2000);
 
     const at = await feetToScreen(page, 400, 400);
-    await hoverRasterAt(page, at.x, at.y);
-    const readout = page.getByTestId("gis-identify-hover");
+    await clickAt(page, at.x, at.y);
+    const readout = page.getByTestId("gis-identify");
     await expect(readout).toBeVisible({ timeout: 8000 });
     // The service's own answer, named — the same shape the vector tooltips use.
     await expect(readout).toContainText(/Wetlands|PFO1A/);
@@ -400,7 +412,7 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
    * click-to-pin popup, `rasterIdentifyMap.js`'s `onClick`) is untouched and still reports every
    * outcome honestly — LOUD-FAILURE governs an action the user asked for, not the mouse merely
    * passing over the map. */
-  test("hovering EMPTY ground with a raster layer on shows nothing — no Checking…, no flash of failure text", async ({ page }) => {
+  test("hovering with a raster layer on shows nothing, and the identify service is never asked until a click", async ({ page }) => {
     await stubElectric(page);
     await page.route("**fwsprimary.wim.usgs.gov/**/MapServer/identify**", (route) => route.abort("failed"));
     await stubWetlandsMetadata(page);
@@ -410,13 +422,19 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
     await page.waitForTimeout(2000);
 
     const at = await feetToScreen(page, 400, 400);
-    await hoverRasterAt(page, at.x, at.y);
-    // Long enough for the debounce, the failed request, and any retry to fully settle.
-    await page.waitForTimeout(1500);
+    let asked = 0;
+    await page.route("**fwsprimary.wim.usgs.gov/**/MapServer/identify**", (route) => { asked += 1; return route.abort("failed"); });
+    await page.mouse.move(at.x, at.y);
+    await page.waitForTimeout(2500); // long enough for the OLD rest delay + a full debounce cycle
     await expect(page.getByTestId("gis-identify-hover")).toHaveCount(0);
+    await expect(page.getByTestId("gis-identify")).toHaveCount(0);
+    expect(asked, "a hover asked the identify service — hover must be silent").toBe(0);
+    // a CLICK is deliberate, so a failed service is stated, never silent (LOUD-FAILURE)
+    await page.mouse.click(at.x, at.y);
+    await expect(page.getByTestId("gis-identify")).toBeVisible({ timeout: 8000 });
   });
 
-  test("resting over bare ground with a raster layer on never even flashes 'Checking…'", async ({ page }) => {
+  test("sweeping over bare ground with a raster layer on never opens anything", async ({ page }) => {
     await stubElectric(page);
     // The service answers HONESTLY (nothing here) rather than failing — the "none" outcome is
     // exactly as unwanted on ambient hover as an error or a pending spinner.
@@ -434,9 +452,10 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
     // tooltip never appears at any of them — not even transiently.
     for (const [fx, fy] of [[300, 300], [500, 500], [700, 300], [300, 700]]) {
       const at = await feetToScreen(page, fx, fy);
-      await hoverRasterAt(page, at.x, at.y);
+      await page.mouse.move(at.x, at.y);
       await page.waitForTimeout(500);
       await expect(readout).toHaveCount(0);
+      await expect(page.getByTestId("gis-identify")).toHaveCount(0);
     }
   });
 
@@ -479,7 +498,7 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
       expect(femaIdentifyCalls, "the FEMA service was asked to identify despite the layer opting out of cursor identify").toBe(0);
     });
 
-    test("with FEMA AND Wetlands both on, hovering a wetlands feature still reports it", async ({ page }) => {
+    test("with FEMA AND Wetlands both on, clicking a wetlands feature still reports it", async ({ page }) => {
       await stubElectric(page);
       let femaIdentifyCalls = 0;
       await page.route("**hazards.fema.gov/**", async (route) => {
@@ -502,8 +521,8 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
       await page.waitForTimeout(2000);
 
       const at = await feetToScreen(page, 400, 400);
-      await hoverRasterAt(page, at.x, at.y);
-      const readout = page.getByTestId("gis-identify-hover");
+      await clickAt(page, at.x, at.y);
+      const readout = page.getByTestId("gis-identify");
       await expect(readout).toBeVisible({ timeout: 8000 });
       await expect(readout).toContainText(/Wetlands|PFO1A/);
       expect(femaIdentifyCalls, "the FEMA service was asked to identify despite the layer opting out of cursor identify").toBe(0);
@@ -518,7 +537,7 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
   /* Both themes, per the verification brief — the readout is app chrome, so it must clear the
    * contrast rule in light AND dark (the B316–B320 palette rule). */
   for (const theme of ["light", "dark"]) {
-    test(`the hover readout renders in the ${theme} theme`, async ({ page }) => {
+    test(`the click card renders in the ${theme} theme`, async ({ page }) => {
       await stubElectric(page);
       /* Set the theme through the app's OWN stored preference ("planyr.theme"), before load, and
        * let ThemeProvider apply it. Forcing `data-theme` on <html> by hand instead flips only the
@@ -532,10 +551,10 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
       await page.waitForTimeout(2500);
 
       const at = await lngLatToScreen(page, LAT, LON);
-      await page.mouse.move(at.x, at.y);
-      const readout = page.getByTestId("gis-identify-hover");
+      await clickAt(page, at.x, at.y);
+      const readout = page.getByTestId("gis-identify");
       await expect(readout).toBeVisible({ timeout: 6000 });
-      await expect(readout).toContainText("Substation (HIFLD)");
+      await expect(readout).toContainText("Substation");
       // The item-1 guarantee must hold in either theme too.
       await expectNoBrokenMarkers(page);
       // Let the theme's colour transitions finish before capturing — a screenshot taken mid-flip
