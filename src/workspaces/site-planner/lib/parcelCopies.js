@@ -272,6 +272,7 @@ export const PARCEL_COPIES = {
   mi_vanburen: [null, "2026-06"],
 
   // MO
+  mo_cass: ["Mid-America Regional Council", "2025-09"],
   mo_platte: ["City of Parkville", "2026-09"],
   mo_taney: ["Taney County Regional Sewer District", "2026-10"],
 

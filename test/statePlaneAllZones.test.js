@@ -280,17 +280,17 @@ describe("6c · decided assignments (judgment calls) carry their reasoning", () 
     expect(COUNTY_ZONE["TX:montgomery"]).toBeUndefined();   // the override is gone
     expect(COUNTY_TABLE.TX.tx_central.split(",")).toContain("montgomery");
   });
-  it("an independent Virginia city takes the zone of the county around it, and says so", () => {
+  it("an independent Virginia city is a plain row in the zone Va. Code 1-601 names it in (B2494337: no longer decided)", () => {
     const z = zoneForCounty("VA", "Alexandria city");
     expect(z.id).toBe("va_north");
-    expect(z.decided).toBe(true);
-    expect(z.decisionNote).toMatch(/surround/i);
+    expect(z.decided).toBe(false);
+    expect(z.decisionNote).toBeNull();
     expect(zoneForCounty("VA", "Charlottesville city").id).toBe("va_south");
   });
-  it("Carson City (NV) is decided Nevada West", () => {
+  it("Carson City (NV) is Nevada West, named by NRS 327.010(2) — a plain row, not decided (B2494337)", () => {
     const z = zoneForCounty("NV", "Carson City");
     expect(z.id).toBe("nv_west");
-    expect(z.decided).toBe(true);
+    expect(z.decided).toBe(false);
   });
   it("Grant County, WA is split by 47°30'N: the site's latitude decides, and with no latitude the answer is an honest null", () => {
     expect(zoneForCounty("WA", "Grant")).toBeNull();

@@ -627,9 +627,9 @@ export default function GradingController({ input, onModel }) {
   const limitInfo = useMemo(() => (gl ? {
     mode: gl.mode, modeLabel: LIMIT_MODE_LABEL[gl.mode] || gl.mode, source: gl.source, areaAc: gl.areaAc, areaSf: gl.areaSf,
     grew: (gl.grewIds || []).map((id) => (input.buildingNames && input.buildingNames.get(id)) || null).filter(Boolean),
-    grewIds: gl.grewIds || [], regions: gl.regions.length, plateaus: gl.plateaus || [], reachFt: gl.reachFt,
+    grewIds: gl.grewIds || [], regions: gl.regions.length, plateaus: gl.plateaus || [], reachFt: gl.reachFt, basis: gl.basis || null,
     editing: !!input.limitEditing, highlight: input.limitHighlight || null, ring: gl.limitRegions && gl.limitRegions[0] ? gl.limitRegions[0].outer : null,
-  } : { mode: cfg.limitMode, modeLabel: LIMIT_MODE_LABEL[cfg.limitMode] || cfg.limitMode, source: cfg.limitRing ? "edited" : "auto", areaAc: null, grew: [], grewIds: [], regions: 0, plateaus: [], editing: !!input.limitEditing, highlight: input.limitHighlight || null, ring: null }), [gl, cfg.limitMode, cfg.limitRing, input.limitEditing, input.limitHighlight, namesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  } : { mode: cfg.limitMode, modeLabel: LIMIT_MODE_LABEL[cfg.limitMode] || cfg.limitMode, source: cfg.limitRing ? "edited" : "auto", areaAc: null, grew: [], grewIds: [], regions: 0, plateaus: [], editing: !!input.limitEditing, highlight: input.limitHighlight || null, ring: null, basis: { kind: "property", marginFt: cfg.gradingMarginFt, bufferFt: cfg.undisturbedBufferFt } }), [gl, cfg.limitMode, cfg.limitRing, cfg.gradingMarginFt, cfg.undisturbedBufferFt, input.limitEditing, input.limitHighlight, namesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const model = useMemo(() => ({
     on: true, cfg, setback, groundBasis: input.groundBasis, demStatus: base.dem.status, demError: base.dem.error, retryDem: base.dem.retry,
     ground: { ...ground, retry: () => setGRetry((n) => n + 1) },
