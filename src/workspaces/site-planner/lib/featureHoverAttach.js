@@ -70,6 +70,7 @@ export function wireFeatureHover(lyr, cfg, identifyOk) {
  * what is genuinely PAINTED right now (a zoom-gated layer with nothing drawn honestly answers
  * nothing) with no extra request. */
 export function attachFeatureCanvasIdentify(lyr, cfg) {
+  if (typeof cfg.warm === "function") { try { cfg.warm(); } catch (_) { /* warming a lookup the card needs never breaks the layer */ } } // NEW-1 (DeSoto zoning): start loading what the card will need (the municipal limits)
   lyr.identifyAt = (at) => {
     const features = [];
     try { lyr.eachFeature((child) => { if (child && child.feature) features.push(child.feature); }); } catch (_) { return null; }
@@ -81,7 +82,7 @@ export function attachFeatureCanvasIdentify(lyr, cfg) {
     // one-line wording below.
     if (typeof cfg.identifyCard === "function") {
       const card = cfg.identifyCard(hit.properties || {}, at);
-      if (card) return { title: card.title || hoverText(cfg, hit.properties || {}), rows: card.rows || [], note: card.note || null, sourceName: cfg.source || null };
+      if (card) return { title: card.title || hoverText(cfg, hit.properties || {}), rows: card.rows || [], note: card.note || null, sourceName: cfg.source || null, ...(card.dedupeKey ? { dedupeKey: card.dedupeKey } : {}) };
     }
     // The SAME one-line wording the map finder's tooltip shows, so the two surfaces cannot drift and
     // neither restates a fact the other omits. No `rows`: everything worth saying is already in that

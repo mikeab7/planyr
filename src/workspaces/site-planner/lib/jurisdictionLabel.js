@@ -195,7 +195,7 @@ function leadFor(model, shape) {
 /* NEW-1 (Georgia, California) — a state-aware model carries `state: "GA" | "CA"` (set only on a point-in-polygon
  * confirmed site). Both are "no ETJ — the county governs outside city limits" states with the same label grammar, so
  * the one predicate (still named `isGa` for the call sites above) covers both and `stateAbbr` prints which. */
-const isGa = (model) => ["GA", "CA", "TN"].includes(String(model.state || "").toUpperCase()); // NEW-1 — Tennessee is the same "no ETJ, the county governs" grammar
+const isGa = (model) => ["GA", "CA", "TN", "MS"].includes(String(model.state || "").toUpperCase()); // NEW-1 (DeSoto MS) — Mississippi: no ETJ, the county governs outside the five cities // NEW-1 — Tennessee is the same "no ETJ, the county governs" grammar
 const isTn = (model) => String(model.state || "").toUpperCase() === "TN";
 /* NEW-1 (New Jersey + New York) — municipal-form states: every acre is in a municipality, there is no ETJ, the municipality's type
  * is part of its name, and the county slot never leads. Deliberately NOT folded into `isGa` (whose branches say "Unincorporated

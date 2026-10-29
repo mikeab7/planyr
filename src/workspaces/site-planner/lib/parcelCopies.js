@@ -277,7 +277,6 @@ export const PARCEL_COPIES = {
   mo_taney: ["Taney County Regional Sewer District", "2026-10"],
 
   // MS
-  ms_desoto: ["ETR Business Development / Tristate Consulting", "2024-06"],
 
   // NM
   nm_bernalillo: ["City of Albuquerque AGIS", "2026-08"],

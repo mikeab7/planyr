@@ -735,10 +735,10 @@ export const COUNTY_VERIFICATION = {
     verifiedNote: "MEASURED 2026-10-19 through the Cloudflare preview of planyr.io/gis-proxy (gis.lojic.org is unreachable from the sandbox, and was never probed before): 4/5 spread interior points and 2/4 points ~300 m inside the county line returned a parcel polygon with PARCELID / LRSN; misses fall on river and road right-of-way. LOJIC's open-data layer carries no owner or address column.",
   },
   ms_desoto: {
-    publisher: "third-party",
-    publisherName: "ETR Business Development / Tristate Consulting (DeSoto County assessor data)",
-    verifiedOn: "2026-09-10",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 80,950 parcel polygons, count query 830ms, 55 populated fields, esriGeometryPolygon. A 3-point spread (Southaven/Hernando/Horn Lake) all answered with real parcels.",
+    publisher: "own",
+    publisherName: "DeSoto County, MS GIS (BaseLayers \"Tax Parcels\")",
+    verifiedOn: "2026-10-29",
+    verifiedNote: "B2507056 — the county's OWN ArcGIS Server, relayed through /gis-proxy (the host is not reachable from the build sandbox). Replaces the 2024-06 ETR / Tristate Consulting Esri-hosted copy (80,950 polygons, verified 2026-09-10), which stays as the last of three fallbacks after Mississippi's statewide MARIS layer. Measured through planyr.io: see the PR description.",
   },
   ms_yalobusha: {
     publisher: "statewide",
