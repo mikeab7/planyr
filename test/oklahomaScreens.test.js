@@ -367,6 +367,9 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
     expect(countyLabelText("MCCURTAIN", "OK", "TX")).toBe("McCurtain Co., OK");
     expect(countyLabelText("MCCLAIN", "OK", "OK")).toBe("McClain Co.");
     expect(tc("MCINTOSH")).toBe("McIntosh");
+    expect(countyLabelText("MCLENNAN", "TX", "TX")).toBe("Mclennan Co."); // every other state is byte-for-byte what it was
+    expect(tc("MCI AIRPORT")).toBe("Mci Airport");
+    expect(ALL_LAYERS.ok_nrhp.where).toBe("Status<>'Removed'");
   });
   it("the quoted tribal counts say 25 areas plus four joint-use areas", () => {
     expect(ALL_LAYERS.ok_tribal.note).toMatch(/25 Oklahoma Tribal Statistical Areas plus four joint-use areas/);

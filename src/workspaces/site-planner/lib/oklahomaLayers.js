@@ -41,7 +41,7 @@ const KEEP_UPPER = /\b(Llc|Inc|Llp|Lp|Pws|Rwd|Okc|Usa|Us|Ok|Occ|Deq|Pst|Nrhp|Ii|
 export const tc = (raw) => {
   const s = raw == null ? "" : String(raw).trim();
   if (!s || /[a-z]/.test(s)) return s;
-  return s.toLowerCase().replace(/(^|[\s\-/.(])([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\b([ODLodl]')([a-z])/g, (_m, a, b) => a.toUpperCase() + b.toUpperCase()).replace(KEEP_UPPER, (w) => w.toUpperCase()).replace(/\bMc([a-z])/g, (_m, a) => "Mc" + a.toUpperCase()); // McCurtain, McClain; // "DON'S" → "Don's" (not "Don'S"), "O'BRIEN" → "O'Brien"
+  return s.toLowerCase().replace(/(^|[\s\-/.(])([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\b([ODLodl]')([a-z])/g, (_m, a, b) => a.toUpperCase() + b.toUpperCase()).replace(KEEP_UPPER, (w) => w.toUpperCase()).replace(/\bMc([a-z])(?=[a-z]{2})/g, (_m, a) => "Mc" + a.toUpperCase()); // McCurtain, McClain; // "DON'S" → "Don's" (not "Don'S"), "O'BRIEN" → "O'Brien"
 };
 const EMPTY = /^(|null|<null>|none|n\/a|undefined|unknown|0|0\.0+)$/i;
 export const clean = (v) => { const s = v == null ? "" : String(v).replace(/_x000d_/gi, "").replace(/\s+/g, " ").trim(); return EMPTY.test(s) ? "" : s; };
@@ -187,7 +187,7 @@ const lineRow = (o) => ({ kind: "esriFeature", ...OKS, role: "line", hoverIdenti
 
 export const OK_MERGE_GROUPS = {
   ok_tribal: { label: "Tribal Areas", note: "Census tribal areas, the Osage Reservation, and — where the Nation publishes it — the Cherokee Nation's reservation and tribal land. Jurisdiction on tribal land is a legal question; this is where to start asking it." },
-  ok_cleanup: { label: "Cleanup Sites (DEQ & OCC)", note: "Every Oklahoma cleanup program that publishes a map: DEQ Superfund, RCRA corrective action, Voluntary Cleanup, Cleanup Assistance, Brownfields and recorded land-use restrictions, plus the Corporation Commission's petroleum Brownfields. A Phase I ESA pre-screen, not a substitute for one." },
+  ok_cleanup: { label: "Cleanup Sites (DEQ & OCC)", note: "DEQ's cleanup-program maps — Superfund, RCRA corrective action, Voluntary Cleanup, Cleanup Assistance, Brownfields and recorded land-use restrictions — plus the Corporation Commission's petroleum Brownfields and Petroleum Tank Releases. A Phase I ESA pre-screen, not a substitute for one." },
   ok_waste: { label: "Landfills & Waste Facilities", note: "DEQ-permitted landfills and solid-waste facilities, and hazardous-waste permit sites." },
   ok_source_water: { label: "Drinking-Water Sources", note: "Where public drinking water comes from: DEQ-modelled wellhead protection areas, the fixed 300-ft circle around each public well, and surface-water intakes." },
   ok_protected_waters: { label: "Protected Waters", note: "Waters Oklahoma protects beyond the ordinary: Water Quality Standards Appendix B areas and streams, Scenic Rivers and the special-provision watersheds, and the sensitive watersheds the OKR10 construction stormwater permit singles out." },
@@ -313,7 +313,7 @@ export const OK_LAYERS = {
     url: urlFor("okSuperfund"), minZoom: 8, color: CLEANUP.superfund.color, weight: 1.5, pointRadius: CLEANUP.superfund.radius,
     legend: CLEANUP_LEGEND, hoverTitle: "Superfund site", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Superfund site", (p) => [rowOf("Site", p.NPL_SITE), rowOf("EPA ID", p.EPA_ID, { raw: true }), /^https?:/i.test(String(p.Link || "")) ? rowOf("Site page", "", { href: p.Link }) : null].filter(Boolean)),
-    note: "DEQ's Superfund (National Priorities List) sites — 18 in Oklahoma, at DEQ's own coordinates.",
+    note: "DEQ's Superfund-program sites — 18 in Oklahoma, at DEQ's own coordinates.",
     infoCaveat: "A listed site is a flag to pull the DEQ and EPA file. A site's footprint is larger than its point.",
     group: "environmental", order: 23,
   }),
@@ -531,7 +531,7 @@ export const OK_LAYERS = {
 
   ok_nrhp: pointRow({
     label: "Historic Places", source: "National Park Service — National Register of Historic Places",
-    url: GIS_SOURCES.okNrhp.serviceUrl, minZoom: 11, color: "#6d28d9", weight: 2, pointRadius: 4,
+    url: GIS_SOURCES.okNrhp.serviceUrl, where: GIS_SOURCES.okNrhp.where, minZoom: 11, color: "#6d28d9", weight: 2, pointRadius: 4,
     hoverTitle: "Historic place", hoverSource: "NPS National Register",
     identifyCard: card("Historic place", (p) => [rowOf("Name", pick(p, "RESNAME")), rowOf("Type", String(pick(p, "ResType") || "").replace(/^./, (c) => c.toUpperCase()), { raw: true }), rowOf("City", pick(p, "City")), rowOf("County", pick(p, "County"))].filter(Boolean)),
     note: "National Register listings — one point per listing (a district is one point, not its boundary). The State Historic Preservation Office keeps its own inventory, which is not in this layer, so recorded-but-unlisted sites are NOT here. A flag to check with the Oklahoma SHPO.",

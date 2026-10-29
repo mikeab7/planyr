@@ -196,6 +196,7 @@ export const OK_SOURCES = {
     label: "National Register of Historic Places (Oklahoma)", provider: "National Park Service — National Register of Historic Places (via Esri Federal Data)",
     serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/nrhp_points_v1/FeatureServer/0",
     geometryType: "point", fields: { name: "RESNAME", type: "ResType", city: "City", county: "County", listed: "CertDate" },
+    where: "Status<>'Removed'", // the service also holds delisted properties (4 in Oklahoma, one in Washington County); only listed ones are drawn
   }),
   okCemeteries: OK("okCemeteries", {
     label: "Cemeteries (USGS / GNIS, Oklahoma)", provider: "U.S. Geological Survey — National Map Structures (GNIS cemeteries)",

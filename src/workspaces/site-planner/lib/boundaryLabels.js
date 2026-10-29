@@ -11,7 +11,7 @@
 
 // "HOUSTON" → "Houston" (H-GAC publishes ALL-CAPS names). Mirrors jurisdiction.js's
 // private titleCase so the identify and the labels render names identically.
-export const titleCaseName = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bMc([a-z])/g, (_m, c) => "Mc" + c.toUpperCase()); // "McAlester", "McKinney" — a lowercase pass alone gives "Mcalester"
+export const titleCaseName = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bMc([a-z])(?=[a-z]{2})/g, (_m, c) => "Mc" + c.toUpperCase()); // "McAlester", "McKinney" — a lowercase pass alone gives "Mcalester"
 
 /* Signed shoelace area + centroid of one ring ([[x,y],...]). Degenerate rings
  * (area ~0) fall back to the vertex average so a sliver still gets an anchor. Pure. */
