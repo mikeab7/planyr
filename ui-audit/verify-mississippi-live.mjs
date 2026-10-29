@@ -31,7 +31,7 @@ const FED_HOSTS = /services\.arcgis\.com\/cJ9YHowT8TU7DUyn|services2\.arcgis\.co
 const ROWS = [
   ["counties_cities", "jur", 32.2902, -90.1785, 11, /SWAP_Mapping\/MapServer\/19\/query|Municipal_Boundaries_2025\/MapServer\/0\/query/],
   ["ms_tribal", "jur", 32.7505, -89.1806, 13, /BND___Bureau_of_Indian_Affairs.*FeatureServer\/4\/query/],
-  ["ms_deq_gard", "env", 34.9672, -89.7906, 15, /MUSTER_Scaled_v15\/MapServer\/12\/query/],
+  ["ms_deq_gard", "env", 32.3, -90.1775, 15, /MUSTER_Scaled_v15\/MapServer\/12\/query/],
   ["ms_deq_ust", "env", 34.959, -89.8306, 16, /MUSTER_Scaled_v15\/MapServer\/10\/query/],
   ["ms_epa_brownfields", "env", 32.3002, -90.1795, 15, /FRS_INTERESTS_ACRES\/FeatureServer\/0\/query/],
   ["ms_deq_landfills", "env", 34.9339, -89.7936, 14, /SWAP_Mapping\/MapServer\/7\/query/],
@@ -145,7 +145,7 @@ try {
 
   /* ── B. click cards ────────────────────────────────────────────────────────────────────────── */
   /* Two DIFFERENT features of each point row, found from what the service really answered at this view, are clicked: both must open their own card (a layer that draws one marker of many fails here). */
-  const CARD_ROWS = [["ms_deq_ust", "env", 34.959, -89.8306, 17, /MUSTER_Scaled_v15\/MapServer\/10\/query/, "Tank status"], ["ms_deq_gard", "env", 34.9672, -89.7906, 15, /MUSTER_Scaled_v15\/MapServer\/12\/query/, "State status|Federal status|Program|Main contaminant|Address"], ["ms_dams", "flood", 34.9691, -89.8427, 15, /MSDamsApp\/MapServer\/0\/query/, "Hazard class"]];
+  const CARD_ROWS = [["ms_deq_ust", "env", 34.959, -89.8306, 17, /MUSTER_Scaled_v15\/MapServer\/10\/query/, "Tank status"], ["ms_deq_gard", "env", 32.3, -90.1775, 15, /MUSTER_Scaled_v15\/MapServer\/12\/query/, "State status|Federal status|Program|Main contaminant|Address"], ["ms_dams", "flood", 34.9691, -89.8427, 15, /MSDamsApp\/MapServer\/0\/query/, "Hazard class"]];
   for (const [id, group, lat, lng, zoom, re, rowLabel] of CARD_ROWS) {
     await page.evaluate(([a, b, z]) => window.__mapFinderMap.setView([a, b], z, { animate: false }), [lat, lng, zoom]);
     await sleep(1200);
