@@ -106,6 +106,6 @@ describe("no hover restyle anywhere in the layer code", () => {
 describe("a boundary's fill never catches a click meant for the layer under it", () => {
   it("index.css makes boundary paths answer on their outline only", () => {
     const css = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
-    expect(css).toMatch(/path\.pf-boundary-hit\.leaflet-interactive\s*\{\s*pointer-events:\s*visibleStroke/);
+    expect(css).toMatch(/\.leaflet-pane > svg path\.pf-boundary-hit\.leaflet-interactive\s*\{\s*pointer-events:\s*visibleStroke/);
   });
 });
