@@ -28,7 +28,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SRC = fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url));
+/* The planner AS TEXT: SitePlanner.jsx plus the modules extracted from it (B1064) — the Drainage / Yield panels now live in
+ * components/YieldDrainagePanels.jsx, and a gate that read only SitePlanner.jsx would throw on every moved anchor. */
+import { plannerSource } from "../test/helpers/plannerSource.js";
 const BUDGETS = fileURLToPath(new URL("./panel-copy-budget.json", import.meta.url));
 
 /* An interpolation costs this much budget: a rendered number/label is typically ~12 chars, and
@@ -273,7 +275,7 @@ function dedupe(items) {
 
 /* Measure every region. Throws on a missing anchor rather than silently reporting zero — a guard
  * that quietly measures nothing is worse than no guard at all. */
-export function measurePanels(source = readFileSync(SRC, "utf8")) {
+export function measurePanels(source = plannerSource()) {
   const out = {};
   for (const r of REGIONS) {
     let prepared, items;

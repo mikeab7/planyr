@@ -12,8 +12,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { canvasBox, nextCanvasSize, framePad, CANVAS_MIN_PX } from "../src/workspaces/site-planner/lib/canvasBox.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const PLANNER = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const PLANNER = plannerSource();
 
 describe("canvasBox — the box is the measured rect, at every size", () => {
   it("passes a narrow pane through unfloored (the owner's case: 152 px wide)", () => {

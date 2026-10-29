@@ -10,6 +10,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { validateName, fileSafe, resolveProjectName, setPendingProjectName, clearPendingProjectName, NAME_MAX } from "../src/shared/names/nameCore.js";
 import { sheetFileName } from "../src/workspaces/site-planner/lib/printSheet.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const walk = (d, out = []) => {
   for (const f of readdirSync(d)) {
@@ -45,7 +46,7 @@ describe("no component seeds state from a name", () => {
   });
 
   it("SitePlanner never holds siteLabel/planLabel as state again", () => {
-    const s = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const s = plannerSource();
     expect(s).not.toMatch(/\[siteLabel, setSiteLabel\]/);
     expect(s).not.toMatch(/\[planLabel, setPlanLabel\]/);
     expect(s).toMatch(/useProjectName\(groupId/);

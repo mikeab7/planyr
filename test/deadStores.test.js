@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collect, compare } from "../ui-audit/dead-store-audit.mjs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const baseline = JSON.parse(readFileSync(resolve(here, "../ui-audit/dead-store-baseline.json"), "utf8"));
@@ -33,7 +34,7 @@ describe("B1128 · no NEW computed-but-never-read value may land", () => {
     // The item that started this: assigned by every branch of the detention verdict block, read by
     // none. Deleted in B1110 rather than rendered (rendering them would duplicate the verdict strip's
     // number — PANEL-BREVITY rule 5). This asserts the names cannot creep back.
-    const src = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const src = plannerSource();
     for (const name of ["detVerdict", "detTone", "detSub"]) {
       // Allowed in prose (the comments explaining why they are gone); never as a declaration.
       expect(src, name).not.toMatch(new RegExp(`(let|const|var)\\s[^\\n]*\\b${name}\\b\\s*=`));

@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { assemblyIntegrity, assemblyTears, tearPayload, ASSEMBLY_TEAR_TOL_FT } from "../src/workspaces/site-planner/lib/assemblyIntegrity.js";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
@@ -515,7 +516,7 @@ describe("race 6 — undo of a multi-select move spanning two assemblies", () =>
  * editing SitePlanner, not by editing this module. These guards fail if a seam is removed — the
  * enumeration in the backlog item is the specification, and this is its enforcement. */
 describe("every seam that can put a child on the canvas or on the wire runs the guard", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("the guard exists and is LOUD on both channels (detected + healed)", () => {
     expect(src).toMatch(/const assemblyGuard = \(list, seam\) =>/);
@@ -531,8 +532,9 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
     // realtime tombstone's removal via applyRemoteInstr) REPLACES it outright, discarding the
     // removal. The mutation check below replays the old bare-value shape and proves it is wrong.
     const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/setEls\(\(cur\) => /);
-    expect(block).not.toMatch(/setEls\(guarded\);/);
+    // (B2498961: the guard writes through `setElsRaw` — it RESTORES geometry and must never be re-interpreted by the drive-follow wrapper.)
+    expect(block).toMatch(/setEls(Raw)?\(\(cur\) => /);
+    expect(block).not.toMatch(/setEls(Raw)?\(guarded\);/);
   });
 
   it("MUTATION CHECK — a bare `setEls(guarded)` at the canvas seam would discard a same-batch functional update", () => {

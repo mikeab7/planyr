@@ -43,8 +43,11 @@ import { displayFor, displayKindFor, displayColorFor, cellColorKind } from "../l
 import { fitGeneralNumber } from "../lib/generalFit.js";
 import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
+import { axisVelocity, axisIndexAt } from "../lib/dragAutoscroll.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
 import { editorHasFocus, fallbackEditAction, applyFallbackEdit } from "../lib/editorFallback.js";
+import { createEditHistory, recordEdit, undoEdit, redoEdit } from "../lib/cellEditHistory.js";
+import { undoKeyKind, CELL_EDITING_ATTR } from "../lib/undoKeyScope.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 // SPACE.sm / SPACE.md / CONTROL_H.md are used below as the LITERAL values 6 / 8 / 26
 // (src/shared/ui/designTokens.js), never imported — this file is lazy-loaded only on the
@@ -54,6 +57,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 // Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
+import { cellPadding, canSpill, spillSpanWidth } from "../lib/cellTextLayout.js";
 import ContextMenu from "./ContextMenu.jsx";
 import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
 import { pinDragCursor } from "../../../shared/ui/controls.jsx";
@@ -245,7 +249,16 @@ const SheetView = forwardRef(function SheetView({
   const [edit, setEdit] = useState(null);      // { r, c } | null
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef(null);
-  const dragRef = useRef(null);                // { r, c } anchor while mouse-dragging a range
+  // NEW-1 (2026-10-29) — the editor's OWN undo (lib/cellEditHistory.js). `editValueRef` mirrors
+  // `editValue` synchronously so a burst of keystrokes can never read a stale value.
+  const editValueRef = useRef("");
+  const editHistoryRef = useRef(null);
+  const putEditValue = useCallback((next, record = true) => {
+    editValueRef.current = next;
+    setEditValue(next);
+    if (record) editHistoryRef.current = recordEdit(editHistoryRef.current, next);
+  }, []);
+  const rangeDragRef = useRef(null);           // the in-flight range drag's session ({ stop }) — see beginRangeDrag
   const [renaming, setRenaming] = useState(null); // colIndex | null
   const [contextMenu, setContextMenu] = useState(null); // { point:{x,y}, items } | null
   // Live LOCAL preview during a column/row drag-resize — see the file header for why this is
@@ -448,6 +461,11 @@ const SheetView = forwardRef(function SheetView({
   const frozenRowIdxs = [];
   for (let r = 0; r < freezeRows; r++) frozenRowIdxs.push(r);
 
+  // Live geometry for beginRangeDrag's window listeners / rAF loop, which outlive the render that
+  // started them and must never read a stale offset table.
+  const geomRef = useRef(null);
+  geomRef.current = { rowOffsets, colOffsets, headerH, freezeRows, freezeCols, sheet };
+
   const r1 = selRange ? Math.min(selRange.r1, selRange.r2) : 0;
   const r2 = selRange ? Math.max(selRange.r1, selRange.r2) : 0;
   const c1 = selRange ? Math.min(selRange.c1, selRange.c2) : 0;
@@ -465,24 +483,32 @@ const SheetView = forwardRef(function SheetView({
   // here is marked via `markProgrammaticScroll` right before it happens — that's what lets
   // ContextMenu's scroll-dismiss listener tell this deliberate, app-initiated nudge apart from a
   // real user scroll without racing it. See shared/ui/programmaticScroll.js for why.
-  useLayoutEffect(() => {
+  // NEW-1 (B2452528) — the body below is `revealCell`, so the MOVING END of a shift-extended
+  // range (shift+arrows, shift+click) can be scrolled into view too: the effect only watches the
+  // ANCHOR (activeR/activeC), which does not move while a range grows, so extending past the
+  // visible edge used to leave the new end off screen.
+  const revealCell = (rr, cc) => {
     const el = outerRef.current;
-    if (!el || edit) return;
-    // A frozen row/column is ALWAYS visible (sticky) — moving the active cell into one never
-    // needs a scroll. Moving into the SCROLLING region might land somewhere off-screen, so:
-    // reveal it just past the frozen band's reserved space, or just inside the far edge.
-    if (activeR >= freezeRows) {
-      const cellTop = headerH + rowOffsets[activeR], cellBottom = headerH + rowOffsets[activeR + 1];
+    if (!el) return;
+    if (rr >= freezeRows) {
+      const cellTop = headerH + rowOffsets[rr], cellBottom = headerH + rowOffsets[rr + 1];
       const frozenBandBottom = el.scrollTop + headerH + rowOffsets[freezeRows];
       if (cellTop < frozenBandBottom) { markProgrammaticScroll(el); el.scrollTop = cellTop - headerH - rowOffsets[freezeRows]; }
       else if (cellBottom > el.scrollTop + el.clientHeight) { markProgrammaticScroll(el); el.scrollTop = cellBottom - el.clientHeight; }
     }
-    if (activeC >= freezeCols) {
-      const cellLeft = colOffsets[activeC], cellRight = colOffsets[activeC + 1];
+    if (cc >= freezeCols) {
+      const cellLeft = colOffsets[cc], cellRight = colOffsets[cc + 1];
       const frozenBandRight = el.scrollLeft + colOffsets[freezeCols];
       if (cellLeft < frozenBandRight) { markProgrammaticScroll(el); el.scrollLeft = cellLeft - colOffsets[freezeCols]; }
       else if (cellRight > el.scrollLeft + el.clientWidth) { markProgrammaticScroll(el); el.scrollLeft = cellRight - el.clientWidth; }
     }
+  };
+  useLayoutEffect(() => {
+    if (edit) return;
+    // A frozen row/column is ALWAYS visible (sticky) — moving the active cell into one never
+    // needs a scroll. Moving into the SCROLLING region might land somewhere off-screen, so:
+    // reveal it just past the frozen band's reserved space, or just inside the far edge.
+    revealCell(activeR, activeC);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeR, activeC]);
 
@@ -508,8 +534,10 @@ const SheetView = forwardRef(function SheetView({
     if (!col) return;
     setSelRange({ r1: r, r2: r, c1: c, c2: c });
     setEdit({ r, c });
-    setEditValue(seed != null ? seed : rawAt(sheet, r, c));
-  }, [sheet, setSelRange]);
+    const original = rawAt(sheet, r, c);
+    editHistoryRef.current = createEditHistory(original);
+    putEditValue(seed != null ? seed : original);
+  }, [sheet, setSelRange, putEditValue]);
 
   const cellClick = (r, c, e) => {
     // B1076480 — a RIGHT mousedown landing INSIDE an already-selected multi-cell range must
@@ -523,16 +551,95 @@ const SheetView = forwardRef(function SheetView({
     if (e.button === 2 && r >= r1 && r <= r2 && c >= c1 && c <= c2) return;
     outerRef.current?.focus();
     if (edit) commitEdit(null);
-    if (e.shiftKey && selRange) setSelRange({ r1: selRange.r1, r2: r, c1: selRange.c1, c2: c });
+    const anchor = e.shiftKey && selRange ? { r: selRange.r1, c: selRange.c1 } : { r, c };
+    if (e.shiftKey && selRange) { setSelRange({ r1: selRange.r1, r2: r, c1: selRange.c1, c2: c }); revealCell(r, c); }
     else setSelRange({ r1: r, r2: r, c1: c, c2: c });
-    dragRef.current = { r, c };
+    if (e.button === 0) {
+      beginRangeDrag("cell", e, (rr, cc) => setSelRange({ r1: anchor.r, r2: rr, c1: anchor.c, c2: cc }));
+    }
   };
-  const cellMouseEnter = (r, c) => { if (dragRef.current) setSelRange({ r1: dragRef.current.r, r2: r, c1: dragRef.current.c, c2: c }); };
+
+  // NEW-1 (B2452528) — ONE drag session for every gesture that extends a range (cell drag-select,
+  // column-header drag, row-header drag, the fill handle). It replaced the per-cell `onMouseEnter`
+  // extension + "stop when the pointer leaves the grid", which is why a drag could never reach past
+  // the visible rows: the cell under the pointer is now found by COORDINATES against the full
+  // row/column offset tables (so a virtualised, un-rendered row is still reachable), and while the
+  // pointer sits at/past an edge of the scroll area a rAF loop keeps scrolling and re-targeting —
+  // even with the mouse held perfectly still (a pointermove-only driver stops the moment you stop
+  // moving). Speed ramps with the distance past the edge (lib/dragAutoscroll.js).
+  // Window-level pointer listeners, not setPointerCapture: browsers already deliver a held-button
+  // drag's pointermove/pointerup to the window even outside the page, and capture on the grid would
+  // retarget the following click and break double-click-to-edit on cells.
+  // kind: "cell" | "col" | "row" | "fill". `apply(r, c)` gets the cell the selection should reach
+  // (r null for "col", c null for "row", c null for "fill"); `onEnd(reason)` — "up" | "cancel".
+  const beginRangeDrag = (kind, startEvent, apply, onEnd) => {
+    rangeDragRef.current?.stop("cancel");
+    const el = outerRef.current;
+    if (!el) return;
+    const wantRows = kind !== "col", wantCols = kind === "cell" || kind === "col";
+    const pointer = { x: startEvent.clientX, y: startEvent.clientY };
+    let raf = 0, lastT = 0, lastKey = "";
+    const reach = () => {
+      const g = geomRef.current;
+      const rect = el.getBoundingClientRect();
+      const r = wantRows ? axisIndexAt({ offsets: g.rowOffsets, pos: pointer.y - rect.top, scroll: el.scrollTop, origin: g.headerH, frozenCount: g.freezeRows, viewSize: el.clientHeight }) : null;
+      let c = wantCols ? axisIndexAt({ offsets: g.colOffsets, pos: pointer.x - rect.left, scroll: el.scrollLeft, origin: 0, frozenCount: g.freezeCols, viewSize: el.clientWidth }) : null;
+      // A merged span answers as its anchor cell, exactly as the old per-cell mouseenter did.
+      if (kind === "cell" && c != null) { const m = mergeAt(g.sheet, r, c); if (m) c = m.c1; }
+      const key = `${r}:${c}`;
+      if (key !== lastKey) { lastKey = key; apply(r, c); }
+    };
+    const tick = (now) => {
+      raf = requestAnimationFrame(tick);
+      const dt = lastT ? Math.min(64, now - lastT) : 16;
+      lastT = now;
+      const g = geomRef.current;
+      const rect = el.getBoundingClientRect();
+      if (wantRows) {
+        const v = axisVelocity(pointer.y - rect.top, g.headerH + g.rowOffsets[g.freezeRows], el.clientHeight);
+        if (v) el.scrollTop += (v * dt) / 1000;
+      }
+      if (wantCols) {
+        const v = axisVelocity(pointer.x - rect.left, g.colOffsets[g.freezeCols], el.clientWidth);
+        if (v) el.scrollLeft += (v * dt) / 1000;
+      }
+      reach(); // re-target every frame: scrolling moves which cell sits under a still pointer
+    };
+    const onMove = (ev) => {
+      if (ev.pointerType === "mouse" && ev.buttons === 0) { stop("up"); return; } // a release we never saw
+      pointer.x = ev.clientX; pointer.y = ev.clientY;
+      reach();
+    };
+    const onUp = (ev) => {
+      const outside = !el.contains(ev.target);
+      stop("up");
+      if (outside) onSelectionSettled?.(); // a release inside the grid reaches stopDrag's own mouseup
+    };
+    const onCancel = () => stop("cancel");
+    const stop = (reason) => {
+      if (rangeDragRef.current !== session) return;
+      rangeDragRef.current = null;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("blur", onCancel);
+      onEnd?.(reason);
+    };
+    const session = { stop };
+    rangeDragRef.current = session;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("blur", onCancel);
+    raf = requestAnimationFrame(tick);
+  };
+  useEffect(() => () => rangeDragRef.current?.stop("cancel"), []);
   // B1007281 — Format Painter. `stopDrag` is the one place every click-OR-drag selection on the
   // sheet finishes (a plain click and a drag-to-select both end here), so it's the natural hook
   // for "a new selection just settled" — ModelApp uses it to apply an armed painter's captured
   // look to whatever the user just clicked or dragged across, a no-op otherwise.
-  const stopDrag = () => { dragRef.current = null; onSelectionSettled?.(); };
+  const stopDrag = () => { rangeDragRef.current?.stop("up"); onSelectionSettled?.(); };
 
   const jumpTo = (r, c) => setSelRange({ r1: r, r2: r, c1: c, c2: c });
 
@@ -544,6 +651,23 @@ const SheetView = forwardRef(function SheetView({
     // after the very first keystroke.
     if (renaming != null) return;
     if (edit) {
+      // NEW-1 (2026-10-29) — Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while a cell is being edited act on the
+      // EDITOR'S text only (Excel). They must never reach the app's sheet-level undo in ModelApp,
+      // whether the key came from the input or — in the B1287888 window — the grid container.
+      // Nothing left to undo abandons the edit back to the cell's original value.
+      const undoKind = undoKeyKind(e);
+      if (undoKind) {
+        e.preventDefault(); e.stopPropagation();
+        if (undoKind === "undo") {
+          const u = undoEdit(editHistoryRef.current);
+          if (u.atStart) cancelEdit();
+          else { editHistoryRef.current = u.history; putEditValue(u.value, false); }
+        } else {
+          const rd = redoEdit(editHistoryRef.current);
+          if (rd.changed) { editHistoryRef.current = rd.history; putEditValue(rd.value, false); }
+        }
+        return;
+      }
       if (e.key === "Enter") { e.preventDefault(); commitEdit(e.shiftKey ? "up" : "down"); }
       else if (e.key === "Tab") { e.preventDefault(); commitEdit(e.shiftKey ? "left" : "right"); }
       else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
@@ -558,7 +682,7 @@ const SheetView = forwardRef(function SheetView({
       // falls through untouched. See lib/editorFallback.js for the full mechanism.
       else if (!editorHasFocus(e.target, inputRef.current)) {
         const action = fallbackEditAction(e.key, e);
-        if (action) { e.preventDefault(); setEditValue((v) => applyFallbackEdit(v, action, e.key)); }
+        if (action) { e.preventDefault(); putEditValue(applyFallbackEdit(editValueRef.current, action, e.key)); }
       }
       return;
     }
@@ -581,14 +705,14 @@ const SheetView = forwardRef(function SheetView({
         const dc = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
         const hasContent = (rr, cc) => rawAt(sheet, rr, cc) !== "";
         const target = ctrlArrowTarget(hasContent, sheet.rowCount, cols.length, activeR, activeC, dr, dc);
-        if (shift) setSelRange({ r1: activeR, c1: activeC, r2: target.r, c2: target.c });
+        if (shift) { setSelRange({ r1: activeR, c1: activeC, r2: target.r, c2: target.c }); revealCell(target.r, target.c); }
         else jumpTo(target.r, target.c);
         return;
       }
       if (k === "c") { e.preventDefault(); onCopy(r1, r2, c1, c2); return; }
       if (k === "v") { e.preventDefault(); onPaste(activeR, activeC, r1, r2, c1, c2); return; }
       if (k === "d") { e.preventDefault(); onFillDown(r1, r2, c1, c2); return; }
-      return; // leave every other Ctrl/Cmd chord (the app's own undo/redo, Find, name-box Go To) alone
+      return; // leave every other Ctrl/Cmd chord (the app's own undo/redo, Find, name-box Go To) alone — undo/redo only reach ModelApp here, with NO cell editor open (see the edit branch above)
     }
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
@@ -596,7 +720,9 @@ const SheetView = forwardRef(function SheetView({
       const dc = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
       if (shift) {
         const base = selRange || { r1: 0, r2: 0, c1: 0, c2: 0 };
-        setSelRange({ r1: base.r1, c1: base.c1, r2: Math.max(0, Math.min(totalRows - 1, base.r2 + dr)), c2: stepCol(cols.length, base.c2, dc) });
+        const er = Math.max(0, Math.min(totalRows - 1, base.r2 + dr)), ec = stepCol(cols.length, base.c2, dc);
+        setSelRange({ r1: base.r1, c1: base.c1, r2: er, c2: ec });
+        revealCell(er, ec); // the moving END of the range, not the anchor the effect watches
       } else {
         const nr = Math.max(0, Math.min(totalRows - 1, activeR + dr));
         const nc = stepCol(cols.length, activeC, dc);
@@ -680,29 +806,23 @@ const SheetView = forwardRef(function SheetView({
     fillDragRef.current = source;
     fillToRef.current = r2;
     setFillTo(r2);
-    const el = outerRef.current;
-    const onMove = (ev) => {
-      if (!fillDragRef.current || !el) return;
-      const rect = el.getBoundingClientRect();
-      const y = ev.clientY - rect.top + el.scrollTop - headerH;
-      const row = Math.max(source.r1, Math.min(totalRows - 1, rowAtOffset(rowOffsets, y)));
-      fillToRef.current = row;
-      setFillTo(row);
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+    // NEW-1 (B2452528) — rides the shared drag session, so dragging the handle past the bottom edge
+    // scrolls and keeps filling further, like cell drag-select does.
+    beginRangeDrag("fill", e, (row) => {
+      const target = Math.max(source.r1, Math.min(totalRows - 1, row));
+      fillToRef.current = target;
+      setFillTo(target);
+    }, (reason) => {
       releaseCursor();
       const src = fillDragRef.current;
       const target = fillToRef.current;
       fillDragRef.current = null;
       fillToRef.current = null;
       setFillTo(null);
-      if (src && target != null && target > r2) onFillDown(src.r1, target, src.c1, src.c2);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, [r1, r2, c1, c2, rowOffsets, headerH, totalRows, onFillDown]);
+      if (reason === "up" && src && target != null && target > r2) onFillDown(src.r1, target, src.c1, src.c2);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r1, r2, c1, c2, totalRows, onFillDown]);
 
   // Double-click autofit. Column: measure every ROW's rendered text in that column (not just
   // the visible slice — a value off-screen must still count) via canvas metrics, size to the
@@ -849,6 +969,18 @@ const SheetView = forwardRef(function SheetView({
       <div key={r} style={{ ...posStyle, left: 0, display: "flex", height: h, width: totalW, zIndex: rowZ, boxShadow: isLastFrozenRow ? "0 2px 4px -1px rgba(0,0,0,0.18)" : undefined, outline: isFillTarget ? "2px dashed var(--accent-model)" : undefined, outlineOffset: -1 }}> {/* design-exempt: no shadow-color token yet repo-wide (matches the zoom control's own shadow below) */}
         <div
           data-testid={`model-row-header-${r}`}
+          onMouseDown={(e) => {
+            // NEW-1 — the row-number gutter selects the whole row; dragging down/up extends it to
+            // the rows under the pointer (autoscrolling past the edge). The resize strip inside it
+            // stops propagation, so a resize drag never lands here.
+            if (e.button !== 0) return;
+            e.preventDefault();
+            outerRef.current?.focus();
+            if (edit) commitEdit(null);
+            const lastCol = cols.length - 1;
+            setSelRange({ r1: r, r2: r, c1: 0, c2: lastCol });
+            beginRangeDrag("row", e, (rr) => setSelRange({ r1: r, r2: rr, c1: 0, c2: lastCol }));
+          }}
           onContextMenu={(e) => openRowMenu(e, r)}
           onMouseEnter={() => setHoverRow(r)}
           onMouseLeave={() => setHoverRow((h) => (h === r ? null : h))}
@@ -896,16 +1028,21 @@ const SheetView = forwardRef(function SheetView({
           // clip instead, matching Excel). The spilled span is `pointer-events: none` so the
           // empty cells underneath stay their own real click targets — spilling is purely
           // visual, never a merge. A merged anchor never spills — it already owns real width.
+          // The gate (`canSpill`) and the text padding (`pad`, below) are shared with the non-spill path,
+          // so clearing or refilling a neighbour changes how FAR a label runs, never where it starts.
+          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
           let spillCols = 0;
-          if (!merge && row && cell.kind === "text" && !cell.empty && !isEditing) {
+          if (row && canSpill({ kind: cell.kind, empty: cell.empty, merged: !!merge, editing: isEditing, align: hAlign, wrap: cellStyle.wrap })) {
             for (let cc = c + 1; cc < cols.length && row[cc] && row[cc].empty; cc++) spillCols++;
           }
           const w = merge ? (() => { let sum = 0; for (let k = merge.c1; k <= merge.c2; k++) sum += renderColW(k); return sum; })() : renderColW(c);
+          // ONE padding for the in-cell path, the spill span and the General-number fit; an indent only
+          // insets the text on its reading side and can never make the box wider than its column (NEW-2).
+          const pad = cellPadding({ indent: cellStyle.indent, align: hAlign, zoom, width: w });
           const spillWidth = spillCols > 0 ? (() => { let sum = w; for (let k = 1; k <= spillCols; k++) sum += renderColW(c + k); return sum; })() : null;
           // Explicit style overrides the kind-based default alignment; an ABSENT valign still
           // means vertically CENTERED — this app's own existing default for every cell, not
           // Excel's "bottom" (see Ribbon.jsx's AlignmentGroup for why that distinction matters).
-          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
           const vAlign = cellStyle.valign === "top" ? "flex-start" : cellStyle.valign === "bottom" ? "flex-end" : "center";
           const border = cellStyle.border || {};
           const edgeCSS = (token) => (token === "double" ? `${3 * zoom}px double var(--text-primary)` : token === "thin" ? `${1.5 * zoom}px solid var(--text-primary)` : "1px solid var(--border-default)");
@@ -929,11 +1066,10 @@ const SheetView = forwardRef(function SheetView({
           if (!merge && cell.kind === "number" && cell.display !== "" && formatAt(sheet, r, c) == null) {
             const rawNum = Number(cell.display);
             if (Number.isFinite(rawNum)) {
-              const padX = (6 + (cellStyle.indent || 0) * 14) * zoom;
               // -1 for the cell's own right border, and a little slack so a canvas-measured
               // "fits" doesn't land 1-2px inside the DOM's own actual (slightly different font
               // hinting) rendered width and still trip the ellipsis below.
-              const availableWidthPx = Math.max(0, w - 2 * padX - 6 * zoom);
+              const availableWidthPx = Math.max(0, w - pad.left - pad.right - 6 * zoom);
               const numFont = `${cellStyle.bold ? "700 " : ""}${(cellStyle.fontSize || 12.5) * zoom}px ${cellStyle.fontFamily || "system-ui, sans-serif"}`;
               shownText = fitGeneralNumber(rawNum, availableWidthPx, (s) => measureTextWidth(s, numFont));
             }
@@ -949,7 +1085,6 @@ const SheetView = forwardRef(function SheetView({
               data-merged={merge ? "true" : undefined}
               data-formula={cell.isFormula ? "true" : undefined}
               onMouseDown={(e) => { e.preventDefault(); cellClick(r, c, e); }}
-              onMouseEnter={() => cellMouseEnter(r, c)}
               onDoubleClick={() => startEdit(r, c, null)}
               onContextMenu={(e) => openCellMenu(e, r, c)}
               style={{
@@ -974,7 +1109,7 @@ const SheetView = forwardRef(function SheetView({
                 boxSizing: "border-box",
                 display: "flex", alignItems: vAlign,
                 justifyContent: hAlign === "right" ? "flex-end" : hAlign === "center" ? "center" : "flex-start",
-                padding: isEditing ? 0 : `0 ${(6 /* SPACE.sm literal — see designTokens.js note above */ + (cellStyle.indent || 0) * 14) * zoom}px`,
+                padding: isEditing ? 0 : `0 ${pad.right}px 0 ${pad.left}px`, // CELL_PAD_PX (SPACE.sm literal — see designTokens.js note above) + the indent on the reading side only
                 borderTop: border.top ? edgeCSS(border.top) : undefined,
                 borderLeft: border.left ? edgeCSS(border.left) : undefined,
                 borderRight: border.right ? edgeCSS(border.right) : "1px solid var(--border-default)",
@@ -1014,7 +1149,7 @@ const SheetView = forwardRef(function SheetView({
                   ref={inputRef}
                   autoFocus
                   value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
+                  onChange={(e) => putEditValue(e.target.value)}
                   // Caret at the END on focus, never select-all: type-to-edit already
                   // seeds editValue with JUST the typed character (the "replace" half of
                   // the contract), so selecting it here would make the VERY NEXT keystroke
@@ -1025,7 +1160,7 @@ const SheetView = forwardRef(function SheetView({
                   style={{ width: "100%", height: "100%", boxSizing: "border-box", border: "none", padding: "0 7px", font: "inherit", fontVariantNumeric: "tabular-nums", background: "transparent", color: "inherit", textAlign: "inherit" }}
                 />
               ) : spillCols > 0 ? (
-                <span style={{ position: "absolute", left: 8 * zoom, top: 0, height: "100%", display: "flex", alignItems: "center", width: spillWidth - 16 * zoom, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
+                <span style={{ position: "absolute", left: pad.left, top: 0, height: "100%", display: "flex", alignItems: vAlign, width: spillSpanWidth(spillWidth, pad.left, pad.right), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
               ) : (
                 // B1076480 — this cell's own text-clipping wrapper (see the outer box's `overflow`
                 // comment above): `minWidth: 0` is required for a flex child to actually shrink
@@ -1104,8 +1239,9 @@ const SheetView = forwardRef(function SheetView({
       ref={outerRef}
       tabIndex={0}
       data-testid="model-sheet"
+      {...{ [CELL_EDITING_ATTR]: edit ? "true" : undefined }}
+      data-letters-are-text=""
       onMouseUp={stopDrag}
-      onMouseLeave={stopDrag}
       onKeyDown={onKeyDown}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       // NEW-1 (2026-10-29) — the grid runs EDGE TO EDGE: no side margin, no side borders, no rounded
@@ -1148,7 +1284,17 @@ const SheetView = forwardRef(function SheetView({
                 key={col.id}
                 data-testid={`model-col-header-${c}`}
                 onDoubleClick={() => setRenaming(c)}
-                onClick={() => setSelRange({ r1: 0, r2: totalRows - 1, c1: c, c2: c })}
+                onMouseDown={(e) => {
+                  // NEW-1 — press selects the column, dragging across headers extends to the
+                  // columns under the pointer (autoscrolling past the edge). The rename <input>
+                  // keeps its own mouse handling; the resize strip stops propagation itself.
+                  if (e.button !== 0 || e.target.closest?.("input")) return;
+                  e.preventDefault();
+                  outerRef.current?.focus();
+                  if (edit) commitEdit(null);
+                  setSelRange({ r1: 0, r2: totalRows - 1, c1: c, c2: c });
+                  beginRangeDrag("col", e, (_r, cc) => setSelRange({ r1: 0, r2: totalRows - 1, c1: c, c2: cc }));
+                }}
                 onContextMenu={(e) => openColMenu(e, c)}
                 onMouseEnter={() => setHoverCol(c)}
                 onMouseLeave={() => setHoverCol((h) => (h === c ? null : h))}

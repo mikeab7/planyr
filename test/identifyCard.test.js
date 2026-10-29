@@ -1,7 +1,7 @@
 /* B2507062 (NEW-7, owner constraint #45) — a layer's click card is CLEAN: plain labels, no raw field names, no empty / null rows, normal dates, short labelled links,
  * and the source behind the (i). The owner's list of offenders: ZONE, CASE_NO, Shape.STArea, OBJECTID, CONVERSION_STATUS. */
 import { describe, it, expect } from "vitest";
-import { humanLabel, looksRawLabel, cleanRow, cleanCard, niceDate, linkLabel, isEmptyText, cardNode } from "../src/workspaces/site-planner/lib/identifyCard.js";
+import { humanTitle, humanLabel, looksRawLabel, cleanRow, cleanCard, niceDate, linkLabel, isEmptyText, cardNode } from "../src/workspaces/site-planner/lib/identifyCard.js";
 import { featureCard, hoverRows } from "../src/workspaces/site-planner/lib/featureHover.js";
 import { DESOTO_LAYERS } from "../src/workspaces/site-planner/lib/desotoLayers.js";
 
@@ -83,5 +83,13 @@ describe("cardNode (the Map view popup)", () => {
     expect(flat).toContain("Ordinance");
     expect(flat).toContain("About this layer");
     expect(flat).toContain("display:none");
+  });
+});
+
+describe("humanTitle", () => {
+  it("turns a service's snake_case layer name into words and leaves ordinary titles alone", () => {
+    expect(humanTitle("TCEQ_Water_Districts: Houston Downtown Management District")).toBe("TCEQ Water Districts: Houston Downtown Management District");
+    expect(humanTitle("Zoning · Olive Branch")).toBe("Zoning · Olive Branch");
+    expect(cleanCard({ title: "TCEQ_Water_Districts: X", rows: [] }).title).toBe("TCEQ Water Districts: X");
   });
 });

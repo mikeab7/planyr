@@ -13,6 +13,7 @@ import {
   roadNetworkStats, resetRoadNetworkCaches, dissolveRingsSteps, dissolveRings, roadSurfaceRing,
 } from "../src/workspaces/site-planner/lib/roadNetwork.js";
 import { roadNetSteps, driveSteps, roadNetInputs, warmRoadNetFromEls } from "../src/workspaces/site-planner/lib/roadNetBuild.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const fixture = (f) => JSON.parse(readFileSync(new URL(`../ui-audit/fixtures/plan-load/${f}.json`, import.meta.url), "utf8"));
 const plan = (f) => {
@@ -93,7 +94,7 @@ describe("dissolve as steps / road ring cache", () => {
 });
 
 describe("wiring (source guards)", () => {
-  const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const sp = plannerSource();
   it("the render's memo drives the SAME steps the warm-up does", () => {
     expect(sp).toMatch(/const roadNet = useMemo\(\(\) => \{[\s\S]{0,400}return driveSteps\(roadNetSteps\(\{/);
     expect(sp).toMatch(/await warmRoadNetFromEls\(els, settings, tick\)/);

@@ -2,9 +2,10 @@
 // browser by ui-audit/verify-crop-leftovers.mjs; these keep the four decisions from being quietly undone.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const tool = readFileSync("src/shared/sitePlans/components/ImageCropTool.jsx", "utf8");
-const planner = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const planner = plannerSource();
 
 describe("crop tool leftovers", () => {
   it("Done saves ONLY the active mode's shape — no hidden rectangle/polygon rides along (NEW-5, supersedes B2066224)", () => {

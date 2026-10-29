@@ -21,13 +21,14 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { jurisdictionSegments, abbreviateJurisdiction } from "../src/workspaces/site-planner/lib/jurisdictionBadgeFit.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const header = read("src/shared/ui/AppHeader.jsx");
 const crumb = read("src/shared/ui/ProjectBreadcrumb.jsx");
 const badgeSrc = read("src/workspaces/site-planner/components/JurisdictionBadge.jsx");
-const planner = read("src/workspaces/site-planner/SitePlanner.jsx");
+const planner = plannerSource();
 
 /* THE OWNER'S OWN PILL, built through the real formatter — not a hand-written fixture. A hand-made
  * badge object tests the shortener against a shape the app may never produce. */
@@ -139,16 +140,16 @@ describe("the layout rule, read off the real source", () => {
     expect(header).toContain("...(narrow ? { flex: 1, ...zoneFixed }");
   });
 
-  it("both crumbs may shrink, and neither may be squeezed below the shared floor", () => {
+  it("both crumbs may shrink, and neither may be squeezed below the shared floor — but a short name is never padded to it (NEW-2)", () => {
     expect(crumb).toContain("export const CRUMB_MIN_W =");
     expect(crumb).toContain(`color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto",`);
     // NEW-4/B1343203 added a THIRD, tighter bound (the phone-narrow compact "…" affordance) —
     // the floor for the ordinary (non-compact) case is still exactly CRUMB_MIN_W.
-    expect(crumb).toContain(`maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : CRUMB_MIN_W`);
+    expect(crumb).toContain(`maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : crumbFloor(projectLabel, CRUMB_MIN_W)`);
     // The plan chip reads the SAME constant — two floors that can drift is how one of the pair
     // ends up squeezable again.
     expect(planner).toContain(`import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";`);
-    expect(planner).toContain("minWidth: CRUMB_MIN_W, whiteSpace: \"nowrap\"");
+    expect(planner).toContain("minWidth: crumbFloor(planLabel, CRUMB_MIN_W), whiteSpace: \"nowrap\"");
     // …and the row itself must be shrinkable, or the zone's overflow clips the last caret off.
     expect(crumb).toContain(`gap: 2, minWidth: 0, flex: "0 1 auto"`);
   });

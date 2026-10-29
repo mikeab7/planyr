@@ -40,7 +40,6 @@
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
-import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
@@ -51,6 +50,8 @@ import Ribbon, { AuditGroup } from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
+import { undoKeyKind, undoKeyOwner, CELL_EDITING_ATTR } from "./lib/undoKeyScope.js";
+import { isTextControl } from "../../shared/keyboard/keyScope.js";
 import {
   createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet, setActiveSheet,
   addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
@@ -58,7 +59,7 @@ import {
   commitCellText, blankRange, renameColumn, setNumberFormat, addColumn,
   formatAt, padRowCount, sheetsDiverge, rawAt,
   setColumnWidth, setRowHeight, setFreeze,
-  styleAt, setCellStyle, applyBorder, clearFormatting,
+  styleAt, setCellStyle, adjustIndent, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
   isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
 } from "./lib/sheetModel.js";
@@ -76,7 +77,7 @@ import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import {
-  readLocalSheet, writeLocalSheet, decideAnonAdoption, loadCloudSheet, saveCloudSheet,
+  readLocalSheet, writeLocalSheet, readSyncMeta, writeSyncMeta, decideAnonAdoption, loadCloudSheet, saveCloudSheet,
   readLocalOrgIndex, writeLocalOrgIndex, touchLocalOrgIndex, removeLocalOrgIndexEntry,
   listOrgWorkbooksCloud, loadOrgWorkbookCloud, saveOrgWorkbookCloud, renameOrgWorkbookCloud, deleteOrgWorkbookCloud,
 } from "./lib/modelStore.js";
@@ -97,7 +98,8 @@ import { parseSpreadsheetInWorker, exportWorkbookInWorker } from "./lib/spreadsh
 // `onProjectsChanged` shape exactly) so a live edit made in the still-mounted Site Planner tab
 // recalculates a formula here without a reload. `fetchAllComps` is the same async/Supabase-only
 // read CompsPanel.jsx uses — there is no synchronous comps cache anywhere in this repo.
-import { buildProjectNames, openConceptName, openPlanId } from "./lib/projectRefs.js";
+import { decideLoadSync, isPlaceholderWorkbook } from "./lib/modelSyncBase.js";
+import { buildProjectNames, openPlanId } from "./lib/projectRefs.js";
 import { onSiteModelChanged, isCloudActive } from "../site-planner/lib/storage.js";
 import { onCompsChanged } from "../../shared/comps/lib/compsChanged.js";
 import { supabase } from "../site-planner/lib/supabase.js";
@@ -175,7 +177,14 @@ export default function ModelApp({
   // File-menu UI (unchanged, reused verbatim) has anything to show.
   org = false,
 }) {
-  const { value: workbook, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
+  const { value: workbook, commit: commitRaw, undo: undoRaw, redo: redoRaw, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
+  // B2450528 — "the person changed it" vs "a load adopted it". Only commit/undo/redo raise this flag
+  // (reset never does), and the local write-through effect consumes it to mark the stored copy DIRTY
+  // (edited since it was last confirmed against the cloud — see lib/modelSyncBase.js).
+  const userEditRef = useRef(false);
+  const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
+  const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
+  const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
   // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
   // undo-tracked `workbook` value, the same way zoom/painter/filterOn already are below: a plain
   // tab click is navigation, not a content edit, and must never mint (or be reverted by) an undo
@@ -308,16 +317,18 @@ export default function ModelApp({
     };
   }, [openPlan]);
   const projectNames = useMemo(() => buildProjectNames(projectId, { comps, planRows }), [projectId, comps, siteTick, _projectsTick, planRows]);
-  // spreadsheet-concept-crumb (NEW-1) — the header dropped the concept/scheme segment the Site tab
-  // shows (Map / Project / Concept ▾), so once a project held more than one concept there was no
-  // way to tell, from this tab alone, which scheme's geometry Site.*/Plan.* were quoting — exactly
-  // the ambiguity #1516 fixed the RESOLUTION half of. Same trigger as `projectNames` above
-  // (`siteTick`, bumped by `onSiteModelChanged` — which a plan switch's `flushSite()` fires too, so
-  // this reads live the instant the Site tab's plan crumb changes), and the identical resolution
-  // (`openConceptName` shares `projectRefs.js`'s one `loadOpenSite`) — no second "which scheme is
-  // open" answer to drift from what the sheet is actually evaluating.
-  const conceptName = useMemo(() => openConceptName(projectId), [projectId, siteTick]);
+  // NEW-1 (2026-10-29) — no plan/concept crumb here: only the Site tab is plan-scoped, so the
+  // Spreadsheet header reads "Dashboard / <Project> ▾" (the old spreadsheet-concept-crumb is gone,
+  // and shared/ui/crumbScope.js would not draw a trailing crumb on this module anyway).
   const cloudVersionRef = useRef(null);
+  // B2450528 — the sync base (modelSyncBase.js): `baseVersionRef` = the cloud version this device's copy was
+  // last confirmed against, `dirtyRef` = it holds edits not yet confirmed uploaded, `workbookRef` = the
+  // workbook on screen RIGHT NOW (so a cloud answer that lands after a keystroke decides on the edited copy).
+  const baseVersionRef = useRef(null);
+  const dirtyRef = useRef(false);
+  const workbookRef = useRef(null);
+  workbookRef.current = workbook;
+  const [cloudSettled, setCloudSettled] = useState(false); // the cloud load has answered (any way) for this workbook
   const pushTimer = useRef(0);
   // V537648 — the debounced push reads these at FIRE time (lib/modelPushGate.js). `statusRef`
   // mirrors `status`; `divergedRef` is the divergence HOLD — a latch set synchronously the moment
@@ -566,50 +577,83 @@ export default function ModelApp({
     setDiverged(false);
     setStatus("idle");
     setCloudConfirmed(false);
+    setCloudSettled(false);
+    userEditRef.current = false;
+    baseVersionRef.current = null;
+    dirtyRef.current = false;
     if (fileMode) return undefined; // NEW-1 — a Library file is open: useFileWorkbook owns the load
     if (!openWorkbook) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
     const local = readLocalSheet(userId, storageKey);
+    // B2450528 — the sync base this device's stored copy carries. No stored copy = a placeholder the
+    // write-through is about to write: it is CLEAN (it can never win a fight with the cloud copy).
+    const meta0 = local ? readSyncMeta(userId, storageKey) : null;
+    if (!local) writeSyncMeta(userId, storageKey, { baseVersion: null, dirty: false });
+    baseVersionRef.current = meta0 ? meta0.baseVersion : null;
+    dirtyRef.current = !!(meta0 && meta0.dirty);
     const initialWorkbook = local ? migrateWorkbook(local) : createWorkbook();
     reset(initialWorkbook);
     setActiveSheetId(initialWorkbook.activeSheetId);
     setReady(true);
     let live = true;
+    /** Show `wb` as the on-screen copy and record the outcome in the sync base. Never a user edit. */
+    const adoptWorkbook = (wb, { base, dirty }) => {
+      userEditRef.current = false;
+      reset(wb);
+      setActiveSheetId(wb.activeSheetId);
+      baseVersionRef.current = base; dirtyRef.current = dirty;
+      writeSyncMeta(userId, storageKey, { baseVersion: base, dirty });
+    };
     (async () => {
-      const r = openProject ? await loadCloudSheet(projectId) : await loadOrgWorkbookCloud(orgWorkbookId);
+      let r;
+      try { r = openProject ? await loadCloudSheet(projectId) : await loadOrgWorkbookCloud(orgWorkbookId); }
+      catch (_) { r = { ok: false, reason: "error" }; }
       if (!live || loadTokenRef.current !== token) return;
       if (r.ok) {
         cloudVersionRef.current = r.version;
         setCloudConfirmed(true);
         // R3 — a workbook made signed-out (scope "local") is adopted once into this account's scope.
         const anon = openProject && userId && !local ? readLocalSheet(null, storageKey) : null;
+        const anonWb = anon ? migrateWorkbook(anon) : null;
         const adoption = decideAnonAdoption({ userId, userLocal: local, cloudSheet: r.sheet, cloudOk: true, anonLocal: anon,
-          diverges: anon && r.sheet ? sheetsDiverge(migrateWorkbook(anon), migrateWorkbook(r.sheet)) : false });
+          // A never-edited signed-out placeholder is not "a different copy" — it can't hold work.
+          diverges: anonWb && r.sheet ? sheetsDiverge(anonWb, migrateWorkbook(r.sheet)) && !isPlaceholderWorkbook(anonWb) : false });
+        const editedMeanwhile = dirtyRef.current; // a keystroke landed before the cloud answered
         if (adoption === "adopt") {
-          const adopted = migrateWorkbook(anon); // the write-through + debounced push effects persist it under this account
-          reset(adopted);
-          setActiveSheetId(adopted.activeSheetId);
-        } else if (!local && r.sheet) {
+          // the write-through + debounced push effects persist it under this account; it is unsynced work
+          adoptWorkbook(anonWb, { base: r.version, dirty: true });
+          setPushNonce((n) => n + 1);
+        } else if (!local && r.sheet && !editedMeanwhile) {
           const cloudWorkbook = migrateWorkbook(r.sheet);
-          if (adoption === "diverged") markDiverged({ device: migrateWorkbook(anon), cloud: cloudWorkbook, showing: "cloud" });
-          reset(cloudWorkbook);
-          setActiveSheetId(cloudWorkbook.activeSheetId);
-        } else if (local && r.sheet) {
-          // Both a local copy AND a saved cloud copy exist. "Local always wins on load" (the
-          // file header) means this device keeps showing ITS content — but if that content
-          // actually differs from what's in the cloud, the very next edit will silently
-          // overwrite the cloud copy at a clean version bump (no CAS conflict, because nothing
-          // raced — this device's `cloudVersionRef` is genuinely current). That is a real
-          // second-device data-loss path, not a hypothetical one, so it is surfaced loudly
-          // rather than left to happen quietly.
-          // ⛔ V537648 — and DETECTING it is not enough: the debounced push scheduled at mount
-          // (before this answer arrived) used to fire anyway and overwrite the cloud copy with no
-          // edit at all. `markDiverged` latches the hold the push body checks at fire time.
-          const localWorkbook = migrateWorkbook(local), cloudWorkbook = migrateWorkbook(r.sheet);
-          if (sheetsDiverge(localWorkbook, cloudWorkbook)) markDiverged({ device: localWorkbook, cloud: cloudWorkbook, showing: "device" });
+          if (adoption === "diverged") markDiverged({ device: anonWb, cloud: cloudWorkbook, showing: "cloud" });
+          adoptWorkbook(cloudWorkbook, { base: r.version, dirty: false });
+        } else {
+          // Both sides may hold something. "Local wins on load" is only safe when this device's copy is
+          // provably newer or equal; otherwise the very next edit would silently overwrite the other copy
+          // (a clean CAS bump — nothing raced). Decide from the sync base (lib/modelSyncBase.js), on the
+          // workbook as it is NOW (the person may have typed while the cloud was answering).
+          // ⛔ V537648 — and DETECTING a divergence is not enough: the debounced push scheduled at mount
+          // used to fire anyway. `markDiverged` latches the hold the push body checks at fire time.
+          const localNow = workbookRef.current || migrateWorkbook(local);
+          const cloudWorkbook = r.sheet ? migrateWorkbook(r.sheet) : null;
+          const meta = readSyncMeta(userId, storageKey);
+          const verdict = decideLoadSync({
+            local: localNow, cloud: cloudWorkbook, cloudVersion: r.version, meta,
+            sameContent: cloudWorkbook ? !sheetsDiverge(localNow, cloudWorkbook) : false,
+            localIsPlaceholder: isPlaceholderWorkbook(localNow),
+          });
+          if (verdict.action === "adopt-cloud") adoptWorkbook(cloudWorkbook, { base: r.version, dirty: false });
+          else if (verdict.action === "in-sync") { baseVersionRef.current = r.version; dirtyRef.current = false; writeSyncMeta(userId, storageKey, { baseVersion: r.version, dirty: false }); }
+          else if (verdict.action === "push-local") { dirtyRef.current = true; baseVersionRef.current = r.version; writeSyncMeta(userId, storageKey, { baseVersion: r.version, dirty: true }); setPushNonce((n) => n + 1); }
+          else if (verdict.action === "no-cloud-copy") {
+            dirtyRef.current = verdict.dirty;
+            writeSyncMeta(userId, storageKey, { baseVersion: null, dirty: verdict.dirty });
+            if (verdict.dirty) setPushNonce((n) => n + 1);
+          } else markDiverged({ device: localNow, cloud: cloudWorkbook, showing: "device" });
         }
       } else if (r.reason === "not-provisioned") {
         setStatus("not-provisioned");
       }
+      setCloudSettled(true);
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -626,7 +670,22 @@ export default function ModelApp({
     if (flipped) return;
     if (!ready || !openWorkbook || fileMode) return; // a Library file keeps its own safety copy (lib/fileDraft.js), never the project's slot
     if (!writeLocalSheet(userId, storageKey, workbook)) setStatus("error");
+    // B2450528 — a PERSON'S edit (commit/undo/redo — never a load's reset) makes the stored copy dirty:
+    // edited since it was last confirmed against the cloud version `baseVersionRef`.
+    if (userEditRef.current) {
+      userEditRef.current = false;
+      dirtyRef.current = true;
+      writeSyncMeta(userId, storageKey, { baseVersion: baseVersionRef.current, dirty: true });
+    }
   }, [workbook, ready, openWorkbook, storageKey, userId, fileMode]);
+
+  // B2450528 — a push landed: the stored copy is now confirmed against `version`, and clean unless something newer
+  // was typed while it was in flight.
+  const noteSynced = useCallback((version, pushedWorkbook) => {
+    baseVersionRef.current = version;
+    if (workbookRef.current === pushedWorkbook) dirtyRef.current = false;
+    writeSyncMeta(userId, storageKey, { baseVersion: version, dirty: dirtyRef.current });
+  }, [userId, storageKey]);
 
   /* Best-effort, debounced cloud push through the guarded save path. Reads `status` without
    * depending on it — this must fire only on a WORKBOOK change, not on every status transition
@@ -636,6 +695,7 @@ export default function ModelApp({
     if (!ready || !openWorkbook || !userId || fileMode) return undefined; // fileMode: the Library file is the save target
     if (status === "not-provisioned") return undefined; // stop hammering a table that isn't there yet
     if (divergedRef.current) return undefined; // V537648 — held until the user picks a copy
+    if (!cloudSettled || !dirtyRef.current) return undefined; // B2450528
     clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(() => {
       runCloudPush({
@@ -646,13 +706,14 @@ export default function ModelApp({
         setStatus,
         onSaved: (version) => {
           cloudVersionRef.current = version; setCloudConfirmed(true);
+          noteSynced(version, workbook);
           if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
         },
       });
     }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode]);
+  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode, cloudSettled]);
 
   /* V537648 — the ONLY two ways out of a divergence besides opening a different workbook. Both
    * are explicit user choices; neither deletes anything (the copy not chosen is reachable by
@@ -666,16 +727,23 @@ export default function ModelApp({
     setStatus("idle");
     setPushNonce((n) => n + 1);
   }, []);
+  // B2450528 — the choice is also the new sync base: keeping this device's copy is unsynced work based on the
+  // cloud version it was just shown against; using the cloud copy is clean against that same version.
   const onKeepDeviceCopy = useCallback(() => {
     const c = divergedCopiesRef.current;
     if (c && c.showing === "cloud") { commit(c.device); setActiveSheetId(c.device.activeSheetId); }
+    baseVersionRef.current = cloudVersionRef.current; dirtyRef.current = true;
+    writeSyncMeta(userId, storageKey, { baseVersion: baseVersionRef.current, dirty: true });
     releaseDivergence();
-  }, [commit, releaseDivergence]);
+  }, [commit, releaseDivergence, userId, storageKey]);
   const onUseCloudCopy = useCallback(() => {
     const c = divergedCopiesRef.current;
-    if (c && c.showing === "device") { commit(c.cloud); setActiveSheetId(c.cloud.activeSheetId); }
+    baseVersionRef.current = cloudVersionRef.current;
+    if (c && c.showing === "device") { commit(c.cloud); setActiveSheetId(c.cloud.activeSheetId); dirtyRef.current = true; }
+    else dirtyRef.current = false;
+    writeSyncMeta(userId, storageKey, { baseVersion: baseVersionRef.current, dirty: dirtyRef.current });
     releaseDivergence();
-  }, [commit, releaseDivergence]);
+  }, [commit, releaseDivergence, userId, storageKey]);
 
   // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
   // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
@@ -701,6 +769,14 @@ export default function ModelApp({
       }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
+      // NEW-1 (2026-10-29) — undo/redo belong to the TEXT being typed (cell editor, formula bar,
+      // Name Box, column rename, Find bar…): leave the key to the field's own native undo, or to
+      // SheetView's editor history. Only with no text control owning the keyboard does the sheet's
+      // undo stack fire. See lib/undoKeyScope.js.
+      if (undoKeyKind(e) && undoKeyOwner({
+        textControl: isTextControl(e.target),
+        cellEditorOpen: !!(e.target instanceof Element && e.target.closest(`[${CELL_EDITING_ATTR}]`)),
+      }) === "text") return;
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
@@ -1051,6 +1127,9 @@ export default function ModelApp({
   const onSetCellStyle = useCallback((patch) => {
     applyActive(setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch);
   }, [applyActive, selRange]);
+  const onAdjustIndent = useCallback((delta) => {
+    applyActive(adjustIndent, selRange.r1, selRange.r2, selRange.c1, selRange.c2, delta);
+  }, [applyActive, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
     applyActive(applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode });
   }, [applyActive, selRange]);
@@ -1138,7 +1217,7 @@ export default function ModelApp({
     activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
     painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
     canUndo, canRedo, onUndo: undo, onRedo: redo,
-    onSetCellStyle, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
+    onSetCellStyle, onAdjustIndent, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
     onFormatPainterToggle, onMergeToggle,
     onInsertRow: onRibbonInsertRow, onInsertColumn: onRibbonInsertColumn, onDeleteRow: onRibbonDeleteRow, onDeleteColumn,
     canDeleteColumn: sheet.columns.length > 1,
@@ -1159,30 +1238,6 @@ export default function ModelApp({
   const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
-  // spreadsheet-concept-crumb (NEW-1) — a trailing breadcrumb crumb, same slot/geometry the Site
-  // tab's own plan switcher occupies (ProjectBreadcrumb.jsx's `planSlot`), naming which concept the
-  // sheet's Site.*/Plan.* values are quoting. `null` (no trailing crumb at all) when the project has
-  // never touched the Site Planner — nothing to name, same as `Site.Acres` reading `#REF!` then.
-  // Read-only here on purpose: switching concepts is the Site tab's own affordance (its plan
-  // crumb), so this jumps there rather than duplicating that switcher's state/menu in this workspace.
-  const conceptCrumb = openProject && conceptName ? (
-    <button
-      type="button"
-      className="dbtn"
-      onClick={() => onShellSwitch?.("site-planner")}
-      title={`“${conceptName}” is the open scheme — its Site plan is what Site.*/Plan.* formulas read. Click to switch to the Site tab.`}
-      data-testid="model-concept-crumb"
-      style={{
-        display: "flex", alignItems: "center", gap: 5, flex: "0 1 auto", minWidth: CRUMB_MIN_W, maxWidth: 200,
-        height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
-        background: "transparent", cursor: "pointer", fontFamily: "inherit",
-        fontSize: 12, fontWeight: 500, color: "var(--chrome-text)", whiteSpace: "nowrap",
-      }}
-    >
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{conceptName}</span>
-    </button>
-  ) : null;
-
   return (
     <div data-testid="model-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
       <AppHeader
@@ -1198,7 +1253,6 @@ export default function ModelApp({
         onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         onSelectOrg={onSelectOrg}
-        planSlot={conceptCrumb}
         authControl={authControl}
         accountActive={accountActive}
         saveState={openWorkbook ? modelSaveState(shownStatus, accountActive, fileMode ? fw.cloudConfirmed : cloudConfirmed) : null}

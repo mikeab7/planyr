@@ -40,6 +40,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const code = (p) => readFileSync(resolve(here, p), "utf8")
@@ -76,7 +77,7 @@ describe("NEW-1 — the breadcrumb's project-privacy padlock is gone", () => {
     expect(gantt).toMatch(/rect x="3" y="11" width="18" height="11"/);
 
     // Site Planner canvas: parcel/markup/measurement/callout/element Lock-Unlock — real per-object locks.
-    const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const planner = plannerSource();
     expect(planner).toMatch(/const toggleParcelLock = /);
     expect(planner).toMatch(/const toggleMarkupLock = /);
     expect(planner).toMatch(/const toggleMeasureLock = /);
@@ -102,6 +103,6 @@ describe("NEW-1 — the breadcrumb's project-privacy padlock is gone", () => {
     // Nothing but the opening of the name's own <span> and (stripped) comments should remain
     // here — EXCEPT the NEW-4/B1343203 compact-crumb ternary, which is a real, deliberate branch
     // (not a leftover), so it's allowed to precede the span rather than banned outright.
-    expect(between.replace(/\s+/g, " ").trim()).toMatch(/^(\{\/\*[\s\S]*?\*\/\}\s*)*(\{crumbCompact \? \( <CollapsedCrumbIcon \/> \) : \( )?<span style=\{\{ overflow:/);
+    expect(between.replace(/\s+/g, " ").trim()).toMatch(/^(\{\/\*[\s\S]*?\*\/\}\s*)*(\{crumbCompact \? \( <CollapsedCrumbIcon \/> \) : \( )?<span (?:data-testid="[^"]*" )?(?:title=\{[^}]*\} )?style=\{\{ overflow:/);
   });
 });

@@ -7,8 +7,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SP = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const SP = plannerSource();
 const PT = readFileSync(new URL("../src/shared/ui/PriorityToolbar.jsx", import.meta.url), "utf8");
 
 describe("NEW-1 — File ▾ Google Earth export", () => {

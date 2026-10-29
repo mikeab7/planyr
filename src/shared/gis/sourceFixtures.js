@@ -457,6 +457,136 @@ export const SOURCE_FIXTURES = {
     { label: "Columbus area", point: [-84.9111, 32.4651], expectMinCount: 1 }, // live: 1
   ],
   },
+  gaRecharge: {
+  fixtures: [
+    { label: "Albany (Dougherty Plain)", point: [-84.16, 31.58], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Macon (Bibb)", point: [-83.63, 32.84], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Adairsville (Bartow)", point: [-84.93, 34.37], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaPollutionSusc: {
+  fixtures: [
+    { label: "Atlanta", point: [-84.39, 33.75], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Savannah", point: [-81.1, 32.08], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Albany", point: [-84.16, 31.58], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Rome", point: [-85.16, 34.26], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  gaProtectedRiver: {
+  fixtures: [
+    { label: "Rome \u2014 Etowah/Oostanaula/Coosa", bbox: [-85.21, 34.21, -85.11, 34.31], expectMinCount: 1 }, // live 2026-10-29: 11
+    { label: "Cartersville \u2014 Etowah", bbox: [-84.85, 34.12, -84.75, 34.22], expectMinCount: 1 }, // live 2026-10-29: 3
+    { label: "Augusta \u2014 Savannah River", bbox: [-82.03, 33.42, -81.93, 33.52], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  gaProtectedMountain: {
+  fixtures: [
+    { label: "Dahlonega\u2013Blairsville mountains", bbox: [-84.2, 34.4, -83.6, 34.95], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Rabun\u2013Towns mountains", bbox: [-83.8, 34.7, -83.6, 34.9], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaCarbonate: {
+  fixtures: [
+    { label: "Rome (Floyd) \u2014 Valley & Ridge carbonates", point: [-85.16, 34.26], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Cartersville (Bartow) \u2014 Knox/Conasauga", point: [-84.8, 34.17], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Albany (Dougherty) \u2014 Ocala/Suwannee limestone", point: [-84.16, 31.58], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaSolidWaste: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.49, 33.65, -84.29, 33.85], expectMinCount: 1 }, // live 2026-10-29: 32
+    { label: "Savannah", bbox: [-81.2, 32.0, -81.0, 32.2], expectMinCount: 1 }, // live 2026-10-29: 27
+    { label: "Valdosta", bbox: [-83.38, 30.73, -83.18, 30.93], expectMinCount: 1 }, // live 2026-10-29: 16
+  ],
+  },
+  gaBrownfields: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.49, 33.65, -84.29, 33.85], expectMinCount: 1 }, // live 2026-10-29: 478
+    { label: "Savannah", bbox: [-81.2, 32.0, -81.0, 32.2], expectMinCount: 1 }, // live 2026-10-29: 42
+    { label: "Augusta", bbox: [-82.07, 33.37, -81.87, 33.57], expectMinCount: 1 }, // live 2026-10-29: 15
+  ],
+  },
+  gaConservation: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.49, 33.65, -84.29, 33.85], expectMinCount: 1 }, // live 2026-10-29: 324
+    { label: "Albany", bbox: [-84.26, 31.53, -84.06, 31.63], expectMinCount: 1 }, // live 2026-10-29: 63
+    { label: "Savannah", bbox: [-81.2, 32.0, -81.0, 32.2], expectMinCount: 1 }, // live 2026-10-29: 45
+  ],
+  },
+  gaDams: {
+  fixtures: [
+    { label: "Griffin (Spalding)", bbox: [-84.36, 33.15, -84.16, 33.35], expectMinCount: 1 }, // live 2026-10-29: 33
+    { label: "Tifton (Tift)", bbox: [-83.61, 31.35, -83.41, 31.55], expectMinCount: 1 }, // live 2026-10-29: 36
+    { label: "Rome (Floyd)", bbox: [-85.26, 34.16, -85.06, 34.36], expectMinCount: 1 }, // live 2026-10-29: 6
+  ],
+  },
+  gaImpaired: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.45, 33.7, -84.35, 33.8], expectMinCount: 1 }, // live 2026-10-29: 7
+    { label: "Brunswick", bbox: [-81.55, 31.1, -81.45, 31.2], expectMinCount: 1 }, // live 2026-10-29: 13
+    { label: "Rome", bbox: [-85.2, 34.2, -85.1, 34.3], expectMinCount: 1 }, // live 2026-10-29: 9
+  ],
+  },
+  gaOpportunityZones: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.49, 33.65, -84.29, 33.85], expectMinCount: 1 }, // live 2026-10-29: 30
+    { label: "Albany", bbox: [-84.26, 31.53, -84.06, 31.63], expectMinCount: 1 }, // live 2026-10-29: 10
+    { label: "Savannah", bbox: [-81.2, 32.0, -81.0, 32.2], expectMinCount: 1 }, // live 2026-10-29: 8
+  ],
+  },
+  gaJobTaxCredit: {
+  fixtures: [
+    { label: "Atlanta (Fulton)", point: [-84.39, 33.75], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Savannah (Chatham)", point: [-81.1, 32.08], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Valdosta (Lowndes)", point: [-83.28, 30.83], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Rome (Floyd)", point: [-85.16, 34.26], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaMrpaCorridor: {
+  fixtures: [
+    { label: "Chattahoochee at Roswell/Johns Creek", point: [-84.3348, 33.9982], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Chattahoochee below Atlanta (Fulton)", point: [-84.8021, 33.5733], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaMrpaVegBuffer: {
+  fixtures: [
+    { label: "Roswell reach", point: [-84.3783, 33.9996], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "South Fulton reach", point: [-84.8086, 33.5738], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaMrpaImpBuffer: {
+  fixtures: [
+    { label: "Roswell reach", point: [-84.3818, 33.9965], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "South Fulton reach", point: [-84.822, 33.5338], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaMrpaTributaryBuffer: {
+  fixtures: [
+    { label: "Roswell reach", point: [-84.3348, 33.9982], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "South Fulton reach", point: [-84.8021, 33.5733], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaSwsw: {
+  fixtures: [
+    { label: "Henry County (Towaliga River)", point: [-84.2138, 33.349], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Fayette/Coweta (Cedar Creek Reservoir)", point: [-84.6914, 33.5207], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Rockdale/Gwinnett (Randy Poynter)", point: [-83.9401, 33.7855], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaSwswProtected: {
+  fixtures: [
+    { label: "Rockdale (Randy Poynter Reservoir)", point: [-83.9391, 33.7615], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Fayette/Coweta (Lake McIntosh)", point: [-84.6433, 33.4183], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Henry (Tussahaw Reservoir)", point: [-84.05, 33.379], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaSpaldingZoning: {
+  fixtures: [
+    { label: "Spalding County \u2014 Pomona/AR1", point: [-84.28, 33.265], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Spalding County \u2014 south", point: [-84.2, 33.18], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Spalding County \u2014 east", point: [-84.14, 33.3], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
   countyCa: {
   fixtures: [
     // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
@@ -1447,6 +1577,82 @@ export const SOURCE_DOCS = {
       "layer, so an empty result is never proof of none. A burial ground on the site is a hard constraint under Georgia " +
       "law, so the county and a survey are the real check.",
     },
+  gaRecharge: {
+  notes:
+    "Georgia Geologic Survey Hydrologic Atlas 18 (1989), 'Most Significant Ground-Water Recharge Areas of Georgia', as EPD republishes it. Rule 391-3-16-.02 defines a significant recharge area BY this map; local governments adopt the protective ordinance, so the county's own recharge-area overlay governs. A modeled 1989 map: screening, not a site hydrogeology.",
+  },
+  gaPollutionSusc: {
+  notes:
+    "Hydrologic Atlas 20 (1992) DRASTIC pollution-susceptibility classes. Rule 391-3-16-.02 uses HIGH / AVERAGE / LOW only INSIDE a significant recharge area to scale its standards; outside one the class carries no state requirement. WATER polygons are withheld from the layer.",
+  },
+  gaProtectedRiver: {
+  notes:
+    "DCA's compiled protected-river lines (perennial streams averaging 400 cfs or more per USGS; O.C.G.A. 12-2-8, Rule 391-3-16-.04). The rule asks local governments for a river-corridor plan with a 100-ft natural vegetative buffer each side measured from the banks; the local ordinance governs. DCA's lines are a planning map, not a survey.",
+  },
+  gaProtectedMountain: {
+  notes:
+    "DCA's analysis of land at or above 2,200 ft with 25% or steeper slope over at least 500 ft horizontally (O.C.G.A. 12-2-8 definition; Rule 391-3-16-.05). North Georgia only. Local governments apply the mountain-protection standards; the county's ordinance governs.",
+  },
+  gaCarbonate: {
+  notes:
+    "USGS SGMC generalised lithology 'Sedimentary, carbonate' for Georgia (limestone / dolomite at the surface). A proxy for karst-prone ground, NOT a sinkhole map: Georgia publishes no statewide sinkhole inventory. Mapped at about 1:500,000, and coastal-plain limestone buried under younger sediment is not shown — absence is no all-clear. Confirm with a geotechnical boring.",
+  },
+  gaSolidWaste: {
+  notes:
+    "EPD's solid-waste facility register: landfills (MSW, C&D, inert, industrial), transfer stations, composting, thermal, material recovery and others, each with permit number and operating status (Operating, Closed, In-Closure, Permit Applied For, etc.). Points are EPD's own coordinates.",
+  },
+  gaBrownfields: {
+  notes:
+    "EPD Brownfield Program properties (Georgia Hazardous Site Reuse and Redevelopment Act): points with the Limitation-of-Liability issue date, risk-reduction standard and acreage. Edited 2022-05-16 — newer closeouts are not in this copy.",
+  },
+  gaConservation: {
+  notes:
+    "DNR WRD's Georgia Conservation Lands (2023): fee-owned public lands, conservation easements (holder named) and covenants. An easement on a parcel binds the land. The polygons are DNR's aggregation of many holders' data; the recorded easement on the title commitment governs.",
+  },
+  gaDams: {
+  notes:
+    "EPD Safe Dams Program Class I and II dams (Class I: probable loss of life on failure; Class II: significant economic loss), republished by GEMA from EPD's 22 Nov 2019 file. Class III dams, and any dam built since, are not in it. A dam upstream of a site is a flood-risk flag, not a floodplain.",
+  },
+  gaImpaired: {
+  notes:
+    "EPD's 2024 305(b)/303(d) List of Waters, stream layer: reaches assessed 'Not Supporting' their designated use (Categories 4a/4b/4c/5). A listing is a water-quality classification of the reach, not a buffer. Updated every two years — a reach can be delisted or newly listed.",
+  },
+  gaOpportunityZones: {
+  notes:
+    "DCA's layer of Georgia's Qualified Opportunity Zone census tracts (IRC 1400Z-1, 2017 designation). Tract-level, federal designation; the investment rules are federal.",
+  },
+  gaJobTaxCredit: {
+  notes:
+    "DCA's 2026 county tiers for the Georgia job tax credit and related incentives ('Bottom 40' = the 40 lowest-ranked, least developed counties, then Tier 1 to Tier 4 = the most developed). The tier moves each year, and the credit per job depends on the tier and on the project; DCA's own list governs.",
+  },
+  gaMrpaCorridor: {
+  notes:
+    "Metropolitan River Protection Act (O.C.G.A. 12-5-440 et seq.) corridor, 2,000 ft either side of the Chattahoochee from Buford Dam to the downstream limit of Fulton/Douglas counties. ARC reviews every land-disturbing proposal inside it for consistency with the Chattahoochee Corridor Plan; the local government issues the permit. Published by ARC for the District.",
+  },
+  gaMrpaVegBuffer: {
+  notes:
+    "The corridor plan's 50-ft natural (undisturbed) vegetative buffer along the river and its impoundments, as ARC publishes it. Measured from the river bank; a survey governs.",
+  },
+  gaMrpaImpBuffer: {
+  notes:
+    "The corridor plan's 150-ft setback for structures and impervious surfaces from the river, as ARC publishes it. Measured from the river bank; a survey governs.",
+  },
+  gaMrpaTributaryBuffer: {
+  notes:
+    "The corridor plan's 35-ft undisturbed buffer along tributary streams inside the 2,000-ft corridor, as ARC publishes it.",
+  },
+  gaSwsw: {
+  notes:
+    "The small water supply watersheds (<100 sq mi upstream of a public intake or non-federal supply reservoir) of the 15-county Metropolitan North Georgia Water Planning District, delineated by the District for Rule 391-3-16-.01(7): 50-ft undisturbed buffer and 75-ft impervious setback outside the 7-mile reach. Only the District's counties are mapped here; elsewhere in Georgia a local government delineates its own.",
+  },
+  gaSwswProtected: {
+  notes:
+    "The 7-mile-upstream 'protected' portion of each small water supply watershed in the Metropolitan North Georgia Water Planning District, where the stricter 100-ft undisturbed buffer and 150-ft impervious setback apply (the District's ProtectedStreamBuffers description). District only.",
+  },
+  gaSpaldingZoning: {
+  notes:
+    "Spalding County's own zoning polygons: the unincorporated county and the town of Orchard Hill (the City of Griffin zones itself and is not in the layer; confirm any other city with the county). The county's description field disagrees with itself for several codes, so Planyr shows the zone CODE only; the Spalding County zoning ordinance defines each district. Edited 2025-08-11.",
+  },
   countyCa: {
   notes:
     "The California counterpart of `county` / `countyCo` / `countyGa`. CDT State Geoportal counties (58, one row per county). A point in NO " +

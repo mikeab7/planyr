@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import { visibleReferenceRows, isHiddenMapSnapshot } from "../src/workspaces/site-planner/lib/overlayOrder.js";
 import { offerable } from "../src/workspaces/site-planner/lib/siblingOverlays.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const snap = { id: "legacy-aerial", name: "Aerial backdrop", fromMap: true };
 const real = { id: "ov1", name: "Site plan.pdf", storageKey: "u/ov1.pdf" };
@@ -40,7 +41,7 @@ describe("sibling offers and wiring", () => {
     expect(offerable({ ...snap, storageKey: "x" }).ok).toBe(false);
   });
   it("the panel and the View menu read the filtered list; the record is kept for print/calibration", () => {
-    const sp = fs.readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/const refRows = visibleReferenceRows\(sheetOverlays, origin\)/);
     expect(sp).toMatch(/overlays=\{\[\.\.\.refRows, \.\.\.foreignOverlays\.rows/); // the redesigned OverlaysPanel (B2158080) is handed the filtered list
     expect(sp).toMatch(/overlays=\{refRows\}/);

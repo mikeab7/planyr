@@ -3,6 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { createOutlineSet } from "../src/workspaces/site-planner/lib/parcelOutlineSet.js";
 import { displaySourcesForView, statewideKeysForState, COUNTIES_MAP, isStatewideLayerUrl } from "../src/workspaces/site-planner/lib/counties.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const GRAND_PORT = { south: 29.84, north: 29.87, west: -94.90, east: -94.86 };
 
@@ -76,15 +77,15 @@ describe("click-a-lot outline set", () => {
 describe("SitePlanner wiring (structural — fails on the pre-fix fan-out)", () => {
   it("the identify effect goes through the outline set, never a per-COUNTIES_MAP mount loop", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toMatch(/createOutlineSet\(\{/);
     expect(src).not.toMatch(/Object\.keys\(COUNTIES_MAP\)\.forEach\(\(key\) => \{\s*resolveOneCountyLayer/);
     expect(src).not.toMatch(/makeParcelDisplayLayer\(url\); fl\.addTo/);
   });
   it("(B2024625) the cross-tab fold adopts per collection, never rewriting an unchanged one", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
-    expect(src).toMatch(/adopt\("els", setEls\)/);
+    const src = plannerSource();
+    expect(src).toMatch(/adopt\("els", setElsRaw\)/);   // B2498961: a cross-tab adoption RESTORES geometry — it goes through the raw setter, never the drive-follow wrapper
   });
 });
 

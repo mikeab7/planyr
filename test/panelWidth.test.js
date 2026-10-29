@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { cssStepForDpr, snapPanelWidth, panelFlowWidth } from "../src/workspaces/site-planner/lib/panelWidth.js";
 import { canvasEdgeLeft } from "../src/workspaces/site-planner/lib/canvasBox.js";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("panelWidth (B2154768)", () => {
   it("steps: whole CSS px that are whole device px", () => {
@@ -43,7 +44,7 @@ describe("panelWidth (B2154768)", () => {
     expect(canvasEdgeLeft(NaN, 5)).toBe(-5);
   });
   it("wiring: the resize handler snaps, and the pan comp no longer rounds the edge", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toMatch(/snapPanelWidth\(startW \+ \(ev\.clientX - startX\)/);
     expect(src).toMatch(/panelFlowWidth\(leftWidth/);           // NEW-2: the canvas edge moves in notches
     expect(src).toMatch(/marginRight: -leftOverlap/);

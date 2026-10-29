@@ -18,9 +18,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CLICK_CONTRACT, E2E_DRIVEN, contractFor, REVIEW_CLICK_CONTRACT, REVIEW_NON_MARKUP_TOOLS, reviewContractFor } from "../e2e/clickContract.table.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 const DR = read("../src/workspaces/doc-review/DocReview.jsx");
 
 /* A source guard must assert about CODE, not about prose. These files document the shapes they

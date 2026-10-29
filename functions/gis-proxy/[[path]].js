@@ -104,6 +104,12 @@ export const ALLOWED_HOSTS = new Set([
   "al20portal.kcsgis.com", // KCS GIS — Colbert County (named in the county viewer's own public config.js: al20server/…/Internal/Colbert_Public_ISV, B2312352)
   /* NEW-1 (B2302785) — Flagship GIS's Autodesk MapGuide servers behind the www.alabamagis.com county viewers. Exact hostnames, one per
    * server number the viewers name (cloudURL in each county's page); read-only anonymous queries only — never a key the viewer injects. */
+  /* NEW-1 (Georgia due-diligence gaps, 2026-10-29) — the three Georgia hosts the layer sweep found but this build sandbox cannot reach (each answers 403 at its egress), so they are
+   * relayed and MEASURED through here, from planyr.io, before anything is wired to them: GDOT's eGIS (traffic counts / dams / functional class are named on its ArcGIS Online items),
+   * the UGA ITOS host that serves GDOT's functional-class map service, and Bartow County's own GIS server (BartowZoning, the county's published zoning). Nothing reads them yet. */
+  "egis.dot.ga.gov", // Georgia DOT eGIS
+  "maps.itos.uga.edu", // UGA ITOS — GDOT functional class / routes / bridges map services
+  "www.bartowgis.org", "bartowgis.org", // Bartow County GIS — AGOServices/BartowZoning
   /* NEW-1 (Georgia, 2026-10-19) — county / regional hosts named by the Georgia parcel sweep; each is MEASURED through this relay before any county is wired to it. */
   "maps.douglascountyga.gov", // Douglas County GA
   "arcgis5.roktech.net", // ROK Technologies — Habersham, Paulding (wired by other route) and other GA county viewers

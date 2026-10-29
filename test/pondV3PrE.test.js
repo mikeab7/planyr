@@ -10,8 +10,9 @@ import { fileURLToPath } from "node:url";
 import { usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
 import { detentionVerdict, mitigationVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 const at = (needle) => {
   const i = src.indexOf(needle);
   if (i < 0) throw new Error(`marker not found: ${needle}`);

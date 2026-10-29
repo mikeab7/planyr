@@ -18,6 +18,7 @@ import {
 } from "../src/workspaces/site-planner/lib/viewCull.js";
 import { sheetLabelPpf, makeLabelFrame, MIN_LABEL_PPF, MAX_LABEL_PPF } from "../src/workspaces/site-planner/lib/exportLabelScale.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const view = { ppf: 0.35, offX: 60, offY: 60 };
 const size = { w: 1600, h: 465 };
@@ -114,7 +115,7 @@ describe("the export renders the COMPLETE model, whatever the view (hard constra
   });
 
   it("SOURCE: both label passes iterate the culled set, and the cull is inert on an export", () => {
-    const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const SP = plannerSource();
     // the element-label candidate pass and the dimension-number collision pass
     expect(SP).toMatch(/const labelCands = \[\];[\s\S]{0,1400}?\n  for \(const el of drawEls\) \{/);
     expect(SP).toMatch(/const dimItems = \[\];[\s\S]{0,400}?\n  for \(const el of drawEls\) \{/);

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   PARCEL_SURFACES, PARCEL_GROUPS, PARCEL_ACTIONS, parcelMenuModel, boundaryEditHint,
 } from "../src/workspaces/site-planner/lib/parcelActions.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* The module ships no id lookup and no flattener — both were test-only, and string data with no
  * runtime consumer costs real bytes in the Site route's bundle (this change had to pay a budget
@@ -30,7 +31,7 @@ const GESTURE_OR_RIGHT_CLICK_ONLY = ["boundary", "chip", "chipReset", "deleteSel
  *                 exactly the failure mode this item is about.
  */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const src = plannerSource();
 const menuSrc = read("../src/workspaces/site-planner/components/RailMenus.jsx"); // NEW-1: the menu's render half
 
 /* A plan with plenty of everything, so nothing is gated off by accident. */

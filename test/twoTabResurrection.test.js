@@ -31,6 +31,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
@@ -210,7 +211,7 @@ describe("B712224 (round 3) — the delete floor: a tombstoned element's stale c
 });
 
 describe("B712224 — SitePlanner.reconcileElems folds drainRemote()'s instructions before diffing (structural guard)", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("drainRemote() returns what it applied, not void — a synchronous caller needs the instructions back", () => {
     const idx = src.indexOf("const drainRemote = () => {");

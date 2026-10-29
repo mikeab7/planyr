@@ -16,6 +16,7 @@ import {
 } from "../ui-audit/lib/rerasterProbe.mjs";
 import { sheetPdfBytes, sheetContentStream, hash32 } from "../ui-audit/lib/sheetPdf.mjs";
 import { RERASTER_ARMS, rerasterArmFixture, rerasterBudget, fixtureSite, fixtureStorageKey } from "../ui-audit/lib/planFixture.mjs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const BAIN = { imgW: 1728, imgH: 2592, ftPerPx: 2.7777777777777777 };
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -108,7 +109,7 @@ describe("rerasterProbe — it has not drifted from SitePlanner.jsx", () => {
   /* ⛔ A SOURCE GUARD, because the retention rule and the settle debounce are the only two things
    * this probe MIRRORS rather than imports, and a mirror that silently drifts is worse than no
    * probe: it reports a confident count for a program nobody is running. */
-  const src = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const src = plannerSource();
   it("the settle debounce the probe dwells past is still the effect's", () => {
     expect(src).toMatch(new RegExp(`\\}, ${RERASTER_SETTLE_MS}\\); // debounce behind zoom settle`));
   });
