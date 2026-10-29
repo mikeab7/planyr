@@ -44,18 +44,18 @@ describe("the shipped layer registry", () => {
     expect(unpinnedDynamicLayers(ALL_LAYERS)).toEqual([]);
   });
 
-  it("the plan-burying defaults are genuinely gone — nothing reference-or-quieter above 0.55", () => {
-    const loud = Object.entries(ALL_LAYERS)
-      .filter(([id, c]) => !isExempt(id) && tierOf(id) !== "constraint" && typeof c.opacity === "number" && c.opacity > 0.55)
+  it("EVERY layer ships at 100% opacity (owner constraint #42, B2507060) — a quieter default hides that the layer is there", () => {
+    const quiet = Object.entries(ALL_LAYERS)
+      .filter(([, c]) => typeof c.opacity === "number" && c.opacity !== 1)
       .map(([id, c]) => `${id}=${c.opacity}`);
-    expect(loud).toEqual([]);
+    expect(quiet).toEqual([]);
+    expect(Object.keys(ALL_LAYERS).length).toBeGreaterThan(50); // the sweep ran over the real registry, not an empty one
   });
 
   it("the tiers are actually SEPARATED — not three names for the same volume", () => {
     // The whole complaint was that everything sat in one narrow band. Assert the model spreads.
-    expect(TIER_MAX_OPACITY.constraint).toBeGreaterThan(TIER_MAX_OPACITY.reference);
-    expect(TIER_MAX_OPACITY.reference).toBeGreaterThan(TIER_MAX_OPACITY.context);
-    expect(TIER_MAX_OPACITY.constraint - TIER_MAX_OPACITY.context).toBeGreaterThanOrEqual(0.4);
+    // (the opacity ceilings are all 1 since the owner's 2026-10-29 reversal; stroke weight still separates the tiers)
+    for (const t of TIERS) expect(TIER_MAX_OPACITY[t], t).toBe(1);
     expect(TIER_MAX_WEIGHT.constraint).toBeGreaterThan(TIER_MAX_WEIGHT.context);
   });
 
@@ -75,7 +75,7 @@ describe("the shipped layer registry", () => {
 describe("the guard actually fails", () => {
   // A guard never shown red is a hope. Each of these is a real regression shape.
   it("rejects a too-loud reference layer", () => {
-    const problems = hierarchyProblems({ txrrc_wells: { kind: "vector", opacity: 0.95 } });
+    const problems = hierarchyProblems({ txrrc_wells: { kind: "vector", weight: 5 } });
     expect(problems.some((p) => /exceeds the "reference" ceiling/.test(p))).toBe(true);
   });
 

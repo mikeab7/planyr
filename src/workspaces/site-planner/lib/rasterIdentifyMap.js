@@ -17,9 +17,8 @@
 import L from "leaflet";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { gisProxyEnabled, rasterIdentifyLayers } from "./layers.js";
-import {
-  createHoverIdentify, IDENTIFY_STATE, stateMessage, HOVER_IDENTIFY_DEBOUNCE_MS,
-} from "./rasterIdentify.js";
+import { createHoverIdentify, IDENTIFY_STATE, stateMessage } from "./rasterIdentify.js";
+import { cardNode } from "./identifyCard.js";
 
 const qs = (params) => Object.entries(params)
   .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&");
@@ -95,28 +94,8 @@ function readoutNode(state) {
     return el;
   }
   state.items.forEach((it, i) => {
-    const block = document.createElement("div");
+    const block = cardNode({ ...it, about: it.about || (it.sourceName ? `Source: ${it.sourceName}` : null) });
     if (i) block.style.marginTop = "7px";
-    const head = document.createElement("div");
-    head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:2px;";
-    head.textContent = it.title;
-    block.append(head);
-    for (const r of it.rows) {
-      const row = document.createElement("div");
-      const lab = document.createElement("span");
-      lab.style.cssText = "opacity:0.7;";
-      lab.textContent = `${r.label}: `;
-      const val = document.createElement("span");
-      val.textContent = r.text;
-      row.append(lab, val);
-      block.append(row);
-    }
-    if (it.sourceName) {
-      const src = document.createElement("div");
-      src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:3px;";
-      src.textContent = `Source: ${it.sourceName}`;
-      block.append(src);
-    }
     el.append(block);
   });
   return el;
@@ -141,15 +120,10 @@ export function attachRasterIdentify(map, opts = {}) {
     getOverlays = () => ({}),
     layerHealthy = () => true,
     identifyOk = () => true,
-    debounceMs = HOVER_IDENTIFY_DEBOUNCE_MS,
     fetchJson = makeIdentifyFetch(),
   } = opts;
 
-  let hoverTip = null, pinned = null, panning = false;
-
-  const dropTip = () => {
-    if (hoverTip) { try { map.closeTooltip(hoverTip); } catch (_) {} hoverTip = null; }
-  };
+  let pinned = null;
 
   const frameOf = () => {
     if (typeof opts.getFrame === "function") return opts.getFrame();
@@ -157,56 +131,9 @@ export function attachRasterIdentify(map, opts = {}) {
     return { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth(), width: s.x, height: s.y };
   };
 
-  /* One controller for hover (debounced, transient tooltip) and one for click (immediate,
-   * pinned popup) so a click can never be cancelled by the hover that follows it.
-   *
-   * ⛔ NEW-1 (B1613408, 2026-09-17, owner report) — AMBIENT HOVER MAY ONLY EVER SHOW SOMETHING FOR
-   * A GENUINE HIT. A raster layer has no features in the DOM, so the only way to know whether the
-   * cursor sits on one is to ask the service — which means "pending"/"none"/"unsupported"/"error"
-   * fire on every rest position, including bare ground with nothing drawn there at all. That is the
-   * "Checking…" tooltip the owner reported floating over open land with only Drainage channels (a
-   * raster MapServer picture) switched on. B1490144 carved FEMA out of cursor identify entirely for
-   * exactly this reason; this generalises the fix to every raster layer WITHOUT losing the feature —
-   * a real hit still answers below — by simply never rendering a non-hit state for ambient hover.
-   * LOUD-FAILURE still governs a DELIBERATE action: the click-to-pin popup (`onClick` below) keeps
-   * showing every outcome, honestly, exactly as before. */
-  const render = (state, at) => {
-    if (state.kind !== IDENTIFY_STATE.hit) return dropTip();
-    dropTip();
-    hoverTip = L.tooltip({ direction: "top", offset: [0, -6], opacity: 0.96, className: "pf-identify-tip" })
-      .setLatLng(at || state.at)
-      .setContent(readoutNode(state));
-    try { hoverTip.addTo(map); } catch (_) { hoverTip = null; }
-  };
-
-  const hover = createHoverIdentify({
-    fetchJson: (url, params, o) => fetchJson(url, params, o),
-    debounceMs,
-    onState: (state) => render(state),
-  });
-
+  /* B2507061 (owner constraint #43): a raster layer answers a CLICK only — no hover tooltip, no mousemove listener, no ambient service asks. (This used to run a
+   * debounced hover identify beside the click one; the click path below is unchanged and still honest about every outcome.) */
   const eligible = () => rasterIdentifyLayers(getOverlays(), { layerHealthy });
-
-  let lastLL = null, pending = false;
-  const onMove = (e) => {
-    lastLL = { lat: e.latlng.lat, lng: e.latlng.lng };
-    if (panning || !identifyOk()) { hover.cancel(); return; }
-    if (pending) return;
-    pending = true;
-    // Coalesce to one decision per frame; the debounce inside the controller does the rest.
-    requestAnimationFrame(() => {
-      pending = false;
-      if (!lastLL || panning || !identifyOk()) return;
-      const layers = eligible();
-      if (!layers.length) { hover.cancel(); return; }
-      hover.hover(lastLL, frameOf(), layers);
-    });
-  };
-
-  const onOut = () => { lastLL = null; hover.cancel(); };
-  const onDragStart = () => { panning = true; hover.cancel(); };
-  const onDragEnd = () => { panning = false; };
-  const onZoomStart = () => { hover.cancel(); dropTip(); };
 
   const onClick = (e) => {
     if (!identifyOk()) return;
@@ -225,26 +152,13 @@ export function attachRasterIdentify(map, opts = {}) {
           .setLatLng(at).setContent(readoutNode(state)).openOn(map);
       },
     });
-    dropTip();
     pin.hover(at, frameOf(), layers, { immediate: true });
   };
 
-  map.on("mousemove", onMove);
-  map.on("mouseout", onOut);
-  map.on("dragstart", onDragStart);
-  map.on("dragend", onDragEnd);
-  map.on("zoomstart", onZoomStart);
   map.on("click", onClick);
 
   return () => {
-    map.off("mousemove", onMove);
-    map.off("mouseout", onOut);
-    map.off("dragstart", onDragStart);
-    map.off("dragend", onDragEnd);
-    map.off("zoomstart", onZoomStart);
     map.off("click", onClick);
-    hover.destroy();
-    dropTip();
-    if (pinned) { try { map.closePopup(pinned); } catch (_) {} pinned = null; }
+    if (pinned) { try { map.closePopup(pinned); } catch (_) { /* already closed */ } pinned = null; }
   };
 }
