@@ -16,9 +16,15 @@ try {
   await assertMeasurable(page, "verify-point-zone-county-live");
   const seen = [];
   page.on("request", (r) => { const u = r.url(); if (/pointZoneLocator|county-polygons/.test(u)) seen.push(u); });
+  // The signed-in helper already loaded the app, so the polygons may be requested before this listener existed: RELOAD with it armed.
   await page.goto(base + "/#/site", { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   const t0 = Date.now();
-  while (Date.now() - t0 < 60000 && !seen.some((u) => /pointZoneLocator/.test(u))) await page.waitForTimeout(500);
+  const fromTimings = () => page.evaluate(() => performance.getEntriesByType("resource").map((e) => e.name).filter((u) => /pointZoneLocator|county-polygons/.test(u))).catch(() => []);
+  while (Date.now() - t0 < 60000 && !seen.some((u) => /pointZoneLocator/.test(u))) {
+    for (const u of await fromTimings()) if (!seen.includes(u)) seen.push(u);
+    await page.waitForTimeout(500);
+  }
   const build = JSON.stringify(s.build);
   console.log("build:", build);
   if (want && !String(s.build && s.build.build || build).startsWith(want)) fail(`served build ${build} is not ${want}…`);
