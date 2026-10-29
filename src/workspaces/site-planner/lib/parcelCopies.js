@@ -180,7 +180,9 @@ export const PARCEL_COPIES = {
   il_woodford: [null, "2026-10"],
 
   // KS
+  ks_chase: [null, "2026-10"],
   ks_lane: ["Tyler Technologies", null],
+  ks_lincoln: ["Saline County GIS", "2026-04"],
   ks_meade: ["Tyler Technologies", null],
   ks_scott: ["Tyler Technologies", null],
   ks_seward: ["City of Liberal", "2023-12"],
