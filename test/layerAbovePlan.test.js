@@ -212,10 +212,10 @@ describe("NEW-1 — the canvas hosts the lifted band inside the plan SVG", () =>
     expect(block).toContain('data-export="skip"'); // the sheet composites its OWN copy of the band
   });
 
-  it("it undoes the SVG's registration shift — a pane inside the SVG must not be nudged twice", () => {
+  it("it undoes the SVG's registration shift AND the plan group's live pan/zoom transform — a pane inside the SVG must not be nudged twice (NEW-1: the second half was missing and a lifted fill slid at 2× the pan)", () => {
     const at = planner.indexOf("{ [FRONT_BAND_ATTR]: \"1\" }");
     const block = planner.slice(at, at + 900);
-    expect(block).toMatch(/translate\(\$\{-regShift\.dx\}px, \$\{-regShift\.dy\}px\)/);
+    expect(block).toMatch(/anchorInverseCss\(viewT, regShift\.dx, regShift\.dy\)/);
   });
 
   it("the anchor is rendered AFTER the elements and BEFORE the labels + handle layer", () => {
