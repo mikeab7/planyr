@@ -215,7 +215,7 @@ try {
     return { keys, all, tiers, flat: Object.values(all).flat() };
   };
   const ga = await rowsAcross(`surface=finder&w=384&${ATLANTA}`);
-  const TX_ONLY = ["Road Ownership", "School Districts", "Water & Sewer", "Oil & Gas Wells", "Leaking Petroleum Tanks", "Traffic Counts", "Pipelines"];
+  const TX_ONLY = ["Road Ownership", "School Districts", "Water & Sewer", "Oil & Gas Wells", "Leaking Petroleum Tanks", "Traffic Counts"]; // Pipelines is NOT here: outside Texas the national (EIA) Pipelines row is offered — asserted per state below
   const HOUSTON_ONLY = ["Channels & ROW", "Watersheds & BFE", "Drainage Easements", "Storm Sewer", "Master Plan Floodplains", "Active Surface Faults"];
   ok("Georgia: no Texas-only row appears anywhere (Road Ownership · School Districts · Water & Sewer · Oil & Gas Wells · LPST · TxDOT counts)", TX_ONLY.filter((n) => ga.flat.some((x) => x.startsWith(n) && n !== "Pipelines")).length === 0, JSON.stringify(ga.all));
   ok("Georgia: no Houston-only row appears (HCFCD / BKDD / Storm Sewer / Master Plan / faults)", HOUSTON_ONLY.filter((n) => ga.flat.includes(n)).length === 0, JSON.stringify(ga.all));
@@ -228,11 +228,12 @@ try {
   ok("Group order is Map Base · Topography · Jurisdictions · Flood & Drainage · Utilities · Environmental · Access", JSON.stringify(hx.keys) === JSON.stringify(["base", "topo", "jur", "flood", "util", "env", "access"]), JSON.stringify(hx.keys));
   const co = await rowsAcross(`surface=planner&w=384&${DENVER}`);
   ok("Colorado: MHFD rows sit under Drainage District (Drainageways & Basins · Channels & Outfalls)", co.tiers.includes("local") && co.flat.includes("Drainageways & Basins") && co.flat.includes("Channels & Outfalls"), JSON.stringify(co.all.flood));
-  ok("Colorado: no Texas row (Road Ownership · Oil & Gas · LPST · Pipelines · HCFCD/BKDD/Storm Sewer/faults)", [...["Road Ownership", "Oil & Gas Wells", "Leaking Petroleum Tanks", "Pipelines"], ...HOUSTON_ONLY].every((n) => !co.flat.includes(n)), JSON.stringify(co.all));
+  ok("Colorado: no Texas row (Road Ownership · Oil & Gas · LPST · HCFCD/BKDD/Storm Sewer/faults); Pipelines is the national row", [...["Road Ownership", "Oil & Gas Wells", "Leaking Petroleum Tanks"], ...HOUSTON_ONLY].every((n) => !co.flat.includes(n)), JSON.stringify(co.all));
   // NEW-1 (New Jersey + New York) — the same location arms: NJ / NY show their own rows and no Texas, Houston or other state's row.
   const njA = await rowsAcross(`surface=planner&w=384&${NEWARK_NJ}`), nyA = await rowsAcross(`surface=planner&w=384&${PLEASANTVILLE_NY}`);
   ok("New Jersey: no Texas-only or Houston-only row appears", [...TX_ONLY, ...HOUSTON_ONLY].filter((n) => njA.flat.some((x) => x.startsWith(n))).length === 0, JSON.stringify(njA.all));
   ok("New York: no Texas-only or Houston-only row appears", [...TX_ONLY, ...HOUSTON_ONLY].filter((n) => nyA.flat.some((x) => x.startsWith(n))).length === 0, JSON.stringify(nyA.all));
+  ok("Colorado, New Jersey, New York: the Pipelines row IS offered (the approximate national one — the RRC row is Texas-only)", [co, njA, nyA].every((r) => r.flat.includes("Pipelines")), JSON.stringify([co.all.env, njA.all.env, nyA.all.env]));
   ok("New Jersey and New York: Counties & Cities is ONE row each", njA.flat.filter((x) => x === "Counties & Cities").length === 1 && nyA.flat.filter((x) => x === "Counties & Cities").length === 1);
   const nnKey = async (q, on) => {
     const page = await open(q + `&on=${on}`);

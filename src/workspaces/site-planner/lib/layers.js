@@ -148,11 +148,12 @@ function reportCacheAge(lyr, k, onStatus) {
 
 /* NEW-1 (FL/GA pipelines) — the four EIA transmission-pipeline rows share one shape, built here so
  * the "approximate" wording, the state scope and the 811 pointer cannot drift apart across them.
- * ⛔ `states: ["FL","GA"]` is load-bearing: a Texas site must never be offered the approximate EIA
- * layer as a stand-in for the authoritative TxRRC one (the panel demotes it as "not available in
- * Texas", exactly like every other out-of-state row). The URL comes from the registry — never inline. */
+ * ⛔ `statesNot: ["TX"]` is load-bearing: a Texas site must never be offered the approximate EIA
+ * layer as a stand-in for the authoritative TxRRC one (the row is not listed in Texas, exactly like every other
+ * out-of-state row), and every site OUTSIDE Texas — whether or not the app has a region for its state — is offered it,
+ * because it is the only pipeline source that works there (the RRC row is `states: ["TX"]`). The URL comes from the registry — never inline. */
 const EIA_APPROX_INFO = "Approximate — major transmission lines only. No local gas mains or gathering lines, and geometry can be miles off.";
-const EIA_APPROX_CAVEAT = "Not a survey and not complete. Confirm with the title commitment (easements), an ALTA survey and an 811 locate — Sunshine 811 in Florida, Georgia 811 in Georgia.";
+const EIA_APPROX_CAVEAT = "Not a survey and not complete. Confirm with the title commitment (easements), an ALTA survey and an 811 locate — call 811 before any dig.";
 /* NEW-2 — each EIA line is drawn in the SAME commodity class the Texas RRC layer uses for that product
  * (pipelineCommodity.js: colour, dash and weight — natural gas amber, refined/petroleum green dashed, crude
  * violet, gas liquids red), so one product reads as one colour in every state, and none is a hydrography or
@@ -162,7 +163,7 @@ const eiaPipelineRow = (regKey, { label, bucket, order, title }) => {
   const b = commodityBucketRecord(bucket);
   const w = Math.min(b.weight, 3); // the layer hierarchy caps a constraint line at 3 (the HVL class is 4 on the Texas layer)
   return {
-  kind: "esriFeature", label, mergeGroup: "pipelines", // NEW-1 (Imagery & Layers) — the four EIA rows drive the ONE Pipelines row on a Florida / Georgia site
+  kind: "esriFeature", label, mergeGroup: "pipelines", // NEW-1 (Imagery & Layers) — the four EIA rows drive the ONE Pipelines row on any site outside Texas
   source: "US EIA (via Esri U.S. Federal Datasets)",
   url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color: b.color, weight: w, opacity: 0.85,
   styleFn: (_props, opacity) => ({ color: b.color, weight: w, dashArray: b.dash || null, opacity, fill: false }),
@@ -176,7 +177,7 @@ const eiaPipelineRow = (regKey, { label, bucket, order, title }) => {
   infoCaveat: EIA_APPROX_CAVEAT,
   // NEW-1 stacking role (lib/mapStack.js): pipeline centrelines.
   role: "line",
-  states: ["FL", "GA"],
+  statesNot: ["TX"],
   group: "environmental", order,
   };
 };
