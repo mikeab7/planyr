@@ -118,6 +118,7 @@ export const ALLOWED_HOSTS = new Set([
   "www.schoolcraftcounty.net", "www.chippewacountymi.gov", "algercounty.gov", "www.alconacountymi.com", "gis.equatorstudios.com", "app.fetchgis.com", "www.colligogis.com", "colligogis.com",
   "a2maps.a2gov.org", "gisappsecure.ewashtenaw.org", "webmapssecure.ewashtenaw.org", "www.washtenaw.org",
   "iosco.net", "www.iosco.net", "presqueislecounty.org", "www.alpenacounty.org", "alpenacounty.org", "www.lucecountymi.gov", "lucecountymi.gov", "www.co.luce.mi.us", "wfs.schneidercorp.com", "www.eupsdc.org",
+  "gis.cuppad.org", "www.cuppad.org", "cuppad.org", "gis.nemcog.org", "nemcog.org", "gis.euprpdc.org", "euprpdc.org", "gis.wuppdr.org", "wuppdr.org",
   /* NEW-1 (Pennsylvania, 2026-10-19) — the hosts the wired Pennsylvania counties sit on, each MEASURED through this relay (on the PR preview) before its county was wired: PASDA (Penn State's state data
    * clearinghouse — one MapServer per county for ~36 counties), the PA DEP partial statewide layer (last-resort source for four counties), and the county-run ArcGIS servers. */
   "arcgis.lancastercountypa.gov", "fcgis.franklincountypa.gov", "gis.beavercountypa.gov", "gis.carboncounty.com", "gis.delcopa.gov",
