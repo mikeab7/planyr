@@ -2073,10 +2073,8 @@
   "Bacon",
   "Baker",
   "Banks",
-  "Berrien",
   "Burke",
   "Calhoun",
-  "Carroll",
   "Clinch",
   "Colquitt",
   "Fannin",
@@ -2090,7 +2088,6 @@
   "Lamar",
   "Lincoln",
   "Long",
-  "Macon",
   "Madison",
   "Marion",
   "McDuffie",
@@ -2417,6 +2414,24 @@
    "county": "Catoosa County",
    "lat": 34.9591,
    "lng": -85.2247
+  },
+  {
+   "name": "Berrien — just inside its own line",
+   "county": "Berrien County",
+   "lat": 31.41421,
+   "lng": -83.31629
+  },
+  {
+   "name": "Carroll — just inside its own line",
+   "county": "Carroll County",
+   "lat": 33.48093,
+   "lng": -85.261
+  },
+  {
+   "name": "Macon — just inside its own line",
+   "county": "Macon County",
+   "lat": 32.46814,
+   "lng": -83.88836
   }
  ]
 }

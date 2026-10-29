@@ -3467,6 +3467,109 @@
     "Shape__Area": 4859839.881591797,
     "Shape__Length": 13329.195731992288
    }
+  },
+  "Berrien": {
+   "url": "/gis-proxy/www.sgrcmaps.com/arcgis/rest/services/Berrien/TaxParcelBoundaries/MapServer/2",
+   "point": [
+    31.28564,
+    -83.37314
+   ],
+   "idField": "PARCEL_NO",
+   "addrField": null,
+   "expectOwner": true,
+   "attrs": {
+    "OBJECTID": 911,
+    "DRAW_ACRES": 184.77830322,
+    "REALKEY": 6179.0,
+    "Latitude": 467306.92331896,
+    "Longitude": 2543334.56888844,
+    "Latitude_DD": 31.28248971,
+    "Longitude_DD": -83.37676187,
+    "PARCELNO": "012     32 000",
+    "REALKEY_1": 6179.0,
+    "OWNKEY": 25554.0,
+    "HOUSE_NO": 0.0,
+    "PARCEL_NO": "012     32 000",
+    "LEGAL_DESC": "201 ACRES",
+    "PREV_VAL": 442460.0,
+    "CURR_VAL": 442460.0,
+    "TAXDISTRIC": "05",
+    "WOODACRES": 59.0,
+    "TOTALACRES": 201.0,
+    "EXISTS_": 0,
+    "ABATE_EX_LA": 0.0,
+    "OBJECTID_1_1": 5478,
+    "OWNKEY_1": 25554.0,
+    "LASTNAME": "ALLEY, DOUG",
+    "ADDRESS2": "1403 COY HANCOCK ROAD",
+    "CITY": "LENOX",
+    "STATE": "GA",
+    "ZIP_1": "316372331",
+    "ACCTSTATUS_1": 1,
+    "EXISTS__1": 0
+   }
+  },
+  "Carroll": {
+   "url": "https://services1.arcgis.com/T9kPZugHsZ2SNOXt/arcgis/rest/services/COUNTY_PARCEL/FeatureServer/0",
+   "point": [
+    33.48093,
+    -85.261
+   ],
+   "idField": "Parcel_no",
+   "addrField": null,
+   "expectOwner": true,
+   "attrs": {
+    "FID": 35011,
+    "OBJECTID_1": 2182,
+    "Parcel_no": "032    0088",
+    "DEED_BK": " 5526  788",
+    "ACRES": 30,
+    "REALKEY": 43918,
+    "OWNKEY": 117229,
+    "HOUSE_NO": 254,
+    "STTYPE": "RD",
+    "STREET_NAM": "DANIEL",
+    "LANDLOT": "203",
+    "RETURN_VAL": 0,
+    "PARCEL_N_1": "032    0088",
+    "LEGAL_DESC": "HSE/30AC  DANIEL RD",
+    "PREV_VAL": 285039,
+    "CURR_VAL": 332400,
+    "TAXDISTRIC": "02",
+    "CCY": "2018",
+    "DIGCLASS": "V",
+    "ROADCLASS": "004",
+    "TOTALACRES": 30,
+    "HOMEDATE": "3/8/2018",
+    "LAT": "85* 15' 43.52\" W",
+    "LON": "33* 28' 44.50\" N",
+    "PARCEL_NO2": "CD926601",
+    "ZIP": "30108",
+    "OWNKEY_1": 117229,
+    "LASTNAME": "BLAIR PRESTON CODY & PRYOR ASHLEY (JTRS)",
+    "ADDRESS1": "254 DANIEL RD",
+    "CITY": "BOWDON",
+    "STATE": "GA",
+    "ZIP_1": "30108"
+   }
+  },
+  "Macon": {
+   "url": "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels12_2018/FeatureServer/0",
+   "point": [
+    32.37143,
+    -84.19014
+   ],
+   "idField": "Parcel_Num",
+   "addrField": "Address",
+   "expectOwner": true,
+   "attrs": {
+    "FID": 8025,
+    "Parcel_Num": "210BE  0002",
+    "Address": "306 ANDERSON STREET",
+    "Owner": "ASHLEY & BRITTANY MATHIS",
+    "Ac1": "1.01 Ac.",
+    "Curr_Val": 54976
+   }
   }
  }
 }
