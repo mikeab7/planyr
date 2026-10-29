@@ -286,8 +286,17 @@ export const PARCEL_COPIES = {
   ny_herkimer: ["Byer Planning LLC", "2025-09"],
   ny_nassau: ["Peconic Land Trust", "2020"],
 
-  // OK
+  // OK (the second pass, B2497472, added the ArcGIS Online copies below: the layer's own data date, not the day it was re-saved; the 52 counties on the state's statewide layer are official and show no line)
+  ok_adair: ["Oklahoma Department of Commerce", "2024-12"],
+  ok_delaware: [null, "2023-08"],
+  ok_garfield: ["City of Enid", "2026-10"],
+  ok_hughes: [null, "2026-06"],
+  ok_logan: [null, "2026-07"],
+  ok_okfuskee: [null, "2026-06"],
   ok_oklahoma: [null, "2026-10"],
+  ok_osage: ["Indian Nations Council of Governments (INCOG)", "2023-07"],
+  ok_seminole: [null, "2026-06"],
+  ok_woodward: ["City of Woodward", "2026-03"],
 
   // OR
   or_lake: ["Klamath County GIS", "2021-07"],

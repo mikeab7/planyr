@@ -20,7 +20,7 @@ export const GAP_SOURCES = [
   { state: "MO", heading: /^### Missouri gaps/, kindCol: "Kind" },
   { state: "WA", heading: /^### Washington gaps/, kindCol: "Kind" },
   { state: "OR", heading: /^## Oregon counties \(2026-10-19\)/, kindCol: "Status", rowOk: (kind) => /^gap/.test(kind) },
-  { state: "OK", heading: /^### Gaps \(61\)/, kindCol: "Kind" },
+  { state: "OK", heading: /^### Gaps \(\d+\)/, kindCol: "Kind" },
   { state: "KS", heading: /^### Gaps — the /, kindCol: "Kind" },
   { state: "IL", heading: /^### The \d+ named gaps/, kindCol: "Kind" },
   { state: "LA", heading: /^### The 26 parishes still named gaps/, kindCol: null },
