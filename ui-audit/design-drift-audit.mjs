@@ -85,6 +85,7 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/layers.js",
   "src/workspaces/site-planner/lib/desotoLayers.js", // B2507057 — registry rows of the same kind as layers.js: map ink for drawn utility lines
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
+  "src/workspaces/site-planner/lib/mississippiLayers.js", // B2539744 — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn points, lines and washes (the legend colours), not chrome
   "src/workspaces/site-planner/lib/vectorLayers.js",
   "src/workspaces/site-planner/lib/planStyle.js",
   "src/workspaces/site-planner/lib/easements.js",
