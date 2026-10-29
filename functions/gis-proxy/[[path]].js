@@ -232,6 +232,13 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
+  /* NEW-1 (Colorado due-diligence layers, 2026-10-29) — the state / city hosts the Colorado candidates sit on. The build sandbox's egress refuses every state.co.us / colorado.gov / city host (CONNECT 403), so each
+   * is relayed and MEASURED through planyr.io before a layer is wired to it: ECMC's wells + flowlines (Colorado DNR's own ArcGIS Server, ECMC_Public), the Division of Water Resources' ditch / structure data,
+   * Aurora's DEN airport noise zone, Denver's zoning. Delete an entry whose layer stays unwired. */
+  "gisdnr.state.co.us", // Colorado DNR GIS — ECMC_Public (wells, flowlines), DWR, CGS
+  "dnrweb.state.co.us", // Colorado DNR web services (CDSS / DWR)
+  "ags.auroragov.org", // City of Aurora — Airport Noise Zone, zoning
+  "gis.denvergov.org", // City & County of Denver — zoning, DEN
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
