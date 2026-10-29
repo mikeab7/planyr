@@ -65,37 +65,25 @@ try {
   if (EXPECT) ok(`the served build is the one under test (${EXPECT.slice(0, 7)})`, JSON.stringify(v || {}).includes(EXPECT.slice(0, 7)), JSON.stringify(v));
   console.log("chunks:", (await page.evaluate(() => [...document.querySelectorAll("script[src]")].map((e) => e.getAttribute("src").split("/").pop()).join(","))).slice(0, 220));
 
-  // ---- 1. Site tab on a throwaway plan
-  await page.evaluate(([uid, sites]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(sites)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(sites)[0]); }, [UID, { [ID]: site }]);
-  await page.goto(`${BASE}/#/site-planner`, { waitUntil: "load" });
-  await page.getByText(NAME, { exact: false }).filter({ visible: true }).first().evaluate((el) => el.click(), null, { timeout: 45000 });
-  await T("planner-canvas").waitFor({ timeout: 45000 });
-  await sleep(2000);
-  for (let i = 0; i < 3 && (await page.locator(".psw-panel").count()); i++) { await page.keyboard.press("Escape"); await sleep(500); }
-  await assertMeasurable(page, "verify-crop-contained-live");
-  await page.locator('[data-rail-tab="references"]').first().evaluate((el) => el.click());
-  await sleep(900);
-  const row = T("reference-open-ov1");
-  await row.waitFor({ timeout: 20000 });
-  if ((await row.getAttribute("aria-expanded")) !== "true") await row.evaluate((el) => el.click());
-  await sleep(500);
-  await openCropEditor(page, "ov1");
-  await probe("site-tab");
-
+  // ---- legs are independent: one that cannot start (e.g. plan seeding) never hides the other
+  const leg = async (name, fn) => { try { await fn(); } catch (e) { if (e.void) throw e; console.error(`LEG ERROR (${name}):`, String(e.message).split("\n")[0]); ok(`${name}: leg ran to completion`, false, String(e.message).split("\n")[0]); } };
+  await leg("map-preplace", async () => {
   // ---- 2. Map/Comps pre-placement (no write: stops at Cancel)
   await page.goto(`${BASE}/#/site`, { waitUntil: "load" });
   await sleep(4500);
   await page.locator("text=Records >> visible=true").first().click().catch(() => {});
   await sleep(800);
-  const up = page.locator('[title="Upload a broker flyer or park plan"] >> visible=true').first();
+  if (process.env.DEBUG_SHOT) await page.screenshot({ path: process.env.DEBUG_SHOT.replace(/\.png$/, "-map.png") });
+  const up = page.getByRole("button", { name: /\+?\s*Site plan/ }).filter({ visible: true }).first();
   const reach = await up.count().then((n) => n > 0);
   ok("the add-a-site-plan entry is reachable on the Map Records rail", reach);
   if (reach) {
     await up.click();
     await sleep(700);
     const b64 = await page.evaluate(({ w, h }) => { const c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d"); g.fillStyle = "#e8a83c"; g.fillRect(0, 0, w, h); g.fillStyle = "#2f6fb0"; g.beginPath(); g.arc(w / 2, h / 2, w / 4, 0, 7); g.fill(); return c.toDataURL("image/png").split(",")[1]; }, { w: W, h: H });
-    await page.locator('input[type="file"]').first().setInputFiles({ name: "zz-crop-check.png", mimeType: "image/png", buffer: Buffer.from(b64, "base64") });
+    await page.locator('input[type="file"][accept*="application/pdf"]').first().setInputFiles({ name: "zz-crop-check.png", mimeType: "image/png", buffer: Buffer.from(b64, "base64") });
     const cropBtn = page.getByTestId("site-plan-flow-crop");
+    if (process.env.DEBUG_SHOT) { await sleep(6000); await page.screenshot({ path: process.env.DEBUG_SHOT }); }
     await cropBtn.waitFor({ timeout: 20000 });
     await cropBtn.click();
     const mb = await page.locator('[data-testid="site-plan-precrop-modal"] [role="dialog"]').boundingBox();
@@ -106,6 +94,27 @@ try {
     // leave the flow without placing: Cancel on the step itself
     await page.getByRole("button", { name: "Cancel", exact: true }).filter({ visible: true }).first().click().catch(() => {});
   }
+  });
+  await leg("site-tab", async () => {
+  // ---- 1. Site tab on a throwaway plan
+  await page.evaluate(([uid, sites]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(sites)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(sites)[0]); }, [UID, { [ID]: site }]);
+  await page.goto(`${BASE}/#/site-planner`, { waitUntil: "load" });
+  await page.getByText(NAME, { exact: false }).filter({ visible: true }).first().evaluate((el) => el.click(), null, { timeout: 45000 });
+  await T("planner-canvas").waitFor({ timeout: 45000 });
+  await sleep(2000);
+  for (let i = 0; i < 3 && (await page.locator(".psw-panel").count()); i++) { await page.keyboard.press("Escape"); await sleep(500); }
+  await assertMeasurable(page, "verify-crop-contained-live");
+  if (process.env.DEBUG_SHOT) await page.screenshot({ path: process.env.DEBUG_SHOT.replace(/\.png$/, "-site.png") });
+  await page.locator('[data-rail-tab="references"]').first().evaluate((el) => el.click());
+  await sleep(900);
+  const row = T("reference-open-ov1");
+  await row.waitFor({ timeout: 20000 });
+  if ((await row.getAttribute("aria-expanded")) !== "true") await row.evaluate((el) => el.click());
+  await sleep(500);
+  await openCropEditor(page, "ov1");
+  await probe("site-tab");
+
+  });
   ok("no page errors", errors.length === 0, errors.join(" | ").slice(0, 300));
 } catch (e) {
   if (e.void) voided = true; else { console.error("HARNESS ERROR:", e.message); ok("harness ran to completion", false, e.message); }
