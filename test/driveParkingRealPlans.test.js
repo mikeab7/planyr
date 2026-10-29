@@ -28,11 +28,22 @@ describe("Tsakiris / Concept A — AS THE APP OPENS IT (bonded fields healed aga
   it("the heal moves the bonded field 5 ft off the stored rows", () => {
     expect(f.cx).toBeCloseTo(-235.73, 2);
   });
-  it("the drive still connects to the bonded field (stored tee AND geometric), as a SKIM: it lies alongside the east edge, so no curb return is built", () => {
+  /* ⛔ B2498961 (owner 2026-10-29: "The road should move with the parking, slightly … if I move the building and the parking 50 feet, keep it attached"):
+   * the heal that re-seats this field 5 ft carries the drive's last point with it, so the drive still LANDS ON THE END FACE where he drew it. On main the same
+   * assertion read the OPPOSITE — `skim: true`, the drive lying alongside the east edge for 19 ft and ending inside the footprint (the lopsided entrance). */
+  it("the drive FOLLOWS the re-seated field: it still lands on the field's end face (a real junction with curb returns, NOT a skim along the east edge)", () => {
+    const f = OPENED.find((e) => e.id === "e52duuwgj");
     const j = driveJunctionsOf(OPENED, SETTINGS).find((x) => x.sideId === ROAD.id && x.targetId === f.id);
     expect(j).toBeTruthy();
-    expect(j.geom.skim).toBe(true);
-    expect(j.geom.wedges.length).toBe(0);
+    expect(j.geom.skim).toBeFalsy();
+    expect(j.geom.wedges.length).toBe(2);
+    const l = rectFrame(f).toLocal(j.junctionPt);
+    expect(l.x).toBeCloseTo(0, 3);                     // on the END face
+    expect(l.y).toBeGreaterThan(0); expect(l.y).toBeLessThan(f.h);   // inside the face's own extent (the lane), not past a corner
+    const opened = OPENED.find((e) => e.id === ROAD.id);
+    expect(opened.pts.slice(0, -1)).toEqual(ROAD.pts.slice(0, -1));  // ONLY the last control point moved
+    expect(opened.pts[opened.pts.length - 1].x).toBeCloseTo(ROAD.pts[ROAD.pts.length - 1].x - 5, 6);   // by the field's own 5 ft
+    expect(opened.driveTee).toEqual(ROAD.driveTee);    // and it is still connected
     const stale = OPENED.map((e) => (e.id === ROAD.id ? { ...e, driveTee: undefined } : e));
     expect(driveJunctionsOf(stale, SETTINGS).some((x) => x.sideId === ROAD.id && x.targetId === f.id)).toBe(true);
   });
