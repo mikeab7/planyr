@@ -369,7 +369,7 @@ describe("NEW-1 — the lift is remembered PER SITE, like every other per-plan d
     expect(sp).toMatch(/const payload = \{[^}]*layerAbove \};/);
     expect(sp).toMatch(/"\|A:" \+ aboveSig\(s\.layerAbove\)/); // its own undo frame
     expect(sp).toMatch(/applyAboveOverrides\(applyOnOverrides\(cur, snapOverrides\), snapAbove\)/);
-    expect(sp).toMatch(/overlaysWithOverrides\(layerOverrides, layerAbove\)/);
+    expect(sp).toMatch(/overlaysWithOverrides\(layerOverrides, layerAbove(, projOpacity)?\)/); // B2448033 adds the project's opacity as an optional third argument
   });
 });
 

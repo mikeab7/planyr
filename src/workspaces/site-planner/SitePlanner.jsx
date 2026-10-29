@@ -83,6 +83,9 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
+// B2448033 — a layer's OPACITY belongs to the PROJECT (owner 2026-10-29): one row per project, written as a patch.
+import { opacityFromOverlays, opacitySig, applyLayerOpacity } from "./lib/layerOpacity.js";
+import { getProjectLayerOpacity, setProjectLayerOpacity, subscribeLayerOpacity, refreshProjectLayerOpacity } from "./lib/layerOpacityStore.js";
 import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack, PLANNER_BASEMAP_CHOICES } from "../../shared/basemaps/basemaps.js";
 import { loadRoadNamesPref, saveRoadNamesPref } from "./lib/roadNamesPref.js";
 import { loadCityNamesPref, saveCityNamesPref } from "./lib/cityNamesPref.js";
@@ -2348,6 +2351,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * buildings here"), so it belongs to the plan, not to the session. */
   const [layerAbove, setLayerAbove] = useState(() => sanitizeLayerAbove(restored?.layerAbove));
   const prevAboveSig = useRef(aboveSig(sanitizeLayerAbove(restored?.layerAbove)));
+  /* B2448033 — the PROJECT's per-layer opacity. NOT part of the plan record: every plan of the project reads
+   * the same single row (layerOpacityStore), keyed on the project's group (the same key `groupId` below uses).
+   * `prevOpacitySig` is the opacity the shared overlays last matched, so an echo of our own write or of the
+   * server's answer is never mistaken for a user change. */
+  const opacityGroup = restored?.groupId || siteId;
+  const prevOpacitySig = useRef("");
   // NEW-6 (2026-09-29): the expanded OVERLAYS row is remembered per plan for the tab session, so a
   // reload does not collapse it and hide Crop… behind an extra click. Per-viewer convenience only —
   // the stored id is used purely to pick which row is open, so a stale/unknown id just opens nothing.
@@ -5963,9 +5972,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *     is undoable — matching how sheetOverlays.visible works. Opacity-only changes don't change the
    *     visibility signature, so they neither snapshot nor churn the saved set. */
   useEffect(() => {
-    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides, layerAbove));
+    const projOpacity = getProjectLayerOpacity(opacityGroup); // synchronous device copy → the first paint is already right
+    prevOpacitySig.current = opacitySig(projOpacity);
+    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides, layerAbove, projOpacity));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* B2448033 — adopt the project's opacity from the server (open, focus, tab visible) and from a sibling
+   * writer in this tab. Opacity-only changes never touch the undo stack or layerOverrides (as today). */
+  useEffect(() => {
+    if (!opacityGroup || !siteId || !active || !setOverlays) return undefined;
+    const apply = (map) => { prevOpacitySig.current = opacitySig(map); setOverlays((o) => applyLayerOpacity(o, map)); };
+    const unsub = subscribeLayerOpacity(opacityGroup, apply);
+    apply(getProjectLayerOpacity(opacityGroup)); // coming back from the map finder: the project's values govern again
+    const refresh = () => { refreshProjectLayerOpacity(opacityGroup, siteId); };
+    refresh();
+    const onVis = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { unsub(); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", onVis); };
+  }, [opacityGroup, siteId, active]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const proj = overridesFromOverlays(overlays);
     const sig = overridesSig(proj);
@@ -5983,6 +6008,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return;
     }
+    // B2448033 — an opacity change is written to the PROJECT (a patch of only the layers that moved). It is
+    // deliberately not an undo frame and not part of layerOverrides, exactly as before.
+    const opMap = opacityFromOverlays(overlays);
+    const opSig = opacitySig(opMap);
+    // Only while this planner is the one on screen: the map finder shares `overlays`, and a change made THERE (no project open) must not be written to a project.
+    if (active && opSig !== prevOpacitySig.current) { prevOpacitySig.current = opSig; setProjectLayerOpacity(opacityGroup, siteId, opMap); }
     const visChanged = sig !== prevLayerSig.current;
     const liftChanged = sigAbove !== prevAboveSig.current;
     if (!visChanged && !liftChanged) return; // no visibility/band change (e.g. opacity-only) → nothing to persist

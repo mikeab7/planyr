@@ -585,6 +585,9 @@
       "file_name",
       "status",
       "total_bytes"
+    ],
+    "project_layer_opacity": [
+      "owner_id"
     ]
   }
 }
