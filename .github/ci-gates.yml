@@ -202,6 +202,17 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-copy-paste.mjs
+      # Notes PASTE OPTIONS gate (NEW-1, B2494096, 2026-10-29). Owner: make the paste badge look and work like Word / Excel's own
+      # Paste Options. A bordered "(Ctrl)" tab, a square flyout with our own drawings, Word's three options for text and Excel's
+      # eight for a table (Keep Source Formatting · Merge Formatting · Keep Source Column Widths · Transpose · Values · Values and
+      # Source Formatting · Formatting only · Picture), each ONE undo step and repeatable. Real Ctrl / clicks / the committed
+      # Excel, Sheets, Word, OneNote and Outlook clipboards, judged on the STORED document: every option and its undo, switching
+      # twice, a grid pasted into existing cells, the right-click menu, phone fit + 44-px targets, the dark-theme halo. Known-good
+      # arms VOID the run (a plain paste raises no tab; the Excel clipboard lands as a table). Reuses the preview server and Chromium.
+      - name: Notes paste options (Office-style tab + flyout, Excel's table set, every option one undo step — NEW-1, B2494096)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-paste-options.mjs
       # Notes header row on ANY row + cell fill gate (NEW-1/NEW-2, 2026-10-28). Owner report: a table's SECOND row was
       # all header cells (bold + grey), the B button read off, and "Header" only ever touched row 1. Real clicks/keys,
       # judged on the STORED document and computed style: Header row pressed / Bold lit in a header cell, the toggle

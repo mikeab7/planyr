@@ -30,6 +30,7 @@
 
 import { Fragment } from "@tiptap/pm/model";
 import { ANCHOR_BOX_PAD_X } from "./notesBoxResize.js";
+import { normalizeFill } from "./notesTableFill.js";
 
 /** Does this HTML hold a table? Cheap and deliberately loose — it only decides who owns the paste. */
 export function htmlHasTable(html) {
@@ -288,4 +289,117 @@ export function tableBoxWidth({ cols, widths = null, current = 0, sheet = 0, col
     : n * column) + pad;                       // the box's own padding + border sit OUTSIDE the table
   const ceiling = Math.max(Number(sheet) || 0, cap, n * minCol + pad);
   return Math.round(Math.max(Number(current) || 0, Math.min(natural, ceiling)));
+}
+
+/* ── the SOURCE table's look: column widths and cell shading (NEW-1, Office-style paste options) ─────────────
+ *
+ * The ordinary paste imports neither (see this file's header and notesTableFill.js): a table's box is sized from
+ * its columns, and a foreign white-on-white fill would be wrong on a dark page. The paste options that ask for
+ * "the source's widths" (W) or "the source's formatting" (E, R) need them, so they are READ here, from the
+ * clipboard markup, and carried beside the paste. Pure over a DOM element — the unit runner has none, so the
+ * length and colour parsing is exported and tested on its own, and the whole read is driven in a browser
+ * (ui-audit/verify-notes-paste-options.mjs) against the committed Excel / OneNote / Word fixtures.
+ */
+
+const CSS_PX = { px: 1, pt: 96 / 72, in: 96, cm: 96 / 2.54, mm: 96 / 25.4 };
+
+/** `"64"`, `"48pt"`, `"0.9in"` → whole CSS pixels; percentages, `auto` and junk → null. */
+export function cssLengthPx(value) {
+  const m = /^\s*(\d*\.?\d+)\s*(px|pt|in|cm|mm)?\s*$/i.exec(String(value ?? ""));
+  if (!m) return null;
+  const n = parseFloat(m[1]) * CSS_PX[(m[2] || "px").toLowerCase()];
+  return n > 0 ? Math.round(n) : null;
+}
+
+/** The fill a CSS declaration block names (a hex or an rgb triple after `background` / `background-color`), as lowercase hex, or null.
+ *  White and "no fill" are not a look anyone chose. */
+export function fillFromDeclarations(css) {
+  const m = /(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/i.exec(String(css || ""));
+  const token = m && /#[0-9a-f]{3,6}\b|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)/i.exec(m[1]);
+  const hex = normalizeFill(token ? token[0] : "");
+  return !hex || hex === "transparent" || /^#(?:f{6}|f{3})$/i.test(hex) ? null : hex;
+}
+
+/** `{ className: fill }` from the clipboard's own `<style>` text. ⛔ EXCEL (and Word) NAME A CELL'S SHADING BY CLASS —
+ *  `<td class=xl65>` with a `.xl65` rule carrying the background in the head — not inline, so reading only `style=` misses
+ *  every real spreadsheet fill (found by driving the committed Excel fixture, whose header row is shaded this way). */
+export function fillsByClass(cssText) {
+  const out = {};
+  const css = String(cssText || "").replace(/<!--|-->/g, " ");
+  for (const m of css.matchAll(/(?:^|[}\s,])(?:td|th)?\.([A-Za-z_][\w-]*)\s*\{([^}]*)\}/g)) {
+    const fill = fillFromDeclarations(m[2]);
+    if (fill && !out[m[1]]) out[m[1]] = fill;
+  }
+  return out;
+}
+
+/** A source cell's shading as `#rrggbb`, or null: inline style first, then `bgcolor`, then its classes' rules. */
+export function sourceFill(el, byClass = null) {
+  if (!el?.getAttribute) return null;
+  const inline = fillFromDeclarations(el.getAttribute("style") || "");
+  if (inline) return inline;
+  const attr = (el.getAttribute("bgcolor") || "").trim();
+  const fromAttr = fillFromDeclarations(`background:${/^[0-9a-f]{6}$/i.test(attr) ? `#${attr}` : attr}`);
+  if (fromAttr) return fromAttr;
+  if (byClass) for (const c of String(el.getAttribute("class") || "").split(/\s+/)) if (c && byClass[c]) return byClass[c];
+  return null;
+}
+
+function elementWidth(el) {
+  const attr = el.getAttribute?.("width");
+  const fromAttr = attr && !/%/.test(attr) ? cssLengthPx(attr) : null;
+  if (fromAttr) return fromAttr;
+  const m = /(?:^|;)\s*width\s*:\s*([^;]+)/i.exec(el.getAttribute?.("style") || "");
+  return m && !/%/.test(m[1]) ? cssLengthPx(m[1].trim()) : null;
+}
+
+const cellsOf = (tr) => Array.from(tr.children || []).filter((c) => /^t[dh]$/i.test(c.tagName || ""));
+
+/** Tables worth reporting, in document order: not an email layout table (the paste unwraps those), not one cell
+ *  (always pasted as text), and not nested inside a table that is itself kept. These are the tables the editor
+ *  ends up holding, one for one. */
+function realTables(root) {
+  const isScaffold = (t) => (isSingleColumn(t) && !isBorderedTable(t)) || t.querySelectorAll("td,th").length < 2;
+  return Array.from(root.querySelectorAll("table")).filter((t) => {
+    if (isScaffold(t)) return false;
+    const up = t.parentElement?.closest?.("table");
+    return !up || isScaffold(up);
+  });
+}
+
+/** `{ widths, fills }` per real table in a clipboard document. `widths[i]` is column i's source width in CSS pixels
+ *  or null; `fills[r][c]` is the shading of the c-th cell of the r-th row (document order) or null. Never throws. */
+export function readSourceTables(root, styleRoot = root) {
+  if (!root?.querySelectorAll) return [];
+  const out = [];
+  const byClass = fillsByClass(Array.from(styleRoot?.querySelectorAll?.("style") || []).map((st) => st.textContent).join("\n"));
+  for (const table of realTables(root)) {
+    try {
+      const widths = [];
+      for (const col of Array.from(table.querySelectorAll(":scope > colgroup > col, :scope > col"))) {
+        const span = Math.max(1, parseInt(col.getAttribute("span") || "1", 10) || 1);
+        const w = elementWidth(col);
+        for (let k = 0; k < span; k += 1) widths.push(w);
+      }
+      const rows = Array.from(table.querySelectorAll(":scope > tr, :scope > tbody > tr, :scope > thead > tr, :scope > tfoot > tr"));
+      const fills = [];
+      const fromCells = [];
+      for (const tr of rows) {
+        let at = 0;
+        const rowFills = [];
+        for (const cell of cellsOf(tr)) {
+          const span = Math.max(1, parseInt(cell.getAttribute("colspan") || "1", 10) || 1);
+          rowFills.push(sourceFill(cell, byClass));
+          const w = elementWidth(cell);
+          if (w && span === 1 && fromCells[at] == null) fromCells[at] = w;
+          at += span;
+        }
+        fills.push(rowFills);
+      }
+      const cols = Math.max(widths.length, fromCells.length);
+      const merged = Array.from({ length: cols }, (_, i) => widths[i] ?? fromCells[i] ?? null);
+      out.push({ widths: merged, fills });
+    } catch (_) { /* one unreadable table costs its look, never the paste */ }
+  }
+  return out;
 }
