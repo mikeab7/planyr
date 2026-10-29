@@ -1582,10 +1582,12 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   /* B2521584 — a draw-budget refusal must SURVIVE the `load` that esri-leaflet fires right after it: the handler below reset the status to "loaded", or to "empty / No
    * features in this view" when nothing was drawn, so a layer that REFUSED to draw read as "no data here" (reproduced against esri-leaflet 3.0.19: failed ×4, then empty).
    * `refused` is raised by `overbudget` and cleared when the next request cycle starts ("loading"). */
-  let refused = false;
+  let refused = false, lastErrAt = 0;
   lyr.on("loading", () => { refused = false; });
   lyr.on("load", () => {
-    tries = 0;
+    /* esri-leaflet fires `load` BEFORE `requesterror` for a failed request (Service.js calls the callback first), so resetting `tries` here wiped the count on every cycle and a
+     * persistently failing service retried forever (simulated: 1,801 refreshes in 12 minutes, "failed" never reached). A load within 10 s of an error is the same cycle's — keep the count. */
+    if (Date.now() - lastErrAt > 10000) tries = 0;
     if (refused) return; // the "too detailed to draw" failure stays on the row
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
@@ -1593,9 +1595,11 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
   lyr.on("overbudget", (e) => {
     refused = true;
-    onStatus && onStatus(k, "failed", `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+    // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
   });
   lyr.on("requesterror", (e) => {
+    lastErrAt = Date.now();
     const code = e && e.error && (e.error.code ?? e.error.httpStatus);
     const { retry, delayMs } = featureRetryDecision(code, tries, max);
     if (retry) {

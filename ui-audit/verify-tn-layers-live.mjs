@@ -53,7 +53,7 @@ const sleep = (ms) => page.waitForTimeout(ms);
 let log = [];
 page.on("response", async (res) => {
   const u = res.url();
-  if (!TN_HOSTS.test(u) && !/services\d?\.arcgis\.com|carto\.nationalmap\.gov/.test(u)) return;
+  if (!TN_HOSTS.test(u) && !/services\d?\.arcgis\.com|nationalmap\.gov/.test(u)) return;
   const e = { url: u, status: res.status(), features: null };
   if (/\/query/.test(u)) { try { const j = await res.json(); e.features = Array.isArray(j.features) ? j.features.length : null; } catch (_) { /* not json */ } }
   log.push(e);
@@ -98,7 +98,9 @@ try {
     return u ? new RegExp(u.replace(/^https:\/\//, "").replace(/^\/gis-proxy\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/query") : null;
   };
   const JOHNSON = { lat: 36.38, lng: -82.9, label: "Greeneville / Johnson City" };
-  const BUDGET_ROWS = ["tn_pws", "tn_crit_habitat", "tn_wqa", "tn_ms4", "tn_nrhp_bounds"];
+  const BUDGET_ROWS = ["tn_pws", "tn_crit_habitat", "tn_wqa", "tn_ms4"];
+  const HATCHIE = { lat: 35.05, lng: -88.785, label: "Hatchie Scenic River (west TN)" };      // one 143,521-vertex MultiPolygon, returned whole
+  const HIWASSEE = { lat: 35.0125, lng: -84.719, label: "Hiwassee mussel reach (Cleveland)" };   // critical habitat: 222k vertices in one cell at z17
   const statusText = (panel, id) => panel.locator(`[data-testid="layer-row-${id}"]`).first().innerText().catch(() => "");
   async function oneRow(id, place, zoom) {
     log = [];
@@ -126,6 +128,8 @@ try {
     await oneRow(id, id === "tn_stream_buffers" ? PLACES.christiana : PLACES.nashville, id === "tn_stream_buffers" ? 14 : z);
   }
   for (const id of BUDGET_ROWS) for (const dz of [0, 2]) await oneRow(id, JOHNSON, Math.min(17, Math.max(Number(TN_LAYERS[id].minZoom) || 12, 9) + dz));
+  for (const dz of [0, 2]) await oneRow("tn_scenic", HATCHIE, Math.max(Number(TN_LAYERS.tn_scenic.minZoom) || 9, 9) + dz);
+  await oneRow("tn_crit_habitat", HIWASSEE, 17);   // the deepest zoom the row is sized to draw; closer in it must say "too detailed", never "empty"
 
   /* ── B + C. located throwaway plans ─────────────────────────────────────────────── */
   const mk = (id, p, label) => ({ ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });
@@ -173,6 +177,7 @@ try {
   const sbState = await stateOf(tnPanel, "tn_stream_buffers");
   console.log(`   stream buffers: row state=${sbState}, ${polys} map paths`);
   check("B · Stream Buffers paints (loaded, not failed or empty)", sbState === "loaded", `state=${sbState}`);
+  check("B · …and real buffer polygons are on the map", polys > 0, `${polys} paths`);
   check("B · the NHD stream lines were asked and answered", answered(/hydro\.nationalmap\.gov|nhd/i).length > 0, `NHD ${answered(/hydro\.nationalmap\.gov|nhd/i).length}`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-christiana-buffers.png` });
 

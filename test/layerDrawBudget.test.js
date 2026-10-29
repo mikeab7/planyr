@@ -131,4 +131,22 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     expect(out).toHaveLength(2);
     expect(out[1][1]).not.toBe("failed");                                // …and reports what it found, not the old refusal
   });
+  it("attachFeatureRetry gives up: esri-leaflet fires `load` BEFORE `requesterror` for a failed request, which used to wipe the retry count every cycle (1,801 refreshes in 12 minutes, 'failed' never reached)", async () => {
+    vi.resetModules(); mocks();
+    vi.useFakeTimers();
+    try {
+      const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+      const handlers = {}; let refreshes = 0;
+      const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, refresh() { refreshes++; }, _layers: {} };
+      const out = [];
+      attachFeatureRetry(lyr, "k", { label: "Layer" }, (...a) => out.push(a[1]));
+      const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
+      for (let cycle = 0; cycle < 12; cycle++) {
+        fire("loading"); fire("load"); fire("requesterror", { error: { code: 503 } });   // the real order: load, then the error
+        vi.advanceTimersByTime(5000);
+      }
+      expect(refreshes).toBeLessThanOrEqual(3);                 // bounded by `max`
+      expect(out).toContain("failed");                          // …and it ends on "failed", not "loaded"/"retrying" forever
+    } finally { vi.useRealTimers(); }
+  });
 });

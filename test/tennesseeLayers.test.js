@@ -94,7 +94,13 @@ describe("every Tennessee row is Tennessee-only and registered whole", () => {
     for (const id of TN_LAYER_IDS) expect(LAYER_TIER[id], id).toBeTruthy();
   });
   it("every polygon row that the service returns WHOLE asks the server to simplify (the draw budget declines a 500k-vertex batch, and zooming in cannot help)", () => {
-    for (const id of ["tn_crit_habitat", "tn_nrhp_bounds", "tn_ms4", "tn_pws", "tn_wqa"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThanOrEqual(3);
+    for (const id of ["tn_crit_habitat", "tn_nrhp_bounds", "tn_ms4", "tn_pws", "tn_wqa", "tn_scenic"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThanOrEqual(3);
+  });
+  it("critical habitat is drawn up to the zoom measured safe (222k vertices at z17, under its own budget) and, closer in, says it is too detailed — not 'zoom in'", () => {
+    expect(ALL_LAYERS.tn_crit_habitat.vertexBudget).toBeGreaterThan(220000);
+    expect(ALL_LAYERS.tn_crit_habitat.vertexBudget).toBeLessThan(300000);   // never the 700k that froze a tab
+    expect(ALL_LAYERS.tn_crit_habitat.overbudgetMsg).toMatch(/zoom out/i);
+    expect(ALL_LAYERS.tn_crit_habitat.overbudgetMsg).not.toMatch(/zoom in\b/i);
   });
   it("the 186,000-record THC layer asks only for the fields its card reads", () => {
     expect(ALL_LAYERS.tn_thc_sites.fields).toEqual(expect.arrayContaining(["COMNAME", "PROPADDR", "DATECONST"]));
@@ -287,6 +293,17 @@ describe("click cards are clean (constraint #45)", () => {
     expect(key.map((k) => k.label)).toEqual(["County", "City Limits"]);
     const { LINE_LAYERS } = await import("../src/workspaces/site-planner/lib/siteScreen.js");
     expect(LINE_LAYERS.TN).toEqual(["tn_city"]);
+  });
+  it("National Register point — the federal layer's raw field names never reach the card; partial NPS dates read as far as they go", () => {
+    const c = cards.nrhpPointCard({ OBJECTID: 1433373, NRIS_Refnum: "84000089", RESNAME: "Federal Reserve Bank of Atlanta", ResType: "building", Address: "226 N. 3rd Ave.", City: "Nashville", County: "Davidson", State: "TENNESSEE", MultiName: "Marr and Holman Buildings in Downtown Nashville TR", CertDate: "1984-10-", Status: "Listed", CONSTRANT: "x" });
+    noJunk(c);
+    expect(c.rows.map((r) => r.label)).toEqual(["Type", "Address", "Location", "Listed", "Listed as part of"]);
+    expect(c.rows.find((r) => r.label === "Type").text).toBe("Building");
+    expect(c.rows.find((r) => r.label === "Listed").text).toBe("October 1984");
+    expect(cards.certDate("1984")).toBe("1984");
+    expect(cards.certDate("1984-10-12")).toBe("October 12, 1984");
+    expect(cards.certDate("")).toBe("");
+    expect(ALL_LAYERS.tn_nrhp.identifyCard).toBeTypeOf("function");
   });
   it("titleCase leaves mixed-case text alone and keeps acronyms", () => {
     expect(cards.titleCase("Harpeth River")).toBe("Harpeth River");

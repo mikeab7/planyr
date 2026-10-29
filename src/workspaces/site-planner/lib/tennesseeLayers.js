@@ -13,7 +13,7 @@
  * PURE: no network, no React. */
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import {
-  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, landfillCard, thcSiteCard, nrhpBoundaryCard, dorSiteCard, isImpairedAttainment, isThreatenedAttainment,
+  drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, landfillCard, thcSiteCard, nrhpBoundaryCard, dorSiteCard, nrhpPointCard, isImpairedAttainment, isThreatenedAttainment,
 } from "./tennesseeCards.js";
 
 const TN = { states: ["TN"] };
@@ -139,7 +139,7 @@ export const TN_LAYERS = {
   tn_scenic: {
     kind: "esriFeature", label: "State Scenic Rivers", source: `${TDEC} — Division of Natural Areas`,
     url: GIS_SOURCES.scenicTn.serviceUrl, ...TN,
-    minZoom: 9, color: "#0e7490", weight: 1.6, opacity: 0.5,
+    minZoom: 9, color: "#0e7490", weight: 1.6, opacity: 0.5, simplifyFactor: 6, // the Hatchie corridor is one 143,521-vertex MultiPolygon the service returns whole to every tile that touches it
     styleFn: (_p, opacity) => ({ color: "#0e7490", weight: 1.6, opacity, fillColor: "#0e7490", fillOpacity: opacity * 0.3 }), // design-exempt: map ink for a drawn designated corridor
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Scenic river", hoverSource: "TDEC",
     hoverFields: [{ names: ["Site_name"] }, { names: ["DESIGNATIO"] }],
@@ -155,6 +155,7 @@ export const TN_LAYERS = {
     minZoom: 11, color: "#6d28d9", weight: 2, opacity: 0.55, pointRadius: 4,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Historic place", hoverSource: "NPS National Register",
     hoverFields: [{ names: ["RESNAME"] }, { names: ["ResType"], label: "type" }, { names: ["City"] }],
+    identifyCard: (props) => nrhpPointCard(props),
     vintage: "NPS National Register — Esri Federal Data copy, edited 2026-10-28",
     note: "National Register listings — one point per listing (a district is one point, not its boundary). The Tennessee Historical Commission's inventory of recorded-but-unlisted sites is not public GIS, so an empty map is never proof of none. A flag to check with the Commission, not a clearance.",
     role: "point", group: "environmental", order: 24,
@@ -210,7 +211,8 @@ export const TN_LAYERS = {
   tn_crit_habitat: {
     kind: "esriFeature", label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
     url: GIS_SOURCES.critHabitatTn.serviceUrl, ...TN,
-    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 6, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies to ~6 screen pixels, re-asked every 2 zoom levels (layers.js)
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45, simplifyFactor: 6, vertexBudget: 250000, // the service returns each mussel reach WHOLE (up to 314k vertices): the server simplifies to ~6 screen pixels, re-asked every 2 zoom levels (layers.js); measured 222k vertices in a 512 px cell at z17 beside a reach — drawn under this budget; closer in (z18+) it is refused, and says so
+    overbudgetMsg: "Critical habitat is mapped as whole river reaches and is too detailed to draw this close in — zoom out a level or two.",
     styleFn: (_p, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // design-exempt: map ink for a drawn designated area
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
     hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["listing_status"], label: "status" }],

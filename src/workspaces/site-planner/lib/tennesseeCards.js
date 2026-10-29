@@ -239,3 +239,30 @@ export function dorSiteCard(props) {
     note: "TDEC's Division of Remediation register (last edited June 2024 — a site opened since is not on it). A flag for a Phase I ESA: pull TDEC's file for the cleanup status and any land-use controls. A neighbouring site is not a finding about this one.",
   };
 }
+
+/* ---- NPS National Register points (the federal layer, read at Tennessee sites) ---- */
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/* NPS certification dates arrive partial: "1984-10-" (month only), "1984" (year only) or a full "1984-10-12". Said as far as they go. */
+export function certDate(raw) {
+  const m = clean(raw).match(/^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?-?$/);
+  if (!m) return clean(raw);
+  const mo = m[2] ? MONTHS[Number(m[2]) - 1] : null;
+  if (!mo) return m[1];
+  return m[3] ? `${mo} ${Number(m[3])}, ${m[1]}` : `${mo} ${m[1]}`;
+}
+export function nrhpPointCard(props) {
+  const p = props || {};
+  const where = [clean(p.City), clean(p.County) ? `${clean(p.County)} County` : ""].filter(Boolean).join(", ");
+  const type = clean(p.ResType);
+  return {
+    title: `${clean(p.RESNAME) || "National Register property"} — National Register`,
+    rows: rowsOf(
+      type ? { label: "Type", text: type.charAt(0).toUpperCase() + type.slice(1) } : null,
+      row("Address", p.Address),
+      row("Location", where),
+      row("Listed", certDate(p.CertDate)),
+      row("Listed as part of", p.MultiName),
+    ),
+    note: "One point per listing (a district is one point — see National Register Boundaries for its footprint). A listing triggers federal Section 106 review where a federal permit or funding is involved.",
+  };
+}
