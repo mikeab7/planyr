@@ -96,18 +96,20 @@ const norm = (dx, dy) => {
 // Nearest point ON a ring's edges to `pt` (segment projection — a rect court's nearest
 // point to its host building centroid is the dock-FACE midpoint, never just a corner).
 export function nearestOnRing(pt, ring) {
-  let best = null, bd = Infinity;
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i], b = ring[(i + 1) % ring.length];
+  // B2319137 ×3: no object per segment (this runs tens of millions of times in a grading build) — the same answer, built once
+  let bx = 0, by = 0, bd = Infinity;
+  const n = ring.length, px = pt.x, py = pt.y;
+  for (let i = 0; i < n; i++) {
+    const a = ring[i], b = ring[(i + 1) % n];
     const dx = b.x - a.x, dy = b.y - a.y;
     const len2 = dx * dx + dy * dy;
-    let t = len2 === 0 ? 0 : ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2;
+    let t = len2 === 0 ? 0 : ((px - a.x) * dx + (py - a.y) * dy) / len2;
     t = Math.max(0, Math.min(1, t));
-    const q = { x: a.x + t * dx, y: a.y + t * dy };
-    const d = Math.hypot(pt.x - q.x, pt.y - q.y);
-    if (d < bd) { bd = d; best = q; }
+    const qx = a.x + t * dx, qy = a.y + t * dy;
+    const d = Math.hypot(px - qx, py - qy);
+    if (d < bd) { bd = d; bx = qx; by = qy; }
   }
-  return best;
+  return bd < Infinity ? { x: bx, y: by } : null;
 }
 // Distance from a point to the nearest edge of ANY ring in the list (the PL tie check).
 export function distToRingEdges(pt, rings) {
@@ -542,7 +544,12 @@ const SEAM_TOUCH_FT = 1.0;      // two paved rings closer than this share an edg
 const SEAM_MIN_DROP_FT = 0.05;  // a seam flatter than this is the same plane (a dock chain's court + trailer row)
 /* ROUND 6 (NEW-3): the open-ground slope away from a pavement / pad edge (%; the gear's "Open-ground slope"). */
 export const OPEN_GROUND_SLOPE_PCT = 2;
-const OPEN_GROUND_PIECE_FT = 25;   // ROUND 8: the graded edges are cut into pieces this long for the open ground's cone family
+const OPEN_GROUND_PIECE_FT = 25;
+const PIECE_BLOCK_FT = 120;     // B2319137 ×3: the blocks the open ground's cone search skips by a lower bound
+/* B2319137 ×3 — the two exact shortcuts (the cone search's block skip, the limit-edge grid) can be switched off so a test can
+ * prove the fast surface IS the full scan (test/gradingFastSurface). Never switched off outside a test. */
+let FAST_BLOCKS = true, FAST_LIMIT = true;
+export const __setFastSurface = (on, which = "both") => { if (which !== "limit") FAST_BLOCKS = !!on; if (which !== "blocks") FAST_LIMIT = !!on; };   // ROUND 8: the graded edges are cut into pieces this long for the open ground's cone family
 export const OPEN_GROUND_MIN_FALL_PCT = 0.5;   // ROUND 8: the fall a pit-filled swale keeps toward its outlet
 const DRAIN_MAX_NODES = 60000;                 // ROUND 8: the drain lattice's density (≈ the contour lattice's)
 const DRAIN_MIN_CELL_FT = 3;
@@ -566,7 +573,7 @@ const sampleRing = (ring, stepFt) => {
   return out;
 };
 /* Nearest point on any ring of the regions (outers + holes) → { q, d, k (region index) }. */
-function nearestOnRegions(pt, regions) {
+export function nearestOnRegions(pt, regions) {
   let best = null;
   regions.forEach((r, k) => {
     for (const ring of [r.outer, ...r.holes]) {
@@ -577,6 +584,61 @@ function nearestOnRegions(pt, regions) {
     }
   });
   return best;
+}
+/* B2319137 ×3 — the same answer as `nearestOnRegions`, from a grid of the regions' edges built once per build: a query visits
+ * cells outward from the point and stops once no unvisited cell can hold a nearer edge. The limit ring is hundreds of
+ * vertices and the grading build asks this for every lattice node (many builds per FFE search). Exact (guard:
+ * test/gradingFastSurface); a point off the grid falls back to the full scan. */
+export function regionEdgeIndex(regions, cellFt = 60) {
+  const ax = [], ay = [], bx = [], by = [], rk = [];
+  regions.forEach((r, k) => {
+    for (const ring of [r.outer, ...r.holes]) for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      ax.push(a.x); ay.push(a.y); bx.push(b.x); by.push(b.y); rk.push(k);
+    }
+  });
+  const NS = ax.length;
+  if (!NS) return { nearest: () => null };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < NS; i++) { x0 = Math.min(x0, ax[i], bx[i]); x1 = Math.max(x1, ax[i], bx[i]); y0 = Math.min(y0, ay[i], by[i]); y1 = Math.max(y1, ay[i], by[i]); }
+  const nx = Math.max(1, Math.ceil((x1 - x0) / cellFt) + 1), ny = Math.max(1, Math.ceil((y1 - y0) / cellFt) + 1);
+  const cells = new Array(nx * ny);
+  for (let i = 0; i < NS; i++) {
+    const i0 = Math.floor((Math.min(ax[i], bx[i]) - x0) / cellFt), i1 = Math.floor((Math.max(ax[i], bx[i]) - x0) / cellFt);
+    const j0 = Math.floor((Math.min(ay[i], by[i]) - y0) / cellFt), j1 = Math.floor((Math.max(ay[i], by[i]) - y0) / cellFt);
+    for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) { const c = cj * nx + ci; (cells[c] || (cells[c] = [])).push(i); }
+  }
+  const seen = new Int32Array(NS).fill(-1);
+  let stamp = 0;
+  const nearest = (pt) => {
+    const px = pt.x, py = pt.y;
+    let bd = Infinity, bqx = 0, bqy = 0, bk = -1;
+    const seg = (i) => {
+      const dx = bx[i] - ax[i], dy = by[i] - ay[i];
+      const len2 = dx * dx + dy * dy;
+      let t = len2 === 0 ? 0 : ((px - ax[i]) * dx + (py - ay[i]) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const qx = ax[i] + t * dx, qy = ay[i] + t * dy;
+      const d = Math.hypot(px - qx, py - qy);
+      if (d < bd || (d === bd && i < bk)) { bd = d; bqx = qx; bqy = qy; bk = i; }
+    };
+    const ci = Math.floor((px - x0) / cellFt), cj = Math.floor((py - y0) / cellFt);
+    if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) { for (let i = 0; i < NS; i++) seg(i); }
+    else {
+      stamp++;
+      const rMax = Math.max(nx, ny);
+      for (let r = 0; r <= rMax; r++) {
+        for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++) {
+          if (Math.max(Math.abs(i - ci), Math.abs(j - cj)) !== r || i < 0 || j < 0 || i >= nx || j >= ny) continue;
+          const l = cells[j * nx + i];
+          if (l) for (const q of l) { if (seen[q] !== stamp) { seen[q] = stamp; seg(q); } }
+        }
+        if (bd <= r * cellFt) break;      // every unvisited cell is at least r cells (r × cellFt) away
+      }
+    }
+    return bk < 0 ? null : { q: { x: bqx, y: bqy }, d: bd, k: rk[bk] };
+  };
+  return { nearest };
 }
 function regionIndexOf(pt, regions) {
   for (let k = 0; k < regions.length; k++) if (pointInRegions(pt, [regions[k]])) return k;
@@ -699,6 +761,24 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   }
   const NP = pAx.length;
   const sqK = Kb * Kb;
+  // B2319137 ×3 — the pieces in BLOCKS of PIECE_BLOCK_FT by their midpoint, each block with its lowest elevation and the box its
+  // pieces can reach. A piece's cone minimum is never below (its lowest end) + K·(distance to the piece), so a block whose
+  // (lowest elevation + K·distance to its box) is already at or above the best answer cannot change it and is skipped —
+  // exact, the same L as scanning every piece (guard: test/gradingFastSurface). It turned a per-point scan of every piece of
+  // every outline into a scan of the blocks near the point (the FFE search builds the surface many times).
+  const blocks = [];
+  {
+    const B = new Map();
+    for (let q = 0; q < NP; q++) {
+      const ex = pAx[q] + pUx[q] * pLen[q], ey = pAy[q] + pUy[q] * pLen[q];
+      const key = `${Math.floor((pAx[q] + ex) / 2 / PIECE_BLOCK_FT)},${Math.floor((pAy[q] + ey) / 2 / PIECE_BLOCK_FT)}`;
+      let b = B.get(key);
+      if (!b) { b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, z: Infinity, q: [] }; B.set(key, b); blocks.push(b); }
+      b.q.push(q);
+      b.x0 = Math.min(b.x0, pAx[q], ex); b.x1 = Math.max(b.x1, pAx[q], ex); b.y0 = Math.min(b.y0, pAy[q], ey); b.y1 = Math.max(b.y1, pAy[q], ey);
+      b.z = Math.min(b.z, pZa[q], pZa[q] + pM[q] * pLen[q]);
+    }
+  }
   // min over s ∈ [0, len] of  z_a + m·s + K·√((s − s0)² + h²)  — convex; the stationary point is s0 − m·h / √(K² − m²)
   const pieceMin = (q, px, py) => {
     const rx = px - pAx[q], ry = py - pAy[q];
@@ -721,7 +801,17 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       if (v < L) L = v;
     }
     if (!Number.isFinite(D)) return null;
-    for (let q = 0; q < NP; q++) { const v = pieceMin(q, pt.x, pt.y); if (v < L) L = v; }
+    const px = pt.x, py = pt.y;
+    if (!FAST_BLOCKS) { for (let q = 0; q < NP; q++) { const v = pieceMin(q, px, py); if (v < L) L = v; } return L - (Kb + sOpen) * D; }
+    for (let k = 0; k < blocks.length; k++) {
+      const b = blocks[k];
+      const ddx = px < b.x0 ? b.x0 - px : px > b.x1 ? px - b.x1 : 0, ddy = py < b.y0 ? b.y0 - py : py > b.y1 ? py - b.y1 : 0;
+      // skipped only when CLEARLY above (a hair of margin): two pieces whose minima agree to the last digit must both be read,
+      // or a rounding-level difference flips which one wins and the pit fill amplifies it (measured: 0.02 ft) — bit-exact
+      if (b.z + Kb * Math.sqrt(ddx * ddx + ddy * ddy) >= L + 1e-6) continue;
+      const qs = b.q;
+      for (let j = 0; j < qs.length; j++) { const v = pieceMin(qs[j], px, py); if (v < L) L = v; }
+    }
     return L - (Kb + sOpen) * D;
   };
   const srcRegions = limit.regions;             // ROUND 6: in both modes the graded area IS the limit (no traced plateau)
@@ -747,12 +837,18 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     if (xs.length) {
       bs = { x: Float64Array.from(xs), y: Float64Array.from(ys), z: Float64Array.from(zs), zMin, zMax, B: new Map() };
       for (let q = 0; q < xs.length; q++) { const key = `${Math.floor(xs[q] / BAND_BUCKET_FT)},${Math.floor(ys[q] / BAND_BUCKET_FT)}`; let l = bs.B.get(key); if (!l) bs.B.set(key, (l = [])); l.push(q); }
+      // B2319137 ×3: the same buckets on an integer grid (a text key per bucket per lattice node was most of bandZ's time)
+      let bi0 = Infinity, bj0 = Infinity, bi1 = -Infinity, bj1 = -Infinity;
+      for (let q = 0; q < xs.length; q++) { const i = Math.floor(xs[q] / BAND_BUCKET_FT), j = Math.floor(ys[q] / BAND_BUCKET_FT); bi0 = Math.min(bi0, i); bi1 = Math.max(bi1, i); bj0 = Math.min(bj0, j); bj1 = Math.max(bj1, j); }
+      bs.gi0 = bi0; bs.gj0 = bj0; bs.gnx = bi1 - bi0 + 1; bs.gny = bj1 - bj0 + 1; bs.G = new Array(bs.gnx * bs.gny);
+      for (const [key, l] of bs.B) { const [i, j] = key.split(",").map(Number); bs.G[(j - bj0) * bs.gnx + (i - bi0)] = l; }
     }
   }
+  const limitIdx = FAST_LIMIT ? regionEdgeIndex(limit.regions) : { nearest: (pt) => nearestOnRegions(pt, limit.regions) };
   const bandZ = (pt, ze) => {
     if (!bs) return ze;
     let L = -Infinity, U = Infinity;
-    const nl = nearestOnRegions(pt, limit.regions);
+    const nl = limitIdx.nearest(pt);
     if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
     // a sample further than ratio × the largest possible |ze − z(b)| constrains nothing
     const R = apronRatio * Math.max(Math.abs(ze - bs.zMin), Math.abs(ze - bs.zMax)) + 1, R2 = R * R;
@@ -767,7 +863,10 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     };
     const i0 = Math.floor((pt.x - R) / BAND_BUCKET_FT), i1 = Math.floor((pt.x + R) / BAND_BUCKET_FT);
     const j0 = Math.floor((pt.y - R) / BAND_BUCKET_FT), j1 = Math.floor((pt.y + R) / BAND_BUCKET_FT);
-    if ((i1 - i0 + 1) * (j1 - j0 + 1) < bs.B.size) { for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const l = bs.B.get(`${i},${j}`); if (l) for (const q of l) one(q); } }
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) < bs.B.size) {
+      const a0 = Math.max(i0, bs.gi0), a1 = Math.min(i1, bs.gi0 + bs.gnx - 1), c0 = Math.max(j0, bs.gj0), c1 = Math.min(j1, bs.gj0 + bs.gny - 1);
+      for (let i = a0; i <= a1; i++) for (let j = c0; j <= c1; j++) { const l = bs.G[(j - bs.gj0) * bs.gnx + (i - bs.gi0)]; if (l) for (let k = 0; k < l.length; k++) one(l[k]); }
+    }
     else for (let q = 0; q < bx.length; q++) one(q);
     return Math.min(Math.max(ze, L), U);
   };
@@ -1058,7 +1157,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       }
       if (boundary || !apronsOn || !(reach > 0)) continue;
       // outside the limit (layout mode): the daylight slope, thrown FROM the limit outward at the elevation the surface reaches there
-      const nr = nearestOnRegions(pt, srcRegions);
+      const nr = limitIdx.nearest(pt);
       if (!nr || nr.d > reach) continue;
       const id = `limit:${nr.k}`;
       if (!gOk) { voidCells++; cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: null, elId: id, cls: "transition", wedge: true, regionId: nr.k }); continue; }
@@ -1114,7 +1213,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
         : { status: "value", ft, elId: `infill:${k}`, cls: "infill", wedge: false };
     }
     if (boundary || !apronsOn) return { status: "none", reason: "outside" };
-    const nr = nearestOnRegions(pt, srcRegions);
+    const nr = limitIdx.nearest(pt);
     if (!nr || nr.d > reach) return { status: "none", reason: "outside" };
     const g0 = existAt(pt);
     if (g0 == null || !isFinite(g0)) return { status: "none", reason: "void" };

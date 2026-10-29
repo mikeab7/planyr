@@ -73,6 +73,9 @@ export function cleanRow(row) {
   return { label, text };
 }
 
+/* A card TITLE built from a service's own layer name ("TCEQ_Water_Districts: Houston Downtown Management District") — a snake_case word is a column / layer name, not words. */
+export const humanTitle = (t) => String(t == null ? "" : t).trim().replace(/\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b/g, (m) => m.replace(/_/g, " "));
+
 /* A whole card → the clean card, or null when nothing worth showing is left (no title and no rows). */
 export function cleanCard(item) {
   if (!item) return null;
@@ -86,7 +89,7 @@ export function cleanCard(item) {
     seen.add(key);
     rows.push(c);
   }
-  const title = String(item.title == null ? "" : item.title).trim();
+  const title = humanTitle(item.title);
   if (!title && !rows.length) return null;
   const note = item.note && !isEmptyText(item.note) ? String(item.note).trim() : null;
   return { ...item, title: title || "Feature", rows, note, about: item.about || item.sourceName || null };

@@ -2124,6 +2124,7 @@ export default function CompEntryGrid({
           tabIndex={-1}
           role="grid"
           aria-label="Comp entry sheet"
+          data-letters-are-text=""
           aria-rowcount={rows.length + 1}
           aria-colcount={visibleIdx.length + 2}
           onKeyDown={onGridKeyDown}

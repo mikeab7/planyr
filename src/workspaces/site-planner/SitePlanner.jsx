@@ -191,6 +191,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
+import { crumbFloor } from "../../shared/ui/crumbScope.js";
 import RotationStepper, { normalizeDeg, formatDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
@@ -200,7 +201,7 @@ import { setLayersHidden } from "./lib/layerHide.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
-import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
+import { anchorTransform, anchorTransformAttr, anchorInverseCss, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
 import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
 import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
@@ -22327,13 +22328,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: FONT_SIZE.control, fontWeight: 500, color: "var(--chrome-text)",
-          maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
+          maxWidth: 200, minWidth: crumbFloor(planLabel, CRUMB_MIN_W), whiteSpace: "nowrap",
         }}
         onClick={() => setPlanMenu((o) => { const next = !o; if (next) refreshDeletedPlansHere(); return next; })}
         title="Switch or rename plan"
         data-testid="plan-crumb"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
+        <span title={planLabel} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); setPlanPurgeArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
@@ -25467,13 +25468,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   surrounding group instead (PDF-PARITY); the group itself is the export's anchor.
                   Geometry mirrors the backdrop exactly (same overscan, same gesture transform);
                   `pointerEvents: none` throughout, so it can neither take a click nor steal a
-                  handle. The inner counter-translate undoes the SVG's own registration shift — the
-                  SVG is nudged onto the imagery, and a map pane inside it must not be nudged twice. */}
+                  handle. The inner counter-transform undoes the SVG's own registration shift AND the plan group's live
+                  pan/zoom transform (`anchorInverseCss`) — this host already carries the basemap's gesture transform
+                  itself, so without the second half a lifted fill moved at TWICE the pan speed and slid off the imagery
+                  until release (NEW-1). */}
               {origin && (
                 <g {...{ [FRONT_BAND_ATTR]: "1" }}>
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
-                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
                       <div ref={geoFrontWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoFrontPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
@@ -25857,8 +25860,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {origin && (
                 <g {...{ [PARCEL_PICK_BAND_ATTR]: "1" }}>
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
-                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
                       <div ref={geoPickWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoPickPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
