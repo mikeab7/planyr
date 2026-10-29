@@ -474,7 +474,7 @@ export const OK_LAYERS = {
     hoverTitle: "Sensitive watershed", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Stormwater sensitive area", (p) => [rowOf("Area", p.NAME), rowOf("HUC-11", p.HUC11, { raw: true })].filter(Boolean),
       "DEQ lists these watersheds as sensitive waters harboring endangered and threatened species and their critical habitats, as set forth in the OKR10 Construction General Stormwater Permit."),
-    note: "Sensitive waters and watersheds harboring threatened and endangered species that DEQ's OKR10 Construction General Stormwater Permit singles out (52 areas: HUC-11 watersheds and river corridors; DEQ's layer is named \"OKR05 Stormwater Sensitive Areas\" and its description cites OKR10).",
+    note: "Sensitive waters and watersheds harboring threatened and endangered species that DEQ's OKR10 Construction General Stormwater Permit singles out (52 areas: HUC-11 watersheds, river watersheds and river corridors; DEQ's layer is named \"OKR05 Stormwater Sensitive Areas\" and its description cites OKR10).",
     infoCaveat: "DEQ's own description of the layer; the permit text governs.",
     group: "environmental", order: 37,
   }),
@@ -581,7 +581,7 @@ export const OK_VINTAGE = {
   ok_deq_appb_areas: "Oklahoma DEQ WaterWeb — no date published", ok_deq_appb_streams: "Oklahoma DEQ WaterWeb — no date published", ok_deq_sensitive: "Oklahoma DEQ WaterWeb — no date published", ok_deq_303d: "Oklahoma DEQ — 2024 Integrated Report",
   ok_owrb_scenic: "Oklahoma Water Resources Board — Water Quality Standards", ok_owrb_special_ws: "Oklahoma Water Resources Board — Water Quality Standards",
   ok_dams: "OWRB Dam Inventory — edited 2026-09-22", ok_water_systems: "OWRB — approximate, as published",
-  ok_nrhp: "National Park Service — Esri federal mirror, edited 2026-10-29", ok_cemeteries: "USGS National Map — GNIS", ok_crit_habitat: "USFWS — final critical habitat",
+  ok_nrhp: "National Park Service — Esri federal mirror, edited 2026-10-28", ok_cemeteries: "USGS National Map — GNIS", ok_crit_habitat: "USFWS — final critical habitat",
 };
 
 /* =============================================================== Vector sources (ok_county, ok_city) =============================================================== */

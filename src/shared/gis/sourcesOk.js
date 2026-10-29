@@ -215,5 +215,5 @@ export const OK_FIXTURE_REACH = {
   okCherokeeLand: ["regional", "Cherokee Nation tribal land tracts — the Nation's tribal land tracts in eastern Oklahoma."],
   okAppendixBLine: ["regional", "Fourteen stream lines in all (DEQ Appendix B Table 1/2 streams), a few stream segments, not a statewide spread — there is nothing to probe across the state."],
   okScenicRivers: ["regional", "OWRB's Scenic Rivers include the Illinois River, Barren Fork, Flint Creek, Lee Creek and the Upper Mountain Fork — all in the east of the state; there is no statewide spread to probe."],
-  okSensitiveWaters: ["regional", "Fifty-two sensitive areas (HUC-11 watersheds and river corridors) concentrated in the east and centre of the state — the fixtures sit on two of them, far apart."],
+  okSensitiveWaters: ["regional", "Fifty-two sensitive areas (HUC-11 watersheds, river watersheds and river corridors) concentrated in the east and centre of the state — the fixtures sit on two of them, far apart."],
 };
