@@ -198,6 +198,8 @@ try {
 } finally {
   if (SIGNED) {
     const gone = await page.evaluate(async (id) => {
+      // the database refuses a permanent delete of a plan that is not in the trash first (sites_block_delete_live_group)
+      try { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); } catch (_) {}
       try { await window.pfSupabase.from("site_elements").delete().eq("site_id", id); } catch (_) {}
       await window.pfSupabase.from("sites").delete().eq("id", id);
       const r = await window.pfSupabase.from("sites").select("id").eq("id", id);
