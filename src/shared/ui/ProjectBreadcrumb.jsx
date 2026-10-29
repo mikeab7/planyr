@@ -76,6 +76,7 @@ import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveContr
 import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts, companyCardsFor } from "../projects/projectSwitcherModel.js";
 import { useOrgName } from "../profile/orgNameStore.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
+import { crumbFloor } from "./crumbScope.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
@@ -1152,7 +1153,7 @@ export default function ProjectBreadcrumb({
         {homeLabel}
       </button>
 
-      <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
+      <span data-testid="crumb-sep" style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
 
       {/* Project crumb (B191) — opens the switcher dropdown. In cross-project mode it
           reads "All projects".
@@ -1187,13 +1188,13 @@ export default function ProjectBreadcrumb({
            collapsing this crumb actually buys back the room the last (plan) crumb needs. */
         style={crumbBtn({
           color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto",
-          maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : CRUMB_MIN_W,
+          maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : crumbFloor(projectLabel, CRUMB_MIN_W),
         })}
       >
         {crumbCompact ? (
           <CollapsedCrumbIcon />
         ) : (
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span data-testid="project-crumb-name" title={projectLabel} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
                 to "Select a project" whenever nothing was picked, which is wrong the moment the
                 same menu also offers the Organization. */}
@@ -1207,7 +1208,7 @@ export default function ProjectBreadcrumb({
             root cause was in the save-status mapping itself (see notesSaveState.js's NEW-5 note),
             not in this crumb, but the badge is the ONE sync indicator now, so this second copy is
             gone rather than fixed in place. */}
-        {!crumbCompact && <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
+        {!crumbCompact && <span data-testid="project-caret" style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
       </button>
 
       {/* NEW-4 (B1343203) — an always-mounted, always-FULL, invisible twin of the crumb above,
@@ -1217,7 +1218,7 @@ export default function ProjectBreadcrumb({
       <span
         ref={projectMeasureRef}
         aria-hidden="true"
-        style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", ...crumbBtn({ maxWidth: 240, minWidth: CRUMB_MIN_W }) }}
+        style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", ...crumbBtn({ maxWidth: 240 }) }}
       >
         <span>{projectLabel}</span>
         <span style={{ fontSize: 11 }}>▾</span>
@@ -1230,7 +1231,7 @@ export default function ProjectBreadcrumb({
           anchor ref, so rendering it twice would fight over both) purely to read its width. */}
       {planSlot && (
         <>
-          <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
+          <span data-testid="crumb-sep" style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
           <span ref={planSlotRef} style={{ display: "flex", alignItems: "center", minWidth: 0 }}>{planSlot}</span>
         </>
       )}
