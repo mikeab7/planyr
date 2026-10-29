@@ -4,6 +4,8 @@
  * that stream asks for:
  *   state    25 ft   every state-waters stream — the Georgia Erosion & Sedimentation Act (O.C.G.A. 12-7-6(b)(15)) buffer.
  *   trout    50 ft   a Georgia DNR-mapped trout stream — the trout-water buffer.
+ *   river   100 ft   a PROTECTED RIVER (perennial, 400 cfs or more — DCA's compiled map): a 100-ft natural vegetative buffer each side, measured from
+ *                    the banks (O.C.G.A. 12-2-8, Rule 391-3-16-.04). Drawn from DCA's own protected-river lines, NOT matched to NHD reaches by name.
  *   district 75 ft   inside the Metropolitan North Georgia Water Planning District — the District's MODEL stream-buffer
  *                    ordinance: 50 ft undisturbed + 25 ft impervious setback. A MODEL: each member county adopts and may
  *                    amend its own, so this is labelled "typical local requirement — confirm with the county", never law.
@@ -25,6 +27,7 @@ import { corridorRingLngLat } from "./pipelineCorridor.js";
 export const GA_BUFFER_TIERS = {
   state: { id: "state", eachSideFt: 25, color: "#b45309", label: "25 ft state-waters buffer" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
   trout: { id: "trout", eachSideFt: 50, color: "#0f766e", label: "50 ft trout-stream buffer" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
+  river: { id: "river", eachSideFt: 100, color: "#0369a1", label: "100 ft protected-river buffer" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
   district: { id: "district", eachSideFt: 75, color: "#b91c1c", label: "75 ft Metro North Georgia District buffer" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
 };
 
@@ -88,7 +91,7 @@ const midpoint = (path) => path[Math.floor(path.length / 2)];
  * midpoint (an NHD reach is ~1 km; a reach straddling the District line takes its middle's answer).
  * `districtOk` is FALSE when the District outline could not be loaded: then NO part is promoted to 75 and the caller
  * must say so — a missing outline must never silently draw the narrower band as if it were the answer. Pure. */
-export function streamBufferBands({ nhd = null, trout = null, district = null } = {}) {
+export function streamBufferBands({ nhd = null, trout = null, district = null, rivers = null } = {}) {
   const rings = districtRings(district);
   const bands = [];
   const push = (path, tier, from) => {
@@ -108,6 +111,13 @@ export function streamBufferBands({ nhd = null, trout = null, district = null } 
       if (!part || part.length < 2) continue;
       const m = midpoint(part);
       push(part, tierFor({ inDistrict: inAnyRing(m[0], m[1], rings), trout: true }), "trout");
+    }
+  }
+  // DCA's protected rivers: 100 ft each side wherever they run (the widest tier — no narrower rule can govern a protected river).
+  for (const feature of (rivers && rivers.features) || []) {
+    for (const part of linePartsOf(feature)) {
+      if (!part || part.length < 2) continue;
+      push(part, GA_BUFFER_TIERS.river, "river");
     }
   }
   return bands;

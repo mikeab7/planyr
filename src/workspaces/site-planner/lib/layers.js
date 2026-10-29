@@ -15,6 +15,7 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -117,6 +118,7 @@ export const MERGE_GROUPS = {
     label: "Fire Hydrants",
     note: "Best-available hydrant locations from every source that reaches this area. Overlapping points from different sources are shown as each source reports them — not yet merged into one marker (follow-up: NEW-2, needs coh_hydrants converted from a raster export to a queryable vector layer before points can be compared).",
   },
+  ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
 };
 
 /* Should raster (export-image) layers go through the same-origin Drive-backed cache proxy
@@ -1177,13 +1179,13 @@ export const AHJ_LAYERS = {
     // Georgia screening — computed buffer bands off the cached NHD + DNR trout + District-outline geometry (see
     // vectorOverlay.cachedStreamBufferLayer and lib/georgiaStreamBuffers.js, which holds every rule).
     kind: "pipelineCorridor", label: "Stream Buffers", swatch: "#3b82f6", bufferRule: "ga_streams",
-    source: "USGS NHD + Georgia DNR trout streams + Atlanta Regional Commission (computed)",
+    source: "USGS NHD + Georgia DNR trout streams + Georgia DCA protected rivers + Atlanta Regional Commission (computed)",
     states: ["GA"],
     // Vector-only: the bands exist only where the NHD centrelines came back as VECTORS, so the gate is the NHD
     // source's own `query.minVectorZoom` (test/layerZoomGate pins the two together).
     minZoom: 12,
     opacity: 0.55,
-    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
+    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, 100 ft on a PROTECTED RIVER (average flow of 400 cfs or more — O.C.G.A. 12-2-8, Rule 391-3-16-.04, drawn from DCA's protected-river lines), and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. The wider rule governs. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
     role: "area", group: "flood", order: 3,
     floodTier: "hydrography", agency: "USGS / Georgia DNR",
   },
@@ -1283,7 +1285,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS };
 
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
@@ -1357,7 +1359,7 @@ export const LAYER_VINTAGE = {
   ga_crit_habitat: "USFWS final critical habitat — layer edited 2026-08-31",
   ga_gopher_tortoise: "Georgia DNR suitable-soils model — layer edited 2026-09-11",
   ga_trout: "Georgia DNR trout streams — layer edited 2024-12-30",
-  ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + the District outline — not a surveyed buffer",
+  ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + DCA protected rivers + the District outline — not a surveyed buffer",
   ga_slope: "USGS 3DEP LiDAR — collection date varies by area",
   bts_truck_network: "FHWA National Network — data year 2018 (layer edited 2023-04-03)",
   hpms_aadt: "FHWA HPMS — data year 2022 (layer edited 2025-02-12)",
@@ -1367,6 +1369,7 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...GEORGIA_VINTAGE,
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".

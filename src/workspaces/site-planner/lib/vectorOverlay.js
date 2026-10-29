@@ -752,13 +752,13 @@ export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts
  *
  * Vector-only: below the NHD source's vector gate there are no centrelines to buffer, so it reports "zoom in". */
 export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
-  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd;
-  if (!nhd || !trout || !district) return null;
+  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd, rivers = VECTOR_SOURCES.ga_protected_rivers;
+  if (!nhd || !trout || !district || !rivers) return null;
   const { cache = gisCache } = opts;
 
   let map = null, opacity = initialOpacity, seq = 0;
-  const data = { nhd: null, trout: null, district: null };
-  const failed = { nhd: false, trout: false, district: false };
+  const data = { nhd: null, trout: null, district: null, rivers: null };
+  const failed = { nhd: false, trout: false, district: false, rivers: false };
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const group = L.layerGroup([], { pane });
   const bands = L.layerGroup([]);
@@ -767,7 +767,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
   const paint = () => {
     bands.clearLayers();
     if (!data.nhd) return;
-    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district });
+    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district, rivers: failed.rivers ? null : data.rivers });
     // Widest first, so a narrower tier laid over a wider one stays legible instead of being buried by it.
     list.sort((a, b) => b.tier.eachSideFt - a.tier.eachSideFt);
     for (const { ring, tier } of list) {
@@ -778,7 +778,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
         interactive: false,
       }));
     }
-    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline"].filter(Boolean);
+    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline", failed.rivers && "the protected-river lines"].filter(Boolean);
     if (lost.length) {
       report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — the bands shown are the 25 ft state minimum only, NOT the full rule (screening only).`);
     } else if (!list.length) {
@@ -807,7 +807,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
       onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data[name] = fr.data; failed[name] = false; paint(); } },
     }).then((r) => { if (mySeq === seq) { data[name] = r.data; failed[name] = false; } })
       .catch((e) => { if (mySeq === seq) { failed[name] = true; reportClientEvent("ga-stream-buffer-source-failed", String((e && e.message) || e), { source: name }); } });
-    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district)]);
+    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district), pull("rivers", rivers)]);
     if (mySeq !== seq || !map) return;
     if (failed.nhd) {
       bands.clearLayers();
@@ -833,7 +833,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
     seq++;
     m.off("moveend", refresh);
     L.LayerGroup.prototype.onRemove.call(this, m);
-    map = null; data.nhd = data.trout = data.district = null;
+    map = null; data.nhd = data.trout = data.district = data.rivers = null;
   };
   group.setOpacity = (o) => { opacity = o; paint(); };
   group.getExportMode = () => "vector";
