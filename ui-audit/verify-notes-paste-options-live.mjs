@@ -33,7 +33,15 @@ const excel = loadFixture("excel");
 const TITLE = "ZZ throwaway paste options " + Date.now().toString(36);
 await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 30000 });
-const before = await page.locator('[data-testid^="notes-row-"]').count();
+/* The rail fills in after the route paints: read the baseline only once the row count has stopped changing (a read of 0 on a
+ * list that was still loading made the "count is back" check a false failure on the first live run). */
+let before = -1;
+for (let i = 0; i < 20; i++) {
+  const n = await page.locator('[data-testid^="notes-row-"]').count();
+  if (n === before && n > 0) break;
+  before = n;
+  await page.waitForTimeout(600);
+}
 await page.locator('[data-testid="notes-new-page"]').click();
 await page.waitForSelector('[data-testid="note-title"]', { timeout: 20000 });
 await page.locator('[data-testid="note-title"]').fill(TITLE);
