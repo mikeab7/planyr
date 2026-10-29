@@ -8,8 +8,8 @@
  *
  * EVERY ROW is an agency's own ArcGIS Online feature service, recorded in the GIS source registry (src/shared/gis/sources.js `ga*` rows) with its probe
  * date and live counts; the URL, and any `where`, are READ FROM THAT ROW — never typed twice. Every row declares `states: ["GA"]`, so a Texas or
- * Colorado view never lists it; the eight rows whose source reaches only part of Georgia also declare a real boundary `regions` (serviceAreas.js:
- * `mngwpd` = the 15-county Metropolitan North Georgia Water Planning District, `spalding_ga` = Spalding County, `ga_blue_ridge` = the north Georgia mountains, the protected-mountain data extent), so a Savannah site is not offered
+ * Colorado view never lists it; the twelve rows whose source reaches only part of Georgia also declare a real boundary `regions` (serviceAreas.js:
+ * `mngwpd` = the 15-county Metropolitan North Georgia Water Planning District and its water-supply watersheds, `mrpa_corridor` = the cells within a few miles of the Chattahoochee MRPA corridor, `spalding_ga` / `bartow_ga` = those counties, `ga_blue_ridge` = the north Georgia mountains, the protected-mountain data extent), so a Savannah site is not offered
  * a layer that can only ever read "nothing here".
  *
  * REGULATORY NUMBERS are each cited in the row's note (O.C.G.A. 12-2-8, Rules 391-3-16-.01…-.05, O.C.G.A. 12-5-440, the District's own item text);
@@ -20,6 +20,7 @@
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { approvalDate } from "./desotoZoning.js";
+import { ROAD_AUTHORITY_COLORS } from "./jurisdiction.js";
 
 /* ⛔ NO ROW SETS `fields` (the outFields limiter). esri-leaflet keys every feature by its OBJECT ID, and a request that leaves the id field out of `outFields` gets features
  * with no id — they all collapse into ONE feature, so a layer returning 50 river segments drew exactly one (caught on the real map by verify-georgia-due-diligence, not by
@@ -27,9 +28,12 @@ import { approvalDate } from "./desotoZoning.js";
 const GA = { kind: "esriFeature", states: ["GA"], hoverIdentify: true, canvasIdentify: true };
 
 /* One row from its registry source: the URL (and the source's own `where`) always come from GIS_SOURCES. */
+/* A registry row marked `relay: true` is on a host the build sandbox cannot reach: the app reads it through the same-origin /gis-proxy relay (functions/gis-proxy allow-list) —
+ * the upstream https URL stays in the registry (provenance + the weekly verifier), the relay path is derived from it so the two cannot drift. */
+export const relayUrl = (serviceUrl) => String(serviceUrl).replace(/^https:\/\//, "/gis-proxy/");
 const row = (key, o) => ({
   ...GA,
-  url: GIS_SOURCES[key].serviceUrl,
+  url: GIS_SOURCES[key].relay ? relayUrl(GIS_SOURCES[key].serviceUrl) : GIS_SOURCES[key].serviceUrl,
   ...(GIS_SOURCES[key].where ? { where: GIS_SOURCES[key].where } : {}),
   ...o,
 });
@@ -44,6 +48,8 @@ export const sentence = (v) => {
   if (!s || /[a-z]/.test(s)) return s;
   return s.toLowerCase().replace(/(^|[\s/(-])([a-z])/g, (_m, a, b) => a + b.toUpperCase());
 };
+/* EPD / USGS fill a value they do not have with the word 'Unknown'; that is an empty row, not a fact (constraint #45). */
+export const known = (v) => { const t = sentence(v); return /^(unknown|unk)$/i.test(t) ? "" : t; };
 const rowIf = (label, v) => { const t = typeof v === "string" ? v : text(v); return t ? [{ label, text: t }] : []; };
 const card = (title, rows, note) => ({ title, rows: rows.flat(), note: note || null });
 
@@ -138,6 +144,46 @@ export const DAM_CLASS = {
 /* ───────────────────────────── Solid waste ───────────────────────────── */
 
 export const solidWasteType = (raw) => text(raw).replace(/^SW-\s*/i, "");
+
+/* ───────────────────────────── Road ownership (GDOT) ───────────────────────────── */
+
+/* GDOT's own `Group_Name` is the owner class (State / County / City / Other). The ink is the Texas road-authority palette (one product, one colour per owner in every state). */
+export const ROAD_OWNER_COLORS = { "State Owned": ROAD_AUTHORITY_COLORS["State (TxDOT)"], "County Owned": ROAD_AUTHORITY_COLORS.County, "City Owned": ROAD_AUTHORITY_COLORS.City, Other: ROAD_AUTHORITY_COLORS.Unknown };
+export const ROAD_OWNER_WORDS = { "State Owned": "The state (Georgia DOT)", "County Owned": "The county (or the consolidated city-county government)", "City Owned": "The city", Other: "Not the state, county or city (private, federal or another authority)" };
+export const roadOwnerGroup = (props) => { const g = text(props && props.Group_Name); return ROAD_OWNER_COLORS[g] ? g : "Other"; };
+export const roadOwnerStyle = (props, opacity) => {
+  const g = roadOwnerGroup(props);
+  return { color: ROAD_OWNER_COLORS[g], weight: 2, opacity, fill: false, ...(g === "Other" ? { dashArray: "5,5" } : {}) }; // a neutral 'Other' is told apart by pattern, not by fading
+};
+
+/* ───────────────────────────── Rare species (DNR) ───────────────────────────── */
+
+export const FEDERAL_STATUS = { LE: "Federally endangered", LT: "Federally threatened", C: "Federal candidate" };
+export const STATE_STATUS = { E: "State endangered", T: "State threatened" };
+
+/* ───────────────────────────── Bartow County zoning ───────────────────────────── */
+
+/* The county's CODE → a colour class. 'Incorporated' is the county's own marker for land inside a city, whose zoning is the city's and is not in this layer. A code not recognised
+ * is neutral, never guessed; no district NAME is shown (a name comes from the ordinance). */
+export function bartowZoneClass(code) {
+  const raw = String(code == null ? "" : code).trim();
+  if (!raw) return "other";
+  if (/^incorporated$/i.test(raw)) return "city";
+  const z = raw.toUpperCase().replace(/\(.*?\)/g, "").replace(/W\/C/g, "").replace(/[\s-]/g, "");
+  if (/^(I|M)\d?(CU)?$/.test(z)) return "industrial";
+  if (/^(C\d?|CN|OI|O\/I)(CU)?$/.test(z)) return "commercial"; // BPD is left neutral: its meaning is the ordinance's, and the ordinance was not reachable
+  if (/^PUD/.test(z)) return "planned";
+  if (/^A\d?(CU)?$/.test(z)) return "agricultural";
+  if (/^R(E)?\d*(CU)?$/.test(z)) return "residential";
+  return "other";
+}
+export const BARTOW_COLORS = { industrial: "#7c3aed", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", planned: "#0f766e", city: "#94a3b8", other: "#6b7280" };
+export const BARTOW_CLASS_LABEL = { industrial: "Industrial / manufacturing", commercial: "Commercial / office", residential: "Residential", agricultural: "Agricultural", planned: "Planned development", city: "Inside a city (the city zones it)", other: "Other" };
+export const bartowStyle = (props, opacity) => {
+  const k = bartowZoneClass(props && props.STZONECODE);
+  const c = BARTOW_COLORS[k];
+  return { color: c, weight: 0.8, opacity, fill: true, fillColor: c, fillOpacity: opacity * (k === "city" ? 0.12 : 0.5), ...(k === "city" ? { dashArray: "4 3" } : {}) };
+};
 
 /* ───────────────────────────── The rows ───────────────────────────── */
 
@@ -290,7 +336,7 @@ export const GEORGIA_LAYERS = {
   }),
   /* ---- Jurisdictions & incentives ---- */
   ga_mrpa_corridor: row("gaMrpaCorridor", {
-    label: "Chattahoochee River Corridor (2,000 ft)", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee River Corridor (2,000 ft)", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 20, minZoom: 9, color: "#0e7490", styleFn: washStyle("#0e7490", 0.12, 1),
     legend: [{ label: "2,000-ft river corridor", color: "#0e7490" }, { label: "150-ft structure / impervious setback", color: "#c2410c" }, { label: "50-ft undisturbed river buffer", color: "#15803d" }, { label: "35-ft undisturbed tributary buffer", color: "#7c3aed" }],
     hoverTitle: "Chattahoochee corridor", hoverSource: "ARC", hoverFields: [],
@@ -301,21 +347,21 @@ export const GEORGIA_LAYERS = {
     infoCaveat: "Buffers are measured from the river bank (and from the stream bank on tributaries); the plan's exceptions and ARC's review govern a specific parcel.",
   }),
   ga_mrpa_buffer_150: row("gaMrpaImpBuffer", {
-    label: "Chattahoochee 150-ft Setback", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee 150-ft Setback", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 21, minZoom: 11, color: "#c2410c", styleFn: washStyle("#c2410c", 0.25, 0.8),
     hoverTitle: "Chattahoochee 150-ft setback", hoverSource: "ARC", hoverFields: [],
     identifyCard: () => card("Chattahoochee 150-ft setback", [[{ label: "Rule", text: "Structures and impervious surfaces are set back 150 ft from the river bank under the Chattahoochee Corridor Plan." }]], "ARC's published buffer — a survey of the bank governs."),
     note: "The corridor plan's 150-ft setback for structures and impervious surfaces from the Chattahoochee bank.",
   }),
   ga_mrpa_buffer_50: row("gaMrpaVegBuffer", {
-    label: "Chattahoochee 50-ft Undisturbed Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee 50-ft Undisturbed Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 22, minZoom: 11, color: "#15803d", styleFn: washStyle("#15803d", 0.35, 0.8),
     hoverTitle: "Chattahoochee 50-ft buffer", hoverSource: "ARC", hoverFields: [],
     identifyCard: () => card("Chattahoochee 50-ft undisturbed buffer", [[{ label: "Rule", text: "A natural vegetative buffer 50 ft wide along the river and its impoundments stays undisturbed under the Chattahoochee Corridor Plan." }]], "ARC's published buffer — a survey of the bank governs."),
     note: "The corridor plan's 50-ft natural (undisturbed) vegetative buffer along the Chattahoochee and its impoundments.",
   }),
   ga_mrpa_buffer_35: row("gaMrpaTributaryBuffer", {
-    label: "Chattahoochee 35-ft Tributary Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mngwpd"],
+    label: "Chattahoochee 35-ft Tributary Buffer", mergeGroup: "ga_mrpa", source: "Atlanta Regional Commission — Metropolitan River Protection Act", ...JUR, regions: ["mrpa_corridor"],
     role: "area", order: 23, minZoom: 11, color: "#7c3aed", styleFn: washStyle("#7c3aed", 0.35, 0.8),
     hoverTitle: "Tributary 35-ft buffer", hoverSource: "ARC", hoverFields: [],
     identifyCard: () => card("Tributary 35-ft undisturbed buffer", [[{ label: "Rule", text: "A 35-ft natural buffer stays undisturbed along tributary streams inside the Chattahoochee corridor." }]], "ARC's published buffer — a survey of the bank governs."),
@@ -352,6 +398,60 @@ export const GEORGIA_LAYERS = {
     note: "Spalding County's own zoning polygons for the unincorporated county and the town of Orchard Hill (colour = a coarse use class; the code prints at close zoom). The City of Griffin zones itself and is not in this layer (confirm any other city with the county). District names are not shown: the county's description field disagrees with itself for several codes, and a name comes from the ordinance. Confirm the district and any conditions with the county.",
     infoCaveat: "County-published polygons (edited August 2025); a rezoning or condition may post later. Confirm with Spalding County Planning & Zoning.",
   }),
+  /* ---- NEW-1 follow-up: hosts the build sandbox cannot reach, read through the /gis-proxy relay (measured from planyr.io) ---- */
+  ga_road_ownership: row("gaRoadOwnership", {
+    label: "Road Ownership", source: "Georgia DOT — roadway ownership (August 2022)", group: "jurisdiction", role: "line", order: 3, minZoom: 14, simplifyFactor: 1,
+    weight: 2, opacity: 0.55, styleFn: roadOwnerStyle,
+    legend: [{ label: "State (Georgia DOT)", color: ROAD_OWNER_COLORS["State Owned"] }, { label: "County", color: ROAD_OWNER_COLORS["County Owned"] }, { label: "City", color: ROAD_OWNER_COLORS["City Owned"] }, { label: "Other", color: ROAD_OWNER_COLORS.Other, dash: true }],
+    hoverTitle: "Road", hoverSource: "Georgia DOT", hoverFields: [],
+    identifyCard: (props) => card("Road ownership", [[{ label: "Owned by", text: ROAD_OWNER_WORDS[roadOwnerGroup(props)] }]], "Whoever owns the road permits the driveway and any work in its right of way."),
+    note: "Who owns each road — Georgia DOT's statewide ownership record (as of August 2022): state, county, city, or other. The owner of the road fronting a site is who permits its driveway and any work in the right of way (a state route means a GDOT driveway permit; a county or city road, that government's). Colours match the Texas road-ownership layer. Drawn from street level.",
+    infoCaveat: "GDOT's August 2022 record, updated yearly — a road transferred or built since is not in it; confirm the owner with the county before a driveway design.",
+  }),
+  ga_rare_species: row("gaRareSpecies", {
+    label: "Rare Species Records", source: "Georgia DNR — Natural Heritage Program (generalised)", ...ENV, role: "area", order: 32, minZoom: 10,
+    color: "#9d174d", styleFn: washStyle("#9d174d", 0.14, 0.5), legend: [{ label: "Protected-species record in this ~4 mi cell (darker = more records)", color: "#9d174d" }],
+    hoverTitle: "Rare species record", hoverSource: "Georgia DNR", hoverFields: [{ names: ["SCOMNAME"] }],
+    identifyCard: (props) => {
+      const p = props || {};
+      const fed = FEDERAL_STATUS[text(p.USESA)] || "", st = STATE_STATUS[text(p.SPROT)] || "";
+      return card("Protected-species record in this ~4-mile cell",
+        [rowIf("One of the records", [sentence(p.SCOMNAME), text(p.SNAME) ? `(${text(p.SNAME)})` : ""].filter(Boolean).join(" ")), rowIf("Status", [fed, st].filter(Boolean).join(" · ")), rowIf("Group", sentence(p.GROUP_))],
+        "A cell can hold several records and the card names one. Ask DNR's Natural Heritage Program for a project review.");
+    },
+    note: "Georgia DNR's rare-species records — only those with a federal status (endangered, threatened, candidate) or state protection (endangered, threatened) — generalised to quarter-quad cells of about 4 miles. A shaded cell means a record somewhere in that cell, never on the site, and the shading stacks where several species share it. An empty map is NOT an all-clear (unrecorded habitat is not on it). The federal §7 / §10 and state review start with DNR's Natural Heritage Program and USFWS IPaC.",
+    infoCaveat: "Generalised on purpose (about 4 miles); a record's age is not published. DNR's review, not this map, answers 'is it on my site'.",
+  }),
+  ga_mineral: row("gaMineral", {
+    label: "Mines & Quarries (MRDS)", source: "USGS — Mineral Resources Data System (Georgia digest, 2005)", ...ENV, role: "point", order: 33, minZoom: 11,
+    color: "#57534e", pointRadius: 4, weight: 1.5, opacity: 0.55,
+    hoverTitle: "Mineral site", hoverSource: "USGS MRDS", hoverFields: [{ names: ["site_name"] }],
+    identifyCard: (props) => {
+      const p = props || {};
+      return card(sentence(p.site_name) || "Mineral resource site",
+        [rowIf("Status", known(p.dev_stat)), rowIf("Commodities", [known(p.commod1), known(p.commod2), known(p.commod3)].filter(Boolean).join(", ")), rowIf("Operation", known(p.oper_type)), rowIf("County", sentence(p.county))],
+        "A 2005 record — a point, not the pit.");
+    },
+    note: "USGS's Mineral Resources Data System records for Georgia (a 2005 digest): quarries, pits, mines, plants, prospects and occurrences — sand, gravel, clay, granite, limestone, kaolin and more — each with its status (producer, past producer, prospect…). A past quarry or pit on or beside a site is a fill, void, blasting-vibration and reclamation flag. A point per record, no boundary; not a current permit list. A few records just across the state line (Alabama, Florida, the Carolinas, Tennessee) ride along in the same file.",
+    infoCaveat: "USGS MRDS compiled to 2005; a closed or reclaimed site may not be marked, and a newer operation will be missing — confirm with EPD's Mining Program and the county.",
+  }),
+  ga_bartow_zoning: row("gaBartowZoning", {
+    label: "Zoning (Bartow County)", source: "Bartow County, GA — Zoning Districts", ...JUR, regions: ["bartow_ga"], role: "area", order: 25, minZoom: 15, simplifyFactor: 1, vertexBudget: 200000,
+    color: BARTOW_COLORS.commercial, styleFn: bartowStyle,
+    legend: ["industrial", "commercial", "residential", "agricultural", "planned", "city"].map((k) => ({ label: BARTOW_CLASS_LABEL[k], color: BARTOW_COLORS[k] })),
+    lineLabel: { field: "STZONECODE", minZoom: 16, format: (v) => { const t = text(v); return t && !/^incorporated$/i.test(t) ? t : null; } },
+    hoverTitle: "Zoning", hoverSource: "Bartow County", hoverFields: [{ names: ["STZONECODE"], label: "zone" }],
+    identifyCard: (props) => {
+      const p = props || {};
+      const code = text(p.STZONECODE), city = bartowZoneClass(code) === "city";
+      return card(city ? "Inside a city" : `Zone ${code || "(code not published)"}`,
+        [[{ label: "Jurisdiction", text: city ? "A city zones this ground — Bartow County's map does not carry the city's zoning (ask the city's planning office)" : "Bartow County's own zoning map (unincorporated county)" }],
+          city ? [] : rowIf("Colour class", BARTOW_CLASS_LABEL[bartowZoneClass(code)]), rowIf("Rezoning / case", text(p.REZONING)), rowIf("County note", text(p.ZONINGTEXT))],
+        city ? "The county's case reference and note, if any, as the county typed them." : "The county's case reference and note are shown as published. A code ending 'CU' or '(wC)' usually has a case in the county's file; when none is shown here, ask the county.");
+    },
+    note: "Bartow County's own zoning districts, parcel by parcel (colour = a coarse use class; the code prints at close zoom). Land inside a city — Adairsville and Cartersville included — is marked INCORPORATED in the county's map and is zoned by the city; that zoning is not in this layer. The county's rezoning case reference and its free-text note are shown as typed. District names are not shown: a name comes from the ordinance. Confirm the district and any conditions with Bartow County Planning & Development.",
+    infoCaveat: "County-published polygons; a rezoning or condition may post later, and the case behind a 'CU' or '(wC)' code is usually, not always, shown here — ask the county. Confirm with Bartow County.",
+  }),
 };
 
 /* The consolidated panel rows these members fold into (layers.js spreads this into MERGE_GROUPS). */
@@ -387,4 +487,8 @@ export const GEORGIA_VINTAGE = {
   ga_opportunity_zones: "Qualified Opportunity Zones — 2017 designation (DCA)",
   ga_jtc_tiers: "DCA Job Tax Credit tiers — 2026 ranking",
   ga_spalding_zoning: "Spalding County zoning — layer edited 2025-08-11",
+  ga_road_ownership: "Georgia DOT roadway ownership — as of August 2022",
+  ga_rare_species: "Georgia DNR Natural Heritage rare-species locations — generalised; edition date not published",
+  ga_mineral: "USGS MRDS / MAS-MILS Georgia digest — 2005",
+  ga_bartow_zoning: "Bartow County zoning districts — current county edition (layer edited by the county; date not published)",
 };

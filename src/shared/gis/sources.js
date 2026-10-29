@@ -1096,6 +1096,68 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-10-29",
   },
+  /* ═══ NEW-1 follow-up (Georgia due-diligence, 2026-10-29) — four rows on hosts the build sandbox cannot reach (403 at its egress) but planyr.io's /gis-proxy relay CAN: the Georgia GIS Data Clearinghouse at UGA ITOS (`maps.itos.uga.edu`: GDOT's own functional-class / ownership service, DNR's rare-species and the USGS mineral-resource records) and Bartow County's own ArcGIS Server. Each was MEASURED through the relay from planyr.io (live 2026-10-29 counts on the fixtures). `relay: true` marks them; layers read `/gis-proxy/<host>/…`, never the upstream. ═══ */
+  /* GDOT's own statewide road-ownership layer (`GDOT/GDOT_FunctionalClass` layer 20 'Ownership', 'Ownership of roadways in Georgia, as of August 2022'): 210,656 segments, `Group_Name` = State Owned / County Owned / City Owned / Other (`OWNERSHIP` 1 = state, 2 = county, 3 = city, 24 = a unified / consolidated city-county government that GDOT files under County; every other code is 'Other' — parks, private, toll, airport, university, federal). `OWNERSHIP_ENTITY` is an unreadable numeric entity code and is never shown. The owner of the road fronting a site is who permits its driveway. Live 2026-10-29 (±0.01° box): Atlanta 141 · Savannah 181 · Albany 73 · Adairsville 85. */
+  gaRoadOwnership: {
+    key: "gaRoadOwnership",
+    label: "Road ownership (Georgia DOT)",
+    provider: "Georgia Department of Transportation — roadway ownership, as of August 2022 (published on the Georgia GIS Data Clearinghouse, UGA ITOS)",
+    serviceUrl: "https://maps.itos.uga.edu/arcgis/rest/services/GDOT/GDOT_FunctionalClass/MapServer/20",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "line",
+    fields: { route: "route_id", group: "Group_Name", ownership: "OWNERSHIP" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* DNR's generalised rare-species locations (`FrameWork/Conservation` layer 1): 11,964 records, each a quarter-quad cell (0.0625°, ~4 mi) — a RECORD OF OCCURRENCE in the cell, never a point or a habitat boundary, and several species share a cell. The row keeps only records with a federal status (`USESA` LE / LT / C) or state protection (`SPROT` E / T): 5,411. Live 2026-10-29 (point): Savannah 7 · Albany 12 · Rome 3 · Macon 2 · Adairsville 2. */
+  gaRareSpecies: {
+    key: "gaRareSpecies",
+    label: "Rare species — DNR Natural Heritage (generalised)",
+    provider: "Georgia Department of Natural Resources — Wildlife Resources Division, Georgia Natural Heritage Program rare-species locations (1:24,000 generalised; published on the Georgia GIS Data Clearinghouse)",
+    serviceUrl: "https://maps.itos.uga.edu/arcgis/rest/services/FrameWork/Conservation/MapServer/1",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "polygon",
+    fields: { species: "SNAME", common: "SCOMNAME", federal: "USESA", state: "SPROT", group: "GROUP_", gRank: "GRANK", sRank: "SRANK" },
+    where: "USESA IN ('LE','LT','C') OR SPROT IN ('E','T')",
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* USGS MRDS / MAS-MILS records for Georgia (`FrameWork/PhysicalGeography` layer 0, 2005 digest): 2,670 points — mines, quarries, pits, plants, prospects and occurrences, with `dev_stat` (Producer · Past Producer · Plant · Prospect · Occurrence · Unknown) and up to three commodities. A past quarry or pit on or beside a site means fill, voids, blast-vibration limits or a reclamation obligation. A 2005 register, point per record, no boundary. Live 2026-10-29 (±0.1° box): Cartersville 328 · Adairsville 57 · Rome 26 · Augusta 17. */
+  gaMineral: {
+    key: "gaMineral",
+    label: "Mineral resource sites (USGS MRDS via Georgia GIS Clearinghouse)",
+    provider: "U.S. Geological Survey — Mineral Resources Data System / MAS-MILS, Georgia digest (2005; published on the Georgia GIS Data Clearinghouse)",
+    serviceUrl: "https://maps.itos.uga.edu/arcgis/rest/services/FrameWork/PhysicalGeography/MapServer/0",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "site_name", county: "county", status: "dev_stat", commodity: "commod1", commodity2: "commod2", type: "oper_type" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
+  /* Bartow County's own zoning layer: 31,627 parcel-level polygons, `STZONECODE` the district and `REZONING` the county's rezoning case reference (2,327 records, e.g. CU-2162-17, RZ-2289-19) and `ZONINGTEXT` its free-text note (377 records: 'w/ conditions', ordinance numbers, approved uses). INCORPORATED land is carried as the code 'Incorporated' — the cities (Adairsville, Cartersville, Emerson…) zone themselves and their zoning is NOT in this layer; the row says so on the card. The server answers point-geometry queries 500 intermittently, so fixtures use envelopes (what the map and the verifier send). Live 2026-10-29 (±0.01° box): Adairsville 902 · rural Bartow 79 and 28. */
+  gaBartowZoning: {
+    key: "gaBartowZoning",
+    label: "Zoning — Bartow County (Bartow County GIS)",
+    provider: "Bartow County, GA — Zoning Districts (the county's own ArcGIS Server, AGOServices/BartowZoning)",
+    serviceUrl: "https://www.bartowgis.org/arcgis/rest/services/AGOServices/BartowZoning/MapServer/0",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "polygon",
+    fields: { code: "STZONECODE", notes: "ZONINGTEXT", rezoning: "REZONING" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-29",
+  },
   /* NEW-1 (California) — the California counterpart of `county` / `countyCo` / `countyGa`. Its OWN row with
    * `states: ["CA"]`; the Texas, Colorado and Georgia rows are untouched. VERIFIED LIVE 2026-10-02 from the
    * build sandbox: exactly 58 county polygons (California's full roster), one per county, ArcGIS-Online hosted
@@ -3229,6 +3291,7 @@ export const SOURCE_FIXTURE_REACH = {
   troutGa: ["regional", "Designated trout waters exist only in the north Georgia mountains — probing a trout stream in Savannah would assert a guaranteed zero."],
   mngwpd: ["regional", "The Metropolitan North Georgia Water Planning District is 15 metro-Atlanta counties — one polygon about 100 km across."],
   // NEW-1 (Georgia due-diligence gaps, 2026-10-29) — rows whose real extent is a region, not the state.
+  gaBartowZoning: ["regional", "Bartow County's zoning polygons — one county by definition (and the incorporated cities inside it are marked 'Incorporated', not zoned)."],
   gaProtectedMountain: ["regional", "Protected mountains (2,200 ft + 25% slope) exist only in the north Georgia mountains — probing one in Savannah would assert a guaranteed zero."],
   gaMrpaCorridor: ["regional", "The Chattahoochee River Corridor under the Metropolitan River Protection Act — one river through metro Atlanta."],
   gaMrpaVegBuffer: ["regional", "The MRPA 50-ft river buffer — one river through metro Atlanta."],
