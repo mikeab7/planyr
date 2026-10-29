@@ -62,6 +62,7 @@ import {
 import { useServiceAreas } from "../lib/useServiceAreas.js";
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
+import { useViewLegends } from "../lib/viewLegendStore.js";
 
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const TEXT = FONT_SIZE.control;
@@ -416,6 +417,7 @@ export default function LayerPanel({
   const rootRef = useRef(null);
   const narrow = useNarrow(rootRef);
   const hidden = useLayersHidden();
+  const viewLegends = useViewLegends(); // B2507063: legends that depend on what is in view (Zoning lists the zone codes on screen)
   useServiceAreas(!!siteLocation); // a row scoped to a service area (HCFCD, City of Houston, BKDD) is judged once its geometry loads — the state change re-renders the rows
   const scope = useMemo(() => ({ state: siteState || null, loc: siteLocation || null }), [siteState, siteLocation]);
   const jur = jurisdictionFor(county);
@@ -530,7 +532,8 @@ export default function LayerPanel({
     if (members.some(([mid]) => mid === "mapillary")) settings.push("token");
     const lift = showAbove && members.some(([, c]) => configCanLift(c));
     const ramp = id === "elevation" ? rampGradient(cfg0) : null;
-    const legend = ramp ? [] : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null);
+    const viewLegendRow = !ramp && members.some(([, c]) => typeof c.viewLegend === "function");
+    const legend = ramp ? [] : (viewLegendRow ? (viewLegends[id] || []) : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
     const zoomGated = vis.state === "dormant-zoom";
     const plan = dropdownPlan({ on: anyOn, zoomGated, canLift: lift, hasStatus: !!status, settings, hasLegend: legend.length > 0, hasRamp: !!ramp, hasInfo: info.some((s) => s && s.text) });
     const corr = overlays.txrrc_pipe_easement || {};
