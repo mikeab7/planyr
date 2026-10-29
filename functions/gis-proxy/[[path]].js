@@ -46,6 +46,9 @@ export const ALLOWED_HOSTS = new Set([
   "maps.stlouisco.com", // St. Louis County GIS Service Center
   "maps6.stlouis-mo.gov", // City of St. Louis
   "gis.boonemo.gov", // Boone County GIS
+  /* RECON (Missouri second pass, 2026-10-29) — hosts read ONLY to find where a Missouri "none" county publishes its parcels; any not used by a wired county is pruned before merge. */
+  "assessorsearch.com", "maps.camavision.com", "www.franklinmo.net", "franklinmo.net",
+  "crawfordgis.breezemaps.com", "dentgis.breezemaps.com", "hickorygis.breezemaps.com", "randolphgis.breezemaps.com", "reynoldsgis.breezemaps.com", "shannongis.breezemaps.com", "texasgis.breezemaps.com",
   /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
    * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
    * county is wired to it. */
