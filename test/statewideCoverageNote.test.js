@@ -29,9 +29,9 @@ describe("a statewide-covered county never reads as a coverage gap", () => {
     expect(noParcelSourceNote(id)).toBeNull();
   });
 
-  it("genuine gaps keep their sentence: Alcona County MI, Pointe Coupee Parish LA", () => {
+  it("genuine gaps keep their sentence: Alpena County MI, Pointe Coupee Parish LA", () => {
     // Pointe Coupee (New Roads) is on the 2026-09-30 not-found list; Lafayette was this example until it was wired.
-    expect(noParcelSourceNote(countyIdentity(44.6852, -83.6154))).toBe("Planyr hasn't found a public parcel map it can use for Alcona County."); // was Wayne County until it was wired (NEW-1, 2026-10-20); BS&A has no map layer → "none"
+    expect(noParcelSourceNote(countyIdentity(45.0345, -83.6392))).toBe("Planyr hasn't found a public parcel map it can use for Alpena County."); // was Wayne County until it was wired (NEW-1, 2026-10-20), then Alcona until the owner measured its Beacon map as paywalled (B2528400); Alpena publishes no map layer → "none"
     expect(noParcelSourceNote(countyIdentity(30.6996, -91.4368))).toBe("Pointe Coupee Parish has a parcel map, but it isn't open to the public, so Planyr can't show lots here yet."); // locked (NEW-1, 2026-10-22)
   });
 
