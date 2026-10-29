@@ -1098,7 +1098,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     if (k >= 0) {
       const os = openSurface(pt);
       if (!os) return { status: "none", reason: "outside" };
-      const ft = os.ft, zb = os.zb;
+      const ft = os.ft;
       return boundary && os.depth > BAND_DEPTH_EPS_FT
         ? { status: "value", ft, elId: `limit:${k}`, cls: "transition", wedge: true }
         : { status: "value", ft, elId: `infill:${k}`, cls: "infill", wedge: false };
