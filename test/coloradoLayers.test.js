@@ -334,8 +334,9 @@ describe("adversarial review round 1 (B2528688) — each confirmed finding stays
     expect(L.co_crit_habitat.minZoom).toBeGreaterThanOrEqual(11);
     expect(L.co_aurora_zoning.minZoom).toBeGreaterThanOrEqual(13);
   });
-  it("Aurora's Industrial District is the industrial colour, not grey", () => {
-    expect(CL.auroraZoningStyle({ Dist_Name: "Industrial District" }, 1).color).toBe(CL.AURORA_ZONE_COLORS.I);
+  it("Aurora's Industrial District is the industrial colour (a literal, not the table it is read from), not grey", () => {
+    expect(CL.auroraZoningStyle({ Dist_Name: "Industrial District" }, 1).color).toBe("#7c3aed");
+    expect(CL.AURORA_ZONE_COLORS.I).toBe("#7c3aed"); expect(CL.AURORA_ZONE_COLORS.other).toBe("#6b7280");
     expect(CL.auroraZoningStyle({ Dist_Name: "Something Else" }, 1).color).toBe(CL.AURORA_ZONE_COLORS.other);
   });
   it("Facilities leaves off the flowline points, draws active vs closed differently and says so in a legend", () => {
@@ -362,5 +363,43 @@ describe("adversarial review round 1 (B2528688) — each confirmed finding stays
   it("the Rule 604 note states the 500–2,000 ft band; the Buckley note gives no industrial verdict", () => {
     expect(L.co_ecmc_wells.note).toMatch(/500 and 2,000 ft/);
     expect(L.co_aurora_apz.note).not.toMatch(/generally allows/);
+  });
+  it("round 2: ECMC flowlines generalise (a z14 Weld cell was 247k vertices over a 120k budget) and start at the zoom where the service's 2,000-record cap is not hit (San Juan z14 cells held 4,244)", () => {
+    expect(L.co_ecmc_flowlines.simplifyFactor).toBeGreaterThan(0);
+    expect(L.co_ecmc_flowlines.minZoom).toBeGreaterThanOrEqual(15);
+  });
+  it("round 2: a Weld town placeholder polygon reads 'In <town>', faint, and is in the legend", () => {
+    expect(CL.weldInTown({ MASTERZ: " ", ZONING: "BRIGHTON" })).toBe(true);
+    expect(CL.weldInTown({ MASTERZ: "C", ZONING: "C-3" })).toBe(false);
+    expect(CL.weldZoningStyle({ MASTERZ: " ", ZONING: "EATON" }, 1).color).toBe(CL.WELD_TOWN_COLOR);
+    const c = cardOf("co_weld_zoning", { MASTERZ: " ", ZONING: "BRIGHTON", CASE_NAME: "BRIGHTON" });
+    expect(c.title).toBe("In Brighton"); expect(c.rows.map((r) => r.label)).not.toContain("Case");
+    expect(L.co_weld_zoning.legend.map((l) => l.color)).toContain(CL.WELD_TOWN_COLOR);
+    expect(L.co_weld_zoning.lineLabel.format("EATON")).toBeNull(); expect(L.co_weld_zoning.lineLabel.format("C-3")).toBe("C-3");
+  });
+  it("round 2: coded text on cards — Adams fill codes, flowline status, WOGLA permit type, undermined placeholders", () => {
+    for (const raw of ["SW/AGRI", "ASH/CD", "LIQ. SOL.", "LOW L RAD"]) expect(CL.adamsFillLabel(raw), raw).toBe("");
+    expect(CL.adamsFillLabel("IF IF")).toBe("Inert fill"); expect(CL.adamsFillLabel("Sanitary")).toBe("Sanitary"); expect(CL.adamsFillLabel("Hillen")).toBe("Hillen");
+    expect(CL.adamsLandfillStyle({ DISP_SITE_TYPE: "Sanitary" }, 1).color).toBe(CL.adamsLandfillStyle({ DISP_SITE_TYPE: "SW" }, 1).color);
+    const t = (c) => c.rows.map((r) => `${r.label}: ${r.text}`).join("\n");
+    expect(t(cardOf("co_ecmc_flowlines", { Status: "PA" }))).toMatch(/Plugged and abandoned/);
+    expect(t(cardOf("co_ecmc_flowlines", { Status: "OOSLAT" }))).toMatch(/Out of service/);
+    expect(t(cardOf("co_weld_ogla", { B1_ALT_ID: "X", B1_APPL_STATUS: "Closed", B1_PER_SUB_TYPE: "CDP" }))).not.toMatch(/Permit type/);
+    expect(cardOf("co_undermined", { MINE_NAME: "Unknown", F_DESC: "Mine fire" }).title).toBe("Undermined area · unnamed mine");
+    expect(t(cardOf("co_undermined", { MINE_NAME: "X", F_DESC: "Mine fire" }))).toMatch(/Feature: Mine fire/);
+  });
+  it("round 2: the oldest wells keep their dates (ECMC stores pre-1970 dates as negative epochs)", () => {
+    const rows = cardOf("co_ecmc_wells", { wellstat: "PA", spud_date: -384825600000, API_Label: "05-123-00001" }).rows;
+    expect(rows.find((r) => r.label === "Spud date").text).toMatch(/1957/);
+  });
+  it("round 2: Aurora cards use the real case-number field; the Superfund EPA link opens even when the data holds http://", () => {
+    expect(L.co_aurora_zoning.fields).toContain("ZONING_CASE_NUMBER");
+    expect(cardOf("co_aurora_zoning", { Dist_Name: "Industrial District", NAME: "PHEASANT RUN", ZONING_CASE_NUMBER: "2004-6012-00" }).rows.map((r) => r.label)).toEqual(expect.arrayContaining(["Development", "Case"]));
+    const sf = cardOf("co_superfund", { NAME: "Site", SiteStatus: "NPL ACTIVE", EPA_Links: "http://www.epa.gov/superfund/x" });
+    expect(sf.rows.find((r) => r.label === "EPA site page").href).toBe("https://www.epa.gov/superfund/x");
+  });
+  it("round 2: a dashed polygon row prints dashed (the Adams airport overlays, Weld IGA and growth boundaries rely on it)", () => {
+    const f = esriPrintFeatures({ properties: { Name: "AIZ" }, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } }, { styleFn: () => ({ color: "#111111", weight: 1, fillColor: "#111111", fillOpacity: 0.1, dashArray: "5 4" }) }, (x) => x).filter((x) => x.kind === "polygon");
+    expect(f[0].style.dash).toBe("5 4");
   });
 });

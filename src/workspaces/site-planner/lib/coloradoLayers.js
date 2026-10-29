@@ -30,7 +30,13 @@
  * PURE: no network, no React, no Leaflet — the style / decode / card rules below unit-test standalone (test/coloradoLayers.test.js). */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
-import { approvalDate } from "./desotoZoning.js";
+import { approvalDate as approvalDateBase } from "./desotoZoning.js";
+/* ECMC stores old dates as negative epoch milliseconds (26% of wells in a 3,000-well sample are pre-1970 — the oldest plugged wells); the shared reader treats <= 0 as an unset date, so a pre-1970 number is formatted here. */
+const approvalDate = (raw) => {
+  const n = typeof raw === "number" ? raw : /^-\d{9,}$/.test(String(raw == null ? "" : raw).trim()) ? Number(raw) : null;
+  if (n != null && n < 0 && n > -2.2e12) return new Date(n).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+  return approvalDateBase(raw);
+};
 
 /* The same-origin relay form of a registry URL: https://host/path → /gis-proxy/host/path (functions/gis-proxy allow-lists the host). */
 export const relayUrl = (serviceUrl) => String(serviceUrl).replace(/^https:\/\/([^/]+)/, "/gis-proxy/$1");
@@ -109,11 +115,14 @@ export function flowlineStyle(props, opacity) {
   const out = flowlineIsOut(props && props.Status);
   return { color: out ? FLOWLINE_COLORS.out : FLOWLINE_COLORS.live, weight: out ? 2 : 1.8, opacity, fill: false, ...(out ? { dashArray: "6 4" } : {}) };
 }
+/* ECMC's flowline Status is free text; its short codes are spelled out on the card (the line style already reads the same text). */
+const FLOWLINE_STATUS_WORDS = { PA: "Plugged and abandoned", TA: "Temporarily abandoned", SI: "Shut in", ABIP: "Abandoned in place", AIP: "Abandoned in place", OOS: "Out of service", OOSLAT: "Out of service", AB: "Abandoned" };
+const flowlineStatusWords = (v) => codeWords(v, FLOWLINE_STATUS_WORDS);
 const FLOWLINE_FORMS = { "Form 44 OLFL": "Form 44 (off-location flowline)", "Form 44 COPWTL": "Form 44 (crude oil / produced-water transfer line)", "Form 12": "Form 12" };
 const FLUID_TIDY = (v) => { const s = tidy(v); if (!s) return ""; return /^[A-Z0-9\s/,&()-]+$/.test(s) ? nice(s) : s; };
 const flowlineCard = (p) => card(
   "Oil & gas flowline",
-  [["Status", tidy(p.Status) || "Not stated"], ["Fluid", FLUID_TIDY(p.FluidType)], ["Pipe size", Number(p.PipeSize) > 0 ? `${p.PipeSize} in` : ""], ["Material", tidy(p.MatType)],
+  [["Status", flowlineStatusWords(p.Status) || "Not stated"], ["Fluid", FLUID_TIDY(p.FluidType)], ["Pipe size", Number(p.PipeSize) > 0 ? `${p.PipeSize} in` : ""], ["Material", tidy(p.MatType)],
     ["Operator", nice(p.Company)], ["Length", Number(p.Length_ft) > 0 ? `${Math.round(p.Length_ft).toLocaleString("en-US")} ft` : ""], ["Registration", FLOWLINE_FORMS[tidy(p.Form_Type)] || tidy(p.Form_Type).replace(/\s+[A-Z]{3,8}$/, "")]],
 );
 
@@ -122,7 +131,7 @@ export const LOCATION_STATUS = { AC: ["Active", "#b91c1c"], CL: ["Closed", "#6b7
 export const locationStatusLabel = (c) => (LOCATION_STATUS[String(c || "").trim().toUpperCase()] || [tidy(c)])[0];
 export function locationStyle(props, opacity) {
   const e = LOCATION_STATUS[String(props && props.facility_status || "").trim().toUpperCase()];
-  const c = e ? e[1] : "#78716c";
+  const c = e ? e[1] : LOCATION_STATUS.CL[1]; // no status stated reads as the closed grey, which the legend carries
   const active = e && e[0] === "Active";
   return { color: c, weight: active ? 1.6 : 1, opacity, fill: true, fillColor: c, fillOpacity: opacity * (active ? 0.4 : 0.2), ...(e && e[0] === "Abandoned location" ? { dashArray: "4 3" } : {}) };
 }
@@ -150,7 +159,7 @@ export const superfundStatusLabel = (s) => codeWords(s, SUPERFUND_STATUS);
 const superfundCard = (p) => card(
   `Superfund site · ${nice(String(p.NAME || p.Site || "").replace(/\/[A-Z]{2,4}$/, "")) || "unnamed"}`,
   [["Status", superfundStatusLabel(p.SiteStatus)], ["City", nice(p.CITY)], ["Contaminants", tidy(p.POLLUTANTS)]],
-  [link("CDPHE site page", p.CDPHE_LINK), link("EPA site page", p.EPA_Links)],
+  [link("CDPHE site page", p.CDPHE_LINK), link("EPA site page", p.EPA_Links, ["epa.gov"])],
 );
 export const rcraStyle = (props, opacity) => {
   const gw = String(props && props.gw_impacts_Y_or_N || "").trim().toUpperCase() === "Y";
@@ -188,7 +197,8 @@ export const swisStyle = (props, opacity) => { const c = SWIS_CLASSES[swisClassO
 const swisCard = (p) => card(`Solid waste facility · ${nice(p.Facility) || "unnamed"}`, [["Type", tidy(p.Type)], ["Status", tidy(p.Status)], ["City", nice(p.City)], ["County", nice(p.County)]]);
 
 /* ── DRMS undermined areas, CPW wildlife ───────────────────────────────────────────────────── */
-const undermCard = (p) => card(`Undermined area · ${tidy(p.MINE_NAME).replace(/,\s*$/, "") || "unnamed mine"}`, [["Mine type", tidy(p.TYPE)], ["Mineral", tidy(p.F_DESC)], ["Buffer", Number(p.BUFF_DIST) > 0 ? `${Math.round(Number(p.BUFF_DIST) * 3.28084)} ft around the workings` : ""]]);
+const undermName = (v) => { const t = tidy(v).replace(/,\s*$/, ""); return /^(unknown|tbd|delete|none|n\/a)$/i.test(t) ? "" : t; };
+const undermCard = (p) => card(`Undermined area · ${undermName(p.MINE_NAME) || "unnamed mine"}`, [["Mine type", tidy(p.TYPE)], ["Feature", tidy(p.F_DESC)], ["Buffer", Number(p.BUFF_DIST) > 0 ? `${Math.round(Number(p.BUFF_DIST) * 3.28084)} ft around the workings` : ""]]);
 export const PRAIRIE_DOG = { H: { color: "#b45309", label: "High potential" }, M: { color: "#d97706", label: "Moderate potential" }, L: { color: "#fcd34d", label: "Low potential" } };
 export function prairieDogStyle(props, opacity) {
   const e = PRAIRIE_DOG[String(props && props.PotentialO || "").trim().toUpperCase()];
@@ -211,13 +221,19 @@ const enterpriseCard = (p) => card(`Enterprise Zone · ${tidy(p.Admin_Zone) || "
 
 /* ── county / city rows ────────────────────────────────────────────────────────────────────── */
 export const WELD_ZONE_COLORS = { A: "#4d7c0f", E: "#a16207", R: "#ca8a04", C: "#ea580c", I: "#7c3aed", PUD: "#0f766e" };
+/* 32 of Weld's 496 zoning polygons are PLACEHOLDERS for ground inside a town: no master zone, and the town's name where the zone would be (AULT, BERTHOUD, BRIGHTON, DACONO, EATON…). Like Adams, they are drawn faint and read "In <town>" — the town's own zoning governs there. */
+export const weldInTown = (p) => !!p && !tidy(p.MASTERZ) && !!tidy(p.ZONING);
+export const WELD_TOWN_COLOR = "#94a3b8";
 export function weldZoningStyle(props, opacity) {
+  if (weldInTown(props)) return { color: WELD_TOWN_COLOR, weight: 0.8, opacity, fill: true, fillColor: WELD_TOWN_COLOR, fillOpacity: opacity * 0.1, dashArray: "4 3" };
   const k = String(props && props.MASTERZ || "").trim().toUpperCase();
   const c = WELD_ZONE_COLORS[k] || "#6b7280";
   const base = k === "A";
   return { color: c, weight: base ? 0.6 : 1, opacity, fill: true, fillColor: c, fillOpacity: opacity * (base ? 0.12 : 0.4) };
 }
-const weldZoneCard = (p) => card(`Weld County zoning · ${tidy(p.ZONING) || tidy(p.MASTERZ) || "district"}`, [["Case", tidy(p.CASE_NAME)], ["Recorded", tidy(p.YEAR)], ["Reception", tidy(p.RECP_NUM)]]);
+const weldZoneCard = (p) => weldInTown(p)
+  ? card(`In ${nice(p.ZONING)}`, [["Zoning", "Set by the town, not the county"]])
+  : card(`Weld County zoning · ${tidy(p.ZONING) || tidy(p.MASTERZ) || "district"}`, [["Case", tidy(p.CASE_NAME)], ["Recorded", tidy(p.YEAR)], ["Reception", tidy(p.RECP_NUM)]]);
 export const adamsZoneKind = (zone) => {
   const z = String(zone == null ? "" : zone).trim().toUpperCase();
   if (!z) return "other";
@@ -248,9 +264,16 @@ export function adamsAviationStyle(props, opacity) {
 }
 const adamsAviationCard = (p) => card(AVIATION_LABEL[tidy(p.Name)] || `Aviation overlay · ${tidy(p.Name)}`, [["Note", tidy(p.Comments)]]);
 export const ADAMS_FILL = { SW: "Solid waste", "SW/Sludge": "Solid waste and sludge", "SW/CD": "Solid waste and construction debris", "Inert Fill": "Inert fill", IF: "Inert fill", CD: "Construction debris", UNK: "" };
-export const adamsFillLabel = (t) => { const s = tidy(t); return s ? (s in ADAMS_FILL ? ADAMS_FILL[s] : s) : ""; }; // blank → "" (a card drops it; never "unknown")
+export const adamsFillLabel = (t) => {
+  const s = tidy(t).replace(/\s+/g, " ");
+  if (!s) return "";
+  const dup = s.match(/^(\S+) \1$/); // CR-LF doubles in the county data ("IF IF")
+  const k = dup ? dup[1] : s;
+  if (k in ADAMS_FILL) return ADAMS_FILL[k];
+  return /^[A-Z0-9 /,.&-]+$/.test(k) ? "" : k; // an all-capitals string no table decodes is a county code, not words (constraint #45)
+}; // blank → "" (a card drops it; never "unknown")
 export const adamsLandfillStyle = (props, opacity) => {
-  const solid = /^SW/i.test(tidy(props && (props.DISP_SITE_TYPE || props.TYPE)));
+  const solid = /^(SW|sanitary|trash|haz|coal ash|ash)/i.test(tidy(props && (props.DISP_SITE_TYPE || props.TYPE)));
   const c = solid ? "#78350f" : "#a16207";
   return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: opacity * 0.4 };
 };
@@ -264,7 +287,7 @@ export const weldOglaStyle = (props, opacity) => {
   const c = done ? "#94a3b8" : "#b91c1c";
   return { color: c, weight: 1.2, opacity, fillColor: c, fillOpacity: opacity * (done ? 0.5 : 0.9), radius: done ? 3 : 5 };
 };
-const weldOglaCard = (p) => card(`Weld oil & gas location assessment · ${tidy(p.B1_ALT_ID)}`, [["Stage", tidy(p.B1_APPL_STATUS)], ["Permit type", tidy(p.B1_PER_SUB_TYPE) === "NA" ? "" : tidy(p.B1_PER_SUB_TYPE)]]);
+const weldOglaCard = (p) => card(`Weld oil & gas location assessment · ${tidy(p.B1_ALT_ID)}`, [["Stage", tidy(p.B1_APPL_STATUS)], ["Permit type", codeWords(p.B1_PER_SUB_TYPE, {})]]);
 const weldRowCard = (p) => card(`County road right-of-way · ${nice(p.ROADNAME) || "unnamed"}`, [["How acquired", nice(p.ROW_STAT)], ["Width", Number(p.ROW_WIDTH) > 0 ? `${p.ROW_WIDTH} ft` : ""], ["Recorded document", tidy(p.DOC_NUM)], ["Note", tidy(p.COMMENTS)]]);
 const weldUgbCard = (p) => card(`Urban growth boundary · ${nice(p.TOWNNAME || p.DISTRICT)}`, []);
 const weldIgaCard = (p) => card(`Intergovernmental agreement area · ${nice(p.TOWNNAME || p.MUNICIPALI)}`, [["Buffered", yn(p.BUFFERED)], ["Dated", approvalDate(p.DATE_)]]);
@@ -298,14 +321,14 @@ export function auroraZoningStyle(props, opacity) {
   const c = AURORA_ZONE_COLORS[auroraZoningClass(props && props.Dist_Name)];
   return { color: c, weight: 0.8, opacity, fill: true, fillColor: c, fillOpacity: opacity * 0.38 };
 }
-const auroraZoningCard = (p) => card(`Aurora zoning · ${tidy(p.Dist_Name) || "district"}`, [["Case", tidy(p.NAME)], ["Subzone", tidy(p.Zone_Subzone)], ["Effective", approvalDate(p.EFFECTIVE_DATE)]]);
+const auroraZoningCard = (p) => card(`Aurora zoning · ${tidy(p.Dist_Name) || "district"}`, [["Development", nice(p.NAME)], ["Case", tidy(p.ZONING_CASE_NUMBER)], ["Subzone", tidy(p.Zone_Subzone)], ["Effective", approvalDate(p.EFFECTIVE_DATE)]]);
 
 /* ⛔ A row that limits `fields` MUST list "OBJECTID": esri-leaflet keys every painted feature by its object id, and without it in outFields every feature in a batch gets the same (undefined)
  * key and overwrites the last — a layer that answers thousands of features then PAINTS ONE (measured 2026-10-29: ECMC wells, NRHP, Weld road right-of-way all reported 1 painted feature).
  * test/coloradoLayers.test.js pins it. */
 /* ── the registry rows ─────────────────────────────────────────────────────────────────────── */
 const ECMC_SOURCE = "Colorado Energy & Carbon Management Commission (ECMC)";
-const ECMC_RULE604 = "Setback context: ECMC Rule 604 (2 CCR 404-1-604, adopted under SB 19-181) keeps a NEW oil-and-gas working pad surface from sitting between 500 and 2,000 ft of a home or other high-occupancy building unless the owners and tenants within 2,000 ft give informed consent, the location is in an approved comprehensive area or drilling plan, or all equipment is beyond 2,000 ft; closer than 500 ft takes its own informed-consent agreement or waiver. It governs where an operator may put a NEW pad; it does not stop anyone building near an existing well, which is set by the local government, your lender and your insurer. ECMC amends its rules — confirm the current text.";
+const ECMC_RULE604 = "Setback context: ECMC Rule 604 (2 CCR 404-1-604, adopted under SB 19-181) keeps a NEW oil-and-gas working pad surface from sitting between 500 and 2,000 ft of a home or other high-occupancy building unless the owners and tenants within 2,000 ft give informed consent, or the location is in an approved comprehensive area or drilling plan; closer than 500 ft takes its own informed-consent agreement or waiver. It governs where an operator may put a NEW pad; it does not stop anyone building near an existing well, which is set by the local government, your lender and your insurer. ECMC amends its rules — confirm the current text.";
 
 const R = (o) => ({ kind: "esriFeature", states: ["CO"], hoverIdentify: true, canvasIdentify: true, ...o });
 const legendOf = (table, order) => order.map((k) => ({ label: table[k].label, color: table[k].color }));
@@ -327,7 +350,7 @@ export const COLORADO_LAYERS = {
   co_ecmc_flowlines: R({
     label: "Oil & Gas Flowlines", source: ECMC_SOURCE + " — flowline registrations (Forms 12 and 44)", hoverSource: "ECMC",
     url: viaRelay("ecmcFlowlines"), fields: ["OBJECTID", "Status", "FluidType", "MatType", "PipeSize", "Company", "Length_ft", "Form_Type"],
-    minZoom: 14, color: FLOWLINE_COLORS.live, weight: 1.8, opacity: 0.8, styleFn: flowlineStyle,
+    minZoom: 15, color: FLOWLINE_COLORS.live, weight: 1.8, opacity: 0.8, simplifyFactor: 1.5, styleFn: flowlineStyle,
     legend: [{ label: "Registered flowline (in service, or status not stated)", color: FLOWLINE_COLORS.live }, { label: "Abandoned, removed, out of service or idle", color: FLOWLINE_COLORS.out, dash: true }],
     hoverTitle: "Oil & gas flowline",
     hoverFields: [{ names: ["Status"] }, { names: ["FluidType"] }, { names: ["PipeSize"], unit: "in" }, { names: ["Company"] }],
@@ -352,7 +375,7 @@ export const COLORADO_LAYERS = {
     label: "Oil & Gas Facilities", source: ECMC_SOURCE + " — facilities", hoverSource: "ECMC",
     url: viaRelay("ecmcFacilities"), where: "facility_type NOT IN ('Nonfacility','Domestic tap','Off-location flowline')", fields: ["OBJECTID", "facility_name", "facility_type", "facility_status", "operator_name", "status_date", "LLink"],
     minZoom: 13, color: "#92400e", weight: 1.2, opacity: 0.55, pointRadius: 4, styleFn: facilityStyle,
-    legend: [{ label: "Active facility", color: "#92400e" }, { label: "Closed, abandoned, shut in or temporarily abandoned", color: "#6b7280" }],
+    legend: [{ label: "Active facility", color: "#92400e" }, { label: "Closed, abandoned, shut in or no status stated", color: "#6b7280" }],
     hoverTitle: "Oil & gas facility",
     hoverFields: [{ names: ["facility_name"] }, { names: ["facility_type"] }, { format: (p) => facilityStatusLabel(p.facility_status) }, { names: ["operator_name"] }],
     identifyCard: facilityCard,
@@ -475,7 +498,7 @@ export const COLORADO_LAYERS = {
     label: "Weld Oil & Gas Assessments", source: "Weld County, Colorado — Oil and Gas Location Assessment permits", hoverSource: "Weld County",
     url: src("weldOilGasAssessment"), fields: ["OBJECTID", "B1_ALT_ID", "B1_APPL_STATUS", "B1_PER_SUB_TYPE"], minZoom: 10, color: "#b91c1c", weight: 1.2, opacity: 0.55, pointRadius: 5, styleFn: weldOglaStyle,
     regions: ["co_weld"],
-    legend: [{ label: "Application, construction, drilling or production", color: "#b91c1c" }, { label: "Closed, expired, withdrawn or reclaimed", color: "#94a3b8" }],
+    legend: [{ label: "Application, construction, drilling or production", color: "#b91c1c" }, { label: "Closed, expired, withdrawn, denied or plugged and abandoned", color: "#94a3b8" }],
     hoverTitle: "Oil & gas location assessment",
     hoverFields: [{ names: ["B1_ALT_ID"] }, { names: ["B1_APPL_STATUS"] }],
     identifyCard: weldOglaCard,
@@ -512,10 +535,10 @@ export const COLORADO_LAYERS = {
     label: "Weld County Zoning", source: "Weld County, Colorado — zoning (unincorporated)", hoverSource: "Weld County",
     url: src("weldZoning"), fields: ["OBJECTID", "ZONING", "MASTERZ", "CASE_NAME", "YEAR", "RECP_NUM"], minZoom: 10, color: "#6b7280", weight: 1, opacity: 0.4, simplifyFactor: 1.5, styleFn: weldZoningStyle,
     regions: ["co_weld"],
-    lineLabel: { field: "ZONING", minZoom: 14, format: (v) => { const t = tidy(v); return t && t.length <= 18 ? t : null; } },
-    legend: [{ label: "Agricultural (A)", color: WELD_ZONE_COLORS.A }, { label: "Estate (E)", color: WELD_ZONE_COLORS.E }, { label: "Residential (R)", color: WELD_ZONE_COLORS.R }, { label: "Commercial (C)", color: WELD_ZONE_COLORS.C }, { label: "Industrial (I)", color: WELD_ZONE_COLORS.I }, { label: "Planned unit development (PUD)", color: WELD_ZONE_COLORS.PUD }],
+    lineLabel: { field: "ZONING", minZoom: 14, format: (v) => { const t = tidy(v); return t && t.length <= 18 && /^(A|E|[CIR]-\d|PUD)\b/.test(t) ? t : null; } }, // town placeholders (AULT, EATON…) are not district codes
+    legend: [{ label: "Agricultural (A)", color: WELD_ZONE_COLORS.A }, { label: "Estate (E)", color: WELD_ZONE_COLORS.E }, { label: "Residential (R)", color: WELD_ZONE_COLORS.R }, { label: "Commercial (C)", color: WELD_ZONE_COLORS.C }, { label: "Industrial (I)", color: WELD_ZONE_COLORS.I }, { label: "Planned unit development (PUD)", color: WELD_ZONE_COLORS.PUD }, { label: "Inside a town (its own zoning governs)", color: WELD_TOWN_COLOR, dash: true }],
     hoverTitle: "Weld County zoning",
-    hoverFields: [{ names: ["ZONING"] }, { names: ["CASE_NAME"], label: "case" }],
+    hoverFields: [{ format: (p) => (weldInTown(p) ? `inside ${nice(p.ZONING)}` : tidy(p.ZONING)) }, { format: (p) => (weldInTown(p) ? "" : tidy(p.CASE_NAME)), label: "case" }],
     identifyCard: weldZoneCard,
     note: "Weld County's zoning for UNINCORPORATED ground — cities zone their own land. Colour = the master zone class; the code (a PUD lists the base zones it carries) prints at close zoom. The county-wide agricultural base is drawn faint.",
     infoCaveat: "Inside a city's limits the city's zoning governs, not this layer. Confirm with Weld County Planning — a PUD's rules are in its recorded plan.",
@@ -561,11 +584,11 @@ export const COLORADO_LAYERS = {
   }),
   co_aurora_zoning: R({
     label: "Aurora Zoning", source: "City of Aurora, Colorado — zoning", hoverSource: "City of Aurora",
-    url: relayUrl(src("auroraZoning")), fields: ["OBJECTID", "Dist_Name", "NAME", "Zone_Subzone", "EFFECTIVE_DATE"], minZoom: 13, color: "#6b7280", weight: 0.8, opacity: 0.4, simplifyFactor: 1.5, styleFn: auroraZoningStyle,
+    url: relayUrl(src("auroraZoning")), fields: ["OBJECTID", "Dist_Name", "NAME", "ZONING_CASE_NUMBER", "Zone_Subzone", "EFFECTIVE_DATE"], minZoom: 13, color: "#6b7280", weight: 0.8, opacity: 0.4, simplifyFactor: 1.5, styleFn: auroraZoningStyle,
     regions: ["co_aurora"],
     legend: [{ label: "Industrial, Business/Tech or Airport district (employment / industrial)", color: AURORA_ZONE_COLORS.I }, { label: "Mixed-use district", color: AURORA_ZONE_COLORS.M }, { label: "Residential district", color: AURORA_ZONE_COLORS.R }, { label: "Buckley accident potential zone", color: AURORA_ZONE_COLORS.APZ }, { label: "Other", color: AURORA_ZONE_COLORS.other }],
     hoverTitle: "Aurora zoning",
-    hoverFields: [{ names: ["Dist_Name"] }, { names: ["NAME"], label: "case" }],
+    hoverFields: [{ names: ["Dist_Name"] }, { names: ["ZONING_CASE_NUMBER"], label: "case" }],
     identifyCard: auroraZoningCard,
     note: "Aurora's zoning districts as the city publishes them (Aurora's code names districts, e.g. Business/Tech, Airport, Mixed-Use Regional, rather than using letter codes). Colour is a grouping for the eye; the district name is the city's.",
     infoCaveat: "Aurora uses a unified development ordinance with overlays and rezoning cases not all shown here — confirm with Aurora Planning. Only ground inside the City of Aurora is drawn: Parker, Centennial and Denver keep their own zoning, so a blank map there is not 'unzoned'. Appears from a closer zoom than most rows because the city's answer is capped per request.",
@@ -629,7 +652,7 @@ export const COLORADO_LAYERS = {
     hoverTitle: "County road right-of-way",
     hoverFields: [{ names: ["ROADNAME"] }, { names: ["ROW_STAT"] }, { names: ["ROW_WIDTH"], unit: "ft" }],
     identifyCard: weldRowCard,
-    note: "Weld County's recorded road right-of-way polygons: how each was acquired (plat, dedication, resolution, deed…), the width where recorded and the instrument number. Setbacks and the access permit are measured from this line, not from the pavement.",
+    note: "Weld County's recorded road right-of-way polygons: how each was acquired (plat, dedication, resolution, deed…), the width where recorded and the instrument number. A road right-of-way line, not the pavement edge, is normally what setbacks and access permits are measured from — confirm with the county.",
     infoCaveat: "The county's mapping of recorded instruments — a county-road ROW can be wider than its pavement by a lot. Order the instrument for any parcel that fronts a county road.",
     role: "area", group: "access", order: 24,
   }),

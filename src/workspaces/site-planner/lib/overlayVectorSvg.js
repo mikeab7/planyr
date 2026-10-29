@@ -169,7 +169,7 @@ export function esriPrintFeatures(gj, cfg, leafStyle) {
     }
   } else if (g.type === "Polygon" || g.type === "MultiPolygon") {
     const o = cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1, fillColor: cfg.color, fillOpacity: 0 };
-    out.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
+    out.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, ...(o.dashArray ? { dash: o.dashArray } : {}), fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
   }
   return out;
 }
