@@ -869,6 +869,8 @@ input[type="range"] { height: 18px; }
    Leaflet's `.leaflet-interactive { cursor: pointer }` on the (viewport-covering)
    county/city fills must not override the +/− select cursor — the tool wins (B98). */
 .pf-select-mode path.pf-boundary-hit { cursor: inherit; }
+/* B2507065 (NEW-10): a county line carries a light halo so the dashed grey reads on any aerial. */
+path.pf-county-line { filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.9)) drop-shadow(0 0 3px rgba(255, 255, 255, 0.55)); }
 
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }

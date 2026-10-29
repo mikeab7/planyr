@@ -91,6 +91,7 @@ import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack, PLANNER_BASEMAP_
 import { loadRoadNamesPref, saveRoadNamesPref } from "./lib/roadNamesPref.js";
 import { loadCityNamesPref, saveCityNamesPref } from "./lib/cityNamesPref.js";
 import { attachPlaceNames } from "./lib/placeNamesGate.js";
+import { cityNamesEffective } from "./lib/placeNamesSuppress.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, mapBoxInset, mapBoxCenterX, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
@@ -3155,7 +3156,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * zoom and a pan re-renders nothing here. Device pref like road names; screen-only like the aerial (PDF-PARITY:
    * the sheet carries neither live label layer). */
   const [cityNamesPref, setCityNamesPref] = useState(loadCityNamesPref);
-  const citiesOn = !!wantBasemapSrc(basemapOn, showAerial, basemapSrc) && cityNamesPref.on && geoZoom != null
+  const citiesOn = !!wantBasemapSrc(basemapOn, showAerial, basemapSrc) && cityNamesEffective(cityNamesPref.on, overlays) && geoZoom != null // B2507065: hidden while Counties & Cities shows its own names
     && siteStack(geoZoom, { cityNames: true }).includes("cityNames");
   useEffect(() => {
     const map = geoMapRef.current;

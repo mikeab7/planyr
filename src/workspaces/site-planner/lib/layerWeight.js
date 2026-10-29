@@ -147,7 +147,9 @@ export const LAYER_TIER = {
   jur_etj: "context",
   jur_isd: "context",
   co_city: "context",              // NEW-2
-  ga_county: "context",            // NEW-1 (Georgia)
+  ga_county: "context",
+  tn_county: "context",            // B2507065 (NEW-10)
+  ms_county: "context",            // NEW-1 (Georgia)
   ga_city: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",

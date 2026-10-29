@@ -16,6 +16,7 @@
 
 import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate, zoneClass, ZONE_COLORS } from "./desotoZoning.js";
 import { zoningLegend } from "./desotoZoningNames.js";
+import { CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { jurisdictionAt, ensureMunicipalities, subscribeMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
 import { providerCardAt, ensureProviders } from "./desotoProviders.js";
 
@@ -257,7 +258,7 @@ Object.assign(DESOTO_LAYERS, {
   ms_desoto_city: county({
     path: "BaseLayers/MapServer/4", label: "City Limits (DeSoto County)", mergeGroup: "counties_cities", role: "line", group: "jurisdiction", order: 5, minZoom: 8, opacity: 0.4,
     source: "DeSoto County GIS — Municipalities", color: "#1d4ed8", weight: 1.6,
-    styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: 1.6, opacity, fill: false }),
+    styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: CITY_LINE_MIN_WEIGHT, opacity, fill: true, fillColor: "#1d4ed8", fillOpacity: CITY_TINT_OPACITY }), // B2507065: bolder outline + a light tint inside, like every city limit
     lineLabel: { field: "NAME", minZoom: 9, format: (v) => titleCase(v) || null },
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "City limits", hoverSource: "DeSoto County GIS", hoverFields: [{ names: ["NAME"] }],
     note: "The five incorporated cities of DeSoto County — Olive Branch, Southaven, Horn Lake, Hernando and Walls. Outside them a site is in unincorporated DeSoto County. Mississippi has no ETJ.",

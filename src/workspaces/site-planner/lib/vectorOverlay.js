@@ -29,6 +29,9 @@ import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, fetchCached, decideVec
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { cardNode } from "./identifyCard.js";
+import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
+import { siteState } from "./siteRegion.js";
+import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { streamBufferBands, bufferLegend } from "./georgiaStreamBuffers.js";
@@ -132,8 +135,8 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 // Map-cartography label style: white with a dark halo reads on any imagery/theme —
 // this is on-map lettering (like the tile providers' own labels), not app chrome,
 // so it deliberately does not follow the app theme tokens.
-const labelHtml = (text, { uppercase }) =>
-  `<span style="position:absolute;transform:translate(-50%,-50%);white-space:nowrap;color:#fff;` +
+const labelHtml = (text, { uppercase, angle = 0 }) =>
+  `<span style="position:absolute;transform:translate(-50%,-50%)${angle ? ` rotate(${Math.round(angle * 10) / 10}deg)` : ""};white-space:nowrap;color:#fff;` +
   `text-shadow:0 0 3px rgba(0,0,0,0.9),0 0 7px rgba(0,0,0,0.55);font:700 11px/1.2 system-ui,sans-serif;` +
   `letter-spacing:0.05em;${uppercase ? "text-transform:uppercase;" : ""}pointer-events:none;">${escapeHtml(text)}</span>`;
 
@@ -165,7 +168,16 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
    * barely see. So a point gets the filled-disc symbology instead, and everything else keeps
    * the boundary style verbatim. */
   const pointStyle = () => ({ ...pointSymbolOptions(cfg, opacity), className: "pf-boundary-hit" });
-  const lineStyle = () => ({
+  /* B2507065 (NEW-10, owner constraint #47) — Counties & Cities reads at a glance. CITY LIMITS: a bolder outline plus a light tint INSIDE (none outside = unincorporated). COUNTIES:
+   * a heavier DASHED grey line with a light halo (the `pf-county-line` CSS filter) — a different kind of line from a city's solid one; state lines (adminBoundaryData) are heavier still. */
+  const countyLine = isCountyLinesId(source.id), cityLine = isCityLimitsId(source.id);
+  const lineStyle = () => (countyLine ? {
+    color: COUNTY_LINE_COLOR, weight: COUNTY_LINE_WEIGHT, opacity: Math.max(opacity, 0.85), dashArray: COUNTY_LINE_DASH,
+    fill: true, fillColor: COUNTY_LINE_COLOR, fillOpacity: interactive ? 0.02 : 0, className: "pf-boundary-hit pf-county-line",
+  } : cityLine ? {
+    color: lineColor, weight: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), opacity,
+    fill: true, fillColor: lineColor, fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit",
+  } : {
     color: lineColor, weight: cfg.weight || 2, opacity,
     // B761: a boundary source can request a DASHED stroke (cfg.dash) — used to draw ETJ
     // in the same hue as solid city limits, so line-style (not color) tells them apart.
@@ -228,8 +240,29 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   // Re-place the zoom-gated name labels for the current view (pure math in
   // boundaryLabels.js; bigger polygons win, collisions drop).
+  /* B2507065 (NEW-10): COUNTY names go alongside the line on each county's own side, turned to run parallel to it ("DeSoto Co." / "Shelby Co., TN"), instead of at the middle
+   * of the county. Pure placement in countyLineLabels.js; this only projects and draws. */
+  const refreshCountyLabels = () => {
+    if (!map || !lastFc || !labelsVisible(source.labelZoom, map.getZoom())) return;
+    const size = map.getSize(), c = map.getCenter();
+    const home = siteState({ lat: c.lat, lng: c.lng });
+    const labels = countyLineLabels((lastFc.features) || [], {
+      textOf: (f) => countyLabelText(nameOf(f), source.stateAbbr, home),
+      project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
+      unproject: (x, y) => { try { const ll = map.containerPointToLatLng([x, y]); return { lat: ll.lat, lng: ll.lng }; } catch (_) { return null; } },
+      viewW: size.x, viewH: size.y,
+    });
+    for (const p of labels) {
+      const icon = L.divIcon({ className: "", html: labelHtml(p.text, { uppercase: false, angle: p.angle }), iconSize: [0, 0] });
+      const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
+      group.addLayer(mk);
+      labelMarkers.push(mk);
+    }
+  };
+
   const refreshLabels = () => {
     clearLabels();
+    if (isCountyLinesId(source.id)) { refreshCountyLabels(); return; }
     if (!map || !anchors.length || !labelsVisible(source.labelZoom, map.getZoom())) return;
     const size = map.getSize();
     /* ⛔ ONE LABEL PER CITY — the city-limits layer skips every name the City-names canvas layer is already

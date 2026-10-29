@@ -46,3 +46,16 @@ export function attachAdminBoundaries(map) {
   }
   return loading.then((m) => m.attachAdminBoundaries(map), () => null);
 }
+
+/* B2507065 (NEW-10, owner constraint #47): while the Counties & Cities layer is on, STATE lines are drawn HEAVIER than its dashed county lines (and its city limits), so
+ * the three kinds of line read as three ranks. A module-level flag + subscribe (the hosts set it from their overlays; the canvas redraws on change). */
+let stateLineEmphasis = false;
+const emphasisSubs = new Set();
+export const getStateLineEmphasis = () => stateLineEmphasis;
+export const subscribeStateLineEmphasis = (cb) => { emphasisSubs.add(cb); return () => emphasisSubs.delete(cb); };
+export function setStateLineEmphasis(on) {
+  const v = !!on;
+  if (v === stateLineEmphasis) return;
+  stateLineEmphasis = v;
+  emphasisSubs.forEach((f) => { try { f(); } catch (_) { /* a bad subscriber never blocks the rest */ } });
+}

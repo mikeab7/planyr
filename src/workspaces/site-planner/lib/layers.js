@@ -1020,6 +1020,23 @@ export const AHJ_LAYERS = {
     note: "Georgia county lines (DCA, all 159 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
+  /* B2507065 (NEW-10) — Tennessee's county lines and DeSoto County's own outline, so a view on the Mississippi / Tennessee line names BOTH counties along it
+   * ("DeSoto Co." / "Shelby Co., TN"). Tennessee is the State's statewide layer (95 counties), offered in TN and, because the line sits at DeSoto's feet, in MS; the
+   * Mississippi row is the county server's own County Outline (ONE county — DeSoto — so it is limited to the DeSoto area; the rest of Mississippi has no county-line row yet). */
+  tn_county: {
+    kind: "vector", label: "County Boundaries (Tennessee)", mergeGroup: "counties_cities", source: "State of Tennessee (STS)",
+    url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "Tennessee county lines (State of Tennessee, all 95 counties). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ms_county: {
+    kind: "vector", label: "County Boundary (DeSoto County, MS)", mergeGroup: "counties_cities", source: "DeSoto County GIS — County Outline",
+    url: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/8", states: ["MS"], regions: ["desoto"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "DeSoto County's own outline (the county server publishes only DeSoto in this layer). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
   ga_city: {
     kind: "vector", label: "City Limits (Georgia)", mergeGroup: "counties_cities", source: "Georgia DCA",
     url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],

@@ -146,6 +146,8 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { attachPlaceNames } from "./lib/placeNamesGate.js";
+import { cityNamesEffective, countiesCitiesOn } from "./lib/placeNamesSuppress.js";
+import { setStateLineEmphasis } from "./lib/adminBoundaryGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
 import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
@@ -2187,19 +2189,21 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      lib/placeNamesGate.js), the layer + datasets behind a dynamic import so nothing rides the
      boot bundle and nothing is fetched at site working zoom. `cityWantRef` closes the race where
      the row is switched off while the chunk is still loading. */
+  // B2507065: while Counties & Cities is on, state lines are drawn heavier than its county / city lines
+  useEffect(() => { setStateLineEmphasis(countiesCitiesOn(overlaysDrawn)); return () => setStateLineEmphasis(false); }, [overlaysDrawn]);
   const cityVisible = siteStack(zoom).includes("cityNames"); // the same gate /food reads (placeNamesVisible inside siteStack)
   const cityRef = useRef(null);
   const cityWantRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
-    cityWantRef.current = cityNames && cityVisible;
+    cityWantRef.current = cityNamesEffective(cityNames, overlaysDrawn) && cityVisible; // B2507065: one set of place names — hidden while Counties & Cities shows its own
     if (!map) return;
     if (cityWantRef.current) {
       attachPlaceNames(map).then((c) => { if (c) { cityRef.current = c; c.setEnabled(cityWantRef.current); } });
     } else if (cityRef.current) {
       cityRef.current.setEnabled(false);
     }
-  }, [cityNames, cityVisible]);
+  }, [cityNames, cityVisible, overlaysDrawn]);
 
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The

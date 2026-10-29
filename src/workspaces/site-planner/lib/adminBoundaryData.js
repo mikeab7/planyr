@@ -37,7 +37,10 @@ export function adminBoundaryLevels(zoom, maxZoom) {
  * of the band, the edge of parcel work) it steps back further — thinner and fainter — so it
  * stays reference context, the same "reference recedes" rule as the Layers panel. Pure so
  * the ramp is unit-tested rather than eyeballed. */
-export function admin1Style(zoom) {
+export const EMPHASIS_STATE_STYLE = { casing: { color: "#000", weight: 5.2, opacity: 0.32 }, line: { color: "#fff", weight: 2.6, opacity: 0.9 } };
+
+export function admin1Style(zoom, emphasis = false) {
+  if (emphasis) return EMPHASIS_STATE_STYLE;
   if (typeof zoom === "number" && zoom >= 10) {
     return { casing: { color: "#000", weight: 1.8, opacity: 0.12 }, line: { color: "#fff", weight: 0.8, opacity: 0.24 } };
   }
