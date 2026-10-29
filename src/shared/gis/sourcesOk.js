@@ -95,6 +95,12 @@ export const OK_SOURCES = {
     serviceUrl: `${OCC}/Facilities/FeatureServer/0`,
     geometryType: "point", fields: { name: "facility_name", type: "facility_type", status: "facility_status", city: "city", county: "county" }, dataLastEdited: "2026-10-28",
   }),
+  okPstReleases: OK("okPstReleases", {
+    label: "Petroleum tank release cases (Oklahoma Corporation Commission)",
+    provider: "Oklahoma Corporation Commission — Petroleum Storage Tank Division, PST releases (leaking-tank cases)",
+    serviceUrl: `${OCC}/PST_Releases/FeatureServer/6`,
+    geometryType: "point", fields: { name: "facility_name", status: "case_status", type: "case_type", released: "release_date", closed: "close_date" }, dataLastEdited: "2026-10-28",
+  }),
   okBrownfieldOcc: OK("okBrownfieldOcc", {
     label: "Brownfield program sites (Oklahoma Corporation Commission)",
     provider: "Oklahoma Corporation Commission — Brownfields Program (OCC's own ArcGIS Online org)",
@@ -209,5 +215,5 @@ export const OK_FIXTURE_REACH = {
   okCherokeeLand: ["regional", "Cherokee Nation tribal land tracts — the Nation's fourteen-county area in northeast Oklahoma."],
   okAppendixBLine: ["regional", "Fourteen stream lines in all (DEQ Appendix B Table 1/2 streams), clustered in the Ouachita and Osage hills — there is no statewide spread to probe."],
   okScenicRivers: ["regional", "OWRB's Scenic Rivers include the Illinois River, Barren Fork, Flint Creek, Lee Creek and the Upper Mountain Fork — all in the east of the state; there is no statewide spread to probe."],
-  okSensitiveWaters: ["regional", "Fifty-two HUC-11 watersheds, all in the east-central half of the state — the fixtures sit on two of them, far apart."],
+  okSensitiveWaters: ["regional", "Fifty-two sensitive areas (HUC-11 watersheds and river corridors) concentrated in the east and centre of the state — the fixtures sit on two of them, far apart."],
 };

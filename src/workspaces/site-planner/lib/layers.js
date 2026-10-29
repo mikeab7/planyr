@@ -14,7 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
-import { OK_LAYERS, OK_MERGE_GROUPS } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
+import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
@@ -1400,6 +1400,7 @@ export const LAYER_VINTAGE = {
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
   ...GEORGIA_VINTAGE,
+  ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".

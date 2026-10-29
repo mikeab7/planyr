@@ -36,7 +36,7 @@ describe("the Oklahoma rows are offered in Oklahoma and nowhere else", () => {
     for (const [k, s] of Object.entries(ELSEWHERE)) expect(s.state, k).not.toBe("OK");
   });
   it("every row declares exactly states:[OK] and is available at the owner's real site", () => {
-    expect(ids.length).toBe(31);
+    expect(ids.length).toBe(32);
     for (const id of ids) {
       expect(ALL_LAYERS[id], id).toBeTruthy();
       expect(ALL_LAYERS[id].states, id).toEqual(["OK"]);
@@ -102,7 +102,7 @@ describe("every row is complete and drawn from the registry", () => {
     }
     // the cleanup row: each of the seven members' own colour is in the lead's key
     const cleanup = ids.filter((id) => ALL_LAYERS[id].mergeGroup === "ok_cleanup");
-    expect(cleanup.length).toBe(7);
+    expect(cleanup.length).toBe(8);
     const keyColors = new Set(ALL_LAYERS.ok_deq_superfund.legend.map((e) => e.color));
     for (const id of cleanup) expect(keyColors.has(ALL_LAYERS[id].color), id).toBe(true);
     const waste = new Set(ALL_LAYERS.ok_deq_solid_waste.legend.map((e) => e.color));
@@ -141,7 +141,7 @@ describe("endpoints: the registry decides, and the relay is allow-listed", () =>
     for (const id of ids.filter((i) => !relayed.includes(i) && ALL_LAYERS[i].kind === "esriFeature")) expect(ALL_LAYERS[id].url, id).toMatch(/^https:\/\/(services\d*\.arcgis\.com|carto\.nationalmap\.gov)\//);
   });
   it("the row URL is the registry URL (+ the sub-layer id) — never a second, hand-typed endpoint", () => {
-    const pairs = { ok_wells: "okWells", ok_pst: "okPst", ok_deq_superfund: "okSuperfund", ok_deq_rcra: "okRcra", ok_deq_restrictions: "okInstControl", ok_deq_vcp: "okVcp", ok_deq_scap: "okScap", ok_deq_brownfields: "okBrownfieldDeq", ok_occ_brownfields: "okBrownfieldOcc", ok_deq_solid_waste: "okSolidWaste", ok_deq_haz_waste: "okHazWaste", ok_deq_whpa: "okWhpa", ok_deq_well_buffers: "okWellBuffer", ok_deq_intakes: "okPwsIntake", ok_deq_appb_areas: "okAppendixBArea", ok_deq_appb_streams: "okAppendixBLine", ok_deq_sensitive: "okSensitiveWaters", ok_deq_303d: "ok303d", ok_owrb_scenic: "okScenicRivers", ok_owrb_special_ws: "okSpecialWatersheds", ok_dams: "okDams", ok_water_systems: "okWaterSystems", ok_nrhp: "okNrhp", ok_cemeteries: "okCemeteries", ok_crit_habitat: "okCritHabitat", ok_road: "okRoad", ok_tribal: "okTribal", ok_cherokee_res: "okCherokeeRes", ok_cherokee_land: "okCherokeeLand" };
+    const pairs = { ok_wells: "okWells", ok_pst: "okPst", ok_deq_superfund: "okSuperfund", ok_deq_rcra: "okRcra", ok_deq_restrictions: "okInstControl", ok_deq_vcp: "okVcp", ok_deq_scap: "okScap", ok_deq_brownfields: "okBrownfieldDeq", ok_occ_brownfields: "okBrownfieldOcc", ok_deq_solid_waste: "okSolidWaste", ok_deq_haz_waste: "okHazWaste", ok_deq_whpa: "okWhpa", ok_deq_well_buffers: "okWellBuffer", ok_deq_intakes: "okPwsIntake", ok_deq_appb_areas: "okAppendixBArea", ok_deq_appb_streams: "okAppendixBLine", ok_deq_sensitive: "okSensitiveWaters", ok_deq_303d: "ok303d", ok_pst_releases: "okPstReleases", ok_owrb_scenic: "okScenicRivers", ok_owrb_special_ws: "okSpecialWatersheds", ok_dams: "okDams", ok_water_systems: "okWaterSystems", ok_nrhp: "okNrhp", ok_cemeteries: "okCemeteries", ok_crit_habitat: "okCritHabitat", ok_road: "okRoad", ok_tribal: "okTribal", ok_cherokee_res: "okCherokeeRes", ok_cherokee_land: "okCherokeeLand" };
     for (const [id, key] of Object.entries(pairs)) expect(ALL_LAYERS[id].url.replace(/^(\/gis-proxy\/[^/]+|https:\/\/[^/]+)/, ""), id).toBe(registryUrl(key).replace(/^https:\/\/[^/]+/, ""));
     expect(Object.keys(pairs).length + 2).toBe(ids.length); // + the two vector rows
     expect(urlFor("okWells")).toMatch(/^\/gis-proxy\/gis\.occ\.ok\.gov\//);
@@ -162,8 +162,8 @@ describe("endpoints: the registry decides, and the relay is allow-listed", () =>
 
 describe("the Oklahoma registry rows", () => {
   const keys = Object.keys(OK_SOURCES);
-  it("31 rows, each Oklahoma-scoped, production-tier, https, not on a test/staging path, with a provider and a verified date", () => {
-    expect(keys.length).toBe(31);
+  it("32 rows, each Oklahoma-scoped, production-tier, https, not on a test/staging path, with a provider and a verified date", () => {
+    expect(keys.length).toBe(32);
     for (const k of keys) {
       const s = GIS_SOURCES[k];
       expect(s, k).toBe(OK_SOURCES[k]);
@@ -356,5 +356,28 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
     for (const code of ["C/D", "C&D"]) expect(ALL_LAYERS.ok_deq_solid_waste.identifyCard({ Facility_Name: "X", Facility_Type: code }).rows.find((r) => r.label === "Kind").text).toBe("Construction & demolition landfill");
     expect(ALL_LAYERS.ok_road.note).toMatch(/usually permits/);
     expect(ALL_LAYERS.ok_road.note).not.toMatch(/On one of these ODOT/);
+  });
+  it("third-review fixes: turnpike is keyed off the maintainer, a route code is no street name, WHPA is generalised, every row has a vintage, the apostrophe case is right", async () => {
+    const { roadClassKeyOf, OK_VINTAGE, tc: tc2 } = await import("../src/workspaces/site-planner/lib/oklahomaLayers.js");
+    expect(roadClassKeyOf({ ODOTROUTECLASS: "I", MAINTENANCERESPONSIBILITY: "T" })).toBe("T");
+    expect(roadClassKeyOf({ ODOTROUTECLASS: "S", MAINTENANCERESPONSIBILITY: "S" })).toBe("S");
+    expect(ALL_LAYERS.ok_road.styleFn({ ODOTROUTECLASS: "I", MAINTENANCERESPONSIBILITY: "T" }, 1).color).toBe(ROAD_CLASSES.find((r) => r.key === "T").color);
+    expect(ALL_LAYERS.ok_road.identifyCard({ ODOTROUTECLASS: "I", MAINTENANCERESPONSIBILITY: "T", STREETNAME: "U059" }).rows.find((r) => r.label === "Road")).toBeUndefined();
+    expect(ALL_LAYERS.ok_deq_whpa.simplifyFactor).toBeGreaterThan(0);
+    expect(ALL_LAYERS.ok_crit_habitat.vertexBudget).toBeGreaterThanOrEqual(135479);
+    for (const id of ids) expect(ALL_LAYERS[id].vintage || (await import("../src/workspaces/site-planner/lib/layers.js")).LAYER_VINTAGE[id], id).toBeTruthy();
+    expect(Object.keys(OK_VINTAGE).sort()).toEqual([...ids].filter((i) => !["ok_county_x"].includes(i)).sort());
+    expect(tc2("DON'S SERVICE")).toBe("Don's Service");
+    expect(tc2("O'BRIEN")).toBe("O'Brien");
+  });
+  it("Petroleum Tank Releases: open cases are the legend's open ink, closed the pale one, dates are words, and the tank row's note points at it", () => {
+    const r = ALL_LAYERS.ok_pst_releases;
+    expect(r.styleFn({ case_status: "Open" }, 1).fillColor).toBe("#4338ca");
+    expect(r.styleFn({ case_status: "Closed" }, 1).fillColor).toBe("#a5b4fc");
+    expect(ALL_LAYERS.ok_deq_superfund.legend.map((e) => e.color)).toEqual(expect.arrayContaining(["#4338ca", "#a5b4fc"]));
+    const c = r.identifyCard({ facility_name: "7-Eleven #1", case_status: "Open", case_type: "Confirmed Release", release_date: 1791867600000, close_date: null, release_cause_type: "Unknown", tank_type: "UST", case_number: "064-5244" });
+    expect(c.rows.find((x) => x.label === "Released").text).toBe("Oct 13, 2026");
+    expect(c.rows.find((x) => x.label === "Closed")).toBeUndefined();
+    expect(ALL_LAYERS.ok_pst.note).toMatch(/Petroleum Tank Releases/);
   });
 });

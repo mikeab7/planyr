@@ -41,7 +41,7 @@ const KEEP_UPPER = /\b(Llc|Inc|Llp|Lp|Pws|Rwd|Okc|Usa|Us|Ok|Occ|Deq|Pst|Nrhp|Ii|
 export const tc = (raw) => {
   const s = raw == null ? "" : String(raw).trim();
   if (!s || /[a-z]/.test(s)) return s;
-  return s.toLowerCase().replace(/(^|[\s'\-/.(])([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(KEEP_UPPER, (w) => w.toUpperCase());
+  return s.toLowerCase().replace(/(^|[\s\-/.(])([a-z])/g, (_m, a, b) => a + b.toUpperCase()).replace(/\b([ODLodl]')([a-z])/g, (_m, a, b) => a.toUpperCase() + b.toUpperCase()).replace(KEEP_UPPER, (w) => w.toUpperCase()); // "DON'S" → "Don's" (not "Don'S"), "O'BRIEN" → "O'Brien"
 };
 const EMPTY = /^(|null|<null>|none|n\/a|undefined|unknown|0|0\.0+)$/i;
 export const clean = (v) => { const s = v == null ? "" : String(v).replace(/_x000d_/gi, "").replace(/\s+/g, " ").trim(); return EMPTY.test(s) ? "" : s; };
@@ -103,7 +103,11 @@ export const ROAD_CLASSES = [
   { key: "S", label: "State highway", color: "#7c3aed", weight: 1.6 },
   { key: "T", label: "Turnpike", color: "#b45309", weight: 2, dash: true },
 ];
-const roadStyle = (props, opacity) => { const c = ROAD_CLASSES.find((r) => r.key === (props && props.ODOTROUTECLASS)) || ROAD_CLASSES[2]; return stroke(c.color, c.weight, c.dash ? "10 5" : null)(opacity); };
+/* A turnpike is drawn by WHO MAINTAINS IT: ODOT's route class marks only 11 segments 'T', while 1,611 segments the Turnpike Authority maintains carry class I / S / U (measured 2026-10-29). */
+export const roadClassKeyOf = (p) => (String((p && p.MAINTENANCERESPONSIBILITY) || "").trim() === "T" ? "T" : String((p && p.ODOTROUTECLASS) || "").trim());
+/* A street name that is really a route code ("U059") is no name. */
+const roadNameOf = (p) => { const n = clean(p && p.STREETNAME); return /^[A-Z]\d{3,4}$/.test(n) ? "" : n; };
+const roadStyle = (props, opacity) => { const c = ROAD_CLASSES.find((r) => r.key === roadClassKeyOf(props)) || ROAD_CLASSES[2]; return stroke(c.color, c.weight, c.dash ? "10 5" : null)(opacity); };
 const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T: "Turnpike Authority", U: "State, urban (interstate ramps and frontage roads)", Z: "State responsibility, maintained by another" };
 
 /* =============================================================== Tribal areas =============================================================== */
@@ -128,10 +132,12 @@ export const CLEANUP = {
   rcra: { label: "RCRA corrective action", color: "#c2410c", radius: 5 },
   restriction: { label: "Recorded land-use restriction", color: "#0f766e", radius: 4.5 },
   vcp: { label: "Voluntary cleanup", color: "#a16207", radius: 4.5 },
-  scap: { label: "Cleanup assistance (armories, orphan sites)", color: "#be185d", radius: 4.5 },
+  scap: { label: "Cleanup assistance (school chemicals, armories, orphan sites)", color: "#be185d", radius: 4.5 },
   brownfieldDeq: { label: "Brownfield (DEQ)", color: "#4d7c0f", radius: 4.5 },
   brownfieldOcc: { label: "Brownfield (Corporation Commission, petroleum)", color: "#15803d", radius: 4.5 },
+  release: { label: "Petroleum tank release — open case (OCC)", color: "#4338ca", radius: 5.5 },
 };
+export const RELEASE_CLOSED = { label: "Petroleum tank release — closed case (OCC)", color: "#a5b4fc", radius: 3.5 };
 const WASTE = {
   solid: { label: "Landfill / solid-waste facility", color: "#78350f", radius: 5 },
   haz: { label: "Hazardous-waste permit site", color: "#6d28d9", radius: 5 },
@@ -164,7 +170,7 @@ export const OK_LAYER_TIERS = {
   ok_county: "context", ok_city: "context", ok_road: "reference",
   ok_tribal: "reference", ok_cherokee_res: "reference", ok_cherokee_land: "reference",
   ok_wells: "reference", ok_pst: "reference",
-  ok_deq_superfund: "reference", ok_deq_rcra: "reference", ok_deq_restrictions: "reference", ok_deq_vcp: "reference", ok_deq_scap: "reference", ok_deq_brownfields: "reference", ok_occ_brownfields: "reference",
+  ok_deq_superfund: "reference", ok_deq_rcra: "reference", ok_deq_restrictions: "reference", ok_deq_vcp: "reference", ok_deq_scap: "reference", ok_deq_brownfields: "reference", ok_occ_brownfields: "reference", ok_pst_releases: "reference",
   ok_deq_solid_waste: "reference", ok_deq_haz_waste: "reference",
   ok_deq_whpa: "reference", ok_deq_well_buffers: "reference", ok_deq_intakes: "reference",
   ok_deq_appb_areas: "reference", ok_deq_appb_streams: "reference", ok_owrb_scenic: "reference", ok_owrb_special_ws: "reference", ok_deq_sensitive: "reference", ok_deq_303d: "reference",
@@ -185,7 +191,7 @@ export const OK_MERGE_GROUPS = {
   ok_protected_waters: { label: "Protected Waters", note: "Waters Oklahoma protects beyond the ordinary: Water Quality Standards Appendix B areas and streams, Scenic Rivers and the special-provision watersheds, and the sensitive watersheds the OKR10 construction stormwater permit singles out." },
 };
 
-const CLEANUP_LEGEND = legendOf(Object.values(CLEANUP).map((c) => ({ label: c.label, color: c.color })));
+const CLEANUP_LEGEND = legendOf([...Object.values(CLEANUP), RELEASE_CLOSED].map((c) => ({ label: c.label, color: c.color })));
 const TRIBAL_LEGEND = legendOf([TRIBAL.otsa, TRIBAL.osage, TRIBAL.trust, TRIBAL.cherokee, TRIBAL.land]);
 const WATER_LEGEND = legendOf([SRC_WATER.whpa, SRC_WATER.buffer, SRC_WATER.intake]);
 const PROTECTED_LEGEND = legendOf([PROTECTED.areaT1, PROTECTED.areaT2, PROTECTED.stream, PROTECTED.sens, PROTECTED.scenic, ...SPECIAL_WS]);
@@ -218,8 +224,8 @@ export const OK_LAYERS = {
     minZoom: 12, color: "#7c3aed", weight: 1.6, styleFn: roadStyle, legend: legendOf(ROAD_CLASSES),
     hoverTitle: "State highway", hoverSource: "ODOT",
     identifyCard: card("State highway", (p) => [
-      rowOf("Road", pick(p, "STREETNAME")),
-      rowOf("Class", (ROAD_CLASSES.find((r) => r.key === p.ODOTROUTECLASS) || {}).label, { raw: true }),
+      rowOf("Road", roadNameOf(p)),
+      rowOf("Class", (ROAD_CLASSES.find((r) => r.key === roadClassKeyOf(p)) || {}).label, { raw: true }),
       rowOf("Maintained by", ROAD_MAINT[String(p.MAINTENANCERESPONSIBILITY || "").trim()], { raw: true }),
       rowOf("Traffic", Number(p.AADT) > 0 ? `${Number(p.AADT).toLocaleString("en-US")} vehicles a day` : "", { raw: true }),
       Number(p.TRUCKROUTE) === 1 ? rowOf("Truck route", "Yes", { raw: true }) : null,
@@ -273,7 +279,7 @@ export const OK_LAYERS = {
       return [
         rowOf("Well", [clean(p.well_name), clean(p.well_num)].filter(Boolean).join(" ")),
         clean(p.symbol_class) ? rowOf("Status", w.label, { raw: true }) : null,
-        rowOf("Operator", p.operator),
+        /not assigned/i.test(String(p.operator || "")) ? rowOf("Operator", "None assigned", { raw: true }) : rowOf("Operator", p.operator),
         rowOf("County", p.county),
       ];
     }),
@@ -295,7 +301,7 @@ export const OK_LAYERS = {
       Number(p.active_ast_tank_count) > 0 ? rowOf("Aboveground tanks", p.active_ast_tank_count, { raw: true }) : null,
       /^yes$/i.test(String(p.indian_trust_lands || "")) ? rowOf("On Indian trust land", "Yes", { raw: true }) : null,
     ].filter(Boolean)),
-    note: "The Corporation Commission's register of regulated petroleum storage tank facilities (21,000+): gas stations, distributors, farms, industrial sites. A REGISTER, not a leak list — release and corrective-action status are not in it. A Phase I ESA pre-screen.",
+    note: "The Corporation Commission's register of regulated petroleum storage tank facilities (21,000+): gas stations, distributors, farms, industrial sites. A REGISTER of tanks, not a leak list — the Commission's release (leaking-tank) cases are their own row, Petroleum Tank Releases, in Cleanup Sites. A Phase I ESA pre-screen.",
     group: "environmental", order: 22,
   }),
 
@@ -353,7 +359,7 @@ export const OK_LAYERS = {
     url: urlFor("okBrownfieldDeq"), minZoom: 8, color: CLEANUP.brownfieldDeq.color, weight: 1.5, pointRadius: CLEANUP.brownfieldDeq.radius,
     hoverTitle: "Brownfield site", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Brownfield site", (p) => [
-      rowOf("Site", p.Site_Name), rowOf("Status", p.Status, { raw: true }), rowOf("Kind", p.Type_of_Site, { raw: true }), rowOf("Contamination", p.Nature_of_Contamination, { raw: true }),
+      rowOf("Site", p.Site_Name), rowOf("Status", ({ RLF: "Revolving loan fund site", "Certificate Completed and RLF": "Certificate completed, revolving loan fund" })[String(p.Status || "").trim()] || p.Status, { raw: true }), rowOf("Kind", p.Type_of_Site, { raw: true }), rowOf("Contamination", p.Nature_of_Contamination, { raw: true }),
       rowOf("Allowed use", p.Allowable_Use, { raw: true }), rowOf("Address", p.Address, { raw: true }),
     ].filter(Boolean)),
     note: "DEQ's Brownfields program (103): Certificate and revolving-loan-fund sites, with what was found and what use the cleanup allows.",
@@ -368,6 +374,27 @@ export const OK_LAYERS = {
     group: "environmental", order: 29,
   }),
 
+  ok_pst_releases: pointRow({
+    label: "Petroleum Tank Releases", mergeGroup: "ok_cleanup", source: OCC_NOTE_SRC + " — Petroleum Storage Tank Division",
+    url: urlFor("okPstReleases"), fields: ["facility_name", "case_status", "case_type", "release_date", "close_date", "release_cause_type", "tank_type", "address1", "city", "county", "case_number"],
+    minZoom: 11, color: CLEANUP.release.color, weight: 1.5, pointRadius: CLEANUP.release.radius,
+    styleFn: (p, opacity) => (String((p && p.case_status) || "").trim().toLowerCase() === "open" ? dot(CLEANUP.release.color, CLEANUP.release.radius) : dot(RELEASE_CLOSED.color, RELEASE_CLOSED.radius))(opacity),
+    hoverTitle: "Petroleum tank release", hoverSource: "OCC",
+    identifyCard: card("Petroleum tank release (leaking tank)", (p) => [
+      rowOf("Facility", p.facility_name),
+      rowOf("Case status", p.case_status, { raw: true }),
+      rowOf("Case type", p.case_type, { raw: true }),
+      rowOf("Released", dateOf(p.release_date), { raw: true }),
+      rowOf("Closed", dateOf(p.close_date), { raw: true }),
+      rowOf("Cause", p.release_cause_type, { raw: true }),
+      rowOf("Tank", p.tank_type, { raw: true }),
+      rowOf("Address", [clean(p.address1), clean(p.city)].filter(Boolean).join(", ")),
+      rowOf("Case no.", p.case_number, { raw: true }),
+    ].filter(Boolean), "A closed case is a case the Commission has closed, not proof the ground is clean — ask the Commission for the file."),
+    note: "The Corporation Commission's petroleum-tank release (leaking underground / aboveground storage tank) cases — 7,600+, open cases in dark indigo, closed cases pale. The most direct Phase I flag for a gas-station or fuel-yard neighbour.",
+    infoCaveat: "At the facility's own coordinate; a release can reach beyond the tank site. Closed does not mean clean.",
+    group: "environmental", order: 29.5,
+  }),
   ok_deq_solid_waste: pointRow({
     label: "Landfills & Solid-Waste Facilities", mergeGroup: "ok_waste", source: DEQ + " — Land Protection",
     url: urlFor("okSolidWaste"), minZoom: 9, color: WASTE.solid.color, weight: 1.5, pointRadius: WASTE.solid.radius,
@@ -388,7 +415,7 @@ export const OK_LAYERS = {
 
   ok_deq_whpa: areaRow({
     label: "Wellhead Protection Areas", mergeGroup: "ok_source_water", source: DEQ + " — Water Quality",
-    url: urlFor("okWhpa"), fields: ["ZONE"], minZoom: 11, color: SRC_WATER.whpa.color, weight: 1.2,
+    url: urlFor("okWhpa"), fields: ["ZONE"], simplifyFactor: 0.5, minZoom: 11, color: SRC_WATER.whpa.color, weight: 1.2,
     styleFn: (p, opacity) => area(SRC_WATER.whpa.color, { A: 0.35, B: 0.22, C: 0.12 }[String(p && p.ZONE || "").trim().toUpperCase()] || 0.15, 1.2)(opacity),
     legend: WATER_LEGEND, hoverTitle: "Wellhead protection area", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Wellhead protection area", (p) => [rowOf("Zone", p.ZONE, { raw: true })],
@@ -438,13 +465,13 @@ export const OK_LAYERS = {
     group: "environmental", order: 36,
   }),
   ok_deq_sensitive: areaRow({
-    label: "Stormwater Sensitive Watersheds", mergeGroup: "ok_protected_waters", source: DEQ + " — Water Quality (OKR10 Construction General Permit)",
+    label: "Stormwater Sensitive Areas", mergeGroup: "ok_protected_waters", source: DEQ + " — Water Quality (sensitive areas for the OKR10 Construction General Permit)",
     url: urlFor("okSensitiveWaters"), fields: ["NAME", "HUC11"], simplifyFactor: 0.5, minZoom: 8, color: PROTECTED.sens.color, weight: 1.4,
     styleFn: flat(area(PROTECTED.sens.color, 0.08, 1.4, "8 5")),
     hoverTitle: "Sensitive watershed", hoverSource: "Oklahoma DEQ",
-    identifyCard: card("Stormwater sensitive watershed", (p) => [rowOf("Watershed", p.NAME), rowOf("HUC-11", p.HUC11, { raw: true })].filter(Boolean),
+    identifyCard: card("Stormwater sensitive area", (p) => [rowOf("Area", p.NAME), rowOf("HUC-11", p.HUC11, { raw: true })].filter(Boolean),
       "DEQ lists these watersheds as sensitive waters harboring endangered and threatened species and their critical habitats, as set forth in the OKR10 Construction General Stormwater Permit. Read the permit's eligibility terms before relying on the general permit."),
-    note: "Sensitive waters and watersheds harboring threatened and endangered species that DEQ's OKR10 Construction General Stormwater Permit singles out (52 HUC-11 watersheds).",
+    note: "Sensitive waters and watersheds harboring threatened and endangered species that DEQ's OKR10 Construction General Stormwater Permit singles out (52 areas: HUC-11 watersheds and river corridors; DEQ's layer is named \"OKR05 Stormwater Sensitive Areas\" and its description cites OKR10).",
     infoCaveat: "DEQ's own description of the layer; the permit text governs. A site inside one needs the permit's endangered-species review.",
     group: "environmental", order: 37,
   }),
@@ -517,7 +544,7 @@ export const OK_LAYERS = {
   }),
   ok_crit_habitat: areaRow({
     label: "Critical Habitat", source: "U.S. Fish & Wildlife Service",
-    url: GIS_SOURCES.okCritHabitat.serviceUrl, simplifyFactor: 0.5, minZoom: 8, color: "#15803d", weight: 1.5,
+    url: GIS_SOURCES.okCritHabitat.serviceUrl, simplifyFactor: 0.5, vertexBudget: 150000, minZoom: 8, color: "#15803d", weight: 1.5,
     styleFn: flat(area("#15803d", 0.5, 1.5)),
     hoverTitle: "Critical habitat", hoverSource: "USFWS",
     identifyCard: card("Critical habitat", (p) => [rowOf("Species", pick(p, "comname")), rowOf("Scientific name", pick(p, "sciname"), { raw: true }), rowOf("Status", pick(p, "listing_status"), { raw: true })].filter(Boolean)),
@@ -537,6 +564,21 @@ export const OK_LAYERS = {
     infoCaveat: "Approximate boundaries; availability, size and pressure are the system's to confirm.",
     group: "utilities", order: 21,
   }),
+};
+
+/* The ⓘ "as of" line of every Oklahoma row (layers.js spreads this into LAYER_VINTAGE). Dates are the services' own last-edit stamps or the agency's stated vintage, read 2026-10-29. */
+export const OK_VINTAGE = {
+  ok_county: "ODOT — edited 2026-08-11", ok_city: "ODOT (Oklahoma Tax Commission) — edited 2026-10-05", ok_road: "ODOT linear-referencing inventory — edited 2026-10-26",
+  ok_tribal: "U.S. Census Bureau — checked weekly, edited 2026-10-28", ok_cherokee_res: "Cherokee Nation — edited 2026-09-24", ok_cherokee_land: "Cherokee Nation — edited 2026-09-21",
+  ok_wells: "Oklahoma Corporation Commission RBDMS — edited 2026-10-29", ok_pst: "Oklahoma Corporation Commission — edited 2026-10-28", ok_pst_releases: "Oklahoma Corporation Commission — edited 2026-10-28",
+  ok_deq_superfund: "Oklahoma DEQ LandWeb — updated 2025-01", ok_deq_rcra: "Oklahoma DEQ LandWeb — updated 2025-10", ok_deq_restrictions: "Oklahoma DEQ LandWeb — filings tracked by DEQ staff",
+  ok_deq_vcp: "Oklahoma DEQ — data set updated 2022-01-25", ok_deq_scap: "Oklahoma DEQ LandWeb — updated 2025-10", ok_deq_brownfields: "Oklahoma DEQ LandWeb — updated 2025-06", ok_occ_brownfields: "Oklahoma Corporation Commission Brownfields — edited 2026-10-26",
+  ok_deq_solid_waste: "Oklahoma DEQ LandWeb — updated 2025-09", ok_deq_haz_waste: "Oklahoma DEQ LandWeb — updated 2025-09",
+  ok_deq_whpa: "Oklahoma DEQ WaterWeb — updated 2026-08", ok_deq_well_buffers: "DEQ — drawn from its 2014 public-well layer", ok_deq_intakes: "Oklahoma DEQ WaterWeb — updated 2026-08",
+  ok_deq_appb_areas: "Oklahoma DEQ WaterWeb — updated 2026-08", ok_deq_appb_streams: "Oklahoma DEQ WaterWeb — updated 2026-08", ok_deq_sensitive: "Oklahoma DEQ WaterWeb — updated 2026-08", ok_deq_303d: "Oklahoma DEQ — 2024 Integrated Report",
+  ok_owrb_scenic: "Oklahoma Water Resources Board — Water Quality Standards", ok_owrb_special_ws: "Oklahoma Water Resources Board — Water Quality Standards",
+  ok_dams: "OWRB Dam Inventory — edited 2026-09-22", ok_water_systems: "OWRB — approximate, as published",
+  ok_nrhp: "National Park Service — Esri federal mirror, edited 2026-10", ok_cemeteries: "USGS National Map — GNIS", ok_crit_habitat: "USFWS — final critical habitat",
 };
 
 /* =============================================================== Vector sources (ok_county, ok_city) =============================================================== */

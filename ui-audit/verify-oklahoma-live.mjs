@@ -39,6 +39,7 @@ const CASES = [
   R("jur", "ok_tribal", "Cherokee Nation tribal land", "Tribal_Land", 36.78518, -95.93355, 13),
   R("env", "ok_wells", "Oil & gas wells", "RBDMS_WELLS", 36.07456, -96.08589, 15),
   R("env", "ok_pst", "Petroleum storage tanks", "Facilities/FeatureServer/0", 36.0748, -96.0299, 14),
+  R("env", "ok_pst_releases", "Petroleum tank releases", "PST_Releases/FeatureServer/6", 36.1515, -95.9916, 14),
   R("env", "ok_cleanup", "Superfund", "LandWeb/MapServer/1/query", 36.12463, -96.07872, 14),
   R("env", "ok_cleanup", "RCRA corrective action", "LandWeb/MapServer/0/query", 36.13811, -96.01158, 14),
   R("env", "ok_cleanup", "Land-use restrictions", "LandWeb/MapServer/3/query", 36.15685, -95.97673, 14),
