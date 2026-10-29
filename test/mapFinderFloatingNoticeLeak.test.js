@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MF = readFileSync(join(here, "../src/workspaces/site-planner/MapFinder.jsx"), "utf8");
@@ -54,7 +55,7 @@ describe("NEW-1 (B1462256): every MapFinder FloatingNotice is gated on `visible`
 
   it("the Site workspace's two ToastHosts are gated on their active flag too", () => {
     const app = readFileSync(join(here, "../src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
-    const planner = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const planner = plannerSource();
     expect(app).toMatch(/\{isActive && <ToastHost toasts=\{statusToasts\}/);
     expect(planner).toMatch(/\{active && <ToastHost toasts=\{toasts\}/);
   });

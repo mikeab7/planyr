@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* B828 — undo-reliability sweep. Four confirmed "the undo button doesn't work" gaps, each a
  * mutation of undoable state that recorded no history frame (or read a STALE snapshot). These are
@@ -11,7 +12,7 @@ const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "ut
 
 describe("B828: undo records a frame on every editable-state mutation (wiring guards)", () => {
   it("parcel fill 'Translucence' opacity field pushes exactly one undo frame per commit", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // B1618656 NEW-1 — the properties-panel grid redesign replaced the continuous opacity SLIDER
     // (which needed sliderHistory's own drag-batching) with a discrete PercentField that commits
     // once (blur/Enter); the guarantee this test protects — never un-undoable, never two frames per
@@ -23,7 +24,7 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
   });
 
   it("the Width box is GONE from the Overlays panel (owner, NEW-1 redesign) and RENAME is undoable: `name` is in the history signature", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     const panel = read("../src/workspaces/site-planner/components/OverlaysPanel.jsx");
     expect(panel).not.toMatch(/>\s*Width\s*<|"Width"|ft wide|′ wide|ft-per-pixel|imgW \* o\.ftPerPx/);
     // a rename is a patchOverlay (pushHistory) — it only undoes if the dedup signature can SEE the name
@@ -50,7 +51,7 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
     expect(st).not.toMatch(/useEffect\(\(\) => \{ editRef\.current = /);
 
     // the pattern this mirrors: SitePlanner assigns its undo state ref during render, not in an effect
-    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     // NEW-1 (parcel-drawing-offline) appended `origin` — the geo anchor rides the snapshot so
     // "Set location" / a placement nudge is a normal undo frame. The guard's subject is the
     // DURING-RENDER assignment, so it stays anchored on the collections and tolerates the tail.

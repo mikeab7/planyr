@@ -7,6 +7,7 @@ import { followDrives, DRIVE_FOLLOW_MAX_FT } from "../src/workspaces/site-planne
 import { createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { driveJunctionsOf } from "../src/workspaces/site-planner/lib/roadJunctions.js";
 import { SETTINGS } from "./helpers/driveMatrix.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const FIELD = { id: "f", type: "parking", cx: 0, cy: 0, w: 200, h: 42, rot: 0 };
 // a long road coming from the east and ending ON the field's east face (x = 100), 24 ft wide
@@ -235,7 +236,7 @@ describe("the load-time heal carries a road along with a re-seated bonded field"
 });
 
 describe("the planner seam (source guard)", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("every element write goes through followDrives; whole-canvas replacements (undo/redo, remote, load, restore, adopt) use the raw setter", () => {
     expect(src).toMatch(/const setEls = \(u\) => \{[\s\S]{0,400}followDrives\(gestureBase \|\| prev/);
     expect(src).toMatch(/const \[els, setElsRaw\] = useState/);

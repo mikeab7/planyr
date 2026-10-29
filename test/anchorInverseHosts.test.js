@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { anchorTransform, anchorInverseCss } from "../src/shared/viewport/viewAnchor.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const anchor = { ppf: 0.35, offX: 60, offY: 60 };
 // parse the CSS the helper emits and apply it right-to-left to a point (what the browser does)
@@ -56,7 +57,7 @@ describe("anchorInverseCss — the in-SVG GIS hosts follow the basemap, not the 
 });
 
 describe("the two in-SVG hosts use it", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const src = plannerSource();
   it("both foreignObject hosts take anchorInverseCss with an explicit transform origin", () => {
     const n = (src.match(/transformOrigin: "0 0",\s*\n\s*transform: anchorInverseCss\(viewT, regShift\.dx, regShift\.dy\)/g) || []).length;
     expect(n).toBe(2);

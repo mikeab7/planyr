@@ -67,7 +67,8 @@ import { defineName, renameName, retargetName, deleteName } from "./lib/namedRan
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
 import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
 import { findInconsistencies } from "./lib/formulaConsistency.js";
-import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
+import { copyRange, pasteRange, fillDown, fillTextToCells, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
+import { rangesOf, applyToRanges, isMulti, collapse, MULTI_SELECTION_MESSAGE } from "./lib/selectionModel.js";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
@@ -77,7 +78,7 @@ import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import {
-  readLocalSheet, writeLocalSheet, decideAnonAdoption, loadCloudSheet, saveCloudSheet,
+  readLocalSheet, writeLocalSheet, readSyncMeta, writeSyncMeta, decideAnonAdoption, loadCloudSheet, saveCloudSheet,
   readLocalOrgIndex, writeLocalOrgIndex, touchLocalOrgIndex, removeLocalOrgIndexEntry,
   listOrgWorkbooksCloud, loadOrgWorkbookCloud, saveOrgWorkbookCloud, renameOrgWorkbookCloud, deleteOrgWorkbookCloud,
 } from "./lib/modelStore.js";
@@ -98,6 +99,7 @@ import { parseSpreadsheetInWorker, exportWorkbookInWorker } from "./lib/spreadsh
 // `onProjectsChanged` shape exactly) so a live edit made in the still-mounted Site Planner tab
 // recalculates a formula here without a reload. `fetchAllComps` is the same async/Supabase-only
 // read CompsPanel.jsx uses — there is no synchronous comps cache anywhere in this repo.
+import { decideLoadSync, isPlaceholderWorkbook } from "./lib/modelSyncBase.js";
 import { buildProjectNames, openPlanId } from "./lib/projectRefs.js";
 import { onSiteModelChanged, isCloudActive } from "../site-planner/lib/storage.js";
 import { onCompsChanged } from "../../shared/comps/lib/compsChanged.js";
@@ -176,7 +178,14 @@ export default function ModelApp({
   // File-menu UI (unchanged, reused verbatim) has anything to show.
   org = false,
 }) {
-  const { value: workbook, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
+  const { value: workbook, commit: commitRaw, undo: undoRaw, redo: redoRaw, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
+  // B2450528 — "the person changed it" vs "a load adopted it". Only commit/undo/redo raise this flag
+  // (reset never does), and the local write-through effect consumes it to mark the stored copy DIRTY
+  // (edited since it was last confirmed against the cloud — see lib/modelSyncBase.js).
+  const userEditRef = useRef(false);
+  const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
+  const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
+  const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
   // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
   // undo-tracked `workbook` value, the same way zoom/painter/filterOn already are below: a plain
   // tab click is navigation, not a content edit, and must never mint (or be reverted by) an undo
@@ -313,6 +322,14 @@ export default function ModelApp({
   // Spreadsheet header reads "Dashboard / <Project> ▾" (the old spreadsheet-concept-crumb is gone,
   // and shared/ui/crumbScope.js would not draw a trailing crumb on this module anyway).
   const cloudVersionRef = useRef(null);
+  // B2450528 — the sync base (modelSyncBase.js): `baseVersionRef` = the cloud version this device's copy was
+  // last confirmed against, `dirtyRef` = it holds edits not yet confirmed uploaded, `workbookRef` = the
+  // workbook on screen RIGHT NOW (so a cloud answer that lands after a keystroke decides on the edited copy).
+  const baseVersionRef = useRef(null);
+  const dirtyRef = useRef(false);
+  const workbookRef = useRef(null);
+  workbookRef.current = workbook;
+  const [cloudSettled, setCloudSettled] = useState(false); // the cloud load has answered (any way) for this workbook
   const pushTimer = useRef(0);
   // V537648 — the debounced push reads these at FIRE time (lib/modelPushGate.js). `statusRef`
   // mirrors `status`; `divergedRef` is the divergence HOLD — a latch set synchronously the moment
@@ -561,50 +578,83 @@ export default function ModelApp({
     setDiverged(false);
     setStatus("idle");
     setCloudConfirmed(false);
+    setCloudSettled(false);
+    userEditRef.current = false;
+    baseVersionRef.current = null;
+    dirtyRef.current = false;
     if (fileMode) return undefined; // NEW-1 — a Library file is open: useFileWorkbook owns the load
     if (!openWorkbook) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
     const local = readLocalSheet(userId, storageKey);
+    // B2450528 — the sync base this device's stored copy carries. No stored copy = a placeholder the
+    // write-through is about to write: it is CLEAN (it can never win a fight with the cloud copy).
+    const meta0 = local ? readSyncMeta(userId, storageKey) : null;
+    if (!local) writeSyncMeta(userId, storageKey, { baseVersion: null, dirty: false });
+    baseVersionRef.current = meta0 ? meta0.baseVersion : null;
+    dirtyRef.current = !!(meta0 && meta0.dirty);
     const initialWorkbook = local ? migrateWorkbook(local) : createWorkbook();
     reset(initialWorkbook);
     setActiveSheetId(initialWorkbook.activeSheetId);
     setReady(true);
     let live = true;
+    /** Show `wb` as the on-screen copy and record the outcome in the sync base. Never a user edit. */
+    const adoptWorkbook = (wb, { base, dirty }) => {
+      userEditRef.current = false;
+      reset(wb);
+      setActiveSheetId(wb.activeSheetId);
+      baseVersionRef.current = base; dirtyRef.current = dirty;
+      writeSyncMeta(userId, storageKey, { baseVersion: base, dirty });
+    };
     (async () => {
-      const r = openProject ? await loadCloudSheet(projectId) : await loadOrgWorkbookCloud(orgWorkbookId);
+      let r;
+      try { r = openProject ? await loadCloudSheet(projectId) : await loadOrgWorkbookCloud(orgWorkbookId); }
+      catch (_) { r = { ok: false, reason: "error" }; }
       if (!live || loadTokenRef.current !== token) return;
       if (r.ok) {
         cloudVersionRef.current = r.version;
         setCloudConfirmed(true);
         // R3 — a workbook made signed-out (scope "local") is adopted once into this account's scope.
         const anon = openProject && userId && !local ? readLocalSheet(null, storageKey) : null;
+        const anonWb = anon ? migrateWorkbook(anon) : null;
         const adoption = decideAnonAdoption({ userId, userLocal: local, cloudSheet: r.sheet, cloudOk: true, anonLocal: anon,
-          diverges: anon && r.sheet ? sheetsDiverge(migrateWorkbook(anon), migrateWorkbook(r.sheet)) : false });
+          // A never-edited signed-out placeholder is not "a different copy" — it can't hold work.
+          diverges: anonWb && r.sheet ? sheetsDiverge(anonWb, migrateWorkbook(r.sheet)) && !isPlaceholderWorkbook(anonWb) : false });
+        const editedMeanwhile = dirtyRef.current; // a keystroke landed before the cloud answered
         if (adoption === "adopt") {
-          const adopted = migrateWorkbook(anon); // the write-through + debounced push effects persist it under this account
-          reset(adopted);
-          setActiveSheetId(adopted.activeSheetId);
-        } else if (!local && r.sheet) {
+          // the write-through + debounced push effects persist it under this account; it is unsynced work
+          adoptWorkbook(anonWb, { base: r.version, dirty: true });
+          setPushNonce((n) => n + 1);
+        } else if (!local && r.sheet && !editedMeanwhile) {
           const cloudWorkbook = migrateWorkbook(r.sheet);
-          if (adoption === "diverged") markDiverged({ device: migrateWorkbook(anon), cloud: cloudWorkbook, showing: "cloud" });
-          reset(cloudWorkbook);
-          setActiveSheetId(cloudWorkbook.activeSheetId);
-        } else if (local && r.sheet) {
-          // Both a local copy AND a saved cloud copy exist. "Local always wins on load" (the
-          // file header) means this device keeps showing ITS content — but if that content
-          // actually differs from what's in the cloud, the very next edit will silently
-          // overwrite the cloud copy at a clean version bump (no CAS conflict, because nothing
-          // raced — this device's `cloudVersionRef` is genuinely current). That is a real
-          // second-device data-loss path, not a hypothetical one, so it is surfaced loudly
-          // rather than left to happen quietly.
-          // ⛔ V537648 — and DETECTING it is not enough: the debounced push scheduled at mount
-          // (before this answer arrived) used to fire anyway and overwrite the cloud copy with no
-          // edit at all. `markDiverged` latches the hold the push body checks at fire time.
-          const localWorkbook = migrateWorkbook(local), cloudWorkbook = migrateWorkbook(r.sheet);
-          if (sheetsDiverge(localWorkbook, cloudWorkbook)) markDiverged({ device: localWorkbook, cloud: cloudWorkbook, showing: "device" });
+          if (adoption === "diverged") markDiverged({ device: anonWb, cloud: cloudWorkbook, showing: "cloud" });
+          adoptWorkbook(cloudWorkbook, { base: r.version, dirty: false });
+        } else {
+          // Both sides may hold something. "Local wins on load" is only safe when this device's copy is
+          // provably newer or equal; otherwise the very next edit would silently overwrite the other copy
+          // (a clean CAS bump — nothing raced). Decide from the sync base (lib/modelSyncBase.js), on the
+          // workbook as it is NOW (the person may have typed while the cloud was answering).
+          // ⛔ V537648 — and DETECTING a divergence is not enough: the debounced push scheduled at mount
+          // used to fire anyway. `markDiverged` latches the hold the push body checks at fire time.
+          const localNow = workbookRef.current || migrateWorkbook(local);
+          const cloudWorkbook = r.sheet ? migrateWorkbook(r.sheet) : null;
+          const meta = readSyncMeta(userId, storageKey);
+          const verdict = decideLoadSync({
+            local: localNow, cloud: cloudWorkbook, cloudVersion: r.version, meta,
+            sameContent: cloudWorkbook ? !sheetsDiverge(localNow, cloudWorkbook) : false,
+            localIsPlaceholder: isPlaceholderWorkbook(localNow),
+          });
+          if (verdict.action === "adopt-cloud") adoptWorkbook(cloudWorkbook, { base: r.version, dirty: false });
+          else if (verdict.action === "in-sync") { baseVersionRef.current = r.version; dirtyRef.current = false; writeSyncMeta(userId, storageKey, { baseVersion: r.version, dirty: false }); }
+          else if (verdict.action === "push-local") { dirtyRef.current = true; baseVersionRef.current = r.version; writeSyncMeta(userId, storageKey, { baseVersion: r.version, dirty: true }); setPushNonce((n) => n + 1); }
+          else if (verdict.action === "no-cloud-copy") {
+            dirtyRef.current = verdict.dirty;
+            writeSyncMeta(userId, storageKey, { baseVersion: null, dirty: verdict.dirty });
+            if (verdict.dirty) setPushNonce((n) => n + 1);
+          } else markDiverged({ device: localNow, cloud: cloudWorkbook, showing: "device" });
         }
       } else if (r.reason === "not-provisioned") {
         setStatus("not-provisioned");
       }
+      setCloudSettled(true);
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -621,7 +671,22 @@ export default function ModelApp({
     if (flipped) return;
     if (!ready || !openWorkbook || fileMode) return; // a Library file keeps its own safety copy (lib/fileDraft.js), never the project's slot
     if (!writeLocalSheet(userId, storageKey, workbook)) setStatus("error");
+    // B2450528 — a PERSON'S edit (commit/undo/redo — never a load's reset) makes the stored copy dirty:
+    // edited since it was last confirmed against the cloud version `baseVersionRef`.
+    if (userEditRef.current) {
+      userEditRef.current = false;
+      dirtyRef.current = true;
+      writeSyncMeta(userId, storageKey, { baseVersion: baseVersionRef.current, dirty: true });
+    }
   }, [workbook, ready, openWorkbook, storageKey, userId, fileMode]);
+
+  // B2450528 — a push landed: the stored copy is now confirmed against `version`, and clean unless something newer
+  // was typed while it was in flight.
+  const noteSynced = useCallback((version, pushedWorkbook) => {
+    baseVersionRef.current = version;
+    if (workbookRef.current === pushedWorkbook) dirtyRef.current = false;
+    writeSyncMeta(userId, storageKey, { baseVersion: version, dirty: dirtyRef.current });
+  }, [userId, storageKey]);
 
   /* Best-effort, debounced cloud push through the guarded save path. Reads `status` without
    * depending on it — this must fire only on a WORKBOOK change, not on every status transition
@@ -631,6 +696,7 @@ export default function ModelApp({
     if (!ready || !openWorkbook || !userId || fileMode) return undefined; // fileMode: the Library file is the save target
     if (status === "not-provisioned") return undefined; // stop hammering a table that isn't there yet
     if (divergedRef.current) return undefined; // V537648 — held until the user picks a copy
+    if (!cloudSettled || !dirtyRef.current) return undefined; // B2450528
     clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(() => {
       runCloudPush({
@@ -641,13 +707,14 @@ export default function ModelApp({
         setStatus,
         onSaved: (version) => {
           cloudVersionRef.current = version; setCloudConfirmed(true);
+          noteSynced(version, workbook);
           if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
         },
       });
     }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode]);
+  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode, cloudSettled]);
 
   /* V537648 — the ONLY two ways out of a divergence besides opening a different workbook. Both
    * are explicit user choices; neither deletes anything (the copy not chosen is reachable by
@@ -661,16 +728,23 @@ export default function ModelApp({
     setStatus("idle");
     setPushNonce((n) => n + 1);
   }, []);
+  // B2450528 — the choice is also the new sync base: keeping this device's copy is unsynced work based on the
+  // cloud version it was just shown against; using the cloud copy is clean against that same version.
   const onKeepDeviceCopy = useCallback(() => {
     const c = divergedCopiesRef.current;
     if (c && c.showing === "cloud") { commit(c.device); setActiveSheetId(c.device.activeSheetId); }
+    baseVersionRef.current = cloudVersionRef.current; dirtyRef.current = true;
+    writeSyncMeta(userId, storageKey, { baseVersion: baseVersionRef.current, dirty: true });
     releaseDivergence();
-  }, [commit, releaseDivergence]);
+  }, [commit, releaseDivergence, userId, storageKey]);
   const onUseCloudCopy = useCallback(() => {
     const c = divergedCopiesRef.current;
-    if (c && c.showing === "device") { commit(c.cloud); setActiveSheetId(c.cloud.activeSheetId); }
+    baseVersionRef.current = cloudVersionRef.current;
+    if (c && c.showing === "device") { commit(c.cloud); setActiveSheetId(c.cloud.activeSheetId); dirtyRef.current = true; }
+    else dirtyRef.current = false;
+    writeSyncMeta(userId, storageKey, { baseVersion: baseVersionRef.current, dirty: dirtyRef.current });
     releaseDivergence();
-  }, [commit, releaseDivergence]);
+  }, [commit, releaseDivergence, userId, storageKey]);
 
   // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
   // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
@@ -745,12 +819,25 @@ export default function ModelApp({
     [commit, activeSheetId],
   );
   const applyStructuralActive = useCallback(
-    (fn, ...args) => commit((wb) => fn(setActiveSheet(wb, activeSheetId), ...args)),
+    (fn, ...args) => {
+      // NEW-2 — insert/delete of rows or columns shifts every address, so the extra ranges (stored by index)
+      // would point at the wrong cells: keep the active range only.
+      setSelRange((s) => collapse(s));
+      commit((wb) => fn(setActiveSheet(wb, activeSheetId), ...args));
+    },
     [commit, activeSheetId],
   );
 
   const onCommitCell = useCallback((r, c, text) => applyActive(commitCellText, r, c, text), [applyActive]);
-  const onBlankRange = useCallback((r1, r2, c1, c2) => applyActive(blankRange, r1, r2, c1, c2), [applyActive]);
+  // NEW-2 — a command on a multi-range selection is ONE commit (one undo step) that threads the sheet through
+  // every selected range; `sel` is a selection ({r1..c2, extra?}) or an explicit list of ranges.
+  const applyActiveRanges = useCallback((sel, fn, ...args) => {
+    const rs = Array.isArray(sel) ? sel : rangesOf(sel);
+    commit((wb) => applyToActiveSheet(setActiveSheet(wb, activeSheetId), (s) => applyToRanges(s, rs, fn, ...args)));
+  }, [commit, activeSheetId]);
+  const onBlankRanges = useCallback((ranges) => applyActiveRanges(ranges, blankRange), [applyActiveRanges]);
+  const onFillDownRanges = useCallback((ranges) => applyActiveRanges(ranges, fillDown), [applyActiveRanges]);
+  const onFillText = useCallback((cells, text, fromR, fromC) => applyActive(fillTextToCells, cells, text, fromR, fromC), [applyActive]);
   const onRenameColumn = useCallback((c, name) => applyActive(renameColumn, c, name), [applyActive]);
   const onAddColumn = useCallback(() => applyActive(addColumn), [applyActive]);
 
@@ -758,7 +845,8 @@ export default function ModelApp({
   // `activeSheetId` state's own header above — never through `commit`); the other four are real
   // content edits and go through the undo stack like everything else, syncing the view's
   // `activeSheetId` afterward since add/duplicate/delete all pick a new active sheet themselves.
-  const onSelectSheetTab = useCallback((id) => setActiveSheetId(id), []);
+  // (NEW-2: a multi-range selection belongs to the sheet it was made on — switching tabs keeps the active cell only.)
+  const onSelectSheetTab = useCallback((id) => { setActiveSheetId(id); setSelRange((s) => collapse(s)); }, []);
   const onAddSheetTab = useCallback(() => {
     const next = addSheet(workbook);
     commit(next);
@@ -800,6 +888,8 @@ export default function ModelApp({
     const t = setTimeout(() => setFileNotice(null), 9000);
     return () => clearTimeout(t);
   }, [fileNotice]);
+  // NEW-2 — a short, visible message from the grid (Excel's "This action won't work on multiple selections").
+  const onNotice = useCallback((text) => setFileNotice({ kind: "warn", text }), []);
   // NEW-1 (owner chat block, 2026-09-05) — Import Excel replaces the WHOLE workbook, and used to
   // do it unconditionally: importing a two-sheet file into a workbook that already had a real
   // Sheet1 silently discarded it, with nothing in the label or the flow saying so (Ctrl+Z recovers
@@ -1037,8 +1127,8 @@ export default function ModelApp({
   // every dollar amount above it in the same column.
   const activeFormat = formatAt(sheet, selRange.r1, selRange.c1);
   const onApplyFormat = useCallback((token) => {
-    applyActive(setNumberFormat, selRange.r1, selRange.r2, selRange.c1, selRange.c2, token);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, setNumberFormat, token);
+  }, [applyActiveRanges, selRange]);
   const onDeleteColumn = useCallback(() => {
     if (sheet.columns.length <= 1) return;
     applyStructuralActive(workbookDeleteColumn, activeCol);
@@ -1052,21 +1142,21 @@ export default function ModelApp({
   const mergedHere = !!mergeAt(sheet, selRange.r1, selRange.c1);
 
   const onSetCellStyle = useCallback((patch) => {
-    applyActive(setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, setCellStyle, patch);
+  }, [applyActiveRanges, selRange]);
   const onAdjustIndent = useCallback((delta) => {
-    applyActive(adjustIndent, selRange.r1, selRange.r2, selRange.c1, selRange.c2, delta);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, adjustIndent, delta);
+  }, [applyActiveRanges, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
-    applyActive(applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode });
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, applyBorder, { edges, style, mode });
+  }, [applyActiveRanges, selRange]);
   const onClearFormattingCmd = useCallback(() => {
-    applyActive(clearFormatting, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
-  }, [applyActive, selRange]);
+    applyActiveRanges(selRange, clearFormatting);
+  }, [applyActiveRanges, selRange]);
   const onNumberFormatOp = useCallback((op) => {
     const fn = op === "increaseDecimals" ? increaseDecimals : op === "decreaseDecimals" ? decreaseDecimals : toggleThousands;
-    applyActive(setNumberFormat, selRange.r1, selRange.r2, selRange.c1, selRange.c2, fn(activeFormat));
-  }, [applyActive, selRange, activeFormat]);
+    applyActiveRanges(selRange, setNumberFormat, fn(activeFormat));
+  }, [applyActiveRanges, selRange, activeFormat]);
 
   // Format Painter — arm/disarm on click (capturing the CURRENT active cell's format+style);
   // applying happens in onSelectionSettled below, fired by SheetView the moment the user's next
@@ -1077,25 +1167,26 @@ export default function ModelApp({
   const onSelectionSettled = useCallback(() => {
     setPainter((p) => {
       if (!p) return p;
-      const sr = selRangeRef.current;
-      applyActive(applyPaintedStyle, sr.r1, sr.r2, sr.c1, sr.c2, p.source);
+      applyActiveRanges(selRangeRef.current, applyPaintedStyle, p.source);
       return null;
     });
-  }, [applyActive]);
+  }, [applyActiveRanges]);
 
   const onMergeToggle = useCallback(() => {
+    if (isMulti(selRange)) { onNotice(MULTI_SELECTION_MESSAGE); return; }
     applyActive((s) => {
       const m = mergeAt(s, selRange.r1, selRange.c1);
       return m ? unmergeAt(s, selRange.r1, selRange.c1) : mergeRange(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
     });
-  }, [applyActive, selRange]);
+  }, [applyActive, selRange, onNotice]);
 
   // Insert/Delete (Cells group) act on the single active row/column — the right-click context
   // menu (SheetView.jsx) is the multi-row/column-aware path; the ribbon mirrors Excel's own
   // ribbon behavior for a plain cell selection.
-  const onRibbonInsertRow = useCallback(() => onInsertRowAt(selRange.r1), [onInsertRowAt, selRange]);
-  const onRibbonInsertColumn = useCallback(() => onInsertColumnAt(selRange.c1), [onInsertColumnAt, selRange]);
-  const onRibbonDeleteRow = useCallback(() => onDeleteRowAt(selRange.r1), [onDeleteRowAt, selRange]);
+  // (NEW-2: these act on ONE row/column, so a multi-range selection gets Excel's message instead of a guess.)
+  const onRibbonInsertRow = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onInsertRowAt(selRange.r1); }, [onInsertRowAt, selRange, onNotice]);
+  const onRibbonInsertColumn = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onInsertColumnAt(selRange.c1); }, [onInsertColumnAt, selRange, onNotice]);
+  const onRibbonDeleteRow = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onDeleteRowAt(selRange.r1); }, [onDeleteRowAt, selRange, onNotice]);
 
   const onSetFreezeTopRow = useCallback(() => onSetFreeze(1, sheet.freezeCols), [onSetFreeze, sheet.freezeCols]);
   const onSetFreezeFirstColumn = useCallback(() => onSetFreeze(sheet.freezeRows, 1), [onSetFreeze, sheet.freezeRows]);
@@ -1106,10 +1197,11 @@ export default function ModelApp({
   // the active column instead of no-op'ing — Excel's own "select one cell, hit Sort" behavior,
   // and far more useful on a real pro-forma than requiring an exact range be dragged first.
   const onSort = useCallback((direction) => {
+    if (isMulti(selRange)) { onNotice(MULTI_SELECTION_MESSAGE); return; }
     let r1 = selRange.r1, r2 = selRange.r2;
     if (r1 === r2) { const used = usedRangeEnd(sheet); r1 = 0; r2 = used ? used.row : 0; }
     applyActive(sortRange, r1, r2, selRange.c1, direction);
-  }, [applyActive, selRange, sheet]);
+  }, [applyActive, selRange, sheet, onNotice]);
 
   const onFilterToggle = useCallback(() => setFilterOn((v) => !v), []);
   const onSetColumnFilter = useCallback((colIndex, allowedOrNull) => {
@@ -1328,7 +1420,10 @@ export default function ModelApp({
             selRange={selRange}
             setSelRange={setSelRange}
             onCommit={onCommitCell}
-            onBlankRange={onBlankRange}
+            onBlankRanges={onBlankRanges}
+            onFillDownRanges={onFillDownRanges}
+            onFillText={onFillText}
+            onNotice={onNotice}
             onRenameColumn={onRenameColumn}
             onAddColumn={onAddColumn}
             onCopy={onCopy}

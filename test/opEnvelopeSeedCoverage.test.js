@@ -71,10 +71,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createOperationTracker } from "../src/workspaces/site-planner/lib/operationEnvelope.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP_PATH = join(here, "../src/workspaces/site-planner/SitePlanner.jsx");
-const SP = readFileSync(SP_PATH, "utf8");
+const SP = plannerSource();
 
 const slice = (fromMarker, toMarker) => {
   const from = SP.indexOf(fromMarker);

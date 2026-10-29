@@ -26,6 +26,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { setbackChipStyle, setbackLineStyle, parcelDefaultStyle } from "../src/workspaces/site-planner/lib/planStyle.js";
 import { PALETTES } from "../src/shared/theme/palette.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const INK = "#15171C";                       // the theme's chip-ink token, both themes
 // Arbitrary line colours — none of them black, none of them the current default. The point is
@@ -81,7 +82,7 @@ describe("setbackChipStyle — the chip's ink tracks nothing on the parcel", () 
 });
 
 describe("source guard — the one chip render site cannot recouple", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
 
   // The chip block: from the `pill` factory that draws it to the end of that factory.
   const block = (() => {

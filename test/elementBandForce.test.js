@@ -22,9 +22,10 @@ import { fileURLToPath } from "node:url";
 import { zOrder, byZ } from "../src/workspaces/site-planner/lib/planStyle.js";
 import * as PlanStyle from "../src/workspaces/site-planner/lib/planStyle.js";
 import { withMissingZ, migrateBandForce, Z_GAP, nextZ } from "../src/workspaces/site-planner/lib/zOrder.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 const PS = read("../src/workspaces/site-planner/lib/planStyle.js");
 const stripComments = (src) => src
   .replace(/\/\*[\s\S]*?\*\//g, "")

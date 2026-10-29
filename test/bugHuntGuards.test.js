@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* Anti-drift guards for the 2026-06-27 bug-hunt fixes (B505–B509). These files are edited
  * by many concurrent sessions; a string-level check fails loudly if a merge silently reverts
@@ -132,7 +133,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     const rb = read("../src/workspaces/doc-review/components/ReviewsBar.jsx");
     expect(rb).toMatch(/role="button" tabIndex=\{0\}/);
     expect(rb).toMatch(/e\.key === "Enter" \|\| e\.key === " "/);
-    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     expect(sp).toMatch(/className="sec-head"[\s\S]{0,200}role="button" tabIndex=\{0\} aria-expanded=\{open\}/);
   });
 
@@ -160,7 +161,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/return reachedAny \? null : \{ error:/);
     // both callers handle the { error } shape
     expect(read("../src/workspaces/site-planner/MapFinder.jsx")).toMatch(/hit && hit\.error/);
-    expect(read("../src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/hit && hit\.error/);
+    expect(plannerSource()).toMatch(/hit && hit\.error/);
   });
 
   it("B541: CloudSyncBadge boundary resets via resetKey, not a remount key (popover survives state churn)", () => {
@@ -273,7 +274,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B563: version restore re-applies parcelDrawings (its own persistence path) so it isn't a mixed-version restore", () => {
-    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     // the per-parcel Attached-Drawings UI was removed, but parcelDrawings still rides its own
     // persistence path and MUST survive a version restore — durably re-applied via a saveSite merge
     // ({...existing, ...partial} preserves the rest), so restore isn't a mixed-version state.
@@ -293,7 +294,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
 
 describe("markup hit-area / callout padding / live color picker (B155 open-path tranche, B566, B567)", () => {
   it("B155: line + polyline markups carry a transparent FAT hit-stroke (not just the 2px visible line)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     expect(src).toMatch(/const MK_HIT_PX = 12;/);                                  // ~6px each side
     // both open-path branches render the wide pointer-catching companion stroke
     expect((src.match(/strokeWidth=\{MK_HIT_PX\}[^>]*pointerEvents="stroke"/g) || []).length).toBeGreaterThanOrEqual(2);
@@ -302,7 +303,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B566: callout/text-box default horizontal padding is more generous than vertical", () => {
-    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     // B1652706 — the resolver moved out of SitePlanner.jsx into its own pure module
     // (lib/calloutStyle.js), alongside the box's new weight/dash/opacity fields.
     const cs = read("../src/workspaces/site-planner/lib/calloutStyle.js");
@@ -322,7 +323,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B567 + NEW-4: every Site Planner color control picks live (onInput) with one-frame undo, and records ONE recent per session", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // livePick takes an optional hist flag (default on); Standards-default swatches pass false so a
     // settings-only pick doesn't leave a dead undo frame (RC-6). Element/markup pickers are
     // unchanged — they still push one frame per picking session. The third arg is the end-of-
@@ -389,7 +390,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B740: multi-selection shares style editing, toggles on Shift, and draws per-member OBB outlines", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // Shift (or Ctrl/⌘) TOGGLES a member in/out — via hasSelMod, not the old add-only selMods branch.
     expect(src).toMatch(/import \{[^}]*hasSelMod[^}]*\} from "\.\.\/\.\.\/shared\/markup\/selection\.js";/);
     expect(src).toMatch(/if \(hasSelMod\(e\)\) \{\s*\n\s*const mods = \{ toggle: true, add: false \};/);
@@ -408,7 +409,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B617: linear markup stroke weights scale with zoom (strokeZoom), NOT fixed screen px", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the pure clamp helper exists and is clamped both ends (floor + relative ceil)
     expect(src).toMatch(/const strokeZoom = \(base, zk\) => Math\.max\(STROKE_ZOOM_FLOOR, Math\.min\(base \* zk, base \* 3\.5\)\);/);
     // the markup layer computes the zoom-scaled width and uses it
@@ -416,7 +417,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B719: a centerline road's pavement edge + curb stripes are drawn TO SCALE (true 6\" curb), not strokeZoom", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the floor constant exists and curbStrokePx is imported from the pure road-geometry lib
     expect(src).toMatch(/const CURB_STROKE_MIN_PX = 0\.75;/);
     expect(src).toMatch(/import \{[^}]*curbStrokePx[^}]*\} from "\.\/lib\/roadGeometry\.js";/);
@@ -434,7 +435,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B880 (amended NEW-2): the setback ring drops when its inset goes sub-pixel; its WEIGHT + DASH are screen pixels, constant across zoom", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the pure zoom helpers are still imported (other strokes — markup lines, easement spines — still use dashZoom)
     expect(src).toMatch(/import \{ dashZoom, insetRingVisible \} from "\.\/lib\/lineZoom\.js";/);
     // sub-pixel-inset suppression guards the setback map (kills the garbled double-line on zoom-out)
@@ -455,7 +456,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B755 fix (V268, Bain live-verify 2026-07-18): the BFE-line/cross-section fetch uses a WIDER envelope than the zone/DEM fetch, matching the derivation engine's own search radius", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the widened pad constant exists and is used to build a second, wider bbox
     expect(src).toMatch(/const BFE_SEARCH_PAD_DEG = 0\.04;/);
     expect(src).toMatch(/const bfeSearchBbox = isFinite\(mnX\) \? floodGeoBbox\(\[\[\[llA\[1\], llA\[0\]\], \[llB\[1\], llB\[0\]\]\]\], BFE_SEARCH_PAD_DEG\) : null;/);
@@ -470,7 +471,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B755 fix, round 3 (Bain live-verify 2026-07-18): the 'BFE (1% WSE)' input's auto-value ternary reads the cross-section-derived estimate (derivedXsWsel), which the field omitted entirely even though it's a real, already-priced provider", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the floodMit props object threads the cross-section estimate through to the panel
     expect(src).toMatch(/derivedXsWsel: fmDerivedXsWsel, \/\/ B755 round 3/);
     // the input's auto-value + label check derivedXsWsel FIRST — same precedence order as
@@ -480,7 +481,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B619: selecting an object never recolors it to the app accent (handle-based selection)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the neutral blue selection chrome + white handle constants exist (real hexes, not var() tokens)
     expect(src).toMatch(/const SEL_BLUE = "#2563eb";/);
     expect(src).toMatch(/const SEL_HANDLE_FILL = "#ffffff";/);
@@ -492,7 +493,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B620: inline labels ride the line (auto-flip, own color+halo, non-sticky, exported)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the pure placement helper exists and auto-flips the angle into [-90,90] (never upside-down)
     expect(src).toMatch(/function inlineLabelPlaces\(/);
     expect(src).toMatch(/ang = \(\(ang % 180\) \+ 180\) % 180; if \(ang > 90\) ang -= 180;/);
@@ -519,7 +520,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B678: inline-label per-feature controls (spacing/size/halo) + screen-space self-thinning", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the renderer takes per-feature style opts and a base font size that DEFAULTS to the old 11
     expect(src).toMatch(/function inlineLabelEls\(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, opts\)/);
     expect(src).toMatch(/opts\.size[\s\S]{0,40}\?\s*opts\.size\s*:\s*11/);
@@ -549,7 +550,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B682 → road-panel NEW-1: label spacing is ONE stepper box (the live slider was dropped, owner-approved); the coalescing writer is unchanged", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the old live slider is GONE; spacing is a single boxed stepper that commits through the same writer
     expect(src).not.toMatch(/<input type="range"[\s\S]{0,220}labelSpacing/);
     expect(src).toMatch(/testid="label-spacing"[\s\S]{0,200}onCommit=\{\(n\) => write\(\{ labelSpacing: n \}\)\}/);
@@ -561,7 +562,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B750/B935: single-click selects only; a double-tap opens Properties (only a callout still edits its text)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // isDoubleTap reconstructs the browser's own double-click test (pointer capture eats the DOM
     // dblclick). NEW-2: it only DETECTS the pair — a callout's double-tap then branches on the click
     // LOCATION (interior text vs border band), not on whether the feature was already selected.
@@ -614,7 +615,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("NEW-1: single-occupancy left dock — inspector TAKES OVER the dock when it opens, never stacks", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // NEW-1 — the takeover is no longer an EFFECT keyed off selection; it lives in the one explicit
     // `openInspector`, docks "properties", and memoizes what it replaced.
     expect(src).toMatch(/const openInspector = \(\) => \{[\s\S]{0,400}shouldInspectorTakeDock\(\{ inspectorOpen: true, narrow, alreadyDocked: leftPanelRef\.current === "properties" \}\)/);
@@ -638,7 +639,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // the committed box + selection chrome are hidden while THIS callout's editor is open → only ONE box
     // NEW-2 (B1612641, rotation) — `x`/`y` are now the plain unrotated bp-relative coordinates
     // (the enclosing <g rotate(...)> supplies the rotation), not a `boxRect` computed in world/
@@ -655,7 +656,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B681: callout align buttons use the Word-style SVG icon, not cryptic glyphs", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     expect(src).toMatch(/function AlignIcon\(\{ dir \}\)/);
     expect(src).toMatch(/<AlignIcon dir=\{a\} \/>/);
     // the old unicode align glyphs are gone from the align-button map
@@ -725,7 +726,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   it("B839: the export aerial stitches cached tiles (fast) with a dynamic-/export fallback", () => {
     // B1042 — the Stitcher moved into lib/exportSheet.js, but the live tile layers it reuses
     // (crossOrigin, so their bytes are canvas-readable) are still SitePlanner's. Guard both.
-    const src = read("../src/workspaces/site-planner/lib/exportSheet.js") + read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = read("../src/workspaces/site-planner/lib/exportSheet.js") + plannerSource();
     // The fast path reuses cached XYZ tiles instead of a slow dynamic /export render, and the live
     // tile layers request CORS so those bytes are canvas-readable and shared with the stitch.
     expect(src).toMatch(/stitchAerialDataUrl/);
@@ -802,7 +803,7 @@ describe("B36(e)/B843: view-driven map layers guard against stale post-unmount r
 
 describe("NEW-1 (two-tab cascade false conflicts) — the SitePlanner wiring exists in source", () => {
   it("the sync engine gets a bonded-aware isDirectEdit predicate + the interaction effect stamps gesture/selection targets", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // bonded (attachedTo) elements are derived unless directly touched; everything else stays direct
     expect(src).toMatch(/isDirectEdit: \(kind, id, el\) => kind !== "el" \|\| !el \|\| el\.attachedTo == null \|\| isDirectTouched\(kind, id\)/);
     // drag / sel / multi targets are stamped into directTouchRef…
@@ -816,7 +817,7 @@ describe("NEW-1 (two-tab cascade false conflicts) — the SitePlanner wiring exi
   });
 
   it("the pending-edit journal is keyed per SESSION (write/read/clear/sweep all pass the tab id)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     expect(src).toMatch(/const journalSid = journalSessionId\(\)/);
     expect(src).toMatch(/writeJournal\(siteId, journalSid, live\.dirtyEntries\(\), Date\.now\(\)\)/);
     expect(src).toMatch(/clearJournal\(siteId, journalSid\)/);
@@ -884,7 +885,7 @@ describe("B850 (2026-07-15, owner: \"i dont need this large pop up\" then \"shou
 
 describe("B869/V352 (2026-07-19 verification handoff): the SITE-BASED suggested FFE chip renders in the Buildability / FFE panel, not only the Mitigation inputs editor", () => {
   it("the Buildability / FFE block (ffeR) reads d.floodMit.suggestFfe and renders a SITE-BASED chip + accept action when no ordinance rule binds", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // Isolate the B824 "Buildability / FFE detail" block (ffeR construction) so this guard can't
     // accidentally pass off the pre-existing mitR copy of the same UI (the original bug).
     const start = src.indexOf("// B824 — Buildability / FFE detail, migrated from the deleted FloodMitigationCard.");

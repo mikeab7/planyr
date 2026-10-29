@@ -12,6 +12,7 @@ import {
   resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, normDeg, showAreaOn,
   nearestOnPath, leaderTargetFt, leaderGeometry,
 } from "../src/workspaces/site-planner/lib/easementLabelPull.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const PPF = 0.45, BASE = 10.5, ident = (p) => p;
 const AREA = "510,172 SF · 11.71 AC";
@@ -181,7 +182,7 @@ describe("rotation + soft snap", () => {
 });
 
 describe("wiring (source guards)", () => {
-  const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("the render reads the one resolver and the area is the stored toggle, not the selection", () => {
     expect(src).toMatch(/resolveEasementLabel\(m, txt/);
     expect(src).not.toMatch(/withArea: isSel/);

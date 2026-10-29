@@ -30,8 +30,8 @@ try {
 
   const cell = (r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`);
   const editor = () => sheet.locator("input").first();
-  // Far-down rows in column D so nothing the fixture already holds is touched.
-  const R = 60, C = 3;
+  // On-screen rows (the grid virtualises rows) in column D, asserted EMPTY below before anything is written.
+  const R = 12, C = 3;
   const before = [await cell(R, C).innerText(), await cell(R + 1, C).innerText(), await cell(R + 2, C).innerText()];
   ok("known-good arm: scratch cells start empty", before.every((t) => t.trim() === ""), JSON.stringify(before));
   if (failures) throw new Error("VOID run: scratch cells not empty");
@@ -76,13 +76,13 @@ try {
     const sheet = page.getByTestId("model-sheet");
     const cell = (r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`);
     await sheet.focus().catch(() => {});
-    await cell(60, 3).click();
-    await cell(62, 3).click({ modifiers: ["Shift"] });
+    await cell(12, 3).click();
+    await cell(14, 3).click({ modifiers: ["Shift"] });
     await page.keyboard.press("Delete");
     let clean = false;
     for (let i = 0; i < 20 && !clean; i++) {
       await page.waitForTimeout(250);
-      clean = (await cell(60, 3).innerText()).trim() === "" && (await cell(61, 3).innerText()).trim() === "" && (await cell(62, 3).innerText()).trim() === "";
+      clean = (await cell(12, 3).innerText()).trim() === "" && (await cell(13, 3).innerText()).trim() === "" && (await cell(14, 3).innerText()).trim() === "";
     }
     ok("cleanup: scratch cells are empty again", clean);
   } catch (e) { console.log("CLEANUP ERROR", e.message); failures++; }

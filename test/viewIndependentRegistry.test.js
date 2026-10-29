@@ -23,9 +23,10 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REGISTRY } from "../ui-audit/lib/viewIndependentRegistry.mjs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const src = plannerSource();
 
 /* A view term whose PRESENCE in a dep array is the defect. `view.ppf` is deliberately NOT here:
  * a value that is genuinely a function of the scale — the scale bar, the north arrow, the label
