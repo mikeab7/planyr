@@ -3859,6 +3859,7 @@ const showToast = (() => {
     const el = document.createElement("div");
     el.setAttribute("data-testid", "schedule-toast");   // B1539584 — stable hook for the fit regression check
     const isError = type === "error";
+    const isWarn = type === "warn";   // NEW-1 (B2189604) — amber "view only" notice: not red, still says the edit was not saved
     Object.assign(el.style, {
       position:      "fixed",
       bottom:        "28px",
@@ -3868,9 +3869,9 @@ const showToast = (() => {
       display:       "flex",
       alignItems:    "flex-start",
       gap:           "8px",
-      background:    isError ? "#fef2f2" : "#f0fdf4",
-      border:        `1px solid ${isError ? "#fecaca" : "#bbf7d0"}`,
-      color:         isError ? "#991b1b" : "#166534",
+      background:    isError ? "#fef2f2" : isWarn ? "#fffbeb" : "#f0fdf4",
+      border:        `1px solid ${isError ? "#fecaca" : isWarn ? "#fde68a" : "#bbf7d0"}`,
+      color:         isError ? "#991b1b" : isWarn ? "#92400e" : "#166534",
       borderRadius:  "8px",
       padding:       "9px 16px 9px 12px",
       fontSize:      "12px",
@@ -3890,7 +3891,7 @@ const showToast = (() => {
     });
 
     const icon = document.createElement("span");
-    icon.textContent = isError ? "⚠" : "✓";
+    icon.textContent = (isError || isWarn) ? "⚠" : "✓";
     Object.assign(icon.style, {
       fontSize: "13px",
       flexShrink: "0",
@@ -20997,7 +20998,14 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
             const now = Date.now();
             if (now - (window.__planarSaveFailToastAt || 0) < 8000) return;
             window.__planarSaveFailToastAt = now;
-            showToast("Your change did NOT save to the cloud (" + ((err && (err.code || err.status)) || "error") + "). It is only on this screen — reloading will lose it.", { type: "error", duration: 10000 });
+            // NEW-1 (B2189604) — a permission refusal (42501 / 403) means this schedule document belongs to another
+            // account, so the honest word is "view only", not a failed save: say so in amber, and still say the edit
+            // is not kept. Every other failure keeps the red LOUD-FAILURE toast.
+            if (err && (err.code === "42501" || err.status === 403)) {
+              showToast("View only — this schedule belongs to another account, so your change is not saved. Create your own schedule to edit.", { type: "warn", duration: 10000 });
+            } else {
+              showToast("Your change did NOT save to the cloud (" + ((err && (err.code || err.status)) || "error") + "). It is only on this screen — reloading will lose it.", { type: "error", duration: 10000 });
+            }
             window.dispatchEvent(new CustomEvent("planar:cloud-save-failed", { detail: { key: k, code: err && err.code } }));
           } catch (e) {}
         };
