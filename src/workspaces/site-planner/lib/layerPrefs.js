@@ -14,9 +14,10 @@
  *   (b) a stale/removed key is IGNORED on apply (and self-prunes on the next save),
  *   (c) both on- and off-overrides are remembered.
  *
- * Deliberately NOT persisted: tiles/features (heavy, view-dependent), per-layer opacity, and the
- * corridor width — the brief scopes this to VISIBILITY (the on/off core); the numeric per-layer
- * settings stay session-only for now.
+ * Deliberately NOT persisted HERE: tiles/features (heavy, view-dependent) and the corridor width.
+ * Per-layer OPACITY is not a per-plan fact at all (B2448033, owner 2026-10-29): it belongs to the
+ * PROJECT, lives in its own single-authority row, and is applied by layerOpacity.js /
+ * layerOpacityStore.js — `overlaysWithOverrides` below takes it as an optional third argument.
  *
  * NEW-1 — A SECOND, SEPARATE SPARSE MAP: `layerAbove` (site model field of the same name), the
  * per-site memory of which layers the user LIFTED with "Show above plan". It is deliberately its
@@ -29,6 +30,7 @@
  */
 import { ALL_LAYERS, defaultOverlayState } from "./layers.js";
 import { configCanLift } from "./mapStack.js";
+import { applyLayerOpacity } from "./layerOpacity.js";
 
 // Coerce any persisted / candidate value into a clean `{ [key]: boolean }` map: keep only boolean
 // values whose key is still a real layer in the registry (a removed layer's key is dropped). Returns
@@ -84,11 +86,12 @@ export const aboveFromOverlays = (overlays) => sanitizeLayerAbove(
 // keys are ignored. Used to REBUILD the shared overlays when a site opens.
 // NEW-1 — `above` is the second (optional) saved map: which layers this site had lifted above the
 // plan. Absent → every layer sits at its default band, which is exactly the pre-NEW-1 behaviour.
-export function overlaysWithOverrides(overrides, above = null) {
+export function overlaysWithOverrides(overrides, above = null, opacity = null) {
   const base = defaultOverlayState();
   const ov = sanitizeLayerOverrides(overrides);
   for (const [k, on] of Object.entries(ov)) if (base[k]) base[k] = { ...base[k], on };
-  return applyAboveOverrides(base, above); // ONE place decides which layers sit in the lifted band
+  const lifted = applyAboveOverrides(base, above); // ONE place decides which layers sit in the lifted band
+  return opacity ? applyLayerOpacity(lifted, opacity) : lifted; // B2448033 — the PROJECT's opacity, absent = defaults
 }
 
 // Merge a saved lifted map onto an EXISTING overlays object, preserving on/opacity/widthFt — the
