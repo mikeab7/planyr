@@ -200,6 +200,13 @@ for (const key of ids) {
   if (!vector) {
     check(`${key} · the layer DREW what its service delivered (nothing refused as "too detailed to draw")`, drawn >= 1 && refused === 0, `drew ${drawn} of ${arrived} features delivered; ${refused} draw-budget refusals`);
     check(`${key} · …and drew ALL of it (no feature dropped by an aborted batch)`, arrived > 0 && refused === 0 ? drawn >= Math.floor(arrived * 0.97) : true, `drew ${drawn} of ${arrived} delivered`);
+    /* A POINT re-delivered by a pan (tile cells overlap, so some arrive twice) was restyled from the flat path style (fill 0) and went hollow: count drawn point markers with no fill. */
+    const hollow = await page.evaluate((src) => {
+      let pts = 0, hol = 0; const re = new RegExp(src);
+      window.__mapFinderMap.eachLayer((l) => { if (l.options && l.options.url && re.test(l.options.url) && l._layers) for (const k of Object.keys(l._layers)) { const m = l._layers[k]; if (m && typeof m.getRadius === "function") { pts++; if (!(m.options.fillOpacity > 0)) hol++; } } });
+      return { pts, hol };
+    }, re.source);
+    if (hollow.pts) check(`${key} · no point drawn hollow after a re-delivery`, hollow.hol === 0, `${hollow.hol} of ${hollow.pts} points have no fill`);
     check(`${key} · no page error while it loaded`, pageErrors.length === 0, pageErrors.slice(0, 2).join(" | "));
   }
   const stall = await page.evaluate(() => Math.round(window.__stall.max));

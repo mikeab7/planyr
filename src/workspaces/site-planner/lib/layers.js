@@ -2110,7 +2110,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : featureBaseStyle(cfg, oo))); } catch (_) {} };
+              : (oo) => { try { const sf = (f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : featureBaseStyle(cfg, oo)); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }; // _originalStyle too: esri-leaflet's resetFeatureStyle (run for every re-delivered feature) restores THAT, so without it a re-delivered point went hollow (featureBaseStyle's fill 0) and a re-delivered feature snapped back to the opacity the layer was built with (B2452976 review pass 4)
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

@@ -311,3 +311,21 @@ describe("review pass 2 stays fixed", () => {
     expect(ALL_LAYERS.fl_sinkhole_areas.vertexBudget).toBeGreaterThanOrEqual(300000);
   });
 });
+
+describe("review pass 4 stays fixed", () => {
+  it("district / canal-owner acronyms stay upper-case and acres are rounded on the cards", async () => {
+    const { hoverRows } = await import("../src/workspaces/site-planner/lib/featureHover.js");
+    const text = (id, props, label) => (hoverRows(ALL_LAYERS[id], props).find((r) => r.label === label) || {}).text;
+    for (const d of ["SFWMD", "SWFWMD", "SJRWMD", "SRWMD", "NWFWMD"]) expect(text("fl_wmd", { WMDNAME: d }, "District")).toBe(d);
+    expect(text("fl_sfwmd_canals", { OWNER: "SFWMD" }, "Owner")).toBe("SFWMD");
+    expect(text("fl_sfwmd_canals", { OWNER: "FORT PIERCE FARMS WCD" }, "Owner")).toBe("Fort Pierce Farms WCD");
+    expect(text("fl_brownfield_areas", { ACREAGE: 3088.95607246 }, "Acres")).toBe("3,089");
+    expect(text("fl_brownfield_areas", { ACREAGE: 41.23000296 }, "Acres")).toBe("41.23");
+    expect(text("fl_sfwmd_conservation_easements", { RECORDED_ACRES: 12.3456789 }, "Acres")).toBe("12.35");
+  });
+  it("the flat-style opacity setter also updates _originalStyle (esri-leaflet's reset restores it on every re-delivered feature)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const layers = readFileSync(new URL("../src/workspaces/site-planner/lib/layers.js", import.meta.url), "utf8");
+    expect(layers).toMatch(/const sf = \(f\) => \(isPointFeature\(f\) \? pointSymbolOptions\(cfg, oo\) : featureBaseStyle\(cfg, oo\)\); lyr\._originalStyle = sf; lyr\.setStyle\(sf\);/);
+  });
+});

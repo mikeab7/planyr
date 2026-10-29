@@ -21,7 +21,7 @@ export const relayUrl = (url) => String(url).replace(/^https:\/\//, `${FLORIDA_R
 
 const FL = { states: ["FL"] };
 /* The agencies publish ALL-CAPS names and addresses; a card prints them in words (a value with any lowercase letter is left exactly as written). */
-const KEEP_CAPS = new Set(["LLC", "INC", "LP", "LLP", "II", "III", "IV", "NW", "NE", "SW", "SE", "FPL", "FDOT", "USA", "FL", "MD", "SR", "US", "CR", "PGA", "DBA", "DEP", "AT&T"]);
+const KEEP_CAPS = new Set(["LLC", "INC", "LP", "LLP", "II", "III", "IV", "NW", "NE", "SW", "SE", "FPL", "FDOT", "USA", "FL", "MD", "SR", "US", "CR", "PGA", "DBA", "DEP", "AT&T", "SFWMD", "SWFWMD", "SJRWMD", "SRWMD", "NWFWMD", "WMD", "WCD", "FWC"]);
 export function niceCase(v) {
   const t = String(v == null ? "" : v).trim();
   if (!t || /[a-z]/.test(t)) return t;
@@ -137,7 +137,7 @@ export const FLORIDA_LAYERS = {
     styleFn: (_p, opacity) => ({ color: "#0f766e", weight: 1.6, opacity, fill: false, dashArray: "10 5" }),
     lineLabel: { field: "WMDNAME", minZoom: 7 },
     ...hoverCommon, hoverTitle: "Water management district", hoverSource: "SFWMD",
-    hoverFields: [{ names: ["WMDNAME"], label: "District" }],
+    hoverFields: [{ names: ["WMDNAME"], label: "District", format: (p) => niceCase(p.WMDNAME) }],
     note: "The five Florida water management districts (SFWMD, SWFWMD, SJRWMD, SRWMD, NWFWMD). The district a site sits in reviews its Environmental Resource Permit (wetlands and stormwater) under its own handbook and criteria.",
     infoCaveat: "A district boundary, not a permit determination. Generalised along the coast; confirm the reviewing district with the agency.",
     role: "line", group: "jurisdiction", order: 6,
@@ -182,7 +182,7 @@ export const FLORIDA_LAYERS = {
     minZoom: 13, color: "#0284c7", weight: 1.6, opacity: 0.55,
     styleFn: (_p, opacity) => ({ color: "#0284c7", weight: 1.6, opacity, fill: false }),
     ...hoverCommon, hoverTitle: "Canal or stream", hoverSource: "SFWMD",
-    hoverFields: [{ names: ["NAME", "ALIAS", "NHD_GNIS_NAME"], label: "Name" }, { names: ["OWNER"], label: "Owner" }, { names: ["OPER_MAINT"], label: "Operated by" }],
+    hoverFields: [{ names: ["NAME", "ALIAS", "NHD_GNIS_NAME"], label: "Name" }, { names: ["OWNER"], label: "Owner", format: (p) => niceCase(p.OWNER) }, { names: ["OPER_MAINT"], label: "Operated by", format: (p) => niceCase(p.OPER_MAINT) }],
     note: "SFWMD's map of the canal and stream network in its 16 counties (the NHD, edited on the District's aerials). A canal beside the site is a possible discharge outlet and a right-of-way / setback question — see Canal & Levee Rights-of-Way. Owner and operator are filled in for only part of the network (a drainage district, the District, a county), so a blank is not 'privately owned'.",
     infoCaveat: "A hydrography map, not a survey of the canal bank or its right-of-way, and not proof the canal can take your discharge. Confirm the owner and any permit with SFWMD and the local drainage district.",
     role: "line", group: "flood", order: 6,
@@ -213,7 +213,7 @@ export const FLORIDA_LAYERS = {
     minZoom: 12, color: "#15803d", weight: 1.2, opacity: 0.4, fetchAll: true,
     styleFn: areaStyle("#15803d", 0.3, 1.2, "6 3"),
     ...hoverCommon, hoverTitle: "Conservation easement", hoverSource: "SFWMD",
-    hoverFields: [{ names: ["CE_TYPE_DESC"], label: "Type" }, { names: ["REG_PERMIT_NO"], label: "Permit no." }, { names: ["GRANTOR"], label: "Grantor" }, { names: ["RECORDED_DATE"], label: "Recorded", date: true }, { names: ["RECORDED_ACRES"], label: "Acres" }, { names: ["COUNTY"], label: "County" }],
+    hoverFields: [{ names: ["CE_TYPE_DESC"], label: "Type" }, { names: ["REG_PERMIT_NO"], label: "Permit no." }, { names: ["GRANTOR"], label: "Grantor" }, { names: ["RECORDED_DATE"], label: "Recorded", date: true }, { names: ["RECORDED_ACRES"], label: "Acres", format: (p) => acres(p.RECORDED_ACRES) }, { names: ["COUNTY"], label: "County" }],
     note: "Conservation easements held by SFWMD, many recorded as a condition of a regulatory permit to preserve wetlands or prevent development. The owner keeps the land but cannot use it in a way that interferes with the easement, so mapped acreage inside your parcel comes off the buildable area.",
     infoCaveat: "SFWMD's own easements only (the County, FDEP and land trusts hold others). Mapped from recorded instruments and not survey-accurate; the recorded instrument governs. Check the title commitment.",
     role: "area", group: "environmental", order: 26,
@@ -241,7 +241,7 @@ export const FLORIDA_LAYERS = {
     minZoom: 10, color: "#a16207", weight: 1.4, opacity: 0.4,
     styleFn: areaStyle("#a16207", 0.25, 1.4, "5 3"),
     ...hoverCommon, hoverTitle: "Brownfield area", hoverSource: "Florida DEP",
-    hoverFields: [{ names: ["AREA_NAME"], label: "Name" }, { names: ["CITY"], label: "City" }, { names: ["ACREAGE"], label: "Acres" }, { names: ["RESOLUTION_NUMBER"], label: "Resolution" }, { names: ["RESOLUTION_DATE"], label: "Designated", date: true }],
+    hoverFields: [{ names: ["AREA_NAME"], label: "Name" }, { names: ["CITY"], label: "City" }, { names: ["ACREAGE"], label: "Acres", format: (p) => acres(p.ACREAGE) }, { names: ["RESOLUTION_NUMBER"], label: "Resolution" }, { names: ["RESOLUTION_DATE"], label: "Designated", date: true }],
     note: "Brownfield Areas designated by a local government resolution under Florida's Brownfields Redevelopment Act (ss. 376.77–.85, F.S.) — areas of abandoned, idled or underused industrial and commercial sites where redevelopment is complicated by real or perceived contamination. Designation opens state financial and regulatory incentives for voluntary cleanup and redevelopment, and flags the area for a Phase I.",
     infoCaveat: "An area can include parcels that are not contaminated, and designation is a local act, not a finding. Confirm the parcel's status with the local government and DEP.",
     role: "area", group: "environmental", order: 22,
