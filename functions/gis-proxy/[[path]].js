@@ -154,6 +154,9 @@ export const ALLOWED_HOSTS = new Set([
   "map11.incog.org",
   "app.datacrosspoint.com", "datacrosspoint.com", "www.datacrosspoint.com", "gis.datacrosspoint.com", "maps.datacrosspoint.com", "api.datacrosspoint.com",
   "maps.adaok.com", "maps.adaok.com:6443", "maps.adaok.com:6080",
+  /* okmaps.org — the GeoServer behind ArcGIS Online's "Parcels - OK - Statewide" item (the Property Records Preservation statewide mosaic, published as WMS at okmaps.org/geoserver/wms). The first pass tried
+   * okmaps.onenet.net only; GeoServer normally also serves WFS (queryable features), which is what is being measured here. */
+  "okmaps.org", "www.okmaps.org",
   /* NEW-1 (Arizona, 2026-10-19) — Mohave County's own GIS server (Mohave is the one Arizona county neither the ADWR compile nor an ArcGIS Online layer covers).
    * The build sandbox cannot reach it, so it is relayed and MEASURED through here (on the PR preview) before the county is wired to it. */
   "mcgis.mohave.gov", // Mohave County GIS — PARCELS MapServer
