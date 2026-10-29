@@ -102,7 +102,7 @@ export const IA_COPY_ROWS = [
 ];
 const iaCopyScope = (scope) => "COUNTYNAME='" + scope.replace(/'/g, "''") + "'";
 export const iaCopyRaw = () => Object.fromEntries(IA_COPY_ROWS.map(([k, n, scope]) => ["ia_" + k, {
-  state: "IA", label: n + " County, IA", layerUrl: IA_STATE_COPY_URL, idField: "PARCELNUMB", pinIdField: true, scopeWhere: iaCopyScope(scope),
+  state: "IA", label: n + " County, IA", layerUrl: IA_STATE_COPY_URL, idField: "PARCELNUMB", pinIdField: true, scopeWhere: iaCopyScope(scope), displayMinZoom: 16,
   help: n + " County parcels (a 2017 statewide copy — see the note on the lot). Search by parcel number.",
 }]));
 export const iaCopyMap = () => Object.fromEntries(IA_COPY_ROWS.map(([k, , scope, la, ln, bb]) => ["ia_" + k, {
