@@ -388,6 +388,7 @@ export default function ModelApp({
   const lastActionRef = useRef(null);               // F4 "repeat last action": { name, args } of a ctx handler
   const clipFnsRef = useRef(null);                  // this render's copy / paste functions (the document listeners call THROUGH it)
   const pushImmediateRef = useRef(false);           // Ctrl+S: the next cloud push fires with no debounce wait
+  const nextPushDelay = () => { const d = pushImmediateRef.current ? 0 : CLOUD_PUSH_DEBOUNCE_MS; pushImmediateRef.current = false; return d; };
   // ⛔ B891184-FOLLOWUP (live production finding, 2026-08-31): the toolbar overflowed a 729px
   // window — measured, the number-format picker's own box sat 22.7px past the viewport edge,
   // reachable to a script but not to a real click. Every formatting control (incl. Undo/Redo,
@@ -734,7 +735,6 @@ export default function ModelApp({
     if (!cloudSettled || !dirtyRef.current) return undefined; // B2450528
     clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(() => {
-      pushImmediateRef.current = false; // Ctrl+S sets it (+ a pushNonce bump) for a no-wait push
       runCloudPush({
         readGate: () => ({ status: statusRef.current, diverged: divergedRef.current }),
         save: async () => (openProject
@@ -747,7 +747,7 @@ export default function ModelApp({
           if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
         },
       });
-    }, pushImmediateRef.current ? 0 : CLOUD_PUSH_DEBOUNCE_MS);
+    }, nextPushDelay());
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode, cloudSettled]);
