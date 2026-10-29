@@ -3,7 +3,7 @@
  * workspace-specific toolbar content). The shell's job is auth, module
  * switching state, and building the auth-control slot that AppHeader needs.
  */
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
 // B927105 — this is the ONLY storage-adjacent thing the shell needs at boot, and it's a
@@ -37,6 +37,8 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 
 // NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
+// Invite-email link (NEW-2): loaded only when the address carries ?invite=, so no other visit pays for it.
+const InviteLanding = lazy(() => import("./InviteLanding.jsx"));
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
@@ -265,6 +267,7 @@ export default function Shell() {
   // (event:click-swallowed, "moved": true). `authKnown` lets AccountControl hold a neutral,
   // stable-width placeholder until the real state is in, instead of asserting "Sign in" first.
   const [authKnown, setAuthKnown] = useState(false);
+  const [hasInviteLink] = useState(() => typeof window !== "undefined" && /[?&]invite=/.test(window.location.search || "")); // captured before InviteLanding strips it
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
@@ -744,6 +747,13 @@ export default function Shell() {
   useEffect(() => { setOrgName(profileApi.org); }, [profileApi.org]);
 
   const openAuth    = () => { setRecovery(false); setAuthOpen(true); };
+  // Invite link (NEW-2): a signed-out visitor opens the auth screen on the right tab with the invited address filled in.
+  const openAuthForInvite = useCallback(({ email, mode }) => {
+    setRecovery(false);
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) setAuthEmail(email);
+    setAuthMode(mode === "signup" ? "signup" : "signin");
+    setAuthOpen(true);
+  }, []);
   const openAccount = (tab) => { setRecovery(false); setAuthTab(tab); setAuthOpen(true); };
 
   // Build the auth-control slot once per render; passed to every workspace so AppHeader always
@@ -765,6 +775,7 @@ export default function Shell() {
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
+      {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} /></Suspense>}
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}

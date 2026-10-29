@@ -6,14 +6,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { generateKeyPairSync } from "node:crypto";
-import { handleInviteEmail, buildInviteEmail, inviteLink } from "../functions/api/lib/inviteEmail.js";
+import { handleInviteEmail, buildInviteEmail, inviteLink, inviteCopy } from "../functions/api/lib/inviteEmail.js";
 import { resendCooldownMs, groupRoster } from "../src/workspaces/site-planner/lib/teamRoster.js";
 
 // A real throwaway RSA key so the service-account JWT is genuinely signed in these tests.
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const SA_JSON = JSON.stringify({ client_email: "inviter@proj.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
 const ENV = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "anon", GMAIL_SERVICE_ACCOUNT_JSON: SA_JSON, INVITE_SENDER: "mike@planyr.io" };
-const CLAIM_OK = { ok: true, invite_id: "inv1", email: "a@b.com", role: "member", team_name: "HIP Houston", inviter_name: "Mike Abbott", prev_sent_at: null };
+const CLAIM_OK = { ok: true, invite_id: "inv1", email: "a@b.com", role: "member", team_name: "HIP Houston", inviter_name: "Mike Abbott", prev_sent_at: null, has_account: true };
 
 function fakeNet({ claim = CLAIM_OK, resend = { ok: true, status: 200 } } = {}) {
   const calls = [];
@@ -39,17 +39,20 @@ const run = async (net, env = ENV, r = req()) => { const res = await handleInvit
 describe("server send core", () => {
   it("one request = exactly one provider send, from a planyr.io address, with the right content", async () => {
     const net = fakeNet(); const r = await run(net);
-    expect(r).toEqual({ status: 200, body: { ok: true } });
+    expect(r).toEqual({ status: 200, body: { ok: true, messageId: "m1" } });
     expect(net.sends()).toBe(1);
     const raw = JSON.parse(net.calls.find((c) => c.url.includes("gmail.googleapis.com")).init.body).raw;
     const mime = Buffer.from(raw, "base64url").toString("utf8");
     expect(mime).toMatch(/^From: Planyr <no-reply@planyr\.io>/m); // From = the public alias; auth `sub` below stays the mailbox
     expect(mime).toMatch(/^To: a@b\.com/m);
+    expect(mime).toMatch(/^Reply-To: support@planyr\.io$/m);   // NEW-1: replies reach a real alias, not no-reply
     const subj = /^Subject: =\?UTF-8\?B\?(.+)\?=/m.exec(mime)[1];
     expect(Buffer.from(subj, "base64").toString("utf8")).toBe("Mike Abbott invited you to HIP Houston on Planyr");
     const parts = mime.split(/--planyr-[a-z0-9]+/).map((p) => Buffer.from(p.split("\r\n\r\n")[1] || "", "base64").toString("utf8"));
     expect(parts.join("\n")).toContain("HIP Houston");
-    expect(parts.join("\n")).toContain("auth=signin&email=a%40b.com");
+    expect(parts.join("\n")).toContain("/?app&invite=inv1"); // NEW-2: the opaque invite id, never the address
+    expect(parts.join("\n")).not.toContain("a%40b.com");
+    expect(parts.join("\n")).not.toMatch(/exact address/i);   // NEW-2: the sign-in puzzle line is gone
     // the token request carried the delegated mailbox as `sub`
     const tokCall = net.calls.find((c) => c.url.includes("oauth2.googleapis.com"));
     if (tokCall) { const jwt = new URLSearchParams(tokCall.init.body).get("assertion").split(".")[1]; expect(JSON.parse(Buffer.from(jwt, "base64url")).sub).toBe("mike@planyr.io"); }
@@ -86,8 +89,55 @@ describe("server send core", () => {
     const m = buildInviteEmail({ inviterName: "<b>x</b>", teamName: "A&B", role: "admin", email: "a@b.com" });
     expect(m.html).not.toContain("<b>x</b>"); expect(m.html).toContain("A&amp;B"); expect(m.html).toContain("an admin");
   });
-  it("link goes to planyr.io sign-in with email prefilled", () => {
-    expect(inviteLink(undefined, "a+b@c.com")).toBe("https://planyr.io/?app&auth=signin&email=a%2Bb%40c.com");
+  it("link carries the invite id (opaque), never the email", () => {
+    const id = "2c2c2b7e-9b88-46f6-97de-a807a4b756b3";
+    expect(inviteLink(undefined, id)).toBe(`https://planyr.io/?app&invite=${id}`);
+    expect(inviteLink("https://x.test/", id)).toBe(`https://x.test/?app&invite=${id}`);
+    expect(inviteLink(undefined, undefined)).toBe("https://planyr.io/?app");
+  });
+});
+
+// NEW-3 — the wording follows whether the invited address already has an account (claim_invite_send's has_account).
+describe("template branching: existing account vs new", () => {
+  const base = { inviterName: "Mike", teamName: "HIP Houston", role: "member", inviteId: "inv1" };
+  it("existing account → 'Accept invitation' + accept-from-the-account-menu line", () => {
+    const m = buildInviteEmail({ ...base, hasAccount: true });
+    expect(m.html).toContain(">Accept invitation</a>");
+    expect(m.html).toContain("Open Planyr and accept from your account menu.");
+    expect(m.text).toContain("Accept invitation:");
+    expect(m.html + m.text).not.toMatch(/added to the team|automatically|exact address/i);
+  });
+  it("no account yet → 'Join team' + create-your-account line", () => {
+    const m = buildInviteEmail({ ...base, hasAccount: false });
+    expect(m.html).toContain(">Join team</a>");
+    expect(m.html).toContain("Create your Planyr account to join");
+    expect(m.html).toContain("as soon as you sign up");
+    expect(m.html + m.text).not.toContain("account menu");
+  });
+  it("unknown (database not yet migrated) → neutral wording that is true either way", () => {
+    expect(inviteCopy(undefined)).toEqual({ button: "Open Planyr", note: "Sign in or create your Planyr account to join." });
+    expect(inviteCopy(null).button).toBe("Open Planyr");
+  });
+  it("the subject and the inviter's name are unchanged (the name stays in the subject and body)", () => {
+    const m = buildInviteEmail({ ...base, hasAccount: false });
+    expect(m.subject).toBe("Mike invited you to HIP Houston on Planyr");
+    expect(m.html).toContain("Mike invited you to join");
+  });
+  it("end to end: the claim's has_account picks the wording that is actually sent", async () => {
+    const decode = (net) => {
+      const raw = JSON.parse(net.calls.find((c) => c.url.includes("gmail.googleapis.com")).init.body).raw;
+      const mime = Buffer.from(raw, "base64url").toString("utf8");
+      return mime.split(/--planyr-[a-z0-9]+/).map((p) => Buffer.from(p.split("\r\n\r\n")[1] || "", "base64").toString("utf8")).join("\n");
+    };
+    let net = fakeNet({ claim: { ...CLAIM_OK, has_account: true } }); await run(net);
+    expect(decode(net)).toContain("Accept invitation");
+    net = fakeNet({ claim: { ...CLAIM_OK, has_account: false } }); await run(net);
+    expect(decode(net)).toContain("Join team");
+  });
+  it("INVITE_REPLY_TO overrides the Reply-To default", async () => {
+    const net = fakeNet(); await run(net, { ...ENV, INVITE_REPLY_TO: "help@planyr.io" });
+    const raw = JSON.parse(net.calls.find((c) => c.url.includes("gmail.googleapis.com")).init.body).raw;
+    expect(Buffer.from(raw, "base64url").toString("utf8")).toMatch(/^Reply-To: help@planyr\.io$/m);
   });
 });
 
@@ -158,5 +208,18 @@ describe("migration shape", () => {
     expect(sql).toMatch(/is_team_admin\(p_team\)/);
     expect(sql).toMatch(/interval '60 seconds'/);
     expect(sql).not.toMatch(/update public\.team_invites set last_sent_at = now\(\)\s*;/i); // never a blanket backfill
+  });
+});
+
+describe("link migration shape (NEW-2 / NEW-3)", () => {
+  const sql = readFileSync(new URL("../src/workspaces/site-planner/db/team_invite_link.sql", import.meta.url), "utf8");
+  it("claim_invite_send reports has_account from auth.users, inside the SECURITY DEFINER function", () => {
+    expect(sql).toMatch(/'has_account'/);
+    expect(sql).toMatch(/from auth\.users u where lower\(trim\(u\.email\)\)/i);
+  });
+  it("invite_preview is callable signed out, keyed by the invite id, and withholds the address once the invite is used", () => {
+    expect(sql).toMatch(/grant execute on function public\.invite_preview\(uuid\) to anon, authenticated/i);
+    const used = sql.slice(sql.indexOf("'claimed'"), sql.indexOf("select coalesce(nullif(trim(concat_ws(' ', p.first_name", sql.indexOf("'claimed'")));
+    expect(used).not.toMatch(/'email'/);
   });
 });
