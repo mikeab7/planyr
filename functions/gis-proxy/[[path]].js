@@ -176,6 +176,14 @@ export const ALLOWED_HOSTS = new Set([
   "maps.boonecountyil.org", "www.colesco.illinois.gov", "maps.grundyco.org", "maps.co.kendall.il.us", "gis.knoxcountyil.gov", "gis.lasallecounty.org", "maps.lakecountyil.gov", "gisportal.co.madison.il.us",
   "www.mcgisweb.org", "sangis.co.sangamon.il.us", "arcgispublicmap.co.st-clair.il.us", "gis.tazewell-il.gov", "rockgis.rockfordil.gov", // Winnebago County's ownership layer (City of Rockford GIS)
   "gis.wiu.edu", // Western Illinois University GIS Center — Henderson and McDonough counties
+  /* NEW-1 (Illinois second pass, 2026-10-29) — PROBE hosts for the 22 Illinois "none" counties, named by county / assessor pages and AGOL item listings the sandbox cannot open. Each is relayed so it can be
+   * MEASURED through this relay before any row uses it; hosts that answer nothing usable are pruned in the PR that wires the counties (an entry nothing uses is attack surface). */
+  "maps.wingis.org", "agis.wingis.org", // WinGIS — runs Stephenson County's public property map (and Boone / Winnebago's)
+  "gis.prairie.illinois.edu", // Prairie Research Institute — hosts the IDNR "Illinois County Parcel Viewers and GIS Data" directory (county → viewer / REST link)
+  "pikeil.wthgis.com", "masonil.wthgis.com", "gallatinil.wthgis.com", // WTH Technology county map viewers (Pike, Mason, Gallatin)
+  "www.efsedge.com", // Saline County's listed GIS host
+  "services.ccgisc.org", // Champaign County GIS Consortium's portal / server
+  "www.centralilmaps.com", // Central Illinois maps host (Logan / Woodford parcels; Mason unverified)
   /* NEW-1 (Kansas, 2026-10-19, B2348000) — the non-arcgis.com hosts the wired Kansas counties sit on; each was MEASURED through this relay on the PR preview before its county was wired. */
   "ww1.bucoks.com", // Butler County GIS
   "geodataportal.net", // Eagleview's MultiPlatformParcels host — Ellis County appraiser
