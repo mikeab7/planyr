@@ -80,7 +80,7 @@ try {
   await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 });
   await page.waitForTimeout(800);
   await assertMeasurable(page, "verify-spreadsheet-flat-chrome");
-  if (SIGNED_IN) console.log(`served build: ${signed.build}  account: ${signed.proof?.email}  base: ${BASE}`);
+  if (SIGNED_IN) { const sb = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json())); console.log(`served build: ${sb.build}  account: ${signed.proof?.email}  base: ${BASE}`); }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(400);
 
@@ -151,7 +151,8 @@ try {
   ok("known-good arm: at least four dropdowns were actually opened", opened >= 4, `${opened} opened`);
 
   // ── 6 fullscreen toggle ────────────────────────────────────────────────────────────────────────────────────────
-  const fs = page.locator('[data-testid="toggle-fullscreen"]');
+  // signed in, other workspaces stay mounted (hidden) with their own copy of the toggle: drive the visible one
+  const fs = page.locator('[data-testid="toggle-fullscreen"]:visible').first();
   if (await fs.count()) {
     const before = await fs.getAttribute("aria-pressed");
     await fs.click();
