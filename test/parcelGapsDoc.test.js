@@ -18,7 +18,7 @@ describe("docs/STATEWIDE-PARCELS.md gap rows ↔ parcelGaps.js", () => {
   it("the parser still finds every state's gap table (a renamed heading must not quietly empty this test)", () => {
     const by = {};
     rows.forEach((r) => { by[r.state] = (by[r.state] || 0) + 1; });
-    expect(by).toEqual({ KY: 83, GA: 48, IA: 22, MI: 29, MO: 38, WA: 5, OR: 3, OK: 61, KS: 55, IL: 27, LA: 26, ID: 10, TN: 1, SD: 49 });
+    expect(by).toEqual({ KY: 83, GA: 43, IA: 22, MI: 29, MO: 38, WA: 1, OR: 1, OK: 61, KS: 55, IL: 27, LA: 23, ID: 10, TN: 1, SD: 14 });
   });
 
   it("every gap row in the doc has an explicit entry in the table (even `none` is a decision, not an omission)", () => {
@@ -48,15 +48,15 @@ describe("docs/STATEWIDE-PARCELS.md gap rows ↔ parcelGaps.js", () => {
     expect(rows.filter((r) => COUNTIES_MAP[r.key]).map((r) => `${r.state} ${r.county}`)).toEqual([]);
   });
 
-  it("B2486192: South Dakota's 49 named gaps are read (the state was never in GAP_SOURCES, so they were invisible)", () => {
-    expect(rows.filter((r) => r.state === "SD")).toHaveLength(49);
-    for (const c of ["Aurora", "Hughes", "Harding", "Lincoln", "Corson", "Fall River", "Oglala Lakota"]) expect(rows.some((r) => r.state === "SD" && r.county === c), c).toBe(true);
+  it("B2486192: South Dakota's named gaps are read (49 on 2026-10-29 morning, 14 after the second pass wired 35) (the state was never in GAP_SOURCES, so they were invisible)", () => {
+    expect(rows.filter((r) => r.state === "SD")).toHaveLength(14);
+    for (const c of ["Hyde", "Harding", "Lincoln", "Corson", "Fall River", "Oglala Lakota"]) expect(rows.some((r) => r.state === "SD" && r.county === c), c).toBe(true);
   });
 
   it("B2486192 red-proof: a gap row the table lacks IS reported (the comparison cannot pass vacuously)", () => {
-    const fake = [{ state: "SD", county: "Aurora" }, { state: "SD", county: "Atlantis" }];
+    const fake = [{ state: "SD", county: "Harding" }, { state: "SD", county: "Atlantis" }];
     expect(missingFromTable(fake, PARCEL_GAPS, gapKey)).toEqual(["SD Atlantis"]);
-    expect(missingFromTable(fake, {}, gapKey)).toEqual(["SD Aurora", "SD Atlantis"]);
+    expect(missingFromTable(fake, {}, gapKey)).toEqual(["SD Harding", "SD Atlantis"]);
   });
 
   it("B2486192 red-proof: a state section nobody registered in GAP_SOURCES is flagged, and the real doc has none", () => {
@@ -90,11 +90,10 @@ describe("docs/STATEWIDE-PARCELS.md gap rows ↔ parcelGaps.js", () => {
   });
 
   it("NEW-2: the measured Schneider counties are filed paywall / locked, and the unmeasured ones are left alone", () => {
-    for (const k of ["ga_taliaferro", "ga_randolph", "ga_quitman", "sd_clay", "sd_mccook", "sd_hughes"]) expect(PARCEL_GAPS[k][0], k).toBe("paywall");
+    for (const k of ["ga_taliaferro", "ga_randolph", "ga_quitman", "sd_clay", "sd_mccook"]) expect(PARCEL_GAPS[k][0], k).toBe("paywall");
     for (const k of ["ga_bacon", "ga_wilkes", "ia_adams", "ia_union", "mi_houghton", "mo_pettis", "ks_miami", "ks_wilson", "il_ogle", "sd_brookings", "sd_custer"]) expect(PARCEL_GAPS[k][0], k).toBe("locked");
-    for (const k of ["ga_early", "ky_martin", "ky_menifee"]) expect(PARCEL_GAPS[k]).toEqual(["none"]);
     const counts = { paywall: 0, locked: 0 };
     for (const e of Object.values(PARCEL_GAPS)) if (/^Schneider map/.test(e[1] || "")) counts[e[0]]++;
-    expect(counts).toEqual({ paywall: 6, locked: 62 });
+    expect(counts).toEqual({ paywall: 5, locked: 62 });
   });
 });

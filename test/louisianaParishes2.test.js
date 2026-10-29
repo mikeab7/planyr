@@ -28,14 +28,24 @@ const MEASURED = {
 };
 const NEW_KEYS = Object.keys(MEASURED);
 
+/* Second pass 2026-10-29 (docs/STATEWIDE-PARCELS.md "Louisiana second pass") — Iberia (the parish's own AGOL org), Vermilion (ES2 copy scoped by geoid) and Bienville (a 2018-roll copy).
+ * Points are interior points of each parish polygon at which the row's layer was queried live 2026-10-29 and returned a polygon carrying the row's id. RED-PROOF: on main c79bc2e these three
+ * keys do not exist (a click in each says "no parcel data wired here yet") and the gap set is 26, not 23. */
+const SECOND = {
+  la_iberia: [[29.57893, -91.90257], [29.57893, -91.78864], [29.94664, -91.67471], [30.03857, -91.33293]],
+  la_vermilion: [[30.0665, -92.61229], [29.629, -92.28614], [29.979, -92.28614], [29.804, -92.06871]],
+  la_bienville: [[32.27679, -93.3355], [32.33943, -93.241], [32.33943, -93.1465], [32.27679, -93.052]],
+};
+const SECOND_KEYS = Object.keys(SECOND);
+
 // The parishes still without a usable public service, each with a recorded, re-searched reason in the docs.
-const GAPS = ["Avoyelles", "Beauregard", "Bienville", "Caldwell", "Catahoula", "Concordia", "East Carroll", "Evangeline", "Franklin", "Grant", "Iberia",
+const GAPS = ["Avoyelles", "Beauregard", "Caldwell", "Catahoula", "Concordia", "East Carroll", "Evangeline", "Franklin", "Grant",
   "Jackson", "LaSalle", "Lincoln", "Madison", "Morehouse", "Pointe Coupee", "Rapides", "Red River", "Sabine", "St. Helena", "Tensas", "Union",
-  "Vermilion", "Vernon", "Winn"];
+  "Vernon", "Winn"];
 
 describe("the four parishes wired 2026-10-19", () => {
   it("laParcels.js rows are exactly these four, plugged into COUNTIES, COUNTIES_MAP and the provenance record", () => {
-    expect(LA_ROWS.map((r) => "la_" + r[0]).sort()).toEqual([...NEW_KEYS].sort());
+    expect(LA_ROWS.map((r) => "la_" + r[0]).filter((k) => !SECOND_KEYS.includes(k)).sort()).toEqual([...NEW_KEYS].sort());
     for (const k of NEW_KEYS) {
       expect(COUNTIES[k], k).toMatchObject({ state: "LA", pinIdField: true });
       expect(COUNTIES[k].label).toMatch(/^[A-Za-z. ]+ Parish, LA$/);
@@ -73,9 +83,9 @@ describe("all 64 parishes: wired, or the named gap sentence — never silently e
   it("the polygon asset holds 64 Louisiana parishes", () => {
     expect(index.counties.filter((c) => c.state === "LA")).toHaveLength(64);
   });
-  it("34 + 4 wired and 26 named gaps account for all 64", () => {
+  it("34 + 4 + 3 wired and 23 named gaps account for all 64", () => {
     const wired = new Set(Object.keys(COUNTIES).filter((k) => k.startsWith("la_")));
-    expect(wired.size).toBe(38);
+    expect(wired.size).toBe(41);
     const gaps = index.counties.filter((c) => c.state === "LA" && !wired.has(countyKeyForName(c.name, "LA"))).map((c) => c.name.replace(/ Parish$/, ""));
     expect(gaps.sort()).toEqual([...GAPS].sort());
   });
@@ -86,5 +96,31 @@ describe("all 64 parishes: wired, or the named gap sentence — never silently e
     if (id.name !== rec.name) return; // bbox centre of a concave parish can fall in a neighbour; the per-name counts above are the guard
     expect(id.status).toBe("no-source");
     expect(noParcelSourceNote(id)).toContain(rec.name);
+  });
+});
+
+describe("the three parishes wired in the 2026-10-29 second pass (Iberia, Vermilion, Bienville)", () => {
+  it("are in laParcels.js, plugged into COUNTIES / COUNTIES_MAP / the provenance record, with the pinned id columns", () => {
+    for (const k of SECOND_KEYS) {
+      expect(LA_ROWS.some((r) => "la_" + r[0] === k), k).toBe(true);
+      expect(COUNTIES[k], k).toMatchObject({ state: "LA", pinIdField: true });
+      expect(COUNTIES_MAP[k].layerUrl).toBe(COUNTIES[k].layerUrl);
+      expect(COUNTY_VERIFICATION[k]).toMatchObject({ verifiedOn: "2026-10-29" });
+      expect(COUNTY_VERIFICATION[k].verifiedNote).toMatch(/MEASURED live/);
+    }
+    expect(COUNTIES.la_iberia.idField).toBe("ParcelNumb");
+    expect(COUNTIES.la_vermilion).toMatchObject({ idField: "parcelnumb", scopeWhere: "geoid='22113'" });
+    expect(COUNTIES.la_bienville.idField).toBe("ASSESSMENT");
+  });
+  it.each(SECOND_KEYS)("%s — every measured parcel point resolves to THIS parish's row", (k) => {
+    for (const [lat, lng] of SECOND[k]) {
+      const id = countyIdentity(lat, lng);
+      expect(id.status, `${k} @ ${lat},${lng}`).toBe("ok");
+      expect(id.key).toBe(k);
+    }
+  });
+  it("the two copies are said to be copies (older / third-party) in their help text", () => {
+    expect(COUNTIES.la_vermilion.help).toMatch(/consultant/);
+    expect(COUNTIES.la_bienville.help).toMatch(/2018/);
   });
 });

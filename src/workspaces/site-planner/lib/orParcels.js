@@ -39,6 +39,8 @@ export const OR_ROWS = [
   ["washington","Washington","/gis-proxy/gispub.co.washington.or.us/server/rest/services/Washington_County_Taxlots/FeatureServer/0","TLNO",null,null,0,45.541,-123.114,[45.282, -123.515, 45.801, -122.713]],
   ["wheeler","Wheeler","https://services3.arcgis.com/e3KSI9Py4B7m3xu6/arcgis/rest/services/Wheeler01_TL/FeatureServer/0","MAPTAXLOT",null,null,1,44.68,-120.072,[44.268, -120.522, 45.092, -119.623]],
   ["yamhill","Yamhill","https://services6.arcgis.com/toubSXwoan3LMhOW/arcgis/rest/services/AT_Taxlots/FeatureServer/1","maptaxlot","situs1",null,1,45.249,-123.326,[45.038, -123.816, 45.459, -122.836]],
+  ["wallowa","Wallowa","https://services.arcgis.com/F7DSX1DSNSiWmOqh/arcgis/rest/services/WC_Taxlots_2018/FeatureServer/0","MapTaxlot",null,null,1,45.5367,-117.2265,[44.974, -118.082, 46.1, -116.371]],
+  ["sherman","Sherman","https://services.arcgis.com/CfRAEL8LSXV81Voa/arcgis/rest/services/FrontierRegionalOR/FeatureServer/26","MapTaxlot",null,null,0,45.4057,-120.7013,[44.979, -121.138, 45.833, -120.265]],
 ];
 export const orRaw = () => Object.fromEntries(OR_ROWS.map(([k, n, url, id, addr, scope]) => ["or_" + k, {
   state: "OR", label: n + " County, OR", layerUrl: url, idField: id, ...(addr ? { addrField: addr } : {}), ...(scope ? { scopeWhere: scope } : {}),
