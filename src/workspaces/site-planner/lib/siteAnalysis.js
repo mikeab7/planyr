@@ -34,7 +34,7 @@ import { screenProximity, fmtDistFt } from "./proximityScreen.js";
 import { summarizeWells } from "./wellStatus.js";
 // NEW-1 — which STATE the site is in, geometrically and without a network call, so the zoning
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
-import { siteState } from "./siteRegion.js";
+import { siteState, US_STATE_NAMES } from "./siteRegion.js";
 import { GA_JURISDICTION_SOURCE_NAME } from "./georgiaJurisdiction.js";
 import { TN_JURISDICTION_SOURCE_NAME, tennesseeConsolidatedFor } from "./tennesseeJurisdiction.js"; // NEW-1 (Tennessee)
 import { NJ_JURISDICTION_SOURCE_NAME, NY_JURISDICTION_SOURCE_NAME, isNjNyState, municipalDisplayName, sortMunicipalNames } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
@@ -351,7 +351,7 @@ export const ANALYSIS_SOURCES = [
 // (2) A card that exists only for some states (`extraFor` — the Georgia cards) is simply ABSENT elsewhere, so a
 //     Houston plan gains no Georgia rows and nothing there reads as "not screened" about a check it never had.
 // ---------------------------------------------------------------------------
-const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", TN: "Tennessee", CA: "California", FL: "Florida", NJ: "New Jersey", NY: "New York" };
+const STATE_NAMES = US_STATE_NAMES; // B2479568 amendment: every state siteState can now answer has its name
 export const stateName = (st) => STATE_NAMES[st] || "this state";
 
 export const cardExistsIn = (source, state) => !Array.isArray(source.extraFor) || (!!state && source.extraFor.includes(state));

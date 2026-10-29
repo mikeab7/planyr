@@ -4,6 +4,9 @@
  *   E2E_LOGIN_KEY=… node ui-audit/verify-layers-location-scope.mjs https://planyr.io [--expect-sha <sha>]
  *                                                                                    LIVE, signed in as the test account, throwaway LOCATED plans (deleted, verified gone)
  *
+ * B2479568 AMENDMENT (every state): Shreveport LA (inside the old Texas box — read "TX") gets a LOCATED throwaway plan and the finder; Columbus OH
+ * (a state the app had no region for) is the finder only. Both must offer no Texas-only row and the national Pipelines row.
+ *
  * For a point in Tennessee, Kentucky (a state the app has no region for) and Houston it opens the REAL Imagery & Layers card on BOTH
  * surfaces (the planner on a located plan, the map finder with the map moved there), reads every row in every group, and asserts:
  *   · Tennessee / Kentucky: NO Texas-only row (Oil & Gas Wells · Road Ownership · School Districts · Leaking Petroleum Tanks · Traffic Counts),
@@ -24,6 +27,8 @@ const POINTS = {
   nashville: { lat: 36.1627, lon: -86.7816, label: "Nashville, TN" },
   louisville: { lat: 38.2527, lon: -85.7585, label: "Louisville, KY" },
   houston: { lat: 29.7604, lon: -95.3698, label: "Houston, TX" },
+  shreveport: { lat: 32.5252, lon: -93.7502, label: "Shreveport, LA" }, // inside the old Texas box: it used to read "TX"
+  columbus: { lat: 39.9612, lon: -82.9988, label: "Columbus, OH", finderOnly: true },
 };
 const TAG = Math.random().toString(36).slice(2, 7);
 const mkSite = (key, p) => ({
@@ -33,7 +38,7 @@ const mkSite = (key, p) => ({
   underlay: null, sheetOverlays: [], parcelDrawings: [], settings: {}, els: [], measures: [], markups: [], callouts: [],
   updatedAt: Date.now(), data: { status: "active" },
 });
-const SITES = Object.fromEntries(Object.entries(POINTS).map(([k, p]) => [k, mkSite(k, p)]));
+const SITES = Object.fromEntries(Object.entries(POINTS).filter(([, p]) => !p.finderOnly).map(([k, p]) => [k, mkSite(k, p)]));
 
 let page, close;
 if (live) {
@@ -98,16 +103,19 @@ try {
   const seen = {};
   for (const [key, p] of Object.entries(POINTS)) {
     // ── planner ──
-    await page.goto(`${base}/#/project/${SITES[key].id}/site`, { waitUntil: "load" });
-    if (live) await page.reload({ waitUntil: "load" });
-    await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
-    await page.waitForTimeout(2200);
-    const chip = page.getByTestId("layers-expand").filter({ visible: true });
-    if (await chip.count()) await chip.first().click();
-    const pp = page.locator('[data-testid="layer-panel"][data-surface="planner"]').first();
-    await pp.waitFor({ state: "visible", timeout: 20000 });
-    await page.waitForTimeout(700); // the service-area geometry arrives by a dynamic import
-    const planner = await allRows(pp);
+    let planner = null;
+    if (SITES[key]) {
+      await page.goto(`${base}/#/project/${SITES[key].id}/site`, { waitUntil: "load" });
+      if (live) await page.reload({ waitUntil: "load" });
+      await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
+      await page.waitForTimeout(2200);
+      const chip = page.getByTestId("layers-expand").filter({ visible: true });
+      if (await chip.count()) await chip.first().click();
+      const pp = page.locator('[data-testid="layer-panel"][data-surface="planner"]').first();
+      await pp.waitFor({ state: "visible", timeout: 20000 });
+      await page.waitForTimeout(700); // the service-area geometry arrives by a dynamic import
+      planner = await allRows(pp);
+    }
     // ── finder ──
     await page.goto(`${base}/#/site-planner`, { waitUntil: "load" });
     if (live) await page.reload({ waitUntil: "load" });
@@ -122,7 +130,7 @@ try {
     await page.waitForTimeout(500);
     const finder = await allRows(fp);
     seen[key] = { planner, finder };
-    console.log(`${p.label}: ${planner.length} planner rows, ${finder.length} finder rows`);
+    console.log(`${p.label}: ${planner ? planner.length : "—"} planner rows, ${finder.length} finder rows`);
   }
 
   // known-good arm: Houston lists the Texas rows, on both surfaces — otherwise the elsewhere-answers prove nothing
@@ -131,14 +139,15 @@ try {
     check(`${s} · Houston (known-good arm): the Texas rows ARE listed`, ["Road Ownership", "Oil & Gas Wells", "Pipelines"].every((n) => h.includes(n)), JSON.stringify(h));
     if (!["Road Ownership", "Oil & Gas Wells", "Pipelines"].every((n) => h.includes(n))) { console.log("VOID: the known-good arm failed"); failed++; }
   }
-  for (const key of ["nashville", "louisville"]) {
+  for (const key of ["nashville", "louisville", "shreveport", "columbus"]) {
     for (const s of ["planner", "finder"]) {
       const rows = seen[key][s];
+      if (!rows) continue; // finder-only point
       const leaked = TX_ONLY.filter((n) => rows.some((x) => x.startsWith(n)));
       check(`${s} · ${POINTS[key].label}: no Texas-only row is offered`, leaked.length === 0, leaked.join(", ") || `${rows.length} rows`);
       check(`${s} · ${POINTS[key].label}: the national Pipelines row IS offered`, rows.includes("Pipelines"), JSON.stringify(rows.filter((x) => /Pipe/.test(x))));
     }
-    check(`${POINTS[key].label}: planner and finder list the same rows`, JSON.stringify(seen[key].planner) === JSON.stringify(seen[key].finder),
+    if (seen[key].planner) check(`${POINTS[key].label}: planner and finder list the same rows`, JSON.stringify(seen[key].planner) === JSON.stringify(seen[key].finder),
       JSON.stringify({ plannerOnly: seen[key].planner.filter((x) => !seen[key].finder.includes(x)), finderOnly: seen[key].finder.filter((x) => !seen[key].planner.includes(x)) }));
   }
 } finally {

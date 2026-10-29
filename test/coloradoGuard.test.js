@@ -32,7 +32,8 @@ describe("NEW-8 · the site's state is resolved without a network call", () => {
   });
 
   it("returns null rather than guessing outside both states", () => {
-    expect(siteState({ lat: 45.5, lng: -122.6 })).toBeNull();   // Portland
+    expect(siteState({ lat: 45.5, lng: -122.6 })).toBe("OR");   // Portland — named since B2479568, never CO/TX
+    expect(siteState({ lat: 43.65, lng: -79.38 })).toBeNull();  // Toronto — off the US entirely
     expect(siteState({})).toBeNull();
     expect(siteState({ lat: NaN, lng: NaN })).toBeNull();
     expect(isColorado(DENVER)).toBe(true);

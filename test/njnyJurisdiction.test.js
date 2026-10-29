@@ -111,7 +111,7 @@ describe("routing — the outlines route, never overlap TX / CO / GA / CA, and t
   it("Greenwich CT and Lockport IL never reach a NJ / NY SOURCE that names them (CT is only in the routing outline; IL is nowhere near)", () => {
     expect(countySourcesForPoint(LOCKPORT_IL[1], LOCKPORT_IL[0])).toEqual([]);
     expect(citySourcesForPoint(LOCKPORT_IL[1], LOCKPORT_IL[0])).toEqual([]);
-    expect(siteState({ lat: LOCKPORT_IL[1], lng: LOCKPORT_IL[0] })).toBeNull();
+    expect(siteState({ lat: LOCKPORT_IL[1], lng: LOCKPORT_IL[0] })).toBe("IL"); // B2479568: named, and never NJ / NY
   });
   it("neither state has an ETJ source, and no NJ / NY city is 'ETJ not mapped'", () => {
     for (const p of [NEWARK, BUFFALO, PLEASANTVILLE]) expect(etjSourcesForPoint(p[1], p[0])).toEqual([]);
