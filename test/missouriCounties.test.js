@@ -14,6 +14,7 @@ import { idAttrFor } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { MO_ROWS } from "../src/workspaces/site-planner/lib/moParcels.js";
 import { MISSOURI_VERIFICATION } from "../src/workspaces/site-planner/lib/moProvenance.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
+import { GC_MAPS } from "../src/shared/gis/giscloudAdapter.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/moCounties.json", import.meta.url), "utf8"));
 const SAMPLES = JSON.parse(readFileSync(new URL("./fixtures/moSamples.json", import.meta.url), "utf8")).rows;
@@ -102,12 +103,13 @@ describe("the wired Missouri rows", () => {
   const ROW_KEYS = MO_ROWS.map(([k]) => "mo_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(MO_ROWS).toHaveLength(71);
+    expect(MO_ROWS).toHaveLength(75);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
       const u = COUNTIES[k].layerUrl;
       if (/^https:\/\/[^/]*arcgis\.com\//.test(u)) continue;
+      if (u.startsWith("/gc/")) { expect(u, k).toBe(`/gc/${k.slice(3)}/FeatureServer/0`); expect(Object.keys(GC_MAPS), k).toContain(k.slice(3)); continue; } // the GIS Cloud adapter (functions/gc), a fixed table — no relay host
       expect(u, k).toMatch(/^\/gis-proxy\//);
       expect(ALLOWED_HOSTS.has(u.split("/")[2]), `${k} → ${u.split("/")[2]}`).toBe(true);
     }
@@ -135,7 +137,7 @@ describe("the wired Missouri rows", () => {
       expect(v, k).toBeTruthy();
       expect(v.publisher, k).toMatch(/^(own|third-party)$/);
       expect(v.publisherName.length, k).toBeGreaterThan(5);
-      expect(v.verifiedOn, k).toBe("2026-10-19");
+      expect(["2026-10-19", "2026-10-29"], k).toContain(v.verifiedOn);
     }
   });
 });
@@ -154,14 +156,14 @@ describe("a recorded real lot from each source reads back parcel id, address, ac
     expect(rec.account, `${name}: parcel id`).toBeTruthy();
     // the stored account (what the card/list stamps at identify time) is the county's DECLARED column, never a row number or a map-sheet fragment
     expect(idAttrFor(key, s.attrs), `${name}: stamped id`).toBe(String(s.attrs[s.idField]));
-    const hasOwner = !/^(Jackson|Boone) County$/.test(name);
+    const hasOwner = !/^(Jackson|Boone|Cass) County$/.test(name);
     if (hasOwner) {
       expect(rec.owner, `${name}: owner`).toBeTruthy();
       expect(rec.owner, `${name}: the owner is not the parcel number`).not.toMatch(/^[0-9][0-9.\-\s/]*$/);
     }
   });
-  it("Jackson (parcel fabric) and Boone (basemap linework) honestly carry no owner", () => {
-    for (const n of ["Jackson County", "Boone County"]) expect(ownerName(SAMPLES[n].attrs), n).toBeNull();
+  it("Jackson (parcel fabric), Boone (basemap linework) and Cass (MARC regional compilation) honestly carry no owner", () => {
+    for (const n of ["Jackson County", "Boone County", "Cass County"]) expect(ownerName(SAMPLES[n].attrs), n).toBeNull();
   });
   it("a county's declared parcel number replaces a map-sheet FRAGMENT the generic resolver caught (Henry PARCEL_NUM '11', Cole PARCELNUM '55', Livingston '05.00')", () => {
     for (const [n, frag] of [["Henry County", "11"], ["Cole County", "55"], ["Livingston County", "05.00"]]) {
