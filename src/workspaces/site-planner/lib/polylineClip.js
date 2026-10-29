@@ -10,10 +10,25 @@
  * Points are [x, y] pairs in ANY planar frame (lattice pixels, feet, or degrees — the arithmetic is affine), rings
  * are arrays of [x, y] (closed implicitly). `inside` is the even-odd rule over the ring SET (a hole ring toggles). */
 
+/* A ring's bounding box, computed once per ring array (B2319137 ×2: the existing-contour clip runs on the main thread
+ * over every contour segment × every limit edge — rejecting by box first is the same answer at a fraction of the work). */
+const BOX = new WeakMap();
+function ringBox(ring) {
+  let b = BOX.get(ring);
+  if (b) return b;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of ring) { if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0]; if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1]; }
+  b = [x0, y0, x1, y1];
+  BOX.set(ring, b);
+  return b;
+}
+
 /* Even-odd point-in-ring-set. */
 export function pointInRings(p, rings) {
   let inside = false;
   for (const ring of rings) {
+    const bb = ringBox(ring);
+    if (p[1] < bb[1] || p[1] > bb[3] || p[0] > bb[2]) continue;   // no edge of this ring can toggle (the ray runs +x)
     const n = ring.length;
     for (let i = 0, j = n - 1; i < n; j = i++) {
       const a = ring[i], b = ring[j];
@@ -27,10 +42,14 @@ export function pointInRings(p, rings) {
 function crossings(a, b, rings) {
   const ts = [];
   const dx = b[0] - a[0], dy = b[1] - a[1];
+  const sx0 = Math.min(a[0], b[0]), sx1 = Math.max(a[0], b[0]), sy0 = Math.min(a[1], b[1]), sy1 = Math.max(a[1], b[1]);
   for (const ring of rings) {
+    const bb = ringBox(ring);
+    if (sx1 < bb[0] || sx0 > bb[2] || sy1 < bb[1] || sy0 > bb[3]) continue;
     const n = ring.length;
     for (let i = 0, j = n - 1; i < n; j = i++) {
       const c = ring[j], d = ring[i];
+      if ((c[0] < sx0 && d[0] < sx0) || (c[0] > sx1 && d[0] > sx1) || (c[1] < sy0 && d[1] < sy0) || (c[1] > sy1 && d[1] > sy1)) continue;
       const ex = d[0] - c[0], ey = d[1] - c[1];
       const den = dx * ey - dy * ex;
       if (Math.abs(den) < 1e-12) continue;

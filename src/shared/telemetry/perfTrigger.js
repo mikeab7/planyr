@@ -75,6 +75,9 @@ export const TRIGGER_DEFAULTS = {
   bootWindowMs: 10_000,       // matches the owner's own "5 to 10 seconds" report, plus margin
   bootTaskBudgetMs: 400,      // cumulative long-task/LoAF blocking time inside the boot window…
   bootSingleTaskMs: 250,      // …OR one task alone at least this slow (an unambiguous single stall)
+
+  /* ── the FREEZE judgment (B2319137 ×2) — see the header block above `feedFreeze`. */
+  freezeMs: 1_000,            // one frame that never came, or one long frame, at least this long
 };
 
 /* Create the trigger state. All storage is allocated here and never again. */
@@ -246,6 +249,39 @@ function fireBoot(s, t, trigger) {
     taskCount: s.bootTaskCount,
     bootWindowMs: s.cfg.bootWindowMs,
   };
+}
+
+/* ── the FREEZE judgment (B2319137 ×2) ───────────────────────────────────────────────────────
+ * ⛔ WHY THE TWO JUDGMENTS ABOVE WERE BOTH BLIND TO THE OWNER'S 30-SECOND FREEZE (2026-10-29, tab
+ * 5abb4ba7: an interaction that waited 31 s for its next paint, and only 135 ms of long tasks).
+ * The grading build ran as hundreds of SHORT slices back to back (`runChunked`), each well under any
+ * long-task bar, with no frame between them — the page never painted, yet no single task was long.
+ *   · `feedFrame` drops any delta past `maxFrameMs` (1.5 s) as "not a frame — a debugger, a
+ *     throttle, a sleep" — which is exactly what a 30 s starved frame looks like from inside.
+ *   · `feedBootTask` sums task time, and only in the first ten seconds.
+ * A freeze is the one case where a SINGLE sample IS the evidence the sustained test exists to
+ * demand: nobody's GC, antivirus or screenshot holds a visible page for a second. So this is an
+ * ABSOLUTE bar, deliberately (the self-relative argument does not apply — a second without a frame is
+ * a freeze on any display), fed from two places that are NOT the sustained window:
+ *   · "frame" — a frame delta from the RUNNING frame loop (the user was interacting, the first frame
+ *     after an idle gap is already dropped at the source) with the page visible the whole time;
+ *   · "task"  — one long-animation-frame / long-task entry, which is how a starved render is
+ *     reported where the platform groups the tasks into the frame they held off.
+ * Same `fires`/`maxAuto`/`cooldownMs` budget as every other auto capture. */
+export function feedFreeze(s, t, ms, via) {
+  const cfg = s.cfg;
+  if (!(ms >= cfg.freezeMs)) return false;
+  if (s.fires >= cfg.maxAuto) return false;
+  if (t - s.lastFireAt < cfg.cooldownMs) return false;
+  fireFreeze(s, t, ms, via);
+  return true;
+}
+
+/* The freeze FIRE branch, split out for the same reason `fire()` is: it is the only part that allocates. */
+function fireFreeze(s, t, ms, via) {
+  s.fires++;
+  s.lastFireAt = t;
+  s.lastVerdict = { source: "freeze", via: via === "task" ? "task" : "frame", freezeMs: Math.round(ms) };
 }
 
 /* Seal the baseline as the MEDIAN of the collected frames. Median, not mean: a collection pause
