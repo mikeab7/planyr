@@ -5,7 +5,7 @@
  * same-origin `/gis-proxy` relay: the MDEQ, MARIS and DeSoto hosts are not reachable from the build sandbox and their CORS headers were never read, so the relay is what the app
  * depends on (MEASURED through planyr.io on 2026-10-29). Federal sources (EPA, NPS, USFWS, BIA) are read directly from the agencies' ArcGIS Online services.
  *
- * WHAT IS NOT HERE, AND WHY, is on the backlog item (B2536480): no statewide stream / wetland buffer rule exists in the sources found (a buffer width is never drawn without a rule
+ * WHAT IS NOT HERE, AND WHY, is on the backlog item (B2539744): no statewide stream / wetland buffer rule exists in the sources found (a buffer width is never drawn without a rule
  * behind it), airport-noise contours are not published as a service, MDAH's historic inventory and the 16th-section school lands have no open service, and several MARIS services are
  * empty shells. Site Analysis verdicts are untouched — these are map layers only.
  *
