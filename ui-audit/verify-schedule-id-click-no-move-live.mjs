@@ -143,6 +143,7 @@ try {
   }
 
   // jitter: 5px toward the row below the selection
+  await page.evaluate(() => { document.querySelector("[data-grid-scroll]").scrollTop = 0; }); await pacedWait(page, 300);   // scrollTo only scans forward
   await scrollTo(page, "Kinder Morgan");
   { const a = await idBox(page, "Kinder Morgan"), b = await idBox(page, LAST_SELECTED);
     await page.mouse.click(a.x + a.width * 0.7, a.y + a.height / 2); await pacedWait(page, 150);
