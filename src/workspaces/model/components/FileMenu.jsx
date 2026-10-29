@@ -37,11 +37,12 @@ const chromeBtnStyle = {
 // click the SAME hidden `<input type=file>` refs the menu's own "Import Excel…"/"Import CSV…"
 // rows already click — so a palette-driven import opens the identical OS file picker through the
 // identical DOM node, never a second import trigger.
-const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile }, ref) {
+const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile, onOpenFile }, ref) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const xlsxInputRef = useRef(null);
   const csvInputRef = useRef(null);
+  const openInputRef = useRef(null);
 
   useImperativeHandle(ref, () => ({
     openImportXlsx: () => xlsxInputRef.current?.click(),
@@ -53,6 +54,11 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
     const file = e.target.files && e.target.files[0];
     e.target.value = ""; // so re-choosing the SAME file still fires a change event next time
     if (file) onImportXlsxFile(file);
+  };
+  const onOpenFileChosen = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file && onOpenFile) onOpenFile(file);
   };
   const onCsvFileChosen = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -100,6 +106,14 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
       )}
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={260}>
         <div>
+          {onOpenFile && (
+            <>
+              <MenuItem data-testid="model-open-file" title="Saves the file in your Library, then opens it here to edit — your original stays untouched" onClick={() => { setOpen(false); openInputRef.current?.click(); }}>
+                Open Excel or CSV file…
+              </MenuItem>
+              <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
+            </>
+          )}
           <MenuItem data-testid="model-export-xlsx" onClick={() => pick(onExportXlsx)}>Download as Excel (.xlsx)</MenuItem>
           <MenuItem data-testid="model-export-csv" onClick={() => pick(onExportCsv)}>Download active sheet as CSV</MenuItem>
           <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
@@ -111,6 +125,7 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
           </MenuItem>
         </div>
       </AnchoredMenu>
+      <input ref={openInputRef} type="file" accept=".xlsx,.xlsm,.xls,.csv" onChange={onOpenFileChosen} style={{ display: "none" }} data-testid="model-open-file-input" />
       <input ref={xlsxInputRef} type="file" accept=".xlsx" onChange={onXlsxFileChosen} style={{ display: "none" }} data-testid="model-import-xlsx-input" />
       <input ref={csvInputRef} type="file" accept=".csv" onChange={onCsvFileChosen} style={{ display: "none" }} data-testid="model-import-csv-input" />
     </span>

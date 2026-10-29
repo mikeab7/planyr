@@ -19,6 +19,7 @@
  * here, the same "pure model, view decides what's shown" split lib/formulaConsistency.js itself
  * documents.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { cellAddressText } from "../lib/sheetEngine.js";
@@ -95,6 +96,7 @@ export default function InconsistencyPanel({ open, flags, onClose, onGoTo, onDis
       {flags.length > 0 && (
         <div style={{ flex: "none", padding: 8, borderBottom: "1px solid var(--border-default)" }}>
           <input
+            {...NO_AUTOFILL}
             ref={searchRef}
             data-testid="inconsistency-search"
             value={search}

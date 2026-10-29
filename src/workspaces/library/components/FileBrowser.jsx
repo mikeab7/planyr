@@ -19,6 +19,7 @@
  */
 import { subscribeLibraryChanged } from "../../../shared/library/libraryChanged.js";
 import { docKindOf } from "../../doc-review/docEditor/docKind.js";
+import { isSpreadsheetName } from "../../model/lib/spreadsheetKind.js";
 import { useFileDragActive, isFileDrag, markDropHandled, dropWasHandled } from "../../../shared/files/fileDrag.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -593,8 +594,10 @@ export default function FileBrowser({
   const isPdfFile = (f) => !f.sourceFile || isPdfName(f.sourceFile);
   // NEW-1: Word and text files open in Review's document editor, so they are no longer a download-only dead end.
   const isDocFile = (f) => !!f.sourceFile && !!docKindOf(f.sourceFile);
+  // NEW-1: Excel/CSV files open in the Spreadsheet module (the Shell routes the row there), so they are no longer a download-only dead end either.
+  const isSheetFile = (f) => !!f.sourceFile && isSpreadsheetName(f.sourceFile);
   const open = (f) => {
-    if (!isPdfFile(f) && !isDocFile(f)) { setPendingDl(f); return; }
+    if (!isPdfFile(f) && !isDocFile(f) && !isSheetFile(f)) { setPendingDl(f); return; }
     const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f);
   };
   // B2022929 — "Version history": opens the file in Review with the history sheet already showing.
@@ -1079,7 +1082,7 @@ export default function FileBrowser({
 
       {fileMenu && (() => {
         const f = fileMenu.f;
-        const items = fileMenuItems({ pdfRow: isPdfFile(f), docRow: isDocFile(f), spatial: isSpatial(f), mapped: onMap(f), pinned: !!(pinnedFileIds && pinnedFileIds.has(f.id)),
+        const items = fileMenuItems({ pdfRow: isPdfFile(f), docRow: isDocFile(f), sheetRow: isSheetFile(f), spatial: isSpatial(f), mapped: onMap(f), pinned: !!(pinnedFileIds && pinnedFileIds.has(f.id)),
           canPin: !!onTogglePinFile, canHistory: !!onOpenHistory, canMove: folderMode && folderRows.length > 0 });
         return <FileRowMenu x={fileMenu.x} y={fileMenu.y} title={f.title || f.item || "file"} items={items} onClose={() => setFileMenu(null)} onPick={(id) => { setFileMenu(null); runMenuAction(id, f); }} />;
       })()}

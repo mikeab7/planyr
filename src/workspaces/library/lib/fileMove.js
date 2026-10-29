@@ -48,8 +48,9 @@ export function applyOptimisticFolder(rows, id, folderId) {
 
 /* The file row's context-menu items, in order, from the row's own state. Pure: the component maps ids to the
  * handlers the row already has. `{ sep: true }` is a separator. */
-export function fileMenuItems({ pdfRow, docRow, spatial, mapped, pinned, canPin, canHistory, canMove }) {
-  const out = [{ id: "open", label: "Open" }, { id: "download", label: "Download" }];
+export function fileMenuItems({ pdfRow, docRow, sheetRow = false, spatial, mapped, pinned, canPin, canHistory, canMove }) {
+  // NEW-1 (open an uploaded Excel in Spreadsheet): a spreadsheet row says where it opens.
+  const out = [{ id: "open", label: sheetRow ? "Open in Spreadsheet" : "Open" }, { id: "download", label: "Download" }];
   if (canMove) out.push({ id: "move", label: "Move to…" });
   out.push({ id: "rename", label: "Rename…" }, { id: "share", label: "Share link" });
   if (canHistory && (pdfRow || docRow)) out.push({ id: "versions", label: "Versions" });

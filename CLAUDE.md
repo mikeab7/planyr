@@ -815,7 +815,7 @@ server/                   # placeholder README only — NOT built or deployed; b
   domain root too.
 
 ### Dependency notes (client bundle)
-Runtime deps are kept few and deliberate. New client dependency added 2026-07-10:
+Runtime deps are kept few and deliberate. **No new dependency for "open an uploaded Excel in Spreadsheet" (NEW-1, 2026-10-29):** it reuses ExcelJS (`lib/xlsxIO.js`), `fflate` (already the .docx unzipper) and the already-installed `xlsx` (SheetJS) — the last now ALSO read client-side, for old `.xls` files only, inside the lazy parse worker (`model/lib/spreadsheetWorker.js`), never in an eager chunk. New client dependency added 2026-07-10:
 - **`dxf-parser` (B747, ~380 KB, one transitive dep `loglevel`)** — parse-only DXF tokeniser used by
   the site-plan overlay's CAD import. Justified over hand-rolling: DXF group-code parsing has to
   survive many real-world exporter/version quirks, and a robust hand-rolled full parser fails the
