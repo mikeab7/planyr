@@ -12,7 +12,7 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVe
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
 import { ALL_LAYERS, MERGE_GROUPS } from "../src/workspaces/site-planner/lib/layers.js";
-import { SPECIAL_WS, OK_LAYERS, OK_MERGE_GROUPS, OK_VECTOR_SOURCES, OK_LAYER_TIERS, WELL_CLASSES, wellClassOf, DAM_CLASSES, damHazardOf, ROAD_CLASSES, IMPAIRED, urlFor, viaRelay, registryUrl, clean, tc } from "../src/workspaces/site-planner/lib/oklahomaLayers.js";
+import { SPECIAL_WS, OK_VINTAGE as OK_VINT, OK_LAYERS, OK_MERGE_GROUPS, OK_VECTOR_SOURCES, OK_LAYER_TIERS, WELL_CLASSES, wellClassOf, DAM_CLASSES, damHazardOf, ROAD_CLASSES, IMPAIRED, urlFor, viaRelay, registryUrl, clean, tc } from "../src/workspaces/site-planner/lib/oklahomaLayers.js";
 import { VECTOR_SOURCES } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
@@ -349,6 +349,11 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
     const c = ALL_LAYERS.ok_wells.identifyCard({ symbol_class: "INACTIVE", well_name: "X", well_num: "1" });
     expect(c.rows.find((x) => x.label === "Status").text).toBe("Inactive");
     expect(ALL_LAYERS.ok_wells.identifyCard({ symbol_class: "PLUGGED" }).rows.find((x) => x.label === "Status").text).toBe("Plugged");
+  });
+  it("every vintage date the registry records appears in the row's ⓘ line (and none is a schema-edit stamp passed off as data currency)", () => {
+    const all = Object.values(OK_VINT).join(" | ");
+    for (const [k, s] of Object.entries(OK_SOURCES)) if (s.dataLastEdited) expect(all, k).toContain(s.dataLastEdited);
+    expect(all).not.toMatch(/2026-08-11|2026-09-24 /); // county/Cherokee-reservation SERVICE stamps; their DATA stamps are 2025-06-20 / 2025-03-04
   });
   it("a tank release whose status is neither Open nor Closed has its own ink, in the legend", () => {
     const r = ALL_LAYERS.ok_pst_releases;

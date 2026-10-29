@@ -44,7 +44,7 @@ export const OK_SOURCES = {
     label: "County boundaries (Oklahoma)",
     provider: "Oklahoma Department of Transportation (ODOT) — GIS Management Branch, County Boundaries",
     serviceUrl: `${ODOT}/County_Boundaries/FeatureServer/0`,
-    geometryType: "polygon", fields: { name: "COUNTY_NAME", fips: "COUNTY_FIPS_NO" }, dataLastEdited: "2026-08-11",
+    geometryType: "polygon", fields: { name: "COUNTY_NAME", fips: "COUNTY_FIPS_NO" }, dataLastEdited: "2025-06-20",
   }),
   okCity: OK("okCity", {
     label: "City limits (Oklahoma)",
@@ -59,7 +59,7 @@ export const OK_SOURCES = {
     provider: "Oklahoma Department of Transportation (ODOT) — Roadways (Linear Referencing System)",
     serviceUrl: `${ODOT}/Roadways/FeatureServer/0`,
     where: "ODOTROUTECLASS IN ('I','U','S','T')", // the state-system classes only — the layer also holds ~80,000 county and city streets
-    geometryType: "line", fields: { name: "STREETNAME", route: "ROUTE_ID", cls: "ODOTROUTECLASS", aadt: "AADT", maint: "MAINTENANCERESPONSIBILITY", truck: "TRUCKROUTE" }, dataLastEdited: "2026-10-26",
+    geometryType: "line", fields: { name: "STREETNAME", route: "ROUTE_ID", cls: "ODOTROUTECLASS", aadt: "AADT", maint: "MAINTENANCERESPONSIBILITY", truck: "TRUCKROUTE" }, dataLastEdited: "2026-10-19",
   }),
   okTribal: OK("okTribal", {
     label: "Tribal areas (U.S. Census, Oklahoma)",
@@ -67,13 +67,13 @@ export const OK_SOURCES = {
     serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/AIANNHA_v1/FeatureServer/0",
     // Oklahoma's rows only: the Oklahoma Tribal Statistical Areas (every name ends "OTSA", joint-use areas included), the Osage Reservation and the Shawnee trust land.
     where: "NAME LIKE '%OTSA%' OR NAME = 'Osage Reservation' OR NAME = 'Shawnee Trust Land'",
-    geometryType: "polygon", fields: { name: "NAME", kind: "LSADC", legal: "FUNCSTAT" }, dataLastEdited: "2026-10-28",
+    geometryType: "polygon", fields: { name: "NAME", kind: "LSADC", legal: "FUNCSTAT" }, dataLastEdited: "2026-10-29",
   }),
   okCherokeeRes: OK("okCherokeeRes", {
     label: "Cherokee Nation reservation (Cherokee Nation)",
     provider: "Cherokee Nation — Cherokee Nation Reservation (published by the Nation on its ArcGIS Online org)",
     serviceUrl: `${CHEROKEE}/Cherokee_Nation_Reservation/FeatureServer/0`,
-    geometryType: "polygon", fields: { acres: "Acres" }, dataLastEdited: "2026-09-24",
+    geometryType: "polygon", fields: { acres: "Acres" }, dataLastEdited: "2025-03-04",
   }),
   okCherokeeLand: OK("okCherokeeLand", {
     label: "Cherokee Nation tribal land tracts (Cherokee Nation)",
@@ -212,8 +212,8 @@ export const OK_SOURCES = {
 /* The reach class of the rows whose real extent is narrower than "the state" (sources.js `SOURCE_FIXTURE_REACH`, `[class, reason]`). */
 export const OK_FIXTURE_REACH = {
   okCherokeeRes: ["regional", "One polygon: the Cherokee Nation's reservation (northeast Oklahoma) — probing it in Guymon would assert a guaranteed zero."],
-  okCherokeeLand: ["regional", "Cherokee Nation tribal land tracts — the Nation's fourteen-county area in northeast Oklahoma."],
-  okAppendixBLine: ["regional", "Fourteen stream lines in all (DEQ Appendix B Table 1/2 streams), clustered in the Ouachita and Osage hills — there is no statewide spread to probe."],
+  okCherokeeLand: ["regional", "Cherokee Nation tribal land tracts — the Nation's tribal land tracts in eastern Oklahoma."],
+  okAppendixBLine: ["regional", "Fourteen stream lines in all (DEQ Appendix B Table 1/2 streams), a few stream segments, not a statewide spread — there is nothing to probe across the state."],
   okScenicRivers: ["regional", "OWRB's Scenic Rivers include the Illinois River, Barren Fork, Flint Creek, Lee Creek and the Upper Mountain Fork — all in the east of the state; there is no statewide spread to probe."],
   okSensitiveWaters: ["regional", "Fifty-two sensitive areas (HUC-11 watersheds and river corridors) concentrated in the east and centre of the state — the fixtures sit on two of them, far apart."],
 };

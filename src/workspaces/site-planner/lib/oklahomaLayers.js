@@ -64,7 +64,7 @@ const legendOf = (classes) => classes.map((c) => ({ label: c.label, color: c.col
 /* RBDMS `symbol_class` → one of seven map classes. ONE table: styleFn and the legend both read it. */
 export const WELL_CLASSES = [
   { key: "orphan", label: "Orphan well", color: "#b91c1c", radius: 5.5, classes: ["ORPHAN"] },
-  { key: "queued", label: "Queued for state plugging", color: "#ea580c", radius: 5, classes: ["STATE_FUNDS_PLUGGING"] },
+  { key: "queued", label: "State-funded plugging (OCC status)", color: "#ea580c", radius: 5, classes: ["STATE_FUNDS_PLUGGING"] },
   { key: "ta", label: "Temporarily abandoned", color: "#d97706", radius: 4.5, classes: ["TEMPORARILY_ABANDONED"] },
   { key: "active", label: "Oil / gas / storage (not plugged)", color: "#1f2937", radius: 3.5, classes: ["OIL", "GAS", "OIL/GAS", "GAS_STORAGE"] },
   { key: "uic", label: "Injection / disposal", color: "#7c3aed", radius: 3.5, classes: ["UIC"] },
@@ -233,7 +233,7 @@ export const OK_LAYERS = {
       Number(p.TRUCKROUTE) === 1 ? rowOf("Truck route", "Yes", { raw: true }) : null,
     ].filter(Boolean)),
     note: "ODOT's state system — Interstates, US highways, state highways and turnpikes. The card's 'Maintained by' line says who maintains each segment — the first call for an access question. An absent line is NOT 'unmaintained'.",
-    infoCaveat: "Loads zoomed in. ODOT's linear-referencing inventory (edited 2026-10-26); a driveway permit decides the access, not this line.",
+    infoCaveat: "Loads zoomed in. ODOT's linear-referencing inventory (data edited 2026-10-19); this line is not an access permission — ask the road's maintainer.",
     group: "jurisdiction", order: 3,
   }),
 
@@ -256,7 +256,7 @@ export const OK_LAYERS = {
     hoverTitle: "Cherokee Nation reservation", hoverSource: "Cherokee Nation",
     identifyCard: card("Cherokee Nation reservation", (p) => [rowOf("Area", acres(p.Acres), { raw: true })],
       "The Cherokee Nation's own depiction of its reservation. The legal effect on a given parcel is a question for counsel and the Nation."),
-    note: "The Cherokee Nation's reservation boundary, as the Nation publishes it (edited 2026-09-24).",
+    note: "The Cherokee Nation's reservation boundary, as the Nation publishes it (data edited 2025-03-04).",
     role: "line", group: "jurisdiction", order: 22,
   }),
   ok_cherokee_land: areaRow({
@@ -286,7 +286,7 @@ export const OK_LAYERS = {
         rowOf("County", p.county),
       ];
     }),
-    note: "Every well on the Oklahoma Corporation Commission's record (457,000+) — orphan wells in red, wells queued for state plugging in orange, temporarily abandoned in amber, plugged wells in light grey. Loads zoomed in.",
+    note: "Every well on the Oklahoma Corporation Commission's record (457,000+) — orphan wells in red, wells in the Commission's state-funded plugging status in orange, temporarily abandoned in amber, plugged wells in light grey. Loads zoomed in.",
     infoCaveat: "Locations are as filed with the Commission. An orphan, unplugged or temporarily abandoned well near a building footprint calls for a field search and a plugging-status check with the Commission's Oil & Gas Conservation Division. Pipelines are not published (the Commission's pipeline data needs a login) — see the Pipelines row for the approximate EIA lines.",
     group: "environmental", order: 21,
   }),
@@ -404,7 +404,7 @@ export const OK_LAYERS = {
     legend: legendOf([WASTE.solid, WASTE.haz]), hoverTitle: "Solid-waste facility", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Solid-waste facility", (p) => [rowOf("Facility", p.Facility_Name), rowOf("Facility type (DEQ code)", p.Facility_Type, { raw: true }), rowOf("City", p.City), rowOf("County", p.Cty)].filter(Boolean)),
     note: "DEQ-permitted solid-waste facilities (147): landfills of every kind, transfer stations, incinerators, compost, tire and medical-waste facilities.",
-    infoCaveat: "A landfill's waste footprint is larger than its point. Landfill gas and settlement make adjacent ground a geotechnical and environmental question.",
+    infoCaveat: "A landfill's waste footprint is larger than its point. Ask DEQ about the facility's permit and boundary.",
     group: "environmental", order: 30,
   }),
   ok_deq_haz_waste: pointRow({
@@ -473,7 +473,7 @@ export const OK_LAYERS = {
     styleFn: flat(area(PROTECTED.sens.color, 0.08, 1.4, "8 5")),
     hoverTitle: "Sensitive watershed", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Stormwater sensitive area", (p) => [rowOf("Area", p.NAME), rowOf("HUC-11", p.HUC11, { raw: true })].filter(Boolean),
-      "DEQ lists these watersheds as sensitive waters harboring endangered and threatened species and their critical habitats, as set forth in the OKR10 Construction General Stormwater Permit. Read the permit's eligibility terms before relying on the general permit."),
+      "DEQ lists these watersheds as sensitive waters harboring endangered and threatened species and their critical habitats, as set forth in the OKR10 Construction General Stormwater Permit."),
     note: "Sensitive waters and watersheds harboring threatened and endangered species that DEQ's OKR10 Construction General Stormwater Permit singles out (52 areas: HUC-11 watersheds and river corridors; DEQ's layer is named \"OKR05 Stormwater Sensitive Areas\" and its description cites OKR10).",
     infoCaveat: "DEQ's own description of the layer; the permit text governs.",
     group: "environmental", order: 37,
@@ -491,7 +491,7 @@ export const OK_LAYERS = {
   }),
   ok_owrb_special_ws: areaRow({
     label: "Special-Provision Watersheds", mergeGroup: "ok_protected_waters", source: "Oklahoma Water Resources Board — Water Quality Standards",
-    url: urlFor("okSpecialWatersheds"), fields: ["name", "type", "type_def"], simplifyFactor: 0.5, minZoom: 8, color: "#0e7490", weight: 1.2,
+    url: urlFor("okSpecialWatersheds"), fields: ["name", "type", "type_def"], simplifyFactor: 0.5, minZoom: 8, color: SPECIAL_WS[0].color, weight: 1.2,
     styleFn: (p, opacity) => { const w = specialWsOf(p && p.type); return area(w ? w.color : SPECIAL_WS_OTHER.color, 0.14, 1.2)(opacity); },
     hoverTitle: "Special-provision watershed", hoverSource: "OWRB",
     identifyCard: card("Special-provision watershed", (p) => [rowOf("Name", p.name), rowOf("Kind", pick(p, "type_def"), { raw: true })].filter(Boolean),
@@ -522,7 +522,7 @@ export const OK_LAYERS = {
       rowOf("Owner", p.owner_name), rowOf("Owner type", damOwnerType(p.owner_type), { raw: true }),
       rowOf("Stream", p.river), rowOf("County", p.county), rowOf("Built", p.year_completed, { raw: true }),
       Number(p.dam_height) > 0 ? rowOf("Height", Number(p.dam_height).toLocaleString("en-US", { maximumFractionDigits: 1 }), { raw: true }) : null,
-      /^y(es)?$/i.test(String(p.inundation_map_created || "").trim()) ? rowOf("Inundation map", "On file with OWRB — ask for it", { raw: true }) : null,
+      /^y(es)?$/i.test(String(p.inundation_map_created || "").trim()) ? rowOf("Inundation map", "Created (per the inventory) — ask OWRB", { raw: true }) : null,
     ].filter(Boolean), "The hazard class describes the consequence of a failure downstream, not the dam's condition."),
     note: "The Oklahoma Dam Inventory (OWRB; 4,900+ dams, including NRCS-built dams) by hazard class. OWRB describes a High hazard dam as one with occupied dwellings immediately downstream.",
     infoCaveat: "The inventory flags the 107 dams that have an inundation map on file with OWRB (the map itself is OWRB's to give). A site downstream of a high or significant hazard dam is a question for the dam's owner and OWRB.",
@@ -562,7 +562,7 @@ export const OK_LAYERS = {
     styleFn: flat(area("#0369a1", 0.1, 1.2)),
     hoverTitle: "Water system service area", hoverSource: "OWRB",
     identifyCard: card("Public water system", (p) => [rowOf("System", p.name), rowOf("ID", p.pwsid, { raw: true }), rowOf("County", p.county)].filter(Boolean),
-      "Approximate. Not a certificated territory and not a commitment to serve — confirm availability and size with the system."),
+      "Approximate, as OWRB publishes it — confirm service availability and size with the system."),
     note: "OWRB's approximate service areas for Oklahoma public water systems (720) — towns and rural water districts.",
     infoCaveat: "Approximate boundaries; availability, size and pressure are the system's to confirm.",
     group: "utilities", order: 21,
@@ -571,17 +571,17 @@ export const OK_LAYERS = {
 
 /* The ⓘ "as of" line of every Oklahoma row (layers.js spreads this into LAYER_VINTAGE). Dates are the services' own last-edit stamps or the agency's stated vintage, read 2026-10-29. */
 export const OK_VINTAGE = {
-  ok_county: "ODOT — edited 2026-08-11", ok_city: "ODOT (Oklahoma Tax Commission) — edited 2026-10-05", ok_road: "ODOT linear-referencing inventory — edited 2026-10-26",
-  ok_tribal: "U.S. Census Bureau — checked weekly, edited 2026-10-28", ok_cherokee_res: "Cherokee Nation — edited 2026-09-24", ok_cherokee_land: "Cherokee Nation — edited 2026-09-21",
-  ok_wells: "Oklahoma Corporation Commission RBDMS — edited 2026-10-29", ok_pst: "Oklahoma Corporation Commission — edited 2026-10-28", ok_pst_releases: "Oklahoma Corporation Commission — edited 2026-10-28",
+  ok_county: "ODOT — data edited 2025-06-20", ok_city: "ODOT (Oklahoma Tax Commission) — edited 2026-10-05", ok_road: "ODOT linear-referencing inventory — data edited 2026-10-19",
+  ok_tribal: "U.S. Census Bureau — checked weekly, edited 2026-10-29", ok_cherokee_res: "Cherokee Nation — data edited 2025-03-04", ok_cherokee_land: "Cherokee Nation — edited 2026-09-21",
+  ok_wells: "Oklahoma Corporation Commission RBDMS — service edited 2026-10-29", ok_pst: "Oklahoma Corporation Commission — service edited 2026-10-28", ok_pst_releases: "Oklahoma Corporation Commission — service edited 2026-10-28",
   ok_deq_superfund: "Oklahoma DEQ LandWeb — no date published", ok_deq_rcra: "Oklahoma DEQ LandWeb — no date published", ok_deq_restrictions: "Oklahoma DEQ LandWeb — filings tracked by DEQ staff",
-  ok_deq_vcp: "Oklahoma DEQ — data set updated 2022-01-25", ok_deq_scap: "Oklahoma DEQ LandWeb — no date published", ok_deq_brownfields: "Oklahoma DEQ LandWeb — no date published", ok_occ_brownfields: "Oklahoma Corporation Commission Brownfields — edited 2026-10-26",
-  ok_deq_solid_waste: "Oklahoma DEQ LandWeb — no date published", ok_deq_haz_waste: "Oklahoma DEQ LandWeb — no date published",
+  ok_deq_vcp: "Oklahoma DEQ — data set updated 2022-01-25", ok_deq_scap: "Oklahoma DEQ LandWeb — updated 2022-01-24", ok_deq_brownfields: "Oklahoma DEQ LandWeb — updated 2025-06-16", ok_occ_brownfields: "Oklahoma Corporation Commission Brownfields — edited 2026-10-26",
+  ok_deq_solid_waste: "Oklahoma DEQ LandWeb — updated 2025-09-24", ok_deq_haz_waste: "Oklahoma DEQ LandWeb — no date published",
   ok_deq_whpa: "Oklahoma DEQ WaterWeb — no date published", ok_deq_well_buffers: "DEQ — drawn from its 2014 public-well layer", ok_deq_intakes: "Oklahoma DEQ WaterWeb — no date published",
   ok_deq_appb_areas: "Oklahoma DEQ WaterWeb — no date published", ok_deq_appb_streams: "Oklahoma DEQ WaterWeb — no date published", ok_deq_sensitive: "Oklahoma DEQ WaterWeb — no date published", ok_deq_303d: "Oklahoma DEQ — 2024 Integrated Report",
   ok_owrb_scenic: "Oklahoma Water Resources Board — Water Quality Standards", ok_owrb_special_ws: "Oklahoma Water Resources Board — Water Quality Standards",
   ok_dams: "OWRB Dam Inventory — edited 2026-09-22", ok_water_systems: "OWRB — approximate, as published",
-  ok_nrhp: "National Park Service — Esri federal mirror", ok_cemeteries: "USGS National Map — GNIS", ok_crit_habitat: "USFWS — final critical habitat",
+  ok_nrhp: "National Park Service — Esri federal mirror, edited 2026-10-29", ok_cemeteries: "USGS National Map — GNIS", ok_crit_habitat: "USFWS — final critical habitat",
 };
 
 /* =============================================================== Vector sources (ok_county, ok_city) =============================================================== */
