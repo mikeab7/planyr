@@ -19,7 +19,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 
 import { ALL_LAYERS, JLAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
-import { STATE_ENVELOPES, STATE_POLYGONS } from "../src/workspaces/site-planner/lib/siteRegion.js";
+import { STATE_ENVELOPES, STATE_POLYGONS, US_STATE_CODES } from "../src/workspaces/site-planner/lib/siteRegion.js";
 
 /* National sources — shown on every site. FEMA, NWI, EPA, rail/airports, OSM, HIFLD, Mapillary, USGS NHD and 3DEP. */
 const NATIONAL = [
@@ -52,7 +52,8 @@ describe("the layer registry's state coverage", () => {
     for (const [id, cfg] of Object.entries(JLAYERS)) expect(cfg.states, id).toEqual(["TX"]);
   });
   it("every state code used is one siteState() can actually return", () => {
-    const known = new Set([...Object.keys(STATE_ENVELOPES), ...Object.keys(STATE_POLYGONS)]);
+    // siteState names all 50 states + DC since B2479568; the original eight (envelopes / outlines) are a subset of that list.
+    const known = new Set([...Object.keys(STATE_ENVELOPES), ...Object.keys(STATE_POLYGONS), ...US_STATE_CODES]);
     for (const [id, c] of Object.entries(ALL_LAYERS)) for (const st of c.states || []) expect(known.has(st), `${id}: ${st}`).toBe(true);
   });
   it("every Georgia layer is Georgia-only, and each is in the declared Georgia set", () => {

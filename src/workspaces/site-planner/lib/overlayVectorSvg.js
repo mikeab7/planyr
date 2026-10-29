@@ -19,7 +19,7 @@
  * style: { stroke, strokeWidth, strokeOpacity, dash, fill, fillOpacity, radius }
  */
 import { xmlEscape } from "./kmzExport.js";
-import { pointSymbolOptions } from "./layerRequest.js";
+import { pointSymbolOptions, lineLabelText } from "./layerRequest.js";
 
 const clampNum = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // Trim to `round` decimals without trailing-zero / exponent noise (kmzExport `num` idiom).
@@ -168,6 +168,42 @@ export function esriPrintFeatures(gj, cfg, leafStyle) {
     out.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
   }
   return out;
+}
+
+/* NEW-1 (DeSoto / Olive Branch) — the printed twin of the on-screen pipe-size label (`cfg.lineLabel`): ONE label per feature, at the middle of the
+ * line's length (the longest part of a multi-line), same text rule as the screen (`lineLabelText`). Returns [{lng,lat,text}] — the shape the export's
+ * vector fragment already takes for contour labels. PDF-PARITY. Pure. */
+export function esriLineLabels(gj, cfg) {
+  const text = lineLabelText(cfg, gj && gj.properties);
+  const g = gj && gj.geometry;
+  if (!text || !g) return [];
+  if (g.type === "Polygon" || g.type === "MultiPolygon") { // a polygon row (DeSoto zoning) labels its largest ring at the ring's area centroid
+    const rings = (g.type === "Polygon" ? [g.coordinates] : g.coordinates).map((r) => r[0]).filter((r) => r && r.length >= 3);
+    let best = null, bestA = 0;
+    for (const r of rings) { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1]; a = Math.abs(a / 2); if (a > bestA) { bestA = a; best = r; } }
+    if (!best || !(bestA > 0)) return [];
+    let cx = 0, cy = 0, A = 0;
+    for (let i = 0, j = best.length - 1; i < best.length; j = i++) { const f = best[j][0] * best[i][1] - best[i][0] * best[j][1]; A += f; cx += (best[j][0] + best[i][0]) * f; cy += (best[j][1] + best[i][1]) * f; }
+    return A ? [{ lng: cx / (3 * A), lat: cy / (3 * A), text }] : [];
+  }
+  const parts = g.type === "LineString" ? [g.coordinates] : g.type === "MultiLineString" ? g.coordinates : [];
+  let best = null, bestLen = -1;
+  for (const pts of parts) {
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (len > bestLen) { bestLen = len; best = pts; }
+  }
+  if (!best || best.length < 2 || !(bestLen > 0)) return [];
+  let half = bestLen / 2;
+  for (let i = 1; i < best.length; i++) {
+    const seg = Math.hypot(best[i][0] - best[i - 1][0], best[i][1] - best[i - 1][1]);
+    if (half <= seg && seg > 0) {
+      const t = half / seg;
+      return [{ lng: best[i - 1][0] + (best[i][0] - best[i - 1][0]) * t, lat: best[i - 1][1] + (best[i][1] - best[i - 1][1]) * t, text }];
+    }
+    half -= seg;
+  }
+  return [];
 }
 
 // terrain worker artifact coords are [lat,lng]; GeoJSON/our features are [lon,lat].
