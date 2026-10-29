@@ -1528,6 +1528,8 @@ export default function ModelApp({
   const onSaveNow = () => {
     if (fileMode) { fw.flush?.(); showNotice(fw.cloudConfirmed ? "Saving the file…" : "Saving…"); return; }
     if (userId && status !== "not-provisioned" && !divergedRef.current) {
+      // main's push effect only fires for edits not yet confirmed uploaded (dirtyRef) — say so when there are none
+      if (!dirtyRef.current) { showNotice("Everything is already saved to your account."); return; }
       pushImmediateRef.current = true;
       setPushNonce((n) => n + 1);
       showNotice("Saving to your account…");
