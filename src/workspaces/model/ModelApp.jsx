@@ -379,6 +379,7 @@ export default function ModelApp({
   // the grid's `selRange` moves but DOM focus is left on nothing (the box blurs to `document.body`)
   // and every keystroke typed right after is silently discarded.
   const sheetViewRef = useRef(null);
+  const formulaBarRef = useRef(null); // NEW-1 — its pending text is committed before a sheet change
   const focusGrid = useCallback(() => sheetViewRef.current?.focusGrid(), []);
   // STAGE 3 (NEW-1) — trace precedents/dependents. Plain view state, like `zoom`/`painter` below
   // — never through the undo stack, never synced to the cloud. `null` = no trace active; see
@@ -831,25 +832,38 @@ export default function ModelApp({
   // `activeSheetId` state's own header above — never through `commit`); the other four are real
   // content edits and go through the undo stack like everything else, syncing the view's
   // `activeSheetId` afterward since add/duplicate/delete all pick a new active sheet themselves.
-  const onSelectSheetTab = useCallback((id) => setActiveSheetId(id), []);
+  // NEW-1 (2026-10-29) — every way of changing which sheet is showing first COMMITS whatever is
+  // half-typed (cell editor, formula bar) to the sheet being left, exactly like Excel. Without it
+  // the editor state outlived the tab change and the next Enter wrote the text into the NEW sheet.
+  // The commit goes through `applyActive`'s CURRENT `activeSheetId`, so this must run before any
+  // `setActiveSheetId` below; it is queued as an ordinary functional commit, so the sheet-changing
+  // commits after it compose on top of it (they build from the latest workbook, not `workbook`).
+  const commitPendingEntry = useCallback(() => {
+    sheetViewRef.current?.commitPending?.();
+    formulaBarRef.current?.commitPending?.();
+  }, []);
+  const onSelectSheetTab = useCallback((id) => { commitPendingEntry(); setActiveSheetId(id); }, [commitPendingEntry]);
   const onAddSheetTab = useCallback(() => {
-    const next = addSheet(workbook);
-    commit(next);
-    setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook]);
-  const onDuplicateSheetTab = useCallback((id) => {
-    const next = duplicateSheet(workbook, id);
-    if (next === workbook) return;
-    commit(next);
-    setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook]);
+    commitPendingEntry();
+    const id = addSheet(workbook).activeSheetId; // ids come from `nextSheetId`, which a cell edit never moves
+    commit((wb) => addSheet(wb));
+    setActiveSheetId(id);
+  }, [commit, workbook, commitPendingEntry]);
+  const onDuplicateSheetTab = useCallback((sheetId) => {
+    if (duplicateSheet(workbook, sheetId) === workbook) return;
+    commitPendingEntry();
+    const id = duplicateSheet(workbook, sheetId).activeSheetId;
+    commit((wb) => duplicateSheet(wb, sheetId));
+    setActiveSheetId(id);
+  }, [commit, workbook, commitPendingEntry]);
   const onRenameSheetTab = useCallback((id, name) => commit((wb) => renameSheet(wb, id, name)), [commit]);
-  const onDeleteSheetTab = useCallback((id) => {
-    const next = deleteSheet(workbook, id);
+  const onDeleteSheetTab = useCallback((sheetId) => {
+    const next = deleteSheet(workbook, sheetId);
     if (next === workbook) return;
-    commit(next);
+    commitPendingEntry();
+    commit((wb) => deleteSheet(wb, sheetId));
     setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook]);
+  }, [commit, workbook, commitPendingEntry]);
   const onReorderSheetTab = useCallback((from, to) => commit((wb) => reorderSheet(wb, from, to)), [commit]);
   // NEW-1 (command palette) — "add/rename/duplicate/delete sheet" from the palette acts on the
   // CURRENTLY VIEWED sheet, calling the exact same onXSheetTab handlers TabStrip's own UI does
@@ -1081,9 +1095,10 @@ export default function ModelApp({
   // A cross-sheet marker click (SheetView.jsx) — pure navigation, the same "plain tab click,
   // never through commit" convention `onSelectSheetTab` above already uses.
   const onNavigateTrace = useCallback((sheetId, row, col) => {
+    commitPendingEntry(); // NEW-1 — leaving a sheet commits what was typed on it
     setActiveSheetId(sheetId);
     setSelRange({ r1: row, r2: row, c1: col, c2: col });
-  }, []);
+  }, [commitPendingEntry]);
   const renderedTrace = useMemo(() => renderableTrace(trace, graph, activeEntry.id), [trace, graph, activeEntry.id]);
 
   // STAGE 3 (NEW-2) — inconsistent-formula flags for the ACTIVE sheet, recomputed fresh on every
@@ -1354,7 +1369,7 @@ export default function ModelApp({
             style={{ flex: "none", background: "var(--surface-raised)" }}
           >
           <Ribbon ctx={ctx} />
-          <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} focusGrid={focusGrid} />
+          <FormulaBar ref={formulaBarRef} sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} focusGrid={focusGrid} />
           </div>
           {/* NEW-1 (B1251888) — Find/Replace, Name Manager, and the Inconsistencies panel all
               render IN NORMAL FLOW here, below the header row and the ribbon/formula-bar card
