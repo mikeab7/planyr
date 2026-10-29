@@ -148,6 +148,12 @@ export const ALLOWED_HOSTS = new Set([
   "okmaps.onenet.net", // OneNet-hosted state GIS server
   "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
   "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
+  /* NEW-1 (Oklahoma second pass, B2497472, 2026-10-29) — hosts the second search of the 61 "none" counties named, added so each can be MEASURED through this relay before any county is wired to it:
+   * INCOG's newer ArcGIS Server (map11 carries Parcels_OsageCo / _CreekCo / _RogersCo / _TulsaCo / _WagonerCo — map8 / map9 above refuse the relay), the DataCrossPoint platform behind
+   * MapView Online (app.datacrosspoint.com/browse/oklahoma, "Oklahoma County Assessor Data"), and the City of Ada's ArcGIS Server (Pontotoc County). Nothing here is wired yet. */
+  "map11.incog.org",
+  "app.datacrosspoint.com", "datacrosspoint.com", "www.datacrosspoint.com", "gis.datacrosspoint.com", "maps.datacrosspoint.com", "api.datacrosspoint.com",
+  "maps.adaok.com", "maps.adaok.com:6443", "maps.adaok.com:6080",
   /* NEW-1 (Arizona, 2026-10-19) — Mohave County's own GIS server (Mohave is the one Arizona county neither the ADWR compile nor an ArcGIS Online layer covers).
    * The build sandbox cannot reach it, so it is relayed and MEASURED through here (on the PR preview) before the county is wired to it. */
   "mcgis.mohave.gov", // Mohave County GIS — PARCELS MapServer
