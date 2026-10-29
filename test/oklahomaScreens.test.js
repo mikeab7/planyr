@@ -89,6 +89,13 @@ describe("every row is complete and drawn from the registry", () => {
     for (const r of ROAD_CLASSES) expect(sw(ALL_LAYERS.ok_road, { ODOTROUTECLASS: r.key }).color).toBe(r.color);
     for (const i of IMPAIRED) expect(sw(ALL_LAYERS.ok_deq_303d, { Category: i.key.toUpperCase() }).color).toBe(i.color);
   });
+  it("no two entries of one merged row's legend share a colour (a swatch must name one thing)", () => {
+    for (const g of Object.keys(OK_MERGE_GROUPS)) {
+      const lead = ids.filter((id) => ALL_LAYERS[id].mergeGroup === g).find((id) => Array.isArray(ALL_LAYERS[id].legend));
+      const cols = ALL_LAYERS[lead].legend.map((e) => `${e.color}${e.dash ? "-dash" : ""}`);
+      expect(new Set(cols).size, `${g}: ${cols.join(" ")}`).toBe(cols.length);
+    }
+  });
   it("a merged row's lead member carries a legend that names every member's colour", () => {
     const members = (g) => ids.filter((id) => ALL_LAYERS[id].mergeGroup === g);
     for (const g of Object.keys(OK_MERGE_GROUPS)) {
@@ -255,10 +262,10 @@ describe("click cards are clean (constraint #45) — plain labels, no empty rows
     expect(rows.find((r) => r.label === "Operator").text).toBe("Hill Resources INC");
     expect(rows.find((r) => r.label === "Well").text).toBe("Smith 1-A");
   });
-  it("a dam card decodes the one-letter hazard and owner codes; an unnamed owner is simply absent", () => {
+  it("a dam card decodes the one-letter hazard code; an undecoded one-letter owner type is absent, never guessed", () => {
     const rows = ALL_LAYERS.ok_dams.identifyCard(samples.ok_dams).rows;
     expect(rows.find((r) => r.label === "Hazard class").text).toMatch(/^High/);
-    expect(rows.find((r) => r.label === "Owner type").text).toBe("Federal");
+    expect(rows.find((r) => r.label === "Owner type")).toBeUndefined();
     expect(rows.find((r) => r.label === "Owner")).toBeUndefined();
   });
   it("a road card decodes the maintainer and prints traffic as words", () => {
@@ -334,7 +341,7 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
       const text = [c.note, c.infoCaveat, c.identifyNote].join(" ");
       expect(text, id).not.toMatch(/has no ETJ|zoning and permitting authority|review pending/i);
       expect(text, id).not.toMatch(/McGirt|Osage Wind|\bBIA\b|sign-off/i);
-      expect(text, id).not.toMatch(/runs with the land|strictest protection|can exclude them|endangered-species review|Land use inside is limited|none is published|is not public/i); // statements no source in the registry supports // legal conclusions about reservations / mineral estates are never typed from memory
+      expect(text, id).not.toMatch(/runs with the land|strictest protection|can exclude them|endangered-species review|Land use inside is limited|none is published|is not public|tighter limits|hard constraint|extra protection|older wells can be approximate/i); // statements no source in the registry supports // legal conclusions about reservations / mineral estates are never typed from memory
     }
     expect(OK_SOURCES.okCity.fullPurposeOnly).toBe(true);
   });
@@ -373,9 +380,9 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
     expect(ALL_LAYERS.ok_crit_habitat.simplifyFactor).toBeGreaterThan(0);
     for (const id of ["ok_tribal", "ok_deq_sensitive", "ok_owrb_special_ws", "ok_deq_appb_areas", "ok_deq_303d"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThan(0);
   });
-  it("the solid-waste card decodes both spellings of construction & demolition, and the state-highway note does not over-claim who permits access", () => {
-    for (const code of ["C/D", "C&D"]) expect(ALL_LAYERS.ok_deq_solid_waste.identifyCard({ Facility_Name: "X", Facility_Type: code }).rows.find((r) => r.label === "Kind").text).toBe("Construction & demolition landfill");
-    expect(ALL_LAYERS.ok_road.note).toMatch(/usually permits/);
+  it("the solid-waste card prints DEQ's own facility-type code (no decoding typed from memory), and the state-highway note does not over-claim who permits access", () => {
+    for (const code of ["C/D", "MDTS"]) expect(ALL_LAYERS.ok_deq_solid_waste.identifyCard({ Facility_Name: "X", Facility_Type: code }).rows.find((r) => r.label === "Facility type (DEQ code)").text).toBe(code);
+    expect(ALL_LAYERS.ok_road.note).not.toMatch(/permits/);
     expect(ALL_LAYERS.ok_road.note).not.toMatch(/On one of these ODOT/);
   });
   it("third-review fixes: turnpike is keyed off the maintainer, a route code is no street name, WHPA is generalised, every row has a vintage, the apostrophe case is right", async () => {

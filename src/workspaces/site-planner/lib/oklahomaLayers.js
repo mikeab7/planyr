@@ -63,7 +63,7 @@ const legendOf = (classes) => classes.map((c) => ({ label: c.label, color: c.col
 /* =============================================================== Oil & gas wells (Corporation Commission) =============================================================== */
 /* RBDMS `symbol_class` → one of seven map classes. ONE table: styleFn and the legend both read it. */
 export const WELL_CLASSES = [
-  { key: "orphan", label: "Orphan well — no responsible operator", color: "#b91c1c", radius: 5.5, classes: ["ORPHAN"] },
+  { key: "orphan", label: "Orphan well", color: "#b91c1c", radius: 5.5, classes: ["ORPHAN"] },
   { key: "queued", label: "Queued for state plugging", color: "#ea580c", radius: 5, classes: ["STATE_FUNDS_PLUGGING"] },
   { key: "ta", label: "Temporarily abandoned", color: "#d97706", radius: 4.5, classes: ["TEMPORARILY_ABANDONED"] },
   { key: "active", label: "Oil / gas / storage (not plugged)", color: "#1f2937", radius: 3.5, classes: ["OIL", "GAS", "OIL/GAS", "GAS_STORAGE"] },
@@ -93,8 +93,7 @@ export const damHazardOf = (raw) => {
   return "Other";
 };
 const damStyle = (props, opacity) => { const c = DAM_CLASSES.find((d) => d.key === damHazardOf(props && props.hazard)); return dot(c.color, c.radius)(opacity); };
-const DAM_OWNER = { f: "Federal", s: "State", l: "Local government", p: "Private", u: "" };
-const damOwnerType = (raw) => { const s = String(raw == null ? "" : raw).trim(); return s.length === 1 ? DAM_OWNER[s.toLowerCase()] || "" : s; };
+const damOwnerType = (raw) => { const s = String(raw == null ? "" : raw).trim(); return s.length === 1 ? "" : s; }; // a one-letter code is not decoded (no recorded source) — the owner name carries the answer
 
 /* =============================================================== State highways (ODOT) =============================================================== */
 export const ROAD_CLASSES = [
@@ -116,7 +115,7 @@ const TRIBAL = {
   osage: { key: "osage", label: "Osage Reservation (Census)", color: "#0f766e" },
   trust: { key: "trust", label: "Trust land (Census)", color: "#a16207" },
   cherokee: { key: "cherokee", label: "Cherokee Nation reservation (the Nation's own file)", color: "#b45309", dash: true },
-  land: { key: "land", label: "Cherokee Nation tribal land tracts", color: "#b45309" },
+  land: { key: "land", label: "Cherokee Nation tribal land tracts", color: "#92400e" },
 };
 const tribalCensusKind = (name) => /^osage reservation$/i.test(String(name || "")) ? "osage" : /trust land/i.test(String(name || "")) ? "trust" : "otsa";
 const tribalStyle = (props, opacity) => {
@@ -143,7 +142,6 @@ const WASTE = {
   solid: { label: "Landfill / solid-waste facility", color: "#78350f", radius: 5 },
   haz: { label: "Hazardous-waste permit site", color: "#9d174d", radius: 5 },
 };
-const SOLID_TYPE = { "C/D": "Construction & demolition landfill", "C&D": "Construction & demolition landfill", CCR: "Coal combustion residual", COMP: "Compost facility", INCR: "Incinerator", MDP: "Medical waste", MDTS: "Medical transfer station", MSW: "Municipal solid-waste landfill", NHIW: "Non-hazardous industrial waste", P: "Processing", T: "Tire", TS: "Transfer station" };
 const IC_PROGRAM = { SCAP: "Site Cleanup Assistance", VCP: "Voluntary Cleanup", RCRA: "RCRA", Superfund: "Superfund", "Solid Waste": "Solid waste", Brownfields: "Brownfields", "Brownfields Land Use Change": "Brownfields land-use change" };
 
 /* =============================================================== Water =============================================================== */
@@ -157,7 +155,7 @@ export const SPECIAL_WS = [
   { key: "SWS", label: "Sensitive water-supply watershed", color: "#2563eb" },
 ];
 const specialWsOf = (t) => SPECIAL_WS.find((w) => w.key === String(t || "").trim().toUpperCase()) || null;
-const PROTECTED = { scenic: { label: "Scenic River (OWRB)", color: "#0e7490" }, areaT1: { label: "Appendix B area — parks, forests, wildlife areas", color: "#15803d" }, areaT2: { label: "Appendix B area — federally listed species", color: "#166534", dash: true }, stream: { label: "Appendix B stream", color: "#15803d" }, sens: { label: "Sensitive watershed — OKR10 stormwater permit", color: "#7e22ce", dash: true } };
+const PROTECTED = { scenic: { label: "Scenic River (OWRB)", color: "#0e7490" }, areaT1: { label: "Appendix B area — parks, forests, wildlife areas", color: "#15803d" }, areaT2: { label: "Appendix B area — federally listed species", color: "#166534", dash: true }, stream: { label: "Appendix B stream", color: "#be123c" }, sens: { label: "Sensitive watershed — OKR10 stormwater permit", color: "#7e22ce", dash: true } };
 export const IMPAIRED = [
   { key: "5a", label: "Impaired — TMDL needed (5a)", color: "#c2410c" },
   { key: "5b", label: "Impaired — category 5b", color: "#b45309" },
@@ -233,7 +231,7 @@ export const OK_LAYERS = {
       rowOf("Traffic", Number(p.AADT) > 0 ? `${Number(p.AADT).toLocaleString("en-US")} vehicles a day` : "", { raw: true }),
       Number(p.TRUCKROUTE) === 1 ? rowOf("Truck route", "Yes", { raw: true }) : null,
     ].filter(Boolean)),
-    note: "ODOT's state system — Interstates, US highways, state highways and turnpikes. On a state-system road ODOT (or the Turnpike Authority) usually permits the access — the card's 'Maintained by' says when a city or county maintains it; off the state system the county or city does. An absent line is NOT 'unmaintained'.",
+    note: "ODOT's state system — Interstates, US highways, state highways and turnpikes. The card's 'Maintained by' line says who maintains each segment — the first call for an access question. An absent line is NOT 'unmaintained'.",
     infoCaveat: "Loads zoomed in. ODOT's linear-referencing inventory (edited 2026-10-26); a driveway permit decides the access, not this line.",
     group: "jurisdiction", order: 3,
   }),
@@ -288,7 +286,7 @@ export const OK_LAYERS = {
       ];
     }),
     note: "Every well on the Oklahoma Corporation Commission's record (457,000+) — orphan wells in red, wells queued for state plugging in orange, temporarily abandoned in amber, plugged wells in light grey. Loads zoomed in.",
-    infoCaveat: "Locations are as filed with the Commission and older wells can be approximate. An orphan, unplugged or temporarily abandoned well near a building footprint calls for a field search and a plugging-status check with the Commission's Oil & Gas Conservation Division. Pipelines are not published (the Commission's pipeline data needs a login) — see the Pipelines row for the approximate EIA lines.",
+    infoCaveat: "Locations are as filed with the Commission. An orphan, unplugged or temporarily abandoned well near a building footprint calls for a field search and a plugging-status check with the Commission's Oil & Gas Conservation Division. Pipelines are not published (the Commission's pipeline data needs a login) — see the Pipelines row for the approximate EIA lines.",
     group: "environmental", order: 21,
   }),
   ok_pst: pointRow({
@@ -305,7 +303,7 @@ export const OK_LAYERS = {
       Number(p.active_ast_tank_count) > 0 ? rowOf("Aboveground tanks", p.active_ast_tank_count, { raw: true }) : null,
       /^yes$/i.test(String(p.indian_trust_lands || "")) ? rowOf("On Indian trust land", "Yes", { raw: true }) : null,
     ].filter(Boolean)),
-    note: "The Corporation Commission's register of regulated petroleum storage tank facilities (21,000+): gas stations, distributors, farms, industrial sites. A REGISTER of tanks, not a leak list — the Commission's release (leaking-tank) cases are their own row, Petroleum Tank Releases, in Cleanup Sites. A Phase I ESA pre-screen.",
+    note: "The Corporation Commission's register of regulated petroleum storage tank facilities (21,000+): each regulated facility with its tanks. A REGISTER of tanks, not a leak list — the Commission's release (leaking-tank) cases are their own row, Petroleum Tank Releases, in Cleanup Sites. A Phase I ESA pre-screen.",
     group: "environmental", order: 22,
   }),
 
@@ -403,7 +401,7 @@ export const OK_LAYERS = {
     label: "Landfills & Solid-Waste Facilities", mergeGroup: "ok_waste", source: DEQ + " — Land Protection",
     url: urlFor("okSolidWaste"), minZoom: 9, color: WASTE.solid.color, weight: 1.5, pointRadius: WASTE.solid.radius,
     legend: legendOf([WASTE.solid, WASTE.haz]), hoverTitle: "Solid-waste facility", hoverSource: "Oklahoma DEQ",
-    identifyCard: card("Solid-waste facility", (p) => [rowOf("Facility", p.Facility_Name), rowOf("Kind", SOLID_TYPE[String(p.Facility_Type || "").trim()] || p.Facility_Type, { raw: true }), rowOf("City", p.City), rowOf("County", p.Cty)].filter(Boolean)),
+    identifyCard: card("Solid-waste facility", (p) => [rowOf("Facility", p.Facility_Name), rowOf("Facility type (DEQ code)", p.Facility_Type, { raw: true }), rowOf("City", p.City), rowOf("County", p.Cty)].filter(Boolean)),
     note: "DEQ-permitted solid-waste facilities (147): landfills of every kind, transfer stations, incinerators, compost, tire and medical-waste facilities.",
     infoCaveat: "A landfill's waste footprint is larger than its point. Landfill gas, settlement and groundwater make adjacent ground a geotechnical and environmental question.",
     group: "environmental", order: 30,
@@ -455,7 +453,7 @@ export const OK_LAYERS = {
     identifyCard: card("Appendix B protected area", (p) => [
       rowOf("Name", p.NAME), rowOf("Kind", p.TYPE, { raw: true }),
       rowOf("Table", Number(p.AB_TABLE) === 2 ? "Table 2 — federally listed species" : Number(p.AB_TABLE) === 1 ? "Table 1 — parks, forests, wildlife areas" : "", { raw: true }),
-    ].filter(Boolean), "Waters in Appendix B areas carry extra protection under the Oklahoma Water Quality Standards; confirm with DEQ Water Quality what that means for a discharge from this site."),
+    ].filter(Boolean), "Appendix B areas are listed in the Oklahoma Water Quality Standards; confirm with DEQ Water Quality what that means for a discharge from this site."),
     note: "Areas listed in Appendix B of the Oklahoma Water Quality Standards — Table 1: waters in national and state parks, forests, wildlife areas and refuges; Table 2: areas with federally listed threatened or endangered species.",
     group: "environmental", order: 35,
   }),
@@ -507,7 +505,7 @@ export const OK_LAYERS = {
     styleFn: impairedStyle, legend: legendOf([...IMPAIRED, IMPAIRED_OTHER]),
     hoverTitle: "Impaired waterbody", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Impaired waterbody", (p) => [rowOf("Name", p.Name), rowOf("Category", (IMPAIRED.find((i) => i.key === String(p.Category || "").trim().toLowerCase()) || {}).label || p.Category, { raw: true })].filter(Boolean),
-      "A stream on DEQ's 303(d) list fails a water-quality standard; a new discharge to it (including stormwater) can face tighter limits. Ask DEQ Water Quality."),
+      "A stream on DEQ's 303(d) list is listed as impaired; ask DEQ Water Quality what that means for a discharge from this site."),
     note: "Streams and lakes on DEQ's 2024 Clean Water Act 303(d) list (839 segments), coloured by category.",
     group: "environmental", order: 38,
   }),
@@ -543,7 +541,7 @@ export const OK_LAYERS = {
     url: GIS_SOURCES.okCemeteries.serviceUrl, minZoom: 12, color: "#475569", weight: 2, pointRadius: 3.5,
     hoverTitle: "Cemetery", hoverSource: "USGS GNIS",
     identifyCard: card("Cemetery", (p) => [rowOf("Name", pick(p, "NAME", "name")), rowOf("City", pick(p, "CITY", "city"))].filter(Boolean)),
-    note: "INCOMPLETE: recorded cemeteries only. Unrecorded family burial grounds are NOT on this layer, so an empty map is never proof of none. A burial ground on the site is a hard constraint; ask the county and have it surveyed.",
+    note: "INCOMPLETE: recorded cemeteries only. Unrecorded family burial grounds are NOT on this layer, so an empty map is never proof of none. Ask the county, and have the site surveyed.",
     group: "environmental", order: 41,
   }),
   ok_crit_habitat: areaRow({
