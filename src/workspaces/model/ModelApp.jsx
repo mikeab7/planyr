@@ -337,7 +337,6 @@ export default function ModelApp({
     setDiverged(true);
     setStatus("diverged");
   }, []);
-  const shownStatus = fileMode ? fw.status : shownModelStatus(status, diverged);
   const loadTokenRef = useRef(0);
   // Ctrl+C/Ctrl+V's INTERNAL clipboard (item 6) — see lib/sheetOps.js's header for why this is
   // deliberately not the OS clipboard. A ref, not state: copying never re-renders anything.
@@ -472,6 +471,9 @@ export default function ModelApp({
     onLoaded: (wb) => { reset(wb); setActiveSheetId(wb.activeSheetId); },
     onFileChanged: (id) => setActiveFile(fileScopeRef.current, id),
   });
+  // The status the header shows: the file's own in file mode, else the project/org workbook's. Declared
+  // AFTER `fileMode` and `fw` (it reads both) — it used to sit above them and crashed the whole tab on open.
+  const shownStatus = fileMode ? fw.status : shownModelStatus(status, diverged);
   const closeFile = useCallback(async () => {
     const ok = await fw.flush();
     if (!ok) return; // the bar already shows why it couldn't save; never close over unsaved edits
