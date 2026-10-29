@@ -176,10 +176,6 @@ export const ALLOWED_HOSTS = new Set([
   "gis.pottcounty-ia.gov", // Pottawattamie County (Council Bluffs) GIS
   "gis.dallascountyiowa.gov", // Dallas County (Adel) GIS
   "magic-gis.com", // MAGIC — Muscatine Area GIS consortium (Muscatine County parcels)
-  /* NEW-1 (Iowa second pass, B2499376, 2026-10-29) — two vendor / county viewer hosts the 21 remaining "none" Iowa counties name. The build sandbox reaches neither (CONNECT 403), so they are
-   * relayed ONLY so a session can MEASURE what they serve (CAMAvision's Iowa county sites; Des Moines County's own viewer) through planyr.io before any county is wired to them. */
-  "maps.camavision.com", // CAMAvision Maps — the assessor-software vendor's county viewers (maps.camavision.com/<county>ia): Appanoose, Carroll, Hancock, Tama, Van Buren, Washington
-  "www.dmcgis.com", // Des Moines County (Burlington) GIS Mapping Application
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",

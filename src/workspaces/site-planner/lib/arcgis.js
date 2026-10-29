@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl } from "./counties.js";
+import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl } from "./counties.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
 // geometry without pulling in counties.js; imported (not bare re-exported) because functions below use them in scope.
@@ -139,7 +139,7 @@ export function isPaginationUnsupportedError(e) {
 // explicitly (lon/lat, projected later by the site's own frame), so the default is now WGS84 and never a state plane.
 export async function queryFeatures(
   layerUrl,
-  { where = "1=1", outFields = "*", count = 8, outSR = 4326, timeoutMs } = {}
+  { where = "1=1", outFields = "*", count = 8, outSR = 4326, timeoutMs, orderBy } = {}
 ) {
   const url = trim(layerUrl) + "/query";
   try {
@@ -149,6 +149,7 @@ export async function queryFeatures(
       returnGeometry: "true",
       outSR,
       resultRecordCount: count,
+      ...(orderBy ? { orderByFields: orderBy } : {}),
     }, { timeoutMs });
     return j.features || [];
   } catch (e) {
@@ -286,6 +287,7 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       outFields: "*",
       returnGeometry: "true",
       outSR: 4326,
+      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
     }, { timeoutMs });
     const feats = j.features || [];
     return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0] || null;
@@ -300,6 +302,7 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       outFields: "*",
       returnGeometry: "true",
       outSR: 4326,
+      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}), // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
     }, { timeoutMs });
     return (j.features || [])[0] || null;
   } catch (e) {

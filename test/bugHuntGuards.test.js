@@ -681,7 +681,11 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     const src = read("../src/workspaces/doc-review/lib/reviewStore.js");
     // the unconditional pre-delete clearDraft is gone; it now runs only on !error
     expect(src).not.toMatch(/\}\s*catch \(_\) \{\}\s*\n\s*if \(uid\) clearDraft\(uid, id\);/);
-    expect(src).toMatch(/if \(!error && uid\) clearDraft\(uid, id\)/);
+    // NEW-1 (2026-10-29): purgeReview deletes the row FIRST and returns on any error, so clearDraft sits
+    // after that early return — still "only after a successful cloud delete", now by ordering.
+    const purge = src.slice(src.indexOf("export async function purgeReview"), src.indexOf("export async function purgeExpiredDeleted"));
+    expect(purge.indexOf("if (error) return")).toBeGreaterThan(-1);
+    expect(purge.indexOf("clearDraft(uid, id)")).toBeGreaterThan(purge.indexOf("if (error) return"));
   });
 
   it("B579: DocReview warns on a genuine signed-in PDF store failure (not oversize, not logged-out)", () => {

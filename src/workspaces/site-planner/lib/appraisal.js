@@ -630,6 +630,8 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
   const rows = apprRows(attrs);
   const row = (label) => { const r = rows.find((x) => x.label === label); return r ? r.value : null; };
   const clean = (v) => (v == null || isPlaceholderValue(v) ? null : String(v).replace(/\s+/g, " ").trim());
+  /* NEW-1 (Iowa second pass): Monroe and Van Buren publish a rural lot's situs as "000000" — a column filler, never an address. */
+  const cleanAddr = (v) => { const c = clean(v); return c && /^0+$/.test(c) ? null : c; };
   let deed = null;
   const ac = row("Acreage");
   if (ac != null) { const n = Number(String(ac).replace(/[^0-9.]/g, "")); deed = Number.isFinite(n) && n > 0 ? n : null; }
@@ -642,7 +644,7 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
     /* …and where the generic resolver caught a GEOID — South Carolina RFA's statewide layer carries `GeoID` (the county/district FIPS-style code, "4500720" for every Aiken lot) beside its real tax-map number
      * `T_Map_Number` — it is a jurisdiction code, never the account, so the county's declared parcel column wins over it. */
     account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); const geoOnly = !!(gen && dec && Object.keys(attrs || {}).some((key) => /^geo_?id$/i.test(leafKey(key)) && clean(attrs[key]) === gen)); return gen && dec && !geoOnly && dec.length > gen.length && dec.includes(gen) ? dec : (geoOnly ? dec : (gen || dec || clean(acct))); })(),
-    address: clean(situsAddress(attrs)) || streetFromParts(attrs) || declared(addrField) || clean(addr),
+    address: cleanAddr(situsAddress(attrs)) || streetFromParts(attrs) || cleanAddr(declared(addrField)) || cleanAddr(addr),
     deedAcres: deed,
     taxYear,
   };

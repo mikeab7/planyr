@@ -5159,29 +5159,9 @@
 "kind": "beacon-only",
 "reason": "Assessor and parcel viewer is Schneider Beacon only (per the AssessorSearch listing); searches of ArcGIS Online by county name returned only school districts and a spring inventory, no parcel layer. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
-"Appanoose": {
-"kind": "no-source-found",
-"reason": "County-name searches (web and ArcGIS Online, three phrasings each) found no county GIS page, viewer vendor or parcel layer \u2014 only historical maps and listings. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
 "Audubon": {
 "kind": "beacon-only",
 "reason": "Beacon viewer per a third-party county guide. Schneider's feed carries only a CityOfAudubon service (the town, not the county); ArcGIS Online has no Audubon parcel layer."
-},
-"Calhoun": {
-"kind": "city-only",
-"reason": "The only public Iowa layer is Lake City's own (ArcGIS Online LakeCity51449, 1,377 parcels, last edited 2018-06) \u2014 one town, stale. The 'Calhoun County parcel viewer' host gis.calhouncounty.org is Calhoun County, ALABAMA (Anniston orthos and city limits) and was rejected. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Carroll": {
-"kind": "adapter-needed",
-"reason": "The county viewer is CAMAvision Maps (maps.camavision.com). CAMAvision Maps is a format Planyr does not read yet (a UMN MapServer: parcel attributes from a point-info call, boundary rings as WFS closed lines) \u2014 a BUILD item, not an absence: this county is added to B2317681 (CAMAvision adapter, 10 Missouri counties there too). The viewer answers through the relay (maps.camavision.com/carrollia returned 200)."
-},
-"Cherokee": {
-"kind": "no-source-found",
-"reason": "Only the assessor's search page (cherokee.iowaassessors.com) and a county GIS page were found; no viewer vendor or query service is named, and ArcGIS Online has only a basemap web map for the county. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Clarke": {
-"kind": "no-source-found",
-"reason": "Parcels are viewed through the county GIS website and clarke.iowaassessors.com (per a third-party directory); no query service or ArcGIS Online layer found. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
 "Clay": {
 "kind": "beacon-only",
@@ -5190,10 +5170,6 @@
 "Davis": {
 "kind": "beacon-only",
 "reason": "Beacon GIS plus the assessor's page; ArcGIS Online hits were unrelated wildfire layers. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Des Moines": {
-"kind": "no-source-found",
-"reason": "The county GIS is a custom app (www.dmcgis.com, per a directory listing) plus desmoines.iowaassessors.com; no ArcGIS REST path for it was seen in any search result, web map or item. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
 "Dubuque": {
 "kind": "host-unreachable",
@@ -5211,30 +5187,6 @@
 "kind": "beacon-only",
 "reason": "Beacon; a 'Fremont County' GIS guide found is Colorado's and was rejected. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
-"Greene": {
-"kind": "no-source-found",
-"reason": "No county viewer or vendor identified; ArcGIS Online has only an Iowa State University PLSS web map for Greene. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Hancock": {
-"kind": "no-source-found",
-"reason": "No viewer or query service identified; the one ArcGIS Online hit was Franklin County control points, not Hancock. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Henry": {
-"kind": "no-source-found",
-"reason": "A county property database with GIS maps exists but its vendor is not named; ArcGIS Online hits for 'Henry' were other organisations' golf-course and parks layers. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Howard": {
-"kind": "adapter-needed",
-"reason": "The county viewer is CAMAvision Maps (maps.camavision.com). CAMAvision Maps is a format Planyr does not read yet (a UMN MapServer: parcel attributes from a point-info call, boundary rings as WFS closed lines) \u2014 a BUILD item, not an absence: this county is added to B2317681 (CAMAvision adapter, 10 Missouri counties there too). The viewer answers through the relay (maps.camavision.com/howardia returned 200)."
-},
-"Ida": {
-"kind": "no-source-found",
-"reason": "Web and ArcGIS Online searches by county name returned nothing relevant. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Jackson": {
-"kind": "stale-only",
-"reason": "A public county layer exists (ArcGIS Online services9 MwhmgVod3RReV4Us Parcels/FeatureServer/0: 22,056 polygons, deed holder and parcel number, measured 5/5 interior and 4/4 county-line points) but it was last edited 2019-07-09 \u2014 older than the 2020 currency floor applied to every Iowa row \u2014 so it is not wired. Swap it in if the county republishes."
-},
 "Jones": {
 "kind": "beacon-only",
 "reason": "Beacon, linked from the county GIS page; otherwise only static PDF maps. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
@@ -5243,41 +5195,17 @@
 "kind": "beacon-only",
 "reason": "Beacon only per the AssessorSearch listing; ArcGIS Online hits were a Penn State feature collection. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
-"Lucas": {
-"kind": "no-source-found",
-"reason": "lucas.iowaassessors.com holds assessments and a GIS link sits under the treasurer's page; the vendor behind it could not be identified and no query service was found. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Madison": {
-"kind": "adapter-needed",
-"reason": "The county viewer is CAMAvision Maps (maps.camavision.com). CAMAvision Maps is a format Planyr does not read yet (a UMN MapServer: parcel attributes from a point-info call, boundary rings as WFS closed lines) \u2014 a BUILD item, not an absence: this county is added to B2317681 (CAMAvision adapter, 10 Missouri counties there too). The viewer answers through the relay (maps.camavision.com/madisonia returned 200)."
-},
 "Marion": {
 "kind": "beacon-only",
 "reason": "Beacon, linked from the county IT/GIS maps page; ArcGIS Online 'Marion' hits are the city of Marion in Linn County. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Monroe": {
-"kind": "adapter-needed",
-"reason": "The county viewer is CAMAvision Maps (maps.camavision.com). CAMAvision Maps is a format Planyr does not read yet (a UMN MapServer: parcel attributes from a point-info call, boundary rings as WFS closed lines) \u2014 a BUILD item, not an absence: this county is added to B2317681 (CAMAvision adapter, 10 Missouri counties there too). The viewer answers through the relay (maps.camavision.com/monroeia returned 200)."
 },
 "Montgomery": {
 "kind": "beacon-only",
 "reason": "Beacon only per the AssessorSearch listing. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
-"O'Brien": {
-"kind": "beacon-only",
-"reason": "Beacon is the listed parcel and GIS viewer; ArcGIS Online has only Iowa DOT project layers for the county. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
 "Page": {
 "kind": "beacon-only",
 "reason": "Beacon (county site pagecounty.iowa.gov); the ArcGIS Online 'Real Estate Parcel' layer is Linn County's. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Palo Alto": {
-"kind": "beacon-only",
-"reason": "Beacon is the listed viewer (an Equator Studios page also exists, a paid-data storefront); ArcGIS Online has only a utility viewer guide. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Plymouth": {
-"kind": "no-source-found",
-"reason": "plymouth.iowaassessors.com is an assessor and GIS portal whose vendor could not be identified; ArcGIS Online returned nothing. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
 "Pocahontas": {
 "kind": "beacon-only",
@@ -5303,10 +5231,6 @@
 "kind": "vendor-viewer-only",
 "reason": "The viewer is an Equator Studios storefront (gis.equatorstudios.com/iowa_sioux) \u2014 a Next.js page selling parcel data, with no query service behind it (read through the relay); ArcGIS Online has none. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
 },
-"Tama": {
-"kind": "adapter-needed",
-"reason": "The county viewer is CAMAvision Maps (maps.camavision.com). CAMAvision Maps is a format Planyr does not read yet (a UMN MapServer: parcel attributes from a point-info call, boundary rings as WFS closed lines) \u2014 a BUILD item, not an absence: this county is added to B2317681 (CAMAvision adapter, 10 Missouri counties there too). The viewer answers through the relay (maps.camavision.com/tamaia returned 200)."
-},
 "Taylor": {
 "kind": "login-required",
 "reason": "The county's Integrity GIS Geocortex site (Taylor_County_IA on bentongis.integritygis.com) answers a guest with 403 'The current user cannot access the desired resource' (measured through the relay) \u2014 a login-gated site is a named gap, never worked around."
@@ -5314,14 +5238,6 @@
 "Union": {
 "kind": "beacon-only",
 "reason": "Beacon per the AssessorSearch listing; the only ArcGIS Online 'Union' hits were Black Hawk County's election layer. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Van Buren": {
-"kind": "no-source-found",
-"reason": "No county GIS viewer found (county site vanburencoia.org); web results were commercial resellers and Van Buren County, Michigan. Absent from Schneider Geospatial's public Iowa county feed (wfs.schneidercorp.com lists 38 Iowa county services; this county is not one) and from ArcGIS Online."
-},
-"Washington": {
-"kind": "adapter-needed",
-"reason": "The county viewer is CAMAvision Maps (maps.camavision.com). CAMAvision Maps is a format Planyr does not read yet (a UMN MapServer: parcel attributes from a point-info call, boundary rings as WFS closed lines) \u2014 a BUILD item, not an absence: this county is added to B2317681 (CAMAvision adapter, 10 Missouri counties there too). The viewer answers through the relay (maps.camavision.com/washingtonia returned 200)."
 }
 }
 }
