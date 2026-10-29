@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-27",
-        "approvedCommit": "db2aa0906",
-        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     }
   }
