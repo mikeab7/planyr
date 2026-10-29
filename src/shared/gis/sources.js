@@ -1097,7 +1097,7 @@ export const GIS_SOURCES = {
     lastVerified: "2026-10-29",
   },
   /* ═══ NEW-1 follow-up (Georgia due-diligence, 2026-10-29) — four rows on hosts the build sandbox cannot reach (403 at its egress) but planyr.io's /gis-proxy relay CAN: the Georgia GIS Data Clearinghouse at UGA ITOS (`maps.itos.uga.edu`: GDOT's own functional-class / ownership service, DNR's rare-species and the USGS mineral-resource records) and Bartow County's own ArcGIS Server. Each was MEASURED through the relay from planyr.io (live 2026-10-29 counts on the fixtures). `relay: true` marks them; layers read `/gis-proxy/<host>/…`, never the upstream. ═══ */
-  /* GDOT's own statewide road-ownership layer (`GDOT/GDOT_FunctionalClass` layer 20 'Ownership', 'Ownership of roadways in Georgia, as of August 2022'): 210,656 segments, `Group_Name` = State Owned / County Owned / City Owned / Other (`OWNERSHIP` 1 = state, 2 / 24 = county, 3 = city; the other codes are all 'Other'). `OWNERSHIP_ENTITY` is an unreadable numeric entity code and is never shown. The owner of the road fronting a site is who permits its driveway. Live 2026-10-29 (±0.01° box): Atlanta 141 · Savannah 181 · Albany 73 · Adairsville 85. */
+  /* GDOT's own statewide road-ownership layer (`GDOT/GDOT_FunctionalClass` layer 20 'Ownership', 'Ownership of roadways in Georgia, as of August 2022'): 210,656 segments, `Group_Name` = State Owned / County Owned / City Owned / Other (`OWNERSHIP` 1 = state, 2 = county, 3 = city, 24 = a unified / consolidated city-county government that GDOT files under County; every other code is 'Other' — parks, private, toll, airport, university, federal). `OWNERSHIP_ENTITY` is an unreadable numeric entity code and is never shown. The owner of the road fronting a site is who permits its driveway. Live 2026-10-29 (±0.01° box): Atlanta 141 · Savannah 181 · Albany 73 · Adairsville 85. */
   gaRoadOwnership: {
     key: "gaRoadOwnership",
     label: "Road ownership (Georgia DOT)",
@@ -1143,7 +1143,7 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-10-29",
   },
-  /* Bartow County's own zoning layer: 31,627 parcel-level polygons, `STZONECODE` the district and `ZONINGTEXT` the county's free-text note (rezoning case numbers, 'w/ conditions', approved uses). INCORPORATED land is carried as the code 'Incorporated' — the cities (Adairsville, Cartersville, Emerson…) zone themselves and their zoning is NOT in this layer; the row says so on the card. The server answers point-geometry queries 500 intermittently, so fixtures use envelopes (what the map and the verifier send). Live 2026-10-29 (±0.01° box): Adairsville 902 · rural Bartow 79 and 28. */
+  /* Bartow County's own zoning layer: 31,627 parcel-level polygons, `STZONECODE` the district and `REZONING` the county's rezoning case reference (2,327 records, e.g. CU-2162-17, RZ-2289-19) and `ZONINGTEXT` its free-text note (377 records: 'w/ conditions', ordinance numbers, approved uses). INCORPORATED land is carried as the code 'Incorporated' — the cities (Adairsville, Cartersville, Emerson…) zone themselves and their zoning is NOT in this layer; the row says so on the card. The server answers point-geometry queries 500 intermittently, so fixtures use envelopes (what the map and the verifier send). Live 2026-10-29 (±0.01° box): Adairsville 902 · rural Bartow 79 and 28. */
   gaBartowZoning: {
     key: "gaBartowZoning",
     label: "Zoning — Bartow County (Bartow County GIS)",
@@ -1152,7 +1152,7 @@ export const GIS_SOURCES = {
     relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
     layerId: null,
     geometryType: "polygon",
-    fields: { code: "STZONECODE", notes: "ZONINGTEXT" },
+    fields: { code: "STZONECODE", notes: "ZONINGTEXT", rezoning: "REZONING" },
     coverage: "georgia",
     states: ["GA"],
     tier: "production",

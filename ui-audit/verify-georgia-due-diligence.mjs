@@ -45,7 +45,7 @@ const LAYERS = [
   { id: "ga_road_ownership", group: "jur", lat: 33.75, lon: -84.39, zoom: 15, needle: "GDOT_FunctionalClass/MapServer/20" },
   { id: "ga_rare_species", group: "env", lat: 31.58, lon: -84.16, zoom: 11, needle: "Conservation/MapServer/1" },
   { id: "ga_mineral", group: "env", lat: 34.17, lon: -84.8, zoom: 12, needle: "PhysicalGeography/MapServer/0" },
-  { id: "ga_bartow_zoning", group: "jur", lat: 34.25, lon: -84.9, zoom: 13, needle: "BartowZoning/MapServer/0" },
+  { id: "ga_bartow_zoning", group: "jur", lat: 34.25, lon: -84.9, zoom: 15, needle: "BartowZoning/MapServer/0" },
 ];
 const NEW_ROW_IDS = [...LAYERS.map((l) => l.id), "ga_swsw", "ga_swsw_protected", "ga_mrpa_corridor"].filter((v, i, a) => a.indexOf(v) === i);
 const POINTS = [

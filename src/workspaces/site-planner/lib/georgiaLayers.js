@@ -48,6 +48,8 @@ export const sentence = (v) => {
   if (!s || /[a-z]/.test(s)) return s;
   return s.toLowerCase().replace(/(^|[\s/(-])([a-z])/g, (_m, a, b) => a + b.toUpperCase());
 };
+/* EPD / USGS fill a value they do not have with the word 'Unknown'; that is an empty row, not a fact (constraint #45). */
+export const known = (v) => { const t = sentence(v); return /^(unknown|unk)$/i.test(t) ? "" : t; };
 const rowIf = (label, v) => { const t = typeof v === "string" ? v : text(v); return t ? [{ label, text: t }] : []; };
 const card = (title, rows, note) => ({ title, rows: rows.flat(), note: note || null });
 
@@ -147,7 +149,7 @@ export const solidWasteType = (raw) => text(raw).replace(/^SW-\s*/i, "");
 
 /* GDOT's own `Group_Name` is the owner class (State / County / City / Other). The ink is the Texas road-authority palette (one product, one colour per owner in every state). */
 export const ROAD_OWNER_COLORS = { "State Owned": ROAD_AUTHORITY_COLORS["State (TxDOT)"], "County Owned": ROAD_AUTHORITY_COLORS.County, "City Owned": ROAD_AUTHORITY_COLORS.City, Other: ROAD_AUTHORITY_COLORS.Unknown };
-export const ROAD_OWNER_WORDS = { "State Owned": "The state (Georgia DOT)", "County Owned": "The county", "City Owned": "The city", Other: "Not the state, county or city (private, federal or another authority)" };
+export const ROAD_OWNER_WORDS = { "State Owned": "The state (Georgia DOT)", "County Owned": "The county (or the consolidated city-county government)", "City Owned": "The city", Other: "Not the state, county or city (private, federal or another authority)" };
 export const roadOwnerGroup = (props) => { const g = text(props && props.Group_Name); return ROAD_OWNER_COLORS[g] ? g : "Other"; };
 export const roadOwnerStyle = (props, opacity) => {
   const g = roadOwnerGroup(props);
@@ -169,14 +171,14 @@ export function bartowZoneClass(code) {
   if (/^incorporated$/i.test(raw)) return "city";
   const z = raw.toUpperCase().replace(/\(.*?\)/g, "").replace(/W\/C/g, "").replace(/[\s-]/g, "");
   if (/^(I|M)\d?(CU)?$/.test(z)) return "industrial";
-  if (/^(C\d?|CN|OI|O\/I|BPD)(CU)?$/.test(z)) return "commercial";
+  if (/^(C\d?|CN|OI|O\/I)(CU)?$/.test(z)) return "commercial"; // BPD is left neutral: its meaning is the ordinance's, and the ordinance was not reachable
   if (/^PUD/.test(z)) return "planned";
   if (/^A\d?(CU)?$/.test(z)) return "agricultural";
   if (/^R(E)?\d*(CU)?$/.test(z)) return "residential";
   return "other";
 }
 export const BARTOW_COLORS = { industrial: "#7c3aed", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", planned: "#0f766e", city: "#94a3b8", other: "#6b7280" };
-export const BARTOW_CLASS_LABEL = { industrial: "Industrial / manufacturing", commercial: "Commercial / office / business park", residential: "Residential", agricultural: "Agricultural", planned: "Planned development", city: "Inside a city (the city zones it)", other: "Other" };
+export const BARTOW_CLASS_LABEL = { industrial: "Industrial / manufacturing", commercial: "Commercial / office", residential: "Residential", agricultural: "Agricultural", planned: "Planned development", city: "Inside a city (the city zones it)", other: "Other" };
 export const bartowStyle = (props, opacity) => {
   const k = bartowZoneClass(props && props.STZONECODE);
   const c = BARTOW_COLORS[k];
@@ -407,7 +409,7 @@ export const GEORGIA_LAYERS = {
     infoCaveat: "GDOT's August 2022 record, updated yearly — a road transferred or built since is not in it; confirm the owner with the county before a driveway design.",
   }),
   ga_rare_species: row("gaRareSpecies", {
-    label: "Rare Species Records", source: "Georgia DNR — Natural Heritage Program (generalised)", ...ENV, role: "area", order: 32, minZoom: 9,
+    label: "Rare Species Records", source: "Georgia DNR — Natural Heritage Program (generalised)", ...ENV, role: "area", order: 32, minZoom: 10,
     color: "#9d174d", styleFn: washStyle("#9d174d", 0.14, 0.5), legend: [{ label: "Protected-species record in this ~4 mi cell (darker = more records)", color: "#9d174d" }],
     hoverTitle: "Rare species record", hoverSource: "Georgia DNR", hoverFields: [{ names: ["SCOMNAME"] }],
     identifyCard: (props) => {
@@ -427,14 +429,14 @@ export const GEORGIA_LAYERS = {
     identifyCard: (props) => {
       const p = props || {};
       return card(sentence(p.site_name) || "Mineral resource site",
-        [rowIf("Status", sentence(p.dev_stat)), rowIf("Commodities", [sentence(p.commod1), sentence(p.commod2), sentence(p.commod3)].filter(Boolean).join(", ")), rowIf("Operation", sentence(p.oper_type)), rowIf("County", sentence(p.county))],
+        [rowIf("Status", known(p.dev_stat)), rowIf("Commodities", [known(p.commod1), known(p.commod2), known(p.commod3)].filter(Boolean).join(", ")), rowIf("Operation", known(p.oper_type)), rowIf("County", sentence(p.county))],
         "A 2005 record — a point, not the pit.");
     },
-    note: "USGS's Mineral Resources Data System records for Georgia (a 2005 digest): quarries, pits, mines, plants, prospects and occurrences — sand, gravel, clay, granite, limestone, kaolin and more — each with its status (producer, past producer, prospect…). A past quarry or pit on or beside a site is a fill, void, blasting-vibration and reclamation flag. A point per record, no boundary; not a current permit list.",
+    note: "USGS's Mineral Resources Data System records for Georgia (a 2005 digest): quarries, pits, mines, plants, prospects and occurrences — sand, gravel, clay, granite, limestone, kaolin and more — each with its status (producer, past producer, prospect…). A past quarry or pit on or beside a site is a fill, void, blasting-vibration and reclamation flag. A point per record, no boundary; not a current permit list. A few records just across the state line (Alabama, Florida, the Carolinas, Tennessee) ride along in the same file.",
     infoCaveat: "USGS MRDS compiled to 2005; a closed or reclaimed site may not be marked, and a newer operation will be missing — confirm with EPD's Mining Program and the county.",
   }),
   ga_bartow_zoning: row("gaBartowZoning", {
-    label: "Zoning (Bartow County)", source: "Bartow County, GA — Zoning Districts", ...JUR, regions: ["bartow_ga"], role: "area", order: 25, minZoom: 12, simplifyFactor: 1, vertexBudget: 200000,
+    label: "Zoning (Bartow County)", source: "Bartow County, GA — Zoning Districts", ...JUR, regions: ["bartow_ga"], role: "area", order: 25, minZoom: 15, simplifyFactor: 1, vertexBudget: 200000,
     color: BARTOW_COLORS.commercial, styleFn: bartowStyle,
     legend: ["industrial", "commercial", "residential", "agricultural", "planned", "city"].map((k) => ({ label: BARTOW_CLASS_LABEL[k], color: BARTOW_COLORS[k] })),
     lineLabel: { field: "STZONECODE", minZoom: 16, format: (v) => { const t = text(v); return t && !/^incorporated$/i.test(t) ? t : null; } },
@@ -444,11 +446,11 @@ export const GEORGIA_LAYERS = {
       const code = text(p.STZONECODE), city = bartowZoneClass(code) === "city";
       return card(city ? "Inside a city" : `Zone ${code || "(code not published)"}`,
         [[{ label: "Jurisdiction", text: city ? "A city zones this ground — Bartow County's map does not carry the city's zoning (ask the city's planning office)" : "Bartow County's own zoning map (unincorporated county)" }],
-          city ? [] : rowIf("Colour class", BARTOW_CLASS_LABEL[bartowZoneClass(code)]), rowIf("County note", text(p.ZONINGTEXT))],
-        city ? "County note, if any, as the county typed it." : "The county's own note is shown as published (case number, conditions) — a '(wC)' or 'CU' on a code means conditions: read the case file.");
+          city ? [] : rowIf("Colour class", BARTOW_CLASS_LABEL[bartowZoneClass(code)]), rowIf("Rezoning / case", text(p.REZONING)), rowIf("County note", text(p.ZONINGTEXT))],
+        city ? "The county's case reference and note, if any, as the county typed them." : "The county's case reference and note are shown as published. A code ending 'CU' or '(wC)' has a case on file — read it for what applies.");
     },
-    note: "Bartow County's own zoning districts, parcel by parcel (colour = a coarse use class; the code prints at close zoom). Land inside a city — Adairsville and Cartersville included — is marked INCORPORATED in the county's map and is zoned by the city; that zoning is not in this layer. The county's free-text note (rezoning case numbers, conditions) is shown as typed. District names are not shown: a name comes from the ordinance. Confirm the district and any conditions with Bartow County Planning & Development.",
-    infoCaveat: "County-published polygons; a rezoning or condition may post later, and conditions ('wC', 'CU') live in the case file. Confirm with Bartow County.",
+    note: "Bartow County's own zoning districts, parcel by parcel (colour = a coarse use class; the code prints at close zoom). Land inside a city — Adairsville and Cartersville included — is marked INCORPORATED in the county's map and is zoned by the city; that zoning is not in this layer. The county's rezoning case reference and its free-text note are shown as typed. District names are not shown: a name comes from the ordinance. Confirm the district and any conditions with Bartow County Planning & Development.",
+    infoCaveat: "County-published polygons; a rezoning or condition may post later, and the case behind a 'CU' or '(wC)' code is in the county's file. Confirm with Bartow County.",
   }),
 };
 

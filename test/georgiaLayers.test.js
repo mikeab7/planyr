@@ -243,6 +243,20 @@ describe("card wording that the adversarial review caught", () => {
     expect(c.note).toMatch(/Orchard Hill/); expect(c.note).toMatch(/Griffin zones itself/); expect(c.note).not.toMatch(/UNINCORPORATED county\b(?! and)/);
     expect(c.identifyCard({ LABEL: "R1" }).rows[0].text).toMatch(/Orchard Hill/);
   });
+  it("Bartow card shows the county's REZONING case reference as its own row and asserts only that a CU / (wC) code has a case on file", () => {
+    const c = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "A1CU", REZONING: "CU-2162-17", ZONINGTEXT: " " });
+    expect(c.rows.find((r) => r.label === "Rezoning / case").text).toBe("CU-2162-17");
+    expect(c.note).toMatch(/has a case on file/); expect(c.note).not.toMatch(/means conditions/);
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.note).not.toMatch(/rezoning case numbers, conditions/);
+  });
+  it("mineral card drops EPD/USGS 'Unknown' filler rows (constraint #45) and keeps real values", () => {
+    const c = GEORGIA_LAYERS.ga_mineral.identifyCard({ site_name: "Q", dev_stat: "Unknown", oper_type: "Unknown", commod1: "Granite", county: "Bartow" });
+    expect(c.rows.map((r) => r.label)).toEqual(["Commodities", "County"]);
+    expect(GEORGIA_LAYERS.ga_mineral.note).toMatch(/Alabama, Florida/);
+  });
+  it("road ownership: a consolidated city-county (GDOT files it under County) is worded as such", () => {
+    expect(GEORGIA_LAYERS.ga_road_ownership.identifyCard({ Group_Name: "County Owned" }).rows[0].text).toMatch(/consolidated city-county/);
+  });
   it("conservation: every common published access value prints, an unreadable code does not", () => {
     const acc = (v) => (GEORGIA_LAYERS.ga_conservation.identifyCard({ Unit_Nm: "U", Category: "Fee", Pub_Access: v }).rows.find((r) => r.label === "Public access") || {}).text;
     expect(acc("No Public Access")).toBe("No public access"); expect(acc("Open Access")).toBe("Open to the public"); expect(acc("OA")).toBe("Open to the public"); expect(acc("Closed Access")).toBe("No public access");
@@ -279,7 +293,9 @@ describe("the relay rows (GDOT road ownership, DNR rare species, USGS mineral si
     expect(roadOwnerGroup({ Group_Name: "Weird" })).toBe("Other"); expect(roadOwnerGroup({})).toBe("Other");
     const c = GEORGIA_LAYERS.ga_road_ownership.identifyCard({ Group_Name: "City Owned", OWNERSHIP_ENTITY: "7340", route_id: "1234" });
     expect(JSON.stringify(c)).not.toMatch(/7340|1234/); // the entity code and route id are unreadable numbers — never shown
-    expect(GEORGIA_LAYERS.ga_road_ownership.minZoom).toBeGreaterThanOrEqual(14); // z13 cells hit the service's 1,000-feature cap and silently truncate
+    expect(GEORGIA_LAYERS.ga_road_ownership.minZoom).toBeGreaterThanOrEqual(14); // z13 cells hit the service's 1,000-feature cap and silently truncate (measured 1,282–1,346)
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.minZoom, "z12–z14 cells hold 3,393–14,406 parcels against the county server's 2,000 cap — silent truncation (measured)").toBeGreaterThanOrEqual(15);
+    expect(GEORGIA_LAYERS.ga_rare_species.minZoom, "the z9 coastal cell holds 1,121 records against the 1,000 cap").toBeGreaterThanOrEqual(10);
   });
   it("rare species card: status in words (LE → Federally endangered, T → State threatened); an unrecorded status prints nothing", () => {
     const c = GEORGIA_LAYERS.ga_rare_species.identifyCard({ SCOMNAME: "Cylindrical Lioplax", SNAME: "Lioplax cyclostomaformis", USESA: "LE", SPROT: " ", GROUP_: "Snails" });
@@ -290,7 +306,7 @@ describe("the relay rows (GDOT road ownership, DNR rare species, USGS mineral si
     expect(GEORGIA_LAYERS.ga_rare_species.note).toMatch(/NOT an all-clear/);
   });
   it("Bartow zoning: codes class by letter (never a district name); 'Incorporated' means a city zones it and says so; unknown is neutral", () => {
-    for (const [code, k] of [["A-1", "agricultural"], ["A1CU", "agricultural"], ["A1 (wC)", "agricultural"], ["R-4", "residential"], ["RE2CU", "residential"], ["R3 (wC)", "residential"], ["C-1", "commercial"], ["CN", "commercial"], ["BPD (wC)", "commercial"], ["O/I", "commercial"], ["I-2", "industrial"], ["M1 (wC)", "industrial"], ["I1CU", "industrial"], ["PUD (wC)", "planned"], ["Incorporated", "city"], ["", "other"], [null, "other"], ["ZZ9", "other"]]) expect(bartowZoneClass(code), String(code)).toBe(k);
+    for (const [code, k] of [["A-1", "agricultural"], ["A1CU", "agricultural"], ["A1 (wC)", "agricultural"], ["R-4", "residential"], ["RE2CU", "residential"], ["R3 (wC)", "residential"], ["C-1", "commercial"], ["CN", "commercial"], ["BPD (wC)", "other"], ["BPD", "other"], ["O/I", "commercial"], ["I-2", "industrial"], ["M1 (wC)", "industrial"], ["I1CU", "industrial"], ["PUD (wC)", "planned"], ["Incorporated", "city"], ["", "other"], [null, "other"], ["ZZ9", "other"]]) expect(bartowZoneClass(code), String(code)).toBe(k);
     const c = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "Incorporated", ZONINGTEXT: "Annexed 2006" });
     expect(c.title).toBe("Inside a city"); expect(c.rows[0].text).toMatch(/city zones this ground/); expect(c.rows.find((r) => r.label === "County note").text).toBe("Annexed 2006");
     const z = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "I-1", ZONINGTEXT: " " });
