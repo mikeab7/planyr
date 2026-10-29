@@ -792,8 +792,11 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const dZo = new Float64Array(DN), dZb = new Float64Array(DN), dZ = new Float64Array(DN);
   const bareAt = (pt) => { const zo = openGroundZ(pt); if (zo == null) return null; return { zo, zb: boundary ? bandZ(pt, zo) : zo }; };
   for (let i = 0; i < dnx; i++) {
-    if (i % 8 === 0) yield;
+    yield;
     for (let j = 0; j < dny; j++) {
+      // B2319137 ×2: a checkpoint every few dozen nodes — one bare-surface read is a cone search, and a whole column of them
+      // ran past a frame (a yield is free when the slice has time left; runChunked decides whether it really pauses)
+      if ((j & 15) === 15) yield;
       const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
       if (inAnyRing(pt, pondRings) || elementAt(pt)) continue;
       const k = regionIndexOf(pt, sRegions);
@@ -822,6 +825,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const outerRings = sRegions.map((r) => r.outer), holeRings = sRegions.flatMap((r) => r.holes);
     const nearest = (pt, rings) => { let best = Infinity, bq = null; for (const r of rings) { const q = nearestOnRing(pt, r); if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < best) { best = d; bq = q; } } } return { d: best, q: bq }; };
     for (let i = 0; i < dnx; i++) for (let j = 0; j < dny; j++) {
+      if ((j & 63) === 63) yield;
       const c = j * dnx + i;
       if (dK[c] < 0) continue;
       dZ[c] = dZb[c];
@@ -844,7 +848,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     let popped = 0;
     while (hz.length) {
       const [z, c] = pop();
-      if (++popped % 8192 === 0) yield;
+      if ((++popped & 2047) === 0) yield;
       const i = c % dnx, j = (c - i) / dnx;
       for (const [ox, oy, st] of N8) {
         const ii = i + ox, jj = j + oy;
@@ -940,10 +944,13 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   let reach = 0;
   const edgeSamples = [];
   if (apronsOn) {
-    srcRegions.forEach((r, k) => {
+    for (let k = 0; k < srcRegions.length; k++) {
+      const r = srcRegions[k];
       const c = ringCentroid(r.outer);
       for (const ring of [r.outer, ...r.holes]) {
+        let n = 0;
         for (const s of sampleRing(ring, LIMIT_SAMPLE_FT)) {
+          if ((++n & 15) === 0) yield;
           const gz = existAt(s);
           if (gz == null || !isFinite(gz)) continue;
           const away = { x: s.x + (s.x - c.x) * 1e-3, y: s.y + (s.y - c.y) * 1e-3 };
@@ -955,7 +962,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
           if (rr > reach) reach = rr;
         }
       }
-    });
+    }
   }
   reach = Math.min(REACH_MAX_FT, reach);
   yield;
@@ -997,6 +1004,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   for (let i = 0; i < nx; i++) {
     yield;
     for (let j = 0; j < ny; j++) {
+      if ((j & 15) === 15) yield;
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
       if (inAnyRing(pt, pondRings)) continue;                       // pond dirt is the excavation ledger's
       const hit = elementAt(pt);
@@ -1173,6 +1181,7 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
     yield;
     const x = x0 + (i + 0.5) * cellFt;
     for (let j = 0; j < ny; j++) {
+      if ((j & 15) === 15) yield;
       const pt = { x, y: y0 + (j + 0.5) * cellFt };
       const r = grid.probe(pt);
       const k = j * nx + i;
