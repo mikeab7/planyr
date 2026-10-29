@@ -22,7 +22,8 @@ import {
   SP_ZONES, COUNTY_ZONE, resolveZone, zoneForCounty, zoneForPoint, projectToZone, zoneToProject, gridScaleFactor,
   gridConvergenceDeg, unitInUsFt, localFrameZone, SINGLE_ZONE_STATE,
 } from "../src/shared/coordinates/statePlane.js";
-import { GEN_ZONES, COUNTY_TABLE, DECIDED_COUNTIES } from "../src/shared/coordinates/statePlaneData.js";
+import { GEN_ZONES } from "../src/shared/coordinates/statePlaneZones.js";
+import { COUNTY_TABLE, DECIDED_COUNTIES } from "../src/shared/coordinates/statePlaneCounties.js";
 import { placementZone, overlayCornersFromPlacement } from "../src/shared/overlay/overlayPlacement.js";
 import { COUNTIES_MAP } from "../src/workspaces/site-planner/lib/counties.js";
 

@@ -9,7 +9,7 @@
  * INSIDE the footprint reads as 0 ft (on/under the site). Everything here is pure and
  * Node-tested; the fetch + interpretation live in siteAnalysis.js.
  */
-import { resolveZone, projectToZone, localFrameZone, unitInUsFt } from "../../../shared/coordinates/statePlane.js";
+import { zoneForPoint, projectToZone, localFrameZone, unitInUsFt } from "../../../shared/coordinates/statePlaneCore.js";   // the lean core: no county table on the boot path
 
 /* ⛔ NEW-1 (STATE-PLANE-AUDIT) — A SCREENING DISTANCE IS MEASURED ON THE SITE'S OWN STATE PLANE ZONE, NOT ON TEXAS SOUTH CENTRAL.
  * This module used to project every point through the hardcoded EPSG:2278 cone, so a Tennessee / Georgia / Colorado site was
@@ -22,7 +22,7 @@ const firstVertex = (rings) => {
   return null;
 };
 export function planeFor(lng, lat) {
-  return resolveZone({ lat, lon: lng }) || localFrameZone(lat, lng);
+  return zoneForPoint(lat, lng) || localFrameZone(lat, lng);
 }
 export function planeForRings(rings) {
   const v = firstVertex(rings);

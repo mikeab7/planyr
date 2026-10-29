@@ -38,7 +38,9 @@
  * byte-identical to before (the statePlane suite pins that). International-foot / metre zones are rescaled to US survey feet
  * (`unitInUsFt`), the unit the overlay math has always spoken.
  */
-import { resolveZone, projectToZone, zoneToProject, gridConvergenceDeg, localFrameZone, unitInUsFt } from "../coordinates/statePlane.js";
+// The LEAN core, not statePlane.js: a placement has only a point, so it never needs the 2,600-name county table (budget — the table
+// stays off the Site route's boot path; see statePlaneCore.js).
+import { zoneForPoint, projectToZone, zoneToProject, gridConvergenceDegIn, localFrameZone, unitInUsFt } from "../coordinates/statePlaneCore.js";
 import { solveSimilarityLSQ, similarityFromTwoPoints } from "../geometry/similarityTransform.js";
 import { effectiveCropRect } from "./overlayCrop.js";
 
@@ -52,7 +54,7 @@ export function normalizeDeg(deg) { return ((deg % 360) + 360) % 360; }
  * placed — and its grid convergence computed — on Texas South Central. `zone.local === true` tells a surface the zone is unknown
  * (show "zone unknown"), it is never a state plane answer. */
 export function placementZone(lat, lon) {
-  return resolveZone({ lat, lon }) || localFrameZone(lat, lon);
+  return zoneForPoint(lat, lon) || localFrameZone(lat, lon);
 }
 
 /** The projector pair to use for a placement anchored at (lat, lon). The overlay math works in US SURVEY feet whatever the zone's
@@ -98,7 +100,7 @@ function projectorsFor(lat, lon) {
  * (verbatim grid rotation), matching every other zone-aware fallback in this module. */
 function gridRotationDeg(placement) {
   const rot = placement.rotationDeg || 0;
-  const conv = gridConvergenceDeg(placement.centerLat, placement.centerLon, { zone: placementZone(placement.centerLat, placement.centerLon) });
+  const conv = gridConvergenceDegIn(placement.centerLat, placement.centerLon, placementZone(placement.centerLat, placement.centerLon));
   return conv == null ? rot : rot - conv;
 }
 
@@ -363,7 +365,7 @@ export function alignOverlayGeo(o, pairs) {
   if (!fit || !(fit.scale > 0)) return null;
   const T = fit.apply({ x: 0, y: 0 });                      // the image centre, in the y-down grid frame
   const centre = toProject({ x: T.x, y: -T.y });
-  const conv = gridConvergenceDeg(centre.lat, centre.lon, { zone });  // same zone as the fit; rotationDeg = gridRotation + convergence
+  const conv = gridConvergenceDegIn(centre.lat, centre.lon, zone);  // same zone as the fit; rotationDeg = gridRotation + convergence
   return {
     centerLat: centre.lat, centerLon: centre.lon, ftPerPx: fit.scale,
     rotationDeg: normalizeDeg(fit.rotDeg + (conv == null ? 0 : conv)), residualFt: fit.residual,

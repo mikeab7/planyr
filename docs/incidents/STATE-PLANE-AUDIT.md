@@ -14,8 +14,9 @@ South Central — a Dallas or Austin site was wrong too. `proximityScreen.js` (e
 
 * **122 zones** — every SPCS83 zone for the 50 states (AK 10, HI 5, TX 5, CA 6, …; Louisiana Offshore included). Constants are **read from EPSG**
   (pyproj 3.8.0 / PROJ 9.8.1), never typed from memory: `python3 scripts/gen-state-plane-zones.py` regenerates
-  `src/shared/coordinates/statePlaneData.js` and `test/fixtures/statePlaneGolden.json`. Dev-time only; nothing in the app or CI runs Python.
-* **Three projections**, one engine (`statePlane.js`): Lambert Conformal Conic (the original code, untouched, so Texas stays bit-for-bit),
+  `src/shared/coordinates/statePlaneZones.js` + `statePlaneCounties.js` and `test/fixtures/statePlaneGolden.json`. Dev-time only; nothing in the app or CI runs Python.
+* **Two modules, one engine.** `statePlaneCore.js` (zones, projections, units, the point resolver, the site-local frame — no county table) and `statePlane.js` (county-first resolution on top; re-exports the core). Point-only callers (`overlayPlacement`, `proximityScreen`) import the core so the 2,600-name table (22 KB) stays off the Site route's boot path — the bundle gate charges this branch +33 KB for the zone table instead of +55 KB.
+* **Three projections**, one engine: Lambert Conformal Conic (the original code, untouched, so Texas stays bit-for-bit),
   **Transverse Mercator** (Karney's n⁶ series — the series PROJ uses; nanometre-accurate inside a zone) and **Hotine Oblique Mercator variant A**
   (EPSG 9812; Alaska zone 1 only).
 * **Units are recorded on the zone and used.** `projectToZone`/`zoneToProject` speak the zone's own unit (`us-ft` | `ft` (international) | `m`);
@@ -263,6 +264,6 @@ the foot as 0.3048 m. The six international-foot states are asserted by a test.
 
 ```bash
 python3 -m venv /tmp/pv && /tmp/pv/bin/pip install pyproj
-/tmp/pv/bin/python scripts/gen-state-plane-zones.py      # rewrites statePlaneData.js + test/fixtures/statePlaneGolden.json
+/tmp/pv/bin/python scripts/gen-state-plane-zones.py      # rewrites statePlaneZones.js + statePlaneCounties.js + test/fixtures/statePlaneGolden.json
 npx vitest run test/statePlaneAllZones.test.js test/statePlane.test.js
 ```
