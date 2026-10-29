@@ -16,7 +16,7 @@ export const LA_ROWS = [
     "West Carroll Parish parcels (a rural electric co-op's copy of the parish assessor roll, republished Dec 2025 — owner names current to its pull, not to today). Search by parcel ID."],
   ["ouachita", "Ouachita", "https://services7.arcgis.com/MwglueBMxIOHOjKe/arcgis/rest/services/Public_Parcels/FeatureServer/0", "Parcel_ID", null, 0, 32.4975, -92.1570, [32.26, -92.42, 32.74, -91.9],
     "Ouachita Parish parcel boundaries (City of Monroe GIS, edited Feb 2026). Boundary and parcel ID only — the source publishes no owner. Search by parcel ID."],
-  /* Second pass, 2026-10-29 (B<PENDING>): Iberia (the parish's own AGOL org), Vermilion (a consultant's copy of the assessor roll, scoped by geoid) and Bienville (an older land-company copy,
+  /* Second pass, 2026-10-29 (B2504800): Iberia (the parish's own AGOL org), Vermilion (a consultant's copy of the assessor roll, scoped by geoid) and Bienville (an older land-company copy,
    * wired under the owner rule that an older copy is usable when it is the best there is). */
   ["iberia", "Iberia", "https://services1.arcgis.com/ZPPrBdbq4892XaIK/arcgis/rest/services/IberiaLAGISFlags/FeatureServer/4", "ParcelNumb", null, 1, 29.8087, -91.6178, [29.48, -92.02, 30.14, -91.21],
     "Iberia Parish parcels (Iberia Parish Government's own ArcGIS Online layer 'ParcelsMay2024', edited Aug 2024). Search by parcel number."],
