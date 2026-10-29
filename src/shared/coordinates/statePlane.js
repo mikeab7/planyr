@@ -11,26 +11,17 @@ export * from "./statePlaneCore.js";
 
 /* Per-county zone assignment for the nine Colorado counties Planyr targets, plus the Texas
  * counties it already serves. `decided:true` marks an assignment this project MADE rather than
- * read off the statute — today that is Broomfield alone, and it carries its reasoning. */
+ * read off the statute — and is allowed ONLY where the statute is genuinely silent (Broomfield is the model; owner rule 2026-10-29).
+ * A `decided` row must carry a `decisionNote` naming the statutory gap: test/statePlaneStatute.test.js enforces it. */
 export const COUNTY_ZONE = {
   // Texas (unchanged — every existing site).
   "TX:harris": { zone: "tx_sc" },
   "TX:fortbend": { zone: "tx_sc" },
   "TX:chambers": { zone: "tx_sc" },
   "TX:waller": { zone: "tx_sc" },
-  /* ⛔ A KNOWN DISAGREEMENT WITH EPSG/NGS, kept on purpose and SAID. EPSG's own county list puts Montgomery County in Texas CENTRAL
-   * (EPSG:2277), not South Central. The app has always projected Montgomery sites on tx_sc, test/statePlane.test.js pins that
-   * ("keeps every Texas county on the app's original zone"), and the brief for the all-states work was that Texas South Central
-   * stays bit-for-bit identical — so the assignment is kept and marked decided. Flipping it is the one line below plus that test;
-   * it is an OWNER DECISION (docs/incidents/STATE-PLANE-AUDIT.md §4). */
-  "TX:montgomery": {
-    zone: "tx_sc",
-    decided: true,
-    decisionNote:
-      "EPSG/NGS lists Montgomery County in Texas CENTRAL (EPSG:2277). Planyr has always placed Montgomery sites on Texas South " +
-      "Central (EPSG:2278) like the rest of its Houston-area counties, and keeps doing so until the owner decides otherwise; " +
-      "the difference is a small scale/convergence effect at screening grade. Confirm against the survey for anything else.",
-  },
+  /* Montgomery County is NOT here any more (B2478961, owner decision 2026-10-29): Tex. Nat. Res. Code §21.074(c) names it in Texas
+   * CENTRAL (EPSG:2277), and the standing rule is that every county sits in the zone its state's statute assigns — no legacy exceptions.
+   * It now resolves from the generated table like every other county (docs/incidents/STATE-PLANE-AUDIT.md §4). */
   // Colorado NORTH (C.R.S. 38-52-101).
   "CO:larimer": { zone: "co_north" },
   "CO:weld": { zone: "co_north" },

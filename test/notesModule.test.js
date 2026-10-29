@@ -75,6 +75,8 @@ const ALL_NOTES_FILES = [
   // retired sketch canvas's own boxes-and-arrows model.
   "lib/notesArrows.js",
   "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
+  // NEW-1 (2026-10-29) — Office-style paste options: the sets + transforms, the table → picture renderer, the drawings.
+  "lib/notesPasteModes.js", "lib/notesTablePicture.js", "components/PasteIcons.jsx",
   "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js",
   "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
   "lib/notesToggleNode.js",
@@ -1567,14 +1569,19 @@ describe("the project a notebook belongs to", () => {
     expect(keys, "typing '- ' then Backspace still takes the bullet back").toMatch(/undoInputRule\(\)/);
   });
 
-  it("the three paste glyphs are OUR drawings, and there are three of them", () => {
-    const ed = code("components/NoteEditor.jsx");
-    expect(ed).toMatch(/const PASTE_ICONS = \{/);
-    for (const mode of ["source", "merge", "text"]) expect(ed).toMatch(new RegExp(`${mode}: \\(`));
-    expect(ed, "each mode is named with its Word access key").toMatch(/key: "K"/);
-    expect(ed).toMatch(/key: "M"/);
-    expect(ed).toMatch(/key: "T"/);
-    expect(ed, "inline SVG on currentColor, like every other icon in the module").toMatch(/stroke="currentColor"/);
+  it("the paste-option glyphs are OUR drawings — one per option, a full-height clipboard under each mark (NEW-1)", () => {
+    const icons = code("components/PasteIcons.jsx");
+    const modes = code("lib/notesPasteModes.js");
+    for (const mode of ["source", "merge", "text", "widths", "transpose", "values", "valuesFormat", "formatting", "picture"]) {
+      expect(icons, `a drawing for ${mode}`).toMatch(new RegExp(`\\n  ${mode}: [(<]`));
+      expect(modes, `${mode} is named`).toMatch(new RegExp(`  ${mode}: \\{ label: "`));
+    }
+    expect(icons, "the clipboard BASE is drawn in every icon, at full height").toMatch(/<rect x="2\.5" y="3\.5" width="13" height="17"/);
+    expect(icons, "no Microsoft asset: the art is inline SVG in this file").not.toMatch(/\.(png|svg|ico)["']/);
+    for (const [label, key] of [["Keep Source Formatting", "K"], ["Merge Formatting", "M"], ["Keep Text Only", "T"], ["Keep Source Column Widths", "W"],
+      ["Transpose", "T"], ["Values", "V"], ["Values and Source Formatting", "E"], ["Formatting only", "R"], ["Picture", "U"]]) {
+      expect(modes, `${label} carries its access key`).toContain(`label: "${label}", key: "${key}"`);
+    }
   });
 
   it("a notebook's 'Belongs to' panel offers each destination exactly once", () => {
