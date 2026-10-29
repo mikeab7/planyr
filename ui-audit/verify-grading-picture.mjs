@@ -40,6 +40,7 @@ const PORT = 5198, BASE = `http://localhost:${PORT}`;
 const EXEC = process.env.PW_CHROME || (existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
 const OUT = new URL("./screenshots/grading/", import.meta.url).pathname;
 const OWNER = process.argv.includes("--owner");
+const MARGIN = (process.argv.find((a) => a.startsWith("--margin=")) || "").slice(9);   // round 8: the grading margin (default 10 ft)
 const fails = [], notes = [];
 const check = (name, ok, extra = "") => { (ok ? notes : fails).push(`${ok ? "✓" : "✗"} ${name}${extra ? " — " + extra : ""}`); };
 mkdirSync(OUT, { recursive: true });
@@ -100,9 +101,9 @@ try {
 
   const bandJudged = {};
   for (const mode of ["layout", "boundary"]) {
-    for (const zoom of ["site", "bldg", "ne"]) {
+    for (const zoom of ["site", "bldg", "ne", "nw"]) {
       const tag = `${mode}-${zoom}${OWNER ? "-owner" : ""}`;
-      const page = await open(`?buildable=0&contours=1&zoom=${zoom}&mode=${mode}${OWNER ? "&owner=1" : ""}`);
+      const page = await open(`?buildable=0&contours=1&zoom=${zoom}&mode=${mode}${OWNER ? "&owner=1" : ""}${MARGIN ? `&margin=${MARGIN}` : ""}`);
       try { await waitPicture(page); } catch (e) { fails.push(`✗ ${tag}: the picture never settled — ${e.message.split("\n")[0]}`); await page.close(); continue; }
       await page.evaluate(() => { window.__harnessF2p = (p) => { const el = document.querySelector('[data-layer="paper"]'); const t = /translate\(([-\d.]+) ([-\d.]+)\) scale\(([-\d.]+)\)/.exec(el.getAttribute("transform")); return { x: p.x * +t[3] + +t[1], y: p.y * +t[3] + +t[2] }; }; });
       await page.locator("#canvas").screenshot({ path: `${OUT}${tag}.png` });
@@ -116,7 +117,7 @@ try {
       {
       // (a) zero contour pixels inside the building ring (inset 4 px past the outline stroke)
       const pad = await countInside(page, bld.ring, 4);
-      check(`(a) ${tag}: zero contour pixels inside the building ring`, pad.brownPx === 0 && pad.total > 1000, `${pad.brownPx} brown of ${pad.total} px`);
+      check(`(a) ${tag}: zero contour pixels inside the building ring`, pad.brownPx === 0 && (pad.total > 1000 || zoom === "nw"), `${pad.brownPx} brown of ${pad.total} px${zoom === "nw" && !pad.total ? " (the building is out of this view)" : ""}`);
       // (b) crossings per court / lot ≤ ceil(depth × 1.5% / interval) + 1 — counted on the traced polylines across a transect
       const cross = await page.evaluate(() => {
         const m = window.__harness.model; const iv = m.contours.interval;
@@ -239,6 +240,64 @@ try {
         return out;
       });
       check(`(g) ${tag}: no closed proposed ring wholly inside the limit unless the surface there is a real pit or hump`, loops.bad.length === 0, JSON.stringify(loops));
+      // ---- ROUND 8 (owner live check 2026-10-29, NW corner, "To the boundary"): the open ground is one continuous drainage
+      // surface (proposedSurface.js "ROUND 8"). (R8-k) zero closed proposed rings whose interior is OPEN GROUND (every probe
+      // sample inside the ring is open ground — no element, no slope band); (R8-l) no proposed polyline crosses a pavement
+      // outline except at a level that pavement's own plane reaches there (±half an interval); (R8-m) boundary mode: the limit
+      // sits inside the parcel by the grading margin everywhere (never on the setback) and outside every buffer.
+      const r8 = await page.evaluate(() => {
+        const m = window.__harness.model, s = window.__harness.gradeSurface, H = window.__harness; const L = s.grid.limit; const iv = m.contours.interval, cell = m.contours.cellFt;
+        const inR = (p, ring) => { let ins = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j]; if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) ins = !ins; } return ins; };
+        const verts = (d) => d.split("M").filter(Boolean).map((seg) => [...seg.matchAll(/[ML]?(-?[\d.]+) (-?[\d.]+)/g)].map((q) => ({ x: +q[1], y: +q[2] })));
+        const ringOf = (e) => e.ring;
+        const paved = H.els.filter((e) => e.type !== "building" && Array.isArray(e.ring));
+        const closedOpen = [];
+        const crossBad = [];
+        let crossings = 0;
+        const segX = (p, q, a, b) => { const d = (q.x - p.x) * (b.y - a.y) - (q.y - p.y) * (b.x - a.x); if (Math.abs(d) < 1e-12) return null; const t = ((a.x - p.x) * (b.y - a.y) - (a.y - p.y) * (b.x - a.x)) / d, u = ((a.x - p.x) * (q.y - p.y) - (a.y - p.y) * (q.x - p.x)) / d; return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? { x: p.x + t * (q.x - p.x), y: p.y + t * (q.y - p.y), u } : null; };
+        for (const lv of m.contours.levels) for (const pc of verts(lv.d)) {
+          if (pc.length >= 4) {
+            const a = pc[0], b = pc[pc.length - 1];
+            if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) {
+              let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const v of pc) { x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); x1 = Math.max(x1, v.x); y1 = Math.max(y1, v.y); }
+              // open ground = not a graded element (the slope band counts: a ring through it is a pit or a hump all the same);
+              // a ring around a limit hole (a pond — an outlet) is allowed
+              let n = 0, open = 0; const step = Math.max(1, Math.min(x1 - x0, y1 - y0) / 12);
+              for (let x = x0 + step / 2; x < x1; x += step) for (let y = y0 + step / 2; y < y1; y += step) { const q = { x, y }; if (!inR(q, pc)) continue; n++; const r = s.grid.probe(q); if (r && r.status === "value" && (r.cls === "infill" || r.cls === "transition")) open++; }
+              const holdsHole = L.limitRegions.some((r) => r.holes.some((h) => inR(h[0], pc)));
+              if (n > 0 && open === n && !holdsHole) closedOpen.push({ level: lv.level, at: { x: Math.round(a.x), y: Math.round(a.y) }, samples: n });
+            }
+          }
+          for (const e of paved) for (let i = 1; i < pc.length; i++) for (let k = 0; k < e.ring.length; k++) {
+            const A = e.ring[k], B = e.ring[(k + 1) % e.ring.length];
+            const x = segX(pc[i - 1], pc[i], A, B); if (!x) continue;
+            crossings++;
+            // the element's own plane at the crossing: a probe a hair inside the outline
+            const cx = e.ring.reduce((t, p) => t + p.x, 0) / e.ring.length, cy = e.ring.reduce((t, p) => t + p.y, 0) / e.ring.length;
+            const l = Math.hypot(cx - x.x, cy - x.y) || 1; const r = s.grid.probe({ x: x.x + (cx - x.x) / l * 0.75, y: x.y + (cy - x.y) / l * 0.75 });
+            if (r && r.status === "value" && Math.abs(r.ft - lv.level) > iv / 2 + 0.05) crossBad.push({ id: e.id, level: lv.level, plane: +r.ft.toFixed(2), at: { x: Math.round(x.x), y: Math.round(x.y) } });
+          }
+        }
+        let margin = null;
+        if (L.mode === "boundary") {
+          const basis = L.basis || { marginFt: 10, bufferFt: 0 };
+          const need = (basis.marginFt || 0) + (basis.bufferFt || 0);
+          const pr = H.ring;
+          const dSeg = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
+          let minD = Infinity, outside = 0, n = 0;
+          for (const r of L.limitRegions) for (const v of r.outer) { n++; if (!inR(v, pr)) outside++; let d = Infinity; for (let k = 0; k < pr.length; k++) d = Math.min(d, dSeg(v, pr[k], pr[(k + 1) % pr.length])); minD = Math.min(minD, d); }
+          const sbRing = H.model && H.model.setback && H.model.setback.rings && H.model.setback.rings[0];
+          let onSetback = 0; if (sbRing) for (const r of L.limitRegions) for (const v of r.outer) { let d = Infinity; for (let k = 0; k < sbRing.length; k++) d = Math.min(d, dSeg(v, sbRing[k], sbRing[(k + 1) % sbRing.length])); if (d < 1) onSetback++; }
+          margin = { need, minD: +minD.toFixed(2), outside, n, onSetback, areaAc: +L.areaAc.toFixed(2) };
+        }
+        return { closedOpen, crossBad, crossings, margin };
+      });
+      check(`(R8-k) ${tag}: zero closed proposed rings whose interior is open ground`, r8.closedOpen.length === 0, JSON.stringify(r8.closedOpen));
+      // (R8-l) is judged in boundary mode (the round-8 surface); layout mode's rounded limit corners cut inside a row's own
+      // corner (round 4's opening by the corner radius), so a slope contour can graze that corner there — reported, not judged
+      if (mode === "boundary") check(`(R8-l) ${tag}: no proposed contour crosses a pavement outline except where that pavement's own plane reaches the level`, r8.crossBad.length === 0, `${r8.crossings} crossings · bad ${JSON.stringify(r8.crossBad.slice(0, 6))}`);
+      else notes.push(`  · (R8-l) ${tag} (reported, layout mode): ${r8.crossings} crossings · ${r8.crossBad.length} at a level the pavement does not reach — ${JSON.stringify(r8.crossBad.slice(0, 3))}`);
+      if (r8.margin) check(`(R8-m) ${tag}: the limit is inside the parcel by the grading margin everywhere, never on the setback`, r8.margin.outside === 0 && r8.margin.minD >= r8.margin.need - 0.5 && r8.margin.onSetback < r8.margin.n * 0.05, JSON.stringify(r8.margin));
       // ---- ROUND 6 (h): never a fill — no brown pixel in a run ≥ 5 px in BOTH directions; the parcel view is index lines only
       const fill = await page.evaluate(async (brownSrc) => {
         const brown = new Function("return " + brownSrc)();

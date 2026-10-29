@@ -36,6 +36,7 @@
  * insert/delete row/column and freeze toggles — the toolbar buttons for the SAME actions are a
  * Stage 2 item, so Stage 1 exposes them here first.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText, unsupportedFormulaAt, formatAt } from "../lib/sheetModel.js";
 import { displayFor, displayKindFor, displayColorFor, cellColorKind } from "../lib/sheetEngine.js";
@@ -95,6 +96,7 @@ function FilterMenu({ colIndex, sheet, evalResult, allowed, onSetFilter }) {
             {values.map((v) => (
               <label key={v} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", fontSize: 12, cursor: "pointer" }}>
                 <input
+                  {...NO_AUTOFILL}
                   type="checkbox" checked={isChecked(v)}
                   onChange={() => {
                     const next = new Set(allowed || values);
@@ -1008,6 +1010,7 @@ const SheetView = forwardRef(function SheetView({
             >
               {isEditing ? (
                 <input
+                  {...NO_AUTOFILL}
                   ref={inputRef}
                   autoFocus
                   value={editValue}
@@ -1197,6 +1200,7 @@ const SheetView = forwardRef(function SheetView({
               >
                 {renaming === c ? (
                   <input
+                    {...NO_AUTOFILL}
                     autoFocus
                     defaultValue={col.name}
                     onBlur={(e) => renameCommit(c, e.target.value)}

@@ -47,8 +47,8 @@ export function parseMgPath(segs) {
 const R = 6378137;
 export const lonLatToMerc = (lng, lat) => [(R * lng * Math.PI) / 180, R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))];
 
-const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
-const fail = (msg) => { const e = new Error(msg); e.mgBadRequest = true; return e; };
+export const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+export const fail = (msg) => { const e = new Error(msg); e.mgBadRequest = true; return e; };
 
 /* The query geometry as { xmin, ymin, xmax, ymax } in lon/lat, or { x, y } for a point. Accepts what the app and esri-leaflet send: an
  * esri JSON envelope or point (with a spatialReference), or a bare "x,y" / "xmin,ymin,xmax,ymax" string. A non-geographic inSR is
@@ -88,10 +88,10 @@ export function spatialClause(geom) {
 }
 
 /* ── where clause ────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
-const stripParens = (s) => { let t = s.trim(); while (t.startsWith("(") && t.endsWith(")") && balanced(t.slice(1, -1))) t = t.slice(1, -1).trim(); return t; };
-const balanced = (s) => { let d = 0, q = false; for (const c of s) { if (c === "'") q = !q; else if (!q && c === "(") d++; else if (!q && c === ")" && --d < 0) return false; } return d === 0 && !q; };
+export const stripParens = (s) => { let t = s.trim(); while (t.startsWith("(") && t.endsWith(")") && balanced(t.slice(1, -1))) t = t.slice(1, -1).trim(); return t; };
+export const balanced = (s) => { let d = 0, q = false; for (const c of s) { if (c === "'") q = !q; else if (!q && c === "(") d++; else if (!q && c === ")" && --d < 0) return false; } return d === 0 && !q; };
 /* Split on a top-level ` AND ` (outside quotes and parentheses). */
-function splitAnd(s) {
+export function splitAnd(s) {
   const parts = []; let d = 0, q = false, last = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
@@ -103,7 +103,7 @@ function splitAnd(s) {
   parts.push(s.slice(last));
   return parts;
 }
-const lit = (v) => `'${String(v).replace(/'/g, "''")}'`;
+export const lit = (v) => `'${String(v).replace(/'/g, "''")}'`;
 
 /* The ArcGIS `where` strings the app builds (buildParcelWhere): `UPPER(F) LIKE UPPER('%x%')`, `F = 123`, `F = 'x'`, `F LIKE '…'`, joined with
  * AND, and `1=1`. Returns an FDO filter string or null (no attribute filter). Anything else is a LOUD 400 — never a silently different query. */
@@ -126,8 +126,8 @@ export function translateWhere(where) {
 }
 
 /* ── request ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
-const truthy = (v) => v === true || /^true$/i.test(String(v));
-const outFieldList = (v) => (v == null || v === "" || v === "*" ? null : String(v).split(",").map((s) => s.trim()).filter(Boolean));
+export const truthy = (v) => v === true || /^true$/i.test(String(v));
+export const outFieldList = (v) => (v == null || v === "" || v === "*" ? null : String(v).split(",").map((s) => s.trim()).filter(Boolean));
 
 /* ArcGIS /query params (an object of strings) → { mode, params } where params are the MapGuide features.geojson query string entries.
  * mode: "features" | "ids" | "count". Throws a `mgBadRequest` error for anything the adapter cannot answer truthfully. */

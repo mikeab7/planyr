@@ -57,6 +57,7 @@
  * that curve (a flush, full-height tab would otherwise poke a square corner past the curve —
  * cheaper and more robust than computing exactly how much horizontal inset would clear it).
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { RADIUS, nestedIn } from "../../../shared/ui/radius.js";
 import ContextMenu from "./ContextMenu.jsx";
@@ -194,6 +195,7 @@ const TabStrip = forwardRef(function TabStrip({ sheets, activeSheetId, onSelect,
             >
               {renaming === s.id ? (
                 <input
+                  {...NO_AUTOFILL}
                   autoFocus
                   defaultValue={s.name}
                   onClick={(e) => e.stopPropagation()}

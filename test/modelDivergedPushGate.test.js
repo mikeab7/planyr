@@ -201,7 +201,8 @@ describe("V537648 — ModelApp.jsx wiring", () => {
   });
 
   it("the badge reads the shown status (hold outranks), so a later render cannot clear the warning", () => {
-    expect(SRC).toMatch(/modelSaveState\(shownStatus, accountActive, cloudConfirmed\)/);
-    expect(SRC).toMatch(/const shownStatus = shownModelStatus\(status, diverged\);/);
+    // NEW-1: a Library file open in Spreadsheet reports ITS OWN status/confirmation (fw.*); every other mode is unchanged.
+    expect(SRC).toMatch(/modelSaveState\(shownStatus, accountActive, fileMode \? fw\.cloudConfirmed : cloudConfirmed\)/);
+    expect(SRC).toMatch(/const shownStatus = fileMode \? fw\.status : shownModelStatus\(status, diverged\);/);
   });
 });

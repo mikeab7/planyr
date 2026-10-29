@@ -84,6 +84,13 @@ import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared
 import FileMenu from "./components/FileMenu.jsx";
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
+// NEW-1 (open an uploaded Excel in Spreadsheet) — a Library file opened as an editable workbook.
+// Everything heavy (ExcelJS, SheetJS, the parse worker) loads lazily behind lib/fileWorkbookStore.js.
+import { useFileWorkbook } from "./lib/useFileWorkbook.js";
+import { scopeKeyFor, readActiveFile, setActiveFile, onActiveFileChanged } from "./lib/activeFile.js";
+import { spreadsheetKindOf } from "./lib/spreadsheetKind.js";
+import { FileBar, FileNotes, FileProblem, FileLoading } from "./components/FileBar.jsx";
+import { parseSpreadsheetInWorker, exportWorkbookInWorker } from "./lib/spreadsheetClient.js";
 // spreadsheet-live-data-refs — the project's own data (site plan + comps), exposed read-only as
 // Site.*/Plan.*/Comp.* formula names (lib/projectRefs.js's own header). `onSiteModelChanged` is a
 // cross-workspace notification this feature added to storage.js (mirroring the pre-existing
@@ -98,15 +105,9 @@ import { fetchPlanRowsForModel, planRowsLoading, planRowsReady, planRowsError, r
 import { fetchProjectNameComps } from "./lib/projectCompsFetch.js";
 
 const CLOUD_PUSH_DEBOUNCE_MS = 800;
-// Excel round-trip (NEW-1) — lib/xlsxIO.js is dynamically imported (never a static import here)
-// so ExcelJS never rides this workspace's own eager chunk; only opening the File menu's Export/
-// Import actions ever fetches it. Both directions share one loader so the file downloads once
-// regardless of which action the user reaches for first.
-let xlsxIOModulePromise = null;
-function loadXlsxIO() {
-  if (!xlsxIOModulePromise) xlsxIOModulePromise = import("./lib/xlsxIO.js");
-  return xlsxIOModulePromise;
-}
+// Excel round-trip — ALL the heavy xlsx work (read, write, old .xls) runs in ONE Web Worker
+// (lib/spreadsheetWorker.js, reached through lib/spreadsheetClient.js, lazily), so opening this tab is
+// never slower for someone who never imports or exports and the tab never freezes on a big workbook.
 
 function sanitizeFilename(name) {
   return String(name || "Workbook").replace(/[\\/:*?"<>|]+/g, "_").trim() || "Workbook";
@@ -336,7 +337,7 @@ export default function ModelApp({
     setDiverged(true);
     setStatus("diverged");
   }, []);
-  const shownStatus = shownModelStatus(status, diverged);
+  const shownStatus = fileMode ? fw.status : shownModelStatus(status, diverged);
   const loadTokenRef = useRef(0);
   // Ctrl+C/Ctrl+V's INTERNAL clipboard (item 6) — see lib/sheetOps.js's header for why this is
   // deliberately not the OS clipboard. A ref, not state: copying never re-renders anything.
@@ -394,7 +395,17 @@ export default function ModelApp({
   // (openOrgWorkbook/openWorkbook/storageKey, the workbook list + its CRUD) builds on these two.
   const orgMode = !!org && !crossProject && !projectId;
   const [orgWorkbookId, setOrgWorkbookId] = useState(null);
-  const viewPrefsKey = orgMode ? orgWorkbookId : projectId;
+  // NEW-1 (open an uploaded Excel) — FILE MODE: the Spreadsheet is showing a Library file, remembered
+  // per place (this project / the Organization). It wins over the project's own workbook until
+  // "Close file". The pointer is lib/activeFile.js (written by the Shell when a Library row is
+  // clicked); the content is the Library file itself (lib/fileWorkbook.js) — never a copy.
+  const fileScopeKey = scopeKeyFor({ projectId: crossProject ? null : projectId, org: orgMode });
+  const [activeFileId, setActiveFileId] = useState(() => readActiveFile(fileScopeKey));
+  const fileScopeRef = useRef(fileScopeKey);
+  useEffect(() => { fileScopeRef.current = fileScopeKey; setActiveFileId(readActiveFile(fileScopeKey)); }, [fileScopeKey]);
+  useEffect(() => onActiveFileChanged((scope, id) => { if (scope === fileScopeRef.current) setActiveFileId(id); }), []);
+  const fileMode = !!activeFileId;
+  const viewPrefsKey = fileMode ? `file:${activeFileId}` : (orgMode ? orgWorkbookId : projectId);
 
   // B1007280 — sheet zoom is a per-workbook VIEW preference (like a browser's own zoom level),
   // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
@@ -447,12 +458,25 @@ export default function ModelApp({
   // The umbrella "is a workbook actually open" condition — a project's own single workbook, or a
   // chosen org workbook. Mutually exclusive by construction (`orgMode` already requires no
   // `projectId`), so `storageKey` below is never ambiguous about which one it names.
-  const openWorkbook = openProject || openOrgWorkbook;
+  const openWorkbook = fileMode || openProject || openOrgWorkbook;
   const storageKey = openProject ? projectId : (openOrgWorkbook ? orgWorkbookId : null);
   const orgWorkbookName = useMemo(
     () => orgWorkbooks.find((w) => w.id === orgWorkbookId)?.name || "Untitled workbook",
     [orgWorkbooks, orgWorkbookId],
   );
+  // NEW-1 — the file's own load / debounced save / status. Hands the parsed workbook to the same
+  // undo-tracked state the other two modes use; `onFileChanged` re-points the remembered file when a
+  // save of an .xls/.csv created its .xlsx copy (or an original opened on its copy).
+  const fw = useFileWorkbook({
+    fileId: activeFileId, userId, workbook,
+    onLoaded: (wb) => { reset(wb); setActiveSheetId(wb.activeSheetId); },
+    onFileChanged: (id) => setActiveFile(fileScopeRef.current, id),
+  });
+  const closeFile = useCallback(async () => {
+    const ok = await fw.flush();
+    if (!ok) return; // the bar already shows why it couldn't save; never close over unsaved edits
+    setActiveFile(fileScopeRef.current, null);
+  }, [fw]);
   // Leaving Organization (switching tabs elsewhere, or picking a project) always drops back to
   // the workbook list — never carry a stale workbook selection into a context that no longer
   // names it.
@@ -541,6 +565,7 @@ export default function ModelApp({
     setDiverged(false);
     setStatus("idle");
     setCloudConfirmed(false);
+    if (fileMode) return undefined; // NEW-1 — a Library file is open: useFileWorkbook owns the load
     if (!openWorkbook) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
     const local = readLocalSheet(userId, storageKey);
     const initialWorkbook = local ? migrateWorkbook(local) : createWorkbook();
@@ -587,21 +612,27 @@ export default function ModelApp({
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey, openWorkbook, openProject, projectId, orgWorkbookId, userId]);
+  }, [storageKey, openWorkbook, openProject, projectId, orgWorkbookId, userId, fileMode]);
 
   /* Write-through local save on every commit — never debounced (the stored copy must never
    * be staler than the screen: a tab close a moment after typing must not lose that edit). */
+  const prevFileModeRef = useRef(fileMode);
   useEffect(() => {
-    if (!ready || !openWorkbook) return;
+    // The commit in which file mode flips still holds the OTHER mode's workbook (the load that swaps it runs in
+    // this same pass) — writing it now would put a Library file's cells into the project's slot, or the reverse.
+    const flipped = prevFileModeRef.current !== fileMode;
+    prevFileModeRef.current = fileMode;
+    if (flipped) return;
+    if (!ready || !openWorkbook || fileMode) return; // a Library file keeps its own safety copy (lib/fileDraft.js), never the project's slot
     if (!writeLocalSheet(userId, storageKey, workbook)) setStatus("error");
-  }, [workbook, ready, openWorkbook, storageKey, userId]);
+  }, [workbook, ready, openWorkbook, storageKey, userId, fileMode]);
 
   /* Best-effort, debounced cloud push through the guarded save path. Reads `status` without
    * depending on it — this must fire only on a WORKBOOK change, not on every status transition
    * the push itself causes (that would restart the debounce on its own "saving" flag).
    * ⛔ V537648 — `runCloudPush` re-asks the gate from REFS when the timer FIRES (see its header). */
   useEffect(() => {
-    if (!ready || !openWorkbook || !userId) return undefined;
+    if (!ready || !openWorkbook || !userId || fileMode) return undefined; // fileMode: the Library file is the save target
     if (status === "not-provisioned") return undefined; // stop hammering a table that isn't there yet
     if (divergedRef.current) return undefined; // V537648 — held until the user picks a copy
     clearTimeout(pushTimer.current);
@@ -620,7 +651,7 @@ export default function ModelApp({
     }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce]);
+  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode]);
 
   /* V537648 — the ONLY two ways out of a divergence besides opening a different workbook. Both
    * are explicit user choices; neither deletes anything (the copy not chosen is reachable by
@@ -775,17 +806,17 @@ export default function ModelApp({
   const [pendingXlsxImport, setPendingXlsxImport] = useState(null); // { file, sheetCount } | null
 
   const currentFileBaseName = useCallback(() => {
+    if (fileMode && fw.name) return sanitizeFilename(fw.name.replace(/\.[A-Za-z0-9]+$/, ""));
     if (openOrgWorkbook) return sanitizeFilename(orgWorkbookName);
     let name = "Workbook";
     if (projectId) name = projectNameOf(projectId, "") || name;
     return sanitizeFilename(name);
-  }, [projectId, openOrgWorkbook, orgWorkbookName]);
+  }, [projectId, openOrgWorkbook, orgWorkbookName, fileMode, fw.name]);
 
   const onExportXlsx = useCallback(async () => {
     setFileBusy(true);
     try {
-      const { exportWorkbookToXlsxBlob } = await loadXlsxIO();
-      const blob = await exportWorkbookToXlsxBlob(workbook, { projectNames });
+      const blob = await exportWorkbookInWorker(workbook, { projectNames });
       downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
@@ -805,9 +836,8 @@ export default function ModelApp({
   const runXlsxImport = useCallback(async (file) => {
     setFileBusy(true);
     try {
-      const { importXlsxToWorkbook } = await loadXlsxIO();
       const buf = await file.arrayBuffer();
-      const { workbook: imported, unsupportedCount } = await importXlsxToWorkbook(buf);
+      const { workbook: imported, unsupportedCount } = await parseSpreadsheetInWorker(buf, file.name);
       commit(imported);
       setActiveSheetId(imported.activeSheetId);
       setFileNotice({
@@ -821,7 +851,7 @@ export default function ModelApp({
       // any raw ExcelJS/JSZip failure into one plain sentence before it ever reaches here (see its
       // header), so `e.message` is always safe to show verbatim now — never string-built from a
       // dependency's own developer-facing text.
-      setFileNotice({ kind: "error", text: `Could not read "${file.name}" as an Excel file: ${e?.message || e}` });
+      setFileNotice({ kind: "error", text: e?.message || `Could not read “${file.name}” as an Excel file.` }); // SpreadsheetFileError messages already name the file
     } finally { setFileBusy(false); }
   }, [commit]);
 
@@ -837,6 +867,42 @@ export default function ModelApp({
   }, [pendingXlsxImport, runXlsxImport]);
 
   const onCancelXlsxImport = useCallback(() => setPendingXlsxImport(null), []);
+
+  // NEW-1 — the file's untouched first upload (the oldest stored version), straight to disk.
+  const onDownloadOriginal = useCallback(async () => {
+    setFileBusy(true);
+    try {
+      const got = await fw.downloadOriginal();
+      if (!got) { setFileNotice({ kind: "error", text: "Couldn’t read the original upload from your Library. Check your connection and try again." }); return; }
+      downloadBlob(got.blob, got.name);
+    } catch (e) {
+      setFileNotice({ kind: "error", text: `Couldn’t download the original: ${e?.message || e}` });
+    } finally { setFileBusy(false); }
+  }, [fw]);
+
+  // NEW-1 — "Open Excel or CSV file…": the in-module door to the SAME place a Library click lands. The
+  // file is FILED in the Library under this project (or the Organization) first — one document, never a
+  // disconnected import — and then opened from there.
+  const onOpenFileFromComputer = useCallback(async (file) => {
+    if (!file) return;
+    if (!spreadsheetKindOf(file.name)) { setFileNotice({ kind: "error", text: `“${file.name}” isn’t an Excel or CSV file. Choose a .xlsx, .xls or .csv file.` }); return; }
+    if (!orgMode && !(openProject && projectId)) { setFileNotice({ kind: "error", text: "Open a project (or switch to the Organization) first — the file is saved in its Library." }); return; }
+    setFileBusy(true);
+    try {
+      const { fileNewReview } = await import("../doc-review/lib/reviewStore.js");
+      const res = await fileNewReview({
+        projectId: orgMode ? null : projectId, project: orgMode ? "" : (projectNameOf(projectId, "") || ""),
+        discipline: "Other", orgScope: orgMode, blob: file, fileName: file.name,
+      });
+      if (!res.ok || res.uploadFailed) {
+        setFileNotice({ kind: "error", text: `Couldn’t save “${file.name}” to your Library: ${res.error || res.driveError || "check your connection and that you’re signed in"}.` });
+        return;
+      }
+      setActiveFile(fileScopeRef.current, res.id);
+    } catch (e) {
+      setFileNotice({ kind: "error", text: `Couldn’t open “${file.name}”: ${e?.message || e}` });
+    } finally { setFileBusy(false); }
+  }, [orgMode, openProject, projectId]);
 
   const onImportCsvFile = useCallback(async (file) => {
     setFileBusy(true);
@@ -1134,10 +1200,10 @@ export default function ModelApp({
         planSlot={conceptCrumb}
         authControl={authControl}
         accountActive={accountActive}
-        saveState={openWorkbook ? modelSaveState(shownStatus, accountActive, cloudConfirmed) : null}
+        saveState={openWorkbook ? modelSaveState(shownStatus, accountActive, fileMode ? fw.cloudConfirmed : cloudConfirmed) : null}
         saveDetail={
           shownStatus === "not-provisioned" ? "Cloud backup for Spreadsheet isn't turned on yet — saved on this device only."
-          : shownStatus === "conflict" ? "This spreadsheet changed elsewhere — reload to see the latest (your edits here stayed on this device)."
+          : shownStatus === "conflict" ? (fileMode ? "This file was changed somewhere else — use “Show the Library’s version” in the bar above the sheet (your edits here are kept on this device)." : "This spreadsheet changed elsewhere — reload to see the latest (your edits here stayed on this device).")
           : shownStatus === "diverged" ? "This spreadsheet has different content saved from another device or browser. Nothing is being saved to the cloud until you choose which copy to keep, using the bar above the sheet."
           : undefined
         }
@@ -1178,6 +1244,7 @@ export default function ModelApp({
               onExportCsv={onExportCsv}
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
+              onOpenFile={onOpenFileFromComputer}
             />
             <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
             <AuditGroup ctx={ctx} />
@@ -1185,8 +1252,34 @@ export default function ModelApp({
         ) : undefined}
       />
 
-      {openWorkbook ? (
+      {openWorkbook && fileMode && fw.phase === "error" ? (
+        <FileProblem
+          message={fw.error?.message || "This file couldn’t be opened."}
+          canRetry={["download", "timeout", "error", "worker"].includes(fw.error?.code)}
+          onRetry={fw.retryOpen}
+          onClose={() => setActiveFile(fileScopeRef.current, null)}
+        />
+      ) : openWorkbook && fileMode && fw.phase !== "ready" ? (
+        <FileLoading name={fw.name} />
+      ) : openWorkbook ? (
         <>
+          {fileMode && (
+            <>
+              <FileBar
+                name={fw.name}
+                inPlace={fw.inPlace}
+                saving={fw.status === "saving"}
+                saveError={fw.saveError}
+                conflict={fw.status === "conflict"}
+                hasOriginal={fw.hasOriginal}
+                onDownloadOriginal={onDownloadOriginal}
+                onClose={closeFile}
+                onRetry={fw.retrySave}
+                onReload={fw.reloadFromLibrary}
+              />
+              <FileNotes notes={fw.notes} fileKey={activeFileId} />
+            </>
+          )}
           {diverged && (
             <DivergedBar
               showing={divergedCopiesRef.current?.showing || "device"}
