@@ -31,8 +31,6 @@ export function toggleItalicPatch(style) { return { italic: style?.italic ? null
 export function toggleUnderlinePatch(style) { return { underline: style?.underline ? null : true }; }
 export function toggleStrikePatch(style) { return { strike: style?.strike ? null : true }; }
 export function toggleWrapPatch(style) { return { wrap: style?.wrap ? null : true }; }
-export function increaseIndentPatch(style) { return { indent: (style?.indent || 0) + 1 }; }
-export function decreaseIndentPatch(style) { return { indent: Math.max(0, (style?.indent || 0) - 1) || null }; }
 
 // Group labels for the palette's section headers. The six that still ride the Home ribbon reuse
 // RIBBON_GROUPS' own label (one source); the rest (relocated to the palette/context menu/row-1,
@@ -83,8 +81,8 @@ export const COMMANDS = [
   { id: "valign-middle", label: label("Vertical Align Middle"), group: "alignment", run: (ctx) => ctx.onSetCellStyle({ valign: null }) },
   { id: "valign-bottom", label: label("Vertical Align Bottom"), group: "alignment", run: (ctx) => ctx.onSetCellStyle({ valign: "bottom" }) },
   { id: "wrap-text", label: label("Wrap Text"), group: "alignment", run: (ctx) => ctx.onSetCellStyle(toggleWrapPatch(ctx.activeStyle)) },
-  { id: "indent-increase", label: label("Increase Indent"), group: "alignment", run: (ctx) => ctx.onSetCellStyle(increaseIndentPatch(ctx.activeStyle)) },
-  { id: "indent-decrease", label: label("Decrease Indent"), group: "alignment", run: (ctx) => ctx.onSetCellStyle(decreaseIndentPatch(ctx.activeStyle)) },
+  { id: "indent-increase", label: label("Increase Indent"), group: "alignment", run: (ctx) => ctx.onAdjustIndent(1) },
+  { id: "indent-decrease", label: label("Decrease Indent"), group: "alignment", run: (ctx) => ctx.onAdjustIndent(-1) },
   { id: "merge-toggle", label: (ctx) => (ctx.mergedHere ? "Unmerge Cells" : "Merge Cells"), group: "alignment", keywords: kw("combine cells"), run: (ctx) => ctx.onMergeToggle() },
 
   // ---- Number format ----

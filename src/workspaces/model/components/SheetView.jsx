@@ -49,6 +49,8 @@ import { insertAtCaret, cycleReferenceAtCaret, todayIso, timeText } from "../lib
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
 import { editorHasFocus, fallbackEditAction, applyFallbackEdit } from "../lib/editorFallback.js";
+import { createEditHistory, recordEdit, undoEdit, redoEdit } from "../lib/cellEditHistory.js";
+import { undoKeyKind, CELL_EDITING_ATTR } from "../lib/undoKeyScope.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 // SPACE.sm / SPACE.md / CONTROL_H.md are used below as the LITERAL values 6 / 8 / 26
 // (src/shared/ui/designTokens.js), never imported — this file is lazy-loaded only on the
@@ -58,6 +60,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 // Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
+import { cellPadding, canSpill, spillSpanWidth } from "../lib/cellTextLayout.js";
 import ContextMenu from "./ContextMenu.jsx";
 import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
 import { pinDragCursor } from "../../../shared/ui/controls.jsx";
@@ -246,6 +249,15 @@ const SheetView = forwardRef(function SheetView({
   const [edit, setEdit] = useState(null);      // { r, c } | null
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef(null);
+  // NEW-1 (2026-10-29) — the editor's OWN undo (lib/cellEditHistory.js). `editValueRef` mirrors
+  // `editValue` synchronously so a burst of keystrokes can never read a stale value.
+  const editValueRef = useRef("");
+  const editHistoryRef = useRef(null);
+  const putEditValue = useCallback((next, record = true) => {
+    editValueRef.current = next;
+    setEditValue(next);
+    if (record) editHistoryRef.current = recordEdit(editHistoryRef.current, next);
+  }, []);
   const dragRef = useRef(null);                // { r, c } anchor while mouse-dragging a range; { header:'col'|'row', anchor } while dragging across headers
   const pendingCaretRef = useRef(null);        // { start, end } to restore on the editor after a programmatic edit (Alt+Enter, F4, Ctrl+;)
   const [contextMenu, setContextMenu] = useState(null); // { point:{x,y}, items } | null
@@ -522,8 +534,10 @@ const SheetView = forwardRef(function SheetView({
     // the active cell and leaves the highlight, which is what lets Ctrl+Enter fill the whole selection).
     if (!(selRange && r >= r1 && r <= r2 && c >= c1 && c <= c2)) setSelRange({ r1: r, r2: r, c1: c, c2: c });
     setEdit({ r, c });
-    setEditValue(seed != null ? seed : rawAt(sheet, r, c));
-  }, [sheet, setSelRange, selRange, r1, r2, c1, c2]);
+    const original = rawAt(sheet, r, c);
+    editHistoryRef.current = createEditHistory(original);
+    putEditValue(seed != null ? seed : original);
+  }, [sheet, setSelRange, putEditValue, selRange, r1, r2, c1, c2]);
 
   const cellClick = (r, c, e) => {
     // B1076480 — a RIGHT mousedown landing INSIDE an already-selected multi-cell range must
@@ -592,14 +606,14 @@ const SheetView = forwardRef(function SheetView({
   // The caret / selection of the open editor, for the edit-mode shortcuts below.
   const caretOf = () => {
     const el = inputRef.current;
-    const len = editValue.length;
+    const len = editValueRef.current.length;
     return el && typeof el.selectionStart === "number" ? [el.selectionStart, el.selectionEnd] : [len, len];
   };
   const insertIntoEditor = (text) => {
     const [ss, se] = caretOf();
-    const res = insertAtCaret(editValue, ss, se, text);
+    const res = insertAtCaret(editValueRef.current, ss, se, text);
     pendingCaretRef.current = { start: res.caret, end: res.caret };
-    setEditValue(res.value);
+    putEditValue(res.value);
   };
   const rawAbove = () => (edit && edit.r > 0 ? rawAt(sheet, edit.r - 1, edit.c) : "");
 
@@ -644,6 +658,23 @@ const SheetView = forwardRef(function SheetView({
 
   const onKeyDown = (e) => {
     if (edit) {
+      // NEW-1 (2026-10-29) — Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while a cell is being edited act on the
+      // EDITOR'S text only (Excel). They must never reach the app's sheet-level undo in ModelApp,
+      // whether the key came from the input or — in the B1287888 window — the grid container.
+      // Nothing left to undo abandons the edit back to the cell's original value.
+      const undoKind = undoKeyKind(e);
+      if (undoKind) {
+        e.preventDefault(); e.stopPropagation();
+        if (undoKind === "undo") {
+          const u = undoEdit(editHistoryRef.current);
+          if (u.atStart) cancelEdit();
+          else { editHistoryRef.current = u.history; putEditValue(u.value, false); }
+        } else {
+          const rd = redoEdit(editHistoryRef.current);
+          if (rd.changed) { editHistoryRef.current = rd.history; putEditValue(rd.value, false); }
+        }
+        return;
+      }
       // ⛔ Excel's edit-mode keys (2026-10-29). Ctrl+B/I/U/5 are handled one level up (they format the
       // whole cell) — everything below acts on the open editor's own text.
       const modKey = e.ctrlKey || e.metaKey;
@@ -651,7 +682,7 @@ const SheetView = forwardRef(function SheetView({
       if (e.key === "Enter" && modKey) {
         // Ctrl+Enter — fill the whole selection with what is typed, and stay on the cell.
         e.preventDefault();
-        const text = editValue;
+        const text = editValueRef.current;
         setEdit(null);
         outerRef.current?.focus();
         onFillSelection?.(r1, r2, c1, c2, text);
@@ -660,8 +691,8 @@ const SheetView = forwardRef(function SheetView({
       if (e.key === "F4" && !e.altKey && !modKey) {
         e.preventDefault();
         const [ss] = caretOf();
-        const res = cycleReferenceAtCaret(editValue, ss);
-        if (res) { pendingCaretRef.current = { start: res.start, end: res.end }; setEditValue(res.value); }
+        const res = cycleReferenceAtCaret(editValueRef.current, ss);
+        if (res) { pendingCaretRef.current = { start: res.start, end: res.end }; putEditValue(res.value); }
         return;
       }
       if (modKey && !e.altKey && e.key === ";") { e.preventDefault(); insertIntoEditor(todayIso()); return; }
@@ -682,7 +713,7 @@ const SheetView = forwardRef(function SheetView({
       // falls through untouched. See lib/editorFallback.js for the full mechanism.
       else if (!editorHasFocus(e.target, inputRef.current)) {
         const action = fallbackEditAction(e.key, e);
-        if (action) { e.preventDefault(); setEditValue((v) => applyFallbackEdit(v, action, e.key)); }
+        if (action) { e.preventDefault(); putEditValue(applyFallbackEdit(editValueRef.current, action, e.key)); }
       }
       return;
     }
@@ -1039,16 +1070,21 @@ const SheetView = forwardRef(function SheetView({
           // clip instead, matching Excel). The spilled span is `pointer-events: none` so the
           // empty cells underneath stay their own real click targets — spilling is purely
           // visual, never a merge. A merged anchor never spills — it already owns real width.
+          // The gate (`canSpill`) and the text padding (`pad`, below) are shared with the non-spill path,
+          // so clearing or refilling a neighbour changes how FAR a label runs, never where it starts.
+          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
           let spillCols = 0;
-          if (!merge && row && cell.kind === "text" && !cell.empty && !isEditing) {
+          if (row && canSpill({ kind: cell.kind, empty: cell.empty, merged: !!merge, editing: isEditing, align: hAlign, wrap: cellStyle.wrap })) {
             for (let cc = c + 1; cc < cols.length && row[cc] && row[cc].empty; cc++) spillCols++;
           }
           const w = merge ? (() => { let sum = 0; for (let k = merge.c1; k <= merge.c2; k++) sum += renderColW(k); return sum; })() : renderColW(c);
+          // ONE padding for the in-cell path, the spill span and the General-number fit; an indent only
+          // insets the text on its reading side and can never make the box wider than its column (NEW-2).
+          const pad = cellPadding({ indent: cellStyle.indent, align: hAlign, zoom, width: w });
           const spillWidth = spillCols > 0 ? (() => { let sum = w; for (let k = 1; k <= spillCols; k++) sum += renderColW(c + k); return sum; })() : null;
           // Explicit style overrides the kind-based default alignment; an ABSENT valign still
           // means vertically CENTERED — this app's own existing default for every cell, not
           // Excel's "bottom" (see Ribbon.jsx's AlignmentGroup for why that distinction matters).
-          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
           const vAlign = cellStyle.valign === "top" ? "flex-start" : cellStyle.valign === "bottom" ? "flex-end" : "center";
           const border = cellStyle.border || {};
           const edgeCSS = (token) => (token === "thick" ? `${3 * zoom}px solid var(--text-primary)` : token === "double" ? `${3 * zoom}px double var(--text-primary)` : token === "thin" ? `${1.5 * zoom}px solid var(--text-primary)` : "1px solid var(--border-default)");
@@ -1072,11 +1108,10 @@ const SheetView = forwardRef(function SheetView({
           if (!merge && cell.kind === "number" && cell.display !== "" && formatAt(sheet, r, c) == null) {
             const rawNum = Number(cell.display);
             if (Number.isFinite(rawNum)) {
-              const padX = (6 + (cellStyle.indent || 0) * 14) * zoom;
               // -1 for the cell's own right border, and a little slack so a canvas-measured
               // "fits" doesn't land 1-2px inside the DOM's own actual (slightly different font
               // hinting) rendered width and still trip the ellipsis below.
-              const availableWidthPx = Math.max(0, w - 2 * padX - 6 * zoom);
+              const availableWidthPx = Math.max(0, w - pad.left - pad.right - 6 * zoom);
               const numFont = `${cellStyle.bold ? "700 " : ""}${(cellStyle.fontSize || 12.5) * zoom}px ${cellStyle.fontFamily || "system-ui, sans-serif"}`;
               shownText = fitGeneralNumber(rawNum, availableWidthPx, (s) => measureTextWidth(s, numFont));
             }
@@ -1117,7 +1152,7 @@ const SheetView = forwardRef(function SheetView({
                 boxSizing: "border-box",
                 display: "flex", alignItems: vAlign,
                 justifyContent: hAlign === "right" ? "flex-end" : hAlign === "center" ? "center" : "flex-start",
-                padding: isEditing ? 0 : `0 ${(6 /* SPACE.sm literal — see designTokens.js note above */ + (cellStyle.indent || 0) * 14) * zoom}px`,
+                padding: isEditing ? 0 : `0 ${pad.right}px 0 ${pad.left}px`, // CELL_PAD_PX (SPACE.sm literal — see designTokens.js note above) + the indent on the reading side only
                 borderTop: border.top ? edgeCSS(border.top) : undefined,
                 borderLeft: border.left ? edgeCSS(border.left) : undefined,
                 borderRight: border.right ? edgeCSS(border.right) : "1px solid var(--border-default)",
@@ -1162,7 +1197,7 @@ const SheetView = forwardRef(function SheetView({
                     data-cell-editor="true"
                     autoFocus
                     value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
+                    onChange={(e) => putEditValue(e.target.value)}
                     style={{ position: "absolute", top: 0, left: 0, zIndex: 6, width: "100%", minHeight: "100%", height: `${editValue.split("\n").length * 1.3}em`, boxSizing: "border-box", resize: "none", overflow: "hidden", border: "2px solid var(--accent-model)", padding: "2px 5px", font: "inherit", lineHeight: 1.3, background: "var(--surface-raised)", color: "inherit", textAlign: "inherit" }}
                   />
                 ) : (
@@ -1172,7 +1207,7 @@ const SheetView = forwardRef(function SheetView({
                   data-cell-editor="true"
                   autoFocus
                   value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
+                  onChange={(e) => putEditValue(e.target.value)}
                   // Caret at the END on focus, never select-all: type-to-edit already
                   // seeds editValue with JUST the typed character (the "replace" half of
                   // the contract), so selecting it here would make the VERY NEXT keystroke
@@ -1184,7 +1219,7 @@ const SheetView = forwardRef(function SheetView({
                 />
                 )
               ) : spillCols > 0 ? (
-                <span style={{ position: "absolute", left: 8 * zoom, top: 0, height: "100%", display: "flex", alignItems: "center", width: spillWidth - 16 * zoom, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
+                <span style={{ position: "absolute", left: pad.left, top: 0, height: "100%", display: "flex", alignItems: vAlign, width: spillSpanWidth(spillWidth, pad.left, pad.right), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
               ) : (
                 // B1076480 — this cell's own text-clipping wrapper (see the outer box's `overflow`
                 // comment above): `minWidth: 0` is required for a flex child to actually shrink
@@ -1263,6 +1298,8 @@ const SheetView = forwardRef(function SheetView({
       ref={outerRef}
       tabIndex={0}
       data-testid="model-sheet"
+      {...{ [CELL_EDITING_ATTR]: edit ? "true" : undefined }}
+      data-letters-are-text=""
       onMouseUp={stopDrag}
       onMouseLeave={stopDrag}
       onKeyDown={onKeyDown}

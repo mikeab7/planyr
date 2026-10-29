@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 /* county → [table reason, a phrase the table note AND the fixture reason must carry, the vendor URL the county's own site links] */
 const SECOND_PASS = {
-  Alcona: ["none", "Schneider Beacon", "beacon.schneidercorp.com/Application.aspx?AppID=1164"],
+  Alcona: ["paywall", "Schneider Beacon", "beacon.schneidercorp.com/Application.aspx?AppID=1164"],
   Alger: ["locked", "Colligo", "colligogis.com/desktop/#sqpf5DSkqDPbsKy7"],
   Alpena: ["none", "no parcel map", null],
   Chippewa: ["locked", "FetchGIS", "app.fetchgis.com/?currentMap=eup"],
@@ -32,8 +32,8 @@ const SECOND_PASS = {
   Luce: ["locked", "Colligo", "colligogis.com/desktop/#HU5daGUuXuRqc8Tx"],
   Menominee: ["locked", "Colligo", "colligogis.com/desktop/#ZmdxvcJUMXkUMiUH"],
   Ogemaw: ["locked", "FetchGIS", "app.fetchgis.com/ogemaw"],
-  Oscoda: ["none", "Schneider Beacon", "beacon.schneidercorp.com/Application.aspx?App=OscodaCountyMI"],
-  "Presque Isle": ["none", "Schneider Beacon", "beacon.schneidercorp.com/Application.aspx?App=PresqueIsleCountyMI"],
+  Oscoda: ["locked", "Schneider Beacon", "beacon.schneidercorp.com/Application.aspx?App=OscodaCountyMI"],
+  "Presque Isle": ["locked", "Schneider Beacon", "beacon.schneidercorp.com/Application.aspx?App=PresqueIsleCountyMI"],
   Schoolcraft: ["locked", "FetchGIS", "app.fetchgis.com/?currentMap=cuppad"],
   Washtenaw: ["locked", "approved by Washtenaw County", "utility.arcgis.com/usrsvcs/servers/62c5"],
 };
@@ -51,19 +51,19 @@ describe("the 15 second-pass counties are filed by what the search found", () =>
     expect(COUNTIES[keyOf(name)], "a gap must not also be wired").toBeUndefined();
   });
 
-  it("11 are locked and 4 stay none; a `none` always says why (a vendor not yet measured, or no county map)", () => {
+  it("13 are locked, 1 is paywall and only Alpena stays none; the `none` says why (the county publishes no map)", () => {
     const rows = Object.keys(SECOND_PASS).map((n) => PARCEL_GAPS[keyOf(n)]);
-    expect(rows.filter((r) => r[0] === "locked")).toHaveLength(11);
-    expect(rows.filter((r) => r[0] === "none")).toHaveLength(4);
+    expect(rows.filter((r) => r[0] === "locked")).toHaveLength(13);
+    expect(rows.filter((r) => r[0] === "paywall")).toHaveLength(1);
+    expect(rows.filter((r) => r[0] === "none")).toHaveLength(1);
     for (const r of rows.filter((x) => x[0] === "none")) expect((r[1] || "").length, "a bare none is not a second-pass result").toBeGreaterThan(30);
   });
 
-  it("the Beacon `none` rows are NOT filed under the owner's measured-Schneider wording (they were not measured)", () => {
-    for (const n of ["Alcona", "Oscoda", "Presque Isle"]) {
-      const note = PARCEL_GAPS[keyOf(n)][1];
-      expect(note).toMatch(/not measured/);
-      expect(note.startsWith("Schneider map")).toBe(false);
-    }
+  it("the three Beacon counties carry the owner's MEASURED Schneider wording (Chrome, 2026-10-29), not the unmeasured note", () => {
+    expect(PARCEL_GAPS.mi_alcona).toEqual(["paywall", "Schneider map subscriber-only (2026-10-29)"]);
+    expect(PARCEL_GAPS.mi_oscoda).toEqual(["locked", "Schneider map public, parcel feed private (2026-10-29)"]);
+    expect(PARCEL_GAPS.mi_presqueisle).toEqual(["locked", "Schneider map public, parcel feed private (2026-10-29)"]);
+    for (const n of ["Alcona", "Oscoda", "Presque Isle"]) expect(PARCEL_GAPS[keyOf(n)][1]).not.toMatch(/not measured/);
   });
 });
 
@@ -82,8 +82,9 @@ describe("every row keeps its evidence in the research record", () => {
     expect(DOC).toContain("### Second pass (2026-10-29)");
     for (const route of ["ArcGIS Online", "relay", "zoning / land-use / addressing", "wfs.schneidercorp.com", "MISS DIG"]) expect(DOC).toContain(route);
     const sec = DOC.slice(DOC.indexOf("### Second pass (2026-10-29)"), DOC.indexOf("Test: `test/michiganCounties.test.js`"));
-    expect((sec.match(/\| locked \|/g) || []).length).toBe(11);
-    expect((sec.match(/\| none \|/g) || []).length).toBe(4);
+    expect((sec.match(/\| locked \|/g) || []).length).toBe(13);
+    expect((sec.match(/\| paywall \|/g) || []).length).toBe(1);
+    expect((sec.match(/\| none \|/g) || []).length).toBe(1);
   });
 });
 

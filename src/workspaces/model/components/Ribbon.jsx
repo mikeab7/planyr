@@ -60,7 +60,7 @@ import { NUMBER_FORMATS, formatLabelFor } from "../lib/numberFormats.js";
 import { computeRibbonLayout, RIBBON_GROUPS, MORE_BUTTON_WIDTH } from "../lib/ribbonLayout.js";
 import {
   toggleBoldPatch, toggleItalicPatch, toggleUnderlinePatch, toggleStrikePatch,
-  toggleWrapPatch, increaseIndentPatch, decreaseIndentPatch,
+  toggleWrapPatch,
 } from "../lib/commandRegistry.js";
 
 const FONT_FAMILIES = [
@@ -411,8 +411,8 @@ function AlignmentGroup({ ctx }) {
         {VALIGN_OPTIONS.map((v) => <MenuItem key={v.id} active={(s.valign || "middle") === v.id} onClick={() => ctx.onSetCellStyle({ valign: v.id === "middle" ? null : v.id })}>{v.label}</MenuItem>)}
       </IconDropdownButton>
       <button type="button" data-testid="ribbon-wrap" data-keytip="HW" title="Wrap text" aria-label="Wrap text" aria-pressed={!!s.wrap} onClick={() => ctx.onSetCellStyle(toggleWrapPatch(s))} style={ribbonBtnStyle(!!s.wrap)}><IconWrap /></button>
-      <button type="button" data-testid="ribbon-indent-dec" data-keytip="H5" title="Decrease indent" aria-label="Decrease indent" onClick={() => ctx.onSetCellStyle(decreaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentDec /></button>
-      <button type="button" data-testid="ribbon-indent-inc" data-keytip="H6" title="Increase indent" aria-label="Increase indent" onClick={() => ctx.onSetCellStyle(increaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentInc /></button>
+      <button type="button" data-testid="ribbon-indent-dec" data-keytip="H5" title="Decrease indent" aria-label="Decrease indent" onClick={() => ctx.onAdjustIndent(-1)} style={ribbonBtnStyle(false)}><IconIndentDec /></button>
+      <button type="button" data-testid="ribbon-indent-inc" data-keytip="H6" title="Increase indent" aria-label="Increase indent" onClick={() => ctx.onAdjustIndent(1)} style={ribbonBtnStyle(false)}><IconIndentInc /></button>
       <IconDropdownButton icon={<IconMerge />} title="Merge cells" width={170} keytip="HM">
         <MenuItem onClick={ctx.onMergeToggle}>{ctx.mergedHere ? "Unmerge Cells" : "Merge Cells"}</MenuItem>
       </IconDropdownButton>

@@ -40,7 +40,6 @@
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
-import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
@@ -51,6 +50,8 @@ import Ribbon, { AuditGroup } from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
+import { undoKeyKind, undoKeyOwner, CELL_EDITING_ATTR } from "./lib/undoKeyScope.js";
+import { isTextControl } from "../../shared/keyboard/keyScope.js";
 import {
   createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet, setActiveSheet,
   addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
@@ -58,7 +59,7 @@ import {
   commitCellText, blankRange, setNumberFormat, addColumn,
   formatAt, padRowCount, sheetsDiverge, rawAt,
   setColumnWidth, setRowHeight, setFreeze,
-  styleAt, setCellStyle, applyBorder, clearFormatting,
+  styleAt, setCellStyle, adjustIndent, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
   isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
   setRowsHidden, setColumnsHidden, clearCellRange, DEFAULT_ROW_H,
@@ -110,7 +111,7 @@ import { parseSpreadsheetInWorker, exportWorkbookInWorker } from "./lib/spreadsh
 // `onProjectsChanged` shape exactly) so a live edit made in the still-mounted Site Planner tab
 // recalculates a formula here without a reload. `fetchAllComps` is the same async/Supabase-only
 // read CompsPanel.jsx uses — there is no synchronous comps cache anywhere in this repo.
-import { buildProjectNames, openConceptName, openPlanId } from "./lib/projectRefs.js";
+import { buildProjectNames, openPlanId } from "./lib/projectRefs.js";
 import { onSiteModelChanged, isCloudActive } from "../site-planner/lib/storage.js";
 import { onCompsChanged } from "../../shared/comps/lib/compsChanged.js";
 import { supabase } from "../site-planner/lib/supabase.js";
@@ -321,15 +322,9 @@ export default function ModelApp({
     };
   }, [openPlan]);
   const projectNames = useMemo(() => buildProjectNames(projectId, { comps, planRows }), [projectId, comps, siteTick, _projectsTick, planRows]);
-  // spreadsheet-concept-crumb (NEW-1) — the header dropped the concept/scheme segment the Site tab
-  // shows (Map / Project / Concept ▾), so once a project held more than one concept there was no
-  // way to tell, from this tab alone, which scheme's geometry Site.*/Plan.* were quoting — exactly
-  // the ambiguity #1516 fixed the RESOLUTION half of. Same trigger as `projectNames` above
-  // (`siteTick`, bumped by `onSiteModelChanged` — which a plan switch's `flushSite()` fires too, so
-  // this reads live the instant the Site tab's plan crumb changes), and the identical resolution
-  // (`openConceptName` shares `projectRefs.js`'s one `loadOpenSite`) — no second "which scheme is
-  // open" answer to drift from what the sheet is actually evaluating.
-  const conceptName = useMemo(() => openConceptName(projectId), [projectId, siteTick]);
+  // NEW-1 (2026-10-29) — no plan/concept crumb here: only the Site tab is plan-scoped, so the
+  // Spreadsheet header reads "Dashboard / <Project> ▾" (the old spreadsheet-concept-crumb is gone,
+  // and shared/ui/crumbScope.js would not draw a trailing crumb on this module anyway).
   const cloudVersionRef = useRef(null);
   const pushTimer = useRef(0);
   // V537648 — the debounced push reads these at FIRE time (lib/modelPushGate.js). `statusRef`
@@ -739,6 +734,14 @@ export default function ModelApp({
       }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
+      // NEW-1 (2026-10-29) — undo/redo belong to the TEXT being typed (cell editor, formula bar,
+      // Name Box, column rename, Find bar…): leave the key to the field's own native undo, or to
+      // SheetView's editor history. Only with no text control owning the keyboard does the sheet's
+      // undo stack fire. See lib/undoKeyScope.js.
+      if (undoKeyKind(e) && undoKeyOwner({
+        textControl: isTextControl(e.target),
+        cellEditorOpen: !!(e.target instanceof Element && e.target.closest(`[${CELL_EDITING_ATTR}]`)),
+      }) === "text") return;
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
@@ -1092,6 +1095,9 @@ export default function ModelApp({
 
   const onSetCellStyle = useCallback((patch) => {
     applyActive(setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch);
+  }, [applyActive, selRange]);
+  const onAdjustIndent = useCallback((delta) => {
+    applyActive(adjustIndent, selRange.r1, selRange.r2, selRange.c1, selRange.c2, delta);
   }, [applyActive, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
     applyActive(applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode });
@@ -1477,7 +1483,7 @@ export default function ModelApp({
     activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
     painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
     canUndo, canRedo, onUndo: undo, onRedo: redo,
-    onSetCellStyle: recd("onSetCellStyle", onSetCellStyle), onApplyBorder: recd("onApplyBorder", onApplyBorderCmd),
+    onSetCellStyle: recd("onSetCellStyle", onSetCellStyle), onAdjustIndent: recd("onAdjustIndent", onAdjustIndent), onApplyBorder: recd("onApplyBorder", onApplyBorderCmd),
     onApplyFormat: recd("onApplyFormat", onApplyFormat), onNumberFormatOp: recd("onNumberFormatOp", onNumberFormatOp),
     onClearFormatting: recd("onClearFormatting", onClearFormattingCmd),
     onFormatPainterToggle, onMergeToggle: recd("onMergeToggle", onMergeToggle),
@@ -1609,30 +1615,6 @@ export default function ModelApp({
   const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
-  // spreadsheet-concept-crumb (NEW-1) — a trailing breadcrumb crumb, same slot/geometry the Site
-  // tab's own plan switcher occupies (ProjectBreadcrumb.jsx's `planSlot`), naming which concept the
-  // sheet's Site.*/Plan.* values are quoting. `null` (no trailing crumb at all) when the project has
-  // never touched the Site Planner — nothing to name, same as `Site.Acres` reading `#REF!` then.
-  // Read-only here on purpose: switching concepts is the Site tab's own affordance (its plan
-  // crumb), so this jumps there rather than duplicating that switcher's state/menu in this workspace.
-  const conceptCrumb = openProject && conceptName ? (
-    <button
-      type="button"
-      className="dbtn"
-      onClick={() => onShellSwitch?.("site-planner")}
-      title={`“${conceptName}” is the open scheme — its Site plan is what Site.*/Plan.* formulas read. Click to switch to the Site tab.`}
-      data-testid="model-concept-crumb"
-      style={{
-        display: "flex", alignItems: "center", gap: 5, flex: "0 1 auto", minWidth: CRUMB_MIN_W, maxWidth: 200,
-        height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
-        background: "transparent", cursor: "pointer", fontFamily: "inherit",
-        fontSize: 12, fontWeight: 500, color: "var(--chrome-text)", whiteSpace: "nowrap",
-      }}
-    >
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{conceptName}</span>
-    </button>
-  ) : null;
-
   return (
     <div data-testid="model-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
       <AppHeader
@@ -1648,7 +1630,6 @@ export default function ModelApp({
         onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         onSelectOrg={onSelectOrg}
-        planSlot={conceptCrumb}
         authControl={authControl}
         accountActive={accountActive}
         saveState={openWorkbook ? modelSaveState(shownStatus, accountActive, fileMode ? fw.cloudConfirmed : cloudConfirmed) : null}

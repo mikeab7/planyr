@@ -385,7 +385,7 @@ function sheetNavItems() {
     item({ id: "sheet.edit.fill-selection", label: "Fill the whole selection with what you typed", keysText: "Ctrl/⌘+Enter",
       evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "onFillSelection?.(r1, r2, c1, c2, text)" }] }),
     item({ id: "sheet.edit.cycle-ref", label: "Cycle $A$1 / A$1 / $A1 / A1 on the reference at the caret", keysText: "F4 (while editing a formula)",
-      evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "cycleReferenceAtCaret(editValue, ss)" }] }),
+      evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "cycleReferenceAtCaret(editValueRef.current, ss)" }] }),
     item({ id: "sheet.header-select", label: "Select a whole column / row", keysText: "Click a column letter or row number (drag or Shift+click for a run; the corner box selects everything)",
       evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "const headerPress = (axis, idx, e)" }] }),
   ];
@@ -412,8 +412,8 @@ const GLOBAL_ITEMS = [
   }),
   item({
     id: "global.fullscreen-bare", label: "Toggle full screen", combo: ["f"],
-    note: "Only where nothing editable is on screen (the map, or a drawing).",
-    evidence: [{ file: "src/shared/ui/AppHeader.jsx", pattern: '(e.key === "f" || e.key === "F") && !e.altKey && !writeableDocumentOnScreen()' }],
+    note: "Only where nothing editable is on screen (the map, or a drawing) — never on the Spreadsheet or a comp sheet.",
+    evidence: [{ file: "src/shared/ui/AppHeader.jsx", pattern: 'bareFullscreenAllowed({' }],
   }),
 ];
 

@@ -7,6 +7,8 @@
  *
  * Pure: no network, no React, no Leaflet — unit-tested in test/desotoZoning.test.js. */
 
+import { zoneWithName } from "./desotoZoningNames.js";
+
 /* Zone code → class. The codes are DeSoto County's ordinance plus Olive Branch's: A / A-R (agricultural, rural residential), R-x residential, C-1…C-5
  * commercial, M-1…M-3 industrial, PUD planned unit development; anything else (overlays, MU, a typo) is "other" and drawn neutral, never guessed. */
 export function zoneClass(code) {
@@ -76,7 +78,7 @@ export function zoningRows(props, jurisdiction) {
   const p = props || {};
   const rows = [];
   const zone = zoneLabelText(p.ZONE);
-  if (zone) rows.push({ label: "Zone", text: `${zone} (${ZONE_CLASS_LABEL[zoneClass(zone)].toLowerCase()})` });
+  if (zone) rows.push({ label: "Zone", text: zoneWithName(zone, jurisdiction) }); // "M-1 · Light Industrial" when the ordinance name is sourced, else the bare code (B2507063)
   rows.push({ label: "Jurisdiction", text: jurisdiction || "Checking city limits…" });
   const prev = zoneLabelText(p.PREV_ZONE);
   if (prev && prev !== zone) rows.push({ label: "Previously", text: prev });
