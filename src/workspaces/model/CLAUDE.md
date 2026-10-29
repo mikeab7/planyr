@@ -13,6 +13,8 @@ file…"). ONE source of truth: the Library file's stored bytes ARE the document
 - In file mode ModelApp's project load / write-through / cloud push are skipped (`fileMode`) — never let them write a file's cells into a project slot.
 - Tests: repo-root `test/` **spreadsheetFile**, **spreadsheetFileWorkbook**, **spreadsheetFileWiring** (real fixtures in `test/fixtures/spreadsheet/`).
 
+**A cell's text starts in ONE place (NEW-1, B2525584).** `lib/cellTextLayout.js` is the single source for the text inset (`cellPadX`) and for which cells may spill across empty neighbours (`canSpill`); both paths in `SheetView.jsx` use it, so clearing or refilling the cell beside a label never moves the label. Guards: repo-root `test/` **cellTextLayout**; e2e **model-clear-cell-layout**.
+
 **Chrome is FLAT and edge to edge (NEW-1, B2517376, owner-approved mockup 2026-10-29).** The toolbar (`components/Ribbon.jsx`), the formula bar (`components/FormulaBar.jsx`), the grid (`components/SheetView.jsx`) and the sheet-tab strip (`components/TabStrip.jsx`) are full-width strips with single hairlines — no floating card, margin, rounded corners or shadow anywhere. Do not bring the card back. Guard: the repo-root ui-audit harness named verify-spreadsheet-flat-chrome.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the lines above in the same commit.
