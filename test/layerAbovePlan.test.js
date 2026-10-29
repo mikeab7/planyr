@@ -38,6 +38,7 @@ import {
   sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig, overlaysWithOverrides,
 } from "../src/workspaces/site-planner/lib/layerPrefs.js";
 import { createSiteModel, mergeSiteContent } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/" + rel, import.meta.url)), "utf8");
 
@@ -190,7 +191,7 @@ describe("NEW-1 — PDF-PARITY: the sheet prints the lift where the screen shows
 });
 
 describe("NEW-1 — the canvas hosts the lifted band inside the plan SVG", () => {
-  const planner = read("SitePlanner.jsx");
+  const planner = plannerSource();
 
   it("the front-band anchor is rendered, and the pane host lives inside it", () => {
     expect(FRONT_BAND_ATTR).toBe("data-gis-front-band");
@@ -364,7 +365,7 @@ describe("NEW-1 — the lift is remembered PER SITE, like every other per-plan d
   });
 
   it("the planner persists and undoes it alongside the visibility set", () => {
-    const sp = read("SitePlanner.jsx");
+    const sp = plannerSource();
     expect(sp).toMatch(/stateRef\.current = \{[^}]*layerAbove[^}]*\};/);
     expect(sp).toMatch(/const payload = \{[^}]*layerAbove \};/);
     expect(sp).toMatch(/"\|A:" \+ aboveSig\(s\.layerAbove\)/); // its own undo frame

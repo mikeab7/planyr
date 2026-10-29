@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { calloutLayout } from "../src/workspaces/site-planner/lib/calloutLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 (B1612640) — "text box border/padding uneven top vs bottom". Root cause: three padded-box
  * text renders (the callout/text-box body, the parcel acreage chip, the measurement summary chip)
@@ -17,7 +18,7 @@ import { calloutLayout } from "../src/workspaces/site-planner/lib/calloutLayout.
  * `dominantBaseline="middle"` convention every other centred <text> in SitePlanner.jsx already
  * uses (element name labels, dimension numbers). */
 
-const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const SP = plannerSource();
 
 describe("NEW-1 (B1612640): callout/chip text is centred on its slot, not a magic baseline ratio", () => {
   it("the banned magic-ratio baseline offset is gone from every padded-box text render", () => {

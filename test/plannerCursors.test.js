@@ -9,6 +9,7 @@ import {
   pinDragCursor, unpinDragCursor, dragCursorPinned, plannerCursorCss, installPlannerCursorStyle, setMapCursor, ROTATE_CURSOR,
 } from "../src/workspaces/site-planner/lib/plannerCursors.js";
 import { canDropOverlay } from "../src/workspaces/site-planner/lib/overlayOrder.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = new URL("../src/workspaces/site-planner/", import.meta.url).pathname;
 const read = (f) => readFileSync(join(ROOT, f), "utf8");
@@ -66,7 +67,7 @@ describe("what a live drag shows", () => {
     expect(dragCursorFor("somethingNew")).toBeNull();
   });
   it("every drag mode the planner arms is classified (a new mode cannot silently miss the pin)", () => {
-    const modes = new Set([...read("SitePlanner.jsx").matchAll(/drag\.current = \{ mode: "([A-Za-z0-9]+)"/g)].map((m) => m[1]));
+    const modes = new Set([...plannerSource().matchAll(/drag\.current = \{ mode: "([A-Za-z0-9]+)"/g)].map((m) => m[1]));
     expect(modes.size).toBeGreaterThan(25);
     const missing = [...modes].filter((m) => dragCursorFor(m, "nwse-resize") === null);
     expect(missing).toEqual([]);
@@ -137,7 +138,7 @@ describe("overlay row drag: a drop the order rules would refuse says no-drop up 
 });
 
 describe("source guards (all red on 2500b00)", () => {
-  const sp = read("SitePlanner.jsx"), mf = read("MapFinder.jsx");
+  const sp = plannerSource(), mf = read("MapFinder.jsx");
   it("no not-allowed cursor anywhere in the Site Planner slice", () => {
     const hits = SLICE.filter((f) => f !== "lib/plannerCursors.js" && /["']not-allowed["']/.test(read(f)));
     expect(hits).toEqual([]);

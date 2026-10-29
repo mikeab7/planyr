@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { mitigationCredit, accumulatePondLedger } from "../src/workspaces/site-planner/lib/pondLedger.js";
 import { bandedStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { sizePondForTargets } from "../src/workspaces/site-planner/lib/pondSizing.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const SQ = (s = 200) => [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }];
 const AC = 43560;
@@ -119,7 +120,7 @@ describe("NEW-26 — the ledger and the optimizer AGREE (both read mitigationCre
 });
 
 describe("NEW-26 / 22 / 23 — SitePlanner wiring (source scan)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const src = plannerSource();
 
   it("NEW-26 — the Optimize card names the outfall gate reason + fix (never a false 'sized toward'/'already covers')", () => {
     expect(src).toContain("} else if (pass2.mitigation.gated) {");

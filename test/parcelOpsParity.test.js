@@ -12,8 +12,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { planCombine, planSplit, includedAcres } from "../src/workspaces/site-planner/lib/parcelOps.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const src = plannerSource();
 const panel = readFileSync(new URL("../src/workspaces/site-planner/components/ParcelsPanel.jsx", import.meta.url), "utf8");
 
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];

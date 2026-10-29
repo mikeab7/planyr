@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* B966630 (NEW-7, owner "while you're doing this, change References to Overlays") — the
  * user-facing name for the panel that renders `sheetOverlays` is "Overlays", everywhere the user
@@ -9,7 +10,7 @@ import { readFileSync } from "node:fs";
  * `title`, which is what an assistive-tech user and the rail tooltip both read) can't silently
  * drift back to "References" without turning this red.
  */
-const SRC = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const SRC = plannerSource();
 const PANEL = readFileSync(new URL("../src/workspaces/site-planner/components/OverlaysPanel.jsx", import.meta.url), "utf8");
 
 describe("Overlays panel — user-facing name, internal id untouched (B966630)", () => {
