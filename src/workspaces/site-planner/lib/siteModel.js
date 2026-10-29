@@ -36,6 +36,7 @@ import { createIdMinter, randomIdSalt } from "../../../shared/ids.js";
 import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan, anchoredAlongSpan } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
+import { followDrives } from "./driveFollow.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ, migrateBandForce } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
@@ -1220,7 +1221,7 @@ export function normalizeBondedChildren(els, onHeal, { mintId = null } = {}) {
   // the foreign-host RUN heal (NEW-1) runs after that drop, so it judges a member's length against
   // the chain it will actually be laid on; the stranded re-fit stays last (it re-places whatever is
   // still geometrically impossible).
-  return normalizeStrandedZones(
+  const healed = normalizeStrandedZones(
     normalizeHostRuns(
       normalizeZoneAlongLen(
         normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(
@@ -1231,7 +1232,12 @@ export function normalizeBondedChildren(els, onHeal, { mintId = null } = {}) {
     ),
     onHeal,
   );
+  /* ⛔ B2498961 (owner 2026-10-29) — LAST, because it reads the fields' FINAL positions: a road connected to a field this heal re-seated follows it by the
+   * same offset (heals are small), so the plan opens with the drive still landing where he drew it. Identity on a plan the heal left alone, and a fixed
+   * point (the field is where the heal wants it, so nothing moves the second time). The rows are not rewritten here — see B2498961 on the data-ownership half. */
+  return Array.isArray(els) ? followDrives(els, els, healed, { restrip: restripRoad }) : healed;
 }
+const restripRoad = (r) => ({ ...r, ...roadStripBBox(r.pts, r.vtx, r.travelW, Number.isFinite(r.curb) ? r.curb : 0.5) });
 
 // v14 (B848736) — the fixed id a folded aerial is minted under. FIXED, not random: two
 // independent createSiteModel() calls over the SAME raw legacy record (e.g. mergeSiteContent's

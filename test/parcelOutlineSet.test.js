@@ -85,7 +85,7 @@ describe("SitePlanner wiring (structural — fails on the pre-fix fan-out)", () 
   it("(B2024625) the cross-tab fold adopts per collection, never rewriting an unchanged one", async () => {
     const fs = await import("node:fs");
     const src = plannerSource();
-    expect(src).toMatch(/adopt\("els", setEls\)/);
+    expect(src).toMatch(/adopt\("els", setElsRaw\)/);   // B2498961: a cross-tab adoption RESTORES geometry — it goes through the raw setter, never the drive-follow wrapper
   });
 });
 
