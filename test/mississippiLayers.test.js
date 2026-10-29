@@ -160,7 +160,7 @@ describe("every Mississippi row is registered whole, sourced, and scoped", () =>
   it("is in the registry and reads the URL its GIS_SOURCES row names (no inline endpoint)", () => {
     const keyOf = {
       ms_city: "msCity", ms_tribal: "msTribal", ms_deq_gard: "msDeqGard", ms_deq_ust: "msDeqUst", ms_epa_brownfields: "msBrownfields", ms_deq_landfills: "msDeqLandfills",
-      ms_deq_mines: "msDeqMines", ms_ogb_wells: "msOgbWells", ms_deq_og_fields: "msDeqOgFields", ms_deq_spa: "msDeqSpa", ms_nrcs_easements: "msNrcsEasements", ms_nrhp: "msNrhp",
+      ms_deq_mines: "msDeqMines", ms_ogb_wells: "msOgbWells", ms_deq_og_fields: "msDeqOgFields", ms_deq_spa: "msDeqSpa", ms_nrcs_easements: "msNrcsEasements", ms_nrhp: "msNrhp", ms_cemeteries: "msCemeteries",
       ms_crit_habitat: "msCritHabitat", ms_303d: "ms303d", ms_dams: "msDams", ms_dam_inundation: "msDamInundation", ms_desoto_drainage: "msDesotoDrainage",
       ms_desoto_levee: "msDesotoLevee", ms_desoto_lomr: "msDesotoLomr", ms_desoto_loma: "msDesotoLoma", ms_desoto_cemeteries: "msDesotoCemeteries",
     };
@@ -259,7 +259,7 @@ describe("requests actually issued", () => {
       syncOverlayLayers(fakeMap(), drawn, {}, { onStatus() {}, onError() {} });
       await new Promise((r) => setTimeout(r, 200));
     } finally { globalThis.fetch = realFetch; }
-    const mine = (u) => MS_HOSTS.test(u) || /cJ9YHowT8TU7DUyn|FiaPA4ga0iQKduv3|QVENGdaPbd4LUkLV/.test(u);
+    const mine = (u) => MS_HOSTS.test(u) || /cJ9YHowT8TU7DUyn|FiaPA4ga0iQKduv3|QVENGdaPbd4LUkLV|carto\.nationalmap\.gov/.test(u);
     return { fetched: fetched.filter(mine), built: featureLayerCalls.filter(mine) };
   }
   it("at Olive Branch every statewide row and every DeSoto row is built", async () => {

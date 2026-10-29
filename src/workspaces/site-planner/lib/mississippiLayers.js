@@ -260,6 +260,13 @@ export const MISSISSIPPI_LAYERS = {
     note: "National Register listings — one point per listing (a district is one point, not its boundary). Mississippi's own historic-resources inventory (MDAH) is not an open service, so recorded-but-unlisted sites are NOT here. A flag to check with MDAH, not a clearance.",
     infoCaveat: "NPS listings through Esri Federal Data. Federal or state permits on a listed property trigger Section 106 review.",
   }),
+  ms_cemeteries: feature("msCemeteries", {
+    ...MS, label: "Cemeteries", role: "point", group: "environmental", order: 40, minZoom: 12, source: "USGS — GNIS cemeteries",
+    color: "#475569", weight: 1.5, pointRadius: 3.5, fields: ["NAME", "CITY", "STATE"],
+    identifyCard: (p) => ({ title: str(p && (p.NAME || p.name)) || "Cemetery", rows: clean([row("City", p && (p.CITY || p.city))]) }),
+    note: "INCOMPLETE: recorded cemeteries only. An unrecorded family burial ground is NOT on this layer, so an empty map is never proof of none. A burial ground on the site is a hard constraint — ask the county and have it surveyed.",
+    infoCaveat: "USGS National Map (GNIS) points; no single edition date.",
+  }),
   ms_crit_habitat: feature("msCritHabitat", {
     ...MS, label: "Critical Habitat", role: "area", group: "environmental", order: 42, minZoom: 8, source: "U.S. Fish & Wildlife Service",
     color: "#15803d", weight: 1.5, fields: ["comname", "sciname", "listing_status"], styleFn: outline("#15803d", 1.5, 0.5),
@@ -347,6 +354,7 @@ export const MISSISSIPPI_VINTAGE = {
   ms_deq_spa: "MDEQ Source Water Assessment Program — current edition",
   ms_nrcs_easements: "USDA NRCS easements — 2024 aggregate republished by MARIS",
   ms_nrhp: "NPS National Register — Esri Federal Data copy",
+  ms_cemeteries: "USGS GNIS cemeteries — recorded sites only; no single edition date",
   ms_crit_habitat: "USFWS final critical habitat — layer edited 2026-08-31",
   ms_303d: "MDEQ 2024 Section 303(d) list",
   ms_dams: "MDEQ Dam Safety inventory — current edition",

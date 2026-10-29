@@ -157,6 +157,7 @@ export const LAYER_TIER = {
   ms_deq_spa: "reference",
   ms_nrcs_easements: "constraint",  // a federal easement bars development on its area
   ms_nrhp: "reference",
+  ms_cemeteries: "constraint",
   ms_crit_habitat: "constraint",
   ms_303d: "reference",
   ms_dams: "reference",

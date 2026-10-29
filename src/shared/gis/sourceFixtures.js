@@ -367,6 +367,13 @@ export const SOURCE_FIXTURES = {
     { label: "Gulfport (Harrison Co.)", point: [-89.091, 30.3694], expectMinCount: 1 },
   ],
   },
+  msCemeteries: {
+  fixtures: [
+    { label: "Olive Branch area (DeSoto Co.)", point: [-89.9374, 34.889], expectMinCount: 1 },
+    { label: "Jackson area (Hinds Co.)", point: [-90.1523, 32.2037], expectMinCount: 1 },
+    { label: "Biloxi (Harrison Co.)", point: [-88.9075, 30.3976], expectMinCount: 1 },
+  ],
+  },
   msCritHabitat: {
   fixtures: [
     { label: "Jackson (Hinds Co.)", point: [-90.1787, 32.2902], expectMinCount: 1 },
@@ -1376,6 +1383,10 @@ export const SOURCE_DOCS = {
   msNrhp: {
   notes:
     "NPS National Register listings (1,100 in Mississippi), one point per listing. Mississippi's own HRI (MDAH) is not an open service; recorded-but-unlisted sites are not here.",
+  },
+  msCemeteries: {
+  notes:
+    "USGS GNIS cemeteries (National Map structures). Recorded cemeteries only: an unrecorded family burial ground is not on the layer, so an empty map is never proof of none.",
   },
   msCritHabitat: {
   notes:
