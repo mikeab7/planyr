@@ -38,7 +38,8 @@ describe("the guard in buildFeatureLayer", () => {
     vi.doMock("esri-leaflet", () => ({
       dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(),
       featureLayer: vi.fn(() => ({
-        createLayers(f) { created.push(f.length); },
+        _layers: {},
+        createLayers(f) { created.push(f.length); f.forEach((x) => { if (x.id != null) this._layers[x.id] = x; }); },
         fire(name, e) { fired.push([name, e]); },
         on() { return this; },
       })),
@@ -56,6 +57,11 @@ describe("the guard in buildFeatureLayer", () => {
     expect(created).toEqual([1]);
     expect(fired.map((f) => f[0])).toEqual(["overbudget"]);
     expect(fired[0][1].vertices).toBeGreaterThan(FEATURE_VERTEX_BUDGET);
+    // the SAME feature delivered again and again (each pan touches it) is never counted twice: forty re-deliveries of a 62k-point polygon all pass
+    const big = { ...poly(62000), id: 77 };
+    for (let i = 0; i < 40; i++) lyr.createLayers([big]);
+    expect(created.length).toBe(41);
+    expect(fired.length).toBe(1);
   });
 });
 
@@ -78,7 +84,8 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
       dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(),
       featureLayer: vi.fn(() => ({
         handlers: {},
-        createLayers(f) { this.created = (this.created || 0) + f.length; },
+        _layers: {},
+        createLayers(f) { this.created = (this.created || 0) + f.length; for (const x of f) if (x && x.id != null) this._layers[x.id] = x; }, // like esri-leaflet: a drawn feature is held under its id
         fire(name, e) { (this.handlers[name] || []).forEach((h) => h(e)); },
         on(name, h) { (this.handlers[name] = this.handlers[name] || []).push(h); return this; },
       })),

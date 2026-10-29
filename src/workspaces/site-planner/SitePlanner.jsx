@@ -191,6 +191,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
+import { crumbFloor } from "../../shared/ui/crumbScope.js";
 import RotationStepper, { normalizeDeg, formatDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
@@ -200,7 +201,7 @@ import { setLayersHidden } from "./lib/layerHide.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
-import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
+import { anchorTransform, anchorTransformAttr, anchorInverseCss, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
 import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
 import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
@@ -384,6 +385,7 @@ import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVerte
 import { regionPathD, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments, rectBandOutlineCutPolylines, curbBandPieces } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
+import { followDrives } from "./lib/driveFollow.js";
 import { keptRuns, snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import {
@@ -1615,7 +1617,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      them; running it before the prune means the prune judges "is this zone on a dock side?" against
      the very same answer it would have given before this change. Identity-stable, so an
      already-healed plan does no work and is not marked dirty. */
-  const [els, setEls] = useState(() => pruneStrandedZones(healDockAxes(restored?.els || []))); // {id,type,cx,cy,w,h,rot}
+  const [els, setElsRaw] = useState(() => pruneStrandedZones(healDockAxes(restored?.els || []))); // {id,type,cx,cy,w,h,rot}
+  /* ⛔ B2498961 (owner 2026-10-29) — EVERY element write goes through here, so a road connected to a parking field / truck court follows it on a small move and
+   * lets go on a big one NO MATTER WHAT moved the field (a drag of the field or its building, an arrow nudge, rotate / resize, a re-laid row, a Properties edit).
+   * `followDrives` (lib/driveFollow.js) is the one rule; this is its one seam. Two things it needs from the gesture, both by reference to refs, never state:
+   *   · the BASE — `drag.current.followBase`, the elements as the gesture BEGAN (spread in by `startGate`), so the let-go threshold is measured over the whole drag
+   *     and the road re-follows if the owner drags back; outside a drag the base is the previous state, which is what a one-shot edit moves from.
+   *   · a way OUT — whole-canvas replacements (undo / redo, a remote row, a plan load, a version restore, a seed adoption) call `setElsRaw`, because those
+   *     RESTORE exact geometry and must never be re-interpreted. Because the road's follow is written into the same state as the field's move, ONE undo frame
+   *     (pushHistory before the gesture) reverses both and redo replays both. */
+  const setEls = (u) => {
+    const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
+    const gestureBase = d && d.followBase ? d.followBase : null;
+    setElsRaw((prev) => followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad }));
+  };
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
   // EVERY road-geometry read below takes this, so pavement, curb stripes, paved area and length all
@@ -4509,7 +4524,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Reflect an engine-assigned z back onto the canvas element so render/hit-test (byZ) and the
   // committed row's z_index + data.z all agree. One of the five collection setters by kind.
   const applyZPatch = (kind, id, patch) => {
-    const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
+    const setter = { el: setElsRaw, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
     if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
   // NEW-1 — direct-vs-derived edit attribution for the sync engine. A gesture on a building
@@ -4657,7 +4672,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
   const applyRemoteInstr = (instr) => {
     if (!instr || instr.action === "ignore") return;
-    const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
+    const setter = { el: setElsRaw, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
     setter((a) => applyInstrToList(a, instr));
   };
@@ -4688,7 +4703,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // outright (React's basicStateReducer treats a non-function action as a replacement, not a
     // merge). Re-deriving from whatever `els` actually is when this dispatches — instead of trusting
     // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
-    if (guarded !== els) setEls((cur) => (cur === els ? guarded : withMissingZ(assemblyIntegrity(cur).els)));
+    if (guarded !== els) setElsRaw((cur) => (cur === els ? guarded : withMissingZ(assemblyIntegrity(cur).els)));
   }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
   /* NEW-1 (B2289936) — a lot's number is STAMPED, so deleting one never renumbers the rest (siteModel.parcelNumbers). A plan read
    * from storage arrives stamped (READ_NORMALIZE); this stamps what was created in this session. Identity-preserving once stamped,
@@ -4851,7 +4866,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
-    replace(setEls, shown.els); replace(setMarkups, shown.markups); replace(setMeasures, shown.measures);
+    replace(setElsRaw, shown.els); replace(setMarkups, shown.markups); replace(setMeasures, shown.measures);
     replace(setCallouts, shown.callouts); replace(setParcels, shown.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
@@ -5203,7 +5218,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // adoption) can queue in the SAME React batch as this write, and a bare `setEls(guarded)`
       // would discard it. Re-derive against whatever `els` actually is at apply time instead of
       // trusting the `guarded` snapshot computed from `preGuard`.
-      if (guarded !== preGuard) { els = guarded; setEls((cur) => (cur === preGuard ? guarded : withMissingZ(assemblyIntegrity(cur).els))); }
+      if (guarded !== preGuard) { els = guarded; setElsRaw((cur) => (cur === preGuard ? guarded : withMissingZ(assemblyIntegrity(cur).els))); }
     }
     try { e.reconcile({ els, markups, measures, callouts, parcels }, { busy }); } catch (_) {}
   };
@@ -5334,7 +5349,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * dissolved road network (~300 ms on a 58-element plan, ~1.5 s at 4× CPU) right after the first lot was
        * added. A real cross-tab difference is still adopted, per collection, exactly as before. */
       const adopt = (key, set) => { if (JSON.stringify(merged[key]) !== JSON.stringify(liveModel[key])) set(merged[key]); };
-      adopt("parcels", setParcels); adopt("els", setEls); adopt("measures", setMeasures);
+      adopt("parcels", setParcels); adopt("els", setElsRaw); adopt("measures", setMeasures);
       adopt("callouts", setCallouts); adopt("markups", setMarkups); adopt("sheetOverlays", setSheetOverlays); adopt("deletedIds", setDeletedIds);
     };
     window.addEventListener("storage", onStore);
@@ -5687,7 +5702,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // an echo landing in the window right after the restore is kept off the canvas too.
     pendingRemoteRef.current = pendingRemoteRef.current.filter((i) => i && i.action === "remove");
     try { const e = elSyncRef.current; if (e) e.noteLocalAuthority(); } catch (_) {}
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    setParcels(s.parcels); setElsRaw(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     // NEW-1 — restore the geo ANCHOR with the geometry. A placement rotate turns the drawing while
     // the anchor stays put, and a nudge does the reverse; undoing only one half would leave the plan
     // sitting somewhere neither state ever described. `undefined` (a pre-NEW-1 frame) leaves it alone.
@@ -5929,7 +5944,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       report: reportClientEvent, flashWarn, flashPolyWarn, pushHistory, flushElems, ensureBasemapOn,
       setOrigin, setLocalSaveFailed, setSaveStatus, setCloudSaveFailed,
       setCollections: (n) => {
-        setParcels(n.parcels || []); setEls(n.els || []); setMeasures(n.measures || []);
+        setParcels(n.parcels || []); setElsRaw(n.els || []); setMeasures(n.measures || []);
         setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
       },
       addParcel: (pc) => setParcels((a) => [...a, pc]),
@@ -6181,6 +6196,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startGate = useCallback((e, { hist = true, rebase = true } = {}) => ({
     gate: makeDragGate({ x: e.clientX, y: e.clientY }, p2f(e.clientX, e.clientY), { rebase }),
     histOnArm: hist,
+    followBase: stateRef.current.els,   // B2498961 — the elements as this gesture began: a drive follows a field relative to THIS, not frame to frame (see `setEls`)
   }), [p2f]);
   const snap = useCallback((v) => {
     const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
@@ -17415,7 +17431,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // any content this union commits (this tab's own work made while read-only, never yet synced)
       // would otherwise land with `op_kind: "unknown"`. Guard: test/opEnvelopeSeedCoverage.test.js.
       opTrackerRef.current.beginOperation("create");
-      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
+      setParcels(merged.parcels); setElsRaw(merged.els); setMeasures(merged.measures);
       setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
       saveSite(merged);                     // write the union to the device mirror immediately
     } else {
@@ -17592,7 +17608,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     pushHistory();
-    setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
+    setParcels(v.parcels); setElsRaw(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
     // restore above silently skips it. The per-parcel Attached-Drawings UI was removed, but the data
@@ -22152,7 +22168,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // it was never on the undo stack at all (Ctrl+Z after clicking this "Undo" undid the ORIGINAL
       // apply a second time). Guard: test/opEnvelopeSeedCoverage.test.js.
       pushHistory();
-      setParcels(beforeParcels); setEls(beforeEls); setMeasures(beforeMeasures);
+      setParcels(beforeParcels); setElsRaw(beforeEls); setMeasures(beforeMeasures);
       // Undo the whole action, not half of it: the stored defaults and the pending edits come back too.
       setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles, measureStyle: beforeSettings.measureStyle }));
       setStdDraft(beforeDraft);
@@ -22327,13 +22343,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: FONT_SIZE.control, fontWeight: 500, color: "var(--chrome-text)",
-          maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
+          maxWidth: 200, minWidth: crumbFloor(planLabel, CRUMB_MIN_W), whiteSpace: "nowrap",
         }}
         onClick={() => setPlanMenu((o) => { const next = !o; if (next) refreshDeletedPlansHere(); return next; })}
         title="Switch or rename plan"
         data-testid="plan-crumb"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
+        <span title={planLabel} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); setPlanPurgeArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
@@ -25467,13 +25483,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   surrounding group instead (PDF-PARITY); the group itself is the export's anchor.
                   Geometry mirrors the backdrop exactly (same overscan, same gesture transform);
                   `pointerEvents: none` throughout, so it can neither take a click nor steal a
-                  handle. The inner counter-translate undoes the SVG's own registration shift — the
-                  SVG is nudged onto the imagery, and a map pane inside it must not be nudged twice. */}
+                  handle. The inner counter-transform undoes the SVG's own registration shift AND the plan group's live
+                  pan/zoom transform (`anchorInverseCss`) — this host already carries the basemap's gesture transform
+                  itself, so without the second half a lifted fill moved at TWICE the pan speed and slid off the imagery
+                  until release (NEW-1). */}
               {origin && (
                 <g {...{ [FRONT_BAND_ATTR]: "1" }}>
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
-                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
                       <div ref={geoFrontWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoFrontPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
@@ -25857,8 +25875,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {origin && (
                 <g {...{ [PARCEL_PICK_BAND_ATTR]: "1" }}>
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
-                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
                       <div ref={geoPickWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoPickPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
