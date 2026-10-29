@@ -3,6 +3,7 @@ import { parcelCardRows } from "../lib/appraisal.js";
 import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import ParcelRequestLink from "./ParcelRequestLink.jsx";
+import ParcelCopyNote from "./ParcelCopyNote.jsx";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
  * finder's search pill after a "Go". FOUR distinct states: found (the parcel's key
@@ -158,6 +159,10 @@ export default function ParcelInfoCard({
               )}
             </>
           )}
+
+          {/* NEW-1 (2026-10-29) — a lot that came from a COPY of the county's data says so, with the date, and offers the
+              request; an official county / statewide row renders nothing here. */}
+          <ParcelCopyNote county={info.county} testId="parcel-card-copy" />
 
           {/* ⛔ NEW-1 (2026-09-08) — THIS CARD NO LONGER CARRIES A PRIMARY ACTION, and the removal
               is the point, not a trim. It used to end in one button chosen by the map toolbar's
