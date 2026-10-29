@@ -46,6 +46,10 @@ export const ALLOWED_HOSTS = new Set([
   "maps.stlouisco.com", // St. Louis County GIS Service Center
   "maps6.stlouis-mo.gov", // City of St. Louis
   "gis.boonemo.gov", // Boone County GIS
+  /* NEW-1 (Missouri second pass, 2026-10-29) — the one new host a newly wired Missouri county rides: the Mid-America Regional Council's ArcGIS Server, whose regional parcel compilation
+   * is Cass County's only readable source (a labelled COPY — the county's own CAMAvision viewer is a format Planyr cannot read yet). MEASURED through this relay on the PR preview.
+   * The ~35 hosts read only to look for sources (assessor portals, county sites, the CAMAvision / Breeze / GIS Cloud vendors) were pruned: nothing wired uses them. */
+  "gis2.marc2.org", // Mid-America Regional Council — Cass County
   /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
    * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
    * county is wired to it. */
@@ -232,6 +236,10 @@ export const ALLOWED_HOSTS = new Set([
    * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
    * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
   "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
+  /* Second pass (Georgia, 2026-10-29) — hosts a "none" county's parcel layer was FOUND on by web-map layer URLs but that the sandbox cannot reach, relayed ONLY so the layer can be measured through
+   * this relay before anything is wired to it (docs/STATEWIDE-PARCELS.md "Georgia counties"). Delete an entry whose county stays unwired. */
+  "portal.segrass.org", // Coastal Regional Commission's newer server — Long County Property_Data / Long_Parcels (crcarcgis)
+  "arcgis4.roktech.net", // ROK Technologies — Habersham County habersham_base (the AGOL 2014 items point here)
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS

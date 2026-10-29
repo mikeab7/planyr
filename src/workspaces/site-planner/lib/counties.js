@@ -3193,7 +3193,7 @@ const COUNTIES_MAP_RAW = {
   la_stmartin: { state: "LA", center: [30.1118, -91.5350], zoom: 10, bbox: [29.72, -91.99, 30.51, -91.08], mapServer: null, layerUrl: COUNTIES.la_stmartin.layerUrl },
   la_plaquemines: { state: "LA", center: [29.4260, -89.5443], zoom: 10, bbox: [28.93, -90.07, 29.92, -89.02], mapServer: null, layerUrl: COUNTIES.la_plaquemines.layerUrl },
   la_sttammany: { state: "LA", center: [30.4465, -89.9142], zoom: 10, bbox: [30.18, -90.26, 30.72, -89.57], mapServer: null, layerUrl: COUNTIES.la_sttammany.layerUrl },
-  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl },
+  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl, scopeWhere: COUNTIES.la_lafayette.scopeWhere }, // scopeWhere: the same layer also holds Vermilion (la_vermilion, 2026-10-29) — every row sharing a service carries its own scope
   la_acadia: { state: "LA", center: [30.2752, -92.3785], zoom: 10, bbox: [30.06, -92.63, 30.49, -92.13], mapServer: null, layerUrl: COUNTIES.la_acadia.layerUrl },
   la_eastfeliciana: { state: "LA", center: [30.8275, -91.0700], zoom: 10, bbox: [30.65, -91.32, 31.01, -90.82], mapServer: null, layerUrl: COUNTIES.la_eastfeliciana.layerUrl },
   la_caddo: { state: "LA", center: [32.6115, -93.7645], zoom: 10, bbox: [32.19, -94.05, 33.03, -93.48], mapServer: null, layerUrl: COUNTIES.la_caddo.layerUrl },
