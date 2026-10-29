@@ -8,6 +8,7 @@ import {
   roadNetworkStats, dissolveRingsSteps, clipPolylineOutside, clusterIds, regionEdgeSegments, rectOutlineCutSegments, polygonOutlineCutSegments,
 } from "./roadNetwork.js";
 import { teeJunctionsOf, driveJunctionsOf } from "./roadJunctions.js";
+import { fieldInsidesOf } from "./parkingApproach.js";
 import { junctionMouthCuts, stripeRunsNearOutline, trimPolylineOutsideRings, snapPieceEnd } from "./roadDeco.js";
 import {
   isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes, teeJunctionCurbStripes,
@@ -90,10 +91,13 @@ export function* roadNetSteps(inp) {
    * is a different statement — a hidden road contributes nothing at all, including its junctions —
    * so it is filtered, and the two filters stay distinct. */
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
   const strip = new Map();
   for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))); yield; }
+  /* NEW-1 (road → parking) — what each car field does about the roads around it (lib/parkingApproach.js): the stalls a drive takes, a road through the field, a
+   * drive running ALONG its aisle-mouth face. Decided once here (VIEW-INDEPENDENT-ONCE); `stallClips` / the outline cuts / the mouths below are read from it. */
+  const inside = fieldInsidesOf({ els, settings, junctions: driveJunctions.filter((dj) => byId.has(dj.sideId)), roads, stripOf: (r) => strip.get(r.id), halfOf: roadOuterHalf, isHidden: (T) => elHidden(hiddenGroups, T) });
   // Extra pavement contributed by each junction, indexed by the road that owns the junction.
   const extra = new Map(roads.map((r) => [r.id, []]));
   // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
@@ -140,6 +144,17 @@ export function* roadNetSteps(inp) {
     if (!ring) continue;
     if (!padCut.has(dj.sideId)) padCut.set(dj.sideId, []);
     padCut.get(dj.sideId).push(ring);
+    if (dj.keepOut) padCut.get(dj.sideId).push(dj.keepOut);   // NEW-1 — and nothing of the drive runs on past the face plane beside the field (roadJunctions `keepOut`)
+  }
+  /* NEW-1 — a drive running ALONG a field's aisle-mouth face is cut against that field exactly like a drive that ends at one: its pavement stops at the face, and its
+   * outline / curb stripe is not ruled along it. At each aisle's opening the near curb stripe is also taken out (a curb CUT), so the aisle opens onto the drive. */
+  for (const [fid, r] of inside) {
+    const ring = padRingOf((els || []).find((e) => e.id === fid));
+    for (const m of r.perimeter) {
+      if (ring) { if (!padCut.has(m.roadId)) padCut.set(m.roadId, []); if (!padCut.get(m.roadId).includes(ring)) padCut.get(m.roadId).push(ring); }
+      const depth = (m.half || 0) + 0.5, n = m.outN;
+      stripeCut.push([m.a, m.b, { x: m.b.x + n.x * depth, y: m.b.y + n.y * depth }, { x: m.a.x + n.x * depth, y: m.a.y + n.y * depth }]);
+    }
   }
   /* NEW-1 (2026-10-15) — where each road's decoration ENDS at a junction (roadDeco.js). Computed here because the stripes below honour the side-road cuts too. */
   const mouth = junctionMouthCuts({ teeJunctions: teeJunctions.filter((tj) => byId.has(tj.sideId) && byId.has(tj.throughId)), driveJunctions, byId });
@@ -281,6 +296,17 @@ export function* roadNetSteps(inp) {
     if (!cutters.length) continue;
     outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
   }
+  /* NEW-1 (road → parking) — the cutters for the field's STALL-ROW band outlines are the PAINTED pavement (pad already subtracted), not the uncut dissolve above.
+   * The uncut region carries the road strip's flat end cap, which at an OBLIQUE approach reaches a few feet INTO the field past its face; a band outline inside
+   * the field was clipped by that invisible triangle and began feet from the face as a floating stub ("a stall row's outline ruled across the mouth" at 60°).
+   * Only edges collinear with the face need the uncut region (that is what `mouths` is for); every other band edge lies inside the field, where no painted
+   * pavement ever is. Map<targetId, cutter rings>. */
+  const bandCuts = new Map();
+  for (const dj of driveJunctions) {
+    const cutters = regions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
+    if (!cutters.length) continue;
+    bandCuts.set(dj.targetId, [...(bandCuts.get(dj.targetId) || []), ...cutters]);
+  }
   /* NEW-1 (B1783376 ×3) — the pad-face run each drive's pavement opens on the field it enters: between the two curb-return tangent points, which lie ON the field's edge.
    * The field's own ink (its outline and its stall rows' outlines) is cut by exactly this span (roadNetwork's `edgeInkPieces`), not by a polygon clip. Map<targetId, [{a,b}]>. */
   const mouths = new Map(), seams = [];
@@ -291,7 +317,22 @@ export function* roadNetSteps(inp) {
     mouths.get(dj.targetId).push({ a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } });
     seams.push({ sideId: dj.sideId, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } });
   }
-  return { regions, stripes, outlineCuts, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  /* NEW-1 (road → parking) — THE FIELD'S OWN INSIDE (lib/parkingApproach.js): the stalls a drive takes, the field's outline where a road crosses it or runs along
+   * its aisle-mouth face. All of it is a function of (els, settings) — decided here, ONCE per model change, never per frame (VIEW-INDEPENDENT-ONCE).
+   * `stallClips` Map<fieldId, { base, count, removed, set, corridors }> — what `renderElPx` skips when it draws the stalls and what the Yield total subtracts. */
+  const stallClips = new Map();
+  for (const [fid, r] of inside) {
+    if (r.clip) stallClips.set(fid, r.clip);
+    if (r.through.length) {
+      const cutters = fullRegions.filter((reg) => r.through.some((t) => reg.ids.includes(t.roadId))).map((reg) => reg.region.outer).filter(Boolean);
+      outlineCuts.set(fid, [...(outlineCuts.get(fid) || []), ...cutters]);
+    }
+    if (r.perimeter.length) {
+      if (!outlineCuts.has(fid)) outlineCuts.set(fid, []);          // an (empty) cut list still routes the field through the interrupted-outline render
+      mouths.set(fid, [...(mouths.get(fid) || []), ...r.perimeter.map(({ a, b }) => ({ a, b }))]);
+    }
+  }
+  return { regions, stripes, outlineCuts, bandCuts, stallClips, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
 }
 export const driveSteps = (gen) => { for (;;) { const r = gen.next(); if (r.done) return r.value; } };
 

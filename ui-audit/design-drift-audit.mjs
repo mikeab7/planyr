@@ -90,6 +90,13 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/jurisdiction.js",
   "src/workspaces/site-planner/lib/printSheet.js",
   "src/workspaces/notes/lib/notesPrint.js",
+  // NEW-1 (2026-10-29) — the Notes paste-options drawings and the table-as-picture renderer. The first is OUR
+  // illustration of Word's/Excel's Paste Options icons (a clipboard plus a mark; fixed art, owner-approved from a
+  // mockup, with a dark-theme twin for the few ink colours via custom properties); the second rasterises a table
+  // onto PAPER (light page, dark ink) for a picture that must read the same in either theme — an export surface,
+  // the same reasoning as notesPrint.js above. Neither is app chrome.
+  "src/workspaces/notes/components/PasteIcons.jsx",
+  "src/workspaces/notes/lib/notesTablePicture.js",
   "src/workspaces/food/lib/ratingColor.js",
   "src/shared/theme/familyInk.js",
   // B711329 — a KML/KMZ export renders in GOOGLE EARTH, a third-party app with no access to our
