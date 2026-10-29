@@ -139,7 +139,6 @@ export const LAYER_TIER = {
   ms_desoto_flu: "context",
   ms_desoto_thoroughfare: "context",
   ms_desoto_future_subd: "context",
-  ms_desoto_discover: "context",
   jur_city: "context",
   jur_etj: "context",
   jur_isd: "context",
