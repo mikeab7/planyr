@@ -272,7 +272,9 @@ export const PARCEL_COPIES = {
 
   // OR
   or_lake: ["Klamath County GIS", "2021-07"],
+  or_sherman: ["Frontier Regional 911", "2026-07"],
   or_union: ["a shared eastern-Oregon county GIS org", "2022-09"],
+  or_wallowa: ["The Nature Conservancy", "2018"],
 
   // PA
   pa_armstrong: [null, "2026-10"],

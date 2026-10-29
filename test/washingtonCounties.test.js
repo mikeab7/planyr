@@ -80,7 +80,7 @@ describe("the wired Washington rows", () => {
   const ROW_KEYS = WA_ROWS.map(([k]) => "wa_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set(ROW_KEYS));
-    expect(WA_ROWS).toHaveLength(34);
+    expect(WA_ROWS).toHaveLength(38); // 34 + Columbia, Garfield, Okanogan, Pacific (second pass 2026-10-29)
   });
   it("the licence-restricted statewide mosaic is not used by any row", () => {
     for (const k of ROW_KEYS) expect(COUNTIES[k].layerUrl, k).not.toMatch(/jsIt88o09Q0r1j8h|wdfw|WADNR|Current_Parcels/i);
@@ -105,7 +105,7 @@ describe("the wired Washington rows", () => {
       expect(v, k).toBeTruthy();
       expect(v.publisher, k).toMatch(/^(own|third-party)$/);
       expect(v.publisherName.length, k).toBeGreaterThan(5);
-      expect(v.verifiedOn, k).toBe("2026-10-19");
+      expect(v.verifiedOn, k).toMatch(/^2026-10-(19|29)$/);
     }
   });
   it("the three copies not hosted by their county are labelled third-party", () => {

@@ -284,15 +284,9 @@ export const PARCEL_GAPS = Object.freeze({
   mo_sullivan: ["locked", "Integrity GIS login-gated"],
   mo_texas: ["none"],
   // Washington
-  wa_columbia: ["none"],
   wa_ferry: ["locked", "Token Required"],
-  wa_garfield: ["none"],
-  wa_okanogan: ["none"],
-  wa_pacific: ["none"],
   // Oregon
   or_polk: ["unreachable", "county ArcGIS server down (HTTP 500)"],
-  or_sherman: ["none"],
-  or_wallowa: ["none"],
   // Oklahoma
   ok_adair: ["none"],
   ok_alfalfa: ["none"],
