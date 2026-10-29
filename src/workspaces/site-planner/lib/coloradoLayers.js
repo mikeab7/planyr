@@ -296,7 +296,7 @@ export function weldRowStyle(props, opacity) {
   if (rowVacated(props)) return { color: "#94a3b8", weight: 1, opacity, fill: true, fillColor: "#94a3b8", fillOpacity: opacity * 0.08, dashArray: "4 3" };
   return { color: "#92400e", weight: 1, opacity, fill: true, fillColor: "#b45309", fillOpacity: opacity * 0.22 };
 }
-const weldRowCard = (p) => card(`${rowVacated(p) ? "Vacated county road right-of-way" : "County road right-of-way"} · ${nice(p.ROADNAME) || "unnamed"}`, [[rowVacated(p) ? "Status" : "How acquired", rowVacated(p) ? "Vacated — no longer right-of-way" : nice(p.ROW_STAT)], ["Width", Number(p.ROW_WIDTH) > 0 ? `${p.ROW_WIDTH} ft` : ""], ["Recorded document", tidy(p.DOC_NUM)], ["Note", nice(p.COMMENTS)]]);
+const weldRowCard = (p) => card(`${rowVacated(p) ? "Vacated county road right-of-way" : "County road right-of-way"} · ${nice(p.ROADNAME) || "unnamed"}`, [[rowVacated(p) ? "Status" : "How acquired", rowVacated(p) ? "Vacated — no longer right-of-way" : nice(p.ROW_STAT)], ["Width", Number(p.ROW_WIDTH) > 0 ? `${p.ROW_WIDTH} ft` : ""], ["Recorded document", tidy(p.DOC_NUM)], ["Note", tidy(p.COMMENTS)]]); // typed as the county wrote it: nice() would turn document numbers like "100/532G" into "100/532g"
 const weldUgbCard = (p) => card(`Urban growth boundary · ${nice(p.TOWNNAME || p.DISTRICT)}`, []);
 const weldIgaCard = (p) => card(`Intergovernmental agreement area · ${nice(p.TOWNNAME || p.MUNICIPALI)}`, [["Buffered", yn(p.BUFFERED)], ["Dated", approvalDate(p.DATE_)]]);
 const weldAirportCard = (p) => card(`Airport overlay · ${tidy(p.Airport_Ov)}`, []);

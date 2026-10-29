@@ -430,4 +430,12 @@ describe("adversarial review round 1 (B2528688) — each confirmed finding stays
     expect(cardOf("co_aurora_apz", { CRASH_ZONE: "APZ II - N" }).title).toBe("Buckley SFB accident potential zone II");
     for (const id of ["co_ecmc_flowlines", "co_weld_row", "co_enterprise_zones", "co_ecmc_locations", "co_undermined"]) { expect(L[id].simplifyFactor, id).toBeGreaterThanOrEqual(1); expect(L[id].simplifyFactor, id).toBeLessThanOrEqual(8); }
   });
+  it("round 4: the dominant real permit-form value is dropped, 'Unknown' plume is dropped, and a right-of-way document reference keeps its case", () => {
+    const tx = (c) => c.rows.map((r) => `${r.label}: ${r.text}`).join("\n");
+    expect(tx(cardOf("co_ecmc_locations", { location_name: "A", facility_status: "AC", form_type: "Approved Location" }))).not.toMatch(/Permit form/);
+    expect(tx(cardOf("co_rcra_ca", { NAME: "S", status: "open", plume_dist_ft: "Unknown" }))).not.toMatch(/Plume/);
+    expect(tx(cardOf("co_weld_row", { ROADNAME: "WCR 1", ROW_STAT: "DEED", COMMENTS: "100/532G" }))).toMatch(/Note: 100\/532G/);
+    expect(L.co_weld_row.styleFn({ ROW_STAT: "VACATED" }, 1).color).toBe("#94a3b8");
+    expect(L.co_weld_row.legend[1].dash).toBe(true);
+  });
 });
