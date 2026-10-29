@@ -251,6 +251,7 @@ import { calloutDblZone } from "../../shared/markup/hitTest.js";
 import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
+const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -17226,7 +17227,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setIdentAdded(identifyAddedRef.current.size);
       setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
+      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, county: hit.county, ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
     } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
   };
   // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
@@ -23131,6 +23132,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
                           </div>
                           {identifyRes.fromFallback && <div data-testid="identify-from-fallback" style={{ color: PAL.warn, marginBottom: 5 }}>{identifyRes.fromFallback}</div>}
+                          {identifyRes.county && <Suspense fallback={null}><ParcelCopyNote county={identifyRes.county} point={{ lat: identifyRes.lat, lng: identifyRes.lng }} testId="identify-copy" style={{ marginTop: 6, marginBottom: 4 }} /></Suspense>}
                           {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
                             <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
                               <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>

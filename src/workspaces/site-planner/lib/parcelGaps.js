@@ -532,9 +532,9 @@ const enc = (v) => encodeURIComponent(v).replace(/['!()*]/g, (c) => `%${c.charCo
 
 /* The "Email Michael to request it" link: a prefilled mailto. Subject names the county + state; the body names them, the
  * sentence the person was shown, the clicked point when there is one, and leaves an empty line for their own note. */
-export function parcelRequestHref({ name, state, sentence, lat, lng }) {
+export function parcelRequestHref({ name, state, sentence, lat, lng, sentenceLabel = "Reason shown" }) {
   const where = `${name}, ${state}`;
-  const lines = [`County: ${where}`, `Reason shown: ${sentence}`];
+  const lines = [`County: ${where}`, `${sentenceLabel}: ${sentence}`];
   if (Number.isFinite(lat) && Number.isFinite(lng)) lines.push(`Point I clicked: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
   const body = `${lines.join("\r\n")}\r\n\r\n`;
   return `mailto:${PARCEL_REQUEST_EMAIL}?subject=${enc(`Parcel data request: ${where}`)}&body=${enc(body)}`;
