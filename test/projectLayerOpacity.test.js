@@ -53,7 +53,8 @@ describe("layerOpacity — the pure rules", () => {
     expect(sanitizeLayerOpacity({ [FEMA]: NaN })).toEqual({});
   });
   it("clamps to the slider's range and rounds float noise", () => {
-    expect(sanitizeLayerOpacity({ [FEMA]: 5 })[FEMA]).toBe(1);
+    expect(dflt(FEMA)).toBe(1); // B2507060: every layer's default is full opacity, so a clamped-up value equals the default and is dropped (sparse)
+    expect(sanitizeLayerOpacity({ [FEMA]: 5 })[FEMA]).toBeUndefined();
     expect(sanitizeLayerOpacity({ [FEMA]: 0 })[FEMA]).toBe(0.1);
     expect(sanitizeLayerOpacity({ [FEMA]: 0.6000000000000001 })[FEMA]).toBe(0.6);
   });

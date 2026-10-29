@@ -40,7 +40,11 @@ export const TIERS = ["constraint", "reference", "context"];
 /* Opacity ceiling per tier. A layer may ship QUIETER than its ceiling (several do — a big
  * translucent wash like the FEMA zones or the MUD boundaries would be overbearing at its
  * ceiling); it may never ship LOUDER. */
-export const TIER_MAX_OPACITY = { constraint: 0.85, reference: 0.55, context: 0.4 };
+export const TIER_MAX_OPACITY = { constraint: 1, reference: 1, context: 1 };
+/* ⛔ SUPERSEDED 2026-10-29 (owner, B2507060, constraint #42): the opacity ceilings above used to be 0.85 / 0.55 / 0.4 ("reference recedes").
+ * The owner reversed it — every layer now STARTS at 100% ("at lower defaults it isn't clear the layer is even there") — so the opacity
+ * ceilings are all 1 and layers.js sets every row's default to 1. The tiers stay: they still govern STROKE WEIGHT below and the ordering
+ * language elsewhere. Do not lower an opacity ceiling again without a new owner decision. */
 
 /* Stroke-weight ceiling per tier, in the same units the layer configs use. The second half of
  * "shouting at the same volume": a 3 px reference centreline reads louder than a 1.5 px
@@ -163,7 +167,9 @@ export const LAYER_TIER = {
   jur_etj: "context",
   jur_isd: "context",
   co_city: "context",              // NEW-2
-  ga_county: "context",            // NEW-1 (Georgia)
+  ga_county: "context",
+  tn_county: "context",            // B2507065 (NEW-10)
+  ms_county: "context",            // NEW-1 (Georgia)
   ga_city: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",

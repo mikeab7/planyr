@@ -13,7 +13,7 @@ const CASES_B2428112 = [
   ["Bath County", "KY", 38.1456, -83.7646, /Bath County keeps its parcel map behind a paid subscription/],
   ["Breckinridge County", "KY", 37.7798, -86.4605, /Breckinridge County has a parcel map, but it isn't open to the public/],
   ["Boyle County", "KY", 37.6456, -84.7694, /Boyle County's parcel map server isn't reachable from Planyr right now/],
-  ["Alcona County", "MI", 44.6852, -83.6154, /Planyr hasn't found a public parcel map it can use for Alcona County/],
+  ["Alcona County", "MI", 44.6852, -83.6154, /Alcona County keeps its parcel map behind a paid subscription/], // was the generic "none" sentence until B2528400 (owner Chrome measurement 2026-10-29)
 ];
 /* B2486192 / B2486193 (V1936416): the South Dakota gaps + a Schneider county. Run with a 4th argument: `… https://planyr.io <build> sd`.
  * Pike KY stays as the known-good arm — if it does not show its exact sentence the run is VOID. */
@@ -31,6 +31,10 @@ const CASES_MI = [
   ["Washtenaw County", "MI", 42.2567, -83.9002, /Washtenaw County has a parcel map, but it isn't open to the public/],
   ["Clare County", "MI", 43.9923, -84.9152, /Clare County has a parcel map, but it isn't open to the public/],
   ["Alpena County", "MI", 45.0345, -83.6392, /Planyr hasn't found a public parcel map it can use for Alpena County/],
+  /* B2528400: the three Schneider Beacon counties the owner measured in his Chrome on 2026-10-29. */
+  ["Alcona County", "MI", 44.6852, -83.6154, /Alcona County keeps its parcel map behind a paid subscription/],
+  ["Oscoda County", "MI", 44.6845, -84.1967, /Oscoda County has a parcel map, but it isn't open to the public/],
+  ["Presque Isle County", "MI", 45.3522, -84.0922, /Presque Isle County has a parcel map, but it isn't open to the public/],
 ];
 const MI_CONTROL = ["Arenac County", "MI", 44.0564, -83.9474]; // wired (mi_arenac): a click is a lot, never a gap notice
 const CASES = process.argv[4] === "sd" ? CASES_SD : process.argv[4] === "mi" ? CASES_MI : CASES_B2428112;

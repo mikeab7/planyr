@@ -50,7 +50,7 @@ import { GEN_ZONES } from "./statePlaneZones.js";
  * NEVER FALL BACK TO TEXAS: where no zone resolves the answer is null (or, for overlay placement, an explicit site-local frame). */
 const US_FT_M = 1200 / 3937;          // 1 US survey foot in metres (exact)
 const INTL_FT_M = 0.3048;
-const UNIT_M = { "us-ft": US_FT_M, ft: INTL_FT_M, m: 1 };
+export const UNIT_M = { "us-ft": US_FT_M, ft: INTL_FT_M, m: 1 };   // metres per grid unit — read by statePlaneInput.js (the unit-explicit INPUT boundary)
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 
 // NAD83 / GRS80 ellipsoid — the datum every zone below is on.

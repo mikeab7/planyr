@@ -90,14 +90,15 @@ export function featureToSvg(feature, projectLngLat, { round = 2, opacity = 1, c
 
 /* Exhibit label text (pre-placed in pixel space): dark ink + white halo (paint-order:stroke),
  * matching the acreage-chip halo the export restyle already emits so the NEW-2 stroke-thinning
- * pass keeps it proportional. `labels` = [{x,y,text,uppercase?}]. Pure. */
+ * pass keeps it proportional. `labels` = [{x,y,text,uppercase?,angle?}]. Pure. */
 function labelSvg(labels, round) {
   let out = "";
   for (const lb of labels || []) {
     if (!lb || !Number.isFinite(lb.x) || !Number.isFinite(lb.y) || !lb.text) continue;
     const up = lb.uppercase ? ' style="text-transform:uppercase"' : "";
+    const rot = Number.isFinite(lb.angle) && lb.angle ? ` transform="rotate(${fmt(lb.angle, 1)} ${fmt(lb.x, round)} ${fmt(lb.y, round)})"` : ""; // B2507065: a county name runs along its line
     out +=
-      `<text x="${fmt(lb.x, round)}" y="${fmt(lb.y, round)}" text-anchor="middle" dominant-baseline="middle"` +
+      `<text x="${fmt(lb.x, round)}" y="${fmt(lb.y, round)}"${rot} text-anchor="middle" dominant-baseline="middle"` +
       ` font-family="Inter,system-ui,sans-serif" font-weight="700" font-size="11" fill="#1a1a1a"` +
       ` stroke="#ffffff" stroke-width="3" paint-order="stroke"${up}>${xmlEscape(lb.text)}</text>`;
   }
