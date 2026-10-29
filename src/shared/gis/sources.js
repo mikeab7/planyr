@@ -887,7 +887,7 @@ export const GIS_SOURCES = {
     serviceUrl: "https://gis.mississippi.edu/server/rest/services/Administrative/MS_Municipal_Boundaries_2025/MapServer/0",
     layerId: null,
     geometryType: "polygon",
-    fields: { name: "Name", county: "County", pop: "Population" },
+    fields: { name: "Name", county: "County", pop: "Population" }, where: "County <> 'DeSoto'", // DeSoto County's five cities are drawn from the county's own, newer layer (ms_desoto_city)
     coverage: "mississippi",
     states: ["MS"],
     tier: "production",

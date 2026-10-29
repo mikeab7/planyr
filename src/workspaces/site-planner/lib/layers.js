@@ -15,6 +15,7 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -1039,6 +1040,15 @@ export const AHJ_LAYERS = {
     note: "DeSoto County's own outline (the county server publishes only DeSoto in this layer). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
+  /* NEW-1 (Mississippi) — the rest of Mississippi's county lines. The DeSoto row above is the county server's own outline of ONE county; this is MDEQ's statewide county layer
+   * (82 counties) with DeSoto left out (`where` in its VECTOR_SOURCES entry), so the line is never drawn twice. */
+  ms_county_state: {
+    kind: "vector", label: "County Boundaries (Mississippi)", mergeGroup: "counties_cities", source: "MDEQ — Office of Land and Water Resources",
+    url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/"), states: ["MS"],
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
+    note: "Mississippi county lines (MDEQ, all 82 counties; DeSoto County's own outline is the separate row). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
   ga_city: {
     kind: "vector", label: "City Limits (Georgia)", mergeGroup: "counties_cities", source: "Georgia DCA",
     url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
@@ -1303,7 +1313,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...MISSISSIPPI_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1395,6 +1405,7 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...MISSISSIPPI_VINTAGE,
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".

@@ -26,7 +26,7 @@ import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county" || id === "ms_county_state";
 export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city"
   || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
 
@@ -344,6 +344,33 @@ export const VECTOR_SOURCES = {
       tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 5 }],
     },
     note: "DeSoto County's own outline (county server).",
+  },
+  /* NEW-1 (Mississippi) — MDEQ's statewide county layer, DeSoto left out (its own row draws the county server's outline). 82 polygons, one statewide pull at the wide tiers. */
+  ms_county_state: {
+    id: "ms_county_state",
+    stateAbbr: "MS",
+    label: "County boundaries (Mississippi)",
+    labelField: "CONAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "MDEQ — Office of Land and Water Resources",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/") + "/query",
+      outFields: ["CONAME"],
+      where: "CONAME <> 'DeSoto'",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "all", offsetDeg: 0.0002, precision: 5 },
+      ],
+    },
+    note: "Mississippi county lines (MDEQ).",
   },
   ga_city: {
     id: "ga_city",
