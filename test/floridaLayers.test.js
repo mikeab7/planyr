@@ -23,7 +23,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 import { ALL_LAYERS, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import {
   FLORIDA_LAYERS, FLORIDA_VINTAGE, FLORIDA_RELAY, relayUrl, districtName, evacColor, EVAC_RAMP, evacStyle,
-  EVAC_OTHER, BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel, ERP_TYPES as ERP_TYPES_FOR_TEST,
+  EVAC_OTHER, BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel, ERP_TYPES as ERP_TYPES_FOR_TEST, niceCase, restrictionWords, cleanupCategory, cleanupStatus, noiseLabel, sinkholeAreaStyle, SINKHOLE_AREA_RAMP, NOISE_RAMP, noiseStyle,
 } from "../src/workspaces/site-planner/lib/floridaLayers.js";
 import { GIS_SOURCES, statesFor, auditRegistry } from "../src/shared/gis/sources.js";
 import { FLORIDA_SOURCES } from "../src/shared/gis/sourcesFlorida.js";
@@ -237,5 +237,34 @@ describe("review findings (adversarial pass 1) stay fixed", () => {
   it("county and city names are title-cased (the services publish ALL CAPS)", () => {
     expect(VECTOR_SOURCES.fl_county.titleCaseLabel).toBe(true);
     expect(VECTOR_SOURCES.fl_city.titleCaseLabel).toBe(true);
+  });
+});
+
+describe("click-card wording", () => {
+  it("prints agency ALL-CAPS in words and leaves mixed case alone", () => {
+    expect(niceCase("CITY OF SUNRISE-SPRINGTREE GOLF COURSE")).toBe("City Of Sunrise-Springtree Golf Course");
+    expect(niceCase("8350 SPRINGTREE DRIVE")).toBe("8350 Springtree Drive");
+    expect(niceCase("NW 44TH ST LLC")).toBe("NW 44th St LLC");
+    expect(niceCase("One Price Dry Cleaning")).toBe("One Price Dry Cleaning");
+    expect(niceCase(null)).toBe("");
+  });
+  it("decodes DEP's cleanup codes and restriction text, and prints an unknown code as written", () => {
+    expect(cleanupCategory("PETRO")).toBe("Petroleum");
+    expect(cleanupCategory("NEWCODE")).toBe("NEWCODE");
+    expect(cleanupStatus("ONHOLD")).toBe("On hold");
+    expect(restrictionWords("EC MAINTENANCE|GROUNDWATER USE RESTRICTION")).toBe("EC Maintenance · Groundwater Use Restriction");
+    expect(restrictionWords("")).toBe(null);
+  });
+  it("sinkhole areas and noise contours paint the ramp colour the legend shows", () => {
+    for (const a of Object.keys(SINKHOLE_AREA_RAMP)) expect(sinkholeAreaStyle({ AREA_DESC: a }, 0.4).fillColor).toBe(SINKHOLE_AREA_RAMP[a]);
+    expect(ALL_LAYERS.fl_sinkhole_areas.legend.map((l) => l.color)).toEqual(Object.values(SINKHOLE_AREA_RAMP));
+    for (const d of [60, 65, 70, 75]) expect(noiseStyle({ CONTOURVAL: d }, 0.5).color).toBe(NOISE_RAMP[d]);
+    expect(ALL_LAYERS.fl_fll_noise.legend.map((l) => l.color)).toEqual([60, 65, 70, 75].map((d) => NOISE_RAMP[d]));
+    expect(noiseLabel("65.0")).toBe("65 dB");
+    expect(noiseLabel("")).toBe(null);
+  });
+  it("the relayed rows' card text carries no raw field names", () => {
+    const rows = ALL_LAYERS.fl_institutional_controls.identifyCard({ PRIMARY_SITE_NAME: "X", PRIMARY_SITE_ADDRESS_LINE_1: "1 MAIN ST", PRIMARY_SITE_CITY: "SUNRISE", DESCRIPTION: "GROUNDWATER USE RESTRICTION", BEGIN_DATE: 1377561600000 }).rows;
+    for (const r of rows) expect(r.label, r.label).not.toMatch(/[A-Z]{3,}_|_[A-Z]/);
   });
 });

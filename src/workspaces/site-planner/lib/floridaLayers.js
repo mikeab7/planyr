@@ -20,11 +20,18 @@ export const FLORIDA_RELAY = "/gis-proxy";
 export const relayUrl = (url) => String(url).replace(/^https:\/\//, `${FLORIDA_RELAY}/`);
 
 const FL = { states: ["FL"] };
+/* The agencies publish ALL-CAPS names and addresses; a card prints them in words (a value with any lowercase letter is left exactly as written). */
+const KEEP_CAPS = new Set(["LLC", "INC", "LP", "LLP", "II", "III", "IV", "NW", "NE", "SW", "SE", "FPL", "FDOT", "USA", "FL", "MD", "SR", "US", "CR", "PGA", "DBA", "DEP", "AT&T"]);
+export function niceCase(v) {
+  const t = String(v == null ? "" : v).trim();
+  if (!t || /[a-z]/.test(t)) return t;
+  return t.toLowerCase().replace(/[a-z0-9&']+/g, (w) => (KEEP_CAPS.has(w.toUpperCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).replace(/(\d)(St|Nd|Rd|Th)\b/g, (_m, d, suf) => d + suf.toLowerCase());
+}
+
 const first = (v) => String(v == null ? "" : v).split(/[\r\n]+/)[0].trim();
 /* Broward's drainage-district names carry stray line breaks and a doubled word ("Coral Bay\r\nCoral Bay"). */
 export const districtName = (v) => first(v) || null;
 
-const hex = (c) => ({ color: c });
 const areaStyle = (color, fillMax = 0.25, weight = 1.2, dash = null) => (_props, opacity) => ({
   color, weight, opacity, fill: true, fillColor: color, fillOpacity: Math.min(fillMax, opacity * 0.5), dashArray: dash,
 });
@@ -198,7 +205,7 @@ export const FLORIDA_LAYERS = {
     identifyCard: (props) => ({
       title: "Cleanup site",
       rows: [
-        { label: "Site", text: props.BUSINESS_NAME }, { label: "Address", text: [String(props.ADDRESS1 || "").trim(), props.CITY].filter(Boolean).join(", ") },
+        { label: "Site", text: niceCase(props.BUSINESS_NAME) }, { label: "Address", text: [niceCase(props.ADDRESS1), niceCase(props.CITY)].filter(Boolean).join(", ") },
         { label: "Program", text: cleanupCategory(props.CLCC_CLEANUP_CATEGORY_KEY) }, { label: "Status", text: cleanupStatus(props.RSC2_REMEDIATION_STATUS_KEY) },
       ],
     }),
@@ -227,7 +234,7 @@ export const FLORIDA_LAYERS = {
     identifyCard: (props) => ({
       title: "Institutional control",
       rows: [
-        { label: "Site", text: props.PRIMARY_SITE_NAME }, { label: "Address", text: [String(props.PRIMARY_SITE_ADDRESS_LINE_1 || "").trim(), props.PRIMARY_SITE_CITY].filter(Boolean).join(", ") },
+        { label: "Site", text: niceCase(props.PRIMARY_SITE_NAME) }, { label: "Address", text: [niceCase(props.PRIMARY_SITE_ADDRESS_LINE_1), niceCase(props.PRIMARY_SITE_CITY)].filter(Boolean).join(", ") },
         { label: "Restrictions", text: restrictionWords(props.DESCRIPTION) }, { label: "In effect since", text: props.BEGIN_DATE },
       ],
     }),
@@ -244,7 +251,7 @@ export const FLORIDA_LAYERS = {
     identifyCard: (props) => ({
       title: "Reported subsidence",
       rows: [
-        { label: "Report no.", text: props.REF_NUM }, { label: "County", text: props.COUNTY },
+        { label: "Report no.", text: props.REF_NUM }, { label: "County", text: niceCase(props.COUNTY) },
         { label: "Field-verified sinkhole", text: String(props.TRUE_SINK || "").trim().toUpperCase() === "Y" ? "Yes" : "" },
       ],
       note: "A reported depression. Most reports were never field-checked, so a dot is not a confirmed sinkhole.",
@@ -368,7 +375,7 @@ export const FLORIDA_LAYERS = {
     identifyCard: (props) => ({
       title: "Environmental Resource Permit",
       rows: [
-        { label: "Project", text: props.PROJECT_NAME }, { label: "Permit no.", text: props.PERMIT_NO }, { label: "Type", text: erpTypeLabel(props.PermitType) },
+        { label: "Project", text: niceCase(props.PROJECT_NAME) }, { label: "Permit no.", text: props.PERMIT_NO }, { label: "Type", text: erpTypeLabel(props.PermitType) },
         { label: "Status", text: props.PermitStatus }, { label: "Issued", text: props.IssueDate },
       ],
     }),
