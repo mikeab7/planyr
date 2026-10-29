@@ -67,6 +67,7 @@ import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule, prefetchModuleWhenQuiet } from "../../app/modulePrefetch.js";
 import { ORG_CAPABLE_MODULES } from "../../app/route.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
+import { bareFullscreenAllowed, insideLettersAreText } from "../keyboard/bareLetterGate.js";
 import { MODULE_TAB_LABEL } from "./moduleTabLabel.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
@@ -992,6 +993,8 @@ export default function AppHeader({
     };
   }, []);
 
+  const moduleRef = useRef(module);
+  moduleRef.current = module; // read at keypress time: the listener below is mounted once
   useEffect(() => {
     const handle = (e) => {
       const tag = e.target.tagName;
@@ -1024,7 +1027,14 @@ export default function AppHeader({
          button in the row-1 right zone, and Ctrl/Cmd+Shift+F — so nothing became
          unreachable. Where there is no document (the Site Planner canvas, the map) the bare
          `f` is untouched, which is why ui-audit/verify-new1-fullscreen.mjs still passes. */
-      if ((e.key === "f" || e.key === "F") && !e.altKey && !writeableDocumentOnScreen()) toggleRef.current();
+      /* NEW-1 (2026-10-29) — the gate is `bareFullscreenAllowed` (shared/keyboard/bareLetterGate.js): a key a
+         grid already consumed, a press inside `data-letters-are-text`, and the Spreadsheet module all keep the
+         letter a letter, in addition to the painted-document rule above. */
+      if (bareFullscreenAllowed({
+        module: moduleRef.current, key: e.key, altKey: e.altKey, defaultPrevented: e.defaultPrevented,
+        inLettersAreText: insideLettersAreText(e.target),
+        writeableDocumentOnScreen: writeableDocumentOnScreen(),
+      })) toggleRef.current();
       // ⛔ Do NOT fight Esc. In real fullscreen the browser consumes it and exits on its own, and
       // `fullscreenchange` reports that here. Acting on it as well would be a second toggle over
       // the top of that. B1173(×2) retired the chrome-hide fallback, which was the only branch Esc
