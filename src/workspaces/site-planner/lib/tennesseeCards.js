@@ -130,7 +130,7 @@ export function scenicCard(props) {
     title: titleCase(p.Site_name) || "State Scenic River",
     rows: rowsOf(
       row("River class", p.DESIGNATIO),
-      Number.isFinite(mi) && mi > 0 ? { label: "Length", text: `${mi} miles` } : null,
+      Number.isFinite(mi) && mi > 0 ? { label: "Length", text: `${Math.round(mi * 10) / 10} miles` } : null,
       row("Reach", p.DESCRIPTIO),
     ),
     note: "Tennessee Scenic Rivers Act of 1968 designation. The river's management plan governs what is allowed in the corridor — ask TDEC's Division of Natural Areas.",
@@ -175,10 +175,10 @@ export function ymd(raw) {
 }
 export function thcSiteCard(props) {
   const p = props || {};
-  const name = titleCase(p.COMNAME) || titleCase(p.HISTNAME) || "Recorded historic site";
+  const name = titleCase(p.COMNAME) || titleCase(p.HISTNAME);
   const hist = titleCase(p.HISTNAME);
   return {
-    title: `${name} — recorded historic site`,
+    title: name ? `${name} — recorded historic site` : "Recorded historic site",
     rows: rowsOf(
       hist && hist !== name ? row("Historic name", hist) : null,
       row("Address", [titleCase(p.PROPADDR), titleCase(p.CITY)].filter(Boolean).join(", ")),

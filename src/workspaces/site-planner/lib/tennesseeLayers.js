@@ -57,13 +57,13 @@ export const TN_LAYERS = {
   tn_wqa: {
     kind: "esriFeature", label: "Impaired & Assessed Waters", source: `${TDEC} — Division of Water Resources, 2026 Water Quality Assessment`,
     url: GIS_SOURCES.wqaTn.serviceUrl, ...TN,
-    minZoom: 10, color: "#c2410c", weight: 2, opacity: 0.55, styleFn: wqaStyle,
+    minZoom: 10, color: "#c2410c", weight: 2, opacity: 0.55, styleFn: wqaStyle, simplifyFactor: 6, // 270–370k vertices in a Middle / East Tennessee metro at the first zoom it draws
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Assessed stream", hoverSource: "TDEC",
     hoverFields: [{ names: ["ASSESSMENT_UNIT_NAME"] }, { names: ["ATTAINMENT"] }],
     identifyCard: (props) => wqaCard(props),
     vintage: "TDEC 2026 Water Quality Assessment — layer edited 2026-08-13",
     note: "TDEC's 2026 stream assessment: orange = impaired (not supporting its uses), amber = threatened, blue = fully supporting, grey = not assessed. It is the spatial companion of the EPA-approved 2026 List of Impaired and Threatened Streams. Click a stream for its status and reach.",
-    infoCaveat: "Impairment can tighten the state's construction buffer (60 ft average instead of 30 ft, TNR100000) and discharge rules, but only for some causes — see \"Restricted Waters\" for TDEC's own list and ask TDEC's Division of Water Resources.",
+    infoCaveat: "Impairment can tighten the state's construction buffer (60 ft average instead of 30 ft, TNR100000) and discharge rules, but only for some causes — TDEC's own list of those waters is on its Construction General Permit map — ask TDEC's Division of Water Resources.",
     role: "line", group: "flood", order: 4,
     floodTier: "hydrography", agency: "TDEC",
   },
@@ -87,7 +87,7 @@ export const TN_LAYERS = {
   tn_pws: {
     kind: "esriFeature", label: "Water Service Areas", mergeGroup: "water_sewer", source: `${TDEC} — Division of Water Resources, public water systems`,
     url: GIS_SOURCES.pwsTn.serviceUrl, ...TN,
-    minZoom: 9, color: "#0369a1", weight: 1.4, opacity: 0.4,
+    minZoom: 9, color: "#0369a1", weight: 1.4, opacity: 0.4, simplifyFactor: 6, // one Greeneville / Johnson City system is a single 112,589-vertex polygon that every tile returns whole
     styleFn: (_p, opacity) => ({ color: "#0369a1", weight: 1.4, opacity, fillColor: "#0369a1", fillOpacity: opacity * 0.1 }), // design-exempt: map ink for a drawn service territory
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Water service area", hoverSource: "TDEC",
     hoverFields: [{ names: ["MA_NAME"] }, { names: ["PWSID"], label: "ID" }],
@@ -186,7 +186,7 @@ export const TN_LAYERS = {
     kind: "esriFeature", label: "Recorded Historic Sites", source: "Tennessee Historical Commission — historic sites survey",
     url: viaRelay(GIS_SOURCES.thcSitesTn.serviceUrl), ...TN,
     minZoom: 16, color: "#7c3aed", weight: 1.5, opacity: 0.55, pointRadius: 3,
-    fields: ["COMNAME", "HISTNAME", "PROPADDR", "CITY", "COUNTY", "DATECONST", "ORIGUSE", "PRESUSE"], // ~100 fields exist; the card reads these (a dense view was 4–5 MB with all of them)
+    fields: ["OBJECTID", "COMNAME", "HISTNAME", "PROPADDR", "CITY", "COUNTY", "DATECONST", "ORIGUSE", "PRESUSE"], // ~100 fields exist; the card reads these (a dense view was 4–5 MB with all of them). ⛔ OBJECTID must be in the list: without it the service sends no feature id and esri-leaflet keys every point under "undefined" — ONE point draws
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Recorded historic site", hoverSource: "THC",
     hoverFields: [{ names: ["COMNAME", "HISTNAME"] }, { names: ["DATECONST"], label: "built" }],
     identifyCard: (props) => thcSiteCard(props),

@@ -296,7 +296,7 @@ export const SOURCE_FIXTURES = {
   critHabitatTn: {
   fixtures: [
     { label: "Hardin / Wayne counties — Tennessee River mussels, west TN (wide box)", bbox: [-88.3, 35.0, -87.5, 35.6], expectMinCount: 1 }, // live: 3
-    { label: "Hancock / Hawkins — Clinch & Holston, east TN (wide box)", bbox: [-83.6, 36.3, -82.9, 36.7], expectMinCount: 1 }, // live: 12
+    { label: "Hancock / Hawkins — Clinch & Holston, east TN (wide box, kept south of the Virginia line)", bbox: [-83.6, 36.3, -83.0, 36.5], expectMinCount: 1 }, // live: 11
     { label: "Christiana / Murfreesboro (Stones River mussels) — wide box", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 1 }, // live: 4
     { label: "Knoxville / Clinch-Holston mussels — wide box", bbox: [-84.22, 35.66, -83.62, 36.26], expectMinCount: 1 }, // live: 2
   ],

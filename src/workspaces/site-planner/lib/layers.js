@@ -1576,13 +1576,20 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;
   lyr.onRemove = function (map) { clearTimeout(timer); if (origOnRemove) return origOnRemove.call(this, map); };
+  /* B2521584 — a draw-budget refusal must SURVIVE the `load` that esri-leaflet fires right after it: the handler below reset the status to "loaded", or to "empty / No
+   * features in this view" when nothing was drawn, so a layer that REFUSED to draw read as "no data here" (reproduced against esri-leaflet 3.0.19: failed ×4, then empty).
+   * `refused` is raised by `overbudget` and cleared when the next request cycle starts ("loading"). */
+  let refused = false;
+  lyr.on("loading", () => { refused = false; });
   lyr.on("load", () => {
     tries = 0;
+    if (refused) return; // the "too detailed to draw" failure stays on the row
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
   // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
   lyr.on("overbudget", (e) => {
+    refused = true;
     onStatus && onStatus(k, "failed", `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
   });
   lyr.on("requesterror", (e) => {
@@ -1626,24 +1633,30 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   {
     const origCreate = lyr.createLayers;
     let drawn = 0;
+    /* B2521584 — a feature the server returns WHOLE to several tiles (a long river polygon touching six 256 px tiles) arrives once per tile, and esri-leaflet draws it once
+     * (it keys layers by id). The budget therefore counts each feature id ONCE: summing the repeats refused batches the map could have drawn (critical habitat at Johnson City:
+     * 81k unique vertices counted as 523k). A feature with no id is counted every time (the safe direction). */
+    const seen = new Set();
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
     lyr.createLayers = function (features) {
-      const v = countVertices(features, Math.max(cap, total));
+      const fresh = (features || []).filter((f) => !(f && f.id != null && seen.has(f.id)));
+      const v = countVertices(fresh, Math.max(cap, total));
       if (v > cap || drawn + v > total) {
         try { this.fire("overbudget", { vertices: v, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
         return undefined;
       }
       drawn += v;
+      for (const f of fresh) if (f && f.id != null) seen.add(f.id);
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { drawn = 0; });
+    lyr.on("remove", () => { drawn = 0; seen.clear(); });
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;
       const onZoom = () => {
         const z = lyr._map && lyr._map.getZoom();
         if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
-        fetchedAt = z; drawn = 0;
+        fetchedAt = z; drawn = 0; seen.clear();
         try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
       };
       lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });

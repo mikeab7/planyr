@@ -70,3 +70,58 @@ describe("opt-in server-side simplification (Future Land Use: 308 k vertices, ~2
     expect(DESOTO_LAYERS.ms_desoto_flu.simplifyFactor).toBeGreaterThan(0);
   });
 });
+
+
+describe("B2521584 — the budget counts a feature once, and a refusal survives the `load` that follows it", () => {
+  const mocks = () => {
+    vi.doMock("esri-leaflet", () => ({
+      dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(),
+      featureLayer: vi.fn(() => ({
+        handlers: {},
+        createLayers(f) { this.created = (this.created || 0) + f.length; },
+        fire(name, e) { (this.handlers[name] || []).forEach((h) => h(e)); },
+        on(name, h) { (this.handlers[name] = this.handlers[name] || []).push(h); return this; },
+      })),
+    }));
+    vi.doMock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
+    vi.doMock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
+    vi.doMock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
+    vi.doMock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
+  };
+  it("a long polygon returned whole to many tiles is counted ONCE (80k unique vertices must not read as 6 × 80k)", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Whole polygons", color: "#000" }, 1, "pane");
+    const whole = { id: 7, ...poly(80000) };
+    for (let tile = 0; tile < 6; tile++) lyr.createLayers([whole]);   // six tiles, the same feature each time
+    expect(lyr.created).toBe(6);                                       // every batch reached esri-leaflet (which keys by id and draws it once)
+    const refused = [];
+    lyr.on("overbudget", (e) => refused.push(e));
+    lyr.createLayers([{ id: 8, ...poly(80000) }, { id: 9, ...poly(80000) }, { id: 10, ...poly(80000) }, { id: 11, ...poly(10000) }]);
+    expect(refused).toHaveLength(1);                                   // genuinely new vertices (250k) still trip the 120k batch cap
+  });
+  it("a feature with no id is counted every time (the safe direction)", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "No ids", color: "#000" }, 1, "pane");
+    const refused = [];
+    lyr.on("overbudget", (e) => refused.push(e));
+    for (let i = 0; i < 5; i++) lyr.createLayers([poly(70000)]);
+    expect(refused.length).toBeGreaterThan(0);                          // 5 × 70k > the 300k layer total
+  });
+  it("attachFeatureRetry: a refusal is NOT overwritten by the `load` that follows; the next request cycle clears it", async () => {
+    vi.resetModules(); mocks();
+    const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const handlers = {};
+    const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, eachLayer: () => {}, _layers: {} };
+    const out = [];
+    attachFeatureRetry(lyr, "k", { label: "Layer" }, (...a) => out.push(a));
+    const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
+    fire("loading"); fire("overbudget", { vertices: 523000 }); fire("load");
+    expect(out.map((o) => o[1])).toEqual(["failed"]);                   // not "failed" then "empty"
+    expect(out[0][2]).toMatch(/too detailed to draw/);
+    fire("loading"); fire("load");                                      // the next cycle (a zoom) starts clean
+    expect(out).toHaveLength(2);
+    expect(out[1][1]).not.toBe("failed");                                // …and reports what it found, not the old refusal
+  });
+});

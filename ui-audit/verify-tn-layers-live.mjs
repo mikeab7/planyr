@@ -88,46 +88,44 @@ const stateOf = (panel, id) => panel.locator(`[data-testid="layer-row-${id}"]`).
 const SHOWN_AS = { tn_county: "counties_cities", tn_city: "counties_cities", tn_pws: "water_sewer" };
 
 try {
-  /* ── A. the finder over Nashville, then Christiana ─────────────────────────────── */
-  for (const place of [PLACES.nashville, PLACES.christiana]) {
+  /* ── A. the finder, one row at a time, at that row's OWN first-drawing zoom ─────────────────────────────────────────────
+   * The draw budget trips at the zoom a row FIRST draws (z9–z12), not at the zoom 15 an earlier version of this script turned everything on at, and a row with no
+   * assertion on its feature count passes while drawing nothing. So: every row, alone, centred on Nashville at its own minZoom → "loaded" (never "empty"/"failed"/over-budget),
+   * with real features in the /query answers it actually received. The budget-prone rows are repeated around Johnson City / Greeneville (a 112,589-vertex water system, whole
+   * mussel reaches) at minZoom and +2. */
+  const rowRe = (id) => {
+    const u = TN_LAYERS[id].url;
+    return u ? new RegExp(u.replace(/^https:\/\//, "").replace(/^\/gis-proxy\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/query") : null;
+  };
+  const JOHNSON = { lat: 36.38, lng: -82.9, label: "Greeneville / Johnson City" };
+  const BUDGET_ROWS = ["tn_pws", "tn_crit_habitat", "tn_wqa", "tn_ms4", "tn_nrhp_bounds"];
+  const statusText = (panel, id) => panel.locator(`[data-testid="layer-row-${id}"]`).first().innerText().catch(() => "");
+  async function oneRow(id, place, zoom) {
     log = [];
-    const fp = await openFinder(place, 13);
-    const listed = {};
-    for (const g of Object.values(PANEL)) listed[g] = await rowsIn(fp, g);
-    console.log(`${place.label} · finder rows:`, JSON.stringify(listed));
-    for (const id of TN_LAYER_IDS) {
-      const want = SHOWN_AS[id] || id, g = PANEL[TN_LAYERS[id].group];
-      check(`A · ${place.label}: ${g} lists "${want}"`, listed[g].includes(want));
-    }
-    // turn every Tennessee row on (the merged ones once), at a zoom each can draw
-    const turnOn = async (group, id) => {
-      await rowsIn(fp, group);
-      const cb = fp.locator(`[data-testid="layer-row-${id}"] input[type="checkbox"]`).first();
-      if (!(await cb.count())) return false;
-      if (!(await cb.isChecked())) await cb.check();
-      return true;
-    };
-    await page.evaluate(([a, b]) => window.__mapFinderMap.setView([a, b], 15, { animate: false }), [place.lat, place.lng]);
-    for (const id of new Set(TN_LAYER_IDS.map((i) => SHOWN_AS[i] || i))) {
-      const reg = TN_LAYERS[id] || TN_LAYERS[TN_LAYER_IDS.find((i) => (SHOWN_AS[i] || i) === id)];
-      await turnOn(PANEL[reg.group], id);
-    }
-    await sleep(14000);
-    for (const id of TN_LAYER_IDS) {
-      const want = SHOWN_AS[id] || id;
-      const g = PANEL[TN_LAYERS[id].group];
-      await rowsIn(fp, g);
-      const st = await stateOf(fp, want);
-      const urlRe = TN_LAYERS[id].url ? new RegExp(TN_LAYERS[id].url.replace(/^https:\/\//, "").replace(/^\/gis-proxy\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/query") : null;
-      const n = urlRe ? featuresFrom(urlRe) : null;
-      console.log(`   ${id.padEnd(18)} state=${st}  features=${n}`);
-      if (id === "tn_stream_buffers") continue; // asserted in B (it paints polygons, not /query features of its own)
-      check(`A · ${place.label}: "${id}" is not failed`, st !== "failed", `state=${st}`);
-    }
+    const fp = await openFinder(place, zoom);
+    const want = SHOWN_AS[id] || id, g = PANEL[TN_LAYERS[id].group];
+    const listed = await rowsIn(fp, g);
+    check(`A · ${place.label}: ${g} lists "${want}"`, listed.includes(want));
+    const cb = fp.locator(`[data-testid="layer-row-${want}"] input[type="checkbox"]`).first();
+    if (!(await cb.count())) { check(`A · "${want}" has a checkbox`, false); return; }
+    if (!(await cb.isChecked())) await cb.check();
+    await sleep(id === "tn_stream_buffers" ? 12000 : 9000);
+    const st = await stateOf(fp, want), txt = await statusText(fp, want);
+    const re = rowRe(id), n = re ? featuresFrom(re) : null;
+    console.log(`   ${id.padEnd(18)} ${place.label.padEnd(26)} z${zoom}  state=${st}  features=${n}`);
+    check(`A · ${id} @ ${place.label} z${zoom}: loaded`, st === "loaded", `state=${st}`);
+    check(`A · ${id} @ ${place.label} z${zoom}: not refused as too detailed`, !/too detailed/i.test(txt));
+    if (re) check(`A · ${id} @ ${place.label} z${zoom}: real features came back`, n > 0, `${n}`);
     const bad = log.filter((e) => !e.req && typeof e.status === "number" && e.status >= 400 && TN_HOSTS.test(e.url));
-    check(`A · ${place.label}: no Tennessee-server request failed`, bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/A-${place === PLACES.nashville ? "nashville" : "christiana"}.png` });
+    check(`A · ${id} @ ${place.label}: no Tennessee-server request failed`, bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/A-${id}-${place === PLACES.nashville ? "nashville" : "other"}-z${zoom}.png` });
   }
+  for (const id of TN_LAYER_IDS) {
+    const z = Math.min(17, Math.max(Number(TN_LAYERS[id].minZoom) || 12, 9));
+    // the stream buffers draw off the NHD streams — judged on Christiana's creeks; the others on Nashville, where each has data
+    await oneRow(id, id === "tn_stream_buffers" ? PLACES.christiana : PLACES.nashville, id === "tn_stream_buffers" ? 14 : z);
+  }
+  for (const id of BUDGET_ROWS) for (const dz of [0, 2]) await oneRow(id, JOHNSON, Math.min(17, Math.max(Number(TN_LAYERS[id].minZoom) || 12, 9) + dz));
 
   /* ── B + C. located throwaway plans ─────────────────────────────────────────────── */
   const mk = (id, p, label) => ({ ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });
@@ -178,7 +176,7 @@ try {
   check("B · the NHD stream lines were asked and answered", answered(/hydro\.nationalmap\.gov|nhd/i).length > 0, `NHD ${answered(/hydro\.nationalmap\.gov|nhd/i).length}`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-christiana-buffers.png` });
 
-  // C · Houston and Atlanta offer none of it, and send nothing to Tennessee
+  // C · Houston and Atlanta offer none of it, and — with their own rows switched ON — send nothing to Tennessee
   for (const [name, plan] of [["Houston", plans.tx], ["Atlanta", plans.ga]]) {
     log = [];
     const panel = await openPanel(plan.id);
@@ -187,10 +185,16 @@ try {
     const all = Object.values(rows).flat();
     console.log(`${name} plan · rows:`, JSON.stringify(rows));
     check(`C · KNOWN-GOOD arm: ${name} lists its own rows (so an empty answer is not an empty registry)`, name === "Houston" ? all.includes("water_sewer") && all.includes("counties_cities") : all.includes("ga_stream_buffers") || all.includes("counties_cities"), `${all.length} rows`);
-    const leaked = TN_LAYER_IDS.filter((id) => all.includes(id));
+    const leaked = all.filter((id) => /^tn_/.test(id));
     check(`C · ${name} offers no Tennessee row`, leaked.length === 0, leaked.join(", "));
-    await sleep(3000);
-    check(`C · ${name} plan issues ZERO requests to the Tennessee servers`, log.filter((e) => e.req).length === 0, `${log.filter((e) => e.req).length} sent: ${log.filter((e) => e.req).slice(0, 2).map((e) => e.url.slice(0, 90)).join(" | ")}`);
+    // switch the merged rows (Counties & Cities, Water & Sewer — where tn_city / tn_county / tn_pws would hide) and the Environmental rows ON
+    for (const [g, ids] of [["jur", ["counties_cities"]], ["util", ["water_sewer"]], ["env", rows.env.slice(0, 6)]]) {
+      await rowsIn(panel, g);
+      for (const id of ids) { const cb = panel.locator(`[data-testid="layer-row-${id}"] input[type="checkbox"]`).first(); if (await cb.count() && !(await cb.isChecked())) await cb.check().catch(() => {}); }
+    }
+    await sleep(9000);
+    const sent = log.filter((e) => e.req);
+    check(`C · ${name} plan (own layers ON) issues ZERO requests to the Tennessee servers`, sent.length === 0, `${sent.length} sent: ${sent.slice(0, 2).map((e) => e.url.slice(0, 90)).join(" | ")}`);
   }
 } finally {
   for (const id of cleanupIds) {

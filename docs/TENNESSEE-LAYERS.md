@@ -45,7 +45,7 @@ the cause, so Planyr cannot tell which streams are 60 ft. The row says so on its
 `tdeconline` is readable (a real-browser CORS probe from planyr.io would settle whether the browser can read it directly).
 
 Sources of the numbers: the 2021 permit text and the TDEC Erosion Prevention & Sediment Control Handbook ch. 3.3.3.2 (riparian buffer zones).
-⚠ **TDEC reissued the permit effective 2026-10-01 (expires 2031-09-30).** A consultant summary says the 30 ft / 15 ft rule is unchanged; the
+⚠ **TDEC's permit page says a final 2026 permit has been issued, effective 2026-10-01 (expires 2031-09-30).** A consultant summary says the 30 ft / 15 ft rule is unchanged; the
 2026 text itself was not read — the permit PDF sits on `tn.gov`, which the build environment cannot reach. The ⓘ says so.
 Measured from the **centreline** (NHD), not the top of bank. A wet-weather conveyance (TDEC rule 0400-40-17 hydrologic determination) carries
 no buffer, and NHD cannot tell one from a stream.
@@ -80,3 +80,8 @@ boundaries include a 363,000-vertex "Old Natchez Trace", and Nashville's MS4 are
 its vertex budget (`layers.buildFeatureLayer`), and zooming in does not shrink a whole-feature answer — so those three rows ask the server to simplify
 (`simplifyFactor: 6`, ~6 screen pixels, re-asked every two zoom levels): measured 15,900–106,000 vertices per cell across z9–z17 (critical habitat), 1,500–3,200
 (National Register), 700–3,100 (MS4). The 186,000-record historic-sites layer requests only the eight fields its card reads.
+
+Also fixed after the second review: the historic-sites layer now requests the object id (without it the service sends no feature id and esri-leaflet draws every point
+under one key — **one point**), Water Service Areas and the stream assessment simplify too (a 112,589-vertex system; 270–370k vertices at first zoom), and the shared
+budget (`layers.buildFeatureLayer`) now counts a feature once however many tiles return it and no longer lets the `load` that follows a refusal turn "too detailed to
+draw" into "empty / no features here" (`test/layerDrawBudget.test.js`).

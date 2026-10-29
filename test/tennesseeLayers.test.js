@@ -94,10 +94,12 @@ describe("every Tennessee row is Tennessee-only and registered whole", () => {
     for (const id of TN_LAYER_IDS) expect(LAYER_TIER[id], id).toBeTruthy();
   });
   it("every polygon row that the service returns WHOLE asks the server to simplify (the draw budget declines a 500k-vertex batch, and zooming in cannot help)", () => {
-    for (const id of ["tn_crit_habitat", "tn_nrhp_bounds", "tn_ms4"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThanOrEqual(3);
+    for (const id of ["tn_crit_habitat", "tn_nrhp_bounds", "tn_ms4", "tn_pws", "tn_wqa"]) expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThanOrEqual(3);
   });
   it("the 186,000-record THC layer asks only for the fields its card reads", () => {
     expect(ALL_LAYERS.tn_thc_sites.fields).toEqual(expect.arrayContaining(["COMNAME", "PROPADDR", "DATECONST"]));
+    // ⛔ without the object id the service sends no feature id, esri-leaflet keys every point under "undefined", and ONE point draws (reproduced against esri-leaflet 3.0.19)
+    expect(ALL_LAYERS.tn_thc_sites.fields).toContain("OBJECTID");
     expect(ALL_LAYERS.tn_thc_sites.fields.length).toBeLessThan(15);
   });
   it("no coverage fixture of a Tennessee row sits outside Tennessee (a North Carolina polygon once passed as one)", () => {
@@ -274,6 +276,17 @@ describe("click cards are clean (constraint #45)", () => {
     expect(cards.titleCase("OAK RIDGE (DOE)")).toBe("Oak Ridge (DOE)");
     expect(cards.wqaCard({ ASSESSMENT_UNIT_NAME: "Lytle Creek", ATTAINMENT: "Fully Supporting", LOCATION_DESCRIPTION: "Lytle Creek from Dilton Road to headwaters.   Ecoregion 71i " }).rows.find((r) => r.label === "Reach").text).toBe("Lytle Creek from Dilton Road to headwaters.");
     expect(cards.pwsCard({ MA_NAME: "X", PL_PSRC: "GUP" }).rows.find((r) => r.label === "Water source").text).toMatch(/^Purchased groundwater/);
+  });
+  it("a blank-named THC site gets a plain title (not 'recorded historic site — recorded historic site'); stream length is rounded", () => {
+    expect(cards.thcSiteCard({ COMNAME: " ", HISTNAME: " ", PROPADDR: "6TH AVE N 211" }).title).toBe("Recorded historic site");
+    expect(cards.scenicCard({ Site_name: "X", GISMILES: 13.200000000000001 }).rows.find((r) => r.label === "Length").text).toBe("13.2 miles");
+  });
+  it("the Counties & Cities key and Site Analysis know the Tennessee city layer", async () => {
+    const { boundaryKey } = await import("../src/workspaces/site-planner/lib/layerPanelModel.js");
+    const key = boundaryKey([["tn_county", ALL_LAYERS.tn_county], ["tn_city", ALL_LAYERS.tn_city]]);
+    expect(key.map((k) => k.label)).toEqual(["County", "City Limits"]);
+    const { LINE_LAYERS } = await import("../src/workspaces/site-planner/lib/siteScreen.js");
+    expect(LINE_LAYERS.TN).toEqual(["tn_city"]);
   });
   it("titleCase leaves mixed-case text alone and keeps acronyms", () => {
     expect(cards.titleCase("Harpeth River")).toBe("Harpeth River");
