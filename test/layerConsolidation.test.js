@@ -56,7 +56,8 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     // so its Title 32 water & sanitation districts are the "who is entitled to serve" half there,
     // exactly as the MUD/CCN rows are in Texas. It is a fifth MEMBER of the one consolidated row,
     // not a second row — which is the whole point of the merge group.
-    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud"].sort());
+    // B2507057 — the DeSoto County MS / Olive Branch utilities joined the one row (Mississippi has no CCN; the city's and the regional authority's own mains are the provider data there).
+    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud", "ms_dcrua_main", "ms_dcrua_structures", "ms_ob_lift_stations", "ms_ob_manholes", "ms_ob_sewer_force", "ms_ob_sewer_gravity", "ms_ob_water_main", "ms_ob_wwtp"].sort());
   });
   it("every member keeps group 'utilities' and its own fetch (url/kind) untouched", () => {
     for (const [, cfg] of membersOf("water_sewer")) {
@@ -78,21 +79,21 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     ];
     for (const label of allLabels()) for (const b of banned) expect(label).not.toBe(b);
   });
-  it("buildGroupSlots folds all 4 members into ONE row when the Utilities group is built", () => {
+  it("buildGroupSlots folds every member into ONE row when the Utilities group is built", () => {
     const utilEntries = Object.entries(ALL_LAYERS).filter(([, cfg]) => cfg.group === "utilities");
     const slots = buildGroupSlots(utilEntries);
     const waterSlot = slots.find((s) => s.kind === "merge" && s.mergeGroup === "water_sewer");
     expect(waterSlot).toBeTruthy();
-    expect(waterSlot.members.length).toBe(5); // NEW-2 — co_water_districts joined the group (see the member list above)
+    expect(waterSlot.members.length).toBe(13); // NEW-2 — co_water_districts joined the group; B2507057 — the 8 DeSoto / Olive Branch members (see the member list above)
     // and only ONE such slot — never split across two rows
     expect(slots.filter((s) => s.kind === "merge" && s.mergeGroup === "water_sewer").length).toBe(1);
   });
 });
 
 describe("B898 — Fire hydrants consolidated to ONE layer", () => {
-  it("exactly the 3 hydrant-relevant adapters merge under fire_hydrants", () => {
+  it("exactly the 4 hydrant-relevant adapters merge under fire_hydrants", () => {
     const members = membersOf("fire_hydrants");
-    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "osm_hydrants"].sort());
+    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "ms_ob_hydrants", "osm_hydrants"].sort()); // B2507057 — Olive Branch's own hydrants
   });
   it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire Hydrants'", () => {
     expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire Hydrants");
