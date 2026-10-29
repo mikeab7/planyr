@@ -538,10 +538,14 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
 const SEAM_SAMPLE_FT = 5;       // how often an element's edge is sampled for a neighbour
 const SEAM_TOUCH_FT = 1.0;      // two paved rings closer than this share an edge
 const SEAM_MIN_DROP_FT = 0.05;  // a seam flatter than this is the same plane (a dock chain's court + trailer row)
-/* ROUND 6 (NEW-3): the open-ground slope away from a pavement / pad edge (%; the gear's "Open-ground slope"), and how many
- * touched edges a point of open ground reads at most. */
+/* ROUND 6 (NEW-3): the open-ground slope away from a pavement / pad edge (%; the gear's "Open-ground slope"). */
 export const OPEN_GROUND_SLOPE_PCT = 2;
-const OPEN_GROUND_K = 6;
+const OPEN_GROUND_PIECE_FT = 25;   // ROUND 8: the graded edges are cut into pieces this long for the open ground's cone family
+export const OPEN_GROUND_MIN_FALL_PCT = 0.5;   // ROUND 8: the fall a pit-filled swale keeps toward its outlet
+const DRAIN_MAX_NODES = 60000;                 // ROUND 8: the drain lattice's density (≈ the contour lattice's)
+const DRAIN_MIN_CELL_FT = 3;
+const BAND_DEPTH_EPS_FT = 0.02;
+const BAND_BUCKET_FT = 40;                // a point whose band clamp is below this is open ground, not the slope band
 const LIMIT_SAMPLE_FT = 10;     // the limit ring is sampled this often for the slope reach + the daylight line
 const REACH_MAX_FT = 400;
 
@@ -657,63 +661,67 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     }
     return null;
   };
-  // ROUND 6 (NEW-3) — THE OPEN GROUND INSIDE THE LIMIT FOLLOWS THE PAVEMENT; IT DOES NOT STEP BACK UP TO THE FFE. In BOTH
-  // modes a point of open ground reads the graded edges it TOUCHES — the nearest elements whose nearest point it can see
-  // without crossing another element (a court shadows the pad behind it, so ground past the court's far edge never hears
-  // of the FFE) — and continues their fall at the site's open-ground slope (`openGroundSlopePct`, default 2%). Each touched
-  // edge e offers   z_e(q_e) − s · d_e + (d_e − d_nearest) / (2 · ratio)   and the LOWEST offer wins: the nearest edge's
-  // offer is its own fall; a farther, lower edge wins where it is lower even after climbing back at the grading slope (the
-  // bank from a lower lot up to the ground beside it, 2:1 by default), and a farther, higher edge can never win (its offer
-  // is above its own fall). So beyond a court falling to E the ground is ≤ E and keeps falling 2% toward the limit (never
-  // interpolated back up toward the FFE — the round-4 inverse-distance infill did exactly that); between a pad and a lower
-  // lot the ground leaves the pad at the FFE and banks down to the lot where their falls meet ("where two falls meet, the
-  // lower wins"); and nothing ever sits above an adjacent pavement edge (every offer is ≤ its edge's elevation as d → 0).
-  // Boundary mode's flat plateau at the FFE (the Level-ground sweep's mask) is GONE: the setback's inward slope (`bandZ`,
-  // B2376240) is thrown from the limit at whatever elevation this surface reaches there. Earthwork, the balance and the
-  // suggested FFE all run on this surface. Every offer is continuous in p, so the surface is (a shadow edge can only drop a
-  // HIGHER offer — one that was not winning — so it does not step there).
+  // ROUND 8 (NEW-1, amends B2396674) — THE OPEN GROUND INSIDE THE LIMIT IS ONE CONTINUOUS DRAINAGE SURFACE. Round 6 took
+  // "the lowest offer among the edges the point can SEE" (a visibility test + the nearest six elements): as the set of
+  // visible edges changed from one cell to the next the chosen plane jumped, and the owner's NW corner printed closed loops
+  // and a crease along the car lot's edge. Now, with K = 1/ratio (the grading slope) and s = the open-ground slope,
+  //     f(p) = L(p) − (K + s)·D(p),   L(p) = min over EVERY graded edge point q of ( z(q) + K·|p − q| ),   D(p) = distance
+  //                                    to the nearest graded edge.
+  // Both terms are continuous (a min of cones, a distance), so f is: no visibility test, no nearest-k cut, nothing that can
+  // jump. On the edge D = 0 and f = L ≤ z(q): the ground meets the pavement exactly where the edges agree within the
+  // grading slope, and never sits above it. Away from the pavement f falls at ≥ s everywhere it is smooth (∇f·∇D ≤
+  // K − (K + s) = −s), so it has no local maximum in open ground and cannot form a hump. Near a single edge it is exactly
+  // z − s·d (the round-6 fall); toward a LOWER element the min-of-cones term pulls the ground down to that curb at the
+  // grading slope. (The literal "min of z − s·d over all edges" is NOT this: the far side of a lot would win and leave
+  // the ground below the pavement at its own edge.) L is exact: the EXACT nearest point on every element, plus a closed-form
+  // minimum over every short straight piece of every graded outline.
   const sOpen = (Number.isFinite(G.openGroundSlopePct) && G.openGroundSlopePct >= 0 ? G.openGroundSlopePct : OPEN_GROUND_SLOPE_PCT) / 100;
-  const segCrossesRing = (p, q, ring) => {
-    const n = ring.length;
-    const dx = q.x - p.x, dy = q.y - p.y;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const c = ring[j], d = ring[i];
-      const ex = d.x - c.x, ey = d.y - c.y;
-      const den = dx * ey - dy * ex;
-      if (Math.abs(den) < 1e-12) continue;
-      const t = ((c.x - p.x) * ey - (c.y - p.y) * ex) / den;
-      const u = ((c.x - p.x) * dy - (c.y - p.y) * dx) / den;
-      if (t > 1e-6 && t < 1 - 1e-6 && u >= 0 && u <= 1) return true;
+  const Kb = 1 / apronRatio;
+  // the graded edges as short straight PIECES with their elevations at both ends (a seam bends a plane, so a piece is short
+  // enough that z is linear along it); the cone min over a piece is closed-form (below), exact for a linear z
+  const pAx = [], pAy = [], pUx = [], pUy = [], pLen = [], pZa = [], pM = [];
+  for (const g of graded) {
+    const r = g.el.ring;
+    for (let k = 0; k < r.length; k++) {
+      const a0 = r[k], b0 = r[(k + 1) % r.length];
+      const len = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      if (!(len > 1e-6)) continue;
+      const n = Math.max(1, Math.ceil(len / OPEN_GROUND_PIECE_FT));
+      for (let t = 0; t < n; t++) {
+        const pa = { x: a0.x + (b0.x - a0.x) * t / n, y: a0.y + (b0.y - a0.y) * t / n }, pb = { x: a0.x + (b0.x - a0.x) * (t + 1) / n, y: a0.y + (b0.y - a0.y) * (t + 1) / n };
+        const za = zOf(g, pa), zb = zOf(g, pb), L = len / n;
+        if (!Number.isFinite(za) || !Number.isFinite(zb)) continue;
+        pAx.push(pa.x); pAy.push(pa.y); pUx.push((pb.x - pa.x) / L); pUy.push((pb.y - pa.y) / L); pLen.push(L); pZa.push(za); pM.push((zb - za) / L);
+      }
     }
-    return false;
-  };
-  // can the point see element `own`'s nearest point `q` without crossing another element? (bbox-culled)
-  const seesEdge = (p, q, own) => {
-    const sx0 = Math.min(p.x, q.x), sx1 = Math.max(p.x, q.x), sy0 = Math.min(p.y, q.y), sy1 = Math.max(p.y, q.y);
-    for (const g of graded) {
-      if (g === own) continue;
-      if (sx1 < g.bbox[0] || sx0 > g.bbox[2] || sy1 < g.bbox[1] || sy0 > g.bbox[3]) continue;
-      if (segCrossesRing(p, q, g.el.ring)) return false;
-    }
-    return true;
+  }
+  const NP = pAx.length;
+  const sqK = Kb * Kb;
+  // min over s ∈ [0, len] of  z_a + m·s + K·√((s − s0)² + h²)  — convex; the stationary point is s0 − m·h / √(K² − m²)
+  const pieceMin = (q, px, py) => {
+    const rx = px - pAx[q], ry = py - pAy[q];
+    const s0 = rx * pUx[q] + ry * pUy[q], h = Math.abs(rx * pUy[q] - ry * pUx[q]);
+    const m = pM[q], len = pLen[q];
+    let sv;
+    if (m * m >= sqK) sv = m > 0 ? 0 : len;
+    else sv = Math.max(0, Math.min(len, s0 - (m * h) / Math.sqrt(sqK - m * m)));
+    const ds = sv - s0;
+    return pZa[q] + m * sv + Kb * Math.sqrt(ds * ds + h * h);
   };
   const openGroundZ = (pt) => {
-    const near = [];
-    for (const g of graded) { const q = nearestOnRing(pt, g.el.ring); if (!q) continue; near.push({ g, q, d: Math.hypot(pt.x - q.x, pt.y - q.y) }); }
-    if (!near.length) return null;
-    near.sort((a, b) => a.d - b.d);
-    const dNear = near[0].d;
-    let best = Infinity, n = 0;
-    for (const c of near) {
-      if (n >= OPEN_GROUND_K) break;
-      if (n > 0 && !seesEdge(pt, c.q, c.g)) continue;      // the nearest edge is always touched; a farther one must be in sight
-      n++;
-      const offer = zOf(c.g, c.q) - sOpen * c.d + (c.d - dNear) / (2 * apronRatio);
-      if (offer < best) best = offer;
+    let D = Infinity, L = Infinity;
+    for (const g of graded) {
+      const q = nearestOnRing(pt, g.el.ring);
+      if (!q) continue;
+      const d = Math.hypot(pt.x - q.x, pt.y - q.y);
+      if (d < D) D = d;
+      const v = zOf(g, q) + Kb * d;
+      if (v < L) L = v;
     }
-    return best;
+    if (!Number.isFinite(D)) return null;
+    for (let q = 0; q < NP; q++) { const v = pieceMin(q, pt.x, pt.y); if (v < L) L = v; }
+    return L - (Kb + sOpen) * D;
   };
-  const insideZ = (pt) => { const g = elementAt(pt); return g ? zOf(g, pt) : openGroundZ(pt); };
   const srcRegions = limit.regions;             // ROUND 6: in both modes the graded area IS the limit (no traced plateau)
   const plateaus = [];                          // retired with the plateau (kept so older readers see an empty list)
   if (!srcRegions.length) return null;
@@ -734,7 +742,10 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       xs.push(smp.x); ys.push(smp.y); zs.push(gz);
       if (gz < zMin) zMin = gz; if (gz > zMax) zMax = gz;
     }
-    if (xs.length) bs = { x: Float64Array.from(xs), y: Float64Array.from(ys), z: Float64Array.from(zs), zMin, zMax };
+    if (xs.length) {
+      bs = { x: Float64Array.from(xs), y: Float64Array.from(ys), z: Float64Array.from(zs), zMin, zMax, B: new Map() };
+      for (let q = 0; q < xs.length; q++) { const key = `${Math.floor(xs[q] / BAND_BUCKET_FT)},${Math.floor(ys[q] / BAND_BUCKET_FT)}`; let l = bs.B.get(key); if (!l) bs.B.set(key, (l = [])); l.push(q); }
+    }
   }
   const bandZ = (pt, ze) => {
     if (!bs) return ze;
@@ -744,16 +755,180 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     // a sample further than ratio × the largest possible |ze − z(b)| constrains nothing
     const R = apronRatio * Math.max(Math.abs(ze - bs.zMin), Math.abs(ze - bs.zMax)) + 1, R2 = R * R;
     const bx = bs.x, by = bs.y, bz = bs.z;
-    for (let q = 0; q < bx.length; q++) {
+    const one = (q) => {
       const ddx = pt.x - bx[q], ddy = pt.y - by[q], d2 = ddx * ddx + ddy * ddy;
-      if (d2 > R2) continue;
+      if (d2 > R2) return;
       const d = Math.sqrt(d2) / apronRatio;
       const lo = bz[q] - d, hi = bz[q] + d;
       if (lo > L) L = lo;
       if (hi < U) U = hi;
-    }
+    };
+    const i0 = Math.floor((pt.x - R) / BAND_BUCKET_FT), i1 = Math.floor((pt.x + R) / BAND_BUCKET_FT);
+    const j0 = Math.floor((pt.y - R) / BAND_BUCKET_FT), j1 = Math.floor((pt.y + R) / BAND_BUCKET_FT);
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) < bs.B.size) { for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const l = bs.B.get(`${i},${j}`); if (l) for (const q of l) one(q); } }
+    else for (let q = 0; q < bx.length; q++) one(q);
     return Math.min(Math.max(ze, L), U);
   };
+  // ROUND 8 (NEW-1) — THE OPEN GROUND DRAINS TO THE LIMIT, AND IT IS ONE LATTICE EVERY READER SHARES. The continuous surface
+  // above falls away from every pavement edge, but where it meets a slope band thrown UP from a limit in cut (boundary mode), or
+  // in a pocket farthest from every edge, it bottoms out in a closed low spot — water with nowhere to go, the owner's closed
+  // loops in the NW corner (measured on the real Chehaw ground: a bowl up to ~10 ft deep west of the trailer row, where the
+  // limit is uphill). A civil carries that water along a swale to an outlet, so the open ground is PIT-FILLED (priority flood,
+  // the standard hydrology depression fill) on a fine DRAIN LATTICE (~the contour lattice's density): seeded at every open
+  // node that touches something that is not open ground — the limit's edge, a pond, or a graded element (a bowl cut below
+  // every limit outlet drains back to the pavement edge, the way a cut section drains to the curb) — each node is raised to
+  // at least its downstream neighbour + `OPEN_GROUND_MIN_FALL_PCT` of the step. A node that already drains is untouched.
+  // The open-ground surface at ANY point is the bilinear of the flooded lattice, a corner that is not open ground standing in
+  // with the bare analytic surface at the point itself — continuous everywhere, exact against the pavement edge, and with no
+  // interior extremum (the flood leaves every node a lower neighbour; a bilinear patch has none inside). The earthwork cells,
+  // the readout, the contour lattice and the slope reach all read it, so they are one surface.
+  const sRegions = srcRegions;
+  const [dbx0, dby0, dbx1, dby1] = bboxOfRings(sRegions.map((r) => r.outer));
+  const dW = dbx1 - dbx0, dH = dby1 - dby0;
+  const dh = Math.max(DRAIN_MIN_CELL_FT, Math.sqrt(Math.max(1, dW * dH) / DRAIN_MAX_NODES));
+  const dnx = Math.max(2, Math.ceil(dW / dh) + 1), dny = Math.max(2, Math.ceil(dH / dh) + 1);
+  const DN = dnx * dny;
+  const dK = new Int16Array(DN).fill(-1);       // region index of an open-ground node inside the limit, else −1
+  const dZo = new Float64Array(DN), dZb = new Float64Array(DN), dZ = new Float64Array(DN);
+  const bareAt = (pt) => { const zo = openGroundZ(pt); if (zo == null) return null; return { zo, zb: boundary ? bandZ(pt, zo) : zo }; };
+  for (let i = 0; i < dnx; i++) {
+    if (i % 8 === 0) yield;
+    for (let j = 0; j < dny; j++) {
+      const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
+      if (inAnyRing(pt, pondRings) || elementAt(pt)) continue;
+      const k = regionIndexOf(pt, sRegions);
+      if (k < 0) continue;
+      const b0 = bareAt(pt);
+      if (!b0) continue;
+      const c = j * dnx + i;
+      dK[c] = k; dZo[c] = b0.zo; dZb[c] = b0.zb;
+    }
+  }
+  const pitFill = { nodes: 0, maxFt: 0, maxAt: null, unreached: 0, cellFt: dh };
+  const distToGradedNode = (pt) => { let D = Infinity; for (const g of graded) { const q = nearestOnRing(pt, g.el.ring); if (q) D = Math.min(D, Math.hypot(pt.x - q.x, pt.y - q.y)); } return D; };
+  {
+    // the filled swale keeps the 0.5% minimum fall (measured: a steeper fill, half the open-ground slope, lifted a few cells of
+    // the Chehaw bowl above the pad's finish — the fill must stay the least that drains)
+    const fall = OPEN_GROUND_MIN_FALL_PCT / 100;
+    const done = new Uint8Array(DN);
+    const hz = [], hc = [];   // a binary min-heap on z
+    const push = (z, c) => { hz.push(z); hc.push(c); let n = hz.length - 1; while (n > 0) { const p = (n - 1) >> 1; if (hz[p] <= hz[n]) break; [hz[p], hz[n]] = [hz[n], hz[p]]; [hc[p], hc[n]] = [hc[n], hc[p]]; n = p; } };
+    const pop = () => { const z = hz[0], c = hc[0]; const lz = hz.pop(), lc = hc.pop(); if (hz.length) { hz[0] = lz; hc[0] = lc; let n = 0; for (;;) { const l = 2 * n + 1, r = l + 1; let m = n; if (l < hz.length && hz[l] < hz[m]) m = l; if (r < hz.length && hz[r] < hz[m]) m = r; if (m === n) break; [hz[m], hz[n]] = [hz[n], hz[m]]; [hc[m], hc[n]] = [hc[n], hc[m]]; n = m; } } return [z, c]; };
+    const dg = dh * Math.SQRT2;
+    const N8 = [[-1, 0, dh], [1, 0, dh], [0, -1, dh], [0, 1, dh], [-1, -1, dg], [1, -1, dg], [-1, 1, dg], [1, 1, dg]];
+    // An outlet's height: water leaves across the LIMIT's outer line at the ground ON that line (boundary mode — the band may
+    // have the node itself below it, and a thin bank between node and line would seal the dish), into a pond / stream buffer
+    // (the limit's holes) or onto a pavement edge at the node's own level.
+    const outerRings = sRegions.map((r) => r.outer), holeRings = sRegions.flatMap((r) => r.holes);
+    const nearest = (pt, rings) => { let best = Infinity, bq = null; for (const r of rings) { const q = nearestOnRing(pt, r); if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < best) { best = d; bq = q; } } } return { d: best, q: bq }; };
+    for (let i = 0; i < dnx; i++) for (let j = 0; j < dny; j++) {
+      const c = j * dnx + i;
+      if (dK[c] < 0) continue;
+      dZ[c] = dZb[c];
+      let edge = i === 0 || j === 0 || i === dnx - 1 || j === dny - 1;
+      if (!edge) for (let q = 0; q < 4; q++) { if (dK[(j + N8[q][1]) * dnx + (i + N8[q][0])] < 0) { edge = true; break; } }
+      if (!edge) continue;
+      if (boundary && typeof existAt === "function") {
+        const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
+        const o = nearest(pt, outerRings);
+        if (o.q && o.d < 1.5 * dh && !(nearest(pt, holeRings).d < o.d) && !(distToGradedNode(pt) < o.d)) {
+          const g = existAt(o.q);
+          if (g != null && Number.isFinite(g) && g > dZ[c]) {
+            dZ[c] = g; pitFill.nodes++;
+            if (g - dZb[c] > pitFill.maxFt) { pitFill.maxFt = g - dZb[c]; pitFill.maxAt = pt; }
+          }
+        }
+      }
+      done[c] = 1; push(dZ[c], c);
+    }
+    let popped = 0;
+    while (hz.length) {
+      const [z, c] = pop();
+      if (++popped % 8192 === 0) yield;
+      const i = c % dnx, j = (c - i) / dnx;
+      for (const [ox, oy, st] of N8) {
+        const ii = i + ox, jj = j + oy;
+        if (ii < 0 || jj < 0 || ii >= dnx || jj >= dny) continue;
+        const n = jj * dnx + ii;
+        if (done[n] || dK[n] < 0) continue;
+        done[n] = 1;
+        const zf = Math.max(dZb[n], z + fall * st);
+        if (zf > dZb[n] + 1e-9) {
+          dZ[n] = zf; pitFill.nodes++;
+          const r = zf - dZb[n];
+          if (r > pitFill.maxFt) { pitFill.maxFt = r; pitFill.maxAt = { x: dbx0 + ii * dh, y: dby0 + jj * dh }; }
+        }
+        push(dZ[n], n);
+      }
+    }
+    for (let c = 0; c < DN; c++) if (dK[c] >= 0 && !done[c]) pitFill.unreached++;
+  }
+  yield;
+  // the open-ground surface at a point (inside the limit, off every element): { ft, zb, zo, depth } — `depth` the band's
+  // clamp (boundary mode), interpolated like the surface. null where no graded edge exists.
+  // Within two lattice steps of a graded element the bare surface is read EXACTLY (plus the interpolated pit-fill raise) and
+  // blended into the lattice reading over the second step: the cone family turns fastest there (a dock wall's corner bank, a
+  // pad-side strip narrower than a node spacing), and no lattice may smear a step across a pavement edge.
+  const distToGraded = (pt) => {
+    let D = Infinity;
+    for (const g of graded) {
+      if (pt.x < g.bbox[0] - D || pt.x > g.bbox[2] + D || pt.y < g.bbox[1] - D || pt.y > g.bbox[3] + D) continue;
+      const q = nearestOnRing(pt, g.el.ring);
+      if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < D) D = d; }
+    }
+    return D;
+  };
+  // Where the flood raised nothing anywhere (no bowl — layout mode on most plans), the open ground IS the bare surface, read
+  // exactly; once any bowl was filled, every reader goes through the filled lattice so a toe trench narrower than a node is
+  // filled with it.
+  const openSurface = (pt) => {
+    if (pitFill.nodes) return filledSurface(pt);
+    const b0 = bareAt(pt);
+    return b0 ? { ft: b0.zb, zb: b0.zb, zo: b0.zo, depth: Math.abs(b0.zb - b0.zo) } : null;
+  };
+  const filledSurface = (pt) => {
+    const lat = latticeSurface(pt);
+    // (not near the LIMIT: there the lattice IS the drainage answer — an exact reading of the band between two nodes can raise
+    // a thin ridge between a dish and its outlet on the limit, measured on the default harness layout, and it did not tighten
+    // the tie to existing ground either)
+    const D = distToGraded(pt);
+    if (!(D < 2 * dh)) return lat;
+    const b0 = bareAt(pt);
+    if (!b0) return lat;
+    const near = { ft: b0.zb + raiseAt(pt), zb: b0.zb, zo: b0.zo };
+    near.depth = Math.abs(near.zb - near.zo);
+    if (!lat || D <= dh) return near;
+    let t = (D - dh) / dh; t = t * t * (3 - 2 * t);
+    const mix = (a, b) => a * (1 - t) + b * t;
+    return { ft: mix(near.ft, lat.ft), zb: mix(near.zb, lat.zb), zo: mix(near.zo, lat.zo), depth: mix(near.depth, lat.depth) };
+  };
+  const raiseAt = (pt) => {
+    if (!pitFill.nodes) return 0;
+    const fx = (pt.x - dbx0) / dh, fy = (pt.y - dby0) / dh;
+    const i0 = Math.max(0, Math.min(dnx - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(dny - 2, Math.floor(fy)));
+    const tx = Math.max(0, Math.min(1, fx - i0)), ty = Math.max(0, Math.min(1, fy - j0));
+    const R = (c) => (dK[c] >= 0 ? dZ[c] - dZb[c] : 0);
+    return (R(j0 * dnx + i0) * (1 - tx) + R(j0 * dnx + i0 + 1) * tx) * (1 - ty) + (R((j0 + 1) * dnx + i0) * (1 - tx) + R((j0 + 1) * dnx + i0 + 1) * tx) * ty;
+  };
+  const latticeSurface = (pt) => {
+    const fx = (pt.x - dbx0) / dh, fy = (pt.y - dby0) / dh;
+    const i0 = Math.max(0, Math.min(dnx - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(dny - 2, Math.floor(fy)));
+    const tx = Math.max(0, Math.min(1, fx - i0)), ty = Math.max(0, Math.min(1, fy - j0));
+    let ft = 0, zbS = 0, zoS = 0, wOff = 0;
+    const W = [(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty], C = [j0 * dnx + i0, j0 * dnx + i0 + 1, (j0 + 1) * dnx + i0, (j0 + 1) * dnx + i0 + 1];
+    for (let q = 0; q < 4; q++) {
+      const w = W[q]; if (!(w > 0)) continue;
+      const c = C[q];
+      if (dK[c] >= 0) { ft += w * dZ[c]; zbS += w * dZb[c]; zoS += w * dZo[c]; } else wOff += w;
+    }
+    if (wOff > 0) {
+      const b0 = bareAt(pt);
+      if (!b0) return null;
+      ft += wOff * b0.zb; zbS += wOff * b0.zb; zoS += wOff * b0.zo;
+    }
+    return { ft, zb: zbS, zo: zoS, depth: Math.abs(zbS - zoS) };
+  };
+  const insideZ = (pt) => { const g = elementAt(pt); if (g) return zOf(g, pt); const o = openSurface(pt); return o ? o.ft : null; };
   // the edge elevation at a point ON the limit: read a hair inside
   const edgeZ = (q, from) => {
     const dx = q.x - from.x, dy = q.y - from.y, L = Math.hypot(dx, dy) || 1;
@@ -847,15 +1022,16 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       if (boundary && regionIndexOf(pt, limit.regions) < 0) continue;   // B2376240: outside the limit is never graded
       const k = regionIndexOf(pt, srcRegions);
       if (k >= 0) {
-        // open ground inside the limit: the pavement's fall (ROUND 6), bent to the setback's inward slope in boundary mode
-        const zo = openGroundZ(pt);
-        if (zo == null) continue;
-        const prop = boundary ? bandZ(pt, zo) : zo;
-        const band = boundary && Math.abs(prop - zo) > 1e-6;
+        // open ground inside the limit: the continuous drainage surface (ROUND 8), bent to the limit's inward slope in
+        // boundary mode, pit-filled so it drains to the limit — read off the one drain lattice
+        const os = openSurface(pt);
+        if (!os) continue;
+        const band = boundary && os.depth > BAND_DEPTH_EPS_FT;
+        const prop = os.ft;
         const dz = gOk ? prop - g0 : null;
         const id = band ? `limit:${k}` : `infill:${k}`;
         const cell = band
-          ? { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: k, clampFt: Math.abs(prop - zo) }
+          ? { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, gFt: g0, elId: id, cls: "transition", wedge: true, regionId: k, clampFt: os.depth }
           : { x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: prop, elId: id, cls: "infill", regionId: k };
         if (band) { wedgeSf += A; regionStats[k].slopeSf += A; } else { gradedSf += A; regionStats[k].areaSf += A; }
         noteOut(pt, A, dz, id, cell);
@@ -920,13 +1096,12 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     if (g) return { status: "value", ft: zOf(g, pt), elId: g.el.id, cls: g.plane.classId, wedge: false };
     const k = regionIndexOf(pt, srcRegions);
     if (k >= 0) {
-      const zo = openGroundZ(pt);
-      if (zo == null) return { status: "none", reason: "outside" };
-      if (!boundary) return { status: "value", ft: zo, elId: `infill:${k}`, cls: "infill", wedge: false };
-      const zb = bandZ(pt, zo);
-      return Math.abs(zb - zo) > 1e-6
-        ? { status: "value", ft: zb, elId: `limit:${k}`, cls: "transition", wedge: true }
-        : { status: "value", ft: zo, elId: `infill:${k}`, cls: "infill", wedge: false };
+      const os = openSurface(pt);
+      if (!os) return { status: "none", reason: "outside" };
+      const ft = os.ft, zb = os.zb;
+      return boundary && os.depth > BAND_DEPTH_EPS_FT
+        ? { status: "value", ft, elId: `limit:${k}`, cls: "transition", wedge: true }
+        : { status: "value", ft, elId: `infill:${k}`, cls: "infill", wedge: false };
     }
     if (boundary || !apronsOn) return { status: "none", reason: "outside" };
     const nr = nearestOnRegions(pt, srcRegions);
@@ -942,7 +1117,8 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     grading: { slopeRatio: apronRatio, shoulderFt: spec.shoulderFt ?? G.shoulderFt, ramp: false },
     limit: {
       mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / 43560,
-      grewIds: limit.grewIds, plateaus, reachFt: reach, shoulderFt: limit.shoulderFt, cornerRadiusFt: limit.cornerRadiusFt,
+      grewIds: limit.grewIds, plateaus, reachFt: reach, basis: spec.basis || null, pitFill,
+      drain: { nx: dnx, ny: dny, cellFt: dh, x0: dbx0, y0: dby0, filled: dZ, bare: dZb, region: dK }, shoulderFt: limit.shoulderFt, cornerRadiusFt: limit.cornerRadiusFt,
       regions_stats: regionStats.map((r) => ({ cutCy: r.cutCf / CF_PER_CY, fillCy: r.fillCf / CF_PER_CY, areaSf: r.areaSf, slopeSf: r.slopeSf })),
     },
     seams: seamSteps, gradedIds, probe, daylight,

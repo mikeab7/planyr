@@ -267,7 +267,9 @@ describe("ROUND 6 — the open ground inside the limit follows the pavement, it 
     { id: "c", type: "paving", ring: rect(0, 100, 200, 130), dockStack: { x: 100, y: 50 }, hostId: "b" },
   ];
   const SB2 = rect(-100, -100, 400, 430);                 // the court's far edge is y = 230; the setback 100 ft past it
-  const flatLow = () => FFE - 7;                           // flat ground near the court's far edge, so the setback band never bites
+  // flat ground well below the open ground's fall, so the setback band never bites. ROUND 8: at FFE − 7 the 4% open ground
+  // dropped BELOW the ground before the limit — a closed bowl the drainage pass now fills to drain — so the premise needs FFE − 12.
+  const flatLow = () => FFE - 12;
   const s = buildProposedSurface({ els: court, ffeFt: FFE, dockDropFt: 4, existAt: flatLow, parcelRings: [SB2],
     grading: { ...G({ setbackRings: [SB2] }, { mode: "boundary" }), openGroundSlopePct: 2 }, opts: { maxCells: 12000, minCellFt: 2, existKey: "r6" } });
   const E = sampleProposedAt(s.grid, { x: 100, y: 229.5 }, flatLow).ft;        // the court's far-edge elevation
