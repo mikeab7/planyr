@@ -16,7 +16,7 @@ beforeAll(async () => {
 
 // county key → a point inside it that the row's layer answered at (recorded from the live measurement, 2026-10-29)
 const WIRED = {
-  ga_early: [31.3, -84.866], ga_catoosa: [34.876, -85.118], ga_berrien: [31.28564, -83.37314], ga_carroll: [33.48093, -85.261], ga_macon: [32.37143, -84.19014],
+  ga_early: [31.3, -84.866], ga_catoosa: [34.876, -85.118], ga_berrien: [31.28564, -83.37314], ga_carroll: [33.48093, -85.261], ga_macon: [32.37143, -84.19014], ga_long: [31.56, -81.62],
   la_iberia: [29.94664, -91.67471], la_vermilion: [29.979, -92.28614], la_bienville: [32.33943, -93.241],
   wa_columbia: [46.35286, -118.14814], wa_garfield: [46.49893, -117.7725], wa_okanogan: [48.39286, -120.00321], wa_pacific: [46.31943, -123.996],
   or_wallowa: [45.5, -117.2], or_sherman: [45.4, -120.7],
@@ -60,7 +60,7 @@ describe("B2504800 — Planning District III: 32 South Dakota counties on the NE
 });
 
 describe("B2504800 — copies are labelled (owner constraint #40)", () => {
-  it.each(["ga_early", "ga_berrien", "ga_carroll", "ga_macon", "la_vermilion", "la_bienville", "or_wallowa", "or_sherman", "sd_lake", "sd_meade"])("%s has its copy line", (k) => {
+  it.each(["ga_early", "ga_berrien", "ga_carroll", "ga_macon", "ga_long", "la_vermilion", "la_bienville", "or_wallowa", "or_sherman", "sd_lake", "sd_meade"])("%s has its copy line", (k) => {
     expect(PARCEL_COPIES[k], k).toBeTruthy();
   });
   it("an older copy says how old (Macon 2018, Wallowa 2018, Bienville's 2021 edit)", () => {
@@ -77,7 +77,7 @@ describe("B2504800 — the counties that stay gaps carry a sharper reason (never
     expect(PARCEL_GAPS[k][0], k).toBe(reason);
     expect(PARCEL_GAPS[k][1], `${k} carries its evidence`).toBeTruthy();
   });
-  it.each(["ga_habersham", "ga_long", "ga_rabun", "la_sthelena", "sd_walworth", "sd_oglalalakota", "sd_hyde"])("%s stays `none` and still offers the request link", (k) => {
+  it.each(["ga_habersham", "ga_rabun", "la_sthelena", "sd_walworth", "sd_oglalalakota", "sd_hyde"])("%s stays `none` and still offers the request link", (k) => {
     expect(PARCEL_GAPS[k][0]).toBe("none");
   });
   it("a gap county's notice still carries the email-Michael request", () => {
@@ -89,9 +89,14 @@ describe("B2504800 — the counties that stay gaps carry a sharper reason (never
   });
 });
 
-describe("B2504800 — the two hosts allowed only to be measured", () => {
-  it("portal.segrass.org (Long GA) and arcgis4.roktech.net (Habersham GA) are on the relay allow-list", () => {
+describe("B2504800 follow-up — Long County GA, found on the host that was allow-listed only to be measured", () => {
+  it("portal.segrass.org is on the relay allow-list (Long's layer rides it) and the dead Habersham host is gone", () => {
     expect(ALLOWED_HOSTS.has("portal.segrass.org")).toBe(true);
-    expect(ALLOWED_HOSTS.has("arcgis4.roktech.net")).toBe(true);
+    expect(ALLOWED_HOSTS.has("arcgis4.roktech.net")).toBe(false);
+  });
+  it("Long reads the Coastal Regional Commission's Property_Data layer 0 (the old Long_Parcels service answers 404)", () => {
+    expect(COUNTIES.ga_long.layerUrl).toBe("/gis-proxy/portal.segrass.org/crcarcgis/rest/services/Long/Property_Data/MapServer/0");
+    expect(COUNTIES.ga_long.idField).toBe("PARCEL_NO");
+    expect(PARCEL_COPIES.ga_long).toEqual(["Coastal Regional Commission of Georgia", "2026-10"]);
   });
 });

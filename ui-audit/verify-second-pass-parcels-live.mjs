@@ -15,7 +15,7 @@ const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log
 
 const WIRED = [
   ["Early", "GA", "Blakely", 31.3774, -84.9344], ["Carroll", "GA", "Carrollton", 33.5801, -85.0766], ["Berrien", "GA", "Nashville", 31.2063, -83.2504],
-  ["Macon", "GA", "Montezuma", 32.3046, -84.0241], ["Catoosa", "GA", "unincorporated (Graysville)", 34.9117, -85.2247],
+  ["Macon", "GA", "Montezuma", 32.3046, -84.0241], ["Long", "GA", "Ludowici", 31.7077, -81.7435], ["Catoosa", "GA", "unincorporated (Graysville)", 34.9117, -85.2247],
   ["Iberia", "LA", "New Iberia", 30.0035, -91.8187], ["Vermilion", "LA", "Abbeville", 29.9744, -92.1343], ["Bienville", "LA", "Arcadia", 32.5496, -92.9226],
   ["Columbia", "WA", "Dayton", 46.3226, -117.9811], ["Garfield", "WA", "Pomeroy", 46.4749, -117.5983], ["Okanogan", "WA", "Omak", 48.4113, -119.5273], ["Pacific", "WA", "Raymond", 46.684, -123.7388],
   ["Wallowa", "OR", "Enterprise", 45.4262, -117.2788], ["Sherman", "OR", "Moro", 45.4854, -120.7312],

@@ -140,7 +140,6 @@ export const PARCEL_GAPS = Object.freeze({
   ga_jones: ["unreachable", "Middle Georgia RC server mgrcmaps.org answers Cloudflare 522 on every path (2026-10-29); county viewer is qPublic/Beacon"],
   ga_lamar: ["locked", "Schneider map public, parcel feed private (2026-10-29)"],
   ga_lincoln: ["locked", "Schneider map public, parcel feed private (2026-10-29)"],
-  ga_long: ["none"],
   ga_madison: ["locked", "Schneider map public, parcel feed private (2026-10-29)"],
   ga_marion: ["locked", "Schneider map public, parcel feed private (2026-10-29)"],
   ga_mcduffie: ["locked", "Schneider map public, parcel feed private (2026-10-29)"],
