@@ -124,7 +124,9 @@ try {
         if (!/^planarfit:sites:/.test(k)) continue;
         try { const m = JSON.parse(localStorage.getItem(k) || "{}"); let ch = false; for (const i of ids) if (m && m[i]) { delete m[i]; ch = true; } if (ch) localStorage.setItem(k, JSON.stringify(m)); } catch (_) {}
       }
-      for (const i of ids) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", i); await window.pfSupabase.from("sites").delete().eq("id", i); }
+      // The group guard refuses a hard delete while a sibling plan is live — so soft-delete EVERY plan first, then hard-delete.
+      for (const i of ids) await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", i);
+      for (const i of ids) await window.pfSupabase.from("sites").delete().eq("id", i);
       const q = await window.pfSupabase.from("sites").select("id").in("id", ids);
       return { cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }
