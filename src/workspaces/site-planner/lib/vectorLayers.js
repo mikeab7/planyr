@@ -26,9 +26,9 @@ import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county" || id === "fl_county";
 export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city"
-  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
+  || id === "fl_city" || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
@@ -295,6 +295,60 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "Georgia county lines (DCA).",
+  },
+  /* NEW-1 (Florida, B2452976) — THE FLORIDA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.js rows (the Georgia lesson). Endpoints come from the GIS_SOURCES rows
+   * (floridaLayers.js reads the same ones). Probed live 2026-10-29: 67 counties in ONE statewide pull; the city limits (411 polygons, UF GeoPlan / FDOR 2021 tax rolls) tile in bbox cells. */
+  fl_county: {
+    id: "fl_county",
+    stateAbbr: "FL",
+    label: "County boundaries (Florida)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "Florida Division of Emergency Management",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyFl.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Florida county lines (FDEM).",
+  },
+  fl_city: {
+    id: "fl_city",
+    label: "City limits (Florida)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. Compiled from the 2021 tax rolls — a later annexation is not in it. NOT proof of utility service. Screening only.",
+    sourceName: "UF GeoPlan / Florida Department of Revenue",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityFl.serviceUrl + "/query",
+      outFields: ["NAME", "COUNTY"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Florida city limits (UF GeoPlan from the 2021 tax rolls).",
   },
   tn_county: {
     id: "tn_county",

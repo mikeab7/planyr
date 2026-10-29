@@ -136,6 +136,17 @@ export const LAYER_TIER = {
   ms_dcrua_easements: "reference",
   ms_dcrua_service_area: "reference",
 
+  // Florida due-diligence layers (B2452976)
+  fl_wellfield_broward: "reference", // a use restriction to confirm with the county, not a land-taking line
+  fl_wellfield_miamidade: "reference",
+  fl_erp_sfwmd: "reference",         // permitted footprints around / on the site — look-up context
+  fl_conservation_lands: "reference",
+  fl_sis_highways: "reference",      // a state designation to confirm with FDOT
+  fl_evac_zones: "reference",        // an insurance / comp-plan flag, not the floodplain
+  fl_natural_lands_broward: "reference",
+  fl_wetlands_broward: "constraint", // a wetland takes land off the site and brings a county license
+  fl_drainage_districts_broward: "reference",
+
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
   ms_ob_planning_area: "context",   // B2507059 — a planning line
@@ -151,6 +162,9 @@ export const LAYER_TIER = {
   tn_county: "context",            // B2507065 (NEW-10)
   ms_county: "context",            // NEW-1 (Georgia)
   ga_city: "context",
+  fl_county: "context",            // NEW-1 (Florida)
+  fl_city: "context",
+  fl_wmd: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",
   nj_county: "context",            // NEW-1 (New Jersey + New York)

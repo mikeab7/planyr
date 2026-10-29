@@ -27,6 +27,8 @@
  * Plain JS (the stack is plain JS/JSX — the brief's `.ts` sketch maps to .js here).
  */
 
+import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
+
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
 export const NON_PRODUCTION_URL_PATTERNS = [
@@ -64,6 +66,7 @@ export const availabilityOf = (entry) => (entry && entry.availability) || "live"
 //   point fixture: [lng, lat] → a ~1 km envelope around it → expect ≥ expectMinCount
 // ---------------------------------------------------------------------------
 export const GIS_SOURCES = {
+  ...FLORIDA_SOURCES, // NEW-1 (Florida, B2452976): own file so sibling state sessions' edits to this one stay additive
   // ---- Site Analysis screening sources ----
   flood: {
     key: "flood",
@@ -2550,6 +2553,7 @@ export const FIXTURE_REACH_CLASSES = {
  * state scope implies, and the value is `[class, reason]` so the audit can require the reason.
  * A row absent from this table takes the class its state scope derives. */
 export const SOURCE_FIXTURE_REACH = {
+  ...FLORIDA_FIXTURE_REACH, // NEW-1 (Florida, B2452976)
   // NEW-1 (FL/GA pipelines) — no crude trunk line crosses Florida or Georgia and only one HGL line
   // (Dixie) crosses Georgia, so a "state" fixture set would have to assert a guaranteed zero. The
   // fixtures instead prove the SERVICE answers on the Gulf Coast lines it does carry; the FL/GA

@@ -53,6 +53,21 @@ if (want("desoto")) {
   if (!rec) throw new Error("DeSoto County MS not found in the county polygon asset");
   areas.desoto = { label: "DeSoto County, MS", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+/* NEW-1 (Florida, B2452976): the county- and district-scoped Florida rows.
+ *   broward / miamidade / palmbeach   the county, from the SAME bundled county polygons as `harris` (no network).
+ *   sfwmd                             the South Florida Water Management District, from its own published boundary (SFWMD's hosted
+ *                                     "Water Management District Boundaries", WMDNAME='SFWMD'); the ERP permit layer, canals and rights of way are
+ *                                     SFWMD's own and carry nothing outside it. */
+for (const [key, name, label] of [["broward", "Broward", "Broward County, FL"], ["miamidade", "Miami-Dade", "Miami-Dade County, FL"], ["palmbeach", "Palm Beach", "Palm Beach County, FL"]]) {
+  if (!want(key)) continue;
+  const rec = index.counties.find((c) => c.state === "FL" && c.name.replace(/ county$/i, "") === name);
+  if (!rec) throw new Error(`${label} not found in the county polygon asset`);
+  areas[key] = { label, source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
+if (want("sfwmd")) {
+  const wmd = await q("https://services1.arcgis.com/sDAPyc2rGRn7vf9B/arcgis/rest/services/BDWMD_Boundary_Area/FeatureServer/0/query", { where: "WMDNAME='SFWMD'", maxAllowableOffset: 0.004 });
+  areas.sfwmd = { label: "South Florida Water Management District", source: "SFWMD Water Management District Boundaries (services1.arcgis.com/sDAPyc2rGRn7vf9B), WMDNAME='SFWMD'", polys: polysOf(wmd) };
+}
 if (want("olivebranch")) {
   /* The city's PLANNING AREA is the ground AROUND the city (it excludes the city proper — measured: downtown Olive Branch is outside it), so it cannot stand for
    * "where the city's utility data lives". The region is instead the union of the published data extents of every Olive Branch utility layer, the planning area and

@@ -76,6 +76,9 @@ const OFF_US = [["Toronto", 43.6532, -79.3832], ["Monterrey MX", 25.6866, -100.3
 const EIA = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
 const groups = PANEL_GROUPS.filter((g) => g.key !== "base").map((g) => g.key);
 const rowsFor = (scope) => groups.flatMap((g) => availableEntries(groupEntriesFor(ALL_LAYERS, g), scope).map(([id]) => id)).sort();
+/* The finder rounds its view centre to 0.05° (~3 mi); a ROW GATED BY A REGION BOUNDARY can legitimately differ between the exact plan origin and that rounded centre when the
+ * point sits within a few miles of the boundary (Orlando is on the edge of the SFWMD district — B2452976). The state-scoped rows must agree exactly; region rows are covered by layerLocationScope. */
+const stateRowsFor = (scope) => groups.flatMap((g) => availableEntries(groupEntriesFor(ALL_LAYERS, g).filter(([, c]) => !(c.regions && c.regions.length)), scope).map(([id]) => id)).sort();
 /* the planner's scope: the plan origin and the state resolved from it (SitePlanner.jsx) */
 const plannerScope = (lat, lng) => ({ state: siteState({ lat, lng }), loc: { lat, lng } });
 /* the finder's scope: the view centre's state, and the centre rounded to a 0.05° cell (MapFinder.jsx onMove) */
@@ -130,7 +133,7 @@ describe("(b) a row is offered only where its source serves — in every state, 
     });
     it(`${st}: the planner and the finder list the SAME rows`, () => {
       const [lat, lng] = INTERIOR[st];
-      expect(rowsFor(plannerScope(lat, lng))).toEqual(rowsFor(finderScope(lat, lng)));
+      expect(stateRowsFor(plannerScope(lat, lng))).toEqual(stateRowsFor(finderScope(lat, lng)));
     });
   }
   for (const [name, lat, lng, st] of BORDER) {
