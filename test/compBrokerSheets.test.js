@@ -16,7 +16,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { parsePaste, parsePasteBlock, matchHeaderCell, parseLatLonPair, parseSingleRecord, rowHasBlockingFlags } from "../src/shared/comps/lib/compParse.js";
+import { parsePaste, parsePasteBlock, matchHeaderCell, correctHeaderWord, parseLatLonPair, parseSingleRecord, rowHasBlockingFlags } from "../src/shared/comps/lib/compParse.js";
 import { draftToComp, validateComp, emptyDraft } from "../src/shared/comps/lib/comps.js";
 import { SHEET_COLUMNS, NOTES_COLUMN } from "../src/shared/comps/lib/compSheetColumns.js";
 import { parseKmlPlacemarks } from "../src/shared/comps/lib/kmlImport.js";
@@ -200,5 +200,48 @@ describe("NEW-1 — KML placemark names decode HTML entities", () => {
     const [a, b] = parseKmlPlacemarks(kml);
     expect(a.name).toBe("Dircks Moving & Logistics");
     expect(b.name).toBe("A & B");
+  });
+});
+
+// Owner correction 2026-10-27: the REAL sheet differs from the brief's header row — a leading empty
+// column on every row, padded headers (" Leased SF ", "Lease Expiration ", "Submarket ",
+// " TI Allowance $/SF ") and a misspelled "Lease Commenecement". Live on 05a9b8a every field filled
+// except Commence. nHoustonRealHeader.tsv is that exact shape (invented values).
+describe("NEW-1 follow-up — the real header shape (leading blank column, padding, a typo)", () => {
+  const rows = parsePasteBlock(fixture("nHoustonRealHeader.tsv"));
+  it("reads Commence from 'Lease Commenecement' on every row (red on 05a9b8a)", () => {
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.draft.leaseCommencementDate)).toEqual(["2026-08-01", "2026-05-01", "2026-04-01"]);
+  });
+  it("the leading blank column and the padded headers change nothing else", () => {
+    const d = rows[0].draft;
+    expect(d).toMatchObject({ compType: "lease", compDate: "2026-06-01", leaseSizeSf: "100043", leaseTi: "10", leaseRate: "0.665", leaseRatePeriod: "monthly", leaseTerm: "126 mo", clearHeightFt: "32", yearBuilt: "2026", title: "Example Logistics Park Bldg 2 - Acme Widgets LLC" });
+    expect(d.anchor).toMatchObject({ lat: 29.927004, lon: -95.442043 });
+    expect(d.notes).toContain("Expires Jan-37");
+    expect(d.notes).toContain("Submarket: North Fwy/Tomball Pkwy");
+    expect(rows.every((r) => Object.keys(r.cellFlags).length === 0)).toBe(true);
+  });
+});
+
+describe("NEW-1 follow-up — near-miss header spellings (fuzzy on the header WORDS, not one typo)", () => {
+  it.each([
+    ["Lease Commenecement", "commencementDate"], ["Lease Comencement", "commencementDate"], ["Commencment Date", "commencementDate"],
+    ["Lease Exectued", "compDate"], ["Lease Expiraton", "expiration"], ["Tennant", "partyAcquirer"], ["Landlrod", "partyProvider"],
+    ["Base Rent Incraeses %", "escalationPct"], ["TI Alowance $/SF", "ti"], ["Clear Hieght (ft)", "clearHeightFt"],
+    ["Longtitude", "lon"], ["Lattitude", "lat"], ["Proprety Name", "propertyName"], ["Adress", "address"],
+  ])("%s → %s", (h, key) => { expect(matchHeaderCell(h).key).toBe(key); });
+  it("never 'corrects' a real word, a short word, or a word with a digit", () => {
+    expect(correctHeaderWord("lease")).toBe("lease");
+    expect(correctHeaderWord("rent")).toBe("rent");
+    expect(correctHeaderWord("rsf")).toBe("rsf");
+    expect(correctHeaderWord("zip")).toBe("zip");
+    expect(correctHeaderWord("q2026")).toBe("q2026");
+    expect(matchHeaderCell("Lease Type").key).toBe("extra");
+    expect(matchHeaderCell("Leased SF").key).toBe("sizeValue");
+  });
+  it("leaves an unrelated word alone (no false matches)", () => {
+    expect(correctHeaderWord("broker")).toBe("broker");
+    expect(correctHeaderWord("zoning")).toBe("zoning");
+    expect(matchHeaderCell("Broker").key).toBe("extra");
   });
 });

@@ -6117,6 +6117,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // What each live layer is really drawn at (NEW-2: "set 60% on an off layer" is asserted on the map's own layer, not the saved number).
       opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])),
       identityEpoch: epoch,
+      /* B2472945 — what a live vector layer has PAINTED at a point (its own `identifyAt`, the same hit-test the canvas click uses over the
+       * same GeoJSON the map draws). The drawn ETJ layer's "is anything shaded here?" has no other observable: the DOM holds Leaflet
+       * paths, not ground truth. Read-only, E2E-gated, null for a layer that is off or has no identify. */
+      identify: (id, at) => { const g = overlayRefs.current && overlayRefs.current[id]; return g && g !== "pending" && typeof g.identifyAt === "function" ? g.identifyAt(at) : null; },
     });
     window.__plannerLayers = hook;
     return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
