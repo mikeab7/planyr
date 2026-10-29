@@ -39,6 +39,11 @@ const CASES = [
   ["Breckinridge County", "KY", 37.7798, -86.4605, /Breckinridge County has a parcel map, but it isn't open to the public/],
   ["Boyle County", "KY", 37.6456, -84.7694, /Boyle County's parcel map server isn't reachable from Planyr right now/],
   ["Fulton County", "KY", 36.5526, -89.1734, /Planyr hasn't found a public parcel map it can use for Fulton County/],
+  // B2486192 / B2486193: South Dakota's researched gaps + a Schneider county — RED ON MAIN: Aurora and Hughes read the generic "hasn't found" line.
+  ["Aurora County", "SD", 43.7164, -98.4872, /Aurora County's parcel map server isn't reachable from Planyr right now/],
+  ["Hughes County", "SD", 44.3683, -100.351, /Hughes County keeps its parcel map behind a paid subscription/],
+  ["Adams County", "IA", 41.0114, -94.7377, /Adams County has a parcel map, but it isn't open to the public/],
+  ["Harding County", "SD", 45.5886, -103.5463, /Planyr hasn't found a public parcel map it can use for Harding County/],
 ];
 
 test.describe("a county with no parcel data says why and offers the request link", () => {
