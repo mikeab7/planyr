@@ -1612,7 +1612,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
       onStatus && onStatus(k, "loading", `${cfg.label}: service hiccup — retrying (${tries}/${max})…`);
       clearTimeout(timer);
       retryPending = true;
-      timer = setTimeout(() => { retryPending = false; try { lyr.refresh(); } catch (_) {} }, delayMs);
+      timer = setTimeout(() => { retryPending = false; gaveUp = false; /* a re-issued request owns the status; esri-leaflet fires no "loading" for a refresh that overlaps one still in flight */ try { lyr.refresh(); } catch (_) {} }, delayMs);
     } else {
       gaveUp = true;
       onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);

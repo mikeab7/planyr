@@ -283,6 +283,19 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
       expect(r.out[r.out.length - 1]).not.toBe("loading");
     } finally { vi.useRealTimers(); }
   });
+  it("status: several cells failing in ONE cycle trip the cap, but the retry that follows owns the status even when no 'loading' fires (a slower cell is still in flight)", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      r.fire("loading");
+      for (let i = 0; i < 4; i++) r.fire("requesterror", { code: 503 });          // four cells 503 in one cycle: tries reaches the cap, the row reads failed
+      expect(r.out[r.out.length - 1]).toBe("failed");
+      vi.advanceTimersByTime(8000);                                                  // the pending retry fires refresh(); the overlapping request means NO "loading" event
+      expect(r.refreshes).toBeGreaterThan(0);
+      r.fire("load");                                                                // everything finally answers
+      expect(r.out[r.out.length - 1]).not.toBe("failed");
+    } finally { vi.useRealTimers(); }
+  });
   it("retries: a recovered blip + a healthy cycle start the count over (cycleErr is cleared by the next 'loading')", async () => {
     vi.useFakeTimers();
     try {
