@@ -54,6 +54,7 @@ export const IA_ROWS = [
   ["pottawattamie","Pottawattamie","/gis-proxy/gis.pottcounty-ia.gov/arcgis/rest/services/PublicDataEnterprise/PublicData_Parcels/FeatureServer/0","PIN","ADDRESS",1,41.3315,-95.6935,[41.151, -96.023, 41.521, -95.152]],
   ["scott","Scott","https://services.arcgis.com/ovln19YRWV44nBqV/arcgis/rest/services/Cadastral/FeatureServer/3","PIN","PropertyAddress",1,41.64,-90.562,[41.44, -90.912, 41.785, -90.316]],
   ["story","Story","https://services6.arcgis.com/AledtxqV5ouP1iUf/arcgis/rest/services/Parcels_Esri/FeatureServer/0","PARCELID","FullSitus",1,42.0315,-93.5355,[41.851, -93.716, 42.217, -93.222]],
+  ["tama","Tama","https://services8.arcgis.com/9f7uiwqlTp3vEvuz/arcgis/rest/services/Tama_County_Roads/FeatureServer/2","PIN","FullSitus",1,42.08,-92.5595,[41.85,-92.789,42.304,-92.292]],
   ["vanburen","Van Buren","https://services7.arcgis.com/LyehP2GGSSSIG2rN/arcgis/rest/services/Master/FeatureServer/17","PIN","ADDRESS",1,40.7535,-92.043,[40.583,-92.203,40.911,-91.706]],
   ["wapello","Wapello","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/WapelloCountyIA_WFS/MapServer/0","PIN","ADDRESS",1,41.0305,-92.5135,[40.891, -92.654, 41.172, -92.174]],
   ["warren","Warren","https://services.arcgis.com/lcU85Lh3UvDs5Naw/arcgis/rest/services/Parcels051622/FeatureServer/0","PARCELID","ADDRESS",1,41.3305,-93.63,[41.15, -93.81, 41.52, -93.319]],
@@ -97,7 +98,6 @@ export const IA_COPY_ROWS = [
   ["obrien","O'Brien","O' BRIEN",43.084,-95.709,[42.904,-95.879,43.268,-95.39]],
   ["paloalto","Palo Alto","PALO ALTO",43.073,-94.751,[42.903,-94.931,43.262,-94.445]],
   ["plymouth","Plymouth","PLYMOUTH",42.744,-96.3105,[42.554,-96.651,42.926,-95.858]],
-  ["tama","Tama","TAMA",42.08,-92.5595,[41.85,-92.789,42.304,-92.292]],
   ["washington","Washington","WASHINGTON",41.3305,-91.7765,[41.15,-91.957,41.521,-91.471]],
 ];
 const iaCopyScope = (scope) => "COUNTYNAME='" + scope.replace(/'/g, "''") + "'";

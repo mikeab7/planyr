@@ -1,10 +1,10 @@
 /* NEW-1 (Iowa second pass, B2499376, 2026-10-29) — the 21 Iowa counties that were "none" after the first pass now resolve to a source.
  *
  * WHAT THE SECOND PASS FOUND (docs/STATEWIDE-PARCELS.md "Iowa second pass"):
- *   · four COUNTY-published layers the first pass missed — Carroll (the county GIS account's ParcelPoly1, edited 2025-09), Monroe (Monroe_Features layer 43, edited 2026-07; found through a
+ *   · five other layers the first pass missed: four COUNTY-published — Carroll (the county GIS account's ParcelPoly1, edited 2025-09), Monroe (Monroe_Features layer 43, edited 2026-07; found through a
  *     CadastralAnnotation TILES service of the same account), Van Buren (the vbcogis account's 'Master' FeatureServer, layer 17, edited 2026-07) and Jackson (a 2019 layer the first pass refused on a
- *     2020 currency floor the owner's 2026-10-28 copy rule replaced);
- *   · for the other 17, the only public polygon source is the Iowa HSEMD statewide compilation (University of Iowa copy on ArcGIS Online), frozen at 2 November 2017 — wired as a labelled COPY.
+ *     2020 currency floor the owner's 2026-10-28 copy rule replaced) — plus Tama (a 2026 copy of the county's export inside a Drake University class project, found only by enumerating every Iowa service);
+ *   · for the other 16, the only public polygon source is the Iowa HSEMD statewide compilation (University of Iowa copy on ArcGIS Online), frozen at 2 November 2017 — wired as a labelled COPY.
  *
  * RED-PROOF: on main (a1ed51b) all 21 are PARCEL_GAPS `none` rows with no wired source, so every assertion below that names one fails; restoring `parcelGaps.js` from main turns the
  * "no gap row" and "resolves to a source" blocks red, and removing the `iaCopyRaw()` / `iaCopyMap()` spreads from counties.js turns the copy blocks red. */
@@ -26,7 +26,7 @@ const COPY = JSON.parse(readFileSync(new URL("./fixtures/iaCopySamples.json", im
 const ALL21 = ["Appanoose", "Calhoun", "Carroll", "Cherokee", "Clarke", "Des Moines", "Greene", "Hancock", "Henry", "Howard", "Ida", "Jackson", "Lucas", "Madison", "Monroe", "O'Brien", "Palo Alto", "Plymouth", "Tama", "Van Buren", "Washington"];
 const keyOf = (n) => "ia_" + n.toLowerCase().replace(/[^a-z]/g, "");
 const COPY_NAMES = IA_COPY_ROWS.map(([, n]) => n);
-const OWN_NAMES = ["Carroll", "Jackson", "Monroe", "Van Buren"];
+const OWN_NAMES = ["Carroll", "Jackson", "Monroe", "Tama", "Van Buren"];
 
 import { beforeAll } from "vitest";
 beforeAll(async () => {
@@ -34,7 +34,7 @@ beforeAll(async () => {
 });
 
 describe("all 21 counties resolve to a source, and none is left a gap row", () => {
-  it("the copy rows and the four county layers partition the 21", () => {
+  it("the copy rows and the five county-source layers partition the 21", () => {
     expect([...COPY_NAMES, ...OWN_NAMES].sort()).toEqual([...ALL21].sort());
   });
   it.each(ALL21)("%s → a wired Iowa source, no PARCEL_GAPS row", (n) => {
@@ -48,7 +48,7 @@ describe("all 21 counties resolve to a source, and none is left a gap row", () =
   });
 });
 
-describe("the 17 COPY rows ride the 2017 statewide compilation, each scoped to its own county", () => {
+describe("the 16 COPY rows ride the 2017 statewide compilation, each scoped to its own county", () => {
   it("one shared layer, distinct COUNTYNAME scopes (the sanctioned Idaho / Mississippi shape), no double-add conflict", () => {
     const scopes = IA_COPY_ROWS.map(([k]) => COUNTIES[keyOf(k)].scopeWhere);
     expect(new Set(scopes).size).toBe(IA_COPY_ROWS.length);
@@ -98,12 +98,12 @@ describe("the 17 COPY rows ride the 2017 statewide compilation, each scoped to i
     const e = s.measured.extent;
     expect(e[0] >= -96.7 && e[2] <= -90.1 && e[1] >= 40.3 && e[3] <= 43.6, `${name}: extent inside Iowa`).toBe(true);
   });
-  it("the 17 covers every county the layer was measured for (the fixture is the spread-point record, not a hand pick)", () => {
+  it("the 16 covers every county the layer was measured for (the fixture is the spread-point record, not a hand pick)", () => {
     expect(Object.keys(COPY).sort()).toEqual(COPY_NAMES.map((n) => n + " County").sort());
   });
 });
 
-describe("the four COUNTY layers", () => {
+describe("the five county-source layers", () => {
   it.each(OWN_NAMES)("%s — a wired county layer with a recorded real lot", (n) => {
     const key = keyOf(n);
     const s = OWN[n + " County"];
@@ -116,6 +116,13 @@ describe("the four COUNTY layers", () => {
     expect(s.measured.hits).toBeGreaterThanOrEqual(4);
     expect(s.measured.edgeHits).toBeGreaterThanOrEqual(3);
     expect(IOWA_VERIFICATION[key].verifiedOn).toBe("2026-10-29");
+  });
+  it("Tama is a labelled 2026 copy (a university class project's copy of the county export), never the county's own", () => {
+    const t = parcelCopyNotice("ia_tama", { lat: 42.08, lng: -92.56 });
+    expect(t.line).toContain("Copy of Tama County parcel data published by a Drake University GIS class project");
+    expect(t.line).toContain("as of March 2026");
+    expect(IOWA_VERIFICATION.ia_tama.publisher).toBe("third-party");
+    expect(OWN["Tama County"].attrs.TaxYear).toBe(2026);
   });
   it("Carroll, Monroe and Van Buren are the county's own (no copy line); Jackson is a labelled 2019 copy from an unverified account", () => {
     expect(parcelCopyNotice("ia_carroll")).toBeNull();

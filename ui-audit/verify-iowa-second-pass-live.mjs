@@ -14,7 +14,7 @@ const wantBuild = process.argv[3] || null;
 const CASES = [
   ["Dallas County", 41.681, -94.072, "known-good", null],
   ["Carroll County", 42.03, -94.931, "own", null],
-  ["Monroe County", 41.0305, -92.9705, "own", null],
+  ["Monroe County", 41.0305, -92.9705, "own", null, { has: /McGreal/, not: /Innisfail/ }], // the county publishes this lot twice; the NEWEST row (current owner) must win
   ["Jackson County", 42.1635, -90.769, "copy", /Copy of Jackson County parcel data .*as of July 2019/],
   ["Appanoose County", 40.7445, -92.941, "copy", /Copy of Appanoose County parcel data published by the Iowa Homeland Security & Emergency Management statewide compilation .*as of November 2017/],
   ["Plymouth County", 42.744, -96.3105, "copy", /Copy of Plymouth County parcel data .*as of November 2017/],
@@ -46,7 +46,7 @@ try {
     await page.mouse.click(pt.x, pt.y);
   };
   const clearSelection = async () => { const c = page.getByTestId("map-decide-clear"); if (await c.count()) await c.first().click().catch(() => {}); };
-  for (const [name, lat, lng, kind, re] of CASES) {
+  for (const [name, lat, lng, kind, re, owner] of CASES) {
     await clearSelection();
     await clickAt(lat, lng);
     if (kind === "gap") {
@@ -65,7 +65,9 @@ try {
     if (kind === "copy") copyText = await line.first().waitFor({ timeout: 15000 }).then(() => line.first().innerText(), () => "");
     else await page.waitForTimeout(2500);
     const hasLine = kind === "copy" ? re.test(copyText) : (await line.count()) === 0;
-    rec({ name, pass: sel && hasLine, detail: `${text} · ${kind === "copy" ? (copyText ? `"${copyText.slice(0, 110)}"` : "copy line MISSING") : "no copy line (as expected)"}` });
+    let ownerOk = true, ownerNote = "";
+    if (owner) { const body = await page.locator("body").innerText(); ownerOk = owner.has.test(body) && !owner.not.test(body); ownerNote = ownerOk ? " · current owner shown" : " · WRONG OWNER (the old row won)"; }
+    rec({ name, pass: sel && hasLine && ownerOk, detail: `${text} · ${kind === "copy" ? (copyText ? `"${copyText.slice(0, 110)}"` : "copy line MISSING") : "no copy line (as expected)"}${ownerNote}` });
   }
   await page.screenshot({ path: process.env.IA_SHOT || "/tmp/iowa-second-pass-live.png" });
   const failed = rows.filter((r) => !r.pass);

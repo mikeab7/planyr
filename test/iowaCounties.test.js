@@ -82,10 +82,10 @@ describe("every county in Iowa resolves to a source or an explicit gap", () => {
 describe("the wired Iowa rows", () => {
   const ROW_KEYS = IA_ROWS.map(([k]) => "ia_" + k);
   it("the table and the registry agree on which counties are wired", () => {
-    // NEW-1 (second pass, 2026-10-29): + the 17 COPY rows of the 2017 statewide compilation (test/iowaSecondPass.test.js owns their assertions)
+    // NEW-1 (second pass, 2026-10-29): + the 16 COPY rows of the 2017 statewide compilation (test/iowaSecondPass.test.js owns their assertions)
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...IA_COPY_ROWS.map(([k]) => "ia_" + k), ...hand]));
-    expect(IA_ROWS).toHaveLength(59);
-    expect(IA_COPY_ROWS).toHaveLength(17);
+    expect(IA_ROWS).toHaveLength(60);
+    expect(IA_COPY_ROWS).toHaveLength(16);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {

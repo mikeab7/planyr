@@ -1,6 +1,6 @@
 {
 "recorded": "2026-10-19",
-"note": "One real attribute bag per wired Iowa county (live point query through the layer the app uses), plus the live measurement. The 2026-10-29 second pass added Carroll, Jackson, Monroe and Van Buren.",
+"note": "One real attribute bag per wired Iowa county (live point query through the layer the app uses), plus the live measurement. The 2026-10-29 second pass added Carroll, Jackson, Monroe, Tama and Van Buren.",
 "rows": {
 "Adair County": {
 "url": "/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/AdairCountyIA_WFS/MapServer/0",
@@ -3356,6 +3356,57 @@
 "Shape__Area": 294400.96484375,
 "Shape__Length": 2170.4090573932526,
 "GlobalID": "75b3d354-0cd7-4c73-be69-67c08f5c2731"
+}
+},
+"Tama County": {
+"url": "https://services8.arcgis.com/9f7uiwqlTp3vEvuz/arcgis/rest/services/Tama_County_Roads/FeatureServer/2",
+"idField": "PIN",
+"addrField": "FullSitus",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-92.768,
+41.862,
+-92.298,
+42.297
+],
+"count": 22980
+},
+"lastEdit": 1774890120336,
+"attrs": {
+"FID": 11070,
+"OID_": 0,
+"PIN": "1014400006",
+"Acreage": 37.74,
+"ALTPin": "1014400006",
+"Shape_Leng": 5128.58537255,
+"Shape_Area": 1621271.49134,
+"TscID": 0,
+"ParcelNumb": "1014400006",
+"ParcelNu_1": "1014400006",
+"TaxYear": 2026,
+"ParcelType": "RE",
+"PropertyCl": "A",
+"DistrictsA": "500 - HOWARD TWP/SOUTH TAMA SCH, 0.0000000000",
+"TifDistric": " ",
+"OwnerName": "BRO, BRETT & BRENDA",
+"AttentionL": " ",
+"Line1": "2166 245TH ST",
+"Line2": " ",
+"City": "TOLEDO",
+"State": "IA",
+"PostalCode": "52342",
+"FullSitus": " ",
+"Legal": "14-84-15 SW SE (EX 150' X 150' IN SW COR)",
+"SecTwpRang": "14 84 15",
+"DeededAcre": 0,
+"NetAcres": "37.740",
+"ExemptAcre": ".000",
+"Shape__Area": 273624.40625,
+"Shape__Length": 2106.953882841487
 }
 },
 "Van Buren County": {

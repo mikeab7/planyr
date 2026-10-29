@@ -437,35 +437,6 @@
 "Shape__Length": 2166.9309847979976
 }
 },
-"Tama County": {
-"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
-"idField": "PARCELNUMB",
-"measured": {
-"hits": 5,
-"of": 5,
-"edgeHits": 4,
-"edgeOf": 4,
-"extent": [
--92.768,
-41.862,
--92.298,
-42.297
-],
-"count": 22837
-},
-"lastEdit": 1715358321440,
-"attrs": {
-"OBJECTID": 2112934,
-"COUNTYNAME": "TAMA",
-"STATEPARID": "86-1014400006",
-"UNPARCELID": "R500  -1014400006               ",
-"PARCELNUMB": "1014400006",
-"PARCELCLAS": "AGRICULTURAL",
-"DEEDHOLDER": "BRO, FRANKLIN W & ORA MAE     ",
-"Shape__Area": 273624.28515625,
-"Shape__Length": 2106.9534997074247
-}
-},
 "Washington County": {
 "url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
 "idField": "PARCELNUMB",

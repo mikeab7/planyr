@@ -149,7 +149,7 @@ export const PARCEL_COPIES = {
   ia_osceola: ["Schneider Geospatial", null],
   ia_paloalto: ["the Iowa Homeland Security & Emergency Management statewide compilation (University of Iowa copy)", "2017-11"],
   ia_plymouth: ["the Iowa Homeland Security & Emergency Management statewide compilation (University of Iowa copy)", "2017-11"],
-  ia_tama: ["the Iowa Homeland Security & Emergency Management statewide compilation (University of Iowa copy)", "2017-11"],
+  ia_tama: ["a Drake University GIS class project", "2026-03"],
   ia_wapello: ["Schneider Geospatial", null],
   ia_warren: [null, "2026-10"],
   ia_washington: ["the Iowa Homeland Security & Emergency Management statewide compilation (University of Iowa copy)", "2017-11"],
