@@ -402,4 +402,32 @@ describe("adversarial review round 1 (B2528688) — each confirmed finding stays
     const f = esriPrintFeatures({ properties: { Name: "AIZ" }, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } }, { styleFn: () => ({ color: "#111111", weight: 1, fillColor: "#111111", fillOpacity: 0.1, dashArray: "5 4" }) }, (x) => x).filter((x) => x.kind === "polygon");
     expect(f[0].style.dash).toBe("5 4");
   });
+  it("round 3: vacated right-of-way is drawn dashed grey and read as vacated, not as 'how acquired'", () => {
+    expect(CL.rowVacated({ ROW_STAT: "VACATED" })).toBe(true); expect(CL.rowVacated({ ROW_STAT: "DEED" })).toBe(false);
+    expect(CL.weldRowStyle({ ROW_STAT: "VACATED" }, 1)).toMatchObject({ color: "#94a3b8", dashArray: "4 3" });
+    expect(CL.weldRowStyle({ ROW_STAT: "DEED" }, 1).color).toBe("#92400e");
+    const c = cardOf("co_weld_row", { ROADNAME: "WCR 1", ROW_STAT: "VACATED" });
+    expect(c.title).toMatch(/^Vacated/); expect(c.rows.find((r) => r.label === "Status").text).toMatch(/Vacated/);
+    expect(L.co_weld_row.legend.map((l) => l.color)).toEqual(["#92400e", "#94a3b8"]);
+  });
+  it("round 3: card text — month-only NRHP dates, YES/NO fields, junk permit form, shouty flowline status, RCRA 'Unk'", () => {
+    const t = (c) => c.rows.map((r) => `${r.label}: ${r.text}`).join("\n");
+    expect(t(cardOf("co_nrhp", { RESNAME: "X", CertDate: "1984-04-" }))).toMatch(/Listed: Apr 1984/);
+    expect(t(cardOf("co_weld_iga", { TOWNNAME: "Erie", BUFFERED: "YES" }))).toMatch(/Buffered: Yes/);
+    expect(t(cardOf("co_weld_iga", { TOWNNAME: "Erie", BUFFERED: "NO" }))).toMatch(/Buffered: No/);
+    expect(t(cardOf("co_ecmc_locations", { location_name: "A", facility_status: "AC", form_type: "Locations" }))).not.toMatch(/Permit form/);
+    expect(t(cardOf("co_ecmc_locations", { location_name: "A", facility_status: "AC", form_type: "Form 2A" }))).toMatch(/Permit form: Form 2A/);
+    expect(t(cardOf("co_ecmc_flowlines", { Status: "ABANDONED" }))).toMatch(/Status: Abandoned/);
+    expect(t(cardOf("co_rcra_ca", { NAME: "S", status: "open", plume_dist_ft: "Unk" }))).not.toMatch(/Plume/);
+    expect(cardOf("co_superfund", { NAME: "Colorado Legacy Land LLC*", SiteStatus: "NPL ACTIVE" }).title).not.toMatch(/\*/);
+  });
+  it("round 3: tests that survived mutation — no-status colours, Weld in-town texts, the APZ II title, and the size of a simplify factor", () => {
+    expect(CL.locationStyle({ facility_status: null }, 1).color).toBe(CL.LOCATION_STATUS.CL[1]);
+    expect(CL.facilityStyle({ facility_status: null }, 1).color).toBe(CL.facilityStyle({ facility_status: "CL" }, 1).color);
+    expect(cardOf("co_weld_zoning", { MASTERZ: " ", ZONING: "GREELEY" }).rows[0].text).toMatch(/municipality/);
+    const hover = L.co_weld_zoning.hoverFields[0].format;
+    expect(hover({ MASTERZ: " ", ZONING: "EATON" })).toBe("inside Eaton"); expect(hover({ MASTERZ: "C", ZONING: "C-3" })).toBe("C-3");
+    expect(cardOf("co_aurora_apz", { CRASH_ZONE: "APZ II - N" }).title).toBe("Buckley SFB accident potential zone II");
+    for (const id of ["co_ecmc_flowlines", "co_weld_row", "co_enterprise_zones", "co_ecmc_locations", "co_undermined"]) { expect(L[id].simplifyFactor, id).toBeGreaterThanOrEqual(1); expect(L[id].simplifyFactor, id).toBeLessThanOrEqual(8); }
+  });
 });

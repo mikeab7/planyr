@@ -117,7 +117,7 @@ export function flowlineStyle(props, opacity) {
 }
 /* ECMC's flowline Status is free text; its short codes are spelled out on the card (the line style already reads the same text). */
 const FLOWLINE_STATUS_WORDS = { PA: "Plugged and abandoned", TA: "Temporarily abandoned", SI: "Shut in", ABIP: "Abandoned in place", AIP: "Abandoned in place", OOS: "Out of service", OOSLAT: "Out of service", AB: "Abandoned" };
-const flowlineStatusWords = (v) => codeWords(v, FLOWLINE_STATUS_WORDS);
+const flowlineStatusWords = (v) => nice(codeWords(v, FLOWLINE_STATUS_WORDS)); // "ABANDONED" → "Abandoned"
 const FLOWLINE_FORMS = { "Form 44 OLFL": "Form 44 (off-location flowline)", "Form 44 COPWTL": "Form 44 (crude oil / produced-water transfer line)", "Form 12": "Form 12" };
 const FLUID_TIDY = (v) => { const s = tidy(v); if (!s) return ""; return /^[A-Z0-9\s/,&()-]+$/.test(s) ? nice(s) : s; };
 const flowlineCard = (p) => card(
@@ -137,7 +137,7 @@ export function locationStyle(props, opacity) {
 }
 const locationCard = (p) => card(
   `Oil & gas location · ${nice(p.location_name) || "unnamed"}`,
-  [["Status", locationStatusLabel(p.facility_status)], ["Operator", nice(p.operator_name)], ["Permit form", tidy(p.form_type)], ["Permit expires", approvalDate(p.expire_date)]],
+  [["Status", locationStatusLabel(p.facility_status)], ["Operator", nice(p.operator_name)], ["Permit form", /^(locations?|approved location)$/i.test(tidy(p.form_type)) ? "" : tidy(p.form_type)], ["Permit expires", approvalDate(p.expire_date)]],
 );
 /* ECMC facility_status codes on the 5,506 facilities the row draws (measured 2026-10-29): AC, CL, AB, AL, SI, TA are decoded; AP, EP, PD and PR occur on one record each and are not (a card drops a code it cannot decode). Active is drawn solid; everything else is grey. */
 export const FACILITY_STATUS = { AC: "Active", CL: "Closed", AB: "Abandoned", AL: "Abandoned location (never built)", SI: "Shut in", TA: "Temporarily abandoned" };
@@ -157,7 +157,7 @@ const facilityCard = (p) => card(
 export const SUPERFUND_STATUS = { "NPL ACTIVE": "On the National Priorities List", "NPL DELETED": "Deleted from the National Priorities List", PROPOSED: "Proposed for the National Priorities List", NRD: "Natural-resource-damage site", "NRD / PROPOSED": "Natural-resource-damage site, proposed for listing" };
 export const superfundStatusLabel = (s) => codeWords(s, SUPERFUND_STATUS);
 const superfundCard = (p) => card(
-  `Superfund site · ${nice(String(p.NAME || p.Site || "").replace(/\/[A-Z]{2,4}$/, "")) || "unnamed"}`,
+  `Superfund site · ${nice(String(p.NAME || p.Site || "").replace(/\/[A-Z]{2,4}$/, "").replace(/\*+$/, "")) || "unnamed"}`,
   [["Status", superfundStatusLabel(p.SiteStatus)], ["City", nice(p.CITY)], ["Contaminants", tidy(p.POLLUTANTS)]],
   [link("CDPHE site page", p.CDPHE_LINK), link("EPA site page", p.EPA_Links, ["epa.gov"])],
 );
@@ -166,8 +166,8 @@ export const rcraStyle = (props, opacity) => {
   const c = gw ? "#b91c1c" : "#d97706";
   return { color: c, weight: 1.2, opacity, fillColor: c, fillOpacity: opacity * 0.85, radius: gw ? 5 : 4 };
 };
-const yn = (v) => { const s = String(v == null ? "" : v).trim().toUpperCase(); return s === "Y" ? "Yes" : s === "N" ? "No" : ""; };
-const plume = (v) => { const s = tidy(v); if (!s || /^null$/i.test(s)) return ""; return /^\d+(\.\d+)?$/.test(s) ? `${s} ft` : s; };
+const yn = (v) => { const s = String(v == null ? "" : v).trim().toUpperCase(); return s === "Y" || s === "YES" ? "Yes" : s === "N" || s === "NO" ? "No" : ""; };
+const plume = (v) => { const s = tidy(v); if (!s || /^(null|unk|unknown)$/i.test(s)) return ""; return /^\d+(\.\d+)?$/.test(s) ? `${s} ft` : s; };
 const rcraCard = (p) => card(
   `RCRA corrective action · ${nice(p.facility_names) || "unnamed"}`,
   [["Status", (nice(p.status) || "").replace(/^./, (c) => c.toUpperCase())], ["Groundwater impacted", yn(p.gw_impacts_Y_or_N)], ["Impact beyond the property line", yn(p.offsite_impacts_Y_or_N)], ["Plume length", plume(p.plume_dist_ft)]],
@@ -215,7 +215,10 @@ export function eagleStyle(props, opacity) {
 const eagleCard = (p) => card("Bald eagle nest site", [["Nest status", (EAGLE_STATUS[String(p.STATUS || "").trim().toUpperCase()] || EAGLE_STATUS.UNKNOWN).label]]);
 
 /* ── shared small card builders for the plain polygon rows ─────────────────────────────────── */
-const nrhpCard = (p) => card(`Historic place · ${tidy(p.RESNAME) || "unnamed"}`, [["Type", tidy(p.ResType)], ["Address", [tidy(p.Address), nice(p.City)].filter(Boolean).join(", ")], ["County", nice(p.County)], ["Listed", approvalDate(p.CertDate)]]);
+/* NRHP CertDate is often month-precision only ("1984-04-"): say "Apr 1984", never an invented day. */
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const certDate = (raw) => { const m = String(raw == null ? "" : raw).trim().match(/^(\d{4})-(\d{2})-?$/); if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return `${MON[Number(m[2]) - 1]} ${m[1]}`; return approvalDate(raw); };
+const nrhpCard = (p) => card(`Historic place · ${tidy(p.RESNAME) || "unnamed"}`, [["Type", tidy(p.ResType)], ["Address", [tidy(p.Address), nice(p.City)].filter(Boolean).join(", ")], ["County", nice(p.County)], ["Listed", certDate(p.CertDate)]]);
 const critCard = (p) => card(`Critical habitat · ${nice(p.comname) || "species"}`, [["Species", tidy(p.sciname)], ["Unit", /^please check/i.test(tidy(p.unitname)) ? "" : tidy(p.unitname)], ["Status", tidy(p.status)]]);
 const enterpriseCard = (p) => card(`Enterprise Zone · ${tidy(p.Admin_Zone) || "zone"}`, [["Statutory zone", tidy(p.Statutory_Zone)]]);
 
@@ -232,7 +235,7 @@ export function weldZoningStyle(props, opacity) {
   return { color: c, weight: base ? 0.6 : 1, opacity, fill: true, fillColor: c, fillOpacity: opacity * (base ? 0.12 : 0.4) };
 }
 const weldZoneCard = (p) => weldInTown(p)
-  ? card(`In ${nice(p.ZONING)}`, [["Zoning", "Set by the town, not the county"]])
+  ? card(`In ${nice(p.ZONING)}`, [["Zoning", "Set by that municipality, not the county"]])
   : card(`Weld County zoning · ${tidy(p.ZONING) || tidy(p.MASTERZ) || "district"}`, [["Case", tidy(p.CASE_NAME)], ["Recorded", tidy(p.YEAR)], ["Reception", tidy(p.RECP_NUM)]]);
 export const adamsZoneKind = (zone) => {
   const z = String(zone == null ? "" : zone).trim().toUpperCase();
@@ -288,7 +291,12 @@ export const weldOglaStyle = (props, opacity) => {
   return { color: c, weight: 1.2, opacity, fillColor: c, fillOpacity: opacity * (done ? 0.5 : 0.9), radius: done ? 3 : 5 };
 };
 const weldOglaCard = (p) => card(`Weld oil & gas location assessment · ${tidy(p.B1_ALT_ID)}`, [["Stage", tidy(p.B1_APPL_STATUS)], ["Permit type", codeWords(p.B1_PER_SUB_TYPE, {})]]);
-const weldRowCard = (p) => card(`County road right-of-way · ${nice(p.ROADNAME) || "unnamed"}`, [["How acquired", nice(p.ROW_STAT)], ["Width", Number(p.ROW_WIDTH) > 0 ? `${p.ROW_WIDTH} ft` : ""], ["Recorded document", tidy(p.DOC_NUM)], ["Note", tidy(p.COMMENTS)]]);
+export const rowVacated = (p) => /^vacated$/i.test(tidy(p && p.ROW_STAT));
+export function weldRowStyle(props, opacity) {
+  if (rowVacated(props)) return { color: "#94a3b8", weight: 1, opacity, fill: true, fillColor: "#94a3b8", fillOpacity: opacity * 0.08, dashArray: "4 3" };
+  return { color: "#92400e", weight: 1, opacity, fill: true, fillColor: "#b45309", fillOpacity: opacity * 0.22 };
+}
+const weldRowCard = (p) => card(`${rowVacated(p) ? "Vacated county road right-of-way" : "County road right-of-way"} · ${nice(p.ROADNAME) || "unnamed"}`, [[rowVacated(p) ? "Status" : "How acquired", rowVacated(p) ? "Vacated — no longer right-of-way" : nice(p.ROW_STAT)], ["Width", Number(p.ROW_WIDTH) > 0 ? `${p.ROW_WIDTH} ft` : ""], ["Recorded document", tidy(p.DOC_NUM)], ["Note", nice(p.COMMENTS)]]);
 const weldUgbCard = (p) => card(`Urban growth boundary · ${nice(p.TOWNNAME || p.DISTRICT)}`, []);
 const weldIgaCard = (p) => card(`Intergovernmental agreement area · ${nice(p.TOWNNAME || p.MUNICIPALI)}`, [["Buffered", yn(p.BUFFERED)], ["Dated", approvalDate(p.DATE_)]]);
 const weldAirportCard = (p) => card(`Airport overlay · ${tidy(p.Airport_Ov)}`, []);
@@ -444,7 +452,7 @@ export const COLORADO_LAYERS = {
   /* ---- Environmental: ground, wildlife, heritage ---- */
   co_undermined: R({
     label: "Undermined Areas", source: "Colorado Division of Reclamation, Mining and Safety (DRMS) — Mine Subsidence Protection Program", hoverSource: "DRMS",
-    url: src("drmsUndermined"), minZoom: 11, color: "#92400e", weight: 1.2, opacity: 0.65,
+    url: src("drmsUndermined"), minZoom: 11, color: "#92400e", weight: 1.2, opacity: 0.65, simplifyFactor: 1.5,
     styleFn: (_p, opacity) => ({ color: "#92400e", weight: 1.2, opacity, fill: true, fillColor: "#b45309", fillOpacity: opacity * 0.35 }),
     hoverTitle: "Undermined area",
     hoverFields: [{ names: ["MINE_NAME"] }, { names: ["TYPE"] }],
@@ -647,7 +655,8 @@ export const COLORADO_LAYERS = {
   co_weld_row: R({
     label: "Weld Road Right-of-Way", source: "Weld County, Colorado — road right-of-way", hoverSource: "Weld County",
     url: src("weldRoadRow"), fields: ["OBJECTID", "ROADNAME", "ROW_STAT", "ROW_WIDTH", "DOC_NUM", "COMMENTS"], minZoom: 13, color: "#92400e", weight: 1, opacity: 0.5, simplifyFactor: 1.5,
-    styleFn: (_p, opacity) => ({ color: "#92400e", weight: 1, opacity, fill: true, fillColor: "#b45309", fillOpacity: opacity * 0.22 }),
+    styleFn: weldRowStyle,
+    legend: [{ label: "Recorded county road right-of-way", color: "#92400e" }, { label: "Vacated (no longer right-of-way)", color: "#94a3b8", dash: true }],
     regions: ["co_weld"],
     hoverTitle: "County road right-of-way",
     hoverFields: [{ names: ["ROADNAME"] }, { names: ["ROW_STAT"] }, { names: ["ROW_WIDTH"], unit: "ft" }],
