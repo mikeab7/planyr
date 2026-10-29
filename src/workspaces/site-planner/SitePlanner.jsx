@@ -80,6 +80,7 @@ import {
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import GisIdentifyCard from "./components/GisIdentifyCard.jsx";
+import { setHighlight, releaseHighlight } from "./lib/featureHighlight.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
@@ -2713,6 +2714,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-4(c) — a plain mirror of the identify-card state, so the zoom effect below can ask "is there anything to clear?" without re-subscribing to it.
   const gisHitRef = useRef(null);
   gisHitRef.current = gisHit;
+  // B2507061: the clicked feature is outlined while its card is open (ONE highlight at a time, across every layer); a new click, closing the card or a click on empty map turns it off. Hover highlights nothing.
+  useEffect(() => {
+    const token = gisHit && Array.isArray(gisHit.items) ? (gisHit.items.find((i) => i && i.highlight) || {}).highlight : null;
+    if (!token) return undefined;
+    setHighlight(token);
+    return () => releaseHighlight(token);
+  }, [gisHit]);
   // The card is anchored in SCREEN space, so a zoom would leave it pointing at ground it
   // no longer covers. A pan already dismisses it (the press does); this covers the wheel.
   /* NEW-4(c) — READ THE REF, SKIP THE DISPATCH. This effect fires on every zoom step and, in the

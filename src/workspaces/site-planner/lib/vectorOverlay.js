@@ -29,6 +29,7 @@ import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, fetchCached, decideVec
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { cardNode } from "./identifyCard.js";
+import { makeHighlight, setHighlight, releaseHighlight, childFor } from "./featureHighlight.js";
 import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
 import { siteState } from "./siteRegion.js";
 import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
@@ -215,6 +216,8 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
       const about = source.sourceName ? `Source: ${source.sourceName}` : null;
       const node = cardNode({ title: displayName(feature), rows: identifyRowsFor(source, feature && feature.properties), note: source.identifyNote || null, about });
       openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map);
+      const token = makeHighlight(lyr); // B2507061: only the CLICKED feature is outlined, and only until its card closes
+      if (token) { setHighlight(token); openPopup.on("remove", () => releaseHighlight(token)); }
     });
   };
   // Close OUR identify popover (never someone else's) — on toggle-off / fallback the
@@ -429,7 +432,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
    * hands the same answer to any surface that can supply a lat/lng: null when nothing
    * is under the point, or when the layer has fallen back to the raster/live path (no
    * geometry in hand to test, and claiming otherwise would be a guess). */
-  group.identifyAt = (at) => identifyPayload(source, lastFc, at, fellBack, (f) => displayName(f));
+  group.identifyAt = (at) => identifyPayload(source, lastFc, at, fellBack, (f) => displayName(f), (f) => childFor(geo, f));
 
   return group;
 }
@@ -438,12 +441,14 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
  * canvas card describe a feature identically. `titleOf` is the layer's OWN headline
  * rule (a boundary layer's label field vs. a line layer's registry title), so neither
  * borrows the other's wording. Pure given `fc`. */
-function identifyPayload(source, fc, at, disabled, titleOf) {
+function identifyPayload(source, fc, at, disabled, titleOf, childOf = null) {
   if (disabled || !fc) return null;
   const f = hitFeature(fc, at || {});
   if (!f) return null;
   const props = f.properties || {};
+  const token = childOf ? makeHighlight(childOf(f)) : null; // the planner outlines this feature while its card is open
   return {
+    ...(token ? { highlight: token } : {}),
     sourceId: source.id || null,
     title: titleOf(f),
     rows: identifyRows(source, props, { decode: decodeFieldValue, href: identifyHref }),
@@ -510,6 +515,8 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     lyr.on("click", (e) => {
       if (!identifyOk() || !map) return;
       openPopup = L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(identifyEl(feature.properties)).openOn(map);
+      const token = makeHighlight(lyr);
+      if (token) { setHighlight(token); openPopup.on("remove", () => releaseHighlight(token)); }
     });
   };
 
@@ -611,7 +618,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
   /* (B1092) Identify without a Leaflet click — see cachedVectorLayer.identifyAt. In the
    * far-out RASTER mode there is no geometry in hand, so this honestly answers null
    * rather than guessing from a picture. */
-  group.identifyAt = (at) => identifyPayload(source, lastFc, at, mode !== "vector", (f) => identifyTitle(source, f.properties || {}));
+  group.identifyAt = (at) => identifyPayload(source, lastFc, at, mode !== "vector", (f) => identifyTitle(source, f.properties || {}), (f) => childFor(geo, f));
   return group;
 }
 

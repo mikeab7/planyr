@@ -18,6 +18,7 @@
 import L from "leaflet";
 import { hoverTitle, featureCard } from "./featureHover.js";
 import { cardNode } from "./identifyCard.js";
+import { makeHighlight, setHighlight, releaseHighlight, childFor } from "./featureHighlight.js";
 import { hitFeature } from "./vectorLayers.js";
 
 /* THE ONE card for a clicked feature (B2507062): a row's own `identifyCard(props, at)` when it has one, else its title + labelled rows. Used by the planner canvas
@@ -42,7 +43,12 @@ export function wireFeatureClick(lyr, cfg, identifyOk, about = null) {
     const props = (feature && feature.properties) || {};
     const item = itemFor(cfg, props, { lat: e.latlng.lat, lng: e.latlng.lng }, about);
     const node = cardNode(item);
-    try { L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map); } catch (_) { /* a popup never breaks the layer */ }
+    try {
+      // opening a new popup closes the old one first (its "remove" turns the previous outline off); the clicked feature is then the only one outlined
+      const popup = L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map);
+      const token = makeHighlight(e.layer);
+      if (token) { setHighlight(token); popup.on("remove", () => releaseHighlight(token)); } // closed by ✕, by another click, or by a click on empty map
+    } catch (_) { /* a popup never breaks the layer */ }
   });
 }
 
@@ -66,6 +72,8 @@ export function attachFeatureCanvasIdentify(lyr, cfg) {
     if (!features.length) return null;
     const hit = hitFeature({ type: "FeatureCollection", features }, at);
     if (!hit) return null;
-    return itemFor(cfg, hit.properties || {}, at, lyr.__pfAbout || null);
+    const item = itemFor(cfg, hit.properties || {}, at, lyr.__pfAbout || null);
+    const token = makeHighlight(childFor(lyr, hit)); // the planner turns it on while its card is open and off when the card closes
+    return token ? { ...item, highlight: token } : item;
   };
 }

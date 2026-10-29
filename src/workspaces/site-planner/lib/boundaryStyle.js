@@ -11,3 +11,6 @@ export const CITY_TINT_OPACITY = 0.12;
 export const BOUNDARY_FALLBACK_INK = "#374151"; // design-exempt: map ink — a boundary row with no colour of its own
 export const STATE_LINE_CASING = "#000"; // design-exempt: map ink — the state line's dark casing
 export const STATE_LINE_CORE = "#fff"; // design-exempt: map ink — the state line's light core
+/* The ONE click highlight (B2507061 amendment): a clicked feature is outlined in this colour until its card closes — never a hover. */
+export const CLICK_HIGHLIGHT_COLOR = "#f97316"; // design-exempt: map ink — the clicked feature's outline
+export const CLICK_HIGHLIGHT_WEIGHT = 4;
