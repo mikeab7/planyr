@@ -1627,7 +1627,9 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     let drawn = 0;
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
     lyr.createLayers = function (features) {
-      const v = countVertices(features, Math.max(cap, total));
+      // esri-leaflet re-delivers a feature it already holds (every pan / grid cell that touches it) and only updates it — never count that twice against the total
+      const fresh = (features || []).filter((f) => !(f && f.id != null && this._layers && this._layers[f.id]));
+      const v = countVertices(fresh, Math.max(cap, total));
       if (v > cap || drawn + v > total) {
         try { this.fire("overbudget", { vertices: v, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
         return undefined;
