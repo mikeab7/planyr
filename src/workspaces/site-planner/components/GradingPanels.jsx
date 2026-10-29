@@ -26,7 +26,7 @@ import { LIMIT_MODES, LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
 import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels, planContourDraw } from "../lib/gradingPaint.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
-import { gradingPanelView } from "../lib/gradingPanelModel.js";
+import { gradingPanelView, limitBasisPhrase } from "../lib/gradingPanelModel.js";
 
 const sectionLabel = {
   fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)",
@@ -133,7 +133,7 @@ export function GroundSection({ model, onToggleBuildable, buildableOn = false })
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={sectionLabel}>Ground</span>
         <RowInfo label="Ground" sections={[
-          { text: "Ground heights: USGS 3DEP bare-earth LiDAR, sampled every 10 ft. A pad counts only inside the setback, with the cut-or-fill limit and slope set in Grading settings, and the slope off its edge must meet existing ground before the setback line. Bank volumes, no retaining walls. Screening only." },
+          { text: "Ground heights: USGS 3DEP bare-earth LiDAR, sampled every 10 ft. A pad counts only inside the setback, with the cut-or-fill limit and slope set in Grading settings. The slopes must meet existing ground inside the property line, less the grading margin and any undisturbed buffer. Bank volumes, no retaining walls. Screening only." },
           { text: setback && setback.usingPropertyLine ? "No setback drawn, using the property line." : "Measured to your parcel setback lines." },
         ]} />
       </div>
@@ -174,6 +174,9 @@ function GradingSettings({ model, dockDropFt, onCfg, onDockDrop }) {
       <Row label="Max pavement slope"><NumField value={cfg.maxPavementSlopePct} min={0.5} step={0.5} unit="%" testid="grading-max-pavement-slope" ariaLabel="Max pavement slope" onCommit={(v) => onCfg({ maxPavementSlopePct: v })} /></Row>
       {/* ROUND 6 (NEW-3) — the open ground inside the limit falls away from the pavement it touches at this slope */}
       <Row label="Open-ground slope"><NumField value={cfg.openGroundSlopePct} min={0} step={0.5} unit="%" testid="grading-open-ground-slope" ariaLabel="Open-ground slope" onCommit={(v) => onCfg({ openGroundSlopePct: v })} /></Row>
+      {/* ROUND 8 (NEW-2) — the limit of disturbance: the property line less a working margin and any undisturbed buffer */}
+      <Row label="Grading margin"><NumField value={cfg.gradingMarginFt} min={0} step={1} unit="ft" testid="grading-margin" ariaLabel="Grading margin inside the property line" onCommit={(v) => onCfg({ gradingMarginFt: v })} /></Row>
+      <Row label="Undisturbed buffer"><NumField value={cfg.undisturbedBufferFt} min={0} step={5} unit="ft" testid="grading-undisturbed-buffer" ariaLabel="Undisturbed buffer along every property line" onCommit={(v) => onCfg({ undisturbedBufferFt: v })} /></Row>
       <span style={muted}>No walls · the slope starts at the grading limit. Bank volumes.</span>
       {rockLine && <span data-rock-status={rock.status} style={muted}>{rockLine}</span>}
       {rock.status === "failed" && (
@@ -277,7 +280,7 @@ function BuildingCard({ c, model, onSelect, onApplyFfeFix, onApplyMoveFix, onPul
         : <div data-grading-earthwork="pending" style={muted}>{c.ffe == null ? "…" : "Reading the ground…"}</div>}
       {c.flag
         ? <FlagCard c={c} onApplyFfeFix={onApplyFfeFix} onApplyMoveFix={onApplyMoveFix} onPullLimit={onPullLimit} />
-        : e && <div data-grading-flag="clear" style={{ color: "var(--success-text)", fontSize: FONT_SIZE.label }}>Slopes daylight inside the setback.</div>}
+        : e && <div data-grading-flag="clear" style={{ color: "var(--success-text)", fontSize: FONT_SIZE.label }}>Slopes daylight inside the property line.</div>}
     </div>
   );
 }
@@ -287,12 +290,11 @@ function BuildingCard({ c, model, onSelect, onApplyFfeFix, onApplyMoveFix, onPul
 export function GradingHeaderActions({ model, dockDropFt, onCfg, onDockDrop }) {
   const gearRef = useRef(null);
   const [open, setOpen] = useState(false);
-  const noSetback = model.setback && model.setback.usingPropertyLine;
   return (
     <span data-grading-header-actions="1" onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "none" }}>
       <RowInfo label="Grading" sections={[
         { text: "The finished floor is suggested for you: the dirt balanced on site, with the pond's spoil counted as fill, held out of rock, and the docks kept on the low side where the ground allows. Type your own number any time; the small auto chip takes it back." },
-        { text: noSetback ? "No setback drawn, using the property line." : "Slopes are measured to your parcel setback lines." },
+        { text: `Grading stays inside the property line, less the grading margin and any undisturbed buffer set in Grading settings. The setback limits buildings, not earthwork.` },
       ]} />
       <IconButton ref={gearRef} size={24} aria-label="Grading settings" aria-expanded={open} data-grading-gear="1" onClick={() => setOpen((o) => !o)}>⚙</IconButton>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={gearRef} placement="below-right" width={280} gap={6}
@@ -310,7 +312,7 @@ export const LIMIT_MODE_OPTIONS = LIMIT_MODES.map((m) => ({ key: m, label: LIMIT
 export function GradedAreaLine({ limit, actions }) {
   if (!limit) return null;
   const ac = limit.areaAc == null ? "…" : `${f1(limit.areaAc)} AC`;
-  const src = limit.mode === "boundary" ? "the setback" : limit.source === "edited" ? "limit edited" : "limit auto";
+  const src = limit.mode === "boundary" ? limitBasisPhrase(limit.basis) : limit.source === "edited" ? "limit edited" : "limit auto";
   const layout = limit.mode !== "boundary";
   return (
     <div data-graded-area="1" data-limit-mode={limit.mode} data-limit-source={limit.source} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0 0 8px" }}>

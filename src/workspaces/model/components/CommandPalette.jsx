@@ -14,6 +14,7 @@
  * builds `ctx` once and hands the SAME object everywhere. This component decides nothing about
  * what an action DOES — only how to find it and invoke it.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { COMMANDS, COMMAND_GROUPS, searchCommands } from "../lib/commandRegistry.js";
@@ -105,6 +106,7 @@ export default function CommandPalette({ open, ctx, onClose }) {
         }}
       >
         <input
+          {...NO_AUTOFILL}
           ref={inputRef}
           data-testid="model-command-palette-input"
           value={query}

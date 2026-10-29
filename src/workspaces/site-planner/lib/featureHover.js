@@ -22,6 +22,7 @@
  * so the tooltip and the Site Analysis card can never disagree about a voltage.
  */
 import { voltLabel, ownerLabel } from "./powerScreen.js";
+import { approvalDate as fmtDate } from "./desotoZoning.js"; // NEW-1 (DeSoto zoning): formats an Esri date field for a hover line
 
 /* The dataset sentinels that mean "withheld / not populated". `0` is included because HIFLD
  * uses it for a withheld voltage, and a bare "0" in a tooltip reads as a real measurement. */
@@ -120,6 +121,7 @@ export function hoverDetails(cfg = {}, props = {}) {
   for (const f of cfg.hoverFields || []) {
     let text = "";
     if (f.clean && HOVER_CLEANERS[f.clean]) text = HOVER_CLEANERS[f.clean](props) || "";
+    else if (f.date) text = fmtDate(pickAttr(props, f.names || [])) || ""; // NEW-1 (DeSoto zoning): an Esri date field arrives as epoch ms
     else text = titleCaseAgency(cleanAttr(pickAttr(props, f.names || [])));
     if (!text) continue;
     if (f.unit && /^[\d.,]+$/.test(text)) text = `${text} ${f.unit}`;

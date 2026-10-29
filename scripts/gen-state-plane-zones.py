@@ -187,6 +187,25 @@ RENAMES = {  # (state, EPSG slug) -> (current slug, why)
 by_state = {}
 for z in zones.values(): by_state.setdefault(z["state"], []).append(z)
 
+# STATUTE OVERRIDES (B2494337, owner rule 2026-10-29: the STATUTE wins over EPSG; a hand edit of the generated files never does).
+# (state, slug) -> (zone id the statute assigns, citation). Each is applied AFTER EPSG's lists are read, printed when it fires, and exported
+# as STATUTE_OVERRIDES so test/statePlaneStatute.test.js pins it. If EPSG ever agrees with an override the run says so ("REDUNDANT") and the
+# row can be deleted.
+STATUTE_OVERRIDES = {
+    ("GA", "lanier"): ("ga_west", "O.C.G.A. 44-4-20(b)(2) West Zone list ('... Jones, Lamar, Lanier, Lee, Lowndes ...'); EPSG/NGS lists Lanier in East."),
+    ("AR", "pulaski"): ("ar_north", "Arkansas Cadastral Mapping Standard (Rule 192.00.19-001: North 41 / South 34 counties) and epsg.io/26951 as read by the owner 2026-10-29; "
+                                    "Ark. Code 15-21-301/305 defers to NGS. The EPSG v12.029 database inside pyproj 3.8.0 still lists Pulaski in SOUTH (the generator did not move it)."),
+}
+# Counties the statute NAMES that EPSG's lists do not (so the polygons cross-check would otherwise make them a `decided` row): plain, statute-backed table rows.
+STATUTE_NAMED = {
+    ("NV", "carson"): ("nv_west", "NRS 327.010(2) names Carson City in the West Zone."),
+}
+# Genuinely statute-silent counties (a `decided:true` row). Needs a note that names the gap (test/statePlaneStatute.test.js enforces it).
+STATUTE_SILENT = {
+    "ND:billings": {"zone": "nd_south", "note": "Billings County is in neither list of N.D.C.C. 47-20.2-01(1) (the statute is silent on it; the South list names 25 counties, the table has 26). "
+                                                "It stays North Dakota South because the surrounding Golden Valley, Stark, Dunn and Slope counties are all South."},
+}
+
 def decode(flat):
     out = [[flat[0], flat[1]]]
     x, y = flat[0], flat[1]
@@ -204,6 +223,7 @@ def bbox_centre(c):
     b = c["bbox"]; return ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
 
 county_tab, aliases, decided, splits = {}, {}, {}, {}
+overrides_applied = {}
 for st, zs in by_state.items():
     if len(zs) == 1: continue
     if st in ("AK", "HI"): continue          # resolved by position / island, see statePlane.js
@@ -252,21 +272,38 @@ for st, zs in by_state.items():
                                 if best is None or d < best[0]: best = (d, o)
                     found = best[1]
                 zid_ = seen.get(slug(found["name"]))
-                decided[f"{st}:{k}"] = {"zone": zid_, "surroundedBy": found["name"]}
-            elif st == "NV" and m == "Carson City":
-                decided[f"{st}:{k}"] = {"zone": "nv_west", "note": "Carson City (formerly Ormsby County) is not named in EPSG's Nevada zone lists; it is surrounded by Douglas, Lyon, Storey and Washoe counties, all Nevada West."}
+                # Va. Code 1-601 names every independent city in the zone this surrounding-county rule gives it (owner read 2026-10-29):
+                # a plain, statute-backed table row, NOT a `decided` one.
+                tab.setdefault(zid_, []).append(k); seen[k] = zid_
+            elif (st, k) in STATUTE_NAMED:
+                zid_, _why = STATUTE_NAMED[(st, k)]
+                tab.setdefault(zid_, []).append(k); seen[k] = zid_
             elif st == "CO" and m == "Broomfield":
                 continue   # decided by hand in statePlane.js (COLORADO-AUDIT.md)
             else:
                 warn.append(f"{st}: polygons county with NO zone: {m}")
     extra = sorted(k for k in seen if k not in {slug(n) for n in names})
     if extra: warn.append(f"{st}: zone-list names not in polygons asset: {extra}")
+    for (ost, ok), (ozone, why) in STATUTE_OVERRIDES.items():
+        if ost != st: continue
+        cur = next((z for z, v in tab.items() if ok in v), None)
+        if cur == ozone: print(f"REDUNDANT override {ost}:{ok} -> {ozone}: EPSG already agrees; delete it from STATUTE_OVERRIDES")
+        else:
+            if cur: tab[cur] = [x for x in tab[cur] if x != ok]
+            tab.setdefault(ozone, []).append(ok); seen[ok] = ozone
+            overrides_applied[f"{ost}:{ok}"] = {"from": cur, "to": ozone, "why": why}
+            print(f"OVERRIDE {ost}:{ok}: {cur} -> {ozone}")
+    tab = {z: sorted(set(v)) for z, v in tab.items()}
     county_tab[st] = tab
 
 # Hawaii: counties are island groups; Kauai County also holds Niihau (zone 5).
 hi = {"hawaii": "hi_1", "maui": "hi_2", "kalawao": "hi_2", "honolulu": "hi_3", "kauai": "hi_4"}
 decided.update({f"HI:{k}": {"zone": v, "note": {"hi_1": "Hawaii County = the island of Hawaii.", "hi_2": "Maui County holds Maui, Molokai, Lanai and Kahoolawe (EPSG zone 2); Kalawao is on Molokai.", "hi_3": "Honolulu County = Oahu.", "hi_4": "Kauai County resolves to Kauai (zone 4); Niihau (zone 5) is also in Kauai County, so a point on Niihau is resolved by position."}[v]} for k, v in hi.items()})
 
+decided.update(STATUTE_SILENT)
+# Run-together spellings a stored routing key can carry that the designation-word slug cannot reach ("of" only falls away at a word boundary):
+# Lake of the Woods, MN slugs to lakethewoods, so a hand-typed / legacy "lakeofthewoods" needs an alias to the same county.
+aliases.update({"MN:lakeofthewoods": "lakethewoods"})
 out_js = {"zones": {}, "counties": {}, "aliases": aliases, "decided": decided, "splits": splits}
 for zid_, z in zones.items():
     d = {k: v for k, v in z.items() if k not in ("_list", "name", "id")}
@@ -295,7 +332,9 @@ cl += ["};", "", "/* An old / mistyped county spelling -> the current slug. */",
        "", "/* Assignments EPSG does not make that this project DID (same pattern as Colorado's Broomfield). */",
        "export const DECIDED_COUNTIES = %s;" % json.dumps(decided, ensure_ascii=False),
        "", "/* Counties split by a parallel: state:slug -> { north, south } zone ids (the split latitude is in statePlaneCore.js). */",
-       "export const SPLIT_COUNTIES = %s;" % json.dumps(splits)]
+       "export const SPLIT_COUNTIES = %s;" % json.dumps(splits),
+       "", "/* Counties whose zone is the STATUTE's, not EPSG's (owner rule 2026-10-29): state:slug -> { from, to, why }. See scripts/gen-state-plane-zones.py STATUTE_OVERRIDES. */",
+       "export const STATUTE_OVERRIDES = %s;" % json.dumps(overrides_applied, ensure_ascii=False)]
 open(os.path.join(ROOT, "src/shared/coordinates/statePlaneCounties.js"), "w").write("\n".join(cl) + "\n")
 json.dump({"generator": "scripts/gen-state-plane-zones.py", "pyproj": pyproj.__version__, "proj": pyproj.proj_version_str, "zones": goldens},
           open(os.path.join(ROOT, "test/fixtures/statePlaneGolden.json"), "w"), indent=1)

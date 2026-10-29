@@ -14,7 +14,7 @@ import { sampleAtLatLng } from "./demGrid.js";
 import { feetToLatLngPair } from "./mapLock.js";
 import { offsetPolygon } from "./parcelOffset.js";
 import { hostBuildingIdOf } from "./gradingMembership.js";
-import { LIMIT_DEFAULTS, LIMIT_MODES } from "./gradingLimit.js";
+import { LIMIT_DEFAULTS, LIMIT_MODES, PROPERTY_LIMIT_DEFAULTS, propertyLimit } from "./gradingLimit.js";
 
 export const GRADING_DEFAULTS = Object.freeze({
   pavementSlopePct: 1.5, minPavementSlopePct: 0.5, maxCutFillFt: 12, slopeRatio: 2, lotDropFt: 0.5, shoulderFt: 5,
@@ -23,6 +23,9 @@ export const GRADING_DEFAULTS = Object.freeze({
   cornerRadiusFt: LIMIT_DEFAULTS.cornerRadiusFt, maxPavementSlopePct: 5, limitMode: "layout",
   // ROUND 6 (NEW-3): the slope the open ground inside the limit falls at, away from the pavement / pad edges it touches.
   openGroundSlopePct: 2,
+  // ROUND 8 (NEW-2): the limit of disturbance is the property line inset by a working margin and any undisturbed buffer
+  // the zoning sets along the adjoining property — never the building setback.
+  gradingMarginFt: PROPERTY_LIMIT_DEFAULTS.marginFt, undisturbedBufferFt: PROPERTY_LIMIT_DEFAULTS.bufferFt,
 });
 export const SLOPE_RATIOS = Object.freeze([2, 3, 4]);
 
@@ -38,6 +41,7 @@ export function gradingCfg(g) {
   const d = num(src.maxCutFillFt);
   const r = num(src.slopeRatio);
   const sh = num(src.shoulderFt), cr = num(src.cornerRadiusFt), mp = num(src.maxPavementSlopePct), og = num(src.openGroundSlopePct);
+  const gm = num(src.gradingMarginFt), ub = num(src.undisturbedBufferFt);
   const ring = Array.isArray(src.limitRing) && src.limitRing.length >= 3 && src.limitRing.every((q) => q && Number.isFinite(q.x) && Number.isFinite(q.y)) ? src.limitRing : null;
   return {
     pavementSlopePct: p == null ? GRADING_DEFAULTS.pavementSlopePct : Math.max(GRADING_DEFAULTS.minPavementSlopePct, p),
@@ -58,6 +62,8 @@ export function gradingCfg(g) {
     cornerRadiusFt: cr == null || cr < 0 ? GRADING_DEFAULTS.cornerRadiusFt : cr,
     maxPavementSlopePct: mp == null || mp <= 0 ? GRADING_DEFAULTS.maxPavementSlopePct : mp,
     openGroundSlopePct: og == null || og < 0 ? GRADING_DEFAULTS.openGroundSlopePct : og,
+    gradingMarginFt: gm == null || gm < 0 ? GRADING_DEFAULTS.gradingMarginFt : gm,
+    undisturbedBufferFt: ub == null || ub < 0 ? GRADING_DEFAULTS.undisturbedBufferFt : ub,
   };
 }
 
@@ -96,10 +102,16 @@ export function gradingSetback(parcels, baseSetback = 0) {
 /* The `grading` argument buildProposedSurface takes. */
 /* `extraRings` — rings of elements that join the limit but are not graded planes (roads inside the site, walks / strips
  * hosted by a building); `aisleFt` — the plan's drive-aisle width (the rounding radius floor and the hole-fill width). */
+/* ROUND 8 (NEW-2): the ring the grading may not cross is the PROPERTY LIMIT — the parcels' property lines inset by the grading
+ * margin + the undisturbed buffer (`gradingLimit.propertyLimit`) — never the setback. The engine's field keeps its old name
+ * (`setbackRings`: "the line the earthwork may not cross"); `limit.basis` says what it is so the words can. The setback
+ * itself still bounds the Level-ground sweep (buildings), which reads `setback.rings`, not this pack. */
 export function gradingPack(cfg, setback, { extraRings = [], aisleFt = LIMIT_DEFAULTS.aisleFt } = {}) {
+  const pl = propertyLimit({ parcelRings: setback.parcelRings, holes: setback.holes,
+    marginFt: cfg.gradingMarginFt ?? GRADING_DEFAULTS.gradingMarginFt, bufferFt: cfg.undisturbedBufferFt ?? GRADING_DEFAULTS.undisturbedBufferFt });
   return {
     pavementSlopePct: cfg.pavementSlopePct, lotDropFt: GRADING_DEFAULTS.lotDropFt,
-    slopeRatio: cfg.slopeRatio, shoulderFt: cfg.shoulderFt, setbackRings: setback.rings,
+    slopeRatio: cfg.slopeRatio, shoulderFt: cfg.shoulderFt, setbackRings: pl.rings,
     openGroundSlopePct: cfg.openGroundSlopePct,   // ROUND 6 (NEW-3): the open ground's fall inside the limit
     // ROUND 4 — one pad inside a grading limit (proposedSurface.js's limitGridSteps). Always present: the per-element
     // model is retired for the grading layer.
@@ -107,7 +119,8 @@ export function gradingPack(cfg, setback, { extraRings = [], aisleFt = LIMIT_DEF
       mode: cfg.limitMode, edited: cfg.limitMode === "layout" ? cfg.limitRing : null,
       shoulderFt: cfg.shoulderFt, cornerRadiusFt: Math.max(cfg.cornerRadiusFt, Math.min(LIMIT_DEFAULTS.minCornerRadiusFt, aisleFt > 0 ? Math.max(aisleFt, LIMIT_DEFAULTS.minCornerRadiusFt) : LIMIT_DEFAULTS.minCornerRadiusFt)),
       aisleFt, maxPavementSlopePct: cfg.maxPavementSlopePct, maxCutFillFt: cfg.maxCutFillFt,
-      extraRings, setbackHoles: setback.holes,
+      extraRings, setbackHoles: pl.holes,
+      basis: { kind: "property", marginFt: pl.marginFt, bufferFt: pl.bufferFt },
     },
   };
 }
@@ -174,7 +187,7 @@ export function parcelsSig(parcels, baseSetback) {
 export function useGradingBase({ enabled, origin, parcels, gradingSettings, baseSetback, extraRings = null, aisleFt = LIMIT_DEFAULTS.aisleFt }) {
   const g = gradingSettings || null;
   const cfgKey = JSON.stringify([g && g.enabled, g && g.pavementSlopePct, g && g.maxCutFillFt, g && g.slopeRatio, g && g.layers && g.layers.buildable, g && g.layers && g.layers.cutfill,
-    g && g.layers && g.layers.contours, g && g.layers && g.layers.paper, g && g.limitMode, g && g.shoulderFt, g && g.cornerRadiusFt, g && g.maxPavementSlopePct, g && g.openGroundSlopePct, g && Array.isArray(g.limitRing) ? ringSig(g.limitRing) : null]);
+    g && g.layers && g.layers.contours, g && g.layers && g.layers.paper, g && g.limitMode, g && g.shoulderFt, g && g.cornerRadiusFt, g && g.maxPavementSlopePct, g && g.openGroundSlopePct, g && g.gradingMarginFt, g && g.undisturbedBufferFt, g && Array.isArray(g.limitRing) ? ringSig(g.limitRing) : null]);
   const cfg = useMemo(() => gradingCfg(g), [cfgKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const psig = enabled ? parcelsSig(parcels, baseSetback) : "";
   const parcelsRef = useRef(parcels); parcelsRef.current = parcels;
@@ -190,6 +203,6 @@ export function useGradingBase({ enabled, origin, parcels, gradingSettings, base
   return useMemo(() => ({
     on: !!enabled, cfg, setback, dem, existAt, pack,
     existKey: dem.dem ? `grid:${dem.dem.req.key}` : "",
-    sig: enabled && setback ? [cfg.pavementSlopePct, cfg.slopeRatio, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.limitMode, cfg.limitRing ? ringSig(cfg.limitRing) : "-", xsig, aisleFt, setback.sig, dem.dem ? dem.dem.req.key : ""].join("~") : "",
+    sig: enabled && setback ? [cfg.pavementSlopePct, cfg.slopeRatio, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitMode, cfg.limitRing ? ringSig(cfg.limitRing) : "-", xsig, aisleFt, setback.sig, dem.dem ? dem.dem.req.key : ""].join("~") : "",
   }), [enabled, cfg, setback, dem, existAt, pack, xsig, aisleFt]);
 }

@@ -14,6 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
+import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -1282,7 +1283,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS };
 
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
@@ -1365,6 +1366,7 @@ export const LAYER_VINTAGE = {
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
+  ...DESOTO_VINTAGE,
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
@@ -1566,12 +1568,30 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
  * inline: it is only reachable once this layer is on, and keeping its wording engine off the boot
  * bundle is part of how this feature pays its bundle budget. The import is kicked off here, at
  * toggle-on — long before a cursor can rest on a feature. */
-function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null } = {}) {
+function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null } = {}) {
   const canHover = hoverIdentifyEnabled(cfg);
+  /* NEW-1 (DeSoto / Olive Branch) — an optional per-line LABEL (`cfg.lineLabel`: the pipe size printed on the line). The text is decided by the pure
+   * `lineLabelText`; the label is a permanent Leaflet tooltip bound ONLY while the map is at or past `lineLabel.minZoom` (a dense network labelled at
+   * every zoom is a wall of numbers) and unbound again below it. The tooltip lives in the label pane so it sits over the strokes. */
+  let labelsOn = false;
+  const labelOpts = () => ({ permanent: true, direction: "center", className: "pf-line-label", interactive: false, opacity: 1, ...(labelPane ? { pane: labelPane } : {}) });
+  const wantLabels = (l) => !!(l && l._map && l._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17));
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
     interactive: interactive && canHover,
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
+    ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
   }));
+  if (cfg.lineLabel) {
+    const syncLabels = () => {
+      const want = wantLabels(lyr);
+      if (want === labelsOn) return;
+      labelsOn = want;
+      try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) l.bindTooltip(l.__pfLabel, labelOpts()); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
+    };
+    lyr.on("add", () => { if (lyr._map) { lyr._map.on("zoomend", syncLabels); syncLabels(); } });
+    lyr.on("remove", () => { try { lyr._map && lyr._map.off("zoomend", syncLabels); } catch (_) { /* map already gone */ } });
+    lyr.on("load", syncLabels);
+  }
   if (canHover) {
     import("./featureHoverAttach.js").then((m) => {
       if (interactive) m.wireFeatureHover(lyr, cfg, identifyOk);
@@ -1937,7 +1957,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriFeature") {
-            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
+            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane });
             // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
             // opacity change — re-applying the style function (not a flat {opacity}) so the
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled

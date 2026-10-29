@@ -11,6 +11,7 @@
  * coverage parameter here by construction; test/coverage.test.js locks it down.
  */
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
+import { pipeSizeLabel } from "./desotoLayers.js"; // NEW-1 (DeSoto / Olive Branch) — the default formatter for a `lineLabel` row
 
 // Route a service URL through the same-origin Drive-backed cache proxy (B445) when asked. This
 // is a pure TRANSPORT swap — the layer still requests its full pinned sublayer set for the whole
@@ -108,12 +109,26 @@ export function pointSymbolOptions(cfg = {}, opacity = 1) {
  *                  (it needs leaflet), so it is injected; `test/pointSymbology.test.js` locks
  *                  down that every live call site passes one.
  *   interactive  — enable pointer events so the hover identify can fire on the features. */
+/* The label printed on a line (NEW-1, DeSoto / Olive Branch): the row's `lineLabel.field` read through `lineLabel.format` (default `pipeSizeLabel`, which cleans the
+ * city's hand-typed sizes), or null when there is nothing worth printing. Pure. */
+export function lineLabelText(cfg, props) {
+  const ll = cfg && cfg.lineLabel;
+  if (!ll || !ll.field || !props) return null;
+  const fmt = typeof ll.format === "function" ? ll.format : pipeSizeLabel;
+  const t = fmt(props[ll.field]);
+  return t ? String(t) : null;
+}
+
 export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: !!opts.interactive };
   if (cfg.fields) o.fields = cfg.fields;
   // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
   if (cfg.where) o.where = cfg.where;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
+  // NEW-1 (DeSoto / Olive Branch): a row's `lineLabel` ({ field, minZoom }) puts a short text (the pipe size) on each line; the Leaflet half (`layers.buildFeatureLayer`) binds it.
+  if (cfg.lineLabel && typeof opts.onLabel === "function") {
+    o.onEachFeature = (feature, layer) => { const t = lineLabelText(cfg, feature && feature.properties); if (t) opts.onLabel(layer, t); };
+  }
   // A LINE-role row never fills: a polyline answered by a service as one long ring must not paint as a solid wedge.
   const noFill = cfg.role === "line" ? { fill: false } : null;
   o.style = typeof cfg.styleFn === "function"

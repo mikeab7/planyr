@@ -10,6 +10,7 @@
  * confirm ReviewsBar.jsx already uses (no window.confirm) — Enter/blur commit a rename, Escape
  * abandons it (EDITOR-EXIT-CONTRACT's "text" class).
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -41,6 +42,7 @@ function WorkbookRow({ wb, onOpen, onRename, onDelete }) {
     >
       {renaming ? (
         <input
+          {...NO_AUTOFILL}
           ref={inputRef}
           defaultValue={wb.name}
           onClick={(e) => e.stopPropagation()}

@@ -472,7 +472,10 @@ export function displayFor(sheet, evalResult, rowIndex, colIndex) {
   }
   if (raw == null || raw === "") return "";
   const v = literalTypedValue(raw);
-  return typeof v === "number" && format ? formatValue(v, { numberFormat: format }) : raw;
+  // A typed DATE literal ("2024-01-01") honours its cell's date format too — an imported Excel date
+  // arrives as exactly this (ISO text + the file's own "m/d/yyyy"), and showing the ISO text
+  // regardless of the format made every opened workbook's dates look different from Excel's.
+  return (typeof v === "number" || isDate(v)) && format ? formatValue(v, { numberFormat: format }) : raw;
 }
 
 /** The colour a cell's own number format wants for what's currently showing there ([Red] etc —

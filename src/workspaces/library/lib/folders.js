@@ -339,10 +339,14 @@ export async function planFolderDelete(projectId, folderId) {
  *
  * Order matters: the Drive trash is asked for FIRST, while this project's `project_folders` rows
  * still exist server-side (the server needs them to know whether — and where — a Drive tree was
- * ever mirrored; see `purgeProjectDrive` in server/storage/folderMirror.js). The rows are then
- * deleted regardless of whether the Drive half succeeded, so a purge never again leaves orphaned
- * `project_folders` rows behind even when Drive itself couldn't be reached — the caller is told
- * about that honestly (LOUD-FAILURE) rather than left to discover it the way this bug was found.
+ * ever mirrored; see `purgeProjectDrive` in server/storage/folderMirror.js).
+ *
+ * NEW-6 (data-risk 2026-10-29) — THE ROWS ARE DELETED ONLY ONCE DRIVE IS DONE WITH. This used to delete
+ * them "regardless of whether the Drive half succeeded": on 2026-10-06 Drive answered HTTP 502, the rows
+ * were deleted anyway and a ~118-folder tree was stranded with nothing left to find it by (B2146554). The
+ * rows ARE the retry handle, so a Drive failure now leaves them in place, reports it (LOUD-FAILURE) and
+ * the purge can be run again. Drive not enabled (404/503) is not a failure — there is nothing in Drive.
+ * A server refusal because the project still has a live plan (409) leaves the rows too.
  * Signed-out / unconfigured → skipped (there is nothing to purge). */
 export async function purgeProjectFolders(projectId) {
   if (!supabase || !projectId) return { ok: true, skipped: true };
@@ -360,15 +364,19 @@ export async function purgeProjectFolders(projectId) {
       if (resp.status === 404 || resp.status === 503) drive = { ok: true, trashed: false, skipped: true }; // Drive not enabled — nothing there to trash
       else {
         let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-        drive = resp.ok && jr.ok ? jr : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+        drive = resp.ok && jr.ok ? jr : { ok: false, live: !!jr.live, error: jr.error || `HTTP ${resp.status}` };
       }
     } catch (e) { drive = { ok: false, error: (e && e.message) || "Network error." }; }
   }
+  if (drive.ok === false) {
+    // Drive failed (or the server refused): keep every row so the cleanup stays retryable.
+    return { ok: false, rowsDeleted: false, driveTrashed: false, live: !!drive.live || undefined, error: drive.error || "Drive cleanup failed." };
+  }
   const { error: delErr } = await supabase.from("project_folders").delete().eq("project_id", projectId);
   return {
-    ok: !delErr && drive.ok !== false,
+    ok: !delErr,
     rowsDeleted: !delErr,
     driveTrashed: !!drive.trashed,
-    error: delErr ? delErr.message : (drive.ok === false ? drive.error : null),
+    error: delErr ? delErr.message : null,
   };
 }

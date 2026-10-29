@@ -454,6 +454,8 @@ async function readWorkbookFile(arrayBuffer) {
   wb.worksheets.forEach((ws, i) => sheetNameToId.set(ws.name.trim().toLowerCase(), `sheet${i + 1}`));
 
   let unsupportedCount = 0;
+  let blockMerges = 0; // NEW-1 (open uploaded Excel) — merges the model can't draw (see below); reported, never silent
+  const hiddenSheets = wb.worksheets.filter((ws) => ws.state && ws.state !== "visible").length;
   const rawSheets = wb.worksheets.map((ws, i) => {
     const id = `sheet${i + 1}`;
     const colCount = Math.max(1, ws.columnCount || 1);
@@ -484,7 +486,9 @@ async function readWorkbookFile(arrayBuffer) {
           if (text != null) cells[key] = text;
         }
 
-        if (cell.numFmt) formats[key] = cell.numFmt;
+        // "General" is Excel's name for NO format. Some writers (SheetJS, hence every converted .xls) spell
+        // it out on the cell; passed through, the formatter would print the word "General" instead of the value.
+        if (cell.numFmt && !/^general$/i.test(String(cell.numFmt).trim())) formats[key] = cell.numFmt;
         const style = excelStyleToPlanyrStyle(cell);
         if (style) styles[key] = style;
       });
@@ -493,7 +497,8 @@ async function readWorkbookFile(arrayBuffer) {
     const merges = [];
     for (const range of (ws.model && ws.model.merges) || []) {
       const parsed = parseA1Range(range);
-      if (!parsed || parsed.r1 !== parsed.r2) continue; // vertical/block merges: content kept, visual merge dropped (sheetModel.js file header — B1007283)
+      if (!parsed) continue;
+      if (parsed.r1 !== parsed.r2) { blockMerges++; continue; } // vertical/block merges: content kept, visual merge dropped (sheetModel.js file header — B1007283)
       const c1 = parsed.c1 - 1, c2 = parsed.c2 - 1;
       if (c2 <= c1 || c1 >= columns.length || c2 >= columns.length) continue;
       merges.push({ r: parsed.r1 - 1, c1Id: columns[c1].id, c2Id: columns[c2].id });
@@ -543,14 +548,14 @@ async function readWorkbookFile(arrayBuffer) {
   }
 
   const workbook = migrateWorkbook({ sheets: rawSheets, activeSheetId: rawSheets[0].id });
-  return { workbook, unsupportedCount };
+  return { workbook, unsupportedCount, blockMerges, hiddenSheets };
 }
 
 /** Parse an ArrayBuffer holding a real .xlsx file into a Planyr workbook. Every worksheet, in
  *  order; formulas stay formulas where every function they call is implemented (see
  *  `checkFormulaSupport`), otherwise the cell keeps the file's own cached VALUE and its original
  *  text lands in `unsupportedFormulas` (never dropped, never a whole-import failure). Returns
- *  `{ workbook, unsupportedCount }` so the caller can tell the user how many cells were kept as
+ *  `{ workbook, unsupportedCount, blockMerges, hiddenSheets }` so the caller can tell the user how many cells were kept as
  *  values (LOUD-FAILURE — never silent). Throws on a file ExcelJS can't parse at all, or on a
  *  file with zero worksheets — the caller surfaces that as a visible error.
  *
