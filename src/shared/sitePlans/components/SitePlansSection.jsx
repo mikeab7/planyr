@@ -1460,30 +1460,31 @@ export default function SitePlansSection({
                   </span>
                 </Field>
               )}
-              {flow.cropping ? (
-                // B1134754 NEW-21 — "crop should be available BEFORE placement… trimming the
-                // flyer down to the plan first, then placing, is the natural workflow." Same
-                // tool the post-placement "Crop…" button opens, over the just-rasterized page.
-                <ImageCropTool
-                  src={flow.previewUrl} imgW={flow.rasterW} imgH={flow.rasterH} crop={flow.crop}
-                  onCommit={(crop) => setF({ crop, cropping: false })}
-                  onCancel={() => setF({ cropping: false })}
-                  maxWidth={420} maxHeight={340}
-                />
-              ) : (
-                <>
-                  <PagePreview url={flow.previewUrl} />
-                  <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
-                    <Button size="sm" onClick={confirmPage} disabled={!flow.overlayId && (!flow.title || !flow.docDate)}>{flow.overlayId ? "Use this page" : "Place on map"}</Button>
-                    {/* NEW-2 (B1263073) — same wording fix as OverlayRow's crop control below:
-                        "Cropped ✓" named a completed status, not the reachable action (re-opening
-                        the crop tool). "Edit crop" once a crop exists, matching the other spot. */}
-                    <Button size="sm" variant="ghost" onClick={() => setF({ cropping: true })} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                      <CropIcon />{hasCrop(flow) ? "Edit crop" : "Crop…"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={cancelFlow}>Cancel</Button>
-                  </div>
-                </>
+              {/* B1134754 NEW-21 — "crop should be available BEFORE placement… trimming the flyer down to the plan first,
+                  then placing, is the natural workflow." B2448817 (owner 2026-10-29: "maybe we should make the box bigger"):
+                  it opens in the SAME full-size CropModal + `fill` tool the post-placement Edit crop uses — one crop
+                  window, one behaviour — over the just-rasterized page. Done returns here with the crop applied; Cancel
+                  returns with no change. */}
+              <PagePreview url={flow.previewUrl} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                <Button size="sm" onClick={confirmPage} disabled={!flow.overlayId && (!flow.title || !flow.docDate)}>{flow.overlayId ? "Use this page" : "Place on map"}</Button>
+                {/* NEW-2 (B1263073) — same wording fix as OverlayRow's crop control below:
+                    "Cropped ✓" named a completed status, not the reachable action (re-opening
+                    the crop tool). "Edit crop" once a crop exists, matching the other spot. */}
+                <Button size="sm" variant="ghost" onClick={() => setF({ cropping: true })} data-testid="site-plan-flow-crop" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <CropIcon />{hasCrop(flow) ? "Edit crop" : "Crop…"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={cancelFlow}>Cancel</Button>
+              </div>
+              {flow.cropping && (
+                <CropModal testId="site-plan-precrop-modal" title={`Crop “${flow.title || (flow.file && flow.file.name) || "this site plan"}”`} onCancel={() => setF({ cropping: false })}>
+                  <ImageCropTool
+                    fill fileName={flow.title || (flow.file && flow.file.name) || ""}
+                    src={flow.previewUrl} imgW={flow.rasterW} imgH={flow.rasterH} crop={flow.crop}
+                    onCommit={(crop) => setF({ crop, cropping: false })}
+                    onCancel={() => setF({ cropping: false })}
+                  />
+                </CropModal>
               )}
             </>
           )}
