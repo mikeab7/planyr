@@ -53,7 +53,8 @@ try {
   const sheetUrl = () => `${BASE}/#/project/${PROJECT}/spreadsheet`;
   const goLibrary = async (cb = false) => { await page.goto(libraryUrl(cb), { waitUntil: "load" }); await page.waitForSelector('[data-testid="library-unified"]', { timeout: 60000 }); await settle(2000); };
   // the Library shows a file's composed TITLE ("<date> <project> - <name without extension>"), not its raw file name
-  const rowFor = (name) => page.locator('[data-testid="library-file-row"]', { hasText: name.replace(/\.[^.]+$/, "") });
+  // A CSV and its new .xlsx copy share a title, so the row also carries the file-type tag (CSV / XLSX) to tell them apart
+  const rowFor = (name) => page.locator('[data-testid="library-file-row"]', { hasText: name.replace(/\.[^.]+$/, "") }).filter({ hasText: new RegExp(name.split(".").pop().toUpperCase()) });
   const rec = (id) => page.evaluate(async (i) => (await window.pfSupabase.from("doc_reviews").select("data").eq("id", i).single()).data?.data, id);
   const idFor = async (token) => { const q = await page.evaluate(async (t) => (await window.pfSupabase.from("doc_reviews").select("id").ilike("title", `%${t}%`).is("deleted_at", null)).data || [], token); return q.map((r) => r.id); };
   const bytesOf = async (driveKey) => {
