@@ -668,14 +668,17 @@ export function sortRange(sheet, r1, r2, colIndex, direction) {
 
   const rows = [];
   for (let r = rr1; r <= rr2; r++) {
-    const rowCells = {}, rowFormats = {}, rowStyles = {};
+    const rowCells = {}, rowFormats = {}, rowStyles = {}, rowUnsupported = {}, rowDismissed = {};
     for (const c of sheet.columns) {
       const key = cellKey(c.id, r);
       if (Object.prototype.hasOwnProperty.call(sheet.cells, key)) rowCells[c.id] = sheet.cells[key];
       if (Object.prototype.hasOwnProperty.call(sheet.formats, key)) rowFormats[c.id] = sheet.formats[key];
       if (Object.prototype.hasOwnProperty.call(sheet.styles, key)) rowStyles[c.id] = sheet.styles[key];
+      // NEW-4 — both maps are keyed colId:row like cells, so they ride in the row bundle too.
+      if (sheet.unsupportedFormulas && Object.prototype.hasOwnProperty.call(sheet.unsupportedFormulas, key)) rowUnsupported[c.id] = sheet.unsupportedFormulas[key];
+      if (sheet.dismissedInconsistencies && Object.prototype.hasOwnProperty.call(sheet.dismissedInconsistencies, key)) rowDismissed[c.id] = sheet.dismissedInconsistencies[key];
     }
-    rows.push({ cells: rowCells, formats: rowFormats, styles: rowStyles, height: sheet.rowHeights[r], sortKey: sortKeyFor(sheet.cells[cellKey(col.id, r)]) });
+    rows.push({ cells: rowCells, formats: rowFormats, styles: rowStyles, unsupported: rowUnsupported, dismissed: rowDismissed, height: sheet.rowHeights[r], sortKey: sortKeyFor(sheet.cells[cellKey(col.id, r)]) });
   }
   const dir = direction === "desc" ? -1 : 1;
   // Blank-last is a property of the DATA, not the direction — it must NOT be inside the part of
@@ -689,6 +692,7 @@ export function sortRange(sheet, r1, r2, colIndex, direction) {
   });
 
   const cells = { ...sheet.cells }, formats = { ...sheet.formats }, styles = { ...sheet.styles }, rowHeights = { ...sheet.rowHeights };
+  const unsupportedFormulas = { ...sheet.unsupportedFormulas }, dismissedInconsistencies = { ...sheet.dismissedInconsistencies };
   for (let i = 0; i < sorted.length; i++) {
     const r = rr1 + i, row = sorted[i];
     for (const c of sheet.columns) {
@@ -696,10 +700,12 @@ export function sortRange(sheet, r1, r2, colIndex, direction) {
       if (Object.prototype.hasOwnProperty.call(row.cells, c.id)) cells[key] = row.cells[c.id]; else delete cells[key];
       if (Object.prototype.hasOwnProperty.call(row.formats, c.id)) formats[key] = row.formats[c.id]; else delete formats[key];
       if (Object.prototype.hasOwnProperty.call(row.styles, c.id)) styles[key] = row.styles[c.id]; else delete styles[key];
+      if (Object.prototype.hasOwnProperty.call(row.unsupported, c.id)) unsupportedFormulas[key] = row.unsupported[c.id]; else delete unsupportedFormulas[key];
+      if (Object.prototype.hasOwnProperty.call(row.dismissed, c.id)) dismissedInconsistencies[key] = row.dismissed[c.id]; else delete dismissedInconsistencies[key];
     }
     if (row.height != null) rowHeights[r] = row.height; else delete rowHeights[r];
   }
-  return { ...sheet, cells, formats, styles, rowHeights };
+  return { ...sheet, cells, formats, styles, rowHeights, unsupportedFormulas, dismissedInconsistencies };
 }
 function sortKeyFor(raw) {
   if (raw == null || raw === "") return { kind: "blank", v: null };
