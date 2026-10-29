@@ -90,10 +90,10 @@ describe("docs/STATEWIDE-PARCELS.md gap rows ↔ parcelGaps.js", () => {
   });
 
   it("NEW-2: the measured Schneider counties are filed paywall / locked, and the unmeasured ones are left alone", () => {
-    for (const k of ["ga_taliaferro", "ga_randolph", "ga_quitman", "sd_clay", "sd_mccook"]) expect(PARCEL_GAPS[k][0], k).toBe("paywall");
-    for (const k of ["ga_bacon", "ga_wilkes", "ia_adams", "ia_union", "mi_houghton", "mo_pettis", "ks_miami", "ks_wilson", "il_ogle", "sd_brookings", "sd_custer"]) expect(PARCEL_GAPS[k][0], k).toBe("locked");
+    for (const k of ["ga_taliaferro", "ga_randolph", "ga_quitman", "sd_clay", "sd_mccook", "mi_alcona"]) expect(PARCEL_GAPS[k][0], k).toBe("paywall");
+    for (const k of ["ga_bacon", "ga_wilkes", "ia_adams", "ia_union", "mi_houghton", "mi_oscoda", "mi_presqueisle", "mo_pettis", "ks_miami", "ks_wilson", "il_ogle", "sd_brookings", "sd_custer"]) expect(PARCEL_GAPS[k][0], k).toBe("locked");
     const counts = { paywall: 0, locked: 0 };
     for (const e of Object.values(PARCEL_GAPS)) if (/^Schneider map/.test(e[1] || "")) counts[e[0]]++;
-    expect(counts).toEqual({ paywall: 5, locked: 62 });
+    expect(counts).toEqual({ paywall: 6, locked: 64 });
   });
 });
