@@ -24,17 +24,24 @@
  * already uses.
  */
 
+import { commaIntOrZero, commaDec2OrZero } from "./numberFormat.js";
+
 /** The canonical unit tokens. Use these anywhere the number formatting is bespoke. */
 export const AC = "AC";
 export const SF = "SF";
 export const AC_FT = "AC-FT";
 
+/* THE ONE HOME for the acre constant (NEW-1). 43,560 is the number of square feet in an acre AND
+ * of cubic feet in an acre-foot (one acre, one foot deep), so it has two NAMES for two meanings —
+ * area in, acres out vs. volume in, acre-feet out — and one value. Import these; never type the
+ * literal. `test/areaUnits.test.js` fails the build on a new `43560` or a new local copy. */
 export const SQFT_PER_ACRE = 43560;
+export const CF_PER_ACFT = 43560;
 
 /* The two number conventions the app already had, kept exactly: square feet to whole numbers,
  * acres to two decimals, thousands separators on both. */
-const int = (n) => Math.round(Number(n) || 0).toLocaleString();
-const two = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const int = commaIntOrZero;
+const two = commaDec2OrZero;
 
 /** "193,007 SF" */
 export const fmtSf = (n) => `${int(n)} ${SF}`;

@@ -16,9 +16,8 @@
  * Pure: cubic feet / cubic yards in, a balance summary out. Node-testable.
  */
 
+import { CF_PER_ACFT, SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 const CF_PER_CY = 27;
-const CF_PER_ACFT = 43560;
-const SQFT_PER_ACRE = 43560;
 const num = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
 
 export const DEFAULT_SHRINK_FACTOR = 1.0;

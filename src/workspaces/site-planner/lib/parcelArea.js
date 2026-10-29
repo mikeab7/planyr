@@ -11,8 +11,9 @@
  * Pure. Unit-tested in test/parcelRecord.test.js.
  */
 import { polyArea } from "./polygonSplit.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { SQFT_PER_ACRE };
 
-export const SQFT_PER_ACRE = 43560;
 
 /* A typed acreage. Accepts "12.50", "12.5 ac", a bare number; anything that isn't a positive finite
  * number is null — never 0, which would read as "the record says zero acres". */

@@ -24,6 +24,7 @@
 import { stormIntensity, runoffCoefficient, DESIGN_STORMS } from "./detentionRules.js";
 import { buildStageStorageDischarge } from "./stageStorageDischarge.js";
 import { outletProblems, sizeOrificeForRelease, sizeWeirForRelease, DEFAULT_ORIFICE_C, DEFAULT_WEIR_C } from "./outletStructure.js";
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 
 export const DEFAULT_TC_MIN = 15;           // screening time of concentration (small industrial site)
 export const DEFAULT_PRE_RUNOFF_C = 0.3;    // undeveloped Houston-area pasture, screening assumption
@@ -266,7 +267,7 @@ export function assessRoutedDetention({
       attenuationPct: postUnrouted > 0 ? round((1 - routed.routedPeakCfs / postUnrouted) * 100, 0) : null,
       criticalDurationMin: routed.criticalDurationMin,
       maxElevFt: round(routed.maxElevFt),
-      peakStorageAcFt: round(routed.peakStorageCf / 43560, 3),
+      peakStorageAcFt: round(routed.peakStorageCf / CF_PER_ACFT, 3),
       overtopped: routed.overtopped,
       status: pass ? "pass" : "short",
     });

@@ -12,8 +12,9 @@
  * PondSection component maps them to SVG with theme tokens, so nothing here touches the DOM and it
  * all unit-tests without a browser. Numbers render at 1dp to match the panel values exactly. */
 
-const AC_FT = 43560;
-export const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
+export { f1 };
 
 // ── label geometry (pure bbox estimate; no DOM/canvas) ──
 const CHAR_PX = 5.4;   // ~0.58em per glyph at the ~10px label size

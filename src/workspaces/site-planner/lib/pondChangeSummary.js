@@ -9,14 +9,12 @@
  * excavationCf, bermFillCf }` — all plain numbers (feet / cubic feet / square feet),
  * `null` where unknown. Nothing here mutates or reaches into app state. */
 
-const AC_FT = 43560;
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
+import { commaInt as f0, plainDec1 as f1, plainDec2 as f2 } from "../../../shared/units/numberFormat.js";
 const EPS_FT = 0.05;
 const EPS_CF = 1; // a cubic foot of "change" is noise
 const EPS_SF = 1;
 
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
-const f2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
-const f0 = (n) => Math.round(n).toLocaleString();
 
 const changed = (a, b, eps) => a != null && b != null && Math.abs(a - b) > eps;
 
@@ -85,7 +83,7 @@ export function buildChangeSummaryRows({
   }
 
   if (changed(before.usableCf, after.usableCf, EPS_CF)) {
-    const beforeAcFt = before.usableCf / AC_FT, afterAcFt = after.usableCf / AC_FT;
+    const beforeAcFt = before.usableCf / CF_PER_ACFT, afterAcFt = after.usableCf / CF_PER_ACFT;
     let note = null;
     if (siteDetReqAcFt != null) {
       const providedNow = siteDetProvidedOtherAcFt + afterAcFt;
@@ -99,7 +97,7 @@ export function buildChangeSummaryRows({
   }
 
   if (changed(before.mitCandidateCf, after.mitCandidateCf, EPS_CF)) {
-    const beforeAcFt = before.mitCandidateCf / AC_FT, afterAcFt = after.mitCandidateCf / AC_FT;
+    const beforeAcFt = before.mitCandidateCf / CF_PER_ACFT, afterAcFt = after.mitCandidateCf / CF_PER_ACFT;
     let note = null;
     if (siteMitReqAcFt != null) {
       const providedNow = siteMitProvidedOtherAcFt + afterAcFt;
@@ -114,8 +112,8 @@ export function buildChangeSummaryRows({
     rows.push({
       key: "land",
       label: "Pond land take",
-      from: `${f2(before.landTakeSf / AC_FT)} AC`,
-      to: `${f2(after.landTakeSf / AC_FT)} AC`,
+      from: `${f2(before.landTakeSf / CF_PER_ACFT)} AC`,
+      to: `${f2(after.landTakeSf / CF_PER_ACFT)} AC`,
       note: after.bermFillCf > 0 ? "berm ring" : null,
     });
   }

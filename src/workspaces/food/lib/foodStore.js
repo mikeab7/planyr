@@ -67,12 +67,6 @@ export function reportBrowseError(error, now = Date.now()) {
   } catch (_) { return Promise.resolve(false); }
 }
 
-export async function fetchPlaceById(id) {
-  if (!supabase || !id) return { data: null, error: null };
-  const { data, error } = await supabase.from("food_places").select("*").eq("id", id).maybeSingle();
-  return { data, error };
-}
-
 /** Search the WHOLE 100,000+-place, three-metro snapshot by name — deliberately NOT scoped to
  *  the current viewport (owner, 2026-08-18: "the entire point of search is finding a place you
  *  cannot see"). Backed by `food_places_search_by_name` (db/food.sql): a trigram word-similarity

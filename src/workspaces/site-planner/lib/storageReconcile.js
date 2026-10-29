@@ -25,7 +25,7 @@
  * Pure: cubic feet in, cubic feet out. Node-testable.
  */
 
-const CF_PER_ACFT = 43560;
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 // An acre-foot residue inside display precision (1 dp) is not a real overlap — a FAIL must name a
 // volume the reader can actually see on the panel, never a rounding crumb.
 export const OVERLAP_TOL_CF = 0.05 * CF_PER_ACFT;

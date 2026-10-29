@@ -38,6 +38,7 @@ import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, 
 import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { fileDropEffect } from "./lib/reviewCursor.js";
+import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -48,12 +49,9 @@ const DBOX = { w: 380, h: 256 }; // detail "cloud" popup viewing box (px) — st
 // Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B300/B301 alignment guards) lives
 // in lib/stitchGeom.js so it can be unit-tested away from the component.
 
-const f0 = (n) => Math.round(n).toLocaleString();
 // One-decimal feet for LINEAR measures, matching the single-sheet Markup tool (B296) — whole-
 // foot rounding hid sub-foot precision (a 150.6 ft line read "151 ft") and clashed with the
 // 2-dp acres shown for area.
-const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* `chromed` (NEW-3): the host now mounts the app's real AppHeader above this component (logo,
  * breadcrumb, module tabs, and an explicitly labelled "‹ Exit Stitch"), so the local back-link that

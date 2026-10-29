@@ -31,7 +31,6 @@ export function loadEasementRules(store) {
   }
   catch (_) { return clone(); }
 }
-export function saveEasementRules(rules) { try { localStorage.setItem(LS, JSON.stringify(rules)); } catch (_) {} }
 
 /** B1953793 — fresh read-modify-write of ONE jurisdiction (see floodplainRules.patchFloodplainRule). */
 export function patchEasementRule(key, patch, store) {

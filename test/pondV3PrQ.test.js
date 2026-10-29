@@ -12,7 +12,7 @@ const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/S
 
 describe("O3 — map storage/depth == panel/section, from one source of truth", () => {
   it("the map 'Holds' uses the pond's USABLE storage (pondSplit.usableCf), NOT the gross tub volume", () => {
-    expect(src).toContain("const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / 43560 : null;");
+    expect(src).toContain("const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / CF_PER_ACFT : null;");
     // the old gross-volume map label is gone
     expect(src.includes("`Holds ${f2(r.vol / SQFT_PER_ACRE)} AC-FT")).toBe(false);
   });

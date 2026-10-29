@@ -21,6 +21,7 @@ import { classifyWell } from "./wellStatus.js";
 import { toGrid, screenProximity, planeForRings } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
 import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 const FT_PER_MI = 5280;
 const EDGE = 1e-6; // a feature EXACTLY at the radius is inside it (≤, not <): float dust must not flip that
@@ -279,7 +280,7 @@ export function measureWetlands(rings, holes, features, thresholds = CHECK_THRES
   }
   const onAll = clipToSite(unionOfFeatures(kept, frame), solid);
   const sqft = pathsArea(onAll);
-  return { siteSqft, sqft, acres: sqft / 43560, count, types: [...types], side: sqft >= thresholds.overlapDustSqft ? sideWord(onAll, solid) : null };
+  return { siteSqft, sqft, acres: sqft / SQFT_PER_ACRE, count, types: [...types], side: sqft >= thresholds.overlapDustSqft ? sideWord(onAll, solid) : null };
 }
 
 /* LINES / POINTS (pipelines, wells): distance of each feature from the real rings (0 when a line

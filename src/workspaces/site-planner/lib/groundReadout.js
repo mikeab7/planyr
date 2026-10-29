@@ -21,11 +21,11 @@
  * whenever either side is unknown (a delta against a guess is a lie).
  */
 import { FILL_RAMP, HEAT_RAMP, binIndex, ZERO_BAND_FT } from "./mitigationHeatmap.js";
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 // A grid cell wider than this is coarse enough that the point sample deserves a "≈".
 export const COARSE_CELL_FT = 12;
 
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 
 /* The chip sits on a dark translucent panel over aerial imagery, so the delta takes the
  * READABLE end of each ramp — the same warm-fill / cool-cut families the cut/fill

@@ -15,10 +15,10 @@
  *      floor; otherwise the chip is silent (never a fabricated number — LOUD-FAILURE).
  */
 
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 const EPS_FT = 0.05; // a rim within this of grade reads as "at grade", not above it
 export const FFE_FREEBOARD_REQ_FT = 1; // the screening freeboard between peak water and finished floor
 
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 
 /**
  * @param {object} opts

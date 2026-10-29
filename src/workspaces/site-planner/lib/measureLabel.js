@@ -22,13 +22,15 @@
  * disagree with the canvas about what a measurement measures. Tests: test/measureLabel.test.js.
  */
 
-export const SQFT_PER_ACRE = 43560;
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+import { commaInt, commaDec2 } from "../../../shared/units/numberFormat.js";
+export { SQFT_PER_ACRE };
 /* Number formatting, one convention for the whole measurement family (mirrors the planner's
  * f0/f2): thousands separators everywhere, acres to two decimals, feet and square feet to
  * zero. Rendered in tabular figures by the caller so digits never jitter between frames. */
-export const fmtInt = (n) => Math.round(n).toLocaleString();
-export const fmt2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const fmtInt = commaInt;
+export const fmt2 = commaDec2;
 export const fmtFeet = (n) => `${fmtInt(n)}′`;
 export const fmtSf = (n) => `${fmtInt(n)} SF`;
 export const fmtAcres = (n) => `${fmt2(n)} AC`;

@@ -15,13 +15,11 @@ import { usablePondVolume } from "./pondGeom.js";
 import { computeRequiredDetention, computePumpedCredit } from "./detentionRules.js";
 import { effectivePondRole } from "./pondLedger.js";
 import { overdugAcFt } from "./pondVerdict.js";
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
+import { usInt as f0, plainDec1 as f1, plainDec2 as f2 } from "../../../shared/units/numberFormat.js";
 
 export const BERM_MAX_RAISE_FT = 4; // screening convention — no published berm-height cap is modeled yet (label it)
-const AC_FT = 43560;
 
-const f0 = (n) => Math.round(n).toLocaleString("en-US");
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
-const f2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const short = (s, n = 22) => {
   const t = String(s || "").trim();
   return t.length > n ? t.slice(0, n - 1) + "…" : t;
@@ -124,9 +122,9 @@ export function rankLedgerMoves({
       .filter((p) => p.factsKnown !== false && p.mode === "anchored" && p.bands && p.bands.mitigationCandidateCf > 0
         && effectivePondRole({ role: p.role }, p).role !== "detention")
       .sort((a, b) => b.bands.mitigationCandidateCf - a.bands.mitigationCandidateCf);
-    let remainingCf = mitOverAcFt * AC_FT;
+    let remainingCf = mitOverAcFt * CF_PER_ACFT;
     for (const p of credited) {
-      if (remainingCf < 0.05 * AC_FT) break;
+      if (remainingCf < 0.05 * CF_PER_ACFT) break;
       const shrinkCf = Math.min(p.bands.mitigationCandidateCf, remainingCf);
       remainingCf -= shrinkCf;
       const cy = shrinkCf / 27;
@@ -134,20 +132,20 @@ export function rankLedgerMoves({
       moves.push({
         kind: "shrink-overdug", id: p.id,
         label: `Shrink ${short(p.name)} toward required+10% — saves ~${f0(cy)} cy of cut${cost != null ? ` (~$${f0(cost)})` : ""}`,
-        info: `The mitigation ledger is over-dug by ~${f2(mitOverAcFt)} AC-FT beyond required + margin — cut past the requirement earns no credit. Shallowing/shrinking this pond's below-WSE band by ${f2(shrinkCf / AC_FT)} AC-FT keeps the ledger covered and saves the dirt. Screening: 1 ac-ft of below-WSE cut = 1 ac-ft of credit. The tool proposes — redraw the pond to take it.`,
-        deltas: { detAcFt: 0, mitAcFt: -(shrinkCf / AC_FT), dirtCy: -Math.round(cy), costUsd: cost != null ? -Math.round(cost) : null, buildingSf: null },
+        info: `The mitigation ledger is over-dug by ~${f2(mitOverAcFt)} AC-FT beyond required + margin — cut past the requirement earns no credit. Shallowing/shrinking this pond's below-WSE band by ${f2(shrinkCf / CF_PER_ACFT)} AC-FT keeps the ledger covered and saves the dirt. Screening: 1 ac-ft of below-WSE cut = 1 ac-ft of credit. The tool proposes — redraw the pond to take it.`,
+        deltas: { detAcFt: 0, mitAcFt: -(shrinkCf / CF_PER_ACFT), dirtCy: -Math.round(cy), costUsd: cost != null ? -Math.round(cost) : null, buildingSf: null },
         confirmFlags: [], destructive: false,
-        score: shrinkCf / AC_FT,
+        score: shrinkCf / CF_PER_ACFT,
       });
     }
   }
 
   // 2) NEW-13 — the one-click berm: smallest joint H that closes the detention gap.
   if (detGapAcFt > 0.01 && ponds.length) {
-    const s = solveBermRaise({ ponds, deficitCf: detGapAcFt * AC_FT });
+    const s = solveBermRaise({ ponds, deficitCf: detGapAcFt * CF_PER_ACFT });
     bermExcluded = s.excluded;
     if ((s.ok || s.partial) && s.perPond.length) {
-      const gainAcFt = s.gainCf / AC_FT;
+      const gainAcFt = s.gainCf / CF_PER_ACFT;
       const n = s.perPond.length;
       const fbNote = criteriaRule?.minFreeboardFt != null ? `Freeboard is preserved (${criteriaRule.minFreeboardFt}′ min per ${criteriaRule.label || "criteria"}).` : "Freeboard is preserved.";
       moves.push({
@@ -193,15 +191,15 @@ export function rankLedgerMoves({
       const sf = (b.areaSf || 0) + (b.courtSf || 0);
       let reqDelta = null;
       if (Number.isFinite(reqInputs.impPct) && Number.isFinite(reqInputs.acres) && reqInputs.acres > 0 && sf > 0) {
-        const newImp = Math.max(0, reqInputs.impPct - (sf / (reqInputs.acres * AC_FT)) * 100);
+        const newImp = Math.max(0, reqInputs.impPct - (sf / (reqInputs.acres * CF_PER_ACFT)) * 100);
         const r2 = computeRequiredDetention({ ...reqInputs, impPct: newImp });
         if (r2 && r2.kind === "point" && Number.isFinite(r2.requiredAcFt) && reqAcFt != null) reqDelta = r2.requiredAcFt - reqAcFt;
       }
-      const gain = u.usableCf / AC_FT + (reqDelta != null ? -reqDelta : 0);
+      const gain = u.usableCf / CF_PER_ACFT + (reqDelta != null ? -reqDelta : 0);
       moves.push({
         kind: "convert-building", id: b.id,
-        label: `Convert ${short(b.name)}+court to a basin: +${f2(u.usableCf / AC_FT)} AC-FT, −${f0(sf / 1000)}k SF`,
-        info: `Replacing this building and its court with a bermed basin at the site pond pattern (${f1(synthDet.depth)}′ deep, ${synthDet.slope}:1 sides, ${f1(synthDet.freeboard)}′ freeboard) stores ~${f2(u.usableCf / AC_FT)} AC-FT usable${reqDelta != null ? ` and drops the requirement by ~${f2(-reqDelta)} AC-FT (impervious falls with the roof/paving)` : ""}. It costs ${f0(sf)} SF of yield: the most expensive move here; ranked accordingly. The tool proposes; redrawing the plan is your call.`,
+        label: `Convert ${short(b.name)}+court to a basin: +${f2(u.usableCf / CF_PER_ACFT)} AC-FT, −${f0(sf / 1000)}k SF`,
+        info: `Replacing this building and its court with a bermed basin at the site pond pattern (${f1(synthDet.depth)}′ deep, ${synthDet.slope}:1 sides, ${f1(synthDet.freeboard)}′ freeboard) stores ~${f2(u.usableCf / CF_PER_ACFT)} AC-FT usable${reqDelta != null ? ` and drops the requirement by ~${f2(-reqDelta)} AC-FT (impervious falls with the roof/paving)` : ""}. It costs ${f0(sf)} SF of yield: the most expensive move here; ranked accordingly. The tool proposes; redrawing the plan is your call.`,
         deltas: { detAcFt: Math.min(gain, detGapAcFt), mitAcFt: null, dirtCy: null, costUsd: null, buildingSf: -Math.round(sf) },
         confirmFlags: [], destructive: true,
         score: Math.min(gain, detGapAcFt) * 0.5,
