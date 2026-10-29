@@ -200,7 +200,7 @@ import { setLayersHidden } from "./lib/layerHide.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
-import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
+import { anchorTransform, anchorTransformAttr, anchorInverseCss, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
 import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
 import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
@@ -25467,13 +25467,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   surrounding group instead (PDF-PARITY); the group itself is the export's anchor.
                   Geometry mirrors the backdrop exactly (same overscan, same gesture transform);
                   `pointerEvents: none` throughout, so it can neither take a click nor steal a
-                  handle. The inner counter-translate undoes the SVG's own registration shift — the
-                  SVG is nudged onto the imagery, and a map pane inside it must not be nudged twice. */}
+                  handle. The inner counter-transform undoes the SVG's own registration shift AND the plan group's live
+                  pan/zoom transform (`anchorInverseCss`) — this host already carries the basemap's gesture transform
+                  itself, so without the second half a lifted fill moved at TWICE the pan speed and slid off the imagery
+                  until release (NEW-1). */}
               {origin && (
                 <g {...{ [FRONT_BAND_ATTR]: "1" }}>
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
-                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
                       <div ref={geoFrontWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoFrontPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
@@ -25857,8 +25859,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {origin && (
                 <g {...{ [PARCEL_PICK_BAND_ATTR]: "1" }}>
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
-                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
                       <div ref={geoPickWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoPickPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
