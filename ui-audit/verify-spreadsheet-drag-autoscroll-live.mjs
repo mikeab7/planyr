@@ -73,8 +73,11 @@ try {
     ok("down: held still below the grid, it scrolls", mid.top > 0, `scrollTop ${mid.top}`);
     ok("down: the selection grew beyond the first screenful and keeps growing", mid.maxRow > inside.maxRow && later.maxRow > mid.maxRow, `visible end ${inside.maxRow} → ${mid.maxRow} → ${later.maxRow}`);
     ok("down: the anchor never moved", (await anchor()).row === 2);
-    await page.mouse.up(); const done = await read(); await hold(500); const after = await read();
-    ok("down: release stops it at once (no runaway)", after.top === done.top && after.maxRow === done.maxRow, `${done.top} → ${after.top}`);
+    await page.mouse.up(); const done = await read(); await hold(300); const settled = await read(); await hold(600); const after = await read();
+    // scroll position is the runaway witness (exact); the RENDERED selected rows lag a scroll by a frame or two (virtualised
+    // render window), so the selection end is compared only once that has settled
+    ok("down: release stops it at once (no runaway)", after.top === done.top && settled.top === done.top && after.maxRow === settled.maxRow,
+      `scrollTop ${done.top} → ${settled.top} → ${after.top}; rendered end row ${done.maxRow} → ${settled.maxRow} → ${after.maxRow}`);
   }
   // 2 up
   {
@@ -128,8 +131,9 @@ try {
     const r = await read();
     ok("row-header drag past the bottom edge selects more rows", r.top > 0 && r.maxRow > 20 && (await anchor()).row === 2, JSON.stringify(r));
     await page.mouse.up(); // released over the tab strip, outside the grid
-    const done = await read(); await hold(500); const after = await read();
-    ok("release outside the grid: selection holds and scrolling stops", after.top === done.top && after.maxRow === done.maxRow, `${done.top} → ${after.top}`);
+    const done = await read(); await hold(300); const settled = await read(); await hold(600); const after = await read();
+    ok("release outside the grid: selection holds and scrolling stops", after.top === done.top && settled.top === done.top && after.maxRow === settled.maxRow,
+      `scrollTop ${done.top} → ${settled.top} → ${after.top}; rendered end row ${done.maxRow} → ${settled.maxRow} → ${after.maxRow}`);
   }
 } catch (e) {
   console.log("ERROR", e && e.message); failures++;
