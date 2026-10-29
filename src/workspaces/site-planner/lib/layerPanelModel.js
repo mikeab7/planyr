@@ -177,14 +177,14 @@ export function rampGradient(cfg) {
 /* Which key entry a member of a merged row contributes ("Counties & Cities": heavier county line,
  * thin city line, dashed ETJ). Members without a role contribute nothing. */
 const KEY_ROLE = {
-  jur_county: "County", ga_county: "County", ca_county: "County", nj_county: "County", ny_county: "County",
+  jur_county: "County", ga_county: "County", ca_county: "County", nj_county: "County", ny_county: "County", tn_county: "County", ms_county: "County",
   jur_city: "City Limits", ga_city: "City Limits", ca_city: "City Limits", co_city: "City Limits", ny_city: "City Limits",
   nj_city: "Municipal Limits", ny_town: "Town Limits", ny_village: "Village Limits", // NEW-1 (NJ + NY): NJ's one municipal layer; NY's nested town / village tiers
   jur_etj: "ETJ",
 };
 const KEY_STYLE = {
-  County: { weight: 3.5, dash: false }, "City Limits": { weight: 1.5, dash: false }, ETJ: { weight: 1.5, dash: true },
-  "Municipal Limits": { weight: 1.5, dash: false }, "Town Limits": { weight: 1.5, dash: false }, "Village Limits": { weight: 1.5, dash: false },
+  County: { weight: 2.8, dash: true }, "City Limits": { weight: 3, dash: false }, ETJ: { weight: 1.5, dash: true }, // B2507065: counties DASHED grey, city limits bolder (the map's own looks)
+  "Municipal Limits": { weight: 3, dash: false }, "Town Limits": { weight: 3, dash: false }, "Village Limits": { weight: 3, dash: false },
 };
 export function boundaryKey(members) {
   const seen = new Map();

@@ -130,6 +130,28 @@ export function hoverDetails(cfg = {}, props = {}) {
   return out;
 }
 
+/* The same details as LABELLED ROWS for the click card (B2507062): `{ label, text }` per `hoverFields` entry, in order. A field with no declared `label` gets
+ * a humanised one (identifyCard.humanLabel), and bookkeeping fields drop out there — a card never prints a column name. */
+export function hoverRows(cfg = {}, props = {}) {
+  const out = [];
+  for (const f of cfg.hoverFields || []) {
+    let text = "";
+    if (f.clean && HOVER_CLEANERS[f.clean]) text = HOVER_CLEANERS[f.clean](props) || "";
+    else if (f.date) text = fmtDate(pickAttr(props, f.names || [])) || "";
+    else text = titleCaseAgency(cleanAttr(pickAttr(props, f.names || [])));
+    if (!text) continue;
+    if (f.unit && /^[\d.,]+$/.test(text)) text = `${text} ${f.unit}`;
+    out.push({ label: f.label || (f.names && f.names[0]) || "", text });
+  }
+  return out;
+}
+
+/* The click card for one feature on layer `cfg`: the layer's singular noun as the title (no parenthetical source — that is behind the (i)) and one labelled
+ * row per detail. The one-line `hoverText` below stays for the few surfaces that still name a feature in a single line (an OSM tooltip's sibling wording). */
+export function featureCard(cfg = {}, props = {}) {
+  return { title: hoverTitle(cfg), rows: hoverRows(cfg, props), note: null };
+}
+
 /* The full one-line hover string for a feature on layer `cfg`. Always returns SOMETHING
  * nameable — a feature whose every attribute is withheld still reports what KIND of thing it
  * is and who published it, which is the question the owner actually asked ("I should be able
