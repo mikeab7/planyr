@@ -513,6 +513,22 @@ export function setCellStyle(sheet, r1, r2, c1, c2, patch) {
   return walkAndPatchStyles(sheet, r1, r2, c1, c2, () => patch);
 }
 
+/** Excel's own ceiling for a cell's indent level. */
+export const MAX_INDENT = 15;
+
+/** Increase / Decrease Indent — each cell in the range steps from ITS OWN level (Excel's rule), not from
+ *  the active cell's: a selection of an indented and an unindented label keeps their difference. 0 is stored
+ *  as "unset" (the same null-means-unset convention every other style key uses), and the level is capped at
+ *  MAX_INDENT. A cell already at the limit is a no-op, so a range that cannot move mints no history entry. */
+export function adjustIndent(sheet, r1, r2, c1, c2, delta) {
+  return walkAndPatchStyles(sheet, r1, r2, c1, c2, (r, c) => {
+    const col = sheet.columns[c];
+    const cur = (col && sheet.styles[cellKey(col.id, r)]?.indent) || 0;
+    const next = Math.max(0, Math.min(MAX_INDENT, cur + delta));
+    return next === cur ? null : { indent: next || null };
+  });
+}
+
 /** Border — the Borders group. `edges` is the subset of top/right/bottom/left to touch;
  *  `style` is `"thin" | "double" | null` (null clears); `mode` is `"outline"` (only the
  *  PERIMETER of the range gets that edge — what "Top Border" / "Bottom Border (double)" / a

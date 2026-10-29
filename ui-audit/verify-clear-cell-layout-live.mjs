@@ -49,7 +49,9 @@ const strip = (g, col) => g.map((x, i) => (i === col ? { cell: x.cell } : x));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 try {
-  await page.evaluate(([uid, st]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify({ [st.id]: st })); }, [UID, site]);
+  // A brand-new project opens before its first write only if its id is in the "freshly minted" list
+  // (projectModel.markProjectFreshlyMinted); without it a signed-in session reads "This project doesn't exist".
+  await page.evaluate(([uid, st]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify({ [st.id]: st })); localStorage.setItem("planyr:freshProjects:v1", JSON.stringify([st.id])); }, [UID, site]);
   await page.goto(`${BASE}/#/project/${SITE_ID}/model`, { waitUntil: "load" });
   await page.getByTestId("model-sheet").waitFor({ timeout: 30000 });
   await sleep(1500);

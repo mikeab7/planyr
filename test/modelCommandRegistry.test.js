@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   COMMANDS, COMMAND_GROUPS, searchCommands, fuzzyScore, resolveLabel, isCommandDisabled,
   toggleBoldPatch, toggleItalicPatch, toggleUnderlinePatch, toggleStrikePatch,
-  toggleWrapPatch, increaseIndentPatch, decreaseIndentPatch,
+  toggleWrapPatch,
 } from "../src/workspaces/model/lib/commandRegistry.js";
 import { NUMBER_FORMATS } from "../src/workspaces/model/lib/numberFormats.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomStepButton } from "../src/workspaces/model/lib/sheetZoom.js";
@@ -24,7 +24,7 @@ function makeCtx(overrides = {}) {
     traceMode: "precedents", traceLevel: 1, traceTruncated: false, traceNoFurther: false, traceCellCount: 1,
     inconsistencyCount: 0, inconsistencyPanelOpen: false, nameManagerOpen: false, zoom: 1,
     onUndo: vi.fn(), onRedo: vi.fn(), onFormatPainterToggle: vi.fn(), onClearFormatting: vi.fn(),
-    onSetCellStyle: vi.fn(), onAutoColorToggle: vi.fn(), onMergeToggle: vi.fn(),
+    onSetCellStyle: vi.fn(), onAdjustIndent: vi.fn(), onAutoColorToggle: vi.fn(), onMergeToggle: vi.fn(),
     onApplyFormat: vi.fn(), onNumberFormatOp: vi.fn(), onApplyBorder: vi.fn(),
     onInsertRow: vi.fn(), onInsertColumn: vi.fn(), onDeleteRow: vi.fn(), onDeleteColumn: vi.fn(),
     onSetFreezeTopRow: vi.fn(), onSetFreezeFirstColumn: vi.fn(), onSetFreezeAtSelection: vi.fn(), onUnfreeze: vi.fn(),
@@ -60,8 +60,8 @@ const EXPECT = {
   "valign-middle": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith({ valign: null }),
   "valign-bottom": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith({ valign: "bottom" }),
   "wrap-text": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith(toggleWrapPatch(ctx.activeStyle)),
-  "indent-increase": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith(increaseIndentPatch(ctx.activeStyle)),
-  "indent-decrease": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith(decreaseIndentPatch(ctx.activeStyle)),
+  "indent-increase": (ctx) => expect(ctx.onAdjustIndent).toHaveBeenCalledWith(1),
+  "indent-decrease": (ctx) => expect(ctx.onAdjustIndent).toHaveBeenCalledWith(-1),
   "merge-toggle": (ctx) => expect(ctx.onMergeToggle).toHaveBeenCalledTimes(1),
   "percent-style": (ctx) => expect(ctx.onApplyFormat).toHaveBeenCalledWith("0.0%"),
   "currency-style": (ctx) => expect(ctx.onApplyFormat).toHaveBeenCalledWith("$#,##0.00"),
@@ -222,15 +222,6 @@ describe("style toggle-patch helpers — the SAME computation Ribbon.jsx's own b
   it("toggleWrapPatch toggles on/null", () => {
     expect(toggleWrapPatch({})).toEqual({ wrap: true });
     expect(toggleWrapPatch({ wrap: true })).toEqual({ wrap: null });
-  });
-  it("increaseIndentPatch increments from unset", () => {
-    expect(increaseIndentPatch({})).toEqual({ indent: 1 });
-    expect(increaseIndentPatch({ indent: 2 })).toEqual({ indent: 3 });
-  });
-  it("decreaseIndentPatch floors at 0 and stores null rather than 0 (matches setCellStyle's own null-means-unset convention)", () => {
-    expect(decreaseIndentPatch({ indent: 1 })).toEqual({ indent: null });
-    expect(decreaseIndentPatch({})).toEqual({ indent: null });
-    expect(decreaseIndentPatch({ indent: 2 })).toEqual({ indent: 1 });
   });
 });
 
