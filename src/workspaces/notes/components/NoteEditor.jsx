@@ -259,7 +259,7 @@ ${PASTE_ICON_CSS}
 .planyr-paste-btn:hover, .planyr-paste-btn:focus-visible { background: var(--surface-page); border-color: var(--border-strong); outline: none; --paste-halo: var(--surface-page); }
 .planyr-paste-btn[aria-pressed="true"] { background: var(--info-bg); border-color: var(--info-text); --paste-halo: var(--info-bg); }
 .planyr-paste-tip { position: absolute; margin-top: 4px; padding: 3px 7px; background: var(--surface-raised); border: 1px solid var(--border-strong); color: var(--text-primary); font-size: 12px; white-space: nowrap; pointer-events: none; z-index: 41; }
-@media (pointer: coarse) { .planyr-paste-btn { width: 44px; height: 44px; } }
+@media (pointer: coarse) { .planyr-paste-btn { width: 44px; height: 44px; } .planyr-paste-tab { min-height: 44px; padding-left: 6px; padding-right: 8px; } }
 /* ⛔ THE NOTE'S DENSITY, AND IT IS THE ONE PLACE THE NUMBER LIVES (NEW-SPACING-1/3).
    It was a hard-coded 1.65 here — which measured as 15px text in a 24.75px line box, while
    Word and OneNote call ~1.15 single. So the loosest setting in the spacing control's own
