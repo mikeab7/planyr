@@ -144,6 +144,20 @@ export const SINGLE_ZONE_STATE = Object.fromEntries(Object.entries(ZONES_OF_STAT
 const OFFSHORE = new Set(["la_offshore"]);
 export const WA_GRANT_SPLIT_LAT = 47.5;  // "Grant north / south of approximately 47°30'N" — EPSG area text
 
+/* California's offshore islands are Zone 6 BY STATUTE (Pub. Res. Code §8802: Santa Catalina and San Clemente — Los Angeles County — and
+ * San Nicolas and Santa Barbara Island) while the counties they belong to are mainland Zone 5, so no county table can express them
+ * (B2494337; the island list is the owner's reading of the statute 2026-10-29). Each is a lon/lat extent that holds the island and the water
+ * around it and NO mainland or other island (the nearest mainland is 20+ km away), so a plain box is exact for the question "is this point on
+ * that island". Anacapa and the northern Channel Islands are not named by the statute and stay with their (Zone 5) counties. */
+export const CA_ISLAND_ZONE6 = [
+  { name: "Santa Catalina Island", latMin: 33.28, latMax: 33.50, lonMin: -118.65, lonMax: -118.27 },
+  { name: "San Clemente Island", latMin: 32.78, latMax: 33.05, lonMin: -118.65, lonMax: -118.30 },
+  { name: "San Nicolas Island", latMin: 33.20, latMax: 33.30, lonMin: -119.60, lonMax: -119.40 },
+  { name: "Santa Barbara Island", latMin: 33.44, latMax: 33.50, lonMin: -119.07, lonMax: -119.00 },
+];
+export const caIslandOf = (lat, lon) =>
+  CA_ISLAND_ZONE6.find((i) => lat >= i.latMin && lat <= i.latMax && lon >= i.lonMin && lon <= i.lonMax) || null;
+
 export const withZone = (id, extra) => ({ ...SP_ZONES[id], decided: false, decisionNote: null, ...extra });
 
 /* Alaska is NOT county-bounded: zones 2–9 are 4°-wide meridian bands (the EPSG area text names the meridians), zone 1 is the
@@ -191,6 +205,9 @@ export function zoneForPoint(lat, lon, state = null) {
   // answer is the legally defined zone; the legacy envelopes below (Houston box, Front Range box) cover Conroe, Liberty and Beaumont-area
   // Texas Central counties and the interleaved Colorado counties, so they may only answer when no county answer exists (locator not
   // loaded yet, point outside every county, or the state in the call disagrees with the county found).
+  // A named California island is Zone 6 by statute whatever county polygon (if any) covers it — before the locator.
+  const isle = (!st || st === "CA") ? caIslandOf(lat, lon) : null;
+  if (isle) return { ...SP_ZONES.ca_6, decided: false, decisionNote: null, via: "island-point", island: isle.name };
   const byCounty = POINT_LOCATOR ? POINT_LOCATOR.forPoint(lat, lon) : null;
   if (byCounty && byCounty.zone && (!st || byCounty.zone.state === st)) {
     return { ...byCounty.zone, via: "county-point", ...(byCounty.nearEdge ? { nearEdge: true } : {}) };

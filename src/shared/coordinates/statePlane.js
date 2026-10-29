@@ -3,7 +3,7 @@
  * is in hand; point-only callers import `statePlaneCore.js` directly. Everything in the core is re-exported unchanged.
  * See docs/incidents/STATE-PLANE-AUDIT.md. */
 import {
-  SP_ZONES, SINGLE_ZONE_STATE, stateCode, withZone, WA_GRANT_SPLIT_LAT, alaskaZoneId, hawaiiZoneId, zoneForPoint,
+  SP_ZONES, SINGLE_ZONE_STATE, stateCode, withZone, WA_GRANT_SPLIT_LAT, alaskaZoneId, hawaiiZoneId, zoneForPoint, caIslandOf,
   gridConvergenceDegIn,
 } from "./statePlaneCore.js";
 import { COUNTY_TABLE, COUNTY_ALIASES, DECIDED_COUNTIES, SPLIT_COUNTIES } from "./statePlaneCounties.js";
@@ -75,12 +75,17 @@ const countyIndex = () => {
 };
 
 /* The zone for a county, when the app knows one. `state` is a USPS code (case-insensitive). `point` ({lat}) is only needed for
- * the one county a parallel splits (Grant, WA). Returns null for a county this project has not assigned — an HONEST null,
+ * the one county a parallel splits (Grant, WA) and for California's statutory Zone-6 islands (which also need `lon`). Returns null for a county this project has not assigned — an HONEST null,
  * never a guess: a caller must render "state plane zone not established here", not a plausible wrong zone. */
 export function zoneForCounty(state, county, point = null) {
   const st = stateCode(state);
   const k = slugCounty(county);
   const key = `${st}:${k}`;
+  // A named California island is Zone 6 by statute, whichever (Zone 5) county it is in — needs the point's lat AND lon.
+  if (st === "CA" && point && Number.isFinite(Number(point.lat)) && Number.isFinite(Number(point.lon))) {
+    const isle = caIslandOf(Number(point.lat), Number(point.lon));
+    if (isle) return withZone("ca_6", { via: "island-point", island: isle.name });
+  }
   const rec = COUNTY_ZONE[key];                    // hand-written: Texas's original five, Colorado's nine, Broomfield
   if (rec) return { ...SP_ZONES[rec.zone], decided: rec.decided === true, decisionNote: rec.decisionNote || null, via: "county" };
   if (SINGLE_ZONE_STATE[st]) return withZone(SINGLE_ZONE_STATE[st], { via: "state" });
@@ -122,7 +127,7 @@ export function resolveZone({ state = null, county = null, lat = null, lon = nul
     const id = hawaiiZoneId(la, lo);
     if (id) return withZone(id, { via: "position" });
   }
-  const byCounty = st && (county || SINGLE_ZONE_STATE[st]) ? zoneForCounty(st, county, havePoint ? { lat: la } : null) : null;
+  const byCounty = st && (county || SINGLE_ZONE_STATE[st]) ? zoneForCounty(st, county, havePoint ? { lat: la, lon: lo } : null) : null;
   if (byCounty) return byCounty;
   // A county with no assignment is a KNOWN gap, not an excuse to fall through to a coarse
   // envelope that would answer confidently for a county we deliberately never assigned.
