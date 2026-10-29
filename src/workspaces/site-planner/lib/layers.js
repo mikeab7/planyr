@@ -1626,6 +1626,22 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
     ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
   }));
+  /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
+   * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
+   * polygons of that batch are never drawn (measured: 530 of 820 wellfield polygons in view; the same on any dense polygon row). Only a Point may reach the point-symbol
+   * factory; every other geometry takes the path style alone. */
+  {
+    const origRedraw = lyr._redraw;
+    lyr._redraw = function (id) {
+      const layer = this._layers && this._layers[id];
+      const g = layer && layer.feature && layer.feature.geometry;
+      if (g && g.type !== "Point") {
+        if (layer.setStyle && this.options.style) this.resetFeatureStyle(layer.feature.id);
+        return undefined;
+      }
+      return origRedraw.call(this, id);
+    };
+  }
   // B2507064 (NEW-9) — the draw budget: a batch of features over the vertex budget is NOT handed to Leaflet (that is what froze the tab); the layer says so instead.
   {
     const origCreate = lyr.createLayers;

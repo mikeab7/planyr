@@ -110,6 +110,8 @@ if (!RELAY) {
 
 const sleep = (ms) => page.waitForTimeout(ms);
 let log = [];
+let pageErrors = [];
+page.on("pageerror", (e) => pageErrors.push(String(e && e.message || e).slice(0, 160)));
 page.on("request", (r) => { if (FL_HOSTS.test(r.url()) || /gis-proxy/.test(r.url())) log.push({ url: r.url(), sent: true }); });
 page.on("response", async (res) => {
   const u = res.url();
@@ -167,6 +169,7 @@ for (const key of ids) {
   const id = key.split("#")[0];
   const [lng, lat, z, re] = CASES[key];
   log = [];
+  pageErrors = [];
   await freshMap(lng, lat, z);
   const row = ROW_OF[id] || id;
   const offered = await rowOffered(row);
@@ -191,7 +194,14 @@ for (const key of ids) {
     return n;
   }, re.source);
   const refused = await page.evaluate(() => (window.__overbudget || []).length);
-  if (!vector) check(`${key} · the layer DREW what its service delivered (nothing refused as "too detailed to draw")`, drawn >= 1 && refused === 0, `drew ${drawn} of ${arrived} features delivered (more arrive than are in view); ${refused} draw-budget refusals`);
+  /* COMPLETENESS, not "drew at least one": a batch aborted inside esri-leaflet (an `Invalid LatLng object` thrown from a polygon reaching `pointToLayer`) leaves the layer
+   * showing SOME of what arrived and no refusal anywhere — the reviewer found 530 of 820 wellfield polygons drawn this way. Every distinct feature that arrived and has a
+   * geometry must be a drawn layer; a page error from the map code is a failure of its own. */
+  if (!vector) {
+    check(`${key} · the layer DREW what its service delivered (nothing refused as "too detailed to draw")`, drawn >= 1 && refused === 0, `drew ${drawn} of ${arrived} features delivered; ${refused} draw-budget refusals`);
+    check(`${key} · …and drew ALL of it (no feature dropped by an aborted batch)`, arrived > 0 && refused === 0 ? drawn >= Math.floor(arrived * 0.97) : true, `drew ${drawn} of ${arrived} delivered`);
+    check(`${key} · no page error while it loaded`, pageErrors.length === 0, pageErrors.slice(0, 2).join(" | "));
+  }
   const stall = await page.evaluate(() => Math.round(window.__stall.max));
   check(`${key} · no main-thread stall past ${BUDGET} ms`, stall <= BUDGET, `${stall} ms`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${id}.png` });

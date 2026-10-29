@@ -1,7 +1,7 @@
 /* Florida due-diligence layer rows (B2452976, 2026-10-29) — the obvious industrial checks for a Florida site (Broward first) that Planyr did not have.
  *
  * EVERY ROW declares `states: ["FL"]` (so a Texas / Georgia / Colorado view never lists it) and, where its source only serves one county or one water
- * management district, a `regions` boundary (serviceAreas.js: `broward`, `miamidade`, `palmbeach`, `sfwmd`) so a Tampa site is not offered a Broward
+ * management district, a `regions` boundary (serviceAreas.js: `broward`, `miamidade`, `sfwmd`, `pantherconsult`) so a Tampa site is not offered a Broward
  * wellfield row. The registry spreads FLORIDA_LAYERS into ALL_LAYERS; the endpoint facts + probe dates live in `shared/gis/sourcesFlorida.js`.
  *
  * THE HOSTS, AND HOW EACH IS REACHED (all MEASURED 2026-10-29): agency-owned ArcGIS Online orgs (FDEM, FNAI, SFWMD, Broward County, Miami-Dade County,
@@ -202,7 +202,7 @@ export const FLORIDA_LAYERS = {
         { label: "Use", text: oneLine(niceCase(props.AUTHORIZATION_)) }, { label: "Issued", text: epochDate(props.DATE_ISSUED) }, { label: "Expires", text: epochDate(props.PERMIT_EXP_DATE) },
       ],
     }),
-    note: "Final Right-of-Way and Right-of-Way Occupancy permits SFWMD has issued on its canal and levee rights-of-way (drafts, permits in review and cancelled or rejected ones are left out; some final permits have since expired — the card shows the expiry). Per SFWMD, an occupancy permit is required before connecting with, placing structures in or across, or discharging into the canal and levee system (the 'Works of the District') and certain other canals, and it conveys no property rights. A permit beside your site shows what the District allowed on that canal bank.",
+    note: "Final Right-of-Way and Right-of-Way Occupancy permits SFWMD has issued on its canal and levee rights-of-way (drafts, permits in review and cancelled or rejected ones are left out; some final permits have since expired — the card shows the expiry where SFWMD recorded one). Per SFWMD, an occupancy permit is required before connecting with, placing structures in or across, or discharging into the canal and levee system (the 'Works of the District') and certain other canals, and it conveys no property rights. A permit beside your site shows what the District allowed on that canal bank.",
     infoCaveat: "These are permitted occupancies, NOT the right-of-way line itself, and not every canal the District's rules reach. Confirm the right-of-way width and any needed permit with SFWMD.",
     role: "area", group: "flood", order: 7,
     floodTier: "local", agency: "SFWMD",
@@ -278,7 +278,7 @@ export const FLORIDA_LAYERS = {
       ],
       note: "A reported depression. Most reports were never field-checked, so a dot is not a confirmed sinkhole.",
     }),
-    note: "The Florida Geological Survey's database of reported subsidence incidents (about 4,500). It may include true sinkholes, but most reports were never checked in the field and the cause is not verified. A cluster near the site is the signal to commission a geotechnical sinkhole study; Central and North Florida (Tampa Bay to the Panhandle) is where it matters, and South Florida has few reports.",
+    note: "The Florida Geological Survey's database of reported subsidence incidents (about 4,500). It may include true sinkholes, but most reports were never checked in the field and the cause is not verified. A cluster near the site is the signal to commission a geotechnical sinkhole study; Central and North Florida (Tampa Bay to the Panhandle) is where it matters.",
     infoCaveat: "Reports only: an empty map does NOT mean no sinkhole risk. A geotechnical investigation is the real check.",
     role: "point", group: "environmental", order: 27,
   },
@@ -288,12 +288,12 @@ export const FLORIDA_LAYERS = {
     minZoom: 9, color: "#c2410c", weight: 1, opacity: 0.4,
     styleFn: sinkholeAreaStyle, simplifyFactor: 4, vertexBudget: 300000, // FGS polygons are 10k+ vertices each and re-delivered per tile (Tampa z14 on a wide window refused a batch at the default)
     legend: [
-      { label: "Area I — thinnest cover", color: SINKHOLE_AREA_RAMP["Area I"] }, { label: "Area II", color: SINKHOLE_AREA_RAMP["Area II"] },
-      { label: "Area III", color: SINKHOLE_AREA_RAMP["Area III"] }, { label: "Area IV — deepest cover", color: SINKHOLE_AREA_RAMP["Area IV"] },
+      { label: "Area I — usually thinnest cover", color: SINKHOLE_AREA_RAMP["Area I"] }, { label: "Area II", color: SINKHOLE_AREA_RAMP["Area II"] },
+      { label: "Area III", color: SINKHOLE_AREA_RAMP["Area III"] }, { label: "Area IV — usually deepest cover", color: SINKHOLE_AREA_RAMP["Area IV"] },
     ],
     ...hoverCommon, hoverTitle: "Sinkhole type area", hoverSource: "Florida Geological Survey",
     hoverFields: [{ names: ["AREA_DESC"], label: "Area" }, { names: ["DESC_1"], label: "Cover" }, { names: ["DESC_2"], label: "Sinkholes" }],
-    note: "The Florida Geological Survey's map of where sinkholes form and what kind: Area I is generally bare or thinly covered limestone, Areas II and III are generally 30–200 ft of sandy or clayey cover and Area IV is generally more than 200 ft. The shading runs by cover thickness only — it is not a hazard scale. Click for the Survey's own description of the sinkholes each area produces (cover-collapse can develop abruptly). Ground outside every area is simply not mapped for sinkhole type.",
+    note: "The Florida Geological Survey's map of where sinkholes form and what kind: Area I is generally bare or thinly covered limestone, Areas II and III are generally 30–200 ft of sandy or clayey cover and Area IV is generally more than 200 ft. The shading runs by cover thickness only — it is not a hazard scale. Click for the Survey's own description of the sinkholes each area produces (cover-collapse can develop abruptly). Where a polygon's own Cover line differs from its area's general description, the polygon's line is the one that applies. Ground outside every area is simply not mapped for sinkhole type.",
     infoCaveat: "A regional screening map, not a site investigation: it says what is likely in the area, not what is under your slab. Order a geotechnical report before committing to a building pad.",
     role: "area", group: "environmental", order: 28,
   },
@@ -344,8 +344,8 @@ export const FLORIDA_LAYERS = {
     legend: [{ label: "60 dB", color: NOISE_RAMP[60] }, { label: "65 dB", color: NOISE_RAMP[65] }, { label: "70 dB", color: NOISE_RAMP[70] }, { label: "75 dB", color: NOISE_RAMP[75] }],
     ...hoverCommon, hoverTitle: "Noise contour", hoverSource: "Broward County Aviation Department",
     hoverFields: [{ names: ["CONTOURVAL"], label: "Day-night average noise level", unit: "dB" }],
-    note: "Day-night average sound level (DNL) contours at 60, 65, 70 and 75 dB around Fort Lauderdale–Hollywood International, from the Aviation Department (the layer is titled 2020, alternative B1b — a forecast scenario, not measured noise). 65 dB is the FAA's reference line for homes and other noise-sensitive uses; warehouse and industrial uses are generally compatible with higher levels, but office, hotel and residential components, and any avigation or noise-disclosure requirement, are worth checking.",
-    infoCaveat: "A forecast scenario for one airport. Other airports (Executive, North Perry, Pompano) have their own contours and are not shown. Confirm the current noise map with the Aviation Department.",
+    note: "Day-night average sound level (DNL) contours at 60, 65, 70 and 75 dB around Fort Lauderdale–Hollywood International, from the Aviation Department (the layer is titled 2020, alternative B1b — modelled contours, not measured noise). 65 dB is the FAA's reference line for homes and other noise-sensitive uses; warehouse and industrial uses are generally compatible with higher levels, but office, hotel and residential components, and any avigation or noise-disclosure requirement, are worth checking.",
+    infoCaveat: "Modelled contours for one airport; no other airport's are shown. Confirm the current noise map with the Aviation Department.",
     role: "line", group: "access", order: 7,
   },
 
@@ -455,7 +455,7 @@ export const FLORIDA_VINTAGE = {
   fl_evac_zones: "FDEM Know Your Zone evacuation zones — statewide layer edited 2026-09-19; each county's zones carry their own edit date (some Broward / Miami-Dade zones date from 2013)",
   fl_drainage_districts_broward: "Broward County drainage districts — layer edited 2021-06-10",
   fl_wellfield_broward: "Broward County wellfield zones — map approved 2001-02-16, ordinance revised June 2013; layer edited 2021-06-10",
-  fl_wellfield_miamidade: "Miami-Dade County wellfield protection areas — layer edited 2025-11-03",
+  fl_wellfield_miamidade: "Miami-Dade County wellfield protection areas — data last edited 2023-04-05 (layer definition edited 2025-11-03)",
   fl_erp_sfwmd: "SFWMD Approved ERP boundaries — continuously maintained by its permitting system",
   fl_sis_highways: "FDOT SIS highways — layer edited 2026-10-26",
   fl_sfwmd_canals: "SFWMD AHED canals and streams — continuously maintained (no edition date published)",
@@ -469,8 +469,8 @@ export const FLORIDA_VINTAGE = {
   fl_outstanding_florida_waters: "Florida DEP OFW boundaries (s. 62-302.700, F.A.C.) — the layer notes an update on 2026-07",
   fl_panther_consultation: "USFWS South Florida Ecological Services consultation area — no edition date published",
   fl_eagle_nesting: "FWC statewide eagle surveys 1998–2017 — historical, not updated",
-  fl_fll_noise: "Broward County Aviation Department DNL contours — 2020 forecast scenario (alt B1b)",
+  fl_fll_noise: "Broward County Aviation Department DNL contours — titled 2020, alternative B1b",
   fl_conservation_lands: "FNAI Florida Conservation Lands — layer edited 2026-10-06",
-  fl_wetlands_broward: "Broward County wetlands — updated regularly by its Aquatic & Wetland Resources program (layer notes 2018)",
+  fl_wetlands_broward: "Broward County wetlands — updated regularly by its Aquatic & Wetland Resources program (layer data edited 2024-12-26)",
   fl_natural_lands_broward: "Broward Protected Natural Lands — layer edited 2018-10-11",
 };
