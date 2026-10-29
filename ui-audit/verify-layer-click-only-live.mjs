@@ -13,6 +13,7 @@
 import { mkdirSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { LIVE_PREFIX, throwawayPlan, cleanupLive } from "./lib/liveFixtures.mjs";
 
 const args = process.argv.slice(2);
 const flag = (n, d = null) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
@@ -51,7 +52,10 @@ async function openGroupWith(id) {
   return false;
 }
 async function turnOn(id) {
-  if (!(await openGroupWith(id))) { check(`row "${id}" is offered at Olive Branch`, false); return false; }
+  // the service-area geometry that scopes a row to its place arrives by a dynamic import — give it time before saying the row is not offered
+  let there = false;
+  for (let i = 0; i < 10 && !there; i++) { there = await openGroupWith(id); if (!there) await sleep(1500); }
+  if (!there) { check(`row "${id}" is offered at Olive Branch`, false); return false; }
   const cb = panel.locator(`[data-testid="layer-row-${id}"] input[type="checkbox"]`).first();
   if (!(await cb.isChecked())) await cb.check();
   return true;
@@ -84,6 +88,8 @@ const overlayState = () => page.evaluate(() => {
 });
 const hiliteCount = async () => (await strokes())[HILITE] || 0;
 
+// a SITE PIN keeps its name tooltip by design (owner constraint #43: not an overlay layer): "<site> · <place/no boundary> · <status>"
+const SITE_PIN_TIP = /·\s*(Pursuit|Active|On hold|Complete|Dead)\s*$/;
 const baseTips = new Set((await overlayState()).tips);
 const before = await strokes();
 console.log("stroke colours before any hover:", JSON.stringify(before));
@@ -94,7 +100,7 @@ let maxTip = 0, maxPop = 0, maxHi = 0;
 for (let gy = 1; gy <= 7; gy++) for (let gx = 1; gx <= 9; gx++) {
   await page.mouse.move(mapBox.x + (mapBox.w * gx) / 10, mapBox.y + (mapBox.h * gy) / 8, { steps: 3 });
   await sleep(120);
-  const o = await overlayState(); const fresh = o.tips.filter((t) => !baseTips.has(t)); if (fresh.length && process.env.DEBUG_CLICK) console.log("new tooltip text:", JSON.stringify(fresh)); maxTip = Math.max(maxTip, fresh.length); maxPop = Math.max(maxPop, o.popups); maxHi = Math.max(maxHi, await hiliteCount());
+  const o = await overlayState(); const fresh = o.tips.filter((t) => !baseTips.has(t) && !SITE_PIN_TIP.test(t)); if (fresh.length && process.env.DEBUG_CLICK) console.log("new tooltip text:", JSON.stringify(fresh)); maxTip = Math.max(maxTip, fresh.length); maxPop = Math.max(maxPop, o.popups); maxHi = Math.max(maxHi, await hiliteCount());
 }
 await sleep(1200);
 const after = await strokes();
@@ -105,18 +111,36 @@ check("2 · after the sweep every stroke colour is exactly what it was before th
 if (SHOTS) await page.screenshot({ path: `${SHOTS}/hover-nothing.png` });
 
 /* 3. click: find points that open a zoning card (a point can land in a road gap — try a spread) */
+/* Points that are certainly INSIDE a zoning polygon: the layer's own children's bounds centres that are on screen and clear of the two floating panels and the site pin. */
+async function zoningPoints() {
+  return page.evaluate(() => {
+    const m = window.__mapFinderMap; let fl = null;
+    Object.values(m._layers).forEach((l) => { if (l.options && l.options.url && /Zoning/.test(l.options.url) && l._layers) fl = l; });
+    if (!fl) return [];
+    const r = m.getContainer().getBoundingClientRect();
+    const out = [];
+    for (const c of Object.values(fl._layers)) {
+      if (!c.getBounds) continue;
+      const p = m.latLngToContainerPoint(c.getBounds().getCenter());
+      const x = r.left + p.x, y = r.top + p.y;
+      if (x > 280 && x < 980 && y > 360 && y < r.bottom - 80 && Math.abs(x - 700) + Math.abs(y - 571) > 60) out.push({ x, y, key: Math.round(x / 40) + ":" + Math.round(y / 40) });
+    }
+    return out;
+  });
+}
 async function clickUntilCard(points, skipText = null) {
-  for (const [fx, fy] of points) {
-    await page.mouse.click(mapBox.x + mapBox.w * fx, mapBox.y + mapBox.h * fy);
+  for (const { x, y } of points) {
+    await page.mouse.click(x, y);
     await sleep(2200);
     const txt = await page.evaluate(() => (document.querySelector(".leaflet-popup-content") || {}).innerText || "");
-    if (process.env.DEBUG_CLICK) console.log(`click ${fx},${fy} → popup: ${JSON.stringify(txt.slice(0, 120))}`);
-    if (/Zoning|Zone/i.test(txt) && txt !== skipText) return { txt, fx, fy };
+    if (process.env.DEBUG_CLICK) console.log(`click ${Math.round(x)},${Math.round(y)} → popup: ${JSON.stringify(txt.slice(0, 120))}`);
+    if (/Zoning/i.test(txt) && /Zone:/.test(txt) && txt !== skipText) return { txt, x, y };
   }
   return null;
 }
-const spread = [[0.5, 0.5], [0.35, 0.4], [0.65, 0.4], [0.4, 0.65], [0.6, 0.65], [0.25, 0.5], [0.75, 0.5], [0.5, 0.3], [0.5, 0.75], [0.2, 0.3], [0.8, 0.7]];
-const first = await clickUntilCard(spread);
+const spread = await zoningPoints();
+if (!spread.length) { console.log("VOID: the Zoning layer has no polygon on screen to click"); voided++; }
+const first = spread.length ? await clickUntilCard(spread) : null;
 if (!first) { console.log("VOID: no click opened a zoning card — nothing to judge"); voided++; }
 else {
   console.log("card 1:\n" + first.txt.split("\n").map((l) => "   " + l).join("\n"));
@@ -128,7 +152,7 @@ else {
   if (h1 === 0) { console.log("VOID: the instrument cannot see the click highlight — the zero readings above prove nothing"); voided++; }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/click-one-outline.png` });
 
-  const second = await clickUntilCard(spread.filter(([x, y]) => Math.hypot(x - first.fx, y - first.fy) > 0.12), first.txt);
+  const second = await clickUntilCard(spread.filter((p) => Math.hypot(p.x - first.x, p.y - first.y) > 150), first.txt);
   if (second) {
     const h2 = await hiliteCount();
     check("3 · a click on a different polygon moves the outline — still exactly one", h2 === 1, `${h2}`);
@@ -138,14 +162,96 @@ else {
   await sleep(600);
   check("3 · closing the card leaves zero outlined", (await hiliteCount()) === 0, `${await hiliteCount()}`);
 
-  await clickUntilCard([[first.fx, first.fy]]);
+  await clickUntilCard([{ x: first.x, y: first.y }]);
   await sleep(300);
-  // empty map: the far top-left corner is outside the DeSoto zoning data at this zoom only if panned away — pan the map off the data and click
-  await page.evaluate(() => window.__mapFinderMap.panBy([2400, 0], { animate: false }));
-  await sleep(1500);
-  await page.mouse.click(mapBox.x + mapBox.w * 0.5, mapBox.y + mapBox.h * 0.5);
-  await sleep(1200);
-  check("3 · clicking empty map leaves zero outlined and no card", (await hiliteCount()) === 0 && (await overlayState()).popups === 0, `${await hiliteCount()} / ${(await overlayState()).popups}`);
+  // empty map: a point inside the view where NOTHING interactive sits under the pointer (no polygon, no marker, no control) — found with elementsFromPoint, never assumed
+  const emptyPt = await page.evaluate(() => {
+    const r = window.__mapFinderMap.getContainer().getBoundingClientRect();
+    for (let y = r.top + 120; y < r.bottom - 60; y += 23) for (let x = r.left + 300; x < r.right - 120; x += 29) {
+      const els = document.elementsFromPoint(x, y);
+      const hot = els.some((e) => e.matches && e.matches("path.leaflet-interactive, .leaflet-marker-icon, .leaflet-popup, button, input, select, a, [data-testid]") );
+      const inMap = els.some((e) => e.classList && e.classList.contains("leaflet-container"));
+      if (inMap && !hot) return { x, y };
+    }
+    return null;
+  });
+  if (!emptyPt) { console.log("VOID: no empty map point in view to click"); voided++; }
+  else {
+    await page.mouse.click(first.x, first.y); await sleep(2200);
+    const open1 = await hiliteCount();
+    await page.mouse.click(emptyPt.x, emptyPt.y); await sleep(1200);
+    const o = await overlayState();
+    check("3 · KNOWN-GOOD: before the empty click a card was open and one feature outlined", open1 === 1, `${open1}`);
+    check("3 · clicking empty map leaves zero outlined and no card", (await hiliteCount()) === 0 && o.popups === 0, `${await hiliteCount()} outlined / ${o.popups} cards`);
+  }
+}
+
+/* ── PLANNER canvas arm: a throwaway LOCATED plan at Olive Branch (deleted at the end, verified gone) ─────────────────────────────────────────────── */
+const planId = `${LIVE_PREFIX}clickonly-${Date.now().toString(36)}`;
+try {
+  const plan = { ...throwawayPlan(planId), origin: { lat: VLAT, lon: VLNG }, site: "ZZ Live Check — click-only" };
+  const err = await page.evaluate(async ([pl]) => {
+    const { data: u } = await window.pfSupabase.auth.getUser();
+    const { error } = await window.pfSupabase.from("sites").insert({ id: pl.id, group_id: pl.groupId, site: pl.site, name: pl.name, county: null, user_id: u.user.id, version: 1, data: pl });
+    return error ? String(error.message) : null;
+  }, [plan]);
+  if (err) throw new Error("throwaway plan insert failed — " + err);
+  await page.goto(`${BASE}/?planyrDiag=1#/project/${planId}/site`, { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("planner-canvas").waitFor({ timeout: 60000 });
+  await sleep(2500);
+  const chip = page.getByTestId("layers-expand").filter({ visible: true });
+  if (await chip.count()) await chip.first().click();
+  const pp = page.locator('[data-testid="layer-panel"][data-surface="planner"]').first();
+  await pp.waitFor({ state: "visible", timeout: 20000 });
+  await sleep(900);
+  for (const [g, id] of [["jur", "counties_cities"], ["jur", "ms_desoto_zoning"]]) {
+    await pp.getByTestId(`layer-group-${g}`).click(); await sleep(250);
+    const cb = pp.locator(`[data-testid="layer-row-${id}"] input[type="checkbox"]`).first();
+    if (await cb.count() && !(await cb.isChecked())) await cb.check();
+  }
+  await sleep(9000);
+  const canvas = page.getByTestId("planner-canvas");
+  const box = await canvas.boundingBox();
+  const hiP = () => page.evaluate((c) => document.querySelectorAll(`path[stroke="${c}" i]`).length, HILITE);
+  const cards = () => page.getByTestId("gis-identify").count();
+  let pMaxCard = 0, pMaxHi = 0;
+  for (let gy = 1; gy <= 5; gy++) for (let gx = 1; gx <= 7; gx++) {
+    await page.mouse.move(box.x + (box.width * gx) / 8, box.y + (box.height * gy) / 6, { steps: 3 }); await sleep(150);
+    pMaxCard = Math.max(pMaxCard, await cards()); pMaxHi = Math.max(pMaxHi, await hiP());
+  }
+  await sleep(2200); // longer than the old hover delay
+  pMaxCard = Math.max(pMaxCard, await cards());
+  check("P2 · planner: hovering 35 points opens no card (the old hover card is gone)", pMaxCard === 0, `${pMaxCard}`);
+  check("P2 · planner: hovering outlines nothing", pMaxHi === 0, `${pMaxHi}`);
+  // a tap on EMPTY canvas beside the throwaway parcel (a tap on a parcel selects it, it does not identify)
+  let card = "", tapped = null;
+  for (const [dx, dy] of [[260, 40], [-300, 60], [280, 200], [-280, 200], [320, -60], [0, 230], [-120, -150]]) {
+    const x = box.x + box.width / 2 + dx, y = box.y + box.height / 2 + dy;
+    await page.mouse.click(x, y); await sleep(2500);
+    card = await page.getByTestId("gis-identify").first().innerText().catch(() => "");
+    if (/Zoning/.test(card)) { tapped = { x, y }; break; }
+  }
+  if (!tapped) { console.log("VOID: no planner tap opened a zoning card"); voided++; }
+  else {
+    console.log("planner card:\n" + card.split("\n").map((l) => "   " + l).join("\n"));
+    check("P3 · planner: the card is clean (no raw field names / null / raw URL)", !/\bZONE\b|CASE_NO|OBJECTID|Shape[._]|CONVERSION_STATUS|\bnull\b|https?:\/\//.test(card), "");
+    check("P3 · planner: KNOWN-GOOD — the tap outlines exactly one feature", (await hiP()) === 1, `${await hiP()}`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/planner-click-one-outline.png` });
+    await page.getByTestId("gis-identify").first().locator('button[aria-label="Close feature details"]').click();
+    await sleep(500);
+    check("P3 · planner: closing the card (✕) leaves zero outlined", (await hiP()) === 0 && (await cards()) === 0, `${await hiP()}`);
+    await page.mouse.click(tapped.x, tapped.y); await sleep(2500);
+    const reopened = await hiP();
+    const other = [[-300, 60], [280, 200], [-280, 200], [320, -60], [0, 230], [-120, -150], [260, 40]].map(([dx, dy]) => ({ x: box.x + box.width / 2 + dx, y: box.y + box.height / 2 + dy })).find((p) => Math.hypot(p.x - tapped.x, p.y - tapped.y) > 120);
+    await page.mouse.click(other.x, other.y); await sleep(2500);
+    check("P3 · planner: KNOWN-GOOD — re-tap re-opens with one outline", reopened === 1, `${reopened}`);
+    check("P3 · planner: a tap on a different spot moves the card and the outline — still exactly one", (await hiP()) === 1 && (await cards()) === 1, `${await hiP()} / ${await cards()}`);
+    await page.keyboard.press("Escape"); // (a press on empty canvas is a tap that identifies again — there is no ground here with no layer under it)
+  }
+} finally {
+  const r = await cleanupLive(page, { planId });
+  check("throwaway plan deleted and verified gone", !r.errors.length && r.left.site === 0, JSON.stringify(r));
 }
 await s.browser.close().catch(() => {});
 console.log(voided ? `VOID (${voided})` : failed ? `FAIL (${failed})` : "PASS");
