@@ -102,7 +102,7 @@ describe("the wired Missouri rows", () => {
   const ROW_KEYS = MO_ROWS.map(([k]) => "mo_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(MO_ROWS).toHaveLength(71);
+    expect(MO_ROWS).toHaveLength(72);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
@@ -135,7 +135,7 @@ describe("the wired Missouri rows", () => {
       expect(v, k).toBeTruthy();
       expect(v.publisher, k).toMatch(/^(own|third-party)$/);
       expect(v.publisherName.length, k).toBeGreaterThan(5);
-      expect(v.verifiedOn, k).toBe("2026-10-19");
+      expect(["2026-10-19", "2026-10-29"], k).toContain(v.verifiedOn);
     }
   });
 });

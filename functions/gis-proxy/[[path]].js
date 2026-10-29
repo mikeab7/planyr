@@ -49,6 +49,9 @@ export const ALLOWED_HOSTS = new Set([
   /* RECON (Missouri second pass, 2026-10-29) — hosts read ONLY to find where a Missouri "none" county publishes its parcels; any not used by a wired county is pruned before merge. */
   "assessorsearch.com", "maps.camavision.com", "www.franklinmo.net", "franklinmo.net",
   "crawfordgis.breezemaps.com", "dentgis.breezemaps.com", "hickorygis.breezemaps.com", "randolphgis.breezemaps.com", "reynoldsgis.breezemaps.com", "shannongis.breezemaps.com", "texasgis.breezemaps.com",
+  "cass.missouriassessors.com", "clark.missouriassessors.com", "clinton.missouriassessors.com", "franklin.missouriassessors.com", "lewis.missouriassessors.com", "pike.missouriassessors.com", "scotland.missouriassessors.com", "stoddard.missouriassessors.com",
+  "clintoncountymo.giscloud.com", "howellgis.breezemaps.com", "gis.equatorstudios.com", "www.franklinmo.org",
+  "www.carrollcountymo.gov", "clintoncomo.org", "www.casscounty.com", "hickorycomo.net", "howellcountyassessor.com", "randolphcounty-mo.com", "www.rcao.com", "www.scotlandcountymo.org", "pikecountymo.net", "www.texascountymissouri.gov", "www.ozarkcountyassessor.com", "www.salemmo.com", "www.knoxcountymo.org", "knoxcountymo.org", "shelbycountymo.com", "www.shelbycountymo.com", "www.lancastermo.com",
   /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
    * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
    * county is wired to it. */
