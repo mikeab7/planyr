@@ -7,6 +7,7 @@ import {
   styleAt, formatAt, paintedStyleAt, applyPaintedStyle,
   mergeAt, mergeRange, unmergeAt, sortRange,
   insertRowAt, deleteRowAt, insertColumnAt, deleteColumn, migrateSheet,
+  unsupportedFormulaAt, isInconsistencyDismissed,
 } from "../src/workspaces/model/lib/sheetModel.js";
 
 describe("setCellStyle", () => {
@@ -236,6 +237,29 @@ describe("sortRange", () => {
     expect(formatAt(s, 1, 0)).toBe("$#,##0");
     expect(styleAt(s, 1, 0)).toEqual({ bold: true });
     expect(formatAt(s, 0, 0)).toBe(null);
+  });
+  // NEW-4 — the "Kept as a value — formula unsupported" marker and a dismissed-warning flag are
+  // keyed colId:row like cells, so they must travel with their row; before, the marker stayed on
+  // the old row and badged an unrelated cell.
+  it("unsupported-formula markers and dismissed flags travel with their row", () => {
+    let s = sheetWithColumn(["30", "10", "20"]);
+    s = setRaw(s, 0, 1, "999");
+    s = { ...s, unsupportedFormulas: { "c2:0": "=FOO(A1)" }, dismissedInconsistencies: { "c2:0": true } };
+    const sorted = sortRange(s, 0, 2, 0, "asc"); // the "30" row (with 999) lands on row 2
+    expect(sorted.cells["c2:2"]).toBe("999");
+    expect(sorted.unsupportedFormulas).toEqual({ "c2:2": "=FOO(A1)" });
+    expect(sorted.dismissedInconsistencies).toEqual({ "c2:2": true });
+    expect(unsupportedFormulaAt(sorted, 0, 1)).toBe(null);
+    expect(isInconsistencyDismissed(sorted, 0, 1)).toBe(false);
+    expect(unsupportedFormulaAt(sorted, 2, 1)).toBe("=FOO(A1)");
+    expect(isInconsistencyDismissed(sorted, 2, 1)).toBe(true);
+  });
+  it("marker maps outside the sorted rows are left alone", () => {
+    let s = sheetWithColumn(["30", "10", "20", "5"]);
+    s = { ...s, unsupportedFormulas: { "c2:3": "=BAR()" }, dismissedInconsistencies: { "c1:3": true } };
+    const sorted = sortRange(s, 0, 2, 0, "asc");
+    expect(sorted.unsupportedFormulas).toEqual({ "c2:3": "=BAR()" });
+    expect(sorted.dismissedInconsistencies).toEqual({ "c1:3": true });
   });
   it("refuses (no-op) when a merge touches the sort range — never corrupts a merge's framing", () => {
     let s = sheetWithColumn(["30", "10", "20"]);

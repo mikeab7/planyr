@@ -64,6 +64,10 @@
  * `buildLineGeneric`/`detectFieldCollisions` below.
  */
 
+// NEW-3 — the calendar check lives in ONE place (compDates.js round-trips a real Date), so an
+// impossible day (2/30, 2/29 in a non-leap year) is no date here either.
+import { isoFrom } from "./compDates.js";
+
 const NUM_SUFFIX = { k: 1e3, m: 1e6, mm: 1e6, thousand: 1e3, million: 1e6 };
 
 // A flat ceiling on the RAW quoted lease rate, regardless of period — $200/SF is already far
@@ -116,11 +120,6 @@ function round2(n) {
 // noise (0.665 stays 0.665, 66.5 cents / 100 doesn't become 0.66500000001).
 function roundRate(n) {
   return Math.round(n * 1e6) / 1e6;
-}
-
-function isoFrom(y, mo, d) {
-  if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
 // Pivot-at-50 2-digit year expansion, the one convention every date reader in this app shares
@@ -285,6 +284,20 @@ function inferTypeFromCapturedFields(g) {
  * generic/ambiguous detectors that run afterward (rate, price, size) can never re-claim or
  * misread a token another field already owns. Whatever is left over after every detector has
  * run — real words, not just punctuation — is preserved verbatim rather than dropped. */
+
+/** The date NEAREST the end of `text` (the last one), with its absolute span. */
+function lastDateIn(text) {
+  let off = 0;
+  let best = null;
+  for (;;) {
+    const h = findDateTokenRaw(text.slice(off));
+    if (!h) break;
+    const start = off + h.match.index;
+    best = { iso: h.iso, soft: h.soft, start, end: start + h.match[0].length };
+    off = best.end;
+  }
+  return best;
+}
 
 function blank(working, m) {
   if (!m) return working;
@@ -858,16 +871,31 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext, opts = {})
   }
 
   const isCommencementLine = COMMENCEMENT_LINE_RE.test(line);
+  let commencementClaimedHere = false;
   if (isCommencementLine && generic.commencementDate == null) {
-    const d = findDateTokenRaw(working);
-    if (d) {
-      generic.commencementDate = d.iso;
+    // NEW-1 — claim only the keyword and the date NEAREST AFTER it (else the nearest before it),
+    // blank just that span, and let every other detector read the rest of the line. The old code
+    // took the line's FIRST date and blanked the whole line, which lost the rate/size/title of a
+    // one-line comp and could store the execution date as the commencement date.
+    const kw = working.match(COMMENCEMENT_LINE_RE);
+    const kwEnd = kw.index + kw[0].length;
+    const after = findDateTokenRaw(working.slice(kwEnd));
+    let hit = null;
+    let span = null;
+    if (after) {
+      hit = after;
+      span = { start: kw.index, end: kwEnd + after.match.index + after.match[0].length };
+    } else {
+      const before = lastDateIn(working.slice(0, kw.index));
+      if (before) { hit = before; span = { start: before.start, end: kwEnd }; }
+    }
+    if (hit) {
+      generic.commencementDate = hit.iso;
       generic.commencementEstimated = /estimat/i.test(line);
       generic.commencementSourceLine = line.trim();
-      // The whole line's point IS the commencement date — "Commencement estimated to be June 1,
-      // 2027" has nothing else worth reading once the date is claimed, same as an address line.
-      working = " ".repeat(working.length);
+      working = working.slice(0, span.start) + " ".repeat(span.end - span.start) + working.slice(span.end);
       claimedAnything = true;
+      commencementClaimedHere = true;
     }
   }
 
@@ -1019,7 +1047,7 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext, opts = {})
     }
   }
 
-  if (!isCommencementLine && generic.compDate == null) {
+  if ((!isCommencementLine || commencementClaimedHere) && generic.compDate == null) {
     const dateTok = findDateTokenRaw(working);
     if (dateTok) {
       generic.compDate = dateTok.iso;

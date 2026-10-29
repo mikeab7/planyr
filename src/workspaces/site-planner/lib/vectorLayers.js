@@ -909,14 +909,22 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
     const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })), { timeoutMs: q.timeoutMs ?? null });
     if (j && j.error) throw new Error(j.error.message || "ArcGIS query error.");
     const batch = (j && j.features) || [];
-    if (!batch.length) break; // empty page → nothing left (also guards a server that wrongly keeps flagging more)
+    if (!batch.length) {
+      // Empty page → nothing left. One that STILL claims more is a server lying about its own data:
+      // stop (never loop) and say the set may be incomplete.
+      if (j && j.exceededTransferLimit === true) truncated = true;
+      break;
+    }
     for (const f of batch) {
       if (features.length >= cap) { truncated = true; break; }
       features.push(f);
     }
     if (features.length >= cap) { truncated = true; break; }
     if (!(j && j.exceededTransferLimit === true)) break; // server says: that's all
-    offset += q.pageSize;
+    // Advance by what ARRIVED, not by the page size we asked for: a server whose record cap is below
+    // pageSize returns short pages with exceededTransferLimit still set, and jumping a full page
+    // would skip the rows in between (NEW-2; the B629 parcel-snapshot builder had the same bug).
+    offset += batch.length;
   }
   return { features, truncated };
 }
