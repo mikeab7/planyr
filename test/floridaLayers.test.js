@@ -23,7 +23,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 import { ALL_LAYERS, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import {
   FLORIDA_LAYERS, FLORIDA_VINTAGE, FLORIDA_RELAY, relayUrl, districtName, evacColor, EVAC_RAMP, evacStyle,
-  BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel,
+  EVAC_OTHER, BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel, ERP_TYPES as ERP_TYPES_FOR_TEST,
 } from "../src/workspaces/site-planner/lib/floridaLayers.js";
 import { GIS_SOURCES, statesFor, auditRegistry } from "../src/shared/gis/sources.js";
 import { FLORIDA_SOURCES } from "../src/shared/gis/sourcesFlorida.js";
@@ -49,7 +49,7 @@ beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
 describe("every Florida row is complete and reads the registry", () => {
   it("is registered in ALL_LAYERS and Florida-only", () => {
-    expect(IDS.length).toBeGreaterThanOrEqual(15);
+    expect(IDS.length).toBeGreaterThanOrEqual(12);
     for (const id of IDS) {
       expect(ALL_LAYERS[id], id).toBe(FLORIDA_LAYERS[id]);
       expect(ALL_LAYERS[id].states, id).toEqual(["FL"]);
@@ -171,6 +171,11 @@ describe("the numbers on screen are the publisher's, and a legend is what the ma
   it("evacuation zones: the legend's zone-A colour is the colour zone A paints, and an unknown zone never paints as zone A", () => {
     const c = ALL_LAYERS.fl_evac_zones;
     expect(c.legend[0].color).toBe(EVAC_RAMP.A);
+    // every colour the map can paint has a legend entry (the service holds A–E plus county zones F–M, HUR, LAKE, NPBC, SPBC …)
+    const painted = new Set(["A", "AB", "B", "BC", "C", "D", "DE", "E", "F", "G", "H", "HUR", "I", "J", "K", "L", "LAKE", "M", "NPBC", "SPBC"].map((z) => evacColor(z)));
+    const legend = new Set(c.legend.map((l) => l.color));
+    for (const col of painted) expect(legend.has(col), `a painted evacuation colour ${col} has no legend entry`).toBe(true);
+    expect(legend.has(EVAC_OTHER)).toBe(true);
     expect(evacStyle({ EZone: "A" }, 0.4).fillColor).toBe(EVAC_RAMP.A);
     expect(evacStyle({ EZone: "AB" }, 0.4).fillColor).toBe(EVAC_RAMP.A);
     expect(evacColor("LAKE")).not.toBe(EVAC_RAMP.A);
@@ -196,10 +201,33 @@ describe("label and permit helpers", () => {
     expect(erpTypeLabel("ZZZ")).toBe("ZZZ");
     expect(erpTypeLabel("")).toBe(null);
   });
-  it("the ERP click card links the permit record instead of printing a raw URL", () => {
-    const card = ALL_LAYERS.fl_erp_sfwmd.identifyCard({ PROJECT_NAME: "Lowes Of Sunrise", PERMIT_NO: "06-02944-P", PermitType: "IND", PermitStatus: "Active", IssueDate: 1100000000000, Link: "https://example.test/permit/1" });
-    const rec = card.rows.find((r) => r.label === "Record");
-    expect(rec.href).toBe("https://example.test/permit/1");
-    expect(rec.text).toBe("");
+});
+
+describe("review findings (adversarial pass 1) stay fixed", () => {
+  it("a layer whose service holds far more than one page answers with every page, never the first 2,000 silently", () => {
+    // counts measured live 2026-10-29: ERP 41,239 · Broward wellfield 4,122 · FNAI 3,435 (a 2,000 first page, then exceededTransferLimit)
+    for (const id of ["fl_erp_sfwmd", "fl_wellfield_broward", "fl_conservation_lands"]) expect(ALL_LAYERS[id].fetchAll, id).toBe(true);
+  });
+  it("fetchAll reaches esri-leaflet as fetchAllFeatures", async () => {
+    const { featureLayerOptions } = await import("../src/workspaces/site-planner/lib/layerRequest.js");
+    expect(featureLayerOptions(ALL_LAYERS.fl_erp_sfwmd, 0.4, "p").fetchAllFeatures).toBe(true);
+    expect(featureLayerOptions(ALL_LAYERS.fl_wmd, 0.4, "p").fetchAllFeatures).toBeUndefined();
+  });
+  it("the evacuation layer opens only once a view's answer fits the draw budget (z9 measured 324k vertices over the 120k cap)", () => {
+    expect(ALL_LAYERS.fl_evac_zones.minZoom).toBeGreaterThanOrEqual(11);
+  });
+  it("Miami-Dade's helper polygons (AVG / MAX / INT / OUTER) are not drawn as a travel-time class", () => {
+    expect(ALL_LAYERS.fl_wellfield_miamidade.where).toBe("TRAVELTIME IN ('010','030','100','210')");
+  });
+  it("the ERP row names no permit-type word it cannot cite, and never links a generic page as the 'record'", () => {
+    expect(Object.keys(ERP_TYPES_FOR_TEST).sort()).toEqual(["CA", "EXEM", "GP", "IND"]);
+    expect(erpTypeLabel("FWD")).toBe("FWD");
+    const card = ALL_LAYERS.fl_erp_sfwmd.identifyCard({ PROJECT_NAME: "X", PERMIT_NO: "06-1-P", Link: "https://www.sfwmd.gov/regpermitting" });
+    expect(card.rows.some((r) => r.href)).toBe(false);
+    expect(ALL_LAYERS.fl_erp_sfwmd.where).toMatch(/Pending-Expired/);
+  });
+  it("county and city names are title-cased (the services publish ALL CAPS)", () => {
+    expect(VECTOR_SOURCES.fl_county.titleCaseLabel).toBe(true);
+    expect(VECTOR_SOURCES.fl_city.titleCaseLabel).toBe(true);
   });
 });

@@ -301,6 +301,7 @@ export const VECTOR_SOURCES = {
   fl_county: {
     id: "fl_county",
     stateAbbr: "FL",
+    titleCaseLabel: true, // FDEM publishes ALL-CAPS names
     label: "County boundaries (Florida)",
     labelField: "NAME",
     labelZoom: { min: 6, max: 14 },
@@ -326,6 +327,7 @@ export const VECTOR_SOURCES = {
   },
   fl_city: {
     id: "fl_city",
+    titleCaseLabel: true, // UF GeoPlan publishes ALL-CAPS names
     label: "City limits (Florida)",
     labelField: "NAME",
     labelZoom: { min: 10, max: 13 },

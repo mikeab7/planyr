@@ -31,7 +31,8 @@ const areaStyle = (color, fillMax = 0.25, weight = 1.2, dash = null) => (_props,
 
 /* ── Hurricane evacuation zones: one hue, darker = nearer the water. Zone A is the Category-1 surge area. ─────────────────────────────────────────── */
 export const EVAC_RAMP = { A: "#9a3412", B: "#c2410c", C: "#ea580c", D: "#f59e0b", E: "#fbbf24" };
-export const evacColor = (zone) => EVAC_RAMP[String(zone == null ? "" : zone).trim().toUpperCase().charAt(0)] || "#fcd34d";
+export const EVAC_OTHER = "#fcd34d"; // the zones a county names beyond A–E (F–M, HUR, LAKE, NPBC …) — the legend carries this colour too
+export const evacColor = (zone) => EVAC_RAMP[String(zone == null ? "" : zone).trim().toUpperCase().charAt(0)] || EVAC_OTHER;
 export const evacStyle = (props, opacity) => {
   const c = evacColor(props && props.EZone);
   return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: Math.min(0.45, opacity * 0.6) };
@@ -87,11 +88,11 @@ export const FLORIDA_LAYERS = {
   fl_evac_zones: {
     kind: "esriFeature", label: "Hurricane Evacuation Zones", source: "Florida Division of Emergency Management — Know Your Zone",
     url: GIS_SOURCES.evacZonesFl.serviceUrl, ...FL,
-    minZoom: 8, color: "#c2410c", weight: 1, opacity: 0.4,
+    minZoom: 11, color: "#c2410c", weight: 1, opacity: 0.4,
     styleFn: evacStyle, simplifyFactor: 0.5,
     legend: [
       { label: "Zone A — usually the Category 1 surge area", color: EVAC_RAMP.A }, { label: "Zone B", color: EVAC_RAMP.B }, { label: "Zone C", color: EVAC_RAMP.C },
-      { label: "Zone D", color: EVAC_RAMP.D }, { label: "Zone E and beyond", color: EVAC_RAMP.E },
+      { label: "Zone D", color: EVAC_RAMP.D }, { label: "Zone E", color: EVAC_RAMP.E }, { label: "Other county-defined zones (F–M, lake, …)", color: EVAC_OTHER },
     ],
     ...hoverCommon, hoverTitle: "Evacuation zone", hoverSource: "FDEM",
     hoverFields: [{ names: ["EZone"], label: "Zone" }, { names: ["County_Nam"], label: "County" }],
@@ -119,8 +120,8 @@ export const FLORIDA_LAYERS = {
   fl_sis_highways: {
     kind: "esriFeature", label: "Strategic Intermodal System Highways", source: "Florida Department of Transportation",
     url: GIS_SOURCES.sisHighwaysFl.serviceUrl, ...FL,
-    minZoom: 8, color: "#0369a1", weight: 2.4, opacity: 0.55,
-    styleFn: (_p, opacity) => ({ color: "#0369a1", weight: 2.4, opacity, fill: false }),
+    minZoom: 8, color: "#0369a1", weight: 2, opacity: 0.55,
+    styleFn: (_p, opacity) => ({ color: "#0369a1", weight: 2, opacity, fill: false }),
     ...hoverCommon, hoverTitle: "SIS highway", hoverSource: "FDOT",
     hoverFields: [{ names: ["FACILITY"], label: "Facility" }, { names: ["SISTYPE_DE"], label: "Type" }, { names: ["COUNTY"], label: "County" }],
     note: "The highways on FDOT's Strategic Intermodal System — the state's designated high-priority freight and passenger corridors (interstates, the Turnpike, major connectors). Freight-oriented industrial sites cluster on them; a driveway or median opening onto a state road needs an FDOT connection permit, and FDOT's access-management rules apply on state roads.",
@@ -132,8 +133,8 @@ export const FLORIDA_LAYERS = {
   fl_wellfield_broward: {
     kind: "esriFeature", label: "Wellfield Protection Zones (Broward)", source: "Broward County — Pollution Prevention, Remediation & Air Quality",
     url: GIS_SOURCES.wellfieldBroward.serviceUrl, ...FL, regions: ["broward"],
-    minZoom: 10, color: "#7c3aed", weight: 1, opacity: 0.4,
-    styleFn: browardWellfieldStyle, simplifyFactor: 0.5,
+    minZoom: 11, color: "#7c3aed", weight: 1, opacity: 0.4,
+    styleFn: browardWellfieldStyle, simplifyFactor: 0.5, fetchAll: true,
     legend: [{ label: "Zone 1 — innermost", color: BROWARD_WELLFIELD_RAMP[1] }, { label: "Zone 2", color: BROWARD_WELLFIELD_RAMP[2] }, { label: "Zone 3 — outermost", color: BROWARD_WELLFIELD_RAMP[3] }],
     ...hoverCommon, hoverTitle: "Wellfield protection zone", hoverSource: "Broward County",
     hoverFields: [{ names: ["ZONE"], label: "Zone" }, { names: ["LABEL"], label: "Wellfield" }],
@@ -145,7 +146,7 @@ export const FLORIDA_LAYERS = {
     kind: "esriFeature", label: "Wellfield Protection Areas (Miami-Dade)", source: "Miami-Dade County — Regulatory & Economic Resources",
     url: GIS_SOURCES.wellfieldMdc.serviceUrl, ...FL, regions: ["miamidade"],
     minZoom: 9, color: "#7c3aed", weight: 1, opacity: 0.4,
-    styleFn: mdcWellfieldStyle, simplifyFactor: 0.5,
+    styleFn: mdcWellfieldStyle, simplifyFactor: 0.5, where: "TRAVELTIME IN ('010','030','100','210')",
     legend: [{ label: "10-day travel time", color: MDC_TRAVEL_RAMP["010"] }, { label: "30-day", color: MDC_TRAVEL_RAMP["030"] }, { label: "100-day", color: MDC_TRAVEL_RAMP["100"] }, { label: "210-day", color: MDC_TRAVEL_RAMP["210"] }],
     ...hoverCommon, hoverTitle: "Wellfield protection area", hoverSource: "Miami-Dade County",
     hoverFields: [{ names: ["TRAVELTIME"], label: "Travel time" }, { names: ["NAME"], label: "Wellfield" }],
@@ -158,25 +159,25 @@ export const FLORIDA_LAYERS = {
     kind: "esriFeature", label: "Approved Environmental Resource Permits", source: "South Florida Water Management District",
     url: GIS_SOURCES.erpSfwmd.serviceUrl, ...FL, regions: ["sfwmd"],
     minZoom: 12, color: "#0f766e", weight: 1.2, opacity: 0.4,
-    styleFn: areaStyle("#0f766e", 0.12, 1.2), simplifyFactor: 0.5,
+    styleFn: areaStyle("#0f766e", 0.12, 1.2), simplifyFactor: 0.5, fetchAll: true, where: "PermitStatus <> 'Pending-Expired'",
     ...hoverCommon, hoverTitle: "Environmental Resource Permit", hoverSource: "SFWMD",
     hoverFields: [{ names: ["PROJECT_NAME"], label: "Project" }, { names: ["PERMIT_NO"], label: "Permit no." }, { names: ["PermitType"], label: "Type" }, { names: ["PermitStatus"], label: "Status" }, { names: ["IssueDate"], label: "Issued", date: true }],
     identifyCard: (props) => ({
       title: "Environmental Resource Permit",
       rows: [
         { label: "Project", text: props.PROJECT_NAME }, { label: "Permit no.", text: props.PERMIT_NO }, { label: "Type", text: erpTypeLabel(props.PermitType) },
-        { label: "Status", text: props.PermitStatus }, { label: "Issued", text: props.IssueDate }, { label: "Record", text: "", href: props.Link },
+        { label: "Status", text: props.PermitStatus }, { label: "Issued", text: props.IssueDate },
       ],
     }),
-    note: "Permitted project footprints from SFWMD's regulation system. An Environmental Resource Permit (Part IV, ch. 373, F.S.) covers wetland impacts AND the stormwater system, so a neighbouring permit shows how nearby sites were drained and mitigated — and a permit on the site itself sets what may change without a modification.",
-    infoCaveat: "SFWMD's footprints only (the permit record link opens its file). A site in another district's territory shows nothing here — that is not an all-clear. Footprints are not survey-accurate.",
+    note: "Permit footprints (active and approved; expired pending applications are left out) from SFWMD's regulation system. An Environmental Resource Permit (Part IV, ch. 373, F.S.) covers wetland impacts AND the stormwater system, so a neighbouring permit shows how nearby sites were drained and mitigated — and a permit on the site itself sets what may change without a modification.",
+    infoCaveat: "SFWMD's footprints only. A site in another district's territory shows nothing here — that is not an all-clear. Footprints are not survey-accurate; the permit file itself is at SFWMD (the permit number on the card finds it).",
     role: "area", group: "environmental", order: 22,
   },
   fl_conservation_lands: {
     kind: "esriFeature", label: "Conservation Lands", source: "Florida Natural Areas Inventory",
     url: GIS_SOURCES.conservationLandsFl.serviceUrl, ...FL,
     minZoom: 8, color: "#15803d", weight: 1.2, opacity: 0.4,
-    styleFn: areaStyle("#15803d", 0.25, 1.2), simplifyFactor: 0.75,
+    styleFn: areaStyle("#15803d", 0.25, 1.2), simplifyFactor: 0.75, fetchAll: true,
     ...hoverCommon, hoverTitle: "Conservation land", hoverSource: "FNAI",
     hoverFields: [{ names: ["MANAME"], label: "Name" }, { names: ["MANAGING_A"], label: "Managed by" }, { names: ["OWNER"], label: "Owner" }, { names: ["TOTACRES"], label: "Acres" }],
     note: "Federal, state, local and some private lands managed at least partly for conservation (FNAI's Florida Conservation Lands, ~3,400 areas). Land next to one draws wildlife, wetland and buffer questions at permitting; a conservation easement over a site's own acreage is a title item.",
@@ -208,17 +209,15 @@ export const FLORIDA_LAYERS = {
 };
 
 /* Permit-type codes → words, used by the ERP row's click card. */
-export const ERP_TYPES = {
-  IND: "Individual", GP: "General", CA: "Conceptual approval", MIT: "Mitigation bank", DF: "Dredge & fill", SLERP: "Statewide listed", EXEM: "Exemption",
-  VAR: "Variance", AQU: "Aquaculture", FWD: "Fish & wildlife", IWD: "Isolated wetland",
-};
+/* Only the four codes whose meaning is standard Florida ERP wording are decoded; any other SFWMD code prints as the agency wrote it (the agency publishes no code list we could cite). */
+export const ERP_TYPES = { IND: "Individual", GP: "General", CA: "Conceptual approval", EXEM: "Exemption" };
 export const erpTypeLabel = (code) => { const c = String(code == null ? "" : code).trim().toUpperCase(); return c ? (ERP_TYPES[c] || c) : null; };
 
 export const FLORIDA_VINTAGE = {
   fl_county: "FDEM county boundaries — layer edited 2026-07-22",
   fl_city: "UF GeoPlan city limits from the 2021 county tax rolls — layer edited 2024-05-03; later annexations are not in it",
   fl_wmd: "FDEP water management district boundaries (SFWMD-hosted copy) — layer edited 2021-10-31",
-  fl_evac_zones: "FDEM Know Your Zone evacuation zones — updated 2026-07-24",
+  fl_evac_zones: "FDEM Know Your Zone evacuation zones — layer edited 2026-09-19 (zone data dated 2026-07-24)",
   fl_drainage_districts_broward: "Broward County drainage districts — layer edited 2021-06-10",
   fl_wellfield_broward: "Broward County wellfield zones — map approved 2001-02-16, ordinance revised June 2013; layer edited 2021-06-10",
   fl_wellfield_miamidade: "Miami-Dade County wellfield protection areas — layer edited 2025-11-03",

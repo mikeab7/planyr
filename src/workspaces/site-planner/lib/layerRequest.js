@@ -151,6 +151,8 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   if (cfg.where) o.where = cfg.where;
   // B2507064 (NEW-9): a row whose polygons are far more detailed than any screen can show (Future Land Use: 14 polygons, 308 k vertices, a ~2 s stall to draw) asks the SERVER to generalise to ~`simplifyFactor` pixels; layers.buildFeatureLayer re-asks when the zoom moves 2 levels so a zoomed-in view never keeps the coarse copy.
   if (cfg.simplifyFactor) o.simplifyFactor = cfg.simplifyFactor;
+  // B2452976 (Florida): esri-leaflet answers a view with its service's first page only (2,000) and says nothing — a dense permit / wellfield layer then silently drops features. `fetchAll` follows the paging until the view is complete (the vertex budget still guards the draw).
+  if (cfg.fetchAll) o.fetchAllFeatures = true;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
   // NEW-1 (DeSoto / Olive Branch): a row's `lineLabel` ({ field, minZoom }) puts a short text (the pipe size) on each line; the Leaflet half (`layers.buildFeatureLayer`) binds it.
   if (cfg.lineLabel && typeof opts.onLabel === "function") {
