@@ -251,7 +251,6 @@ const SheetView = forwardRef(function SheetView({
   // on its own: the caller has to ask for it explicitly once the jump has landed. Exposed only
   // to the ONE caller that actually needs it (the Name Box's Enter handler) — Find/Name Manager
   // deliberately keep focus in their own panel so repeated Enter/"Go" clicks keep working.
-  useImperativeHandle(ref, () => ({ focusGrid: () => outerRef.current?.focus() }), []);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
   const [edit, setEdit] = useState(null);      // { r, c } | null
@@ -542,6 +541,22 @@ const SheetView = forwardRef(function SheetView({
   }, [edit, editValue, onCommit, setSelRange, totalRows, cols.length]);
 
   const cancelEdit = useCallback(() => { setEdit(null); outerRef.current?.focus(); }, []);
+
+  // NEW-1 (2026-10-29) — a half-typed cell is COMMITTED to the sheet it was typed on when the
+  // caller is about to change which sheet is showing (Excel's contract). The editor has no blur, and
+  // `edit` is component state that outlives a sheet change (this view is not keyed by sheet), so
+  // without this the next Enter / click on the NEXT sheet wrote the text into the wrong sheet. Must
+  // be called BEFORE the active sheet changes, so `onCommit` still targets the sheet being left.
+  // Reads the editor's synchronous mirror, never the possibly-stale `editValue` state.
+  useImperativeHandle(ref, () => ({
+    focusGrid: () => outerRef.current?.focus(),
+    commitPending: () => {
+      if (!edit) return false;
+      onCommit(edit.r, edit.c, editValueRef.current);
+      setEdit(null);
+      return true;
+    },
+  }), [edit, onCommit]);
 
   const startEdit = useCallback((r, c, seed) => {
     const col = colAt(sheet, c);
