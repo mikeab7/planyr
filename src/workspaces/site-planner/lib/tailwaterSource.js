@@ -24,6 +24,7 @@
  * ingest) — the live InFRM/BKDD/USGS fetch is egress-blocked in the sandbox, so it ships behind an
  * injectable seam and is confirmed live. No DOM, no network of its own. */
 
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 // Placeholder-leak guard: a candidate within this of site grade is treated as the grade placeholder
 // (not real receiving-water data) and rejected.
 export const GRADE_PLACEHOLDER_EPS_FT = 0.05;
@@ -137,7 +138,6 @@ export async function resolveTailwater({ ctx = {}, fetchers = {}, localCandidate
   return { ...deriveTailwater(candidates, { gradeFt: ctx.gradeFt }), attempts };
 }
 
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 
 /* Plain-English one-liner for the panel: names the value, the source, and the EST caveat. Pure,
  * em-dash-free. */

@@ -40,13 +40,13 @@ import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
   ringsPathD, contourLinesToFeet, ringsToLatticePx, GRADING_PAPER_RGB, GRADING_PAPER_OPACITY, bandField, bandRingsToFeet,
 } from "../lib/gradingPaint.js";
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 const EMPTY = [];
 // ROUND 7: the contours' own daylight line is usable as the band's outer edge only when it was traced off the SAME surface
 const contoursResKeyOf = (bandRes, contoursRes) => (bandRes && contoursRes && !contoursRes.error && contoursRes.key === bandRes.key
   && contoursRes.daylight && Array.isArray(contoursRes.daylight.rings) && contoursRes.daylight.rings.length ? contoursRes.key : "");
 export const PAPER_MARGIN_FT = 60;   // ROUND 5 (NEW-6): how far past the daylight line the paper reaches
-const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
 const fmtE = (v) => f1(v).replace(/\.0$/, "");
 const centreOf = (ring) => {
   let x = 0, y = 0;

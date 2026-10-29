@@ -3,8 +3,9 @@
  * Turns one `sites.data` jsonb blob (siteModel v11 shape) into a compact, LLM-readable
  * summary: parcel acreage, building inventory + footprint SF, element tallies, coverage.
  *
- * SCOPE RULE: this module may import ONLY `polyArea` from src/shared/markup/geometry.js
- * (verified pure — no React/DOM/deps). Never import siteModel.js / projectModel.js /
+ * SCOPE RULE: this module may import ONLY `polyArea` from src/shared/markup/geometry.js and the
+ * acre constant from src/shared/units/areaUnits.js (both verified pure — no React/DOM/deps; areaUnits
+ * pulls in only the equally pure numberFormat.js). Never import siteModel.js / projectModel.js /
  * pondGeom.js here: their chains pull clipper-lib and planner-coupled code into the
  * Pages Function bundle.
  *
@@ -13,8 +14,7 @@
  * here — the payload says so explicitly instead of approximating them silently.
  */
 import { polyArea } from "../../../src/shared/markup/geometry.js";
-
-const SQFT_PER_ACRE = 43560;
+import { SQFT_PER_ACRE } from "../../../src/shared/units/areaUnits.js";
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const round1 = (v) => Math.round(v * 10) / 10;

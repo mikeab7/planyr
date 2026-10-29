@@ -12,6 +12,7 @@
  * `compFieldRows` is the single place that decision is made, so no renderer has to re-derive it.
  */
 import { formatDateDisplay } from "./compDates.js";
+import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
 
 export const COMP_TYPES = ["land", "building_sale", "lease"];
 export const LEASE_PERIODS = ["annual", "monthly"];
@@ -23,7 +24,6 @@ export const LEASE_EXPENSE_BASES = ["nnn", "gross"];
 // raw 23514 the instant it reaches Postgres — never just a frontend change.
 export const ANCHOR_KINDS = ["pin", "parcel", "site_plan"];
 
-const SF_PER_ACRE = 43560;
 
 export function isCompType(t) {
   return COMP_TYPES.includes(t);
@@ -94,7 +94,7 @@ export function anchorCountyFlag(anchor) {
 export function landSizeSf(sizeValue, sizeUnit) {
   const v = positiveNumber(sizeValue);
   if (!v) return null;
-  if (sizeUnit === "ac") return v * SF_PER_ACRE;
+  if (sizeUnit === "ac") return v * SQFT_PER_ACRE;
   if (sizeUnit === "sf") return v;
   return null;
 }

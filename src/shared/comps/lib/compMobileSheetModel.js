@@ -9,8 +9,9 @@
 import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN, formatNumberDisplay, sanitizeNumericInput, activeCellFlags } from "./compSheetColumns.js";
 import { draftToComp, buildingPricePerSf, landPricePerAreaUnit, annualLeaseRate, validateComp } from "./comps.js";
 import { rowHasBlockingFlags } from "./compParse.js";
+import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
+export { SQFT_PER_ACRE as SF_PER_ACRE };
 
-export const SF_PER_ACRE = 43560;
 
 const col = (key) => (key === "notes" ? NOTES_COLUMN : SHEET_COLUMNS[columnIndex(key)]);
 export const mobileCol = col;
@@ -143,8 +144,8 @@ export function priceReadback(draft) {
   if (draft.compType === "land") {
     const r = landPricePerAreaUnit(comp);
     if (!r) return null;
-    const perAc = r.unit === "ac" ? r.value : r.value * SF_PER_ACRE;
-    const perSf = r.unit === "sf" ? r.value : r.value / SF_PER_ACRE;
+    const perAc = r.unit === "ac" ? r.value : r.value * SQFT_PER_ACRE;
+    const perSf = r.unit === "sf" ? r.value : r.value / SQFT_PER_ACRE;
     return r.unit === "ac"
       ? `= ${money(perAc)} /AC · ${money2(perSf)} /SF`
       : `= ${money2(perSf)} /SF · ${money(perAc)} /AC`;
@@ -180,7 +181,7 @@ export function footerReadback(draft) {
     const p = priceOf(draft);
     if (p !== "" && p != null && Number(p) > 0) parts.push(money(Number(p)));
     const r = landPricePerAreaUnit(comp);
-    if (r) parts.push(`${money2(r.unit === "ac" ? r.value / SF_PER_ACRE : r.value)}/SF`);
+    if (r) parts.push(`${money2(r.unit === "ac" ? r.value / SQFT_PER_ACRE : r.value)}/SF`);
   } else {
     if (sizeText) parts.push(`${sizeText} SF`);
     const p = priceOf(draft);

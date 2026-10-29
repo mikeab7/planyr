@@ -10,8 +10,8 @@
  * drainage study. LOUD-FAILURE: a grid too small / an off-grid outlet → honest null. Pure +
  * Node-testable (runs in the terrain worker like the rest of flowField/demGrid); no DOM. */
 import { d8Direction } from "./flowField.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
-const SQFT_PER_ACRE = 43560;
 
 /* D8 downstream neighbor index for a cell, or -1 (pit/flat/edge). Wraps flowField.d8Direction
  * (which returns a {dx,dy} step or null) into a flat index. Pure. */

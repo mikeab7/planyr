@@ -25,11 +25,11 @@
  * because the FFE search rebuilds the surface dozens of times over an unchanged layout. */
 import ClipperLib from "clipper-lib";
 import { pointInRing } from "./pondGeom.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 export const LIMIT_DEFAULTS = Object.freeze({ shoulderFt: 5, cornerRadiusFt: 30, aisleFt: 24, minCornerRadiusFt: 30 });
 export const LIMIT_MODES = Object.freeze(["layout", "boundary"]);
 export const LIMIT_MODE_LABEL = Object.freeze({ layout: "Around the layout", boundary: "To the boundary" });
-const SQFT_PER_ACRE = 43560;
 
 const SCALE = 100;                 // feet → centi-feet
 const CLEAN_DELTA = SCALE * 0.01;

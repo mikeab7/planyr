@@ -321,16 +321,12 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
 /* Identify the parcel under a clicked point across several candidate counties at
  * once — so the user never has to pre-pick a county. Each candidate is
  * { county, url } (the county's resolved parcel-layer URL). Queries them in
- * parallel and returns EVERY hit as { county, feature } (a click that straddles a
+ * parallel and keeps EVERY hit as { county, feature } (a click that straddles a
  * county line can legitimately hit two — the caller merges). A candidate whose
  * service is down/unreachable is skipped (its rejection swallowed) rather than
- * failing the whole identify, so a sibling county can still answer. Returns [] when
- * nothing matched anywhere. */
-export async function identifyParcelAcross(candidates, lng, lat) {
-  return (await identifyParcelDetailed(candidates, lng, lat)).hits;
-}
-
-/* Same identify, but also reports how many candidate services actually RESPONDED,
+ * failing the whole identify, so a sibling county can still answer.
+ *
+ * Also reports how many candidate services actually RESPONDED,
  * so a caller can tell "couldn't reach any parcel service" (responded === 0) apart
  * from "a service answered, but there's no parcel at this point" (responded > 0,
  * hits empty) — two states that must read differently (B233). Also returns a

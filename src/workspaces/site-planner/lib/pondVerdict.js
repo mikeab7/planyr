@@ -33,10 +33,9 @@
  * must not offer a shortfall solver).
  */
 
-const AC_FT = 43560;
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
+import { usInt as f0, plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 const CF_PER_CY = 27;
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
-const f0 = (n) => Math.round(n).toLocaleString("en-US");
 
 /* The over-provision slack: how far past the requirement is normal freeboard-and-rounding
  * headroom rather than waste. `slackAcFt` / `slackPct` come from the jurisdiction criteria
@@ -58,7 +57,7 @@ export function overdugAcFt(providedAcFt, requiredAcFt, { slackAcFt = 1, slackPc
  * `costUsd` is null and the caller shows volume only — a cost is NEVER fabricated. Pure. */
 export function overProvision(overAcFt, { earthPerCy = null } = {}) {
   if (!Number.isFinite(overAcFt) || overAcFt <= 0) return null;
-  const cy = (overAcFt * AC_FT) / CF_PER_CY;
+  const cy = (overAcFt * CF_PER_ACFT) / CF_PER_CY;
   const price = Number.isFinite(earthPerCy) && earthPerCy > 0 ? earthPerCy : null;
   const costUsd = price != null ? cy * price : null;
   return {

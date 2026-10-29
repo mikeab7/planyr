@@ -18,8 +18,9 @@ import { trimPolylineEnds, roundaboutNodes, roundaboutGeometry, roundaboutDiamet
 import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "./metesAndBounds.js";
 import { roadSurfaceRing } from "./roadNetwork.js";
 import { imperviousCorrectionWidths } from "./roadCrossSection.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { SQFT_PER_ACRE };
 
-export const SQFT_PER_ACRE = 43560;
 
 /* ----------------------------- geometry ---------------------------- */
 export const rot2 = (x, y, deg) => {

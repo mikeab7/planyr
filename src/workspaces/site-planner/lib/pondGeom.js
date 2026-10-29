@@ -15,6 +15,7 @@ import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { polyArea } from "./polygonSplit.js";
 import { crestTopRing } from "./inwardBerm.js";
 import { pointInRing } from "./ringMath.js";
+import { CF_PER_ACFT, SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 // Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})? Re-exported because
 // several modules have long imported it from here; the implementation is ringMath's.
@@ -627,11 +628,11 @@ export function estimateFootprintSf({ volumeCf, avgDepthFt } = {}) {
 export function detentionLandTakeEstimate({ requiredAcFt, providedUsableCf, avgDepthFt = 8 } = {}) {
   const req = Number(requiredAcFt);
   if (!Number.isFinite(req) || req <= 0 || providedUsableCf == null || !Number.isFinite(providedUsableCf)) return null;
-  const deficitCf = req * 43560 - providedUsableCf;
+  const deficitCf = req * CF_PER_ACFT - providedUsableCf;
   if (!(deficitCf > 0)) return null;
   const footprintSf = estimateFootprintSf({ volumeCf: deficitCf, avgDepthFt });
   if (footprintSf == null) return null;
-  return { deficitCf, deficitAcFt: deficitCf / 43560, footprintSf, footprintAc: footprintSf / 43560, avgDepthFt };
+  return { deficitCf, deficitAcFt: deficitCf / CF_PER_ACFT, footprintSf, footprintAc: footprintSf / SQFT_PER_ACRE, avgDepthFt };
 }
 
 // B909 — screening candidate CENTER points for auto-placing a pond that doesn't exist yet

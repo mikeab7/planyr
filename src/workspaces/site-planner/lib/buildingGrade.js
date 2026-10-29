@@ -16,6 +16,7 @@ import { solveBalanceFfeSteps, evalSteps } from "./ffeBalance.js";
 export { evalSteps };
 import { hostBuildingIdOf, assemblyIds } from "./gradingMembership.js";
 import { limitCrossPlace } from "./gradingPanelModel.js";
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 export const CF_PER_CY = 27;
 export const BALANCE_TOL_CY = 500;     // "CY net, balanced" when |net| is under this
@@ -259,7 +260,6 @@ export function* findMoveFix(clearsAt, { buildingCentre, offendCentroid }) {
 
 /* ---- spot elevations + fall arrows ---- */
 
-const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
 const STATION_COURT_WIDE_FT = 400;     // a court wider than this gets three stations, else two
 const LOT_WIDE_FT = 200;               // a lot wider than this gets two, else one
 export const GRADE_TAG_MIN_DEPTH_FT = 90;

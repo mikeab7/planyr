@@ -41,10 +41,11 @@ import {
   polylineDistMeters,
 } from "./jurisdiction.js";
 import { ftypeLabel } from "./nhdFlowline.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { SQFT_PER_ACRE };
 
 const DAY = 24 * 3600 * 1000;
 const FT_PER_M = 3.28084;
-export const SQFT_PER_ACRE = 43560;
 
 // ---------------------------------------------------------------------------
 // Rule records — versioned data, newest first per authority.

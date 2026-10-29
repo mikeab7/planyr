@@ -32,6 +32,7 @@
  * LOUD-FAILURE: a missing/non-positive length or slope returns null — never a fabricated Tc.
  * Pure + Node-testable; no DOM/network (no live DEM sampling here — see above). */
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 const num = (v) => (Number.isFinite(v) ? v : null);
 const round = (n, p = 2) => (n == null ? null : Math.round(n * 10 ** p) / 10 ** p);
 
@@ -63,7 +64,7 @@ export function estimateFlowPathLengthFt({ areaAcres, kFactor = DEFAULT_FLOW_PAT
   const A = num(areaAcres);
   if (A == null || A <= 0) return null;
   const k = num(kFactor) ?? DEFAULT_FLOW_PATH_K_FACTOR;
-  return round(k * Math.sqrt(A * 43560), 1);
+  return round(k * Math.sqrt(A * SQFT_PER_ACRE), 1);
 }
 
 /* THE top-level call: compute Tc for a site, resolving L and S from whatever real inputs

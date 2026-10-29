@@ -13,8 +13,8 @@
  * runoff depth. LOUD-FAILURE: an unknown soil group / rainfall returns null (never a
  * fabricated CN or volume). Pure + Node-testable; no DOM/network. */
 
-const SQFT_PER_ACRE = 43560;
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 export const HSG = ["A", "B", "C", "D"];
 // Dual groups (A/D, B/D, C/D) — drained vs undrained. Screening takes the DRAINED (first)
 // letter's number unless the seasonal-high water table says otherwise (groundwater.js).
