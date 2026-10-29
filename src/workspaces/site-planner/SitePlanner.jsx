@@ -79,6 +79,7 @@ import {
   PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ,
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
+import GisIdentifyCard from "./components/GisIdentifyCard.jsx";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
@@ -705,11 +706,6 @@ const CANVAS_IDENTIFY_SLOP_PX = 14;
  * never goes idle it still fires here. B874's "the attempt always fires" invariant depends on
  * this being finite — never remove it in favour of a bare requestIdleCallback. */
 const DRAIN_AUTO_IDLE_TIMEOUT_MS = 4000;
-/* How long the cursor must REST on the canvas before the hover identify answers (NEW-2). Long
- * enough that sweeping across the canvas asks nothing at all — the vector pass is a hit-test
- * over everything painted, and the raster pass is a network request — short enough to feel
- * like hover rather than a click. */
-const CANVAS_HOVER_IDENTIFY_MS = 320;
 // Feet per degree, the SHORTER of the two axes at this latitude band (longitude at ~30°N),
 // so a tolerance in degrees is never tighter than the on-screen slop it came from.
 const FT_PER_DEG_MIN = 300000;
@@ -2712,16 +2708,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * vector layers what's under it and shows the same facts the map finder's popover does:
    * the easement's recorded width and exhibit, the channel's name and class. */
   const [gisHit, setGisHit] = useState(null);
-  /* NEW-2 — the HOVER readout, same shape as gisHit plus an optional `note` for the honest
-   * non-hit states of a raster identify. Never open at the same time as the pinned card: a
-   * deliberate tap always wins (see hoverIdleOk). */
-  const [gisHover, setGisHover] = useState(null);
-  // NEW-4(c) — plain mirrors of the two identify-card states, so the zoom effects below can ask
-  // "is there anything to clear?" without reading (and re-subscribing to) the state itself.
+  /* B2507061 (owner constraint #43): there is NO hover readout. A layer answers a CLICK only — the card above, for vector AND raster layers (identifyGisAt). */
+  // NEW-4(c) — a plain mirror of the identify-card state, so the zoom effect below can ask "is there anything to clear?" without re-subscribing to it.
   const gisHitRef = useRef(null);
-  const gisHoverRef = useRef(null);
   gisHitRef.current = gisHit;
-  gisHoverRef.current = gisHover;
   // The card is anchored in SCREEN space, so a zoom would leave it pointing at ground it
   // no longer covers. A pan already dismisses it (the press does); this covers the wheel.
   /* NEW-4(c) — READ THE REF, SKIP THE DISPATCH. This effect fires on every zoom step and, in the
@@ -7943,23 +7933,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the tolerance is never tighter than it looks on screen).
     const tolFt = CANVAS_IDENTIFY_SLOP_PX / Math.max(0.0001, view.ppf);
     const items = identifyOverlaysAt(overlayRefs.current, overlaysDrawn, { lat, lng, tolDeg: tolFt / FT_PER_DEG_MIN });
-    if (!items.length) { setGisHit(null); return; }
     const r = wrapRef.current ? wrapRef.current.getBoundingClientRect() : null;
-    setGisHit({ x: e.clientX - (r ? r.left : 0), y: e.clientY - (r ? r.top : 0), items });
+    const anchor = { x: e.clientX - (r ? r.left : 0), y: e.clientY - (r ? r.top : 0) };
+    if (items.length) { rasterHover.current?.cancel(); setGisHit({ ...anchor, items }); return; }
+    /* Nothing in the vector layers. The RASTER-painted overlays (FEMA, wetlands, the City mains, HCFCD, BKDD, the wells) hold no geometry — they are pictures — so a
+     * click asks their service (B2507061: this used to run on hover; the click is now the only way, and every outcome is stated, never silent). */
+    const layers = rasterIdentifyLayers(overlaysDrawn, { layerHealthy: (id) => (layerStatus?.[id]?.state ?? null) !== "failed" });
+    if (!layers.length) { rasterHover.current?.cancel(); setGisHit(null); return; }
+    rasterAnchor.current = anchor;
+    const ctl = ensureRasterHover();
+    if (!ctl) {
+      // the controller's chunk is still loading (first click of the session): say so, then ask the moment it lands
+      setGisHit({ ...anchor, items: [{ id: "raster-loading", title: "Checking…", rows: [] }] });
+      loadRasterIdentify().then(() => { const c2 = ensureRasterHover(); if (c2 && rasterAnchor.current === anchor) c2.hover({ lat, lng }, plannerIdentifyFrame(), layers, { immediate: true }); }).catch(() => setGisHit({ ...anchor, items: [{ id: "raster-status", title: "Source didn't answer", rows: [] }] }));
+      return;
+    }
+    ctl.hover({ lat, lng }, plannerIdentifyFrame(), layers, { immediate: true });
   };
 
-  /* NEW-2 — HOVER identify on the planner canvas. The owner's ask was literally "I should be
-   * able to hover over it and see what it is", and on THIS surface a Leaflet mouseover can
-   * never fire: the backdrop map is pointer-events:none, the SVG owns every pointer event. So
-   * the hover is driven from the canvas's own already-throttled cursor position — the same
-   * pipeline that answers the contour elevation under the cursor (contourHover) — and rendered
-   * in the same card the tap identify uses.
-   *
-   * Gates, in order: a located site; the select tool with no drag in progress (never while
-   * drawing, panning or dragging a vertex); and no PINNED card already open, which always wins
-   * — a deliberate tap must not be overwritten by the hover that follows it. */
-  const hoverIdleOk = () => !!origin && tool === "select" && !drag.current && !panning && !gisHit
-    && !draftPoly && !draftRect && !draftElPoly && !draftRoadPts && !identifyMode;
   /* The map frame an ArcGIS identify resolves its pixel tolerance against. The planner's
    * backdrop Leaflet map follows the SVG view, so its bounds/size ARE the frame the user is
    * looking at — even though it can never receive a pointer event itself. */
@@ -7973,68 +7964,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const rasterAnchor = useRef(null);
   const rasterHover = useRef(null);
-  /* The controller lives in a lazily-loaded chunk (rasterIdentifyLazy.js — it is off the boot
-   * bundle to stay inside the bundle budgets), so it is built on FIRST NEED rather than at mount.
-   * Until the chunk lands this returns null and the hover simply shows nothing for that one rest —
-   * the same honest "not yet" the contour readout already does on its first move. */
+  /* The raster controller lives in a lazily-loaded chunk (rasterIdentifyLazy.js — off the boot bundle), so it is built on FIRST NEED. Until the chunk lands this
+   * returns null and the click says "Checking…" (the chunk starts loading at once). A CLICK is a deliberate action, so every outcome — a hit, "nothing here",
+   * "source didn't answer" — is shown honestly (LOUD-FAILURE). */
   const ensureRasterHover = () => {
     if (rasterHover.current) return rasterHover.current;
     const m = rasterIdentifyNow();
     if (!m) { loadRasterIdentify().catch(() => {}); return null; }
-    /* ⛔ NEW-1 (B1613408, 2026-09-17, owner report) — a raster layer has no features in the DOM,
-     * so the only way to know whether the cursor sits on one is to ask the service, which means
-     * "pending"/"none"/"unsupported"/"error" fire on every rest position — including bare ground
-     * with nothing drawn there. That was the "Checking…" tooltip floating over open land with only
-     * Drainage channels (a raster MapServer picture) switched on. B1490144 carved FEMA out of
-     * cursor identify entirely for the same reason; this generalises the fix to every raster layer
-     * without losing the feature — a genuine HIT still answers below — by never surfacing a
-     * non-hit state for ambient hover. (The pinned click card, `gisHit` above, is a deliberate
-     * action and stays fully honest — LOUD-FAILURE is untouched there.) */
     rasterHover.current = makeHoverIdentify({
-      debounceMs: 0, // the effect below already debounced on cursor rest
+      debounceMs: 0,
       onState: (state) => {
         const a = rasterAnchor.current;
-        if (!a || state.kind !== m.IDENTIFY_STATE.hit) { setGisHover(null); return; }
-        setGisHover({ ...a, items: state.items });
+        if (!a || state.kind === m.IDENTIFY_STATE.idle) return;
+        if (state.kind === m.IDENTIFY_STATE.hit) { setGisHit({ ...a, items: state.items.map((it) => ({ ...it, about: it.sourceName ? `Source: ${it.sourceName}` : null })) }); return; }
+        setGisHit({ ...a, items: [{ id: "raster-status", title: m.stateMessage(state), rows: [] }] });
       },
     });
     return rasterHover.current;
   };
   useEffect(() => () => rasterHover.current?.destroy(), []);
-  useEffect(() => {
-    if (!cursorLL || !hoverIdleOk()) { setGisHover(null); return; }
-    const t = setTimeout(() => {
-      if (!hoverIdleOk()) return;
-      const tolFt = CANVAS_IDENTIFY_SLOP_PX / Math.max(0.0001, view.ppf);
-      const at = { lat: cursorLL.lat, lng: cursorLL.lng, tolDeg: tolFt / FT_PER_DEG_MIN };
-      const r = wrapRef.current ? wrapRef.current.getBoundingClientRect() : null;
-      const pt = lastPtrClient.current;
-      if (!pt) { setGisHover(null); return; }
-      const anchor = { x: pt.x - (r ? r.left : 0), y: pt.y - (r ? r.top : 0) };
-      // VECTOR first — it is already in hand, so it answers instantly and for free.
-      const items = identifyOverlaysAt(overlayRefs.current, overlaysDrawn, at, { limit: 1 });
-      if (items.length) { rasterHover.current?.cancel(); setGisHover({ ...anchor, items }); return; }
-      /* Nothing in the vector layers. The RASTER-painted overlays (FEMA, wetlands, the City
-       * mains, HCFCD, BKDD, the wells) hold no geometry at all — they are pictures — so the
-       * only way to name what is under the cursor is to ask their service. Debounced above,
-       * cancelled on the next move, and always ending in a stated outcome. */
-      const layers = rasterIdentifyLayers(overlaysDrawn, {
-        layerHealthy: (id) => (layerStatus?.[id]?.state ?? null) !== "failed",
-      });
-      if (!layers.length) { setGisHover(null); return; }
-      rasterAnchor.current = anchor;
-      const ctl = ensureRasterHover();
-      if (!ctl) { setGisHover(null); return; } // chunk still loading — say nothing rather than guess
-      ctl.hover({ lat: cursorLL.lat, lng: cursorLL.lng }, plannerIdentifyFrame(), layers, { immediate: true });
-    }, CANVAS_HOVER_IDENTIFY_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursorLL, overlaysDrawn, tool, gisHit, panning, view.ppf]);
-  // A zoom moves the ground out from under a screen-anchored card, exactly as it does for the
-  // pinned one (B1092's note) — drop it rather than let it point at ground it no longer covers.
-  // NEW-4(c) — same ref guard as gisHit above, same reason: this fired on every zoom step and
-  // almost always wrote null over null.
-  useEffect(() => { if (gisHoverRef.current) setGisHover(null); }, [view.ppf]);
 
   /* NEW-2 (B806081) — ADD LEADER must win the press wherever it lands. Every element/markup shape
    * renders `pointerEvents="all"` with its own bubble-phase `onPointerDown` (`startMoveEl` /
@@ -25124,56 +25072,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               on the canvas and the facts that make that layer worth being VECTOR arrive:
               the recorded easement width and its exhibit, the watercourse's name and class.
               Anchored at the tap, clamped inside the canvas, dismissed by the next press. */}
-          {gisHit && (
-            <div data-export="skip" data-testid="gis-identify"
-              style={{ position: "absolute", zIndex: 45, maxWidth: 260,
-                left: Math.max(6, Math.min(gisHit.x + 10, (size.w || 0) - 268)),
-                top: Math.max(6, Math.min(gisHit.y + 10, (size.h || 0) - 120)),
-                background: "var(--surface-overlay)", color: PAL.ink, border: `1px solid ${PAL.panelLine}`,
-                borderRadius: 9, boxShadow: "0 8px 26px rgba(28,25,20,0.24)", padding: "9px 11px",
-                fontSize: 11.5, lineHeight: 1.45 }}>
-              <button onClick={() => setGisHit(null)} title="Close" aria-label="Close feature details"
-                style={{ float: "right", marginLeft: 8, background: "transparent", border: "none", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, lineHeight: 1, padding: 0 }}>✕</button>
-              {gisHit.items.map((it, i) => (
-                <div key={it.id} style={{ marginTop: i ? 8 : 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 2 }}>{it.title}</div>
-                  {it.rows.map((r, j) => (
-                    <div key={j}>
-                      <span style={{ color: PAL.muted }}>{r.label}: </span>
-                      {r.href
-                        ? <a href={r.href} target="_blank" rel="noopener noreferrer" style={{ color: PAL.accent }}>{r.text}</a>
-                        : <span>{r.text}</span>}
-                    </div>
-                  ))}
-                  {it.note && <div style={{ color: PAL.muted, marginTop: 3 }}>{it.note}</div>}
-                  {it.sourceName && <div style={{ color: PAL.muted, fontSize: 10.5, marginTop: 3 }}>Source: {it.sourceName}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-          {/* NEW-2 — the HOVER readout: what is under the cursor, without a click. Same chrome as
-              the pinned card above so the two never read as different features, but no close
-              button (it follows the cursor and clears itself) and pointerEvents:none so it can
-              never swallow the click that would pin it. Suppressed while the pinned card is open. */}
-          {gisHover && !gisHit && (
-            <div data-export="skip" data-testid="gis-identify-hover"
-              style={{ position: "absolute", zIndex: 44, maxWidth: 260, pointerEvents: "none",
-                left: Math.max(6, Math.min(gisHover.x + 12, (size.w || 0) - 268)),
-                top: Math.max(6, Math.min(gisHover.y + 12, (size.h || 0) - 96)),
-                background: "var(--surface-overlay)", color: PAL.ink, border: `1px solid ${PAL.panelLine}`,
-                borderRadius: 9, boxShadow: "0 8px 26px rgba(28,25,20,0.24)", padding: "8px 10px",
-                fontSize: 11.5, lineHeight: 1.45 }}>
-              {(gisHover.items || []).map((it, i) => (
-                <div key={it.id || i} style={{ marginTop: i ? 7 : 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 12.5 }}>{it.title}</div>
-                  {(it.rows || []).map((r, j) => (
-                    <div key={j}><span style={{ color: PAL.muted }}>{r.label}: </span><span>{r.text}</span></div>
-                  ))}
-                  {it.sourceName && <div style={{ color: PAL.muted, fontSize: 10.5, marginTop: 3 }}>Source: {it.sourceName}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+          {gisHit && <GisIdentifyCard hit={gisHit} size={size} onClose={() => setGisHit(null)} ink={PAL.ink} muted={PAL.muted} accent={PAL.accent} line={PAL.panelLine} />}
           {/* NEW-2 — `transform` below is the MEASURED sub-pixel translate that welds the
               drawing onto wherever Leaflet actually seated the basemap. `p2f` reads this
               element's own bounding box, so this ONE transform corrects the pointer path

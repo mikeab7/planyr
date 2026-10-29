@@ -28,6 +28,7 @@ import { gisCache } from "./gisCache.js";
 import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
+import { cardNode } from "./identifyCard.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { streamBufferBands, bufferLegend } from "./georgiaStreamBuffers.js";
@@ -196,39 +197,12 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   const wireFeature = (feature, lyr) => {
     if (!interactive) return;
-    lyr.on("mouseover", (e) => {
-      if (!identifyOk()) return;
-      // A point's emphasis is a fatter ring at full fill — dropping fillOpacity to 0.1 (the
-      // right nudge for a boundary's near-invisible hit fill) would make a hovered disc FAINTER
-      // than an unhovered one, i.e. emphasis backwards.
-      try { lyr.setStyle(isPointFeature(feature) ? { weight: (cfg.weight || 2) + 1.2, fillOpacity: 1 } : { weight: (cfg.weight || 2) + 1.2, fillOpacity: 0.1 }); } catch (_) {}
-      try { lyr.bindTooltip(displayName(feature), { sticky: true, direction: "top" }).openTooltip(e.latlng); } catch (_) {}
-    });
-    lyr.on("mouseout", () => {
-      try { lyr.setStyle(baseStyle(feature)); } catch (_) {}
-      try { lyr.unbindTooltip(); } catch (_) {}
-    });
+    // B2507061 (owner constraint #43): NO hover tooltip and no hover emphasis — a boundary answers a CLICK with the clean card, and nothing else.
     lyr.on("click", (e) => {
       if (!identifyOk() || !map) return;
-      // Content built as DOM nodes (names arrive from an external service — never innerHTML them).
-      const el = document.createElement("div");
-      el.style.cssText = "font-size:12px;line-height:1.45;max-width:250px;";
-      const head = document.createElement("div");
-      head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;";
-      head.textContent = displayName(feature);
-      el.append(head);
-      // B1075: registry-declared detail rows (BKDD easement width + its recorded exhibit) —
-      // an easement is a hard buildable-area constraint, so its width has to REACH the user,
-      // not sit invisibly behind a band on the map.
-      appendIdentifyRows(el, source, feature && feature.properties);
-      const note = document.createElement("div");
-      note.style.cssText = "opacity:0.85;margin-top:4px;";
-      note.textContent = source.identifyNote || "";
-      const src = document.createElement("div");
-      src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:4px;";
-      src.textContent = source.sourceName ? `Source: ${source.sourceName}` : "";
-      el.append(note, src);
-      openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(el).openOn(map);
+      const about = source.sourceName ? `Source: ${source.sourceName}` : null;
+      const node = cardNode({ title: displayName(feature), rows: identifyRowsFor(source, feature && feature.properties), note: source.identifyNote || null, about });
+      openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map);
     });
   };
   // Close OUR identify popover (never someone else's) — on toggle-off / fallback the
@@ -492,35 +466,14 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     openPopup = null;
   };
 
-  // Identify popover DOM (external attribute values → textContent, never innerHTML).
+  // Identify popover DOM (external attribute values → textContent, never innerHTML): the clean card (identifyCard.js), source behind the (i).
   const identifyEl = (props) => {
     const p = props || {};
-    const color = (styleFor(source, p) || {}).color || "#333";
-    const el = document.createElement("div");
-    el.style.cssText = "font-size:12px;line-height:1.5;max-width:260px;";
-    const head = document.createElement("div");
-    head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;display:flex;align-items:center;gap:6px;";
-    const sw = document.createElement("span");
-    sw.style.cssText = `width:14px;height:0;border-top:3px solid ${color};flex:none;`;
-    const ct = document.createElement("span");
-    ct.textContent = identifyTitle(source, p);
-    head.append(sw, ct);
-    el.append(head);
-    appendIdentifyRows(el, source, p);
-    const note = document.createElement("div");
-    note.style.cssText = "opacity:0.85;margin-top:4px;";
-    note.textContent = source.identifyNote || "";
-    const src = document.createElement("div");
-    src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:3px;";
-    src.textContent = source.sourceName ? `Source: ${source.sourceName}` : "";
-    el.append(note, src);
-    return el;
+    return cardNode({ title: identifyTitle(source, p), rows: identifyRowsFor(source, p), note: source.identifyNote || null, about: source.sourceName ? `Source: ${source.sourceName}` : null });
   };
 
   const wireFeature = (feature, lyr) => {
     if (!interactive) return;
-    lyr.on("mouseover", () => { try { lyr.setStyle({ weight: (styleFeature(feature).weight || 2) + 1.5 }); } catch (_) {} });
-    lyr.on("mouseout", () => { try { lyr.setStyle(styleFeature(feature)); } catch (_) {} });
     lyr.on("click", (e) => {
       if (!identifyOk() || !map) return;
       openPopup = L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(identifyEl(feature.properties)).openOn(map);

@@ -1285,6 +1285,14 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
 
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS };
 
+/* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
+ * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
+ * project-opacity rules in layerOpacity.js, the panel, the export) reads `cfg.opacity`, so normalising the registry here moves them all
+ * together. A value somebody already set is untouched (layerOpacity.js stores only values that differ from the default). The per-row
+ * numbers above survive as comments of intent only; the old tier CEILINGS (layerWeight.js) no longer bound a default. */
+export const DEFAULT_LAYER_OPACITY = 1;
+Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg) cfg.opacity = DEFAULT_LAYER_OPACITY; });
+
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
  * decision-relevant "current as of" stamp, and is DELIBERATELY DISTINCT from
@@ -1371,6 +1379,14 @@ export const LAYER_VINTAGE = {
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
 export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;
+/* The text behind a click card's (i) (B2507062): who published the layer and how current it is. Never printed on the card itself. */
+export const layerAbout = (id, cfg) => {
+  const lines = [];
+  if (cfg && cfg.source) lines.push(`Source: ${cfg.source}`);
+  const v = layerVintage(id, cfg);
+  if (v) lines.push(`Data: ${v}`);
+  return lines.length ? lines.join("\n") : null;
+};
 
 // Fresh per-layer UI state (all off, each at its default opacity). A corridor layer (B752)
 // also carries an editable `widthFt` (total assumed corridor width, feet).
@@ -1572,7 +1588,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
  * inline: it is only reachable once this layer is on, and keeping its wording engine off the boot
  * bundle is part of how this feature pays its bundle budget. The import is kicked off here, at
  * toggle-on — long before a cursor can rest on a feature. */
-function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null } = {}) {
+function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null, labelPane = null, about = null } = {}) {
   const canHover = hoverIdentifyEnabled(cfg);
   /* NEW-1 (DeSoto / Olive Branch) — an optional per-line LABEL (`cfg.lineLabel`: the pipe size printed on the line). The text is decided by the pure
    * `lineLabelText`; the label is a permanent Leaflet tooltip bound ONLY while the map is at or past `lineLabel.minZoom` (a dense network labelled at
@@ -1627,7 +1643,8 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   }
   if (canHover) {
     import("./featureHoverAttach.js").then((m) => {
-      if (interactive) m.wireFeatureHover(lyr, cfg, identifyOk);
+      lyr.__pfAbout = about;
+      if (interactive) m.wireFeatureClick(lyr, cfg, identifyOk, about);
       m.attachFeatureCanvasIdentify(lyr, cfg);
     }, () => { /* the layer still paints; only its hover answer is unavailable */ });
   }
@@ -1689,7 +1706,7 @@ export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
     try {
       const hit = lyr.identifyAt(at);
       // NEW-1 (DeSoto PSC): several layers may answer with the SAME card (one click → all four utility providers); a shared `dedupeKey` keeps one.
-      if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit });
+      if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit, about: hit.about || layerAbout(k, cfg) });
     } catch (_) { /* one bad layer never breaks the identify */ }
     if (out.length >= limit) break;
   }
@@ -1943,7 +1960,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // NEW-1 (DFW ETJ) — a multi-service layer has no single service to fall back to; a row that
           // says so (`noLiveFallback`) reports FAILED instead of repainting one publisher's slice.
           buildFallback: cfg.noLiveFallback ? null : () => {
-            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
+            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, about: layerAbout(k, cfg) });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the
             // panel's opacity slider keeps working after a fallback engagement.
@@ -1993,7 +2010,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriFeature") {
-            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane });
+            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk, labelPane: lyrLabelPane, about: layerAbout(k, cfg) });
             // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
             // opacity change — re-applying the style function (not a flat {opacity}) so the
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled

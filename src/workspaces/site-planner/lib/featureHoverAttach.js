@@ -1,6 +1,6 @@
 /* The vector-overlay hover/identify ATTACH layer (NEW-2), deliberately off the boot path.
  *
- * WHY THIS IS ITS OWN MODULE. `wireFeatureHover` and `attachFeatureCanvasIdentify` are only ever
+ * WHY THIS IS ITS OWN MODULE. `wireFeatureClick` and `attachFeatureCanvasIdentify` are only ever
  * needed once a hover-capable layer is actually switched ON, and the wording engine they pull in
  * (`featureHover.js`, plus `powerScreen`'s redaction cleaners) is only needed once a cursor is
  * actually over a feature. Left in layers.js they rode the Site route's boot bundle and helped
@@ -15,45 +15,34 @@
  * that (`typeof lyr.identifyAt !== "function"`), so a tap in that window declines to answer rather
  * than answering wrongly.
  */
-import { hoverText } from "./featureHover.js";
+import L from "leaflet";
+import { hoverTitle, featureCard } from "./featureHover.js";
+import { cardNode } from "./identifyCard.js";
 import { hitFeature } from "./vectorLayers.js";
-import { pointSymbolOptions } from "./layerRequest.js";
 
-const isPoint = (feature) => {
-  const t = feature && feature.geometry && feature.geometry.type;
-  return t === "Point" || t === "MultiPoint";
-};
+/* THE ONE card for a clicked feature (B2507062): a row's own `identifyCard(props, at)` when it has one, else its title + labelled rows. Used by the planner canvas
+ * (`attachFeatureCanvasIdentify`) and by the Map view's click popup (`wireFeatureClick`), so the two surfaces cannot drift. `about` is the (i) text. */
+function itemFor(cfg, props, at, about) {
+  if (typeof cfg.identifyCard === "function") {
+    const card = cfg.identifyCard(props, at);
+    if (card) return { title: card.title || hoverTitle(cfg), rows: card.rows || [], note: card.note || null, sourceName: cfg.source || null, about, ...(card.dedupeKey ? { dedupeKey: card.dedupeKey } : {}) };
+  }
+  return { ...featureCard(cfg, props), sourceName: cfg.source || null, about };
+}
 
-/* Bind the hover tooltip + emphasis for an interactive esri featureLayer. The wording comes from
- * featureHover.js so a HIFLD substation reads exactly like the OSM one two rows above it in the
- * Layers panel.
- *
- * A sticky tooltip (following the cursor) rather than a fixed one: transmission lines are long, and
- * a tooltip pinned to a polyline's centroid can land off-screen entirely. */
-export function wireFeatureHover(lyr, cfg, identifyOk) {
+/* Map view: a feature answers a CLICK with a pinned popup — never a hover (owner constraint #43, B2507061). Nothing is bound to mouseover, no tooltip, no hover
+ * emphasis; the layer's features stay interactive only so a click lands on them. The popup is the same clean card the planner canvas shows. */
+export function wireFeatureClick(lyr, cfg, identifyOk, about = null) {
   const ok = () => (typeof identifyOk === "function" ? identifyOk() : true);
-  const restyle = (feature, hovered) => {
-    const base = isPoint(feature)
-      ? pointSymbolOptions(cfg, cfg.opacity ?? 1)
-      : { color: cfg.color || "#b91c1c", weight: cfg.weight || 2 };
-    if (!hovered) return base;
-    // A point's emphasis is a fatter ring at FULL fill — dropping fillOpacity (right for a
-    // boundary's near-invisible hit fill) would make a hovered disc fainter than an unhovered one.
-    return { ...base, weight: (cfg.weight || 2) + 1.4, ...(isPoint(feature) ? { fillOpacity: 1 } : {}) };
-  };
-  lyr.on("mouseover", (e) => {
+  lyr.on("click", (e) => {
     if (!ok()) return;
+    const map = lyr._map || (e.target && e.target._map);
+    if (!map) return;
     const feature = e.layer && e.layer.feature;
     const props = (feature && feature.properties) || {};
-    try { e.layer.setStyle(restyle(feature, true)); } catch (_) {}
-    // hover-only (a tooltip, nothing to click): never advertise the pointer hand Leaflet gives every interactive feature
-    try { const el = e.layer.getElement && e.layer.getElement(); if (el) el.style.cursor = "inherit"; } catch (_) {}
-    try { e.layer.bindTooltip(hoverText(cfg, props), { sticky: true, direction: "top" }).openTooltip(); } catch (_) {}
-  });
-  lyr.on("mouseout", (e) => {
-    const feature = e.layer && e.layer.feature;
-    try { e.layer.setStyle(restyle(feature, false)); } catch (_) {}
-    try { e.layer.unbindTooltip(); } catch (_) {}
+    const item = itemFor(cfg, props, { lat: e.latlng.lat, lng: e.latlng.lng }, about);
+    const node = cardNode(item);
+    try { L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map); } catch (_) { /* a popup never breaks the layer */ }
   });
 }
 
@@ -77,16 +66,6 @@ export function attachFeatureCanvasIdentify(lyr, cfg) {
     if (!features.length) return null;
     const hit = hitFeature({ type: "FeatureCollection", features }, at);
     if (!hit) return null;
-    // A row may opt into a fuller card with `identifyCard(props, at)` → { title, rows:[{label,text,href?}], note? } (NEW-1, DeSoto zoning: a zone needs its case,
-    // approval date and ordinance LINK, and a label for the jurisdiction the site falls in — none of which fit one tooltip line). Everything else keeps the
-    // one-line wording below.
-    if (typeof cfg.identifyCard === "function") {
-      const card = cfg.identifyCard(hit.properties || {}, at);
-      if (card) return { title: card.title || hoverText(cfg, hit.properties || {}), rows: card.rows || [], note: card.note || null, sourceName: cfg.source || null, ...(card.dedupeKey ? { dedupeKey: card.dedupeKey } : {}) };
-    }
-    // The SAME one-line wording the map finder's tooltip shows, so the two surfaces cannot drift and
-    // neither restates a fact the other omits. No `rows`: everything worth saying is already in that
-    // line, and a second copy below it would be the accumulation PANEL-BREVITY exists to prevent.
-    return { title: hoverText(cfg, hit.properties || {}), rows: [], note: null, sourceName: cfg.source || null };
+    return itemFor(cfg, hit.properties || {}, at, lyr.__pfAbout || null);
   };
 }
