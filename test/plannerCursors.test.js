@@ -172,10 +172,10 @@ describe("source guards (all red on 2500b00)", () => {
     expect(mf.match(/interactive: !sitesInert/g).length).toBe(3);
     expect(mf).toContain("blockSelect: sitesInert");
   });
-  it("hover-only layers do not advertise pointer; the plan image's select-click is pointer, a pin pick is crosshair", () => {
-    expect(read("lib/featureHoverAttach.js")).toContain('el.style.cursor = "inherit"');
-    expect(read("lib/mapSymbols.js")).toContain("pf-hover-only");
-    expect((read("lib/evidenceLayers.js").match(/pf-hover-only/g) || []).length).toBe(5);
+  it("map layers are CLICK-only (B2507061, constraint #43): nothing is hover-only any more, so no layer inherits the cursor to hide a tooltip; the plan image's select-click is pointer, a pin pick is crosshair", () => {
+    expect(read("lib/featureHoverAttach.js")).not.toContain('el.style.cursor = "inherit"');
+    expect(read("lib/mapSymbols.js")).not.toContain("pf-hover-only");
+    expect((read("lib/evidenceLayers.js").match(/pf-hover-only/g) || []).length).toBe(0);
     expect(read("lib/rotatedImageLayer.js")).toContain('kind === "pin" ? "crosshair" : "pointer"');
     expect(read("lib/overlayPlacementHandles.js")).not.toContain("cursor:grab");
   });

@@ -38,6 +38,7 @@ import L from "leaflet";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { ADMIN_BOUNDARY_MAX_ZOOM } from "./adminBoundaryGate.js";
 import { adminBoundaryLevels, admin1Style, decodeAsset } from "./adminBoundaryData.js";
+import { getStateLineEmphasis, subscribeStateLineEmphasis } from "./adminBoundaryGate.js";
 import { createZoomTracker, toUnit } from "./zoomTracker.js";
 
 const ASSET = "geo/admin-boundaries.json";
@@ -150,7 +151,7 @@ export function attachAdminBoundaries(map) {
       admin1: want.admin1 && !(want.detail && detailReady),
       admin1Detail: want.admin1 && want.detail && detailReady,
     };
-    const style = admin1Style(f.zoom);
+    const style = admin1Style(f.zoom, getStateLineEmphasis());
     const drawn = [];
     /* NEW-1 (2026-10-22, work-laptop report) — A CANVAS THAT HAS NOTHING TO DRAW HOLDS NO PIXELS. This canvas is one map-sized
      * backing store (5122×1499 = 29 MB at the laptop's 2.6775 pixel ratio) allocated at attach and kept for the life of the map —
@@ -192,6 +193,7 @@ export function attachAdminBoundaries(map) {
   let ro = null;
   try { if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(() => schedule()); ro.observe(map.getContainer()); } } catch (_) { /* no observer: the move events still drive it */ }
 
+  const unsubEmphasis = subscribeStateLineEmphasis(() => schedule()); // B2507065: Counties & Cities toggles the heavier state line
   const controller = {
     sync: schedule,
     drawSync(ts) { if (raf) { cancelAnimationFrame(raf); raf = 0; } draw(ts); }, // headless checks: draw NOW, on the caller's frame
@@ -201,6 +203,7 @@ export function attachAdminBoundaries(map) {
       map.off("move zoom moveend zoomend resize", onMove);
       tracker.destroy();
       try { ro && ro.disconnect(); } catch (_) { /* ignore */ }
+      try { unsubEmphasis(); } catch (_) { /* ignore */ }
       try { canvas.remove(); } catch (_) { /* map already torn down */ }
       attached.delete(map);
     },

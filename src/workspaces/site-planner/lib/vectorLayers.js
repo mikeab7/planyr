@@ -26,7 +26,7 @@ import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county";
 export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city"
   || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
 
@@ -200,11 +200,12 @@ export const VECTOR_SOURCES = {
    * the exact columns jurisdiction.js already reads. */
   jur_county: {
     id: "jur_county",
+    stateAbbr: "TX", // the county label adds ", TX" only when the view is centred in a different state (B2507065)
     label: "County boundaries",
     labelField: "CNTY_NM",
     // County-name labels on the map (B695): on at region zoom, off at parcel zoom
     // (you're inside one county there — the label is noise).
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     // Click-identify popover (B695): name line + the has-jurisdiction wording the
     // Layers panel already teaches (one disclaimer, reused — never a new claim).
     nameTemplate: "{name} County",
@@ -270,9 +271,10 @@ export const VECTOR_SOURCES = {
    * 512 KB entry cap); Adairsville answers at parcel zoom. Georgia has no ETJ, so there is no ETJ source. */
   ga_county: {
     id: "ga_county",
+    stateAbbr: "GA", // the county label adds ", GA" only when the view is centred in a different state (B2507065)
     label: "County boundaries (Georgia)",
     labelField: "NAME",
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
     sourceName: "Georgia DCA",
@@ -293,6 +295,55 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "Georgia county lines (DCA).",
+  },
+  tn_county: {
+    id: "tn_county",
+    stateAbbr: "TN",
+    label: "County boundaries (Tennessee)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "State of Tennessee (STS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyTn.serviceUrl + "/query",
+      outFields: ["NAME", "GEOID"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Tennessee county lines (State of Tennessee).",
+  },
+  ms_county: {
+    id: "ms_county",
+    stateAbbr: "MS",
+    label: "County boundary (DeSoto County, MS)",
+    labelField: "COUNTY",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "DeSoto County GIS — County Outline",
+    liveFallback: true,
+    query: {
+      url: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/8/query",
+      outFields: ["COUNTY"],
+      where: "1=1",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 5 }],
+    },
+    note: "DeSoto County's own outline (county server).",
   },
   ga_city: {
     id: "ga_city",
@@ -329,9 +380,10 @@ export const VECTOR_SOURCES = {
    * ~82 KB (under the 512 KB entry cap). California has no ETJ, so there is no ETJ source. */
   ca_county: {
     id: "ca_county",
+    stateAbbr: "CA", // the county label adds ", CA" only when the view is centred in a different state (B2507065)
     label: "County boundaries (California)",
     labelField: "CDT_NAME_SHORT",
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
     sourceName: "California CDT State Geoportal",
@@ -387,9 +439,10 @@ export const VECTOR_SOURCES = {
    * same bbox-only tiering as the Texas / Georgia / California city rows (a statewide pull of 564 / 933 / 532 polygons is too heavy for one entry). */
   nj_county: {
     id: "nj_county",
+    stateAbbr: "NJ", // the county label adds ", NJ" only when the view is centred in a different state (B2507065)
     label: "County boundaries (New Jersey)",
     labelField: "COUNTY",
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — but in New Jersey the municipality, not the county, is the zoning and site-plan authority. A boundary is not a utility service area. Screening only.",
     sourceName: "NJ Office of GIS (NJOGIS)",
@@ -438,9 +491,10 @@ export const VECTOR_SOURCES = {
   },
   ny_county: {
     id: "ny_county",
+    stateAbbr: "NY", // the county label adds ", NY" only when the view is centred in a different state (B2507065)
     label: "County boundaries (New York)",
     labelField: "NAME",
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — but in New York the town, village or city, not the county, approves zoning and site plans. A boundary is not a utility service area. Screening only.",
     sourceName: "NYS ITS Geospatial Services",
@@ -815,7 +869,7 @@ export function buildVectorQuery(source, bbox, { offset = 0, tier = null } = {})
 /* Compose a full /query URL from a base + params (skips null/undefined). Mirrors
  * jurisdiction.js's buildQueryUrl; `f` is carried in the params here. Pure. */
 export function buildQueryUrl(baseUrl, params) {
-  const u = new URL(baseUrl);
+  const u = new URL(baseUrl, typeof location !== "undefined" && location.origin ? location.origin : "http://localhost"); // a relative /gis-proxy/… URL resolves against the page's origin
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
   return u.toString();
 }
