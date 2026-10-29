@@ -196,6 +196,9 @@ describe("every Mississippi row is registered whole, sourced, and scoped", () =>
       if (c.group === "flood") expect(["regulatory", "local", "hydrography", "advisory"], id).toContain(c.floodTier);
     }
   });
+  it("declares no `fields` list on any row: esri-leaflet draws by the unique-id field, and a list that omits it collapses every feature to one id (live on the preview: one marker of ten)", () => {
+    for (const id of IDS) expect(ALL_LAYERS[id].fields, id).toBeUndefined();
+  });
   it("draws no assumed buffer or setback anywhere: Mississippi has no statewide stream / wetland buffer rule in the sources found", () => {
     for (const id of IDS) { expect(ALL_LAYERS[id].bufferRule, id).toBeUndefined(); expect(ALL_LAYERS[id].kind, id).not.toBe("pipelineCorridor"); }
   });
