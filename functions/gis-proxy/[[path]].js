@@ -190,7 +190,7 @@ export const ALLOWED_HOSTS = new Set([
   "www.kearnycountykansas.com", "www.kingmancoks.org", "www.marioncoks.net", "www.mitchellcountykansas.com", "www.morriscountyks.org", "www.mtcoks.com",
   "www.neoshocountyks.org", "www.nortoncountyks.gov", "www.osbornecounty.org", "www.phillipscountyks.org", "www.prattcounty.org", "www.ricecounty.us",
   "www.rookscounty.net", "www.stantoncountyks.com", "www.stevenscoks.org", "www.tregocountyks.com", "wallacecountyks.gov", "washingtoncountyks.gov", "www.wbcounty.org",
-  "www.wichitacounty.org", "chasecountyks.com", "ks283.cichosting.com", "ks497.cichosting.com", "ks1495.cichosting.com", "ks1497.cichosting.com", "www.kansasgis.org",
+  "www.wichitacounty.org", "chasecountyks.com", "ks283.cichosting.com", "ks497.cichosting.com", "ks1495.cichosting.com", "ks1497.cichosting.com", "www.kansasgis.org", "apps.kansasgis.org", "orkahub.kansasgis.org", "kansasgis.org", "data.kansasgis.org",
   "www.gray.kansasgov.com", "osborne.kansasgov.com",
   /* NEW-1 (New York, 2026-10-20) — county / city parcel hosts this build sandbox's egress blocks (CONNECT 403), so their layers could only be
    * measured through this relay on the PR preview; relayed server-side so the app never depends on their ACAO header. */
