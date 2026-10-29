@@ -3212,6 +3212,88 @@ const MENU_STOPS_GRID = {
   onMouseUp:   e => e.stopPropagation(),
   "data-menu-isolated": "1",
 };
+
+/* ⛔ ANCHORED-POPOVER (NEW-1 / B2465520, 2026-10-28) — ONE mechanism keeps every popover that is portaled
+ * out of a cell (or a header button) attached to the thing it belongs to.
+ *
+ * THE DEFECT (owner report, Schedule › Grid): click the traffic-light dot on a row near the bottom,
+ * scroll the wheel — the picker stayed where it opened while the rows scrolled away under it. The cause
+ * was a pattern repeated across the file: `getBoundingClientRect()` read ONCE in the click handler into a
+ * `position:fixed` portal, with nothing to move it afterwards. (ContactPicker alone tracked its cell, with
+ * a private rAF loop — correct, but a second copy of the idea, and it did not know about the sticky
+ * header, so a cell scrolled UNDER the column header kept its popup drawn over the header.)
+ *
+ * THE RULE, stated once: while a popover is open it re-reads its anchor's real rect EVERY FRAME (a rAF
+ * loop has no event to miss — a capture scroll listener does not always fire for the nested grid
+ * scroller inside the iframe, see the ContactPicker NEW-4 note in test/contactCreateConfirm.test.js) and
+ * re-places itself; and the instant the anchor is no longer visible — scrolled out of any clipping
+ * ancestor, out of the window, or fully hidden behind the sticky header or a pinned column — it calls
+ * `onGone()`, which every caller wires to a plain CLOSE (never a commit: a picker that is dismissed
+ * because its cell left changes nothing).
+ *
+ * `anchorHidden` is the pure verdict (unit-tested through the real source in
+ * test/anchoredPopover.test.js); `useAnchoredPopover` is the one hook. A NEW popover that positions a
+ * `position:fixed` portal from a measured rect uses the hook — test/anchoredPopover.test.js sweeps for a
+ * `setPos(` that follows a `getBoundingClientRect()` outside it. */
+const anchorHidden = (r, area, occluders) => {
+  if (!(r.width > 0 || r.height > 0)) return true;                           // laid out nowhere (display:none / detached)
+  if (r.bottom <= area.top || r.top >= area.bottom || r.right <= area.left || r.left >= area.right) return true;
+  return (occluders || []).some(o => r.left >= o.left && r.right <= o.right && r.top >= o.top && r.bottom <= o.bottom);
+};
+// The visible area of `el` (the window narrowed by every ancestor that clips it) and what can sit ON TOP
+// of the area without clipping it: the grid's sticky header row and its pinned columns.
+function anchorSurroundings(el) {
+  const area = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+    const cs = getComputedStyle(p);
+    if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+    const pr = p.getBoundingClientRect();
+    area.left = Math.max(area.left, pr.left); area.top = Math.max(area.top, pr.top);
+    area.right = Math.min(area.right, pr.right); area.bottom = Math.min(area.bottom, pr.bottom);
+  }
+  const occluders = [];
+  const sb = el.closest("[data-scroll-bounds]");
+  if (sb) {
+    const sbr = sb.getBoundingClientRect();
+    const hdr = sb.querySelector("[data-grid-header]");
+    // the sticky header covers whatever scrolls under it — but a header cell's OWN menu belongs to the header
+    if (hdr && !hdr.contains(el)) occluders.push({ left: sbr.left, right: sbr.right, top: sbr.top, bottom: hdr.getBoundingClientRect().bottom });
+    const ownCell = el.closest("[data-col-key],[data-hdr-col]");
+    const own = ownCell ? (ownCell.getAttribute("data-col-key") || ownCell.getAttribute("data-hdr-col")) : null;
+    sb.querySelectorAll("[data-hdr-col]").forEach(h => {
+      if (h.getAttribute("data-hdr-col") === own || getComputedStyle(h).position !== "sticky") return;
+      const hr = h.getBoundingClientRect();
+      occluders.push({ left: hr.left, right: hr.right, top: sbr.top, bottom: sbr.bottom });
+    });
+  }
+  return { area, occluders };
+}
+// `place(rect)` -> the popover's position object; returns that object (null until the first measure) or
+// null while closed. `onGone()` closes the popover without committing anything.
+function useAnchoredPopover(open, anchorRef, place, onGone) {
+  const [pos, setPos] = React.useState(null);
+  const placeRef = React.useRef(place); placeRef.current = place;
+  const goneRef = React.useRef(onGone); goneRef.current = onGone;
+  React.useLayoutEffect(() => {
+    if (!open) { setPos(null); return undefined; }
+    let raf = null, dead = false;
+    const measure = () => {
+      const el = anchorRef.current;
+      if (!el || !el.isConnected) { goneRef.current(); return false; }
+      const r = el.getBoundingClientRect();
+      const s = anchorSurroundings(el);
+      if (anchorHidden(r, s.area, s.occluders)) { goneRef.current(); return false; }
+      const next = placeRef.current(r);
+      setPos(p => (p && Object.keys(next).every(k => p[k] === next[k]) ? p : next));
+      return true;
+    };
+    if (!measure()) return undefined;                  // placed before the first paint — no flash at the old spot
+    const tick = () => { if (dead) return; if (measure()) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => { dead = true; if (raf) cancelAnimationFrame(raf); };
+  }, [open]);
+  return open ? pos : null;
+}
 // Excel-style fill palette: 5 columns x 4 rows = 20 swatches. Top rows = pastel tints
 // (read well on light grid rows + leave room for text); bottom rows = stronger fills
 // (work well as Gantt-bar accents). Used by the right-click Format toolbar.
@@ -5771,6 +5853,28 @@ const rowDropIntent = (tasks, blocked, rowFloat) => {
   return { kind: "gap", gapIndex, ...resolveDropParent(tasks, blocked, gapIndex) };
 };
 
+// B2445008 (×2) — where the pointer is, in ROWS, over the grid's scroll element. The grid scales
+// itself with CSS `zoom` (Ctrl+wheel, `gridZoom`, kept per browser), so clientY and the element's
+// bounding rect are VISUAL pixels while scrollTop, the header and every row's layout are the element's
+// own, UNZOOMED CSS pixels. The first nest fix divided visual pixels by an unzoomed row height, so at
+// any zoom other than 100% the drop resolved to a row ABOVE (zoom < 1) or BELOW (zoom > 1) the one
+// under the pointer — and with the selection directly above the target, "the row above" is a dragged
+// row, which offers no drop at all. `zoom` is MEASURED (rect height / layout height), never assumed.
+const rowFloatAtPointer = (clientY, rectTop, scrollTop, zoom, headerH, rowH) =>
+  (((clientY - rectTop) / (zoom > 0 && isFinite(zoom) ? zoom : 1)) + scrollTop - headerH) / rowH;
+
+// B2445008 (×2) — does a press on row `ri`'s ID cell PICK UP the selected rows (Microsoft Project's
+// gesture: select rows by their ID, then drag an ID to move them) rather than start a new row
+// selection? Only when the row is inside a multi-row, full-row selection — a press on any other ID
+// cell (or on the only selected row) still selects/extends exactly as before. A press that does not
+// move is a plain click and selects that one row (GridView's startRowDrag onClick).
+const idPressMovesRows = (selRange, ri, colCount) => {
+  if (!selRange) return false;
+  const r1 = Math.min(selRange.r1, selRange.r2), r2 = Math.max(selRange.r1, selRange.r2);
+  const c1 = Math.min(selRange.c1, selRange.c2), c2 = Math.max(selRange.c1, selRange.c2);
+  return r2 > r1 && ri >= r1 && ri <= r2 && c1 === 0 && c2 >= colCount - 1;
+};
+
 // ── Delete-with-children: "keep subtasks" path — promote survivors to the nearest ancestor NOT
 // being deleted. Handles a whole deleted CHAIN transitively (delete a parent and its own selected
 // child together, and the child's own children promote past both, straight to the grandparent) —
@@ -6070,6 +6174,123 @@ function stepGridRow(flat, allTasks, selectedId, dir, lastIdx, topIdx) {
   if (g == null) return flat[clamp(Number.isInteger(topIdx) ? topIdx : 0)].id;               // nothing known: the row at the top of the view
   if (dir > 0) return g + 1 >= n ? NEW : flat[Math.max(0, g + 1)].id;
   return flat[clamp(g)].id;
+}
+
+// NEW-1 (B2451776, owner request 2026-10-28) — Ctrl/Cmd+Arrow jumps across blank cells like Excel: ride a run of
+// filled cells to its last one, otherwise land on the next filled cell, otherwise the edge (first / last TASK row
+// — never "+ New task" — or first / last visible column). Navigation is by VISIBLE order, so collapsed / Focused-away
+// rows are skipped. "Blank" = the cell draws nothing that carries data (a rolled-up date on a summary IS data; the
+// Notes "+" and an empty Owner are not). These three functions mirror src/workspaces/scheduler/lib/gridCtrlNav.js
+// BYTE-IDENTICALLY (save the `export `); test/gridCtrlNav.test.js fails if they diverge. Rules + rationale live there.
+function ctrlJumpIndex(isBlank, n, cur, dir) {
+  const inRange = i => i >= 0 && i < n;
+  const edge = dir > 0 ? n - 1 : 0;
+  const next = cur + dir;
+  if (!inRange(next)) return inRange(cur) ? cur : null;           // already on the edge (or off it, heading away)
+  if (inRange(cur) && !isBlank(cur) && !isBlank(next)) {
+    let i = next;                                                   // inside a run: ride it to its last cell
+    while (inRange(i + dir) && !isBlank(i + dir)) i += dir;
+    return i;
+  }
+  let i = next;                                                     // on / before a gap: the next filled cell
+  while (inRange(i) && isBlank(i)) i += dir;
+  return inRange(i) ? i : edge;                                     // none → the edge
+}
+
+function gridCtrlArrowTarget(key, rowCount, colMasters, row, col, blankAt) {
+  const dir = (key === "ArrowDown" || key === "ArrowRight") ? 1 : -1;
+  if (key === "ArrowUp" || key === "ArrowDown") {
+    if (!(rowCount > 0)) return null;
+    const r = ctrlJumpIndex(i => blankAt(i, col), rowCount, row, dir);
+    return r == null ? null : { row: r, col };
+  }
+  const nc = colMasters ? colMasters.length : 0;
+  if (!nc) return null;
+  const pos = colMasters.indexOf(col);
+  if (pos < 0) {                                                    // the cursor sits on a hidden column: snap toward dir
+    if (dir > 0) { const f = colMasters.find(i => i > col); return { row, col: f !== undefined ? f : colMasters[nc - 1] }; }
+    let b; colMasters.forEach(i => { if (i < col) b = i; });
+    return { row, col: b !== undefined ? b : colMasters[0] };
+  }
+  const j = ctrlJumpIndex(q => blankAt(row, colMasters[q]), nc, pos, dir);
+  return j == null ? null : { row, col: colMasters[j] };
+}
+
+function gridCellBlank(task, col, env) {
+  if (!task) return true;
+  if (col.t === "formula") {
+    const f = env.formula(task.id, col.k);
+    return !f || f.display === "" || f.display == null;
+  }
+  switch (col.k) {
+    case "id": return false;
+    case "name": return String(task.name == null ? "" : task.name).trim() === "";
+    case "start": case "end": return !task[col.k];
+    case "duration": return task.duration === "" || task.duration == null;
+    case "predecessors": return env.predCount(task.predecessors) === 0;
+    case "successors": return env.succCount(task.id) === 0;
+    case "health": case "status": return !!(task.hasChildren && task.isExpanded);
+    case "percentComplete": return false;
+    case "responsibleParty": return env.ownerCount(task) === 0;
+    case "cost": case "budget": case "actualCost": {
+      const rolledKey = col.k === "cost" ? "rolledCost" : col.k === "budget" ? "rolledBudget" : "rolledActual";
+      return !(task[rolledKey] ?? (Number(task[col.k]) || 0));
+    }
+    case "notes": return !(task.notes && task.notes.length);
+    case "meetingBody": return task.hasChildren ? true : !(task.deadlineForTaskId != null || task.meetingBound);
+    case "floatToDeadline": return env.floatDays(task) == null;
+    case "costIfMissed": return env.costDays(task) == null;
+    default: return task[col.k] == null || task[col.k] === "";
+  }
+}
+
+// B2470832 — THE one rule for "this row is a Focus group": it has at least one child. `hasChildren` on the grid's
+// rows (the flattened list and the review list), the Focus chip's visibility, and Alt+F's target all come from
+// this set, so they can never disagree. Whether anything is currently HIDEABLE in the group is a different
+// question (hideableCount) and decides only what the chip's tooltip and Alt+F's toast say — never whether the
+// control exists. (It used to decide that too, plus "is expanded": a group whose children were all in progress,
+// or one that was collapsed, had no Focus button at all while its siblings did.)
+function focusGroupIds(tasks) {
+  const ids = new Set();
+  (tasks || []).forEach(t => { if (t.parentId != null) ids.add(t.parentId); });
+  return ids;
+}
+// The grid draws a Focus chip on exactly these rows. `hideableCount` is a number only on the Focus-aware
+// grid list (flatTasks); the review list ignores Focus entirely, so it has no chip.
+function rowCanFocus(row) { return !!row && !!row.hasChildren && typeof row.hideableCount === "number"; }
+// Chip tooltip. Every variant keeps its established prefix ("Focus: hide" / "Show all tasks") — other
+// harnesses tell the chip's title apart from the task name by it.
+function focusChipTitle(row) {
+  if (row.focused)
+    return `Show all tasks in this group — ${row.hideableDone} completed, ${row.hideablePaused} paused, ${row.hideableUpcoming} not started hidden (Alt+F)`;
+  if (row.hideableCount > 0)
+    return `Focus: hide ${row.hideableCount} completed / paused / not-started task${row.hideableCount>1?'s':''} (Alt+F)`;
+  return "Focus: hide completed / paused / not-started tasks here — none right now (Alt+F)";
+}
+
+// NEW-1 (B2455200) — Alt+F toggles Focus. WHICH group: the anchor row is the TOP selected row; if it is a
+// summary (has children) it is that row's own Focus, if it is a plain task it is its parent group's, and a
+// top-level plain task (no parent) has none -> null (the key does nothing, no error). Pure; unit-tested by
+// extracting this source (test/scheduleFocusKey.test.js).
+function focusToggleTarget(allTasks, anchorId) {
+  if (anchorId == null || anchorId === "__NEW_TASK__") return null;
+  const t = (allTasks || []).find(x => x.id === anchorId);
+  if (!t) return null;
+  if (focusGroupIds(allTasks).has(t.id)) return t.id;
+  return (t.parentId != null && allTasks.some(x => x.id === t.parentId)) ? t.parentId : null;
+}
+// After a Focus toggle: where the selection goes. Kept when its row is still visible; else the nearest
+// ANCESTOR that is visible (the parent summary row, or higher when the parent is itself hidden); null when
+// nothing qualifies (the selection is left alone).
+function focusReselectTarget(allTasks, visibleIds, selId) {
+  if (selId == null || selId === "__NEW_TASK__" || visibleIds.has(selId)) return selId;
+  const byId = new Map((allTasks || []).map(t => [t.id, t]));
+  let cur = byId.get(selId);
+  for (let guard = 0; cur && cur.parentId != null && guard < 1000; guard++) {
+    if (visibleIds.has(cur.parentId)) return cur.parentId;
+    cur = byId.get(cur.parentId);
+  }
+  return null;
 }
 
 // ── Task-complete celebration ("Ring & Spark" toast) ──────
@@ -6621,7 +6842,6 @@ function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, va
   const [chips, setChips] = React.useState(initialOwners);
   const [query, setQuery] = React.useState(seedText || '');
   const [highlight, setHighlight] = React.useState(-1);
-  const [pos, setPos] = React.useState(null);       // popup rect {left,top,width,above}
   const [ghost, setGhost] = React.useState(null);   // {left, fontSize, fontFamily, fontWeight}
   const [warn, setWarn] = React.useState(null);     // {kind:'comma'|'prefix'|'cap', text}
   const [dragIdx, setDragIdx] = React.useState(null);
@@ -6685,41 +6905,19 @@ function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, va
   }, [query]);
 
   /* NEW-4 — track the cell every frame while the picker is open, and close (committing whatever is
-   * final) the instant the cell scrolls out of its own scroll container. A capture-phase scroll
-   * listener depends on the event actually bubbling THROUGH something this component's ancestors
-   * can see, and measured live it does not always fire for a nested grid scroller inside the
-   * iframe — a rAF loop has no event to miss: it just re-reads the real DOM position every frame,
-   * so it cannot desync from whatever the browser is actually painting. */
-  React.useEffect(() => {
-    let raf = null;
-    const tick = () => {
-      const el = inputRef.current;
-      if (!el) { raf = requestAnimationFrame(tick); return; }
-      const r = el.getBoundingClientRect();
-      const bounds = wrapRef.current && wrapRef.current.closest('[data-scroll-bounds]');
-      if (bounds) {
-        const b = bounds.getBoundingClientRect();
-        if (r.bottom < b.top || r.top > b.bottom || r.right < b.left || r.left > b.right) {
-          finishEditing();   // scrolled fully out of the grid's own viewport — never float over the header
-          return;
-        }
-      }
-      const popupH = Math.min(260, 40 + totalItems * 40);   // rough estimate; only decides which side to open on
-      const roomBelow = window.innerHeight - r.bottom;
-      const above = roomBelow < popupH + 8 && r.top > popupH + 8;
-      const width = Math.max(240, r.width);
-      setPos(p => {
-        const top = above ? Math.round(r.top - popupH - 2) : Math.round(r.bottom + 2);
-        const left = Math.round(r.left);
-        if (p && p.left === left && p.top === top && p.width === width && p.above === above) return p; // skip no-op renders
-        return { left, top, width, above };
-      });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => { if (raf) cancelAnimationFrame(raf); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalItems]);
+   * final) the instant the cell scrolls out of view. NEW-1 / B2465520 MOVED this loop into the shared
+   * `useAnchoredPopover` (the grid's other cell popovers had no tracking at all and floated off their
+   * cell on scroll) — what stays here is only THIS popup's placement: it flips ABOVE the cell when there
+   * is no room below. The hook also closes it when the cell goes UNDER the sticky header or a pinned
+   * column, which the private loop this replaced did not know about. `place` reads the live item count
+   * through the hook's ref, so it is never a render behind. */
+  const pos = useAnchoredPopover(true, inputRef, r => {
+    const popupH = Math.min(260, 40 + totalItems * 40);   // rough estimate; only decides which side to open on
+    const roomBelow = window.innerHeight - r.bottom;
+    const above = roomBelow < popupH + 8 && r.top > popupH + 8;
+    return { left: Math.round(r.left), top: above ? Math.round(r.top - popupH - 2) : Math.round(r.bottom + 2),
+      width: Math.max(240, r.width), above };
+  }, () => finishEditing());   // scrolled fully out of view — never float over the header
 
   /* THE ONE WRITE PATH (B1341728). Every chip mutation goes through here, immediately — there is
    * no deferred "final" list to lose. `newContact` is handed over in the SAME call that assigns
@@ -8195,7 +8393,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
   // movers carry preview dates + Δ, other pending tasks get a clickable dot. Pure view state — only Approve writes.
   const flattenAll = (ts) => {
     if (!ts || !ts.length) return [];
-    const childSet = new Set(ts.filter(t => t.parentId != null).map(t => t.parentId));
+    const childSet = focusGroupIds(ts);
     const kids = new Map();
     ts.forEach(t => { if (!kids.has(t.parentId)) kids.set(t.parentId, []); kids.get(t.parentId).push(t); });
     const out = [];
@@ -8626,6 +8824,9 @@ function App() {
   const [moveToCtx, setMoveToCtx] = useState(null); // {ids, projId} | null — "Move to…" destination-picker modal
   const moveSelectRef = useRef(null); // new id of the moved block's first root row → select + scroll to it after a move
   const [edit,       setEdit]       = useState(null);
+  const editLiveRef = useRef(null);   // NEW-1 — the key handler's closure is stale w.r.t. `edit`; this is live
+  useEffect(() => { editLiveRef.current = edit; }, [edit]);
+  const focusReselectRef = useRef(null);   // NEW-1 — set by Alt+F, consumed by the layout effect below
   const [editStartChar, setEditStartChar] = useState(null);
   const [selectedId,    setSelectedId]    = useState(null);
   const [selRange,      setSelRange]      = useState(null); // {r1,r2,c1,c2} — row/col indices into flatTasks/COLS
@@ -9402,6 +9603,19 @@ function App() {
         if (!e.repeat) insertTask();
         return;
       }
+      // NEW-1 (B2455200) — Alt+F toggles Focus for the group of the TOP selected row (see focusToggleTarget).
+      // e.code, not e.key: with Alt held a Mac reports "ƒ". Never while a cell is being edited (an input has
+      // focus, or the editor state is open) — then the key is left entirely alone. Outside editing,
+      // preventDefault always runs (even when there is no group to toggle) so Chrome's own File menu never
+      // opens on Windows: Alt+F is ours everywhere on the grid, consistently.
+      if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyF" &&
+          !typing && !document.activeElement?.isContentEditable && !editLiveRef.current) {
+        e.preventDefault();
+        if (e.repeat) return;
+        const ids = rowRangeSelIds();
+        toggleGroupFocus(ids.length ? ids[0] : selectedId, selectedId);
+        return;
+      }
       if (e.key === "Delete" && !typing) {
         if (!e.repeat && selectedId !== null) {
           e.preventDefault();
@@ -9447,6 +9661,55 @@ function App() {
               updateTask(selectedId, {[col.k]: blank});
             }
           }
+        }
+        return;
+      }
+      // NEW-1 (B2451776) — Ctrl/Cmd+Arrow: jump across blank cells like Excel (the rule and the definition of
+      // "blank" live in src/workspaces/scheduler/lib/gridCtrlNav.js; the three functions are mirrored near
+      // stepGridRow). NAVIGATION MODE ONLY: a focused input / an open cell editor (editLiveRef) / a contentEditable
+      // all fall through untouched so Ctrl+Arrow still moves by word in the text. preventDefault runs only once the
+      // grid has an anchor to move from. Ctrl+Shift+Arrow extends the Shift+Arrow range from its moving end.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && selectedId !== null &&
+          !document.activeElement?.isContentEditable && !editLiveRef.current &&
+          (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        const flat = flatTasksRef.current;
+        const NEW_ROW = "__NEW_TASK__";
+        const anchorRow = selectedId === NEW_ROW ? flat.length : flat.findIndex(t => t.id === selectedId);
+        if (anchorRow < 0) return;                       // the selected row is hidden / gone — nothing to anchor on
+        e.preventDefault();
+        const proj = activeProjectOf(dataRef.current);
+        const eff = activeEffectiveCols(dataRef.current);
+        let formulas = null, succIds = null;             // built lazily — only if a scan actually reaches such a column
+        const env = {
+          formula: (id, k) => { if (!formulas) formulas = computeFormulaValues(flat, formulaColsOf(proj), proj); return formulas[id]?.[k]; },
+          predCount: arr => normPreds(arr).length,
+          succCount: id => {
+            if (!succIds) { succIds = new Set(); (proj?.tasks || []).forEach(t => normPreds(t.predecessors).forEach(p => succIds.add(p.id))); }
+            return succIds.has(id) ? 1 : 0;
+          },
+          ownerCount: t => ownerListOf(t).length,
+          floatDays: t => t.hasChildren ? null : meetingFloatBD(t, fdLocal(new Date())),
+          costDays: t => t.hasChildren ? null : meetingCostDays(t, MEETING_BODY_INDEX[t.meetingBodyId]),
+        };
+        // "+ New task" (row === flat.length) is a blank row to scan THROUGH, never a destination.
+        const blankAt = (r, c) => r >= flat.length || !eff[c] ? true : gridCellBlank(flat[r], eff[c], env);
+        const colMasters = visibleColIdxs();
+        if (e.shiftKey) {
+          if (selectedId === NEW_ROW) return;            // Shift+Arrow ignores "+ New task" too
+          const cur = selRange || {r1:anchorRow, r2:anchorRow, c1:selectedColIdx, c2:selectedColIdx};
+          const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, cur.r2, cur.c2, blankAt);
+          if (t) {
+            setSelRange({...cur, r2:t.row, c2:t.col});
+            // the range's moving end is not the selection, so the grid's selection-chase doesn't follow it — ask it to
+            document.dispatchEvent(new CustomEvent("planar-reveal-cell", {detail: {row: t.row, col: t.col}}));
+          }
+          return;
+        }
+        const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, anchorRow, selectedColIdx, blankAt);
+        if (t) {
+          setSelectedColIdx(t.col);
+          if (t.row !== anchorRow && flat[t.row]) setSelectedId(flat[t.row].id);
+          setSelRange(null);
         }
         return;
       }
@@ -9655,6 +9918,27 @@ function App() {
     // changes. Referencing the helpers directly here would read them before initialization if the
     // build ever kept `const` block-scoping instead of hoisting to `var`.
   }, [selectedId, selectedColIdx, selRange, isUndoing]);
+
+  // NEW-1 (B2455200) — the Alt+F action: flips `focused` through updateTask, i.e. EXACTLY what the summary row's
+  // Focus chip does, so it is undoable the same way (one history step, Ctrl+Z). A multi-row selection
+  // collapses to its top row (the toggle changes which rows exist, so the old row range would be stale). The
+  // insert pins are dropped in the same batch (a Focus toggle re-applies the filter — the focusSig effect does
+  // it too, but one render later). The selection follows below, in the focusSig layout effect.
+  const toggleGroupFocus = (anchorId, selId) => {
+    const all = activeProjectOf(dataRef.current)?.tasks || [];
+    const gid = focusToggleTarget(all, anchorId);
+    if (gid == null) return;
+    const g = all.find(t => t.id === gid);
+    if (!g) return;
+    focusReselectRef.current = { selId };   // the row that IS selected (a range's cursor), not the range's top row
+    setFocusPins(p => (p.size ? new Set() : p));
+    setSelRange(null);
+    updateTask(gid, { focused: !g.focused });
+    // The chip is only drawn on an EXPANDED summary with something to hide; when it is not, say what happened.
+    const row = (flatTasksRef.current || []).find(t => t.id === gid);
+    if (!(row && row.isExpanded && row.hideableCount > 0))
+      showToast(`Focus ${g.focused ? "off" : "on"} for "${g.name || "Untitled"}"` + (g.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
+  };
 
   // Ctrl+scroll → zoom Gantt timeline instead of browser zoom
   // RAF-throttled so rapid scrolling doesn't overwhelm React with renders
@@ -11018,7 +11302,7 @@ function App() {
   const flatTasks = useMemo(() => {
     if (!proj) return [];
     const settings = data?.settings; // healthRules (or legacy cfRules) for computeDisplayHealth — Focus must classify by the SAME status the grid shows (B717)
-    const childSet = new Set(proj.tasks.filter(t => t.parentId !== null).map(t => t.parentId));
+    const childSet = focusGroupIds(proj.tasks);
     const byId = {};
     const kidsBy = new Map();
     proj.tasks.forEach(t => {
@@ -11115,6 +11399,15 @@ function App() {
   // re-applies the filter: rows pinned visible by an insert drop back under it.
   const focusSig = (proj?.tasks || []).filter(t => t.focused).map(t => t._sid).join(",");
   React.useEffect(() => { setFocusPins(p => (p.size ? new Set() : p)); }, [focusSig]);
+  // NEW-1 (B2455200) — after an Alt+F toggle commits, a selection whose row Focus just hid moves to its
+  // nearest visible ancestor (the parent summary row) instead of staying on an invisible row. Runs only for
+  // a toggle the key made (focusReselectRef), never for a chip click or an undo.
+  React.useLayoutEffect(() => {
+    const r = focusReselectRef.current; if (!r) return;
+    focusReselectRef.current = null;
+    const next = focusReselectTarget(proj?.tasks || [], new Set(flatTasks.map(t => t.id)), r.selId);
+    if (next != null && next !== r.selId) setSelectedId(next);
+  }, [focusSig]);
   // NEW-1 — the flat index the selection was last SEEN at. When its row is deleted (selection → null) the
   // arrow keys re-anchor here instead of jumping to the first / last row (stepGridRow). Only ever written
   // while the selection is actually in the list, so a hide or a delete leaves the last real position.
@@ -11945,12 +12238,12 @@ function App() {
 // ── ProjDropdown ──────────────────────────────────────────
 function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false}) {
   const [open, setOpen] = useState(false);
-  const [pos,  setPos]  = useState({top:0, left:0});
   const [editingId, setEditingId] = useState(null);
   const [editVal,   setEditVal]   = useState("");
   const editRef = useRef(null);
   const btnRef  = useRef(null);
   const menuRef = useRef(null);
+  const pos = useAnchoredPopover(open, btnRef, r => ({top: r.bottom + 4, left: r.left}), () => setOpen(false));   // NEW-1
 
   const projHealth = p => {
     if (!p.tasks.length) return "gray";
@@ -11960,13 +12253,7 @@ function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false})
     return "gray";
   };
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({top: r.bottom + 4, left: r.left});
-    }
-    setOpen(o => !o);
-  };
+  const toggle = () => setOpen(o => !o);
 
   useEffect(() => {
     if (!open) { setEditingId(null); return; }
@@ -12005,7 +12292,7 @@ function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false})
           style={{fontSize:breadcrumb?11:13,color:"var(--mut)",flexShrink:0,transition:"transform .15s",transform:open?"rotate(180deg)":"none"}} />
       </button>
 
-      {open && ReactDOM.createPortal(
+      {open && pos && ReactDOM.createPortal(
         <div ref={menuRef} style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",border:"1px solid var(--bd2)",
           borderRadius:6,padding:4,zIndex:9999,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",minWidth:230}}>
           {Object.values(data.projects).map(p => {
@@ -12117,7 +12404,11 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
     const key  = e => { if (e.key === "Escape") onClose(); };
     document.addEventListener("mousedown", down);
     document.addEventListener("keydown",   key);
-    return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key); };
+    // NEW-1 — opened at a click point, so a scroll or resize leaves it stranded: close it (like TaskContextMenu).
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);
+    return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key);
+      window.removeEventListener("scroll", onClose, true); window.removeEventListener("resize", onClose); };
   }, [onClose]);
 
   // Nudge menu back on-screen if it would overflow
@@ -12343,10 +12634,12 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
     document.addEventListener("mousedown", down);
     document.addEventListener("keydown",   key);
     window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);   // NEW-1 — a resized window leaves the click point stale
     return () => {
       document.removeEventListener("mousedown", down);
       document.removeEventListener("keydown",   key);
       window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("resize", onClose);
     };
   }, [onClose]);
 
@@ -12563,8 +12856,10 @@ function HealthColHeaderIcon({style: s, size=14}) {
 
 function HealthColHeader({current, onChange}) {
   const [open, setOpen] = useState(false);
-  const [pos,  setPos]  = useState({top:0,left:0});
   const ref = useRef(null);
+  const anchorRef = useRef(null);
+  // NEW-1 — a header cell scrolls sideways with the columns; the menu follows it (or closes when it leaves).
+  const pos = useAnchoredPopover(open, anchorRef, r => ({top: r.bottom + 4, left: r.left}), () => setOpen(false));
 
   useEffect(() => {
     if (!open) return;
@@ -12575,14 +12870,12 @@ function HealthColHeader({current, onChange}) {
 
   const handleClick = e => {
     e.stopPropagation();
-    const r = e.currentTarget.getBoundingClientRect();
-    setPos({top: r.bottom + 4, left: r.left});
     setOpen(o => !o);
   };
 
   return (
     <>
-      <span onClick={handleClick} title="Change header style"
+      <span ref={anchorRef} onClick={handleClick} title="Change header style"
         style={{display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
           width:"100%",height:"100%",borderRadius:3,
           outline:open?"1.5px solid var(--bd2)":"1.5px solid transparent",transition:"outline-color .1s"}}
@@ -12590,7 +12883,7 @@ function HealthColHeader({current, onChange}) {
         onMouseLeave={e=>e.currentTarget.style.outline=open?"1.5px solid var(--bd2)":"1.5px solid transparent"}>
         <HealthColHeaderIcon style={current} size={13} />
       </span>
-      {open && ReactDOM.createPortal(
+      {open && pos && ReactDOM.createPortal(
         <div ref={ref} style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",
           border:"1px solid var(--bd2)",borderRadius:8,padding:8,zIndex:9999,
           boxShadow:"0 4px 20px rgba(0,0,0,0.14)",display:"flex",flexDirection:"column",gap:2,minWidth:160}}>
@@ -12633,7 +12926,8 @@ function StatusHeaderDropdown({data, setData}) {
   const [editing, setEditing] = useState(null); // {k, label}
   const ref     = useRef(null);
   const menuRef = useRef(null);
-  const [menuPos, setMenuPos] = useState({top:0,left:0});
+  const menuPos = useAnchoredPopover(open, ref, r => ({top: r.bottom + 4, left: r.left}),
+    () => { setOpen(false); setAdding(false); setEditing(null); setNewLabel(""); });   // NEW-1
 
   useEffect(() => {
     if (!open) return;
@@ -12647,8 +12941,6 @@ function StatusHeaderDropdown({data, setData}) {
 
   const openMenu = e => {
     e.stopPropagation();
-    const r = ref.current.getBoundingClientRect();
-    setMenuPos({top: r.bottom + 4, left: r.left});
     setOpen(o => !o);
   };
 
@@ -12702,7 +12994,7 @@ function StatusHeaderDropdown({data, setData}) {
         style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:3,userSelect:"none"}}>
         Status <span style={{fontSize:7,opacity:.7}}>▾</span>
       </span>
-      {open && ReactDOM.createPortal(
+      {open && menuPos && ReactDOM.createPortal(
         <div ref={menuRef} onMouseDown={e=>e.stopPropagation()}
           style={{position:"fixed",top:menuPos.top,left:menuPos.left,minWidth:190,
             background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,
@@ -12797,7 +13089,7 @@ function NotesColHeader({data, setData}) {
   const [size, setSize] = useState(() => { try { return localStorage.getItem("planar_noteSize")||"sm"; } catch { return "sm"; } });
   const ref = useRef(null);
   const menuRef = useRef(null);
-  const [menuPos, setMenuPos] = useState({top:0,left:0});
+  const menuPos = useAnchoredPopover(open, ref, r => ({top: r.bottom + 4, left: r.left}), () => { setOpen(false); setConfirm(null); });   // NEW-1
 
   const hasNotes = data ? Object.values(data.projects||{}).some(p=>(p.tasks||[]).some(t=>(t.notes||[]).length>0)) : false;
 
@@ -12808,7 +13100,7 @@ function NotesColHeader({data, setData}) {
     return () => document.removeEventListener("mousedown", down);
   }, [open]);
 
-  const openMenu = e => { e.stopPropagation(); const r=ref.current.getBoundingClientRect(); setMenuPos({top:r.bottom+4,left:r.left}); setOpen(o=>!o); };
+  const openMenu = e => { e.stopPropagation(); setOpen(o=>!o); };
 
   const applySize = (value, overrideAll) => {
     setSize(value); try { localStorage.setItem("planar_noteSize", value); } catch {}
@@ -12839,7 +13131,7 @@ function NotesColHeader({data, setData}) {
           fontFamily:"inherit",marginLeft:"auto",transition:"background .1s"}}
         onMouseEnter={e=>e.currentTarget.style.background="var(--bd)"}
         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>···</button>
-      {open && ReactDOM.createPortal(
+      {open && menuPos && ReactDOM.createPortal(
         <div ref={menuRef} style={{position:"fixed",top:menuPos.top,left:menuPos.left,
           background:"#fff",border:"1px solid var(--bd2)",borderRadius:7,
           boxShadow:"0 4px 18px rgba(0,0,0,.13)",zIndex:9999,minWidth:192,padding:"4px 0",overflow:"hidden"}}>
@@ -13197,8 +13489,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     return ids.includes(anchorId) ? ids : [anchorId];
   };
 
-  const startRowDrag = (e, anchorTaskId) => {
+  const startRowDrag = (e, anchorTaskId, opts = null) => {
     if (review || e.button !== 0) return;
+    const onClick = opts && opts.onClick;   // a press that never moves (an ID-cell press inside the selection) is a click
     const ids = dragTargetIds(anchorTaskId);
     // Full blocked set (dragged rows + every descendant, from the FULL project tree so a
     // COLLAPSED descendant still blocks a drop into its own ancestor being dragged).
@@ -13241,8 +13534,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       const el = ref.current;
       if (!el || !tasks.length) return { kind: "none" };
       const rect = el.getBoundingClientRect();
-      const docY = (state.lastClientY - rect.top) + el.scrollTop;
-      return rowDropIntent(tasks, state.blocked, (docY - TL_H) / ROW_H);
+      const zoom = el.offsetHeight ? rect.height / el.offsetHeight : (gridZoom || 1);
+      return rowDropIntent(tasks, state.blocked, rowFloatAtPointer(state.lastClientY, rect.top, el.scrollTop, zoom, TL_H, ROW_H));
     };
 
     const computeAndPaint = () => {
@@ -13323,6 +13616,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       const elEnd = ref.current;
       if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = ""; r.style.outline = ""; r.style.outlineOffset = ""; } });
       rowDragRef.current = null;
+      // A press that never moved is a click, not a drag (an ID-cell press inside the selection).
+      if (!state.moved && onClick) { onClick(); return; }
       const intent = state.intent;
       if (intent && intent.kind === "gap" && moveRows) {
         moveRows(anchorTaskId, intent.destParentId, intent.insertAfterId);
@@ -13432,6 +13727,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // across full rows. rowMode tells onMouseEnter to span all
     // columns no matter which column the pointer crosses.
     if (c.k === "id") {
+      // B2445008 (×2) — the ID cell of a row inside a multi-row selection is a pick-up handle for the
+      // whole selection (the 8px grip was the only way in, and the owner drags by the ID he selected by).
+      if (!review && idPressMovesRows(selRange, ri, allCols.length)) {
+        e.preventDefault();
+        startRowDrag(e, task.id, { onClick: () => { setSelectedId(task.id); setSelectedColIdx(0); setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1}); } });
+        return;
+      }
       dragAnchor.current = {ri, ci: 0, rowMode: true};
       isDraggingCells.current = true;
       setSelectedId(task.id);
@@ -13594,6 +13896,50 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     el.scrollTop = Math.max(0, st + anchor * (ROW_H - prevRH));
   }, [ROW_H]);
 
+  // NEW-1 (B2451776) — the two scroll-into-view moves of the selection chase below, as closures so the grid can
+  // ALSO reveal a cell that is not the selection: Ctrl+Shift+Arrow moves a range's far end (the selection itself
+  // stays at the anchor), and asks for it via the "planar-reveal-cell" event. Bodies are the chase effect's own,
+  // moved verbatim — row N's document top is TL_H + N*ROW_H (the sticky header holds TL_H).
+  const revealRowIdx = idx => {
+    const el = ref.current;
+    if (!el || !(idx >= 0)) return;
+    const rowTop = TL_H + idx * ROW_H, rowBottom = rowTop + ROW_H;
+    const visTop = el.scrollTop + TL_H, visBottom = el.scrollTop + el.clientHeight;
+    if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
+    else if (rowBottom > visBottom) el.scrollTop = rowBottom - el.clientHeight;
+  };
+  const revealColKey = selKey => {
+    const el = ref.current;
+    if (!el) return;
+    // Horizontal reveal: measure from the columns ACTUALLY rendered (the visible set in
+    // display order) — not COLS.slice, which would sum hidden columns' widths and scroll
+    // to the wrong place when columns are hidden or reordered.
+    const pin = pinRef.current || { lw: 0, rw: 0, l: [], r: [], w: {} };
+    const cw = { ...(colWidthsRef.current || {}), ...pin.w };     // DISPLAY widths (the Task cap applies)
+    const dispPos = selKey ? colOrder.indexOf(selKey) : -1;
+    if (dispPos >= 0) {
+      // +2: every row/header starts after its 2px left border (the selection/review marker), so a column's
+      // true offset in the scrolled content is 2px more than the sum of the widths before it.
+      const colLeft  = 2 + colOrder.slice(0, dispPos).reduce((s, k) => s + (cw[k] || colByK[k]?.w || 0), 0);
+      const colRight = colLeft + (cw[selKey] || colByK[selKey]?.w || 0);
+      // NEW-1 — the pinned columns cover the edges of the scrollport, so "visible" is the strip BETWEEN
+      // them; a pinned column itself is always visible and never needs a scroll.
+      const selPinned = pin.l.includes(selKey) || pin.r.includes(selKey);
+      const visLeft  = el.scrollLeft + pin.lw, visRight = el.scrollLeft + el.clientWidth - pin.rw;
+      if (!selPinned) {
+        if (colLeft < visLeft)          el.scrollLeft = colLeft - pin.lw;
+        else if (colRight > visRight)   el.scrollLeft = colRight - (el.clientWidth - pin.rw);
+      }
+    }
+  };
+  const revealCellRef = useRef(null);
+  revealCellRef.current = (row, masterCol) => { revealRowIdx(row); revealColKey(allCols[masterCol]?.k); };
+  useEffect(() => {
+    const on = e => { const d = e.detail || {}; if (revealCellRef.current) revealCellRef.current(d.row, d.col); };
+    document.addEventListener("planar-reveal-cell", on);
+    return () => document.removeEventListener("planar-reveal-cell", on);
+  }, []);
+
   const chasedSelRef = useRef({ id: selectedId, col: selectedColIdx });
   useEffect(() => {
     const suppressSelChase = suppressSelChaseRef.current;
@@ -13613,37 +13959,11 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const shouldChase = selMoved || selChaseAllowedRef.current;
     const idx = tasks.findIndex(t => t.id === selectedId);
     if (idx >= 0 && !suppressSelChase && shouldChase) {
-      // Row N's document top is TL_H + N*ROW_H (the sticky header holds TL_H — same formula the
-      // B463922 anchor effect above already uses). Omitting TL_H here nudged the topmost fully-
-      // visible row up by one header height on a plain click/select — bug C of NEW-1.
-      const rowTop = TL_H + idx * ROW_H, rowBottom = rowTop + ROW_H;
-      const visTop = el.scrollTop + TL_H, visBottom = el.scrollTop + el.clientHeight;
-      if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
-      else if (rowBottom > visBottom) el.scrollTop = rowBottom - el.clientHeight;
+      // Omitting TL_H in revealRowIdx nudged the topmost fully-visible row up by one header height on a
+      // plain click/select — bug C of NEW-1.
+      revealRowIdx(idx);
     }
-    // Horizontal reveal: measure from the columns ACTUALLY rendered (the visible set in
-    // display order) — not COLS.slice, which would sum hidden columns' widths and scroll
-    // to the wrong place when columns are hidden or reordered.
-    const pin = pinRef.current || { lw: 0, rw: 0, l: [], r: [], w: {} };
-    const cw = { ...(colWidthsRef.current || {}), ...pin.w };     // DISPLAY widths (the Task cap applies)
-    // B583: resolve via the effective registry (allCols/colByK) so a formula column scrolls
-    // into view too; compute left offset from the DISPLAY order (main's gridColNav approach).
-    const selKey = allCols[selectedColIdx]?.k;
-    const dispPos = selKey ? colOrder.indexOf(selKey) : -1;
-    if (dispPos >= 0) {
-      // +2: every row/header starts after its 2px left border (the selection/review marker), so a column's
-      // true offset in the scrolled content is 2px more than the sum of the widths before it.
-      const colLeft  = 2 + colOrder.slice(0, dispPos).reduce((s, k) => s + (cw[k] || colByK[k]?.w || 0), 0);
-      const colRight = colLeft + (cw[selKey] || colByK[selKey]?.w || 0);
-      // NEW-1 — the pinned columns cover the edges of the scrollport, so "visible" is the strip BETWEEN
-      // them; a pinned column itself is always visible and never needs a scroll.
-      const selPinned = pin.l.includes(selKey) || pin.r.includes(selKey);
-      const visLeft  = el.scrollLeft + pin.lw, visRight = el.scrollLeft + el.clientWidth - pin.rw;
-      if (!selPinned) {
-        if (colLeft < visLeft)          el.scrollLeft = colLeft - pin.lw;
-        else if (colRight > visRight)   el.scrollLeft = colRight - (el.clientWidth - pin.rw);
-      }
-    }
+    revealColKey(allCols[selectedColIdx]?.k);
   }, [selectedId, selectedColIdx, tasks]);
 
   // While reviewing, scroll the proposed/target row into view whenever the active target changes.
@@ -14057,7 +14377,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   return (
     <div style={{position:"relative",flex:1,minWidth:0,minHeight:0,display:"flex"}}>
     <div ref={ref} data-grid-scroll="1" data-scroll-bounds style={{flex:1,overflow:"auto",position:"relative",zoom:gridZoom,paddingBottom:`calc(var(--fab-dock, 0px) / ${gridZoom})`}} onScroll={handleScroll} onMouseEnter={()=>setHoverZone?.("grid")}>
-      <div style={{position:"sticky",top:0,zIndex:10,display:"flex",background:"var(--surf)",borderBottom:"2px solid var(--amber)",borderLeft:"2px solid transparent",minWidth:totalW,height:30}}>
+      <div data-grid-header="1" style={{position:"sticky",top:0,zIndex:10,display:"flex",background:"var(--surf)",borderBottom:"2px solid var(--amber)",borderLeft:"2px solid transparent",minWidth:totalW,height:30}}>
         {orderedCols.map(c => (
           <div key={c.k} data-hdr-col={c.k} className={pinCls(c.k) || undefined}
             draggable={c.k !== "health" && c.k !== "status"}
@@ -14190,7 +14510,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                 // Predecessor editor shows a live hint below the input — let it escape the clipped 24px cell.
                 const predEditing = c.k==="predecessors" && edit?.taskId===task.id && edit?.col===c.k;
                 return (
-                  <div key={c.k} data-col-key={c.k} className={pinCls(c.k) || undefined} style={{
+                  <div key={c.k} data-col-key={c.k} data-cell-active={active ? "1" : undefined} data-cell-in-range={(selected && hasRange) ? "1" : undefined} className={pinCls(c.k) || undefined} style={{
                     width:dispW[c.k], flexShrink:0,
                     overflow: (c.k==="health" || predEditing) ? "visible" : "hidden",
                     height:ROW_H,
@@ -14205,7 +14525,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     borderBottom: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
                     boxShadow: [selShadow(ri, ci, selected, active), (isFocused && c === orderedCols[0]) ? "inset 2px 0 0 0 var(--blue)" : "none"].filter(x => x !== "none").join(",") || "none",
                     userSelect: isDraggingCells.current ? "none" : "auto",
-                    cursor: "default",   // the range-select drag's own `cell` cursor is pinned by the gesture (cellDragPin), never read from a ref here
+                    cursor: (c.k === "id" && !review && idPressMovesRows(selRange, ri, allCols.length)) ? "grab" : "default",   // the range-select drag's own `cell` cursor is pinned by the gesture (cellDragPin), never read from a ref here; an ID cell inside a multi-row selection is a pick-up handle (B2445008 ×2)
                     // NEW-1 — a pinned cell paints its own opaque look (row colour, then any range / cell fill on top)
                     ...(pinStyle(c.k, [rowBg, (selected && hasRange) ? "#dbeafe" : cfmt?.fill], 5) || {})
                   }}
@@ -14329,11 +14649,12 @@ const PICKER_EVENT = "planar-picker-open";
 
 function HealthPicker({value, onChange}) {
   const [open, setOpen]   = useState(false);
-  const [pos, setPos]     = useState({top:0, left:0});
   const [hiIdx, setHiIdx] = useState(-1);
   const dotRef  = useRef(null);
   const menuRef = useRef(null);
   const idRef   = useRef(`hp-${Math.random()}`);
+  // NEW-1 — follows its cell while open; closes (no commit) when the cell leaves the visible grid.
+  const pos = useAnchoredPopover(open, dotRef, r => ({top: r.bottom + 4, left: r.left + r.width / 2 - 10}), () => setOpen(false));
 
   useEffect(() => {
     const onOther = e => { if (e.detail !== idRef.current) setOpen(false); };
@@ -14388,8 +14709,6 @@ function HealthPicker({value, onChange}) {
     // by the full-cell trigger below. onClick is more reliable in practice.
     e.stopPropagation();
     document.dispatchEvent(new CustomEvent(PICKER_EVENT, {detail: idRef.current}));
-    const r = dotRef.current.getBoundingClientRect();
-    setPos({top: r.bottom + 4, left: r.left + r.width / 2 - 10});
     setOpen(o => !o);
   };
 
@@ -14422,7 +14741,7 @@ function HealthPicker({value, onChange}) {
           <DotSpan hk={value} active={open} noPointer />
         </span>
       </span>
-      {open && ReactDOM.createPortal(
+      {open && pos && ReactDOM.createPortal(
         <div ref={menuRef} {...MENU_STOPS_GRID}
           style={{position:"fixed",top:pos.top,left:pos.left,
             background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,
@@ -14457,11 +14776,12 @@ function HealthPicker({value, onChange}) {
 // ── StatusPicker ──────────────────────────────────────────
 function StatusPicker({value, onChange}) {
   const [open, setOpen]   = useState(false);
-  const [pos, setPos]     = useState({top:0, left:0});
   const [hiIdx, setHiIdx] = useState(-1);
   const ref     = useRef(null);
   const menuRef = useRef(null);
   const idRef   = useRef(`sp-${Math.random()}`);
+  // NEW-1 — follows its cell while open; closes (no commit) when the cell leaves the visible grid.
+  const pos = useAnchoredPopover(open, ref, r => ({top: r.bottom + 4, left: r.left}), () => setOpen(false));
 
   useEffect(() => {
     const onOther = e => { if (e.detail !== idRef.current) setOpen(false); };
@@ -14506,8 +14826,6 @@ function StatusPicker({value, onChange}) {
   const handleClick = e => {
     e.stopPropagation();
     document.dispatchEvent(new CustomEvent(PICKER_EVENT, {detail: idRef.current}));
-    const r = ref.current.getBoundingClientRect();
-    setPos({top: r.bottom + 4, left: r.left});
     setOpen(o => !o);
   };
 
@@ -14532,7 +14850,7 @@ function StatusPicker({value, onChange}) {
         style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4,color:"var(--mut)",fontSize:11,fontFamily:"'Inter',system-ui,sans-serif"}}>
         {(HEALTH[value]||HEALTH.gray).label}
       </span>
-      {open && ReactDOM.createPortal(
+      {open && pos && ReactDOM.createPortal(
         <div ref={menuRef} {...MENU_STOPS_GRID}
           style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",
             border:"1px solid var(--bd2)",borderRadius:6,padding:"5px 6px",
@@ -14615,7 +14933,6 @@ function depCellNarrowNext(prevNarrow, width) {
 }
 function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   const [hovered, setHovered] = useState(false);
-  const [pos, setPos] = useState({top:0, left:0, width:0});
   const [narrow, setNarrow] = useState(false);
   const [cellEl, setCellEl] = useState(null);
   const ref = useRef(null);
@@ -14632,10 +14949,10 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   const visibleCount = canTwoLine && !narrow ? 2 : 1;
   const extra = items.length - visibleCount;
 
+  // NEW-1 — the "+N" list follows its cell and drops when the cell leaves the visible grid.
+  const pos = useAnchoredPopover(hovered && extra > 0, ref, r => ({top: r.bottom + 4, left: r.left, width: Math.max(r.width, 220)}), () => setHovered(false));
   const onEnter = () => {
     if (!ref.current || items.length <= visibleCount) return;
-    const r = ref.current.getBoundingClientRect();
-    setPos({top: r.bottom + 4, left: r.left, width: Math.max(r.width, 220)});
     setHovered(true);
   };
 
@@ -14693,7 +15010,7 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
           </div>
         ))}
       </div>
-      {hovered && extra > 0 && ReactDOM.createPortal(
+      {hovered && extra > 0 && pos && ReactDOM.createPortal(
         <div {...MENU_STOPS_GRID}
           style={{position:"fixed", top:pos.top, left:pos.left, minWidth:pos.width, background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, padding:"8px 10px", zIndex:9999, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", display:"flex", flexDirection:"column", gap:5}}
           onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
@@ -14954,13 +15271,12 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             {task.name || "New task"}
           </span>
         ); })()}
-        {task.hasChildren && task.isExpanded && task.hideableCount > 0 && (
+        {rowCanFocus(task) && (
           <span
+            data-focus-chip={task.focused ? "on" : "off"}
             onClick={e=>{ e.stopPropagation(); updateTask(task.id, {focused: !task.focused}); }}
             onDoubleClick={e=>e.stopPropagation()}
-            title={task.focused
-              ? `Show all tasks in this group — ${task.hideableDone} completed, ${task.hideablePaused} paused, ${task.hideableUpcoming} not started hidden`
-              : `Focus: hide ${task.hideableCount} completed / paused / not-started task${task.hideableCount>1?'s':''}`}
+            title={focusChipTitle(task)}
             style={{
               marginLeft:"auto", flexShrink:0, cursor:"pointer", userSelect:"none",
               display:"inline-flex", alignItems:"center", gap:5,
@@ -16039,7 +16355,7 @@ let MB_ACTIVE_POPOVER_CLOSE = null;
 function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null), popRef = useRef(null);
-  const [pos, setPos] = useState({top:0,left:0});
+  const pos = useAnchoredPopover(open, btnRef, r => ({top: r.bottom + 4, left: r.left}), () => setOpen(false));   // NEW-1
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
@@ -16057,8 +16373,6 @@ function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButto
   };
   const openMenu = e => {
     e.stopPropagation();
-    const r = btnRef.current.getBoundingClientRect();
-    setPos({top: r.bottom + 4, left: r.left});
     setOpen(o => !o);
   };
   const chip = (on, extra) => ({padding:"4px 10px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)",fontFamily:"inherit",...extra});
@@ -16069,7 +16383,7 @@ function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButto
         style={{fontSize:12,padding:"3px 8px",border:"1px solid var(--bd2)",borderRadius:5,background:"#fff",color:"var(--txt)",cursor:"pointer",fontWeight:600,display:"inline-flex",alignItems:"center",gap:3,fontFamily:"inherit"}}>
         {label} <span style={{fontSize:7,opacity:.7}}>▾</span>
       </button>
-      {open && ReactDOM.createPortal(
+      {open && pos && ReactDOM.createPortal(
         <div ref={popRef} onMouseDown={e=>e.stopPropagation()}
           style={{position:"fixed",top:pos.top,left:pos.left,minWidth:200,maxWidth:260,background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,padding:6,zIndex:9999,boxShadow:"0 4px 16px rgba(0,0,0,.15)",display:"flex",flexWrap:"wrap",gap:4}}>
           <button type="button" role="checkbox" aria-checked={isAll} onClick={()=>{ onChange(allValue); setOpen(false); }}
@@ -16823,9 +17137,9 @@ function FormatPanel({data, setData, onClose}) {
 // theirs exactly, without touching AutomationPanel or any other panel's own behavior.
 function RuleColorPicker({value, onChange}) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos]   = useState({top:0, left:0});
   const dotRef  = useRef(null);
   const menuRef = useRef(null);
+  const pos = useAnchoredPopover(open, dotRef, r => ({top: r.bottom + 4, left: r.right - 110}), () => setOpen(false));   // NEW-1
 
   useEffect(() => {
     if (!open) return;
@@ -16837,8 +17151,6 @@ function RuleColorPicker({value, onChange}) {
   }, [open]);
 
   const openMenu = () => {
-    const r = dotRef.current.getBoundingClientRect();
-    setPos({top: r.bottom + 4, left: r.right - 110});
     setOpen(o => !o);
   };
 
@@ -16848,7 +17160,7 @@ function RuleColorPicker({value, onChange}) {
       <span ref={dotRef} onClick={openMenu} title={hh.label} data-rule-color-swatch="1"
         style={{width:16,height:16,borderRadius:"50%",background:hh.dot,border:hh.dot==="#ffffff"?"1.5px solid #d1d5db":hh.border,
           display:"block",cursor:"pointer"}} />
-      {open && ReactDOM.createPortal(
+      {open && pos && ReactDOM.createPortal(
         <div ref={menuRef} {...MENU_STOPS_GRID} data-rule-color-menu="1"
           style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",border:"1px solid var(--bd2)",
             borderRadius:6,padding:"4px",display:"flex",flexDirection:"column",gap:2,zIndex:10000,
@@ -18104,7 +18416,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         width:30 + activeCols.reduce((s,c)=>s+(colWidths[c.k]||100),0),fontSize:12}}>
         <thead>
           <tr>
-            <th key="__jump" style={{width:30,minWidth:30,maxWidth:30,padding:0,
+            <th key="__jump" data-grid-header="1" style={{width:30,minWidth:30,maxWidth:30,padding:0,
               position:"sticky",top:0,zIndex:3,background:"#fafbfc",
               boxShadow:"inset -1px 0 0 var(--bd), inset 0 -1px 0 var(--bd2)"}} />
             {displayCols.map(col => {

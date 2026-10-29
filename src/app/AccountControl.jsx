@@ -1,6 +1,6 @@
 /* AccountControl — the header's right-edge auth surface: the signed-in account pill + its
- * dropdown (Profile / Team / Settings / Sign out), the signed-out "Sign in" pill, and the
- * "Cloud off" explainer when Supabase isn't configured.
+ * dropdown (pending team invitations / Profile / Team / Settings / Sign out), the signed-out "Sign in"
+ * pill, and the "Cloud off" explainer when Supabase isn't configured.
  *
  * WHY THIS IS ITS OWN COMPONENT (B734). Shell builds ONE authControl element and passes it to
  * every kept-alive workspace's AppHeader — so several copies of the trigger button mount at
@@ -19,7 +19,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../shared/ui/radius.js";
-import { MenuTrigger } from "../shared/ui/controls.jsx";
+import { MenuTrigger, Button } from "../shared/ui/controls.jsx";
+import { FONT_SIZE } from "../shared/ui/designTokens.js";
+import { useTeamInvites } from "./teamInvites.js";
+import { inviteLine, badgeLabel } from "../shared/teams/teamInviteModel.js";
 import { supabase, supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
 import { useIsAdmin } from "../workspaces/admin/lib/useIsAdmin.js";
@@ -68,6 +71,16 @@ const acctRow = {
   padding: "8px 9px", borderRadius: RADIUS.sm, border: "none", background: "transparent",
   cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)",
 };
+// NEW-1 (invite inbox) — the pending-invitation count on the account button, and the invitation cards
+// at the top of its menu. Accent (never red: red is reserved for alerts, and an invitation is good news).
+const inviteBadge = {
+  position: "absolute", top: -6, right: -7, minWidth: 15, height: 15, padding: "0 4px", boxSizing: "border-box",
+  borderRadius: RADIUS.pill, display: "grid", placeItems: "center", lineHeight: 1,
+  fontSize: FONT_SIZE.micro, fontWeight: 800, background: "var(--accent)", color: "var(--on-accent)",
+  border: "1.5px solid var(--chrome-bg-elev)", pointerEvents: "none",
+};
+const inviteSectionLabel = { padding: "4px 9px 2px", fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--text-secondary)" };
+const inviteCard = { padding: "7px 9px 9px", borderRadius: RADIUS.sm, background: "var(--hover-ghost)", margin: "2px 0 4px" };
 const acctDivider = { height: 1, background: "var(--border-default)", margin: "4px 4px" };
 const hoverOn  = (e) => { e.currentTarget.style.background = "var(--hover-ghost)"; };
 const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
@@ -88,11 +101,44 @@ const ICON = {
   signout:  (<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>),
 };
 
+// One pending invitation: who/what/role + Accept / Decline. Module scope (MODULE-SCOPE-COMPONENTS) so its
+// busy/error state survives the parent's re-renders. The row leaves the list when the server accepts the
+// answer; a failure stays on the card, in words, with the buttons live again (LOUD-FAILURE).
+function InviteCard({ invite, onAnswer }) {
+  const [busy, setBusy] = useState(null); // "accept" | "decline" | null
+  const [err, setErr] = useState("");
+  const go = async (accept) => {
+    setBusy(accept ? "accept" : "decline"); setErr("");
+    const r = await onAnswer(invite, accept);
+    if (!r.ok) { setErr(r.text); setBusy(null); } // on success this card unmounts (the list drops it)
+  };
+  return (
+    <div style={inviteCard} data-testid="account-invite-card" data-invite-id={invite.id}>
+      <div style={{ fontWeight: 700, fontSize: FONT_SIZE.emphasis, overflowWrap: "anywhere" }}>{invite.teamName}</div>
+      <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", overflowWrap: "anywhere", marginBottom: 7 }}>{inviteLine(invite)}</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button size="sm" data-testid="account-invite-accept" disabled={busy !== null} onClick={() => go(true)}>{busy === "accept" ? "Joining…" : "Accept"}</Button>
+        <Button size="sm" variant="ghost" data-testid="account-invite-decline" disabled={busy !== null} onClick={() => go(false)}>{busy === "decline" ? "Declining…" : "Decline"}</Button>
+      </div>
+      {err && <div role="alert" style={{ marginTop: 6, fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>{err}</div>}
+    </div>
+  );
+}
+
 export default function AccountControl({ user, authKnown = true, profileApi, onOpenAuth, onOpenAccount }) {
   const [acctOpen, setAcctOpen] = useState(false);  // account dropdown (signed-in pill, B298)
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
   const acctAnchor = useRef(null);
   const who = profileApi?.displayName;
+  // NEW-1 (invite inbox) — pending team invitations addressed to this account's email.
+  const { invites, count: inviteCount, status: inviteStatus, refresh: refreshInvites, answer: answerInvite } = useTeamInvites(user);
+  const [inviteNote, setInviteNote] = useState(""); // "You joined USEC." — shown until the menu closes
+  useEffect(() => { if (acctOpen) refreshInvites(); else setInviteNote(""); }, [acctOpen, refreshInvites]);
+  const answerAndNote = async (invite, accept) => {
+    const r = await answerInvite(invite, accept);
+    if (r.ok) setInviteNote(r.text);
+    return r;
+  };
 
   // NEW-1/NEW-2 (B711904 follow-up) — the admin answer comes from the ONE shared store
   // (admin/lib/adminStatus.js via useIsAdmin): fetched once per signed-in user, keyed by user id so an
@@ -237,9 +283,14 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
         ref={acctAnchor}
         onClick={() => setAcctOpen((o) => !o)}
         open={acctOpen}
-        title={`Signed in as ${who}${user?.email ? ` (${user.email})` : ""}`}
-        aria-label={`Account: ${who}`}
-        leading={<span style={avatar(true)}>{profileApi.initial}</span>}
+        title={`Signed in as ${who}${user?.email ? ` (${user.email})` : ""}${inviteCount ? ` — ${inviteCount} team invitation${inviteCount === 1 ? "" : "s"} waiting` : ""}`}
+        aria-label={`Account: ${who}${inviteCount ? `, ${inviteCount} team invitation${inviteCount === 1 ? "" : "s"} waiting` : ""}`}
+        leading={
+          <span style={{ position: "relative", display: "inline-flex" }}>
+            <span style={avatar(true)}>{profileApi.initial}</span>
+            {inviteCount > 0 && <span style={inviteBadge} data-testid="account-invite-badge">{badgeLabel(inviteCount)}</span>}
+          </span>
+        }
       />
       <AnchoredMenu
         open={acctOpen}
@@ -260,6 +311,20 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
           </div>
         </div>
         <div style={acctDivider} />
+        {(inviteCount > 0 || inviteNote || inviteStatus === "error") && (
+          <div data-testid="account-invites">
+            <div style={inviteSectionLabel}>Team invitations</div>
+            {inviteNote && <div role="status" style={{ padding: "4px 9px", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{inviteNote}</div>}
+            {invites.map((inv) => <InviteCard key={inv.id} invite={inv} onAnswer={answerAndNote} />)}
+            {inviteStatus === "error" && (
+              <div role="alert" style={{ padding: "4px 9px", fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>
+                Couldn't check for team invitations.{" "}
+                <button onClick={refreshInvites} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", font: "inherit", color: "var(--text-primary)", fontWeight: 700, textDecoration: "underline" }}>Retry</button>
+              </div>
+            )}
+            <div style={acctDivider} />
+          </div>
+        )}
         <button style={acctRow} onClick={() => { setAcctOpen(false); onOpenAccount("profile"); }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
           <RowIcon d={ICON.profile} /> Profile
         </button>

@@ -106,7 +106,7 @@ const ALL_NOTES_FILES = [
   // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
   "lib/notesTableToText.js",
   "lib/notesTablePaste.js",
-  "lib/notesTableClipboard.js",
+  "lib/notesTableClipboard.js", "lib/notesTableFill.js",
   // NEW-1/NEW-2 (B1554272/B1554273) — widening a table column must not squeeze its neighbours,
   // and a column may never be squeezed below a readable floor. Pure decision + the editor command.
   "lib/notesTableWidth.js", "lib/notesTableColumns.js",
@@ -520,10 +520,13 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      *     "More" panel, neither of which can mirror the editor: `moreOpen` (the panel is open) and
      *     `moreBox` (where it hangs — `{ top, max }` measured off the bar's own
      *     `getBoundingClientRect()` and `visualViewport`, so it never exceeds the visible area).
+     *   ⛔ RAISED 18 → 19 (NEW-2, 2026-10-28) — `FillPopover`'s `open` (the table Fill swatch dropdown), the
+     *     same transient popover flag every other picker here carries; the fill it shows is read from
+     *     the document (`currentFill(editor.state)`), never stored in React.
      * If a future change makes any of these read `editor.` at init, the sharp assertion above
      * fails first and this inventory is not what saves it. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(18);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(19);
   });
 });
 
@@ -1321,12 +1324,12 @@ describe("the project a notebook belongs to", () => {
      * being grip-only was the owner's "dragging the note by its BODY does nothing at all,
      * silently" — with a 9x14px grip at zero opacity as the only alternative. The grip is now
      * decoration and takes no presses at all, which also retires instrument trap #9. */
-    expect(node, "the box body carries the drag").toMatch(/dom\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ immediate: false \}\)\)/);
-    /* ⛔ …AND THE GRIP STILL DOES TOO, unconditionally. The body stands down while the caret is
-     * inside the box (a press-and-travel there is somebody selecting a phrase), so without this
-     * the one box you are typing in would be the one box you cannot move. */
-    expect(node, "the grip drags too, and owns its press outright")
-      .toMatch(/grip\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ immediate: true \}\)\)/);
+    expect(node, "the box body carries the drag").toMatch(/dom\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ band: false \}\)\)/);
+    /* ⛔ …AND THE BORDER BAND DOES TOO, caret or not (B2426788 — it replaced the striped grip). The body
+     * stands down while the caret is inside the box (a press-and-travel there is somebody selecting
+     * a phrase), so without this the one box you are typing in would be the one box you cannot move. */
+    expect(node, "the border band drags too, caret or not")
+      .toMatch(/edge\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ band: true \}\)\)/);
     const print = read(NOTES, "lib", "notesPrint.js");
     /* ⛔ MATCHED ON THE SHARED HANDLE CLASS (NEW-PICTURE-CANVAS). There are eight resize handles
      * now, and pinning the exact selector LIST would mean this guard has to be edited every time
@@ -1334,7 +1337,7 @@ describe("the project a notebook belongs to", () => {
      * that catches anything. `.planyr-anchor-h` is the class they all carry, so a ninth handle is
      * covered by construction and cannot start printing by omission. */
     expect(print, "no chrome on paper").toMatch(/\.note-body \.planyr-anchor-h \{ display: none; \}/);
-    expect(print, "…and the grip still does not print either").toMatch(/\.note-body \.planyr-anchor-grip/);
+    expect(print, "…and the border band does not print either").toMatch(/\.note-body \.planyr-anchor-edge/);
     /* ⛔ AND A PICTURE BOX PRINTS AT THE SIZE IT WAS DRAGGED TO (PDF-PARITY). The height rides the
      * node's own style attribute exactly as the position does, but BOTH DOM shapes have to be
      * named here: the node view builds a figure wrapping the img, while `renderHTML` — which is

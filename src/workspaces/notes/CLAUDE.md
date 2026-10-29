@@ -396,6 +396,13 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   passed because a signed-out sandbox has nothing that re-renders mid-gesture. The check was right
   and its CONDITIONS were unreachable; `verify-notes-box-selection` now forces that re-render on
   every run.
+- **⛔ A BOX IS MOVED BY ITS BORDER — THE STRIPED GRIP IS RETIRED (B2426788, owner decision 2026-10-27, CLAUDE.md constraint #37).**
+  Four `.planyr-anchor-edge` strips (notesAnchorNode.js) straddle the outline — 5 px out, the line, 3 px in, inside the box's own padding so
+  no letter is covered — with the `move` cursor, an accent-coloured thickening on hover (an INSET shadow, no reflow), and a drag that
+  moves the box or the whole selection whether or not the caret is inside it. A click on the band only SELECTS (`focusFromMat`'s band
+  branch; the pointer capture retargets the `mousedown` to the box, so the node view flags the press with `data-edge-press`); the resize
+  handles paint above it and keep their spots; a drag from the MIDDLE of a box still pans. On touch a SELECTED box's band reaches further
+  outward only. Guards: the **verify-notes-box-edge** harness and its touch twin under `ui-audit/`; read carry-forward trap 48 before touching it.
 - **SELECT SEVERAL BOXES AND MOVE THEM TOGETHER (B421494, `lib/notesMarquee.js`).** A press on blank
   page already meant "place a box", so one gesture had to learn two meanings: the boundary is
   DISTANCE and it is decided at **mouse-UP** — deciding at mouse-down is impossible and deciding at
@@ -1604,6 +1611,8 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   link — the shipped regression test used a hand-authored `<table><tr><td>` with none of that);
   and a table inside a positioned box exercised beyond row-add (delete-row, and "Convert table to
   text" from inside the box).** All 22 closed clean — guard: **verify-notes-table-gaps**.
+
+- **`lib/notesTableFill.js` — A HEADER ROW ON ANY ROW, BOLD TELLING THE TRUTH IN IT, AND CELL FILL (NEW-1/NEW-2, B2456096/B2456097, 2026-10-28).** The `NoteTableFill` extension: `toggleHeaderRows` acts on the CARET'S row(s) (Tiptap's own `toggleHeaderRow` is `toggleHeader("row")`, hard-wired to ROW 0 — a header row anywhere else could never be undone); a `background` attr on `tableCell`/`tableHeader` (`null` | solid hex | `"transparent"` = "No fill" on a header row), rendered as inline `background-color` + `data-cell-fill` (what Notes reads back; a foreign table's backgrounds are NOT imported); `setCellFill` (CellSelection, else the caret cell's whole row); `boldTruth` (the B button is lit in a header cell — header text is bold by CSS, not by mark). Palette `TABLE_FILLS` + `FILL_INK` live in `notesFormatPalette.js`. UI: `FillPopover` + the "Header row" button in `NoteToolbar.jsx`'s table group (so the phone More sheet gets them for free), `tableMenuItems` in the right-click menu. ⛔ A stray header row is a header row PUSHED DOWN by Row ↑ — NOT header-ness copied into a new row (measured). Guards: the repo-root `test/` suite **notesTableFill** + the **verify-notes-table-fill** harness under `ui-audit/` (CI gate).
 
 **Guards that will fail the build if you break them** (the `notesModule` suite under `test/`): the
 eight-place workspace registration checklist · theme-token-only chrome in the three JSX surfaces ·

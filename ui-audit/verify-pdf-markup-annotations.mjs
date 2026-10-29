@@ -186,7 +186,12 @@ async function run() {
   /* ---------- structure of the two files ---------- */
   const latin1 = (b) => b.toString("latin1");
   const edit = latin1(results.allEdit), flat = latin1(results.allFlat);
-  const annotDicts = edit.match(/\/Type \/Annot [^\n]*/g) || [];
+  /* NEW-1 (2026-10-27) — sheet furniture (scale bar, north arrow, Buildings table) is written as Stamps of its own, so it is
+     counted and masked apart: every count / parity figure below is about the MARKUPS. */
+  const everyDict = edit.match(/\/Type \/Annot [^\n]*/g) || [];
+  const furnDicts = everyDict.filter((a) => /\/NM \(planyr-sheet-furniture-/.test(a));
+  const annotDicts = everyDict.filter((a) => !/\/NM \(planyr-sheet-furniture-/.test(a));
+  check(furnDicts.length >= 2 && everyDict.slice(-furnDicts.length).every((a) => /sheet-furniture/.test(a)), `the scale bar and north arrow are their own annotations, written last (${furnDicts.length} furniture Stamps)`);
   check(!/\/Annots/.test(flat), "toggle ON: the PDF has zero annotations (today's flattened file)");
   check(annotDicts.length === 14, `toggle OFF: one annotation per markup — found ${annotDicts.length} of 14`);
   const subtypes = annotDicts.map((a) => /\/Subtype \/(\w+)/.exec(a)[1]).sort();
@@ -208,9 +213,15 @@ async function run() {
   try { execFileSync("pdftoppm", ["-v"], { stdio: "pipe" }); } catch (e) { hasPoppler = /Poppler|pdftoppm/i.test(String(e.stderr || e.stdout || "")); }
   if (!hasPoppler) { bad("pdftoppm is not available — render parity could not be checked"); }
   else {
-    const C = raster(join(OUT, "nomarkups.pdf"), "nomarkups");
+    const furnRects = furnDicts.map((a) => /\/Rect \[([^\]]+)\]/.exec(a)[1].split(" ").map(Number));
+    const mask = (img) => { // the furniture plates are page picture in the flattened/markup-free renders and Stamps here: compare the MARKUPS, not the plates
+      const k = DPI / 72;
+      for (const r of furnRects) for (let y = Math.max(0, Math.floor((PH - r[3]) * k) - 2); y < Math.min(img.height, Math.ceil((PH - r[1]) * k) + 2); y++) for (let x = Math.max(0, Math.floor(r[0] * k) - 2); x < Math.min(img.width, Math.ceil(r[2] * k) + 2); x++) for (let c = 0; c < img.channels; c++) img.data[(y * img.width + x) * img.channels + c] = 255;
+      return img;
+    };
+    const C = mask(raster(join(OUT, "nomarkups.pdf"), "nomarkups"));
     for (const kind of ["shapes", "all"]) {
-      const A = raster(join(OUT, `${kind}-flat.pdf`), `${kind}-flat`), B = raster(join(OUT, `${kind}-editable.pdf`), `${kind}-editable`);
+      const A = mask(raster(join(OUT, `${kind}-flat.pdf`), `${kind}-flat`)), B = mask(raster(join(OUT, `${kind}-editable.pdf`), `${kind}-editable`));
       // known-good arm: markups really are in the flattened page (it must differ from the markup-free export)
       const known = perceptualParity(A, C);
       check(!known.identical && known.detail.pct > 0.01, `[${kind}] known-good arm: the flattened page differs from a markup-free export (touched ${known.detail.pct}% of the frame) — the comparison is not vacuous`);
@@ -231,7 +242,7 @@ async function run() {
       check(ratio <= 0.15 && vsEdit.p999 <= 0.08, `[${kind}] render parity: the editable PDF puts the same ink in the same place as the flattened one (difference ${(ratio * 100).toFixed(1)}% of the markups' own weight; bar 15%${kind === "all" ? "; text face differs by design" : ""})`);
       // the editable file's PAGE content must not already contain the markups: page-only render (annotations hidden)
       execFileSync("pdftoppm", ["-r", String(DPI), "-png", "-singlefile", "-hide-annotations", join(OUT, `${kind}-editable.pdf`), join(OUT, `${kind}-editable-page-only`)]);
-      const D = decodePng(readFileSync(join(OUT, `${kind}-editable-page-only.png`)));
+      const D = mask(decodePng(readFileSync(join(OUT, `${kind}-editable-page-only.png`))));
       const pageOnly = perceptualParity(D, C);
       console.log(`   [${kind}] page content (annotations hidden) vs markup-free export:`, parityLine(pageOnly));
       check(pageOnly.detail.pct < 0.05, `[${kind}] the editable PDF's page content contains no markup drawing (annotations hidden → matches a markup-free export; ${pageOnly.detail.pct}% touched)`);
@@ -243,7 +254,7 @@ async function run() {
   const doc = await pdfjs.getDocument({ data: new Uint8Array(results.allEdit), verbosity: 0 }).promise;
   const page = await doc.getPage(1);
   const an = await page.getAnnotations();
-  check(an.length === 14, `pdf.js reads all ${an.length} annotations back`);
+  check(an.length === 14 + furnDicts.length, `pdf.js reads all ${an.length} annotations back (14 markups + ${furnDicts.length} furniture Stamps)`);
   check(an.every((a) => (a.annotationFlags & 192) === 0), "pdf.js: none is ReadOnly or Locked — every one can be moved and edited");
   check(an.every((a) => a.hasAppearance), "pdf.js: every annotation has an appearance stream");
   const ft = an.filter((a) => a.annotationType === 3).map((a) => String(a.contentsObj?.str ?? a.contents ?? ""));

@@ -61,7 +61,7 @@ export async function runSiteScreen(rings, opts = {}) {
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
   const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
-  const roadP = !sourceCoversState(GIS_SOURCES.road, state)
+  const roadP = !sourceCoversState(state === "TN" ? GIS_SOURCES.roadTn : GIS_SOURCES.road, state)
     ? Promise.resolve({ __notScreened: true })
     : Promise.all(roadRings(rings).map((ring) => Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e })))).then(mergeRoadAnswers);
   // CCN: Texas institutions (PUC). Off Texas ground they are never asked — the call simply applies.

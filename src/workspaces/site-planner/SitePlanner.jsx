@@ -67,7 +67,7 @@ import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsR
 import { ftPerPointForScale, chooseOverlayScale } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+import { syncOverlayLayers, liveRefOpacities, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
 import { buildingFloodExposure, exposureHeadline, FLOOD_CLASS_LABEL } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
@@ -547,7 +547,7 @@ import {
  * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
-import { jurisdictionSourceName, GA_JURISDICTION_SOURCE_NAME } from "./lib/georgiaJurisdiction.js";
+import { jurisdictionSourceName } from "./lib/georgiaJurisdiction.js";
 import { NJNY_NOT_WIRED_FLAGS, isNjNyState } from "./lib/njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
@@ -6114,6 +6114,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 (Imagery & Layers) — what the map is actually told to draw (Hide Layers / hidden-here applied) and what has a LIVE layer right now.
       drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
       live: Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k] && overlayRefs.current[k] !== "pending"),
+      // What each live layer is really drawn at (NEW-2: "set 60% on an off layer" is asserted on the map's own layer, not the saved number).
+      opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])),
       identityEpoch: epoch,
     });
     window.__plannerLayers = hook;
@@ -14134,7 +14136,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
     // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
     // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
-    : siteStateId === "GA" || siteStateId === "CA" || isNjNyState(siteStateId) // NEW-1 (California; New Jersey + New York) — same carrier, "not available in <State> yet"
+    : siteStateId === "GA" || siteStateId === "TN" || siteStateId === "CA" || isNjNyState(siteStateId) // NEW-1 (California; New Jersey + New York) — same carrier, "not available in <State> yet"
     ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
@@ -14142,7 +14144,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "CA" && !isNjNyState(siteStateId) && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "TN" && siteStateId !== "CA" && !isNjNyState(siteStateId) && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -16463,7 +16465,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        *     (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "")
        * — the governing city recovered by PARSING the badge string. It survived only because the
        * old label happened to put the city first and join everything with " / ". Under NEW-1's
-       * grammar the same parse returns "Humble · Houston ETJ" on an in-city-plus-ETJ site; that
+       * grammar the same parse returns a multi-slot string on any site with a second governing slot; that
        * matches no rule record, so the CITY's floodplain ordinance is never raised as a candidate
        * and the site is priced on the county's, which in flat Harris/Fort Bend floodplain commonly
        * sits 1–2 ft LOWER. `governingCityOf` answers the same question from the structured model
@@ -17093,7 +17095,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           straddle: false, governingCities: [], edgeOnlyCities: [], partialCities: [], touchesCities: [],
           unresolvedRoles: ["city", "etj", "county"], unresolved: true,
           cityContainment: "unknown", etjLabels: [],
-          sourceName: siteStateId === "GA" ? GA_JURISDICTION_SOURCE_NAME : "TxDOT / TxGIO / H-GAC",
+          sourceName: jurisdictionSourceName(siteStateId), // NEW-1 (Tennessee) — was GA-or-Texas only
           failureNote: `The jurisdiction lookup could not be completed (${String((e && e.message) || e)}). Nothing here is settled — re-check before relying on the floodplain rule.`,
         });
       });
@@ -24184,12 +24186,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     /* NEW-1 (print ignores send-to-back) — the REAL editable-PDF composition (the default "Flatten markups" OFF
        path): which annotations became native PDF annotations (they paint ABOVE the page) and which stayed in the
        page picture. Read-only; same gate. */
-    const composedHook = async () => {
+    const composedHook = async (o = {}) => {
       const { createExportSheet } = await loadExportSheet();
-      const c = await createExportSheet(exportCtx()).buildComposedSheet("letter", "landscape", true, true, "", "", true, null, true, true);
+      // `o` (E2E only): { paper, orient, buildingsTable, annotate } — the sheet shape under test; defaults are the editable-PDF Letter sheet
+      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false);
       if (!c) return null;
       return {
         sheetSvg: c.sheetSvg,
+        annotRects: (c.annotationSet?.annots || []).map((a) => ({ nm: a.nm, family: a.family, subtype: a.subtype, rect: a.rect })),
         liftedIds: (c.annotationSet?.annots || []).length,
         keptInPage: c.annotationsKeptInPage || 0,
         pins: c.annotationPins || [],

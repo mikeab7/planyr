@@ -11,11 +11,11 @@ import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
 import { selectParcelsHintFor } from "./lib/selectParcelsHint.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
-import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
+import { decideTargetOf, escapeClearsDecideBar, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, snapshotHitAt as snapshotHitAtLib, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
+import { syncOverlayLayers, liveRefOpacities, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
 import { isDiagArmed } from "./lib/diagArm.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
@@ -630,6 +630,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
   const activeOverlayIdRef = useRef(null); // NEW-2 (B848496): read by the once-bound click handler, to deselect on a background click
   const selectedRef = useRef([]);
+  /* B2451472 — SELECTION EPOCH. Bumped every time the selection is dropped (`clearSel`, returning to the map). A lot lookup
+   * (`handleClick`, `selectParcelAt`) is async and captures the epoch it started in; when it lands in a LATER epoch the
+   * selection was cleared meanwhile, so it must not re-add the lot (or toast about it). The ✕ hid this — a click on it
+   * outlasts the lookup — and Escape, being instant, exposed it: measured live, 5 of 6 Escapes brought a lot back. */
+  const selectEpochRef = useRef(0);
   const draggingRef = useRef(false);
   // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
   // (or a health dot flipping) never re-binds a Leaflet listener.
@@ -2279,6 +2284,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
   }, [visible]);
 
+  /* E2E-only, read-only: the opacity each live layer on THIS map is really drawn at (the finder twin of `__plannerLayers().opacities`). */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
+    const hook = () => ({ opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])) });
+    window.__finderLayers = hook;
+    return () => { if (window.__finderLayers === hook) window.__finderLayers = null; };
+  }, []);
   /* ⛔ NEW-1 (B1933584) — read-only overlay-leak diagnostic (STANDING RULE #2 disposition:
    * "instrument it so it captures itself when he hits it"). The leak above was found by reading the
    * source, not by reproducing it live, so the next time Michael sees a layer painting over a
@@ -2386,7 +2398,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      existing "clears a committed selection on return" contract above. */
   useEffect(() => {
     setSelectMode(false); setBackupNotice(null); setCachedNotice(null);
-    if (visible) { clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
+    if (visible) { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -3455,6 +3467,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const snapshotHitAt = (lng, lat) => snapshotHitAtLib(lng, lat, SNAPSHOT_COUNTIES);
 
   const handleClick = async (latlng, ack = null) => {
+    const epoch = selectEpochRef.current; // B2451472 — a clear while this lookup is in flight abandons it (see selectEpochRef)
+    const cleared = () => epoch !== selectEpochRef.current;
     await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
@@ -3520,6 +3534,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         skipped: () => skippedCandidates(latlng, [opt && opt.county]),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
+      if (cleared()) return; // B2451472 — cleared (Escape / ✕) while the lookup ran: nothing to add, nothing to say
       lastIdentifyRef.current = { at: [latlng.lat, latlng.lng], routed: candidateCountiesForPoint(latlng.lat, latlng.lng).map((k) => ({ key: k, url: !!layerUrlsRef.current[k], open: isSourceOpen(k) })), primary: candidates.map((c) => c.county), queried: res.queried.map((c) => c.county), via: res.via, hits: res.hits.map((h) => h.county), silent: res.silent };
       if (!res.hits.length) {
         // Live returned nothing. If the optimistic highlight came from a loaded Drive snapshot
@@ -3543,6 +3558,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * path already uses — regardless of what's currently painted on the map. */
         if (res.responded === 0) {
           const cached = await snapshotHitAt(latlng.lng, latlng.lat);
+          if (cleared()) return;
           if (cached) {
             const added = addParcelHit(cached, latlng);
             if (added) {
@@ -3604,6 +3620,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
+      if (cleared()) return;
       failUnavailable(humanizeError(e), latlng, () => handleClick(latlng)); // NEW-4 — a thrown lookup is an outage too
     } finally {
       stopSlow(); setLookupNote("");
@@ -3645,7 +3662,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const selectParcelAt = async (latlng, label, tok, noSnap = false) => {
     // B545: when called from a search, `tok` is that search's generation; a newer search makes
     // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
-    const live = () => tok == null || tok === addrTokRef.current;
+    const epoch = selectEpochRef.current; // B2451472 — a clear while the lookup is in flight supersedes it too
+    const live = () => (tok == null || tok === addrTokRef.current) && epoch === selectEpochRef.current;
     await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2)
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     const nearSources = neighbourCandidates(latlng); // NEW-1 (Memphis line band)
@@ -3803,7 +3821,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     try { await selectParcelAt(at, label, null, true); } finally { stopSlow(); setLookupNote(""); setBusy(false); }
   };
 
-  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
+  const clearSel = () => { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
 
   /* NEW-1 (2026-09-24) — a decide-bar verb that finishes WITHOUT leaving the map (Log a comp, Add a
    * note) must exit select mode ITSELF, not just empty the selection. "Plan this site" gets that for
@@ -3833,6 +3851,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // NEW-1 — leaving the decide bar without answering it. Never destructive: a pin is a point the
   // user marked, nothing has been written anywhere yet.
   const clearDecidePin = () => setDroppedPin(null);
+  /* The decide bar's ✕ AND its Escape key (B2451472): clears whichever ground the bar is about. The ✕ keeps the
+   * selection-clearing contract of `clearSel()` — NOT `finishGroundAction` — so clearing to re-pick stays in
+   * select mode (test/decideBarDismiss). `decideTarget` is the per-render value, defined further down. */
+  const clearDecide = () => { if (decideTargetOf({ selectedCount: selectedRef.current.length, hasPin: !!droppedPin }) === "parcels") clearSel(); else clearDecidePin(); };
 
   /* NEW-4 — THE FALLBACK. Start a plan with no parcel, LOCATED at `at` (or wherever the map is
    * looking), so the owner can draw the boundary himself and still get the aerial, the flood
@@ -4291,6 +4313,40 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [decideTarget, selected, droppedPin, lastVerb]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* B2451472 — ESCAPE DOES WHAT THE BAR'S ✕ DOES: `clearDecide` is the ONE clearing path (the ✕ calls the same
+   * function), so every selected parcel — or the dropped pin — goes, with the outline, the acreage chip and the
+   * bar. The rule for WHEN is the pure `escapeClearsDecideBar`; this listener only reads the live facts.
+   * One listener for the component's life (a ref carries the facts, so no re-subscribe per render and none left
+   * behind on unmount). It is registered at mount, so it runs BEFORE any menu's own Escape listener of the same
+   * keypress — which is why an open Record info menu is read from the ref (still open) and left alone: the
+   * first Escape closes only the menu, the next one clears. The finder stays mounted but hidden behind an open
+   * project / another workspace, so it also demands `visible && isActive`. */
+  const escapeFactsRef = useRef(null);
+  escapeFactsRef.current = {
+    decideTarget,
+    mapShown: !!(visible && isActive),
+    ownedElsewhere: !!(
+      recordMenuOpen || statusMenu || compMenu || dateEditor || locateNotice || editingNote || renaming ||
+      calibration || activeOverlayId || clickableOverlayId || placingCompPin || pinDecideArmed
+    ),
+    clear: clearDecide,
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const f = escapeFactsRef.current;
+      if (!f) return;
+      const ae = document.activeElement;
+      const typing = isTextControl(ae) || (!!ae && PICKER_TAGS.includes(ae.tagName));
+      // A modal dialog (any surface's) keeps its own Escape.
+      const modalOpen = !!document.querySelector('[aria-modal="true"]');
+      if (!escapeClearsDecideBar({ decideTarget: f.decideTarget, mapShown: f.mapShown, typing, ownedElsewhere: f.ownedElsewhere || modalOpen })) return;
+      f.clear();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
 
   /* B427410 — the `field` style object that used to live here dressed ONE control: the Imagery
@@ -4867,7 +4923,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   : "Pin dropped"}
               </span>
               <button
-                onClick={() => { if (decideTarget === "parcels") clearSel(); else clearDecidePin(); }}
+                onClick={clearDecide}
                 title={decideTarget === "parcels" ? "Clear selection" : "Remove the pin"}
                 data-testid="map-decide-clear"
                 style={{

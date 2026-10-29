@@ -112,8 +112,11 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: sb 
 describe("client invite / resend", () => {
   let teams;
   beforeEach(async () => {
-    sb.upserts = [];
-    sb.from = () => ({ upsert: async (row, opts) => { sb.upserts.push({ row, opts }); return { error: null }; } });
+    sb.upserts = []; sb.calls = [];
+    // NEW-1 (invite inbox): inviteByEmail first deletes a DECLINED invite for the same team+email (the table
+    // has no UPDATE policy, so a fresh row is the only way to re-invite) — a chainable, awaitable stub.
+    const del = () => { const c = { eq: () => c, not: (...a) => { sb.calls.push(["delete-declined", a]); return c; }, then: (res) => res({ error: null }) }; return c; };
+    sb.from = () => ({ delete: del, upsert: async (row, opts) => { sb.calls.push(["upsert"]); sb.upserts.push({ row, opts }); return { error: null }; } });
     teams = await import("../src/workspaces/site-planner/lib/teams.js");
   });
   const stubFetch = (resp) => { const f = vi.fn(async () => resp); globalThis.fetch = f; return f; };
@@ -124,6 +127,12 @@ describe("client invite / resend", () => {
     expect(sb.upserts).toHaveLength(1); expect(f).toHaveBeenCalledTimes(1);
     expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ teamId: "t1", email: "a@b.com" });
     expect(r).toMatchObject({ ok: true, emailed: true });
+  });
+  it("re-inviting clears a DECLINED invite first, then inserts (NEW-1 invite inbox)", async () => {
+    stubFetch(new Response('{"ok":true}', { status: 200 }));
+    await teams.inviteByEmail("t1", "a@b.com", "member");
+    expect(sb.calls.map((c) => c[0])).toEqual(["delete-declined", "upsert"]);
+    expect(sb.calls[0][1]).toEqual(["declined_at", "is", null]);
   });
   it("a send failure keeps the invite (ok:true, emailed:false) so the UI can say 'saved, but…'", async () => {
     stubFetch(new Response('{"ok":false,"error":"nope"}', { status: 502 }));

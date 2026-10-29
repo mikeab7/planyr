@@ -1142,7 +1142,7 @@ export function createExportSheet(ctx) {
     let annotationPins = [];
     let annotationsKeptInPage = 0; // NEW-1 — annotations stacked behind page content stay in the picture (see annotationExtract)
     if (annotate) {
-      const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
+      const [{ extractMarkupAnnotations, domToTree }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
       const mctx = document.createElement("canvas").getContext("2d");
       const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
       const { descriptors, patterns, flattened, pinned, notes } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, els, f2p, measureText });
@@ -1161,7 +1161,25 @@ export function createExportSheet(ctx) {
       const a0 = f2p({ x: 0, y: 0 }), a1 = f2p({ x: 1, y: 0 });
       const unitsPerFt = Math.hypot(a1.x - a0.x, a1.y - a0.y);
       const ftPerPt = unitsPerFt > 0 && k > 0 ? 1 / (unitsPerFt * k) : null;
+      /* NEW-1 (2026-10-27) — SHEET FURNITURE ON TOP OF THE SITE, AND REMOVABLE: the Buildings table, the scale bar and the north
+         arrow. Page content paints UNDER every annotation, so a plate left in the page picture is painted over by whatever site
+         element's annotation overlaps it (the owner's Buildings table lost "Building" off its third row — "it's printing
+         under"). Each plate becomes its own Stamp, appended LAST so it paints above every site annotation — the stacking the
+         flattened sheet and the screen already have — and Bluebeam can select, move or delete it. They stay where the corner
+         picker put them (the table top-right on the owner's plan, as on screen). */
+      const furnLift = [];
+      for (const fel of Array.from(built.clone.querySelectorAll("[data-furniture-kind]"))) {
+        const kind = fel.getAttribute("data-furniture-kind");
+        descriptors.push({ family: "sheet-furniture", id: kind, kind, tree: domToTree(fel, { measureText, root: built.clone }), meta: { subject: kind === "scale-bar" ? "Scale bar" : kind === "north-arrow" ? "North arrow" : "Buildings table" } });
+        furnLift.push({ el: fel, kind });
+      }
       annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString(), ftPerPt });
+      // LOUD-FAILURE: a plate leaves the page ONLY once its annotation exists — never a table or scale bar in neither place
+      const haveAnnot = (id) => annotationSet.annots.some((a) => a.family === "sheet-furniture" && a.id === id);
+      for (const { el, kind } of furnLift) {
+        if (haveAnnot(kind)) el.remove();
+        else annotationSet.degraded.push(`${kind === "scale-bar" ? "scale bar" : kind === "north-arrow" ? "north arrow" : "Buildings table"} stays in the page (it could not be written as its own annotation)`);
+      }
       // LOUD-FAILURE: every object kept in the page, and why, rides the same warning list as any other simplification
       const WHY = { "under-reference": "a reference drawing shown above the plan covers it", "under-pinned": "it sits under something that is printed into the page", "under-page": "page content drawn after it covers it", straddle: "it and another object each sit partly on top of the other" };
       for (const pin of pinned) annotationSet.degraded.push(`${pin.name} is printed into the page, not editable: ${WHY[pin.why] || pin.why}${pin.by ? ` (${pin.by})` : ""}`);

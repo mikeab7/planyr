@@ -34,7 +34,7 @@
  *   • IT PERSISTS AND SYNCS FOR FREE, because it is part of the document model, which is the
  *     thing that is stored and merged. Reload, another machine, the PDF: same place.
  *   • AND IT IS MOVABLE AFTERWARDS — drag it anywhere on its body (NOTES-FREE-PLACEMENT; the
- *     grip is now only the visible affordance for it). A block you cannot reposition is a block
+ *     border is the handle that always works; owner decision 2026-10-27). A block you cannot reposition is a block
  *     you placed wrong once and live with.
  *
  * ⛔ THE COORDINATES ARE UNSCALED DOCUMENT PIXELS, MEASURED FROM THE TOP-LEFT OF THE EDITOR'S
@@ -303,7 +303,7 @@ export const NoteAnchor = Node.create({
        *  every bug we have spent two days finding once."* So there is still exactly ONE placed
        *  node and ONE placement command — a box holding a paragraph is what a press makes, a box
        *  holding a picture is what a drop makes, and press-to-place, the selection ring, the drag
-       *  grip, resize, Delete, the right-click menu, undo, the stored round trip and the tombstone
+       *  border handle, resize, Delete, the right-click menu, undo, the stored round trip and the tombstone
        *  cascade are all already written and are not written twice.
        *
        *  ⛔ THE CARET ONLY FOLLOWS INTO A BOX SOMEBODY IS GOING TO TYPE IN. Dropping a picture is
@@ -595,7 +595,7 @@ export const NoteAnchor = Node.create({
     };
   },
 
-  /** The node view exists for ONE reason: the drag grip. Position itself comes from
+  /** The node view exists for ONE reason: the border move handle. Position itself comes from
    *  `renderHTML`, so a build with no node view still draws every block in the right place —
    *  which is what keeps the print path honest. */
   addNodeView() {
@@ -629,11 +629,26 @@ export const NoteAnchor = Node.create({
       };
       markEmpty(node);
 
-      const grip = document.createElement("div");
-      grip.className = "planyr-anchor-grip";
-      grip.setAttribute("contenteditable", "false");
-      grip.setAttribute("title", "Drag anywhere on this note to move it");
-      grip.setAttribute("data-testid", "note-anchor-grip");
+      /* ⛔ THE BORDER IS THE MOVE HANDLE (B2426788, owner decision 2026-10-27 — he picked "A" of four
+       * mockups: *"I like it that it only interacts by the edges"*, and called the old striped grip
+       * *"pretty ugly and honestly just annoying to look at"*). PowerPoint's, Word's and Bluebeam's
+       * convention for a text box. The striped grip in the left padding is RETIRED — no second
+       * affordance is left behind.
+       *
+       * FOUR strips, one per side, each straddling the outline (a few px outside the line, the line,
+       * a few px inside it — see `.planyr-anchor-edge` in `NoteEditor.jsx`'s stylesheet), so the band
+       * is a RING and never a filled rectangle: a middle press still falls through to the box's own
+       * select / enter / pan rules, untouched (his standing rule — B2156912, carry-forward §7).
+       * The resize handles paint ABOVE the strips, so a corner or edge handle keeps its press and
+       * its directional cursor exactly as before; everywhere else along the edge moves. */
+      const edges = ["n", "e", "s", "w"].map((side) => {
+        const el = document.createElement("div");
+        el.className = `planyr-anchor-edge planyr-anchor-edge-${side}`;
+        el.setAttribute("contenteditable", "false");
+        el.setAttribute("data-edge", side);
+        el.setAttribute("data-testid", "note-anchor-edge");
+        return el;
+      });
 
       const content = document.createElement("div");
       content.className = "planyr-anchor-content";
@@ -652,7 +667,7 @@ export const NoteAnchor = Node.create({
        * remaining routes hand FOCUS BACK TO THE DOCUMENT after removing the node, or Ctrl+Z has
        * nowhere to land and a destructive action becomes un-undoable. Both do. */
 
-      dom.appendChild(grip);
+      for (const edge of edges) dom.appendChild(edge);
       dom.appendChild(content);
 
       /* ═══ DRAG-FROM-THE-DOT — ONE OF THE TWO WAYS TO CONNECT TWO BOXES (NEW-2) ═════════════
@@ -906,28 +921,25 @@ export const NoteAnchor = Node.create({
 
       syncHandles(node);
 
-      /* ⛔ THE WHOLE BOX IS THE DRAG SURFACE (NOTES-FREE-PLACEMENT / NEW-2, owner report
-       * 2026-09-08: *"click and drag it anywhere in its body… nothing, with no feedback"*, and
-       * the grip he was expected to find instead measured 9×14px at zero opacity until hover).
+      /* ⛔ THE SAME DRAG IS WIRED TO TWO SURFACES, WHICH IS NOT REDUNDANCY — THEY ANSWER DIFFERENT
+       * QUESTIONS (NOTES-FREE-PLACEMENT / NEW-2 → B2426788). The BODY drags only while the caret is
+       * elsewhere, because once you are typing in a box a press-and-travel inside it is somebody
+       * selecting a phrase, which is his own rule (*"text selection taking over only once the note
+       * has focus"*). The BORDER BAND drags UNCONDITIONALLY — caret in the box or not — because a box
+       * you have just typed into still has to be movable without pressing Escape first, which is
+       * the whole reason a dedicated handle exists. (It used to be a striped grip in the left padding;
+       * owner decision 2026-10-27: the border itself is the handle, like PowerPoint and Bluebeam.)
        *
-       * ⛔ SO THE SAME DRAG IS WIRED TO TWO SURFACES, WHICH IS NOT REDUNDANCY — THEY ANSWER
-       * DIFFERENT QUESTIONS. The BODY drags only while the caret is elsewhere, because once you
-       * are typing in a box a press-and-travel inside it is somebody selecting a phrase, which is
-       * his own rule (*"text selection taking over only once the note has focus"*). The GRIP
-       * drags UNCONDITIONALLY, because a box you have just typed into still has to be movable
-       * without pressing Escape first — which is the whole reason a grip exists and why it stays
-       * a real target rather than becoming decoration. It sits in the box's own 16px left padding
-       * (left: 3px, 12px wide), so it covers no text and eats no press meant for a word.
+       * ⛔ BOTH ENGAGE ON MOVEMENT, NEVER ON THE PRESS ITSELF. The body's press is already spoken for
+       * by the two-stage select/enter model in `focusFromMat`; the band's press is too — `focusFromMat`
+       * SELECTS the box on a press that lands on its border (and never enters it), so a plain click on
+       * the outline selects exactly as PowerPoint's does, and a pointer that travels past the
+       * threshold becomes a move. Neither `preventDefault`s the pointer press: the mat does that on
+       * the matching `mousedown`, which is what keeps a border drag from starting a native text
+       * selection.
        *
-       * ⛔ AND THE BODY ENGAGES ON MOVEMENT, NEVER ON THE PRESS ITSELF. The grip can `preventDefault`
-       * on `pointerdown` because nothing else wanted that press; the BODY's press is already
-       * spoken for by the two-stage select/enter model in `focusFromMat`, and swallowing it would
-       * take selecting a box away to buy dragging it. So the press is recorded and passed
-       * through, and only a pointer that actually TRAVELS past the threshold becomes a drag. The
-       * grip has no such constraint and keeps its own immediate `preventDefault`.
-       *
-       * ⛔ WHAT DECIDES BETWEEN "MOVE IT" AND "SELECT ITS TEXT" IS THE CARET, READ LIVE — not
-       * the selection ring, and not a React attribute. His rule is *"text selection takes over
+       * ⛔ WHAT DECIDES BETWEEN "MOVE IT" AND "SELECT ITS TEXT" FOR THE BODY IS THE CARET, READ LIVE —
+       * not the selection ring, and not a React attribute. His rule is *"text selection takes over
        * once the note has focus"*: press 1 leaves the caret outside the box (`focusFromMat`
        * preventDefaults it), so a travelling press 1 is a move; press 2 puts the caret inside, so
        * a travelling press 2 is an ordinary text selection. `anchorPosAtSelection` answers that
@@ -951,13 +963,23 @@ export const NoteAnchor = Node.create({
       /* The drag. Pointer capture rather than a document-level listener, so releasing outside
        * the window still ends it — a drag that never ends is a note you cannot type in. */
       let from = null;
-      /** ⛔ ONE GESTURE, WIRED TWICE. `immediate` is the grip: it owns its press outright. The
-       *  body's is deferred to the movement threshold in `pointermove` below. */
-      const beginDrag = (e, { immediate }) => {
+      /** ⛔ ONE GESTURE, WIRED TWICE. `band` is the border: it moves the box whether or not the caret
+       *  is inside it. The body's drag stands down while the caret is inside (that is a text
+       *  selection). Both are deferred to the movement threshold in `pointermove` below. */
+      const beginDrag = (e, { band }) => {
         if (e.button !== 0) return;
-        if (!immediate && onOwnChrome(e.target)) return;
-        if (!immediate && caretInside()) return;   // the note has focus: this press is about text
-        if (immediate) { e.preventDefault(); e.stopPropagation(); }
+        if (!band && onOwnChrome(e.target)) return;
+        if (!band && caretInside()) return;   // the note has focus: this press is about text
+        if (band) {
+          /* Modified presses are the mat's (Shift toggles the selection, Ctrl/Alt/Cmd open menus), as are
+           * the two modes that give a press another meaning: click-to-connect and space-pan. */
+          if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+          if (dom.closest('[data-arrow-mode="1"], [data-space-pan="1"]')) return;
+          /* The press is the border's, and the pointer capture below retargets the `mousedown` that
+           * follows to the box itself — so `focusFromMat` is told by an attribute, not by its target. */
+          dom.setAttribute("data-edge-press", "1");
+          e.stopPropagation();   // not the box body's own deferred drag as well
+        }
         /* ⛔ WHERE IN THE BOX YOU GRABBED IT, kept — so the box cannot re-seat itself under the
          * cursor when the drag starts. Every position below is then derived from the pointer's
          * offset INSIDE THE EDITOR, read fresh on each move, which makes the whole gesture
@@ -973,12 +995,12 @@ export const NoteAnchor = Node.create({
          * this view was BUILT (see the width handle above), so a stale read of it is a bug
          * waiting for whoever edits this next. Every number below comes from the pointer and
          * from live geometry. */
-        /* ⛔ IF SEVERAL BOXES ARE SELECTED, THE GRIP MOVES ALL OF THEM (NEW-MULTI-DRAG).
+        /* ⛔ IF SEVERAL BOXES ARE SELECTED, A DRAG MOVES ALL OF THEM (NEW-MULTI-DRAG).
          *
          * HIS REPORT: *"if I select multiple things and then I grab one of them to move it, it
          * should move all of the items together."* He also guessed the cause and was right about
          * its shape: a group drag DOES exist (`beginGroupDrag` in NoteEditor.jsx) and it is wired
-         * to the MAT's press handler — but the grip calls `preventDefault()` on `pointerdown`,
+         * to the MAT's press handler — but the old grip called `preventDefault()` on `pointerdown`,
          * which suppresses the compatibility `mousedown` the mat listens for. So grabbing a box
          * by the one affordance built for moving it was the single path the group drag could
          * never see, and marquee-select became pointless for the thing people select for.
@@ -1009,7 +1031,7 @@ export const NoteAnchor = Node.create({
           hostWidth: host.offsetWidth,
           group,
           moved: false,
-          immediate,
+          band: !!band,
         };
         /* ⛔ THE POINTER IS CAPTURED AT THE PRESS, NOT AT THE THRESHOLD — and this line is the
          * difference between the body drag working and doing nothing at all. Measured: without
@@ -1023,12 +1045,12 @@ export const NoteAnchor = Node.create({
         /* ⛔ THE CURSOR OF A DRAG IS PINNED FOR THE WHOLE GESTURE (convention 2026-10-20). Measured: with
          * the pointer captured on the box, a drag of a box whose caret is inside it painted the box's own
          * TEXT cursor under the pointer, and leaving the box handed the cursor to whatever the pointer
-         * crossed (the mat's open hand). The grip is a pick-up grip → grabbing; the body (and a group)
-         * moves the object → move. The body's pin waits for the threshold, so a plain click pins nothing. */
-        if (immediate) { from.moved = true; from.release = pinDragCursor("grabbing"); }
+         * crossed (the mat's open hand). A border drag, a body drag and a group drag all MOVE the object
+         * → move (four arrows, owner decision 2026-10-27). The pin waits for the threshold, so a plain
+         * click pins nothing. */
       };
-      dom.addEventListener("pointerdown", (e) => beginDrag(e, { immediate: false }));
-      grip.addEventListener("pointerdown", (e) => beginDrag(e, { immediate: true }));
+      dom.addEventListener("pointerdown", (e) => beginDrag(e, { band: false }));
+      for (const edge of edges) edge.addEventListener("pointerdown", (e) => beginDrag(e, { band: true }));
       dom.addEventListener("pointermove", (e) => {
         if (!from) return;
         /* ⛔ THE THRESHOLD IS WHAT KEEPS A PLAIN CLICK A PLAIN CLICK. Below it nothing has
@@ -1036,7 +1058,7 @@ export const NoteAnchor = Node.create({
          * and takes the pointer, so releasing outside the window still ends it. */
         if (!from.moved) {
           if (Math.abs(e.clientX - from.startX) < DRAG_SLOP && Math.abs(e.clientY - from.startY) < DRAG_SLOP) return;
-          if (caretInside()) { from = null; return; }
+          if (!from.band && caretInside()) { from = null; return; }
         }
         e.preventDefault();
         from.moved = true;
@@ -1088,6 +1110,7 @@ export const NoteAnchor = Node.create({
         const moves = from.moves;         // …and the group's, when this was a group drag
         from.release?.();
         from = null;
+        dom.removeAttribute("data-edge-press");
         try { dom.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         /* ⛔ A PRESS THAT NEVER MOVED WRITES NOTHING AT ALL — not a transaction, not an undo
          * frame, not a save. It used to commit the box's own coordinates back over themselves,

@@ -36,6 +36,7 @@ import { addArrow, removeArrow } from "./notesArrows.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
+import { NoteTableFill } from "./notesTableFill.js";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
@@ -239,6 +240,8 @@ export const NOTE_EXTENSIONS = [
    * bundles the four for convenience and offers no hook to swap one out). */
   NoteTable.configure({ resizable: true, allowTableNodeSelection: true, cellMinWidth: TABLE_COL_MIN_WIDTH }),
   TableCell, TableHeader, TableRow,
+  // Header row on ANY row + cell fill (NEW-1/NEW-2, 2026-10-28) — see lib/notesTableFill.js.
+  NoteTableFill,
 
   // "Convert table to text" (NEW-2) — a right-click command that pulls a table's rows out as
   // plain lines, keeping every cell's marks. See lib/notesTableToText.js for the whole rule,

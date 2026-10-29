@@ -610,6 +610,74 @@ export const GIS_SOURCES = {
     lastVerified: "2026-09-30",
   },
 
+  /* NEW-1 (Tennessee, 2026-10-28) — THE TENNESSEE JURISDICTION ROWS: county, city, and the road-maintenance layer.
+   * SOURCE CHOICE, in the owner's order (state first): all three are STATE of Tennessee publications, ArcGIS-Online
+   * hosted, `access-control-allow-origin: *` (CORS-clean from planyr.io, no key, no relay), live-probed 2026-10-28.
+   *   • county — "TN_Counties_view" (State of Tennessee STS, the org that publishes the Comptroller's parcel layer
+   *     already wired here): 95 polygons, TIGER attributes (NAME, GEOID 47xxx), data edited 2026-03-18.
+   *   • city — "Tennessee Cities" / `TN_Cities_view` (same org): 345 polygons — TN's whole municipal roster — with a
+   *     NAME column and nothing else; no county, no type. Data edited 2026-03-18. THE VINTAGE IS PART OF THE ANSWER: an
+   *     annexation after that date is not in the layer, so the badge says so in its tooltip. Nashville is published as the
+   *     "balance" (the satellite cities Belle Meade, Berry Hill, Forest Hills, Oak Hill, Goodlettsville and Ridgetop are their
+   *     own polygons and are NOT inside it); Lynchburg and Hartsville are the town polygons of the two other consolidated
+   *     governments. A city that crosses a county line is ONE polygon here — the COUNTY a site is in always comes from
+   *     the county layer at the site, never from the city.
+   *   • road — TDOT "Road Segment" (`Administrative`-sibling service, TDOT's own road inventory, updated monthly; edited
+   *     2026-10-26): every public road in the state with GOVT_CTRL (State Highway Agency / County Highway Agency /
+   *     Municipal Highway Agency / …), the route name, functional class and the incorporated-area name. The TX road-authority
+   *     counterpart. Geometry is Tennessee State Plane (WKID 2274); queried in 4326 it reprojects server-side.
+   * Rejected: Census TIGERweb (the sandbox proxy answers 403 for tigerweb.geo.census.gov, so it could not be verified live —
+   * not wired, per the verify-before-you-wire house rule); TDOT "Administrative Boundaries" City Boundary (data last edited
+   * 2023-05, older); the 2017 `TN City and County Boundaries` map service (stale); Esri/third-party republications.
+   * Point fixtures live 2026-10-28: Culvert St Nashville → Davidson / Nashville · Belle Meade → Belle Meade · Memphis → Shelby /
+   * Memphis · Germantown, Collierville · Murfreesboro → Rutherford · Epps Mill Rd at I-24 → Rutherford, no city · Chattanooga →
+   * Hamilton · Clarksville → Montgomery · Knoxville → Knox · Lynchburg → Moore · Hartsville → Trousdale · Goodlettsville (Sumner
+   * side) → Sumner / Goodlettsville · Lauderdale rural → no city. */
+  countyTn: {
+    key: "countyTn",
+    label: "County boundaries (Tennessee)",
+    provider: "State of Tennessee (STS) — statewide counties",
+    serviceUrl: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/TN_Counties_view/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", fips: "GEOID", full: "NAMELSAD" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-03-18",
+    lastVerified: "2026-10-28",
+  },
+  cityTn: {
+    key: "cityTn",
+    label: "City limits (Tennessee)",
+    provider: "State of Tennessee (STS) — Tennessee Cities",
+    serviceUrl: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/TN_Cities_view/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    // NEW-1 cityLimitClass rule: the layer holds municipal limits and nothing else — one polygon, one government.
+    fullPurposeOnly: true,
+    dataLastEdited: "2026-03-18",
+    lastVerified: "2026-10-28",
+  },
+  roadTn: {
+    key: "roadTn",
+    label: "Road maintenance authority (Tennessee)",
+    provider: "Tennessee Department of Transportation (TDOT) — Road Segment",
+    serviceUrl: "https://services2.arcgis.com/nf3p7v7Zy4fTOh6M/arcgis/rest/services/Road_Segment/FeatureServer/0",
+    layerId: null,
+    geometryType: "polyline",
+    fields: { name: "RTE_NME", authority: "GOVT_CTRL", system: "ADM_SYS", funcClass: "FUNC_CLASS", route: "NBR_RTE", city: "NBR_INC_AREA", county: "NBR_TENN_CNTY" },
+    coverage: "tennessee",
+    states: ["TN"],
+    tier: "production",
+    dataLastEdited: "2026-10-26",
+    lastVerified: "2026-10-28",
+  },
+
   /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING ROWS. Every endpoint below was read and
    * queried live on 2026-10-04 from the build sandbox (reachable, answers `f=json`, `access-control-allow-origin: *`
    * so planyr.io can call it from the browser) and sits on a production host — no `/Test/` or staging path.

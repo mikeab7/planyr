@@ -1,8 +1,9 @@
 /* B2436064 ×3 (Imagery & Layers NEW-1) + B2436065 (NEW-2) + B2436066 (NEW-3), on the REAL app, both surfaces.
  *
  *   NEW-1  a one-pixel divider in the border token sits between the group list and the rows, the full height of the panes (wherever the two
- *          panes sit side by side); a row's name starts one small gap after the checkbox + swatch slot — checkbox right edge → name left edge
- *          at most 18 (it measured 27) — and starts at the same x in every pane; nothing overlaps or clips.
+ *          panes sit side by side); a row's name starts ONE gap (SPACE.sm, 6) after the checkbox — on an off row AND an on row with a
+ *          colour chip — checkbox right edge → name left edge EXACTLY 6 (it measured 27, then 18 with an empty reserved slot); the chip
+ *          follows the name and exists only on an on row; names start at the same x in every row of every pane; nothing overlaps or clips.
  *   NEW-2  no row is faded: every row's computed opacity matches a normal row.
  *   NEW-3  a located plan at Grand Port and the finder centred on the same point list the same Flood & Drainage rows: FEMA + streams only.
  * Matrix: planner + finder × light + dark × desktop + phone. Red-proof: on bd89cc8 the divider, the gap and the Grand Port rows all fail. */
@@ -17,7 +18,7 @@ const site = {
   parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 1320, y: 0 }, { x: 1320, y: 1320 }, { x: 0, y: 1320 }], active: true, z: 0 }],
   underlay: null, sheetOverlays: [], parcelDrawings: [], settings: {}, els: [],
 };
-const GAP_TARGET = 18;
+const GAP = 6; // SPACE.sm — the one checkbox → name gap
 
 async function boot(page, hash, vp, theme) {
   await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (r) => r.abort());
@@ -72,9 +73,19 @@ for (const surface of ["planner", "finder"]) {
           await expect(div, "the group-dropdown layout has nothing side by side").toHaveCount(0);
         }
 
+        // An ON row with a map colour, so the chip arm is real: FEMA (Flood & Drainage) and Counties & Cities (Jurisdictions).
+        const wantChip = [];
+        for (const [group, rowId] of [["flood", "fema"], ["jur", "counties_cities"]]) {
+          if (!(await groupKeys(panel)).includes(group)) continue;
+          await selectGroup(panel, group);
+          const cb = panel.getByTestId(`layer-row-${rowId}`).locator('input[type="checkbox"]').first();
+          if (await cb.count()) { await cb.check({ force: true }); wantChip.push(rowId); }
+        }
+        expect(wantChip.length, "at least one ON row with a colour to measure").toBeGreaterThan(0);
+
         // ── NEW-1 + NEW-2 over every group: gap, same x, no overlap, never faded ──
         const xs = new Set();
-        let worst = 0, rows = 0;
+        let worst = 0, rows = 0, chips = 0, offRows = 0;
         for (const key of await groupKeys(panel)) {
           await selectGroup(panel, key);
           const m = await panel.evaluate((p) => {
@@ -84,17 +95,22 @@ for (const surface of ["planner", "finder"]) {
               const cb = row.querySelector('input[type="checkbox"]').getBoundingClientRect();
               const nm = row.querySelector("label span[title]"), rg = document.createRange(); rg.selectNodeContents(nm.firstChild);
               const nb = rg.getBoundingClientRect();
-              return { id: row.getAttribute("data-testid"), gap: nb.left - cb.right, x: Math.round((nb.left - pane.left) * 10) / 10, op: getComputedStyle(row.firstElementChild).opacity, right: nb.right <= pane.right + 1, cbRight: cb.right > pane.left - 1 };
+              const chip = row.querySelector("[data-swatch]");
+              return { id: row.getAttribute("data-testid"), gap: nb.left - cb.right, checked: row.querySelector('input[type="checkbox"]').checked, chip: !!chip, chipAfterName: !chip || chip.getBoundingClientRect().left >= nb.right - 0.5, x: Math.round((nb.left - pane.left) * 10) / 10, op: getComputedStyle(row.firstElementChild).opacity, right: nb.right <= pane.right + 1, cbRight: cb.right > pane.left - 1 };
             });
           });
           for (const r of m) {
             rows++; worst = Math.max(worst, r.gap); xs.add(r.x);
-            expect(r.gap, `${key}/${r.id} checkbox → name`).toBeLessThanOrEqual(GAP_TARGET + 0.5);
+            if (r.chip) chips++; if (!r.checked) offRows++;
+            expect(Math.abs(r.gap - GAP), `${key}/${r.id} (${r.checked ? "on" : "off"}) checkbox → name is exactly ${GAP}`).toBeLessThanOrEqual(0.6);
+            if (r.chip) { expect(r.checked, `${key}/${r.id}: a chip only on an ON row`).toBe(true); expect(r.chipAfterName, `${key}/${r.id}: the chip follows the name`).toBe(true); }
             expect(r.op, `${key}/${r.id} is not faded`).toBe("1");
             expect(r.right, `${key}/${r.id} name stays inside the pane`).toBe(true);
           }
         }
         expect(rows, "rows were measured").toBeGreaterThan(8);
+        expect(offRows, "off rows were measured").toBeGreaterThan(4);
+        expect(chips, "an on row with a colour chip was measured").toBeGreaterThan(0);
         expect([...xs], "names start at the same x in every pane").toHaveLength(1);
 
         // ── NEW-3: Grand Port lists FEMA + streams only, on BOTH surfaces ──

@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-22",
-        "approvedCommit": "713a7846e",
-        "note": "B2436064/B2436065: Imagery & Layers card on the Map landing page gains a one-pixel divider between the group list and the rows and tighter checkbox-to-name spacing (swatch slot narrower); no other surface should change. [CI-authored by run 39853299521 on 713a7846e4d85e9fd4269152735b34dd003aba4a]"
+        "approvedAt": "2026-10-27",
+        "approvedCommit": "db2aa0906",
+        "note": "B2436064 x2 / B2448032: Imagery & Layers rows start the name one gap after the checkbox. Also re-baselines drift on surfaces this PR does not touch (library, header): main's builds since 2026-10-23 stopped at the performance-budget gate, so these surfaces never reached visual regression after the runner image changed. [CI-authored by run 40532007995 on db2aa09068ddbb53447499209cfbd85cc0ec196c]"
       }
     }
   }

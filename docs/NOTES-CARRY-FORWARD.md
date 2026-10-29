@@ -85,6 +85,13 @@ Two more found since, each worth its own line because each returned a confident 
    > the two behave the same on a press that travels. What is unchanged, and is why this stays:
    > the grip still owns its own press, still sits at the box's top-left, and still is not content
    > — so a fixed offset from the corner is still not a way to reach a word.
+   > **⛔ AND AMENDED AGAIN 2026-10-27 (B2426788) — THE GRIP IS GONE, AND THE SAME TRAP HAS MOVED TO THE WHOLE
+   > OUTLINE.** `.planyr-anchor-grip` no longer exists; the box's BORDER band (four `.planyr-anchor-edge`
+   > strips, 5 px outside the line · the line · 3 px inside it) is the move handle. A harness aiming at
+   > `box.x + 10, box.y + 10` or at the last pixel of a box is now pressing the band, which selects a box
+   > on a click and never enters it. Aim at the box's content (the centre of a real word) for a caret, and
+   > at `box.x + 0.3 × width, box.y + 0.5` for the top edge. The north strip's own centre is a picture
+   > box's north resize handle — which is why every harness here grabs the edge at 30 %, not at the middle.
 
 10. **A DRAG THAT LEAVES ITS OWN ELEMENT STOPS BEING DELIVERED TO IT (2026-09-08).** A body drag
    wired with `pointerdown` + `pointermove` on the box, capturing the pointer only once a movement
@@ -596,6 +603,24 @@ be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 ---
 
 47. **⛔ A CURSOR READ UNDER A DRAG IS READ AT TWO PLACES, AND A BOX THAT FOLLOWS THE POINTER HIDES ONE OF THEM (B2426784, 2026-10-22).** `getComputedStyle(elementFromPoint(x, y)).cursor` is the cursor the browser paints — but while a box is being dragged by its grip the box moves WITH the pointer, so the element under it is the dragged box's own grip and reads `grabbing` whatever the page's cursor rules do. A harness that read only there reported "the grip drag is fine" on a tree where the cursor reverted the moment the pointer outran the box. **Read twice: at a point the dragged thing has NOT followed to (the toolbar is the cheap one — it sets its own pointer, so a pinned cursor is the only way it reads `grabbing`), and, for a captured pointer, on the capture target itself** (`document.querySelectorAll('[data-testid="note-anchor"]')[n]` — Chromium paints the captured element's cursor). Measured with the second read: an EDITING box's grip drag read `text` on the box (an I-beam under the hand) before the fix and `grabbing` after. Also measured the same pass, so nobody re-hunts it: **a single box's BODY is not a move surface in any state** — press 1 selects, press 2 ENTERS it (`data-editing` flips on the `mousedown`, so the body drag stands down; a selected picture box does not move either), and a drag from an unselected body pans. The only bodies that drag are members of a multi-selection (`beginGroupDrag`), which is why `data-movable` exists. And two harness traps: `vite preview` serves a **cached directory listing** (rebuild into the same `--outDir` and the running server still serves the old build — restart it, and compare `/version.json`), and `{ type: "text", text: "" }` in a seeded document is an invalid node that blanks the WHOLE page with no error (an empty paragraph has no `content`).
+48. **⛔ A BORDER BAND IS A RING, AND POINTER CAPTURE RETARGETS THE `mousedown` THAT FOLLOWS ITS PRESS (B2426788, 2026-10-27).**
+   Three things to know before touching `.planyr-anchor-edge` (notesAnchorNode.js) or the band branch in `focusFromMat`.
+   (a) **The band takes the pointer at the press (`setPointerCapture` on the BOX), and Chromium delivers the compat `mousedown` to
+   the capture target — the box, not the strip.** `focusFromMat` therefore cannot ask `e.target.closest(".planyr-anchor-edge")`
+   alone; the node view sets `data-edge-press="1"` on the box for exactly the length of the press and the branch reads both. A
+   probe that checks only the target reports "a click on the border selects nothing" about working code.
+   (b) **A press on the band must not run `beginGroupDrag` too** — the node view already moves the whole selection from the DOM
+   (`[data-selected="1"]`), so two group drags would apply the delta twice. The band branch returns before it.
+   (c) **Its inside depth is bounded by the box's own padding** (3 px top/bottom, 6 right, 16 left) so it never covers a letter;
+   widening it (a finger-sized band on touch reaches only OUTWARD, and only on a SELECTED box) is the safe direction, deepening it
+   is not. The resize handles paint above the strips (z-index 2 vs 1) — a handle keeps its press, its cursor and its resize.
+   (d) **A SEEDED FIXTURE NEVER SHRINKS, AND A BOX PLACED BY A REAL DOUBLE-CLICK ALWAYS DOES (`fit`, B2248944).** The east-handle row
+   was green on every local run and failed live (+114 for a 50 pull) until the boxes were built by real presses (`DBL=1`); the cause
+   (B2458960, a shrunk box jumps to ~160 on the first move of a handle drag) is PRE-EXISTING and identical on the pre-change build.
+   Same species as trap 14: a fixture only varies the dimensions you varied — here, "has this box ever been clicked out of".
+   Guards: `ui-audit/verify-notes-box-edge.mjs` (mouse; 49 rows, 31 ✗ on pre-fix main, known-good arms for the pan and the handle),
+   `ui-audit/verify-notes-box-edge-touch.mjs` (Chromium touch emulation — WebKit cannot be installed on this host).
+
 
 ## 2 · The fixture that finds real bugs
 
@@ -1521,13 +1546,14 @@ was, Shift or no Shift:
 | travels, no modifier | **pan** — the mat's own `scrollLeft`/`scrollTop`, one-to-one with the pointer |
 | travels, Shift held | **select** — the rubber band; every box it touches, replacing the selection |
 | starts on one of the four sheet edge grips | **resize the page** — the grip's `pointerdown` calls `preventDefault()`, which suppresses the compat `mousedown`, so `focusFromMat` never runs at all |
+| starts on a BOX'S BORDER BAND (B2426788) | **move the box** (or the whole selection) — a click only SELECTS it; the band moves a box whether or not it has the caret. The middle of a box keeps every rule above |
 
 **⛔ AND A FIFTH ROW SINCE 2026-10-06 (NEW-1 / B2156912): a plain mouse press that starts on a BOX'S CONTENT
 (table cell / header / border, picture, text) of a box that is neither selected nor being edited is DEFERRED —
 the capture-phase effect above the touch pan in `NoteEditor.jsx` takes the `pointerdown`/`mousedown` before
 ProseMirror, the box body drag and `focusFromMat` can see them, so nothing is selected on the press. Travels →
 the same pan as above (followed from the press); does not travel → the press is REPLAYED into `focusFromMat`
-unchanged (a plain click is exactly what it was). It does NOT claim: the grip / resize handles / connect dot /
+unchanged (a plain click is exactly what it was). It does NOT claim: the box's border band / resize handles / connect dot /
 column-resize handle / page grips, controls and links, any modifier, middle button, Space, click-to-connect,
 touch, a selected box (its press is the click-in; a group still drags) or the box being edited (text
 selection). Guard: `ui-audit/verify-notes-drag-pan.mjs` (required `build` step; 21 ✗ on pre-fix main).
@@ -1656,3 +1682,13 @@ Two owner reports, one session: a OneNote table pasted into a box a third as wid
 2. Every orphan ends in exactly one outcome — adopted / binned / purged / settled — decided by the pure `planOrphanResolution`; a finding is cleared for all of them. The only fifth state, write-refused, is decided by `persistTree`'s returned `writeTree` boolean. **The bar renders a write outcome only off that explicit signal, never off a count of things found.**
 3. The leak's source: the cloud seed (`planPageSeed`) must never adopt a row the local tree has tombstoned, nor upload a tombstoned local-only body; it reports `repurge` instead, and a failed cloud purge leaves the row un-purged so the id stays eligible on the next seed.
 4. **Instrument trap:** `ui-audit/verify-notes-project-integrity.mjs` has stale steps on main (§3 row click, §8 mutation arm, the project-switcher rows) — a failing row there is NOT evidence about your change; diff failure identities against a clean-main build (use `git worktree`, not `pkill -f`, which kills your own shell). Its §9 is the tombstoned-leftover guard, with a known-good arm.
+
+
+## A header row is a STYLE, not a mark; and the brief's "inference" was wrong (B2456096 / B2456097, 2026-10-28)
+
+- **`th { font-weight: 650; background: var(--surface-page) }` is CSS.** Header text is visibly bold with no bold mark, so `editor.isActive("bold")` reads false on it, the size box reads the same as everything else, and a person can see a bold grey row no control admits to. Any control that reports "what is this text" must go through `boldTruth` (`lib/notesTableFill.js`) inside a header cell.
+- **Tiptap's `toggleHeaderRow` is prosemirror-tables `toggleHeader("row")` = ROW 0 ONLY** (`top: 0, bottom: 1`). The package's *other* export `toggleHeaderRow` (deprecated logic) acts on the caret's row. Use `toggleHeaderRows` (ours) in the app.
+- **MEASURED, NOT INFERRED: Row ↑ / Row ↓ beside a header row insert a PLAIN row** (prosemirror-tables 1.8.5 `addRow`: it copies the neighbour's cell type but substitutes plain cells when that neighbour is a whole header row). The "stray" header row is the original header row being PUSHED DOWN (Header on row 1 → Row ↑ → it is row 2). The only way a new row comes out header is between two header rows. A brief's cause that says "inference — confirm with a red test" is a hypothesis; the test came back green, which is itself the finding.
+- **Instrument traps hit building `ui-audit/verify-notes-table-fill.mjs`:** (1) a read of `localStorage` before the 600 ms save debounce is a false failure — the wait lives INSIDE the `stored()` reader; (2) Ctrl+Z after a `persisted()` (which RELOADS) undoes nothing — the editor's history dies with the reload, so undo/redo must be driven in the same session as the edit; (3) `nt-print` no longer exists — print is `notes-header-export` → `notes-header-export-print` (other harnesses still reference `nt-print`: stale); (4) Chrome rewrites inline `style` on the clipboard / print DOM to `rgb(r, g, b)`, so assert hex OR rgb; (5) **`pkill -f` kills your own shell** (the command line contains the pattern) — stop a preview server by its pid; (6) this container's Playwright wants a Chromium build that isn't installed — set `PW_CHROME=/opt/pw-browsers/chromium-1248/chrome-linux64/chrome`.
+- **A cell fill is a CONTENT colour**, same in every theme, so a filled cell forces `FILL_INK` on its unmarked text; do not "fix" dark theme by making the tints theme tokens. `"transparent"` on a header cell is the only way to say "no shade" (null means the default header shade) — un-headering drops it back to null.
+- **Never import a `shared/` module from a Notes lib to reuse a six-line helper (B2456097, PR #2568).** `lib/notesTableFill.js` first imported `normalizeHex` from `shared/ui/colorRecents.js`; the bundler hoisted that file into a shared chunk the Site route then loaded and the perf budget's Site-route allowlist (`ui-audit/perf-bundle-audit.mjs`) failed the required `build`. Mirror the helper locally with a comment (as `NoteToolbar.jsx` does for the control radii). Run `npm run build && node ui-audit/perf-bundle-audit.mjs` and look for `siteRouteAllowlist` before pushing any new Notes import — the other four absolute-size lines fail locally on clean main too (CI compares against the base ref), so only the allowlist line is yours.

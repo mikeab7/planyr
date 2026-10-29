@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { decideTargetOf, orderVerbs, verbLabel } from "../src/workspaces/site-planner/lib/decideBar.js";
+import { decideTargetOf, escapeClearsDecideBar, orderVerbs, verbLabel } from "../src/workspaces/site-planner/lib/decideBar.js";
 
 const ALL = ["site", "comp", "siteplan", "note"];   // B1372144 added the fourth
 
@@ -147,5 +147,65 @@ describe("the fresh-tab default is described in prose exactly as verbLabel says 
       .filter(({ line }) => line.includes("Track as site"))
       .filter(({ line }) => !/retired|until 2026-09-08|corrected/i.test(line));
     expect(offenders.map((o) => o.n), "the retired label is being stated as current").toEqual([]);
+  });
+});
+
+describe("escapeClearsDecideBar — Escape is the ✕'s keyboard twin, and yields to everything that already owns the key (B2451472)", () => {
+  const base = { decideTarget: "parcels", mapShown: true, typing: false, ownedElsewhere: false };
+
+  it("clears for a parcel selection and for a dropped pin when nothing else owns the press", () => {
+    expect(escapeClearsDecideBar(base)).toBe(true);
+    expect(escapeClearsDecideBar({ ...base, decideTarget: "pin" })).toBe(true);
+  });
+
+  it("is a no-op with no ground in hand", () => {
+    expect(escapeClearsDecideBar({ ...base, decideTarget: null })).toBe(false);
+    expect(escapeClearsDecideBar()).toBe(false);
+  });
+
+  it("does nothing while the Map is hidden behind a project or another workspace", () => {
+    expect(escapeClearsDecideBar({ ...base, mapShown: false })).toBe(false);
+  });
+
+  it("leaves Escape to a focused text field / select", () => {
+    expect(escapeClearsDecideBar({ ...base, typing: true })).toBe(false);
+  });
+
+  it("yields to an open menu, modal or armed tool (the first Escape closes only that)", () => {
+    expect(escapeClearsDecideBar({ ...base, ownedElsewhere: true })).toBe(false);
+  });
+});
+
+describe("MapFinder wiring of the Escape key (B2451472)", () => {
+  const finder = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url)), "utf8");
+  const effectAt = finder.indexOf("const escapeFactsRef = useRef(null)");
+  const effect = finder.slice(effectAt, effectAt + 2400);
+
+  it("routes through the ONE clearing path the ✕ uses, and asks the pure rule", () => {
+    expect(effectAt).toBeGreaterThan(0);
+    expect(effect).toMatch(/clear: clearDecide/);
+    expect(effect).toMatch(/escapeClearsDecideBar\(/);
+    expect(effect).toMatch(/visible && isActive/);
+  });
+
+  it("registers exactly one listener for the component's life and removes it on unmount", () => {
+    expect(effect.match(/window\.addEventListener\("keydown", onKey\)/g)).toHaveLength(1);
+    expect(effect).toMatch(/return \(\) => window\.removeEventListener\("keydown", onKey\);\n  \}, \[\]\);/);
+  });
+
+  it("names every menu / mode that owns Escape first, Record info included", () => {
+    for (const flag of ["recordMenuOpen", "statusMenu", "compMenu", "editingNote", "calibration", "activeOverlayId", "placingCompPin", "pinDecideArmed"]) {
+      expect(effect, flag).toContain(flag);
+    }
+  });
+
+  it("a clear abandons an in-flight lot lookup: the selection epoch is bumped by clearSel and checked after every await (live-found, 5 of 6 Escapes)", () => {
+    expect(finder).toMatch(/const selectEpochRef = useRef\(0\)/);
+    expect(finder).toMatch(/const clearSel = \(\) => \{ selectEpochRef\.current \+= 1;/);
+    const click = finder.slice(finder.indexOf("const handleClick = async"), finder.indexOf("const snapToAddressLot"));
+    expect(click).toMatch(/const epoch = selectEpochRef\.current/);
+    expect(click.match(/cleared\(\)/g).length).toBeGreaterThanOrEqual(3); // after identify, after the snapshot lookup, in the catch
+    const pick = finder.slice(finder.indexOf("const selectParcelAt = async"), finder.indexOf("const goAddress = async"));
+    expect(pick).toMatch(/epoch === selectEpochRef\.current/);
   });
 });

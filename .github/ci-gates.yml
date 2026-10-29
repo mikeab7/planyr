@@ -202,6 +202,17 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-copy-paste.mjs
+      # Notes header row on ANY row + cell fill gate (NEW-1/NEW-2, 2026-10-28). Owner report: a table's SECOND row was
+      # all header cells (bold + grey), the B button read off, and "Header" only ever touched row 1. Real clicks/keys,
+      # judged on the STORED document and computed style: Header row pressed / Bold lit in a header cell, the toggle
+      # on the caret's row (undo/redo one step), Row ↑/↓ beside a header row, Fill on a row / cell range / header row,
+      # "No fill", reload, dark theme ink, right-click menu, clipboard HTML + paste + print carrying the fill, and the
+      # phone More sheet. Known-good arm (a real bold mark) VOIDS the run. 11 ✗ on the pre-fix build. Reuses the preview
+      # server and Chromium the gates above already paid for.
+      - name: Notes header row on any row, Bold lit in a header, and cell fill (NEW-1/NEW-2, 2026-10-28)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-table-fill.mjs
       # Notes drag-pans-from-anywhere gate (NEW-1 / B2156912, 2026-10-06). Owner: "click-and-drag should
       # ALWAYS pan the page, from any spot" — a drag that began on a table selected it instead. Trusted
       # `page.mouse` only; table cell / header / border, box text and picture each must move the workspace
@@ -212,6 +223,17 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-drag-pan.mjs
+      # Notes box BORDER move handle (B2426788, owner decision 2026-10-27). The striped grip is retired: a box is
+      # moved by grabbing its outline, PowerPoint / Bluebeam-style. Real mouse + stored-document reads: the ring
+      # (just outside / on / just inside each edge resolves to the move band with the move cursor; the middle does
+      # not), hover feedback, a border drag moves the box and a click only selects, a middle drag still pans, a
+      # resize handle keeps priority, a box with the caret is still movable by its edge, a two-box selection moves
+      # together, a picture box has the same handle. 31 ✗ on pre-fix main; known-good arms VOID the run. The touch
+      # twin uses Chromium touch emulation (WebKit cannot be installed on the runner). Reuses the preview server.
+      - name: Notes box border move handle (the outline moves a box; the middle still pans — B2426788)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-box-edge.mjs && node ui-audit/verify-notes-box-edge-touch.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at

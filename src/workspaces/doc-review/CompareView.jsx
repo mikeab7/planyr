@@ -52,7 +52,7 @@ function paintWash(codes, W, H) {
 const kindLabel = (k) => (k === "added" ? "Added" : k === "removed" ? "Removed" : "Changed");
 const kindColor = (k) => (k === "added" ? CSS.added : k === "removed" ? CSS.removed : CSS.mixed);
 
-export default function CompareView({ a, b, onClose }) {
+export default function CompareView({ a, b, onClose, topInset = 0 }) {
   // a / b = { name, source } — source is a File/Blob/ArrayBuffer/{url} loadPdf accepts. `a` is the
   // OLDER revision (its removed ink is what's gone in the newer), `b` the NEWER.
   const [pdfs, setPdfs] = useState(null);   // { a, b } loaded pdf.js docs
@@ -188,15 +188,17 @@ export default function CompareView({ a, b, onClose }) {
   );
 
   return (
-    <div data-cmp="compare-view" data-status={status} data-active-region={activeRegion} data-change-count={counts.total} style={overlay}>
+    <div data-cmp="compare-view" data-status={status} data-active-region={activeRegion} data-change-count={counts.total} style={topInset ? { ...overlay, top: topInset } : overlay}>
       {/* header */}
       <div style={header}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {/* B2426787 — the names and both page steppers WRAP rather than truncate: on a phone the old single nowrap line pushed
+            the second stepper under Close ✕. Each file name still ellipsises on its own; the steppers never clip. */}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px 10px", minWidth: 0, flex: "1 1 0" }}>
           <strong style={{ fontSize: 13 }}>Compare revisions</strong>
-          <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            <span style={{ color: CSS.removed }}>◀ {a.name || "Older"}</span> {pageStepper("a", numA)}
-            <span style={{ margin: "0 6px", color: "var(--muted)" }}>vs</span>
-            <span style={{ color: CSS.added }}>{b.name || "Newer"} ▶</span> {pageStepper("b", numB)}
+          <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: "2px 6px", fontSize: 12, color: "var(--muted)", minWidth: 0 }}>
+            <span style={{ ...nameChip, color: CSS.removed }}>◀ {a.name || "Older"}</span> {pageStepper("a", numA)}
+            <span style={{ color: "var(--muted)" }}>vs</span>
+            <span style={{ ...nameChip, color: CSS.added }}>{b.name || "Newer"} ▶</span> {pageStepper("b", numB)}
           </span>
         </div>
         <button data-cmp="close" onClick={onClose} style={closeBtn}>Close ✕</button>
@@ -252,6 +254,7 @@ function Dot({ c }) {
 }
 
 // --- inline styles (token-driven; the overlay chromes with the app theme) ---
+// B2426787 — `topInset` is where the app header ends: the overlay fills the body BELOW it (the header is z-index 60, so inset:0 hid the Compare header row under it).
 const overlay = { position: "absolute", inset: 0, zIndex: 50, display: "flex", flexDirection: "column", background: "var(--surface-page)", color: "var(--ink)" };
 const header = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 12px", borderBottom: "1px solid var(--border-default)", background: "var(--surface-raised)" };
 const legend = { display: "flex", gap: 16, alignItems: "center", padding: "6px 12px", fontSize: 12, borderBottom: "1px solid var(--border-default)", flexWrap: "wrap" };
@@ -259,7 +262,8 @@ const warnBar = { padding: "6px 12px", fontSize: 12, color: "var(--warn-text)", 
 const canvasWrap = { position: "relative", flex: 1, minWidth: 0, overflow: "hidden", background: "var(--surface-page)", touchAction: "none" };
 const listPane = { width: 240, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", background: "var(--surface-raised)" };
 const listItem = { display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", borderBottom: "1px solid var(--border-default)", cursor: "pointer", font: "inherit", fontSize: 12, color: "var(--ink)" };
-const closeBtn = { border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 };
+const nameChip = { maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const closeBtn = { flex: "none",  border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 };
 const stepBtn = (disabled) => ({ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 4, width: 20, height: 20, lineHeight: 1, padding: 0, cursor: disabled ? "default" : "pointer" }); // disabled at either end of the pages → the arrow
 const busyOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--hover-ghost)", fontSize: 13, color: "var(--muted)", cursor: "progress" };
 const errOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", fontSize: 13, color: "var(--warn-text)" };

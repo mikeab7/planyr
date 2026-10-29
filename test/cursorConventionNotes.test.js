@@ -47,9 +47,9 @@ describe("a box shows the cursor of what a press on it will do", () => {
   it("an EDITING box still shows text over its typed text", () => {
     expect(css).toMatch(/\.planyr-anchor\[data-editing="1"\] \.planyr-anchor-content \{ cursor: text; \}/);
   });
-  it("the grip keeps grab at rest and grabbing while pressed", () => {
-    expect(css).toMatch(/\.planyr-anchor-grip \{[^}]*cursor: grab;/);
-    expect(css).toMatch(/\.planyr-anchor-grip:active \{ cursor: grabbing; \}/);
+  it("the BORDER band is the move handle and shows move (four arrows) at rest — the striped grip is retired (B2426788)", () => {
+    expect(css).toMatch(/\.planyr-anchor-edge \{[^}]*cursor: move;/);
+    expect(css).not.toMatch(/\.planyr-anchor-grip/);
   });
 });
 
@@ -78,9 +78,9 @@ describe("drags pin their cursor for the whole gesture (pinDragCursor, never a b
     expect(editor).toMatch(/pinDragCursor\("row-resize"\)/);
     expect(editor).toMatch(/pinDragCursor\("grabbing"\)/);
   });
-  it("a box body / group drag pins move; a grip drag pins grabbing; a connect drag pins crosshair; a resize pins its handle's cursor", () => {
+  it("a box body / border / group drag pins move (the striped grip and its grabbing are retired, B2426788); a connect drag pins crosshair; a resize pins its handle's cursor", () => {
     expect(anchor).toMatch(/pinDragCursor\("move"\)/);
-    expect(anchor).toMatch(/pinDragCursor\("grabbing"\)/);
+    expect(anchor).not.toMatch(/pinDragCursor\("grabbing"\)/);
     expect(anchor).toMatch(/pinDragCursor\("crosshair"\)/);
     expect(anchor).toMatch(/pinDragCursor\(HANDLE_CURSOR\[/);
   });

@@ -76,6 +76,8 @@ import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
 } from "../lib/notesMarkdown.js";
 import { docToHtml } from "../lib/notesDocHtml.js";
+import { FILL_INK } from "../lib/notesFormatPalette.js";
+import { TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
 import { buildPrintDocument, printHtmlDocument } from "../lib/notesPrint.js";
 import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
 import { activeOutlineIndex, outlineFromDoc } from "../lib/notesOutline.js";
@@ -342,6 +344,10 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror table td, .planyr-note .ProseMirror table th { border: 1px solid var(--border-strong); padding: 6px 9px; vertical-align: top; position: relative; min-width: 2em; }
 .planyr-note .ProseMirror table th { background: var(--surface-page); font-weight: 650; text-align: left; }
+/* A CELL FILL (NEW-2) is a solid content colour — the same in every theme — so a cell that carries one forces a
+   dark ink on its unmarked text, or light-theme-pale-on-dark-theme-light-text would be unreadable. Text with its
+   own colour mark is untouched (the mark is more specific than inheritance). "transparent" is not a fill. */
+.planyr-note .ProseMirror table td[data-cell-fill]:not([data-cell-fill="transparent"]), .planyr-note .ProseMirror table th[data-cell-fill]:not([data-cell-fill="transparent"]) { color: ${FILL_INK}; }
 .planyr-note .ProseMirror table .selectedCell:after { content: ""; position: absolute; inset: 0; background: var(--accent-notes); opacity: 0.16; pointer-events: none; }
 .planyr-note .ProseMirror .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: var(--accent-notes); cursor: col-resize; }
 .planyr-note .ProseMirror .tableWrapper { overflow-x: auto; }
@@ -400,28 +406,36 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within { border-color: var(--accent-notes); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within .planyr-anchor-content::after { content: "Type here"; position: absolute; left: 16px; top: 3px; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
 .planyr-note .ProseMirror .planyr-anchor-content { position: relative; }
-/* ⛔ THE GRIP IS AN AFFORDANCE, NOT A TARGET (NOTES-FREE-PLACEMENT / NEW-2). It used to be the
-   ONLY way to move a box — 9×14px, at opacity 0 until the box was selected, and dragging the box
-   by its body did nothing at all and said nothing about it. The whole body drags now (see the
-   node view), so this exists purely to SAY so: it appears on hover as well as on selection, at a
-   size somebody can actually see. It stays a REAL target rather than becoming decoration for one
-   reason: a box you have just typed into must still be movable without pressing Escape first, and
-   the body's own drag deliberately stands down while the caret is inside (see the node view). It
-   sits inside the box's own 16px left padding, so it covers no text — instrument trap #9's hazard
-   was a harness aiming at a fixed offset from the corner, which is a harness rule, not a reason to
-   remove the affordance. */
-.planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 4px; width: 12px; height: 20px; cursor: grab; border-radius: 3px; opacity: 0; transition: opacity 90ms linear; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
-.planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
-.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip,
-.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip { opacity: 1; }
+/* ⛔ THE BORDER IS THE MOVE HANDLE (B2426788, owner decision 2026-10-27, "A" of four mockups: *"I
+   like it that it only interacts by the edges"*). Four strips, one per side, each straddling the
+   outline: 5 px outside the line, the line, 3 px inside it. A RING, never a filled rectangle — the
+   middle of the box keeps select / enter / pan exactly as before — and the inside depth stays
+   within the box's own padding (3 px top and bottom, 6 right, 16 left), so no strip ever covers a
+   letter. The cursor is move (four arrows) over the whole band. It is there whether or not the box
+   is selected or has the caret, which is the grip's whole old job: a box you have just typed into
+   is still movable without pressing Escape. The resize handles paint ABOVE the strips (z-index 2
+   vs 1), so each handle keeps its press and its directional cursor; everywhere else along the edge
+   moves. Nothing is drawn off hover — the box looks as clean as before. touch-action: none so a
+   finger on the band is a drag, not a page scroll. */
+.planyr-note .ProseMirror .planyr-anchor-edge { position: absolute; z-index: 1; cursor: move; touch-action: none; }
+.planyr-note .ProseMirror .planyr-anchor-edge-n { left: -6px; right: -6px; top: -6px; height: 9px; }
+.planyr-note .ProseMirror .planyr-anchor-edge-s { left: -6px; right: -6px; bottom: -6px; height: 9px; }
+.planyr-note .ProseMirror .planyr-anchor-edge-w { top: -6px; bottom: -6px; left: -6px; width: 9px; }
+.planyr-note .ProseMirror .planyr-anchor-edge-e { top: -6px; bottom: -6px; right: -6px; width: 9px; }
+/* Hover feedback: the pointer is on the band, so the outline thickens and darkens in the accent
+   colour — "you have caught the edge". An INSET shadow adds the second pixel INSIDE the border
+   box, so nothing reflows and nothing paints outside the box over a neighbour's controls (the
+   reason outline / outer box-shadow are banned in this file). Held for the whole drag too. */
+.planyr-note .ProseMirror .planyr-anchor:has(> .planyr-anchor-edge:hover),
+.planyr-note .ProseMirror .planyr-anchor[data-edge-press="1"] { border-color: var(--accent-notes); border-style: solid; box-shadow: inset 0 0 0 1px var(--accent-notes); }
 /* ⛔ THE CURSOR SAYS WHAT A PRESS ON THE BOX WILL DO (owner convention 2026-10-20, docs/DESIGN.md
    "Cursor convention"; it REPLACES NEW-2 point 3's open hand for a box's body). The four-arrow MOVE
    cursor belongs to a body that really drags, and keeps it for the whole drag (notesAnchorNode.js
    and NoteEditor pin it): that is a member of a MULTI-SELECTION (data-movable, painted beside
    data-selected). A single box's body does not drag on this build — press 1 selects, press 2 enters
    it, and a drag from an unselected body pans the page (B2156912, "click and drag should ALWAYS
-   pan") — so an unselected box keeps the open hand, and it is the grip (always a drag, always a
-   move) that carries grab/grabbing. The text cursor is for the one state where a press is about
+   pan") — so an unselected box keeps the open hand, and it is the BORDER band (B2426788; always a drag,
+   always a move) that carries the four-arrow cursor. The text cursor is for the one state where a press is about
    words rather than position: while the caret is inside this box. data-editing is painted from
    the editor's own two-stage state, and a box being edited is never also drawn as movable. */
 .planyr-note .ProseMirror .planyr-anchor { cursor: grab; }
@@ -440,7 +454,7 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    enabled, correctly labelled, and impossible to click. This is CHROME-NEVER-EATS-A-PRESS with the
    sides reversed — the content ate the chrome. The rule the z-index encodes: a control drawn ON the
    box belongs to the box's chrome layer. */
-.planyr-note .ProseMirror .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor-h { z-index: 1; }
+.planyr-note .ProseMirror .planyr-anchor-h { z-index: 2; }   /* above the border band (z-index 1): a handle keeps its own press */
 /* ⛔ THE CONNECT DOT — DRAG-FROM-THE-DOT, ONE OF THE TWO WAYS TO DRAW AN ARROW (NEW-2). Visible
    only once selected (same rule as the resize handles above: an affordance shown on every box
    all the time is noise). A box marked as the live drop target while a connect-drag is in
@@ -505,9 +519,6 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-note-image { margin: 0; height: 100%; }
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-note-image img,
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] > img.planyr-note-img { display: block; width: 100%; height: 100%; object-fit: fill; max-width: none; }
-/* The grip has to read over any picture, so on an image box it carries its own backdrop rather
-   than relying on the page behind it. */
-.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-anchor-grip { left: 2px; top: 2px; padding: 0 1px; border-radius: 3px; background-color: color-mix(in srgb, var(--surface-raised) 82%, transparent); }
 
 /* ⛔ THE ONE STRUCTURAL TRAILING PARAGRAPH IS NEVER SHOWN (NEW-1, 2026-09-22). ProseMirror
    restores a real textblock at the end of the document whenever the last child would
@@ -638,29 +649,25 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor,
 .planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor * { cursor: grabbing !important; }
 
-/* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the box grip (12 px), the eight resize handles
-   (10 px), the connect dot (11 px) and the sheet edge grips (left alone, see the note). The
-   VISIBLE size is unchanged: each gets an invisible 44 px hit area centred on itself (a pseudo-element is
-   part of its element for hit-testing). Mouse pointers never match this block. */
+/* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the eight resize handles (10 px), the connect dot
+   (11 px) and the sheet edge grips (left alone, see the note). The VISIBLE size is unchanged: each handle
+   gets an invisible 44 px hit area centred on itself (a pseudo-element is part of its element for
+   hit-testing). Mouse pointers never match this block. */
 @media (pointer: coarse) {
   /* Halos exist only on the SELECTED box, and they must never sit over the box's TEXT: a tap on the first
-     letters is a caret placement (NEW-3) and a tap on the grey is a pan (NEW-2). The grip's halo therefore
-     grows only up and to the LEFT of the grip (off the text, onto the paper edge); the resize / connect
-     halos are centred on their dots, so they are off while the box is being edited. Found on final main:
-     the original centred, always-on 44 px halo swallowed the taps verify-notes-touch-box-tap and
-     touch-pan measure. */
-  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip::after {
-    content: ""; position: absolute; right: 0; bottom: 0; width: 44px; height: 44px;
-  }
+     letters is a caret placement (NEW-3) and a tap on the grey is a pan (NEW-2). The resize / connect
+     halos are centred on their dots, so they are off while the box is being edited. */
   .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-h::after,
   .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-connect::after {
     content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%);
   }
-  /* The grip outranks the resize handles' halos: on a small box the west/north-west handles' 44 px
-     halos land on top of the grip, and the grip is the one control a finger must always be able to
-     reach (it is how a box moves). Cost, stated: a corner handle's halo is partly shadowed by the
-     grip's on a very small box — its own visible square still hits. */
-  .planyr-note .ProseMirror .planyr-anchor-grip { z-index: 2; }
+  /* The border band is the finger's way to move a box (B2426788), so on a SELECTED box it reaches
+     further OUT onto the paper (15 px beyond the line) and no further in — never over the text. The
+     handles' halos (z-index 2) outrank it at their own spots, so a corner still resizes. */
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-n { top: -16px; height: 19px; }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-s { bottom: -16px; height: 19px; }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-w { left: -16px; width: 19px; }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-e { right: -16px; width: 19px; }
   /* The sheet's EDGE grips are deliberately NOT enlarged: they sit where a page-edge tap places a box, and
      every enlargement tried (44 px symmetric, then 36 px outward-only) moved a first letter off the finger
      by 5 px at 200% zoom in verify-notes-touch-landing. Resizing a page is a deliberate desktop-style act. */
@@ -1262,8 +1269,12 @@ function MiniColor({ id, title, colors, current, onPick }) {
 function MiniBar({ editor }) {
   const chain = () => editor.chain().focus();
   const size = editor.getAttributes("textStyle")?.fontSize || "";
+  /* A header cell's text is bold by style — the B must never read off on it (NEW-1, 2026-10-28). */
+  const headerCells = selectionInHeaderCells(editor.state);
+  const boldInHeader = headerCells === "all";
+  const boldLit = boldTruth(editor.isActive("bold") ? "true" : "false", headerCells) !== "false";
   const items = [
-    { id: "bold", title: "Bold (Ctrl+B)", active: editor.isActive("bold"), run: () => chain().toggleBold().run() },
+    { id: "bold", title: boldInHeader ? "Bold (header row: use Header row to change)" : "Bold (Ctrl+B)", active: boldLit, run: () => { if (!boldInHeader) chain().toggleBold().run(); } },
     { id: "italic", title: "Italic (Ctrl+I)", active: editor.isActive("italic"), run: () => chain().toggleItalic().run() },
     { id: "underline", title: "Underline (Ctrl+U)", active: editor.isActive("underline"), run: () => chain().toggleUnderline().run() },
     { id: "strike", title: "Strikethrough", active: editor.isActive("strike"), run: () => chain().toggleStrike().run() },
@@ -1388,6 +1399,9 @@ function MenuRow({ item, onClose }) {
         textAlign: "left", cursor: "pointer",
       }}
     >
+      {item.chip !== undefined ? (
+        <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 3, border: "1px solid var(--border-strong)", flex: "0 0 auto", background: item.chip || "var(--surface-page)", color: "var(--text-tertiary)", fontSize: 10, lineHeight: "12px", textAlign: "center" }}>{item.chip ? "" : "✕"}</span>
+      ) : null}
       <span style={{ flex: 1 }}>{item.label}</span>
       {item.accel ? <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>{item.accel}</span> : null}
     </button>
@@ -1433,6 +1447,27 @@ export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
   if (left + width + margin > vw) left = vw - width - margin;   // the right edge, same rule
   left = Math.max(margin, left);
   return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
+}
+
+/** The table section of the right-click menu: "Header row" (shown as on/off) and "Fill ▸" with No fill first. */
+function tableMenuItems(editor) {
+  const state = editor.state;
+  const fillNow = currentFill(state);
+  return [
+    SEP,
+    { id: "header-row", label: "Header row", active: headerRowsState(state) === "true", run: () => editor.chain().focus().toggleHeaderRows().run() },
+    {
+      id: "fill",
+      label: "Fill",
+      sub: TABLE_FILLS.map((f) => ({
+        id: f.value ? `fill-${f.name.toLowerCase()}` : "fill-none",
+        label: f.name,
+        chip: f.value || "",
+        active: f.value ? fillNow === f.value.toLowerCase() : false,
+        run: () => editor.chain().focus().setCellFill(f.value).run(),
+      })),
+    },
+  ];
 }
 
 function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable, pressGuardRef }) {
@@ -1513,6 +1548,10 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
        table is the only thing in its list item). Its own row, not lumped with `link`, because
        it restructures the document rather than formatting a selection. */
     ...(onConvertTable ? [SEP, { id: "convert-table-text", label: "Convert table to text", run: onConvertTable }] : []),
+    /* NEW-1/NEW-2 (2026-10-28) — the table's Header row and Fill, where a right-click lands. The SAME two
+       commands the toolbar's Table group runs (`toggleHeaderRows` / `setCellFill`): the cell selection if
+       there is one, else the caret cell's whole row. */
+    ...(at?.inTable ? tableMenuItems(editor) : []),
     ...(onDeleteBox ? [SEP, { id: "delete-box", label: "Delete this box", accel: "Del", danger: true, run: onDeleteBox }] : []),
   ];
 
@@ -3513,6 +3552,23 @@ const NoteEditor = forwardRef(function NoteEditor({
         if (editor && !editor.isDestroyed) editor.commands.blur();
         return;
       }
+      /* ⛔ A PRESS ON A BOX'S BORDER BAND SELECTS IT AND NOTHING MORE (B2426788). The band is the move
+       * handle (PowerPoint / Bluebeam): the node view owns the DRAG — a single box or the whole
+       * selection, caret in it or not — so this press must not start a second one (`beginGroupDrag`
+       * below) and must never ENTER the box (stage 2 puts a caret on the outline, which is not text).
+       * An unselected box becomes the selection; a selected one keeps it, and a box with the caret
+       * keeps its caret (`preventDefault` stops the browser moving focus off it). The pointer capture
+       * the drag takes retargets this `mousedown` to the box, so the band is also named by the
+       * `data-edge-press` flag the node view sets for exactly the length of that press. */
+      if (id && (el.closest(".planyr-anchor-edge") || inBlock.hasAttribute("data-edge-press"))) {
+        e.preventDefault();
+        if (!selRef.current.has(String(id))) {
+          setEditingId(null);
+          setSelection(new Set([String(id)]));
+          if (editor && !editor.isDestroyed) editor.commands.blur();
+        }
+        return;
+      }
       if (id && selRef.current.has(String(id)) && selRef.current.size > 1) {
         if (beginGroupDrag(e, id)) return;
       }
@@ -4133,7 +4189,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * stage-1 select that stage 2's native caret placement and word-select build on).
    *
    * ⛔ WHAT KEEPS ITS OWN DRAG, stated because a drag that is "always a pan" would otherwise eat
-   * them: the box move grip, the resize handles, the arrow connect dot, a table's column-resize
+   * them: the box border (its move handle), the resize handles, the arrow connect dot, a table's column-resize
    * handle, the page-edge grips, and any form control / link / `<summary>`; Shift / Ctrl / Alt /
    * Cmd presses (marquee, toggle, context menu); a box that is already SELECTED (its body still
    * drags the box / the whole selection, the same rule the touch pan uses); and — this one is a
@@ -4146,7 +4202,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   useEffect(() => {
     const sc = scrollerRef.current;
     if (!sc || !editor) return undefined;
-    const OWN = 'input, textarea, select, button, a, summary, [data-handle], .planyr-anchor-grip, '
+    const OWN = 'input, textarea, select, button, a, summary, [data-handle], .planyr-anchor-edge, '
       + '.planyr-anchor-connect, .planyr-anchor-del, .planyr-anchor-size, .column-resize-handle, '
       + '[class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], [data-testid="note-zoom-pill"]';
     let claimed = false;
@@ -4269,10 +4325,10 @@ const NoteEditor = forwardRef(function NoteEditor({
       const [a, b] = [...live.values()];
       return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }) };
     };
-    /* Pressing one of these is never a pan. A selected / edited box, a box grip or resize handle, a
+    /* Pressing one of these is never a pan. A selected / edited box, a box border or resize handle, a
      * sheet edge grip, a form control, and the zoom pill all own their own touches. */
     const ownsTheTouch = (el) => !(el instanceof Element) || !!el.closest(
-      'input, textarea, select, button, a, [data-handle], .planyr-anchor-grip, [class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], '
+      'input, textarea, select, button, a, [data-handle], .planyr-anchor-edge, [class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], '
       + '.planyr-anchor[data-selected="1"], .planyr-anchor[data-editing="1"], [data-testid="note-zoom-pill"]');
     const beginPan = (id, at, latched) => {
       pan = { id, from: at, startView: { ...viewRef.current }, latched, samples: [{ t: performance.now(), ...at }] };
@@ -5159,7 +5215,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const onDown = (e) => {
       if (e.pointerType !== "touch" || !e.isPrimary) { cancel(); return; }
       if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
-      if (e.target.closest("input, textarea, select, button, a, [data-handle], .planyr-anchor-grip")) return;
+      if (e.target.closest("input, textarea, select, button, a, [data-handle], .planyr-anchor-edge")) return;
       start = { x: e.clientX, y: e.clientY, target: e.target };
       timer = setTimeout(() => {
         timer = 0;

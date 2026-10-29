@@ -265,9 +265,10 @@ try {
   if (!s0?.selected || s0.editing) void_(`press 1 did not leave box 0 selected-and-not-editing (${JSON.stringify(s0)})`);
   await move(b0.x, b0.y);
   check("hover a SELECTED single box body (the next press enters it and puts the caret there)", await cursorAt(b0.x, b0.y), "text");
-  const gripR = await rect(".planyr-anchor-grip", 0);
-  await move(gripR.cx, gripR.cy);
-  check("hover a box's grip", await cursorAt(gripR.cx, gripR.cy), "grab");
+  const bandR = await rect('[data-testid="note-anchor"]', 0);
+  const bandPt = { x: Math.round(bandR.x + bandR.w * 0.3), y: Math.round(bandR.y + 0.5) };
+  await move(bandPt.x, bandPt.y);
+  check("hover a box's BORDER band (B2426788 — the striped grip is retired)", await cursorAt(bandPt.x, bandPt.y), "move");
 
   /* ── 2. MID-DRAG: BODY of a box in a multi-selection (the one body that really drags). The dragged boxes follow the
    *      pointer, so the element under it is a dragged box; the pin is also read at a point they have NOT followed to. ── */
@@ -295,20 +296,21 @@ try {
   await pacedWait(page, 250);
   if (tb) check("after the group drag: pin released (over the toolbar → its own cursor)", await cursorAt(tb.cx, tb.cy), ["auto", "default", "pointer"]);
 
-  /* ── 3. MID-DRAG: GRIP (not editing) ─────────────────────────────────────────────────────── */
+  /* ── 3. MID-DRAG: BORDER band (not editing) ───────────────────────────────────────────────── */
   await fresh();
   const bg = await boxPoint(0);
   await move(bg.x, bg.y);
-  const g1 = await rect(".planyr-anchor-grip", 0);
+  const g1r = await rect('[data-testid="note-anchor"]', 0);
+  const g1 = { cx: Math.round(g1r.x + g1r.w * 0.3), cy: Math.round(g1r.y + 0.5) };
   await move(g1.cx, g1.cy);
   await page.mouse.down();
   await move(g1.cx + 30, g1.cy + 14, 6);
-  check("mid-drag of a box GRIP: under the pointer", await cursorAt(g1.cx + 30, g1.cy + 14), "grabbing");
-  if (tb) check("mid-drag of a box GRIP: pointer far off, over the toolbar", await cursorAtAfterMove(tb.cx, tb.cy), "grabbing");
+  check("mid-drag of a box BORDER: under the pointer", await cursorAt(g1.cx + 30, g1.cy + 14), "move");
+  if (tb) check("mid-drag of a box BORDER: pointer far off, over the toolbar", await cursorAtAfterMove(tb.cx, tb.cy), "move");
   await page.mouse.up();
   await pacedWait(page, 250);
 
-  /* ── 4. EDITING + the grip drag of an EDITING box (audit: UNVERIFIED — does an I-beam leak through capture?) ── */
+  /* ── 4. EDITING + the BORDER drag of an EDITING box (audit: UNVERIFIED — does an I-beam leak through capture?) ── */
   await fresh();
   await enterBox(1);
   const s1 = await stateOf(1);
@@ -316,15 +318,15 @@ try {
   const e1 = await boxPoint(1);
   await move(e1.x, e1.y);
   check("editing: over the typed text", await cursorAt(e1.x, e1.y), "text");
-  const g2 = await rect(".planyr-anchor-grip", 1);
+  const g2r = await rect('[data-testid="note-anchor"]', 1);
+  const g2 = { cx: Math.round(g2r.x + g2r.w * 0.3), cy: Math.round(g2r.y + 0.5) };
   await move(g2.cx, g2.cy);
-  note("editing box: cursor over its own grip (rest)", await cursorAt(g2.cx, g2.cy));
+  check("editing box: over its own BORDER band (rest) — move, not the I-beam", await cursorAt(g2.cx, g2.cy), "move");
   await page.mouse.down();
   await move(g2.cx + 30, g2.cy + 30, 6);
   const captureTarget = await cursorOfSel('[data-testid="note-anchor"]', 1);
-  note("editing-box grip drag: the captured box's own computed cursor (Chromium paints this one while captured)", captureTarget);
-  check("mid-drag of an EDITING box's grip: under the pointer", await cursorAt(g2.cx + 30, g2.cy + 30), "grabbing");
-  check("mid-drag of an EDITING box's grip: the captured box itself (no I-beam)", captureTarget, "grabbing");
+  note("editing-box border drag: the captured box's own computed cursor (Chromium paints this one while captured)", captureTarget);
+  check("mid-drag of an EDITING box's BORDER: under the pointer", await cursorAt(g2.cx + 30, g2.cy + 30), "move");
   await page.mouse.up();
   await pacedWait(page, 250);
 

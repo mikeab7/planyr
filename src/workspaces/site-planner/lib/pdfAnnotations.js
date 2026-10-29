@@ -577,6 +577,8 @@ function largestRing(ink) {
  *
  * descriptor = { family: "markup"|"callout"|"measure"|"building"|"element"|"parcel-label", id, kind, tree, hints?, meta? }
  *              (a building's hints.verts is the ONE outline through its corner bump-outs — lib/buildingOutline.js)
+ *              family "sheet-furniture" (the Buildings table, the scale bar, the north arrow): a Stamp, so each is its own
+ *              object the recipient can select, move or delete; `d.M0` / `d.frame` override opts.M0 / opts.frame.
  * opts       = { M0: user→PDF matrix, frame: [x0,y0,x1,y1] PDF rect the sheet's plan window occupies,
  *                patterns: id→tree, now: ISO string, author: string }
  * Returns { annots: [...], skipped: [{id, why}], degraded: [...] }.
@@ -585,12 +587,13 @@ export function buildAnnotations(descriptors, opts) {
   const { M0, frame, patterns = {}, now = new Date().toISOString(), author = null, ftPerPt = null } = opts;
   const annots = [], skipped = [], degraded = [];
   for (const d of descriptors) {
-    const flat = flattenTree(d.tree, M0, patterns);
+    // a descriptor may carry its OWN matrix and window (the sheet's Buildings table lives on the page, outside the plan window)
+    const flat = flattenTree(d.tree, d.M0 || M0, patterns);
     const items = flat.items;
     flat.degraded.forEach((g) => degraded.push(`${d.family} ${d.id}: ${g}`));
     if (!items.length) { skipped.push({ id: d.id, family: d.family, why: "nothing drawn" }); continue; }
     const full = unionBox(items.map(itemBBox));
-    const rect = intersectBox(full, frame);
+    const rect = intersectBox(full, d.frame || frame);
     if (!rect) { skipped.push({ id: d.id, family: d.family, why: "outside the plan window" }); continue; }
     const ink = items.filter((i) => i.t === "path");
     const main = ink.find((i) => !/leader|callout-box/.test(i.src || "")) || ink[0];
@@ -697,6 +700,14 @@ export function buildAnnotations(descriptors, opts) {
     } else if (d.family === "parcel-label") {
       // a parcel's acreage chip that a lifted site element would otherwise cover: its own small label, never a building's
       base.subj = base.subj || "Parcel label";
+      annots.push({ ...base, subtype: "Stamp" });
+    } else if (d.family === "sheet-furniture") {
+      /* NEW-1 (2026-10-27) — sheet furniture as its own annotation. Page content is painted UNDER every annotation, so a
+         table / scale bar / north arrow left in the page can be covered by the site's annotations (the owner's Buildings
+         table, "ng 3") and cannot be removed in Bluebeam. A Stamp carries its drawn appearance and is selectable, movable
+         and deletable; it takes no /Contents (a hover note box) and none of the shape fields a Stamp ignores. */
+      base.subj = base.subj || "Sheet furniture";
+      base.color = null; base.ic = null; base.bw = 0; base.dash = []; base.ca = 1;
       annots.push({ ...base, subtype: "Stamp" });
     } else if (d.family === "building" || d.family === "element") {
       /* NEW-2 (2026-10-19) — a building footprint as a native Polygon. The vertices are the model's footprint ring

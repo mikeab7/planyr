@@ -122,7 +122,7 @@ describe("buildSheetFurnitureSvg — renders the expected sheet furniture", () =
   const svg = buildSheetFurnitureSvg({ ...frame, fmtFeet: (n) => String(n), pal: { ink: "#111", muted: "#888", panelLine: "#ccc" } });
 
   it("emits two anchored groups (scale bar + north arrow)", () => {
-    expect(svg.match(/<g transform="translate\(/g)?.length).toBe(2);
+    expect(svg.match(/<g data-furniture-kind="[a-z-]+" transform="translate\(/g)?.length).toBe(2);
   });
 
   it("includes the FEET unit label and the N marker", () => {
@@ -335,9 +335,9 @@ describe("furnitureLayout / buildSheetFurnitureSvg — the buildings inset joins
 
   it("buildSheetFurnitureSvg emits a third group only when there ARE building rows", () => {
     const without = buildSheetFurnitureSvg({ ...frame, fmtFeet: (n) => String(n) });
-    expect(without.match(/<g transform="translate\(/g)?.length).toBe(2);
+    expect(without.match(/<g data-furniture-kind="[a-z-]+" transform="translate\(/g)?.length).toBe(2);
     const withBuildings = buildSheetFurnitureSvg({ ...frame, fmtFeet: (n) => String(n), buildingRows: rows, buildingTotal: 500000 });
-    expect(withBuildings.match(/<g transform="translate\(/g)?.length).toBe(3);
+    expect(withBuildings.match(/<g data-furniture-kind="[a-z-]+" transform="translate\(/g)?.length).toBe(3);
     expect(withBuildings).toContain("Building 1");
     expect(withBuildings).toContain("BUILDINGS");
   });

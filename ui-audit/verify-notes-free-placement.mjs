@@ -103,15 +103,15 @@ const geom = (page) => page.evaluate(() => {
   };
 });
 
-/** Drag one box by its grip, with a real mouse, in `steps` so the gesture is a gesture. */
+/** Drag one box by its BORDER (B2426788 — the striped grip is retired), with a real mouse, in `steps` so the gesture is a gesture. */
 async function dragBox(page, aid, dx, dy, { steps = 10 } = {}) {
   const src = await page.evaluate((id) => {
-    const el = document.querySelector(`.planyr-anchor[data-anchor-id="${id}"] .planyr-anchor-grip`);
-    if (!el) return null;
+    const el = document.querySelector(`.planyr-anchor[data-anchor-id="${id}"]`);
+    if (!el || !el.querySelector(".planyr-anchor-edge")) return null;
     const r = el.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    return { x: Math.round(r.left + r.width * 0.3), y: Math.round(r.top + 0.5) };
   }, aid);
-  if (!src) throw new Error(`dragBox: no grip for ${aid} — the harness cannot vouch for a gesture it never made`);
+  if (!src) throw new Error(`dragBox: no border band for ${aid} — the harness cannot vouch for a gesture it never made`);
   await page.mouse.move(src.x, src.y);
   await page.mouse.down();
   for (let i = 1; i <= steps; i += 1) await page.mouse.move(src.x + (dx * i) / steps, src.y + (dy * i) / steps);
@@ -418,7 +418,7 @@ console.log("=".repeat(100));
 
 /* ═══ 7. NEW-2 — THE BODY DRAGS; THE GRIP IS VISIBLE AND USABLE ═══════════════════════════ */
 console.log("\n" + "=".repeat(100));
-console.log("7. DRAGGING BY THE BODY — and what the grip looks like");
+console.log("7. DRAGGING BY THE BODY — and what the border looks like");
 console.log("=".repeat(100));
 {
   const page = await openPage(docWith([{ x: 200, y: 200, aid: "b1", text: "DRAG MY BODY" }]));
@@ -437,37 +437,30 @@ console.log("=".repeat(100));
 
   const chrome = await page.evaluate(() => {
     const box = document.querySelector('.planyr-anchor[data-anchor-id="b1"]');
-    const grip = box.querySelector(".planyr-anchor-grip");
-    const gr = grip.getBoundingClientRect();
+    const edge = box.querySelector(".planyr-anchor-edge-n");
     return {
       cursor: getComputedStyle(box).cursor,
-      gripW: Math.round(gr.width), gripH: Math.round(gr.height),
-      gripEvents: getComputedStyle(grip).pointerEvents,
-      gripCursor: getComputedStyle(grip).cursor,
+      grips: box.querySelectorAll(".planyr-anchor-grip").length,
+      edges: box.querySelectorAll(".planyr-anchor-edge").length,
+      edgeEvents: edge ? getComputedStyle(edge).pointerEvents : "MISSING",
+      edgeCursor: edge ? getComputedStyle(edge).cursor : "MISSING",
     };
   });
-  ok("the cursor reads grab over the whole box, not only over the grip", chrome.cursor === "grab", chrome.cursor);
-  ok("the grip is a usable size", chrome.gripW >= 12 && chrome.gripH >= 20, `${chrome.gripW}×${chrome.gripH}`);
-  ok("…and is still a real target, so a box you are typing in can still be moved",
-    chrome.gripEvents !== "none" && chrome.gripCursor === "grab", `${chrome.gripEvents} · ${chrome.gripCursor}`);
+  ok("the cursor reads grab over the box's body (a drag there pans), the move cursor is the border's", chrome.cursor === "grab", chrome.cursor);
+  ok("the striped grip is retired (B2426788) and the box carries four border strips", chrome.grips === 0 && chrome.edges === 4, `${chrome.grips} grips · ${chrome.edges} strips`);
+  ok("…each a real target with the move cursor, so a box you are typing in can still be moved",
+    chrome.edgeEvents !== "none" && chrome.edgeCursor === "move", `${chrome.edgeEvents} · ${chrome.edgeCursor}`);
 
-  const hover = await page.evaluate(async () => {
-    const box = document.querySelector('.planyr-anchor[data-anchor-id="b1"]');
-    const grip = box.querySelector(".planyr-anchor-grip");
-    const idle = getComputedStyle(grip).opacity;
-    box.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    return { idle };
-  });
-  const hovered = await page.evaluate(() => {
+  const idle = await page.evaluate(() => getComputedStyle(document.querySelector('.planyr-anchor[data-anchor-id="b1"]')).boxShadow);
+  const onBand = await page.evaluate(() => {
     const r = document.querySelector('.planyr-anchor[data-anchor-id="b1"]').getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    return { x: Math.round(r.left + r.width * 0.3), y: Math.round(r.top + 0.5) };
   });
-  await page.mouse.move(hovered.x, hovered.y);
+  await page.mouse.move(onBand.x, onBand.y);
   await pacedWait(page, 250);
-  const onHover = await page.evaluate(() =>
-    getComputedStyle(document.querySelector('.planyr-anchor[data-anchor-id="b1"] .planyr-anchor-grip')).opacity);
-  ok("the grip appears on hover rather than only once the box is selected",
-    parseFloat(onHover) > 0.5, `idle ${hover.idle} → hovered ${onHover}`);
+  const onHover = await page.evaluate(() => getComputedStyle(document.querySelector('.planyr-anchor[data-anchor-id="b1"]')).boxShadow);
+  ok("the outline thickens in the accent colour when the pointer is on the border (and not before)",
+    onHover !== "none" && onHover !== idle, `idle ${idle} → hovered ${onHover}`);
   await page.context().close();
 }
 

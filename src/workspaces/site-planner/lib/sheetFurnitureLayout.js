@@ -15,7 +15,9 @@
  */
 import { furnitureMetrics, pickScaleBar, scaleBarPlate, northArrowPlate, buildingsPlate, r2 } from "./sheetFurniture.js";
 
-const translate = (tx, ty, inner) => `<g transform="translate(${r2(tx)},${r2(ty)})">${inner}</g>`;
+// `kind` tags a plate so the editable PDF can lift it out of the page as its OWN annotation (exportSheet.js): annotations
+// always paint above the page picture, so a plate left in the page is painted over by any site element's annotation.
+const translate = (tx, ty, inner, kind = null) => `<g${kind ? ` data-furniture-kind="${kind}"` : ""} transform="translate(${r2(tx)},${r2(ty)})">${inner}</g>`;
 
 // ── No-occlude placement (NEW-1, 2026-06-29) ──────────────────────────────
 // The export furniture used to be pinned to fixed corners of the PLAN frame
@@ -108,9 +110,9 @@ export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bear
 
 export function buildSheetFurnitureSvg(opts) {
   const L = furnitureLayout(opts);
-  let s = translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup) +
-    translate(L.north.tx, L.north.ty, L.north.markup);
-  if (L.buildings) s += translate(L.buildings.tx, L.buildings.ty, L.buildings.markup);
+  let s = translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup, "scale-bar") +
+    translate(L.north.tx, L.north.ty, L.north.markup, "north-arrow");
+  if (L.buildings) s += translate(L.buildings.tx, L.buildings.ty, L.buildings.markup, "buildings-table");
   return s;
 }
 

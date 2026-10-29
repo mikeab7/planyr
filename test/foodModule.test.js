@@ -1384,8 +1384,9 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     const panel = src("components/VisitPanel.jsx");
     const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
     expect(sliderUsages.length).toBe(2);
-    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" isMobile=\{isMobile\} \/>/);
-    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" isMobile=\{isMobile\} \/>/);
+    // NEW-1 (2026-10-27): the field names are the ONE caps label (FOOD_TYPE.label) wrapped in a span, so the form never carries a second label dialect.
+    expect(panel).toMatch(/<span style=\{FOOD_TYPE\.label\}>Food<\/span>\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" isMobile=\{isMobile\} \/>/);
+    expect(panel).toMatch(/<span style=\{FOOD_TYPE\.label\}>Ambiance<\/span>\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" isMobile=\{isMobile\} \/>/);
     expect(panel).not.toMatch(/>Rating</); // the old ambiguous bare label is gone
   });
 
@@ -1410,8 +1411,9 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     // NEW-1 (2026-10-20): the visit row is ONE line built by restaurantPanel.visitRowLabel — each rating is added only when set.
     expect(panel).toMatch(/visitRowLabel\(visit, formatVisitDate\)/);
     const lib = src("lib/restaurantPanel.js");
-    expect(lib).toMatch(/if \(visit\.rating != null\) parts\.push\(`Food \$\{formatRating\(visit\.rating\)\}`\);/);
-    expect(lib).toMatch(/if \(visit\.rating_ambiance != null\) parts\.push\(`Ambiance \$\{formatRating\(visit\.rating_ambiance\)\}`\);/);
+    // NEW-1 (2026-10-27): the row is built from visitRowParts (date apart from the scores); visitRowLabel is the same parts as one plain string.
+    expect(lib).toMatch(/if \(visit\.rating != null\) parts\.push\(\{ kind: "score", label: "Food", value: formatRating\(visit\.rating\) \}\);/);
+    expect(lib).toMatch(/if \(visit\.rating_ambiance != null\) parts\.push\(\{ kind: "score", label: "Ambiance", value: formatRating\(visit\.rating_ambiance\) \}\);/);
     expect(visitRowLabel({ visited_on: "2026-01-05", rating: "8.25", rating_ambiance: null }, () => "Jan 5")).toBe("Jan 5 · Food 8.25");
     expect(visitRowLabel({ visited_on: null, rating: null, rating_ambiance: 8 }, () => "x")).toBe("No date · Ambiance 8.0");
   });
@@ -2415,7 +2417,7 @@ describe("VisitPanel — visit rows (NEW-1, 2026-10-20 mockup): one compact line
   });
 
   it("section label reads 'Visits · N'; the two most recent show and the rest sit behind 'Show N more' (restaurantPanel.visitsToShow)", () => {
-    expect(panel).toMatch(/Visits · \{pastVisits\.length\}/);
+    expect(panel).toMatch(/<SectionLabel count=\{pastVisits\.length\}>Visits<\/SectionLabel>/); // renders "Visits · N" (components/SectionLabel.jsx)
     expect(panel).not.toMatch(/Past visits · /);
     expect(panel).toMatch(/visitsToShow\(pastVisits,/);
     expect(panel).toMatch(/data-testid="food-visits-more"/);
@@ -3288,7 +3290,9 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
   });
 
   it("⛔ every field label is small-caps, 10px (FONT_SIZE.micro), letter-spaced, in the secondary text token", () => {
-    expect(section).toMatch(/const FIELD_LABEL_STYLE = \{[\s\S]{0,220}?fontSize: FONT_SIZE\.micro,[\s\S]{0,220}?textTransform: "uppercase"/);
+    // NEW-1 (2026-10-27): the field label IS the shared caps label (lib/foodType.js: 10.5, bold, uppercase, tracked, secondary) — one dialect, not a local 10px copy.
+    expect(section).toMatch(/const FIELD_LABEL_STYLE = \{ display: "block", \.\.\.FOOD_TYPE\.label,/);
+    expect(src("lib/foodType.js")).toMatch(/textTransform: "uppercase"/);
   });
 
   it("Order it again — now carries its own label (the shipped defect: three buttons with nothing saying what they answer), and EVERY selected state uses the SAME accent fill (previously only 'yes' got the real fill)", () => {
@@ -3316,7 +3320,7 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
     expect(section).toMatch(/const sections = useMemo\(\(\) => dishSections\(rows\), \[rows\]\);/);
     expect(section).toMatch(/data-testid="food-dishes-order"/);
     expect(section).toMatch(/data-testid="food-dishes-maybe"/);
-    expect(section).toMatch(/data-testid="food-dishes-skip-toggle"/);
+    expect(section).toMatch(/testId="food-dishes-skip-toggle"/); // the Skip header is a SectionLabel toggle (components/SectionLabel.jsx)
     expect(section).toMatch(/const \[skipOpen, setSkipOpen\] = useState\(false\);/); // Skip is collapsed by default
     expect(section).toMatch(/\{sections\.order\.length > 0 && \(/); // an empty section is not drawn
     expect(section).toMatch(/\{sections\.maybe\.length > 0 && \(/);
@@ -3340,7 +3344,7 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
 
   describe("⛔ NO BARE X, NO PENCIL, NO KEBAB (NEW-2, 2026-10-20): every per-dish action lives in the DISH SHEET", () => {
     const sheet = section.slice(section.indexOf("export function DishSheet"), section.indexOf("export default function DishesSection"));
-    const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SECTION_HEADING"));
+    const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("/* ── The dish sheet (NEW-2)"));
     const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
 
     it("the OLD bare-delete / pencil / kebab testids are gone", () => {
