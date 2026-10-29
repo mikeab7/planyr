@@ -74,61 +74,67 @@ const MAX_CONCURRENT_TILES = 4;              // a wide view wants ~12 tiles; don
 // ---------------------------------------------------------------------------
 // Singleton worker with lazy rebuild after a crash (a crashed worker stays crashed —
 // every pending job fails LOUDLY, the next refresh spins a fresh one).
-let worker = null, seq = 0;
-const pending = new Map(); // id -> {resolve, reject}
-function getWorker() {
-  if (worker) return worker;
-  worker = new TerrainWorker();
-  worker.onmessage = (e) => {
-    const d = e.data || {};
-    const p = pending.get(d.id);
-    if (!p) return;
-    pending.delete(d.id);
-    if (d.ok) p.resolve(d);
-    else p.reject(new Error(d.error || "terrain worker error"));
+//
+// ⛔ B2319137 ×3 — TWO workers, one per kind of work. The existing contour layer traces a lattice TILE per job and a zoom step
+// at the building zoom queues a fresh set of them; the owner-only grading jobs (the ground sweep, the pad mask, the slope-band
+// outline, the proposed contours) shared the same first-come-first-served queue and sat behind every tile — after three zoom
+// steps the grading panel read "Reading the ground…" for over 75 s with nothing painted (V1950033 FAILED, 2026-10-29). Grading
+// has its own worker now (same module, same code), created only when grading first asks, so map tiles never stand in front of
+// it and nothing changes for an account that never grades.
+let seq = 0;
+function workerSlot(label) {
+  let worker = null;
+  const pending = new Map(); // id -> {resolve, reject}
+  const get = () => {
+    if (worker) return worker;
+    worker = new TerrainWorker();
+    worker.onmessage = (e) => {
+      const d = e.data || {};
+      const p = pending.get(d.id);
+      if (!p) return;
+      pending.delete(d.id);
+      if (d.ok) p.resolve(d);
+      else p.reject(new Error(d.error || `${label} worker error`));
+    };
+    worker.onerror = (e) => {
+      const err = new Error(`${label} worker crashed${e && e.message ? `: ${e.message}` : ""}`);
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      try { worker.terminate(); } catch (_) { /* already dead */ }
+      worker = null;
+    };
+    return worker;
   };
-  worker.onerror = (e) => {
-    const err = new Error(`terrain worker crashed${e && e.message ? `: ${e.message}` : ""}`);
-    for (const p of pending.values()) p.reject(err);
-    pending.clear();
-    try { worker.terminate(); } catch (_) { /* already dead */ }
-    worker = null;
-  };
-  return worker;
-}
-if (import.meta.hot) import.meta.hot.dispose(() => { try { worker && worker.terminate(); } catch (_) {} worker = null; });
-
-/* NEW-1 (owner-only grading layer) — a buildable-ground job on the SAME singleton worker the contours
- * use (buildableGround.js / buildableLattice.js run inside terrainWorker.js). Structured-clones the payload
- * (the DEM grid stays in the site-grid cache here); resolves with the worker's reply, rejects LOUDLY. */
-export function runBuildableJob(payload) {
-  return new Promise((resolve, reject) => {
+  // post one job → a promise of the worker's reply (rejects LOUDLY: a throw while posting, an error reply, a crash)
+  const post = (msg, transfer = []) => new Promise((resolve, reject) => {
     const id = ++seq;
     pending.set(id, { resolve, reject });
-    try { getWorker().postMessage({ id, kind: "buildable", ...payload }); }
+    try { get().postMessage({ id, ...msg }, transfer); }
     catch (e) { pending.delete(id); reject(e); }
   });
+  const dispose = () => { try { worker && worker.terminate(); } catch (_) {} worker = null; };
+  return { post, dispose };
 }
-/* ROUND 7 (NEW-1) — trace the slope band's outline on the same worker: { values: Float32Array (the band field), nx, ny }
+const tileWorker = workerSlot("terrain");
+const gradingWorker = workerSlot("grading");
+if (import.meta.hot) import.meta.hot.dispose(() => { tileWorker.dispose(); gradingWorker.dispose(); });
+
+/* NEW-1 (owner-only grading layer) — a buildable-ground job (buildableGround.js / buildableLattice.js run inside
+ * terrainWorker.js) on the GRADING worker. Structured-clones the payload (the DEM grid stays in the site-grid cache here);
+ * resolves with the worker's reply, rejects LOUDLY. */
+export function runBuildableJob(payload) {
+  return gradingWorker.post({ kind: "buildable", ...payload });
+}
+/* ROUND 7 (NEW-1) — trace the slope band's outline on the grading worker: { values: Float32Array (the band field), nx, ny }
  * → { rings, holes } in lattice pixels. The values buffer is TRANSFERRED. */
 export function runBandOutlineJob(payload) {
-  return new Promise((resolve, reject) => {
-    const id = ++seq;
-    pending.set(id, { resolve, reject });
-    try { getWorker().postMessage({ id, kind: "band-outline", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []); }
-    catch (e) { pending.delete(id); reject(e); }
-  });
+  return gradingWorker.post({ kind: "band-outline", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []);
 }
-/* ROUND 4 (B2349122) — trace the PROPOSED surface's contours on the same worker: { values: Float32Array (NaN = none),
+/* ROUND 4 (B2349122) — trace the PROPOSED surface's contours on the grading worker: { values: Float32Array (NaN = none),
  * nx, ny, interval } → { interval, levels: [{ level, isIndex, lines: [[[px, py]…]] }], labels }. The values buffer is
  * TRANSFERRED (the caller builds it for this call). */
 export function runProposedContoursJob(payload) {
-  return new Promise((resolve, reject) => {
-    const id = ++seq;
-    pending.set(id, { resolve, reject });
-    try { getWorker().postMessage({ id, kind: "contours-proposed", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []); }
-    catch (e) { pending.delete(id); reject(e); }
-  });
+  return gradingWorker.post({ kind: "contours-proposed", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,11 +291,7 @@ function computeTile(req, { fetchImpl, contourInterval = 1 } = {}) {
     }
     releaseSlot();
     const tAfterFetch = Date.now();
-    const id = ++seq;
-    const res = await new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      getWorker().postMessage({ id, req, buffer: buf, opts: { contourInterval } }, [buf]);
-    });
+    const res = await tileWorker.post({ req, buffer: buf, opts: { contourInterval } }, [buf]);
     rememberGrid(req.key, req, res.grid);
     reportTileTiming(req.band, {
       queueMs: tAfterQueue - tStart, fetchMs: tAfterFetch - tAfterQueue,

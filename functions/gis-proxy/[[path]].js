@@ -232,6 +232,12 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
+  /* NEW-1 (Tennessee industrial due-diligence layers, 2026-10-29) — the State of Tennessee's own ArcGIS Servers, relayed so the layers they publish can be MEASURED through planyr.io (the build
+   * sandbox cannot reach any *.tn.gov host) before a row is wired to them. TDEC (Dept. of Environment & Conservation) publishes Division of Remediation sites, oil & gas wells and the Division of
+   * Water Resources public layers on tdeconline.tn.gov; maps.tdec.tn.gov is its hosting server. Delete an entry whose host ends up unused. */
+  "tdeconline.tn.gov", // TDEC — DOR_Sites (remediation sites, drycleaners), Oil_and_Gas2, DWR_Public
+  "maps.tdec.tn.gov", // TDEC — hosting server (Permitted_Tennessee_Landfills)
+  "tnmap.tn.gov", // State of Tennessee Office of Information Resources — TNMap (state GIS clearinghouse)
   /* NEW-1 (Colorado due-diligence layers, B2528688, 2026-10-29) — the two hosts the wired Colorado rows read through this relay. The build sandbox's egress refuses every state.co.us / colorado.gov / city host
    * (CONNECT 403), so each was MEASURED through planyr.io (on the branch preview) before a layer was wired to it. Probe hosts that were measured and NOT used were pruned: dnrweb.state.co.us (no ArcGIS REST
    * service — the DWR structure data is on gisdnr's Hosted folder as points of diversion only) and gis.denvergov.org (answers Cloudflare error 1016, origin unreachable). */

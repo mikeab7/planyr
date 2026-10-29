@@ -49,7 +49,10 @@ import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureShee
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
-import { VECTOR_SOURCES, styleFor, isCountyLinesId } from "./vectorLayers.js";
+import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
+import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
+import { siteState } from "./siteRegion.js";
 import { gisCache } from "./gisCache.js";
 import { gridRequest } from "./demGrid.js";
 
@@ -907,12 +910,25 @@ export function createExportSheet(ctx) {
       let fc = geo ? geo.toGeoJSON() : null;
       if ((!fc || !fc.features) && typeof ref.eachFeature === "function") { const fs = []; ref.eachFeature((l) => l.feature && fs.push(l.feature)); fc = { type: "FeatureCollection", features: fs }; }
       if (!fc || !fc.features || !fc.features.length) return { features: [] };
-      const style = { stroke: cfg.color || "#374151", strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+      // B2507065 (NEW-10) — PDF-PARITY with the screen: counties a heavier dashed grey line, city limits a bolder outline + light tint, county names along the line.
+      const style = isCountyLinesId(id)
+        ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
+        : isCityLimitsId(id)
+          ? { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), strokeOpacity: 1, fill: cfg.color || BOUNDARY_FALLBACK_INK, fillOpacity: CITY_TINT_OPACITY }
+          : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
       const features = [];
       for (const f of fc.features) features.push(...esriPolygonFeatures(f.geometry, style));
       let labels = [];
       const src = VECTOR_SOURCES[id];
-      if (src && src.labelField) {
+      if (src && isCountyLinesId(id) && src.labelField) {
+        const home = siteState({ lat: origin.lat, lng: origin.lon });
+        const placedC = countyLineLabels(fc.features, {
+          textOf: (f) => countyLabelText(f.properties && f.properties[src.labelField], src.stateAbbr, home),
+          project: (lng, lat) => projLLtoPx([lng, lat]),
+          viewW: size.w, viewH: size.h,
+        });
+        labels = placedC.map((p) => ({ x: p.x, y: p.y, text: p.text, angle: p.angle }));
+      } else if (src && src.labelField) {
         const anchors = labelAnchors(fc, { labelField: src.labelField, titleCase: !!src.titleCaseLabel });
         const placed = placeLabels(anchors, { project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
         const tmpl = src.nameTemplate || "{name}";
