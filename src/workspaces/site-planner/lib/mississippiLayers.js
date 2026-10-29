@@ -14,6 +14,7 @@
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { approvalDate } from "./desotoZoning.js";
 import { titleCase } from "./desotoJurisdiction.js";
+import { CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 
 /* The hosts reached through the relay (everything else — arcgis.com — is read directly). */
 const RELAYED_HOSTS = new Set(["gis.deq.ms.gov", "opcgis.deq.state.ms.us", "gis.mississippi.edu", "gis.desotocountyms.gov"]);
@@ -28,6 +29,8 @@ const row = (label, v, extra) => (has(v) ? { label, text: str(v), ...(extra || {
 const link = (label, href) => (/^https?:\/\//i.test(str(href)) ? { label, text: "Open", href: str(href) } : null);
 const clean = (rows) => rows.filter(Boolean);
 const num1 = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? (n >= 100 ? Math.round(n).toLocaleString("en-US") : String(Math.round(n * 10) / 10)) : null; };
+/* MDEQ shouts county names ("DESOTO", "DE SOTO" never occurs; Mississippi's one camel-case county is DeSoto). */
+const countyName = (v) => { const t = titleCase(v); return /^de\s?soto$/i.test(t) ? "DeSoto" : t; };
 const place = (...parts) => parts.map(str).filter((t) => t && !/^null$/i.test(t)).join(", ");
 
 /* ---------------- the colour rules (legend and map read the same table) ---------------- */
@@ -35,7 +38,7 @@ const place = (...parts) => parts.map(str).filter((t) => t && !/^null$/i.test(t)
 export const UST_CLASSES = {
   open: { label: "Open release", color: "#b91c1c", radius: 5 },
   active: { label: "In service, no release reported", color: "#854d0e", radius: 3.5 },
-  closed: { label: "Closed / out of use", color: "#78716c", radius: 3 },
+  closed: { label: "Closed, Pre 88 or Unregulated", color: "#78716c", radius: 3 },
 };
 /* MDEQ's RELEASE_STATUS is "Open Release" / "No Release"; STATUS is Active / Closed / Confirmed Release / Unconfirmed Release / Closed Release. An open release wins over the tank's own status. */
 export const ustClass = (p) => (/open/i.test(str(p && p.RELEASE_STATUS)) ? "open" : /^active$/i.test(str(p && p.STATUS)) ? "active" : "closed");
@@ -45,17 +48,18 @@ export const GARD_CLASSES = {
   active: { label: "Active state site", color: "#c2410c", radius: 5 },
   other: { label: "Inactive / other status", color: "#78716c", radius: 4 },
 };
-export const gardClass = (p) => (/^npl/i.test(str(p && p.FEDERALSTATUS)) ? "npl" : /^active$/i.test(str(p && p.STATESTATUS)) ? "active" : "other");
+/* Only a site that IS on the National Priorities List is red: "NPL-Delisted" (cleaned up) and "NPL-Proposed" (not on the list) are not. */
+export const gardClass = (p) => (/^npl$/i.test(str(p && p.FEDERALSTATUS)) ? "npl" : /^active$/i.test(str(p && p.STATESTATUS)) ? "active" : "other");
 
 export const WELL_CLASSES = {
   active: { label: "Producing, injecting or stand-by", color: "#b45309", radius: 3.5 },
   plugged: { label: "Plugged and abandoned", color: "#64748b", radius: 3 },
   orphaned: { label: "Orphaned or plugging unverified", color: "#a21caf", radius: 4 },
-  other: { label: "Monitor, water source, other", color: "#0f766e", radius: 3 },
+  other: { label: "Monitor, water source, temporarily abandoned, other", color: "#0f766e", radius: 3 },
 };
-const WELL_ACTIVE = new Set(["PR", "CI", "AI", "SB", "TA", "DG", "PWP", "CPLNP"]);
+const WELL_ACTIVE = new Set(["PR", "CI", "AI", "SB", "DG", "PWP", "CPLNP"]);
 const WELL_PLUGGED = new Set(["PA", "PAS", "DA", "JA", "AA"]);
-const WELL_ORPHAN = new Set(["OPA", "O", "APA", "APS", "AUS"]);
+const WELL_ORPHAN = new Set(["OPA", "O", "PO", "APA", "APS", "AUS", "AU"]);
 /* The Board's status description starts with its code ("PA - Plugged and Abandoned", "O - Orphaned Well", "DWW Domestic Water Well"). */
 export function wellClass(p) {
   const m = /^([A-Z]+)\b/.exec(str(p && p.statdesc));
@@ -73,7 +77,7 @@ export const DAM_CLASSES = {
   high: { label: "High hazard", color: "#b91c1c", radius: 5.5 },
   significant: { label: "Significant hazard", color: "#c2410c", radius: 4.5 },
   low: { label: "Low hazard", color: "#64748b", radius: 3.5 },
-  other: { label: "Breached / unclassified", color: "#94a3b8", radius: 3 },
+  other: { label: "Breached or no hazard class listed", color: "#94a3b8", radius: 3 },
 };
 export const DAM_HAZARD_WORD = { H: "High", S: "Significant", L: "Low" };
 export const damClass = (p) => { const h = str(p && p.HAZRDCLASS).toUpperCase(); return h === "H" ? "high" : h === "S" ? "significant" : h === "L" ? "low" : "other"; };
@@ -129,13 +133,17 @@ export function damCard(p) {
   p = p || {};
   const eap = str(p.Online_EAP), insp = str(p.Online_Inspect);
   const ok = (u) => /^https:\/\/landandwater\.deq\.ms\.gov\//i.test(u);
+  const hz = str(p.HAZRDCLASS).toUpperCase();
+  const height = Number(p.Dam_Height);
+  const cond = str(p.CONDITION);
   return {
     title: str(p.DAMNAME) || "Dam",
     rows: clean([
-      row("County", titleCase(p.COUNTYNAME)),
-      row("Hazard class", DAM_HAZARD_WORD[str(p.HAZRDCLASS).toUpperCase()] || str(p.HAZRDCLASS)),
-      row("Height", has(p.Dam_Height) ? `${str(p.Dam_Height)} ft` : null),
-      row("Condition", p.CONDITION),
+      row("County", countyName(p.COUNTYNAME)),
+      // H / S / L are the three hazard classes MDEQ publishes; FIN, U and a blank carry no class the data explains, so the card says nothing rather than print a code
+      row("Hazard class", DAM_HAZARD_WORD[hz] || (hz === "BREACHED" ? "Breached" : null)),
+      row("Height", Number.isFinite(height) && height > 0 ? `${str(p.Dam_Height)} ft` : null),
+      row("Condition", /^(test)$/i.test(cond) ? null : cond),
       ok(eap) ? link("Emergency action plan", eap) : null,
       ok(insp) ? link("Inspection report", insp) : null,
     ]),
@@ -174,16 +182,16 @@ export const MISSISSIPPI_LAYERS = {
   ms_city: feature("msCity", {
     ...MS, label: "City Limits (Mississippi)", mergeGroup: "counties_cities", role: "line", group: "jurisdiction", order: 6, minZoom: 9,
     source: "Mississippi Statewide Governmental Boundaries Layer (MARIS)", color: "#1d4ed8", weight: 1.6,
-    styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: 3, opacity, fill: true, fillColor: "#1d4ed8", fillOpacity: 0.12, className: "pf-boundary-hit" }),
+    styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: CITY_LINE_MIN_WEIGHT, opacity, fill: true, fillColor: "#1d4ed8", fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit" }),
     lineLabel: { field: "Name", minZoom: 9, declutter: true, format: (v) => str(v) || null },
     identifyCard: (p) => ({ title: `${str(p && p.Name) || "City"} city limits`, rows: clean([row("County", p && p.County), row("Population", p && p.Population ? Number(p.Population).toLocaleString("en-US") : null), row("Incorporated", p && p.Year_Incor)]) }),
     note: "Mississippi's 300 incorporated places (MARIS statewide governmental boundaries, 2025). Inside = in the city; outside = unincorporated county. Mississippi has no ETJ. DeSoto County's five cities come from the county's own layer.",
-    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel. Each city's boundary was last updated in a different year (the layer records it); annexations after that are not drawn.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel. Each city's boundary was last updated in a different year (the layer records it); MARIS also publishes a short supplemental list of recent annexations that is not drawn here, so a very recent annexation may be missing.",
   }),
   ms_tribal: feature("msTribal", {
     ...MS, label: "Tribal Lands", role: "area", group: "jurisdiction", order: 10, minZoom: 6,
     source: "U.S. Bureau of Indian Affairs — land area representations", color: "#9a3412", weight: 1.6,
-    styleFn: outline("#9a3412", 1.6, 0.18),
+    simplifyFactor: 0.75, styleFn: outline("#9a3412", 1.6, 0.18),
     lineLabel: { field: "LARName", minZoom: 9, format: (v) => str(v).replace(/\s+LAR$/i, "") || null },
     identifyCard: (p) => ({ title: str(p && p.LARName).replace(/\s+LAR$/i, "") || "Tribal land", rows: clean([row("Acres", num1(p && p.GISAcres))]), note: "Federal and tribal jurisdiction apply on tribal trust land." }),
     note: "Federally recognized tribal land boundaries (BIA). In Mississippi these are the Mississippi Band of Choctaw's trust lands in the east-central and southern counties. Tribal and federal law, not county zoning, governs on this land.",
@@ -220,7 +228,7 @@ export const MISSISSIPPI_LAYERS = {
   }),
   ms_deq_mines: feature("msDeqMines", {
     ...MS, label: "Surface Mines", role: "area", group: "environmental", order: 34, minZoom: 11, source: "MDEQ — Surface Mining",
-    color: "#a16207", weight: 1.4, styleFn: outline("#a16207", 1.4, 0.22),
+    color: "#a16207", weight: 1.4, simplifyFactor: 0.75, styleFn: outline("#a16207", 1.4, 0.22),
     identifyCard: (p) => ({ title: "Surface mine permit", rows: clean([row("Permit", p && p.PermitNumber), row("Acres", num1(p && p.Acres)), row("Permitted", p && /^yes$/i.test(str(p.PERMITTED)) ? "Yes" : p && p.PERMITTED)]) }),
     note: "MDEQ surface-mining permit boundaries — sand, gravel, clay and borrow pits, active and released. Mined or backfilled ground is a geotechnical flag.",
     infoCaveat: "Permit boundaries as MDEQ maps them; a released permit may be reclaimed. The polygons carry the permit number and acres only.",
@@ -233,8 +241,8 @@ export const MISSISSIPPI_LAYERS = {
     infoCaveat: "Surface locations from the Board's July 2025 data, republished by MARIS (the Board publishes no open map service). A plugged well is still a setback and re-entry issue — confirm with the Board and on the title.",
   }),
   ms_deq_og_fields: feature("msDeqOgFields", {
-    ...MS, label: "Oil & Gas Fields", role: "area", group: "environmental", order: 36, minZoom: 8, source: "MDEQ — Office of Geology",
-    color: "#ca8a04", weight: 1.2, styleFn: outline("#ca8a04", 1.2, 0.16),
+    ...MS, label: "Oil & Gas Fields", role: "area", group: "environmental", order: 36, minZoom: 9, source: "MDEQ — Office of Geology",
+    color: "#ca8a04", weight: 1.2, simplifyFactor: 0.75, styleFn: outline("#ca8a04", 1.2, 0.16),
     lineLabel: { field: "FIELD_NM", minZoom: 11, format: (v) => str(v) || null },
     identifyCard: (p) => ({ title: str(p && p.FIELD_NM) || "Oil or gas field" }),
     note: "Generalized outlines of Mississippi's oil and gas fields. An outline is a producing area, not a surface restriction — check the title for mineral reservations and surface-use rights.",
@@ -242,14 +250,14 @@ export const MISSISSIPPI_LAYERS = {
   }),
   ms_deq_spa: feature("msDeqSpa", {
     ...MS, label: "Source Water Protection Areas", role: "area", group: "environmental", order: 37, minZoom: 10, source: "MDEQ — Source Water Assessment Program",
-    color: "#0369a1", weight: 1.3, styleFn: outline("#0369a1", 1.3, 0.14, "6 4"),
+    color: "#0369a1", weight: 1.3, simplifyFactor: 0.75, styleFn: outline("#0369a1", 1.3, 0.14, "6 4"),
     identifyCard: (p) => ({ title: "Source water protection area", rows: clean([row("Public water system ID", p && p.PWS_ID)]), note: "Protection area around a public water-supply source." }),
     note: "Delineated protection areas around public drinking-water sources. Mississippi's program is a state assessment, not a statewide land-use rule — a city or county may add its own limits inside one.",
     infoCaveat: "MDEQ's delineations carry only the public water system ID. Ask the county or city planning office whether a wellhead overlay applies.",
   }),
   ms_nrcs_easements: feature("msNrcsEasements", {
     ...MS, label: "Conservation Easements (NRCS)", role: "area", group: "environmental", order: 38, minZoom: 10, source: "USDA NRCS (via MARIS)",
-    color: "#15803d", weight: 1.4, styleFn: outline("#15803d", 1.4, 0.25),
+    color: "#15803d", weight: 1.4, simplifyFactor: 0.75, styleFn: outline("#15803d", 1.4, 0.25),
     identifyCard: (p) => ({ title: "NRCS conservation easement", rows: clean([row("Program", p && p.Program), row("County", p && p.County), row("Acres", num1(p && p.CalcAcres))]), note: "Easements like these typically bar development on the easement area." }),
     note: "USDA wetland-reserve and similar conservation easements. These typically prohibit development and drainage changes on the easement area, and the federal government holds the right.",
     infoCaveat: "NRCS's aggregated, approximate boundaries (2024) republished by MARIS — read the recorded easement before relying on a line.",
@@ -269,8 +277,8 @@ export const MISSISSIPPI_LAYERS = {
     infoCaveat: "USGS National Map (GNIS) points; no single edition date.",
   }),
   ms_crit_habitat: feature("msCritHabitat", {
-    ...MS, label: "Critical Habitat", role: "area", group: "environmental", order: 42, minZoom: 8, source: "U.S. Fish & Wildlife Service",
-    color: "#15803d", weight: 1.5, styleFn: outline("#15803d", 1.5, 0.5),
+    ...MS, label: "Critical Habitat", role: "area", group: "environmental", order: 42, minZoom: 9, source: "U.S. Fish & Wildlife Service",
+    color: "#15803d", weight: 1.5, simplifyFactor: 0.75, styleFn: outline("#15803d", 1.5, 0.5),
     identifyCard: (p) => ({ title: str(p && p.comname) || "Critical habitat", rows: clean([row("Species", p && p.sciname), row("Listing", p && p.listing_status)]) }),
     note: "USFWS final critical habitat (Mississippi has the gopher frog, pearl darter, black pinesnake, sandhill crane and several mussels). It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. USFWS IPaC is the authoritative species list.",
     infoCaveat: "A screen, not a species survey.",
@@ -292,9 +300,9 @@ export const MISSISSIPPI_LAYERS = {
     floodTier: "hydrography", agency: "MDEQ",
   }),
   ms_dam_inundation: feature("msDamInundation", {
-    ...MS, label: "Dam Breach Inundation", role: "area", group: "flood", order: 31, minZoom: 10, source: "MDEQ — Dam Safety",
-    color: "#1d4ed8", weight: 1.2, styleFn: outline("#1d4ed8", 1.2, 0.2, "5 3"),
-    identifyCard: (p) => ({ title: "Dam breach inundation area", rows: clean([row("Dam", titleCase(p && p.DamName)), row("County", titleCase(p && p.County)), row("Dam height", p && has(p.DamHeight) ? `${str(p.DamHeight)} ft` : null)]), note: "Ground that could flood if this dam failed." }),
+    ...MS, label: "Dam Breach Inundation", role: "area", group: "flood", order: 31, minZoom: 11, source: "MDEQ — Dam Safety",
+    color: "#1d4ed8", weight: 1.2, simplifyFactor: 0.75, styleFn: outline("#1d4ed8", 1.2, 0.2, "5 3"),
+    identifyCard: (p) => ({ title: "Dam breach inundation area", rows: clean([row("Dam", titleCase(p && p.DamName)), row("County", countyName(p && p.County)), row("Dam height", p && has(p.DamHeight) ? `${str(p.DamHeight)} ft` : null)]), note: "Ground that could flood if this dam failed." }),
     note: "Modeled areas that could flood if a dam failed. Only dams MDEQ has studied have one — no polygon does not mean no risk. Advisory, not a regulatory floodplain.",
     infoCaveat: "322 modeled inundation areas from MDEQ Dam Safety. Never treat as a FEMA flood zone.",
     floodTier: "advisory", agency: "MDEQ",

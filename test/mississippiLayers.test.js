@@ -6,14 +6,15 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 
 const featureLayerCalls = [];
+const featureLayerObjs = [];
 vi.mock("esri-leaflet", () => ({
   dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(),
-  featureLayer: vi.fn((o) => { featureLayerCalls.push(o.url); return { on() {}, off() {}, addTo() { return this; }, setStyle() {}, eachFeature() {} }; }),
+  featureLayer: vi.fn((o) => { featureLayerCalls.push(o.url); const lyr = { opts: o, styles: [], on() {}, off() {}, addTo() { return this; }, setStyle(f) { this.styles.push(f); }, eachFeature() {} }; featureLayerObjs.push(lyr); return lyr; }),
 }));
 vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
 vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({
-  cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn(),
+  cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn((f) => !!(f && f.geometry && f.geometry.type === "Point")),
 }));
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn(() => () => null) }));
 
@@ -67,7 +68,8 @@ describe("the colour rules and the legends printed beside them", () => {
   });
   it("federal NPL wins over state status; an active state site is its own class", () => {
     expect(gardClass({ FEDERALSTATUS: "NPL", STATESTATUS: "Inactive" })).toBe("npl");
-    expect(gardClass({ FEDERALSTATUS: "NPL-Proposed" })).toBe("npl");
+    expect(gardClass({ FEDERALSTATUS: "NPL-Proposed" })).toBe("other"); // not on the list
+    expect(gardClass({ FEDERALSTATUS: "NPL-Delisted" })).toBe("other"); // cleaned up and removed
     expect(gardClass({ FEDERALSTATUS: "NFRAP", STATESTATUS: "Active" })).toBe("active");
     expect(gardClass({ FEDERALSTATUS: "Archive", STATESTATUS: "SNFA" })).toBe("other");
     expect(gardClass({})).toBe("other");
@@ -75,7 +77,7 @@ describe("the colour rules and the legends printed beside them", () => {
   it.each([
     ["PA - Plugged and Abandoned", "plugged"], ["PAS - Plugged and Abandoned - surveyor inspection", "plugged"], ["DA - Dry and Abandoned", "plugged"],
     ["PR - Producing", "active"], ["CI - Closed In (Producing Well)", "active"], ["AI - Active Injection", "active"], ["SB - Stand By (Injection Well)", "active"],
-    ["OPA - Orphaned P&A", "orphaned"], ["O - Orphaned Well", "orphaned"], ["APA - Appears P&A/No Records", "orphaned"], ["APS - Appears P&A/No Records - surveyor inspection", "orphaned"],
+    ["OPA - Orphaned P&A", "orphaned"], ["O - Orphaned Well", "orphaned"], ["PO - Potential Orphan", "orphaned"], ["AU - Abandoned - Unapproved", "orphaned"], ["TA - Temporarily Abandoned", "other"], ["APA - Appears P&A/No Records", "orphaned"], ["APS - Appears P&A/No Records - surveyor inspection", "orphaned"],
     ["AUS - Abandoned - Unapproved Surveyor Inspection", "orphaned"], ["NRR - No Report Required", "other"], ["DWW Domestic Water Well", "other"], ["", "other"],
   ])("well status %j → %s (every status the Board publishes — the 25,200-well census, 2026-10-29)", (statdesc, k) => expect(wellClass({ statdesc })).toBe(k));
   it("landfills: only an Active permit is the loud class; closed, inactive and unknown are quiet", () => {
@@ -129,7 +131,7 @@ describe("click cards — recorded attribute bags, cleaned the way the app clean
       .toEqual({ Type: "Municipal Solid Waste Landfills", Status: "Active", County: "Chickasaw", Acres: "236", Permit: "SW00901B0302" });
     expect(rowsOf(wellCard({ typedesc: "OIL - Production", statdesc: "PA - Plugged and Abandoned", API: "2300122827" }))).toEqual({ Type: "OIL - Production", Status: "PA - Plugged and Abandoned", "API no.": "2300122827" });
   });
-  it("a dam: hazard in words, height with its unit, the two posted documents as short links — only MDEQ's own host, and an empty condition is dropped", () => {
+  it("a dam: hazard in words, height with its unit, the two posted documents as short links — only MDEQ's own host; an empty condition is dropped", () => {
     const ok = damCard({ DAMNAME: "W B CROSS LAKE DAM", COUNTYNAME: "ATTALA", HAZRDCLASS: "L", Dam_Height: "14", CONDITION: " ", Online_EAP: "https://landandwater.deq.ms.gov/damsafety/docs/digital%20eaps/MS00001.pdf", Online_Inspect: "https://landandwater.deq.ms.gov/damsafety/docs/inspection%20reports/MS00001.pdf" });
     const c = cleanCard(ok);
     expect(c.rows.map((r) => [r.label, r.text])).toEqual([["County", "Attala"], ["Hazard class", "Low"], ["Height", "14 ft"], ["Emergency action plan", "Open"], ["Inspection report", "Open"]]);
@@ -137,6 +139,15 @@ describe("click cards — recorded attribute bags, cleaned the way the app clean
       "https://landandwater.deq.ms.gov/damsafety/docs/digital%20eaps/MS00001.pdf", "https://landandwater.deq.ms.gov/damsafety/docs/inspection%20reports/MS00001.pdf"]);
     const foreign = cleanCard(damCard({ DAMNAME: "X", Online_EAP: "https://evil.example/x.pdf", Online_Inspect: "javascript:alert(1)" }));
     expect(foreign.rows.filter((r) => r.href)).toEqual([]);
+  });
+  it("a dam card never prints a code the data does not explain: FIN / U / blank hazard, a zero height and the junk condition 'Test' drop out; DeSoto keeps its capital S", () => {
+    const rowsOf2 = (p) => Object.fromEntries(cleanCard(damCard({ DAMNAME: "D", ...p })).rows.map((r) => [r.label, r.text]));
+    for (const hz of ["FIN", "U", "", undefined]) expect(rowsOf2({ HAZRDCLASS: hz }), String(hz)).not.toHaveProperty("Hazard class");
+    expect(rowsOf2({ HAZRDCLASS: "BREACHED" })["Hazard class"]).toBe("Breached");
+    expect(rowsOf2({ Dam_Height: "0" })).not.toHaveProperty("Height");
+    expect(rowsOf2({ CONDITION: "Test" })).not.toHaveProperty("Condition");
+    expect(rowsOf2({ CONDITION: "SATISFACTORY" }).Condition).toBe("SATISFACTORY");
+    expect(rowsOf2({ COUNTYNAME: "DESOTO" }).County).toBe("DeSoto");
   });
   it("FEMA letters: case numbers and links, no more than are there", () => {
     const lomr = cleanCard(lomrCard({ CASE_NO: "21-04-0112P", EFF_DATE: 1613088000000, LINK_1: "https://msc.fema.gov/a.pdf", LINK_2: null, LINK_3: " " }));
@@ -221,8 +232,20 @@ describe("every Mississippi row is registered whole, sourced, and scoped", () =>
     const src = VECTOR_SOURCES.ms_county_state;
     expect(src).toBeTruthy();
     expect(src.query.url).toBe(`${ALL_LAYERS.ms_county_state.url}/query`);
-    expect(src.query.where).toBe("CONAME <> 'DeSoto'");
     expect(isCountyLinesId("ms_county_state")).toBe(true);
+  });
+  it("the `where` of every filtered row is pinned to the value measured live (a wrong literal once excluded nothing and drew DeSoto twice)", () => {
+    expect(ALL_LAYERS.ms_epa_brownfields.where).toBe("STATE_CODE='MS'");
+    expect(ALL_LAYERS.ms_nrhp.where).toBe("State = 'MISSISSIPPI'");
+    expect(ALL_LAYERS.ms_cemeteries.where).toBe("STATE = 'MS'");
+    expect(ALL_LAYERS.ms_city.where).toBe("County <> 'DeSoto'");
+    expect(VECTOR_SOURCES.ms_county_state.query.where).toBe("UPPER(CONAME) <> 'DESOTO'"); // MDEQ stores the name as "Desoto"
+  });
+  it("the heavy polygon rows ask the server to generalise and sit at a zoom where their cells fit the draw budget (live: Gulf sturgeon habitat alone is 725,409 vertices)", () => {
+    for (const id of ["ms_crit_habitat", "ms_deq_og_fields", "ms_dam_inundation"]) {
+      expect(ALL_LAYERS[id].simplifyFactor, id).toBeGreaterThan(0);
+      expect(ALL_LAYERS[id].minZoom, id).toBeGreaterThanOrEqual(9);
+    }
   });
   it("the statewide city layer leaves DeSoto County's five cities to the county's own (newer) layer", () => {
     expect(ALL_LAYERS.ms_city.where).toBe("County <> 'DeSoto'");
@@ -273,6 +296,27 @@ describe("requests actually issued", () => {
     const r = await run(MS_POINTS.jackson);
     expect(r.built.length).toBe(STATEWIDE_IDS.length);
     expect(r.built.concat(r.fetched).some((u) => /desotocountyms/.test(u))).toBe(false);
+  });
+  it("the opacity setter keeps each marker's own colour (a flat restyle would turn every tank the same colour on the first slider move)", async () => {
+    featureLayerObjs.length = 0;
+    await run(OLIVE_BRANCH);
+    const cases = [
+      ["ms_deq_ust", UST_CLASSES, [[{ RELEASE_STATUS: "Open Release", STATUS: "Confirmed Release" }, "open"], [{ RELEASE_STATUS: "No Release", STATUS: "Closed" }, "closed"]]],
+      ["ms_ogb_wells", WELL_CLASSES, [[{ statdesc: "OPA - Orphaned P&A" }, "orphaned"], [{ statdesc: "PA - Plugged and Abandoned" }, "plugged"]]],
+      ["ms_dams", DAM_CLASSES, [[{ HAZRDCLASS: "H" }, "high"], [{ HAZRDCLASS: "L" }, "low"]]],
+    ];
+    for (const [id, classes, feats] of cases) {
+      const lyr = featureLayerObjs.find((l) => l.opts.url === ALL_LAYERS[id].url);
+      expect(lyr, id).toBeTruthy();
+      lyr.setOpacity(0.4);
+      const styleFn = lyr.styles[lyr.styles.length - 1];
+      expect(typeof styleFn, id).toBe("function");
+      for (const [props, k] of feats) {
+        const st = styleFn({ properties: props, geometry: { type: "Point", coordinates: [-89.8, 34.9] } });
+        expect(st.color, `${id} ${k}`).toBe(classes[k].color);
+        expect(st.opacity, `${id} ${k}`).toBe(0.4);
+      }
+    }
   });
   it.each(Object.entries(ELSEWHERE))("at %s: zero requests to any Mississippi source", async (_k, p) => {
     const r = await run(p);

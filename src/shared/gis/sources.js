@@ -926,7 +926,7 @@ export const GIS_SOURCES = {
     serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/nrhp_points_v1/FeatureServer/0",
     layerId: null,
     geometryType: "point",
-    fields: { name: "RESNAME", type: "ResType", city: "City", county: "County", listed: "CertDate" },
+    fields: { name: "RESNAME", type: "ResType", city: "City", county: "County", listed: "CertDate" }, where: "State = 'MISSISSIPPI'", // the national layer: only Mississippi's listings
     coverage: "mississippi",
     states: ["MS"],
     tier: "production",
@@ -939,7 +939,7 @@ export const GIS_SOURCES = {
     serviceUrl: "https://carto.nationalmap.gov/arcgis/rest/services/structures/MapServer/37",
     layerId: null,
     geometryType: "point",
-    fields: { name: "NAME", city: "CITY", state: "STATE" },
+    fields: { name: "NAME", city: "CITY", state: "STATE" }, where: "STATE = 'MS'", // the national layer: only Mississippi's cemeteries (the row is offered near the Tennessee line)
     coverage: "mississippi",
     states: ["MS"],
     tier: "production",

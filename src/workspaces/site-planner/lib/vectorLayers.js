@@ -359,7 +359,7 @@ export const VECTOR_SOURCES = {
     query: {
       url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/") + "/query",
       outFields: ["CONAME"],
-      where: "CONAME <> 'DeSoto'",
+      where: "UPPER(CONAME) <> 'DESOTO'", // MDEQ stores the name as "Desoto" — a plain <> 'DeSoto' excluded nothing and drew DeSoto's outline twice
       pageSize: 100,
       maxFeatures: 100,
       ttl: 30 * 24 * 3600 * 1000,
