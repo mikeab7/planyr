@@ -104,7 +104,7 @@ describe("the wired Illinois rows", () => {
   const ROW_KEYS = IL_ROWS.map(([k]) => "il_" + k);
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(IL_ROWS).toHaveLength(62);
+    expect(IL_ROWS).toHaveLength(71); // 62 on 2026-10-20 + 9 from the second pass (2026-10-29, B2496304)
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
@@ -129,13 +129,13 @@ describe("the wired Illinois rows", () => {
       expect(v, k).toBeTruthy();
       expect(v.publisher, k).toMatch(/^(own|third-party)$/);
       expect(v.publisherName.length, k).toBeGreaterThan(5);
-      expect(v.verifiedOn, k).toBe("2026-10-20");
+      expect(v.verifiedOn, k).toMatch(/^2026-10-(20|29)$/); // the first pass (2026-10-20) and the second pass (2026-10-29)
     }
   });
 });
 
 describe("a recorded real lot from each source reads back parcel id, address, acreage and (where the layer has one) owner", () => {
-  const NO_OWNER = new Set(["Boone County", "Greene County", "Macon County", "Washington County"]);
+  const NO_OWNER = new Set(["Boone County", "Greene County", "Macon County", "Washington County", "Alexander County", "Champaign County"]);
   it("the fixture covers every wired county", () => {
     expect(Object.keys(SAMPLES).sort()).toEqual(IL_ROWS.map(([, n]) => n + " County").sort());
   });
@@ -155,7 +155,7 @@ describe("a recorded real lot from each source reads back parcel id, address, ac
       expect(rec.owner, `${name}: the owner is not the parcel number`).not.toMatch(/^[0-9][0-9.\-\s/]*$/);
     }
   });
-  it("Boone (assessment linework), Greene, Macon and Washington honestly carry no owner", () => {
+  it("Boone (assessment linework), Greene, Macon, Washington, Alexander (CoreLogic extract) and Champaign (PIN-only copy) honestly carry no owner", () => {
     for (const n of NO_OWNER) expect(ownerName(SAMPLES[n].attrs), n).toBeNull();
   });
   it("the Devnet / Tyler owner spellings resolve (owner1_nam, TSC_Owner1, PrimaryName, Owner1Name, Primary_Owner, OWN_FULL)", () => {

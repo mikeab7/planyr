@@ -31,7 +31,7 @@ describe("the reason lookup — one sample of each code, across more than three 
     ["Dubuque County", "IA", "unreachable"],
     // none — owner-accepted gaps and the default
     ["Fulton County", "KY", "none"], ["New Madrid County", "MO", "none"], ["Pemiscot County", "MO", "none"],
-    ["Washtenaw County", "MI", "none"], ["Bryan County", "OK", "none"], ["Early County", "GA", "none"],
+    ["Alpena County", "MI", "none"], ["Bryan County", "OK", "none"], ["Early County", "GA", "none"],
     ["Harding County", "SD", "none"], ["Lake County", "SD", "none"], ["Yankton County", "SD", "none"],
   ])("%s, %s → %s", (name, st, reason) => { expect(gapReasonFor(name, st)).toBe(reason); });
 

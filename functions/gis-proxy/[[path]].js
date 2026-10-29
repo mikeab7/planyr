@@ -176,6 +176,10 @@ export const ALLOWED_HOSTS = new Set([
   "gis.pottcounty-ia.gov", // Pottawattamie County (Council Bluffs) GIS
   "gis.dallascountyiowa.gov", // Dallas County (Adel) GIS
   "magic-gis.com", // MAGIC — Muscatine Area GIS consortium (Muscatine County parcels)
+  /* NEW-1 (Iowa second pass, B2499376, 2026-10-29) — two vendor / county viewer hosts the 21 remaining "none" Iowa counties name. The build sandbox reaches neither (CONNECT 403), so they are
+   * relayed ONLY so a session can MEASURE what they serve (CAMAvision's Iowa county sites; Des Moines County's own viewer) through planyr.io before any county is wired to them. */
+  "maps.camavision.com", // CAMAvision Maps — the assessor-software vendor's county viewers (maps.camavision.com/<county>ia): Appanoose, Carroll, Hancock, Tama, Van Buren, Washington
+  "www.dmcgis.com", // Des Moines County (Burlington) GIS Mapping Application
   /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
    * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
   "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",
@@ -191,6 +195,16 @@ export const ALLOWED_HOSTS = new Set([
   "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
   "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
   "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
+  /* NEW-1 (Kansas second pass, 2026-10-29) — DISCOVERY hosts: each Kansas "none" county's own website / appraiser page and the ORKA portal, read through this relay (the build sandbox reaches
+   * none of them) to find the viewer or service each one actually uses. Temporary: the PR that wires the winners prunes every host nothing uses. */
+  "allencounty.org", "www.allencounty.org", "www.bartoncounty.org", "www.bourboncountyks.org", "www.brcoks.org", "www.chautauquacountyks.com",
+  "www.claycountykansas.org", "www.comanchecoks.org", "www.crawfordcountykansas.org", "www.dccoks.org", "govecountyks.gov", "greeleycounty.org", "www.grantcoks.org",
+  "www.greenwoodcounty.org", "www.haskellcounty.org", "www.hodgemancountyks.com", "www.jacksoncountyks.com", "jewellcountykansas.net", "kiowacountyks.org",
+  "www.kearnycountykansas.com", "www.kingmancoks.org", "www.marioncoks.net", "www.mitchellcountykansas.com", "www.morriscountyks.org", "www.mtcoks.com",
+  "www.neoshocountyks.org", "www.nortoncountyks.gov", "www.osbornecounty.org", "www.phillipscountyks.org", "www.prattcounty.org", "www.ricecounty.us",
+  "www.rookscounty.net", "www.stantoncountyks.com", "www.stevenscoks.org", "www.tregocountyks.com", "wallacecountyks.gov", "washingtoncountyks.gov", "www.wbcounty.org",
+  "www.wichitacounty.org", "chasecountyks.com", "ks283.cichosting.com", "ks497.cichosting.com", "ks1495.cichosting.com", "ks1497.cichosting.com", "www.kansasgis.org", "apps.kansasgis.org", "orkahub.kansasgis.org", "kansasgis.org", "data.kansasgis.org",
+  "www.gray.kansasgov.com", "osborne.kansasgov.com",
   /* NEW-1 (New York, 2026-10-20) — county / city parcel hosts this build sandbox's egress blocks (CONNECT 403), so their layers could only be
    * measured through this relay on the PR preview; relayed server-side so the app never depends on their ACAO header. */
   "maps2.cattco.org", // Cattaraugus County GIS (ArcGIS Enterprise web adaptor)
@@ -222,6 +236,9 @@ export const ALLOWED_HOSTS = new Set([
    * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
    * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
   "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
+  /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
+   * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
+  "gis.desotocountyms.gov", // DeSoto County MS GIS
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
