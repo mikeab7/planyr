@@ -1082,7 +1082,7 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-10-29",
   },
-  /* Spalding County's own zoning polygons (item `creagan_spalding`, edited 2025-08-11; 1,335 polygons, ~124k vertices). UNINCORPORATED county only — the City of Griffin and the other cities zone themselves and are not in it (measured: downtown Griffin has no polygon). The county's `DESCRIPTION` field is inconsistent between records of one code (C2 reads both MANUFACTURING and MANUFACTURING--LIGHT), so only the code is shown. Live 2026-10-29: 5 points across the county all answered. */
+  /* Spalding County's own zoning polygons (item `creagan_spalding`, edited 2025-08-11; 1,335 polygons, ~124k vertices). The unincorporated county AND the town of Orchard Hill (measured by the adversarial review: ~91% of the town's DCA municipal polygon is covered) — the City of Griffin zones itself and is not in it (downtown Griffin has no polygon; measured 0.1% coverage). Whether Sunny Side is in it was not testable (not in DCA's municipal layer). The county's `DESCRIPTION` field is inconsistent between records of one code (C2 reads both MANUFACTURING and MANUFACTURING--LIGHT), so only the code is shown. Live 2026-10-29: 5 points across the county all answered. */
   gaSpaldingZoning: {
     key: "gaSpaldingZoning",
     label: "Zoning — Spalding County (SCWA GIS)",
@@ -2850,7 +2850,7 @@ export const SOURCE_FIXTURE_REACH = {
   gaMrpaTributaryBuffer: ["regional", "The MRPA 35-ft tributary buffer — inside the Chattahoochee corridor only."],
   gaSwsw: ["regional", "The Metropolitan North Georgia Water Planning District's 22 small water supply watersheds — 15 metro-Atlanta counties only."],
   gaSwswProtected: ["regional", "The 7-mile protected reach of the District's water supply watersheds — 15 metro-Atlanta counties only."],
-  gaSpaldingZoning: ["local", "Spalding County's unincorporated zoning — one county (about 20 km across) by definition."],
+  gaSpaldingZoning: ["local", "Spalding County's zoning (unincorporated county + Orchard Hill) — one county (about 20 km across) by definition."],
   gopherTortoiseGa: ["regional", "The gopher tortoise's range is the Georgia coastal plain and sandhills — there is no tortoise soil model in the mountains to probe."],
   hcfcdChannels: ["regional", "Harris County Flood Control District — one county by definition."],
   hcfcdWatersheds: ["regional", "Harris County Flood Control District — one county by definition."],

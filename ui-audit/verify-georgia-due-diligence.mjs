@@ -29,7 +29,7 @@ const LAYERS = [
   { id: "ga_recharge", group: "env", lat: 31.58, lon: -84.16, zoom: 11, needle: "Most_Significant_Ground_Water" },
   { id: "ga_gw_susceptibility", group: "env", lat: 33.75, lon: -84.39, zoom: 11, needle: "DRASTIC", wide: { lat: 33.2, lon: -84.2, zoom: 9 } },
   { id: "ga_protected_rivers", group: "env", lat: 34.26, lon: -85.16, zoom: 11, needle: "EnvironmentalPlanning/FeatureServer/6" },
-  { id: "ga_protected_mountains", group: "env", lat: 34.65, lon: -83.9, zoom: 10, needle: "EnvironmentalPlanning/FeatureServer/3", wide: { lat: 34.65, lon: -83.9, zoom: 10 } },
+  { id: "ga_protected_mountains", group: "env", lat: 34.65, lon: -83.9, zoom: 10, needle: "EnvironmentalPlanning/FeatureServer/3", wide: { lat: 34.65, lon: -83.9, zoom: 16 } },
   { id: "ga_water_supply", group: "env", lat: 33.349, lon: -84.2138, zoom: 11, needle: "SWSW" },
   { id: "ga_karst", group: "env", lat: 34.17, lon: -84.8, zoom: 10, needle: "SGMC" },
   { id: "ga_solid_waste", group: "env", lat: 33.75, lon: -84.39, zoom: 12, needle: "Solid_Waste_Facilities" },
@@ -44,8 +44,9 @@ const LAYERS = [
 ];
 const NEW_ROW_IDS = [...LAYERS.map((l) => l.id), "ga_swsw", "ga_swsw_protected", "ga_mrpa_corridor"].filter((v, i, a) => a.indexOf(v) === i);
 const POINTS = [
-  { key: "savannah", label: "Savannah (coast, outside the metro District and Spalding)", lat: 32.08, lon: -81.10, expect: { shown: ["ga_recharge", "ga_karst", "ga_jtc_tiers", "ga_conservation", "ga_dams"], hidden: ["ga_mrpa", "ga_water_supply", "ga_spalding_zoning"] } },
+  { key: "savannah", label: "Savannah (coast, outside the metro District and Spalding)", lat: 32.08, lon: -81.10, expect: { shown: ["ga_recharge", "ga_karst", "ga_jtc_tiers", "ga_conservation", "ga_dams"], hidden: ["ga_mrpa", "ga_water_supply", "ga_spalding_zoning", "ga_protected_mountains"] } },
   { key: "roswell", label: "Roswell (on the Chattahoochee, in the metro District)", lat: 33.9982, lon: -84.3348, expect: { shown: ["ga_mrpa", "ga_water_supply", "ga_recharge"], hidden: ["ga_spalding_zoning"] } },
+  { key: "dahlonega", label: "Dahlonega (north Georgia mountains)", lat: 34.53, lon: -83.98, expect: { shown: ["ga_protected_mountains", "ga_recharge"], hidden: ["ga_mrpa", "ga_spalding_zoning"] } },
   { key: "griffin", label: "Griffin (Spalding County)", lat: 33.2468, lon: -84.2641, expect: { shown: ["ga_spalding_zoning", "ga_dams"], hidden: ["ga_mrpa"] } },
   { key: "houston", label: "Houston (known-good arm: Texas rows still listed, no new Georgia row)", lat: 29.7604, lon: -95.3698, expect: { shown: [], hidden: NEW_ROW_IDS } },
 ];
@@ -137,6 +138,7 @@ try {
 
   /* ---------- DRAWS (+ CARD) ---------- */
   for (const L of LAYERS) {
+    if (process.env.GA_ONLY && !process.env.GA_ONLY.split(",").includes(L.id)) continue; // a focused re-run after a fix
     console.log(`— DRAWS: ${L.id} —`);
     const fp = await openFinder(L.lat, L.lon, L.zoom);
     await rowIds(fp, L.group);

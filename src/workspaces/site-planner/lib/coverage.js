@@ -57,9 +57,6 @@ export const LAYER_SCOPE = {
   // Tsakiris tract because the study area doesn't reach it, and an ungated blank there
   // would read as "no floodplain" instead of "outside this study area".
   bkdd_drainage: "regional", bkdd_easements: "regional", bkdd_dmp: "regional",
-  // NEW-1 (Georgia due-diligence gaps) — protected mountains exist only in the north Georgia mountains; the service publishes its extent in Web Mercator, so the
-  // coverage engine can say "no data in this area" over Savannah instead of leaving an empty map. (The MRPA / water-supply / Spalding rows are scoped by declared `regions`.)
-  ga_protected_mountains: "regional",
   // B1078 — NHD is national by construction; that universality is the whole point.
   nhd_flowlines: "national",
 };

@@ -1372,7 +1372,7 @@ export const SOURCE_DOCS = {
   },
   gaJobTaxCredit: {
   notes:
-    "DCA's 2026 county tiers for the Georgia job tax credit and related incentives (Tier 1 = most distressed, 'Bottom 40' = the lowest-ranked counties). The tier moves each year, and the credit per job depends on the tier and on the project; DCA's own list governs.",
+    "DCA's 2026 county tiers for the Georgia job tax credit and related incentives ('Bottom 40' = the 40 lowest-ranked, least developed counties, then Tier 1 to Tier 4 = the most developed). The tier moves each year, and the credit per job depends on the tier and on the project; DCA's own list governs.",
   },
   gaMrpaCorridor: {
   notes:
@@ -1400,7 +1400,7 @@ export const SOURCE_DOCS = {
   },
   gaSpaldingZoning: {
   notes:
-    "Spalding County's own zoning polygons, UNINCORPORATED county only (the City of Griffin and the other cities zone themselves). The county's description field disagrees with itself for several codes, so Planyr shows the zone CODE only; the Spalding County zoning ordinance defines each district. Edited 2025-08-11.",
+    "Spalding County's own zoning polygons: the unincorporated county and the town of Orchard Hill (the City of Griffin zones itself and is not in the layer; confirm any other city with the county). The county's description field disagrees with itself for several codes, so Planyr shows the zone CODE only; the Spalding County zoning ordinance defines each district. Edited 2025-08-11.",
   },
   countyCa: {
   notes:

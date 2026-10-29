@@ -73,7 +73,7 @@ if (want("olivebranch")) {
  *   mngwpd       the 15-county Metropolitan North Georgia Water Planning District (ARC's `MNGWPD_Boundary` layer 1 — the SAME outline the stream-buffer rule uses).
  *                The Chattahoochee MRPA corridor/buffers and the District's small water supply watersheds are declared for this area.
  *   spalding_ga  Spalding County GA, from the SAME bundled county polygons as `harris` (no network) — the county's own unincorporated zoning layer.
- * `--only=mngwpd,spalding_ga` rebuilds just these two and keeps every other area as committed. */
+ * `--only=mngwpd,spalding_ga,ga_blue_ridge` rebuilds just these three and keeps every other area as committed. */
 if (want("mngwpd")) {
   /* The District outline is NOT enough on its own: the District's own small-water-supply watersheds reach past it (the Randy Poynter reservoir's basin sits partly in
    * Walton/Newton — measured: its interior point is outside the outline). The region is the outline ∪ those watersheds ∪ the Chattahoochee MRPA corridor, so a row declared
@@ -82,6 +82,15 @@ if (want("mngwpd")) {
   const parts = [];
   for (const l of ["MNGWPD_Boundary/FeatureServer/1", "SWSW/FeatureServer/0", "ProtectedSWSW/FeatureServer/1", "Chattahoochee_River_Corridor_2000ft/FeatureServer/0"]) parts.push(...polysOf(await q(`${ARC}/${l}/query`, { where: "1=1", maxAllowableOffset: 0.003 })));
   areas.mngwpd = { label: "Metropolitan North Georgia Water Planning District, its water-supply watersheds and the Chattahoochee corridor", source: "Atlanta Regional Commission MNGWPD_Boundary layer 1 ∪ SWSW ∪ ProtectedSWSW ∪ Chattahoochee_River_Corridor_2000ft", polys: parts };
+}
+if (want("ga_blue_ridge")) {
+  /* DCA's protected-mountain polygon (one feature, 28k pieces) is north Georgia only: the region is its published data extent (returnExtentOnly, WGS84) padded 0.05° — a rectangle,
+   * honestly "within or near the Georgia mountains", so a Savannah or Macon site is not offered a layer that can only ever read "nothing here". */
+  const u = new URL("https://services2.arcgis.com/Gqyymy5JISeLzyNM/arcgis/rest/services/EnvironmentalPlanning/FeatureServer/3/query");
+  for (const [k, v] of Object.entries({ f: "json", where: "1=1", returnExtentOnly: "true", outSR: 4326 })) u.searchParams.set(k, v);
+  const j = await (await fetch(u)).json(); if (!j.extent) throw new Error(`protected mountains → no extent ${JSON.stringify(j)}`);
+  const e = j.extent, PAD = 0.05, x0 = round(e.xmin - PAD), y0 = round(e.ymin - PAD), x1 = round(e.xmax + PAD), y1 = round(e.ymax + PAD);
+  areas.ga_blue_ridge = { label: "North Georgia mountains (DCA protected-mountain data extent)", source: "Georgia DCA EnvironmentalPlanning layer 3 (ProtectedMountainAreas) extent, padded 0.05°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
 if (want("spalding_ga")) {
   const rec = index.counties.find((c) => c.state === "GA" && /^spalding$/i.test(c.name.replace(/ county$/i, "")));

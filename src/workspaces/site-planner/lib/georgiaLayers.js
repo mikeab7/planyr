@@ -69,7 +69,11 @@ export const conservationStyle = (props, opacity) => {
   const c = CONSERVATION_COLORS[conservationKind(props)];
   return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: opacity * 0.3 };
 };
-const ACCESS_WORDS = { OA: "Open to the public", RA: "Restricted access", XA: "Closed", Closed: "Closed", Open: "Open to the public", Restricted: "Restricted access" };
+const ACCESS_WORDS = {
+  OA: "Open to the public", "Open Access": "Open to the public", Open: "Open to the public", Yes: "Open to the public",
+  RA: "Restricted access", Restricted: "Restricted access",
+  XA: "No public access", Closed: "No public access", "Closed Access": "No public access", "No Public Access": "No public access", No: "No public access",
+}; // any other published value (an unreadable code, "Unknown") is left out rather than guessed
 
 /* ───────────────────────────── Job tax credit tiers ───────────────────────────── */
 
@@ -117,6 +121,13 @@ export function impairedCategories(raw) {
     .map((c) => ({ code: c, meaning: IMPAIRED_CATEGORY[c] || null }));
 }
 
+/* EPD's own abbreviations for what a reach is listed for. Only the ones EPD's list uses unambiguously are spelled out; anything else is kept exactly as published. */
+export const CAUSE_WORDS = {
+  "bio f": "fish community", "bio m": "macroinvertebrate community", "do": "dissolved oxygen", "fc": "fecal coliform bacteria", "e coli": "E. coli bacteria",
+  "ph": "pH", "temp": "temperature", "cu": "copper", "pb": "lead", "zn": "zinc", "se": "selenium", "as": "arsenic", "cd": "cadmium", "ni": "nickel", "hg": "mercury", "pcbs": "PCBs",
+};
+export const causeWords = (raw) => String(raw == null ? "" : raw).split(/[,;]/).map((c) => c.trim()).filter(Boolean).map((c) => CAUSE_WORDS[c.toLowerCase()] || c).join(", ");
+
 /* ───────────────────────────── Dams ───────────────────────────── */
 
 export const DAM_CLASS = {
@@ -136,10 +147,10 @@ const JUR = { group: "jurisdiction" };
 export const GEORGIA_LAYERS = {
   /* ---- Part V: groundwater (EPD) ---- */
   ga_recharge: row("gaRecharge", {
-    label: "Groundwater Recharge Areas", source: "Georgia EPD — Hydrologic Atlas 18 (1989)", ...ENV, role: "area", order: 20, minZoom: 8, color: "#0e7490", styleFn: washStyle("#0e7490", 0.35, 0.8), legend: [{ label: "Significant recharge area", color: "#0e7490" }],
+    label: "Groundwater Recharge Areas", source: "Georgia EPD — Hydrologic Atlas 18 (1989)", ...ENV, role: "area", order: 20, minZoom: 8, simplifyFactor: 1, color: "#0e7490", styleFn: washStyle("#0e7490", 0.35, 0.8), legend: [{ label: "Significant recharge area", color: "#0e7490" }],
     hoverTitle: "Groundwater recharge area", hoverSource: "Georgia EPD", hoverFields: [{ names: ["NAME"], label: "aquifer" }],
     identifyCard: (props) => card("Significant groundwater recharge area",
-      [rowIf("Aquifer", sentence(props && props.NAME)), [{ label: "Rule", text: "Georgia Rule 391-3-16-.02 — new landfills, hazardous-waste facilities, large above-ground tanks and septic lot sizes are restricted here; the county's recharge-area ordinance sets the standard." }]],
+      [rowIf("Mapped as", sentence(props && props.NAME)), [{ label: "Rule", text: "Georgia Rule 391-3-16-.02 — new landfills, hazardous-waste facilities, large above-ground tanks and septic lot sizes are restricted here; the county's recharge-area ordinance sets the standard." }]],
       "A 1989 modeled map — screening, not a site hydrogeology."),
     note: "Georgia's 'significant groundwater recharge areas' — Hydrologic Atlas 18 (Georgia Geologic Survey, 1989) as EPD republishes it. Rule 391-3-16-.02 defines a recharge area by this map; the county adopts the protective ordinance, so confirm the county's recharge-area overlay. Turn on 'Groundwater Pollution Susceptibility' beside it: the stricter standards apply where susceptibility is high.",
     infoCaveat: "A 1989 modeled map; the county ordinance governs what is restricted. Absence is not an all-clear for private wells.",
@@ -160,7 +171,7 @@ export const GEORGIA_LAYERS = {
   }),
   /* ---- Part V: rivers, mountains, water-supply watersheds ---- */
   ga_protected_rivers: row("gaProtectedRiver", {
-    label: "Protected Rivers", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "line", order: 22, minZoom: 8, color: "#0369a1", weight: 2.4, opacity: 0.55, legend: [{ label: "Protected river", color: "#0369a1" }],
+    label: "Protected Rivers", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "line", order: 22, minZoom: 8, simplifyFactor: 1, color: "#0369a1", weight: 2.4, opacity: 0.55, legend: [{ label: "Protected river", color: "#0369a1" }],
     hoverTitle: "Protected river", hoverSource: "Georgia DCA", hoverFields: [{ names: ["FENAME"] }],
     identifyCard: (props) => card(sentence(props && props.FENAME) || "Protected river",
       [[{ label: "Rule", text: "A protected river (average flow of 400 cfs or more): local governments must keep a 100-ft natural vegetative buffer each side, measured from the banks (O.C.G.A. 12-2-8, Rule 391-3-16-.04). Turn on 'Stream Buffers' to see the band." }]],
@@ -169,7 +180,7 @@ export const GEORGIA_LAYERS = {
     infoCaveat: "DCA's compiled lines (2003) — a planning map, not a survey; the buffer is measured from the bank, not this line.",
   }),
   ga_protected_mountains: row("gaProtectedMountain", {
-    label: "Protected Mountains", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "area", order: 23, minZoom: 9, simplifyFactor: 2, vertexBudget: 400000, color: "#166534", styleFn: washStyle("#166534", 0.4, 0.5), legend: [{ label: "Protected mountain", color: "#166534" }],
+    label: "Protected Mountains", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "area", order: 23, minZoom: 9, simplifyFactor: 2, precision: 3, cellSize: 4096, vertexBudget: 700000, regions: ["ga_blue_ridge"], color: "#166534", styleFn: washStyle("#166534", 0.4, 0.5), legend: [{ label: "Protected mountain", color: "#166534" }],
     hoverTitle: "Protected mountain", hoverSource: "Georgia DCA", hoverFields: [],
     identifyCard: () => card("Protected mountain",
       [[{ label: "Definition", text: "Land at or above 2,200 ft elevation with a slope of 25% or more over at least 500 ft horizontally (O.C.G.A. 12-2-8)." }, { label: "Rule", text: "Local governments must adopt mountain-protection standards for it (Rule 391-3-16-.05); check the county ordinance before planning any grading." }]],
@@ -201,7 +212,7 @@ export const GEORGIA_LAYERS = {
   }),
   /* ---- Karst ---- */
   ga_karst: row("gaCarbonate", {
-    label: "Karst-Prone Rock (Carbonate)", source: "USGS — State Geologic Map Compilation", ...ENV, role: "area", order: 26, minZoom: 8, color: "#7e22ce", styleFn: washStyle("#7e22ce", 0.35, 0.8), legend: [{ label: "Limestone / dolomite at the surface", color: "#7e22ce" }],
+    label: "Karst-Prone Rock (Carbonate)", source: "USGS — State Geologic Map Compilation", ...ENV, role: "area", order: 26, minZoom: 8, simplifyFactor: 1, color: "#7e22ce", styleFn: washStyle("#7e22ce", 0.35, 0.8), legend: [{ label: "Limestone / dolomite at the surface", color: "#7e22ce" }],
     hoverTitle: "Carbonate rock", hoverSource: "USGS", hoverFields: [{ names: ["UNIT_NAME"] }],
     identifyCard: (props) => card(sentence(props && props.UNIT_NAME) || "Carbonate rock",
       [[{ label: "Why it matters", text: "Limestone and dolomite dissolve — sinkholes, caves and rock-head that varies by tens of feet form in it (Bartow, Floyd and Polk counties; the Dougherty Plain)." }]],
@@ -229,9 +240,9 @@ export const GEORGIA_LAYERS = {
         [rowIf("Address", [text(p.Address), text(p.City)].filter(Boolean).join(", ")), rowIf("County", text(p.County)),
           rowIf("Acreage", Number.isFinite(acres) && acres > 0 ? `${acres.toFixed(acres < 10 ? 2 : 1)} AC` : ""),
           rowIf("Liability limitation issued", approvalDate(p.LOLIssueDate) || "")],
-        "The limitation of liability travels with the property; EPD's file has the closeout terms.");
+        (approvalDate(p.LOLIssueDate) ? "The limitation of liability travels with the property; EPD's file has the terms." : "EPD's file shows whether a limitation of liability was issued."));
     },
-    note: "Properties in EPD's Brownfield Program (Georgia Hazardous Site Reuse and Redevelopment Act) with the date EPD issued the prospective purchaser's limitation of liability. A listed site has been through a regulatory closeout — good news for the buyer, and a deed and risk-reduction restriction to read. Neighbouring brownfields are a Phase I flag.",
+    note: "Properties in EPD's Brownfield Program (Georgia Hazardous Site Reuse and Redevelopment Act) with the date EPD issued the prospective purchaser's limitation of liability. A listed property is in or has been through EPD's program; where a limitation of liability was issued its date is shown (about half the records carry none) and it comes with a risk-reduction standard and deed terms to read. Neighbouring brownfields are a Phase I flag.",
     infoCaveat: "EPD's list as last edited (May 2022) — newer closeouts are not in this copy.",
   }),
   ga_dams: row("gaDams", {
@@ -255,7 +266,7 @@ export const GEORGIA_LAYERS = {
       const p = props || {};
       const cats = impairedCategories(p.Category);
       return card(text(p.Name) || "Impaired stream",
-        [rowIf("Reach", text(p.Location)), rowIf("Listed for", text(p.Cause)), rowIf("Designated use", text(p.Uses)),
+        [rowIf("Reach", text(p.Location)), rowIf("Listed for", causeWords(p.Cause)), rowIf("Designated use", text(p.Uses)),
           cats.map((c) => ({ label: `Category ${c.code.toUpperCase()}`, text: c.meaning || "As EPD lists it" }))],
         "A water-quality listing of the reach — it is not a buffer.");
     },
@@ -311,7 +322,7 @@ export const GEORGIA_LAYERS = {
     note: "The corridor plan's 35-ft undisturbed buffer along tributary streams inside the 2,000-ft corridor.",
   }),
   ga_opportunity_zones: row("gaOpportunityZones", {
-    label: "Opportunity Zones", source: "Georgia DCA — Federal Opportunity Zones", ...JUR, role: "area", order: 22, minZoom: 8, color: "#be185d", styleFn: washStyle("#be185d", 0.3, 1), legend: [{ label: "Qualified Opportunity Zone tract", color: "#be185d" }],
+    label: "Opportunity Zones", source: "Georgia DCA — Federal Opportunity Zones", ...JUR, role: "area", order: 22, minZoom: 8, simplifyFactor: 1, color: "#be185d", styleFn: washStyle("#be185d", 0.3, 1), legend: [{ label: "Qualified Opportunity Zone tract", color: "#be185d" }],
     hoverTitle: "Opportunity zone", hoverSource: "Georgia DCA", hoverFields: [{ names: ["NAMELSAD10"] }, { names: ["County"] }],
     identifyCard: (props) => card("Qualified Opportunity Zone", [rowIf("Census tract", sentence(props && props.NAMELSAD10)), rowIf("County", sentence(props && props.County))], "Federal designation (IRC §1400Z-1); the tax rules are federal."),
     note: "Georgia's federally designated Qualified Opportunity Zone census tracts (2017 designation, DCA). An investment through a qualified opportunity fund into property here carries federal capital-gains treatment — a tract-level fact, so confirm the parcel's tract and the fund rules with tax counsel.",
@@ -331,14 +342,14 @@ export const GEORGIA_LAYERS = {
     infoCaveat: "The 2026 ranking; eligibility and the credit amount are set by DCA's current schedule.",
   }),
   ga_spalding_zoning: row("gaSpaldingZoning", {
-    label: "Zoning (Spalding County)", source: "Spalding County, GA — zoning GIS", ...JUR, regions: ["spalding_ga"], role: "area", order: 24, minZoom: 11, color: SPALDING_COLORS.manufacturing, styleFn: spaldingStyle,
+    label: "Zoning (Spalding County)", source: "Spalding County, GA — zoning GIS", ...JUR, regions: ["spalding_ga"], role: "area", order: 24, minZoom: 11, simplifyFactor: 1, vertexBudget: 200000, color: SPALDING_COLORS.manufacturing, styleFn: spaldingStyle,
     legend: ["manufacturing", "commercial", "residential", "agricultural", "planned", "other"].map((k) => ({ label: SPALDING_CLASS_LABEL[k], color: SPALDING_COLORS[k] })),
     lineLabel: { field: "LABEL", minZoom: 15, format: (v) => { const t = text(v); return t || null; } },
     hoverTitle: "Zoning", hoverSource: "Spalding County", hoverFields: [{ names: ["LABEL"], label: "zone" }],
     identifyCard: (props) => card(`Zone ${spaldingCode(props) || "(code not published)"}`,
-      [[{ label: "Jurisdiction", text: "Unincorporated Spalding County — the City of Griffin and the other cities zone themselves" }], rowIf("Colour class", SPALDING_CLASS_LABEL[spaldingZoneClass(props && props.LABEL)])],
+      [[{ label: "Jurisdiction", text: "Spalding County's own zoning — covers the unincorporated county and the town of Orchard Hill; the City of Griffin zones itself and is not in this layer" }], rowIf("Colour class", SPALDING_CLASS_LABEL[spaldingZoneClass(props && props.LABEL)])],
       "The county's zoning ordinance defines each district; ask Planning & Zoning."),
-    note: "Spalding County's own zoning polygons for the UNINCORPORATED county (colour = a coarse use class; the code prints at close zoom). The cities zone themselves and are not in this layer. District names are not shown: the county's description field disagrees with itself for several codes, and a name comes from the ordinance. Confirm the district and any conditions with the county.",
+    note: "Spalding County's own zoning polygons for the unincorporated county and the town of Orchard Hill (colour = a coarse use class; the code prints at close zoom). The City of Griffin zones itself and is not in this layer (confirm any other city with the county). District names are not shown: the county's description field disagrees with itself for several codes, and a name comes from the ordinance. Confirm the district and any conditions with the county.",
     infoCaveat: "County-published polygons (edited August 2025); a rezoning or condition may post later. Confirm with Spalding County Planning & Zoning.",
   }),
 };

@@ -773,7 +773,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
     }
     const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline", failed.rivers && "the protected-river lines"].filter(Boolean);
     if (lost.length) {
-      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — the bands shown are the 25 ft state minimum only, NOT the full rule (screening only).`);
+      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — the bands shown may be narrower than the rule, NOT the full answer (screening only).`);
     } else if (!list.length) {
       report("empty", "No state-waters streams in this view.");
     } else if (data.nhd.truncated) {

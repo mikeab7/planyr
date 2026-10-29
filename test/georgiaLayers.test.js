@@ -18,7 +18,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 import { ALL_LAYERS, MERGE_GROUPS, LAYER_GROUP_ORDER, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import {
   GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE, susceptibilityStyle, SUSCEPTIBILITY_COLORS, conservationStyle, conservationKind, CONSERVATION_COLORS,
-  jtcStyle, JTC_COLORS, spaldingZoneClass, SPALDING_COLORS, spaldingStyle, impairedCategories, solidWasteType, sentence,
+  jtcStyle, JTC_COLORS, causeWords, spaldingZoneClass, SPALDING_COLORS, spaldingStyle, impairedCategories, solidWasteType, sentence,
 } from "../src/workspaces/site-planner/lib/georgiaLayers.js";
 import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
 import { _setServiceAreas } from "../src/workspaces/site-planner/lib/serviceAreas.js";
@@ -26,12 +26,13 @@ import { SERVICE_AREAS } from "../src/workspaces/site-planner/lib/serviceAreaDat
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 import { streamBufferBands, GA_BUFFER_TIERS, bufferLegend } from "../src/workspaces/site-planner/lib/georgiaStreamBuffers.js";
 import { VECTOR_SOURCES } from "../src/workspaces/site-planner/lib/vectorLayers.js";
+import { featureLayerOptions } from "../src/workspaces/site-planner/lib/layerRequest.js";
 
 const IDS = Object.keys(GEORGIA_LAYERS);
 _setServiceAreas(SERVICE_AREAS);
 
 const SAVANNAH = { lat: 32.08, lng: -81.10 }, ATLANTA = { lat: 33.75, lng: -84.39 }, ROSWELL = { lat: 33.9982, lng: -84.3348 };
-const HOUSTON = { lat: 29.76, lng: -95.37 }, NASHVILLE = { lat: 36.16, lng: -86.78 }, GRIFFIN = { lat: 33.2468, lng: -84.2641 }, BUTTS = { lat: 33.29, lng: -83.97 };
+const DAHLONEGA = { lat: 34.53, lng: -83.98 }, HOUSTON = { lat: 29.76, lng: -95.37 }, NASHVILLE = { lat: 36.16, lng: -86.78 }, GRIFFIN = { lat: 33.2468, lng: -84.2641 }, BUTTS = { lat: 33.29, lng: -83.97 };
 const shown = (id, loc) => layerAvailableHere(ALL_LAYERS[id], { loc });
 
 describe("every Georgia due-diligence row is declared complete and Georgia-only", () => {
@@ -110,6 +111,10 @@ describe("a row is never offered where its source cannot answer", () => {
     expect(metro.length).toBe(6);
     for (const id of metro) { expect(shown(id, SAVANNAH), `${id} @ Savannah`).toBe(false); expect(shown(id, GRIFFIN), `${id} @ Griffin`).toBe(false); expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true); }
   });
+  it("protected mountains: offered in the north Georgia mountains only — not on a Savannah, Macon, Columbus, Augusta or Atlanta site", () => {
+    expect(shown("ga_protected_mountains", DAHLONEGA)).toBe(true);
+    for (const p of [SAVANNAH, ATLANTA, { lat: 32.84, lng: -83.63 }, { lat: 32.46, lng: -84.99 }, { lat: 33.47, lng: -81.97 }]) expect(shown("ga_protected_mountains", p), JSON.stringify(p)).toBe(false);
+  });
   it("Spalding County zoning shows in Spalding, not in Butts (the neighbour) or Atlanta", () => {
     expect(shown("ga_spalding_zoning", GRIFFIN)).toBe(true);
     expect(shown("ga_spalding_zoning", BUTTS)).toBe(false);
@@ -187,6 +192,50 @@ describe("the click cards print plain words — never a raw field, 'null' or 'un
     const bf = GEORGIA_LAYERS.ga_brownfields.identifyCard(samples.ga_brownfields);
     expect(bf.rows.find((r) => r.label === "Liability limitation issued").text).toBe("Sep 13, 2012");
     expect(bf.rows.find((r) => r.label === "Acreage").text).toBe("18.7 AC");
+  });
+});
+
+describe("heavy-geometry rows ask the service for what the browser can draw", () => {
+  it("every polygon row with no simplification of its own would stall the draw budget: all polygon rows over ~100k vertices generalise server-side", () => {
+    for (const id of ["ga_gw_susceptibility", "ga_protected_mountains", "ga_conservation", "ga_impaired_streams", "ga_opportunity_zones", "ga_spalding_zoning", "ga_jtc_tiers", "ga_recharge", "ga_karst", "ga_protected_rivers"]) expect(GEORGIA_LAYERS[id].simplifyFactor, id).toBeGreaterThan(0);
+  });
+  it("protected mountains: ONE big cell per view and coarse coordinates, a budget above the measured worst case (535k vertices at parcel zoom), and it passes through to the request", () => {
+    const c = GEORGIA_LAYERS.ga_protected_mountains;
+    expect(c.vertexBudget).toBeGreaterThanOrEqual(600000);
+    expect(c.cellSize).toBeGreaterThanOrEqual(2048);
+    const o = featureLayerOptions(c, 1, "p");
+    expect(o.cellSize).toBe(c.cellSize); expect(o.precision).toBe(3); expect(o.simplifyFactor).toBe(2);
+  });
+  it("Spalding zoning's whole layer is 124k vertices: its budget is raised above the per-batch default", () => { expect(GEORGIA_LAYERS.ga_spalding_zoning.vertexBudget).toBeGreaterThan(124444); });
+});
+
+describe("card wording that the adversarial review caught", () => {
+  it("impaired streams: EPD's cause codes read as words, an unknown code is kept as published", () => {
+    expect(causeWords("Bio F, Bio M, E Coli")).toBe("fish community, macroinvertebrate community, E. coli bacteria");
+    expect(causeWords("DO")).toBe("dissolved oxygen"); expect(causeWords("Zzz")).toBe("Zzz"); expect(causeWords("")).toBe("");
+    const c = GEORGIA_LAYERS.ga_impaired_streams.identifyCard({ Name: "X Creek", Category: "5", Cause: "Bio F" });
+    expect(c.rows.find((r) => r.label === "Listed for").text).toBe("fish community");
+  });
+  it("brownfields: the liability line appears only when EPD issued a limitation (46% of records have none)", () => {
+    const withDate = GEORGIA_LAYERS.ga_brownfields.identifyCard({ PropertyName: "A", LOLIssueDate: 1347494400000 });
+    const without = GEORGIA_LAYERS.ga_brownfields.identifyCard({ PropertyName: "B", LOLIssueDate: null });
+    expect(withDate.note).toMatch(/travels with the property/); expect(without.note).not.toMatch(/travels with the property/);
+    expect(without.rows.some((r) => /Liability/.test(r.label))).toBe(false);
+    expect(GEORGIA_LAYERS.ga_brownfields.note).not.toMatch(/has been through a regulatory closeout/);
+  });
+  it("Spalding zoning does not claim 'unincorporated only': Orchard Hill is in it, Griffin is not", () => {
+    const c = GEORGIA_LAYERS.ga_spalding_zoning;
+    expect(c.note).toMatch(/Orchard Hill/); expect(c.note).toMatch(/Griffin zones itself/); expect(c.note).not.toMatch(/UNINCORPORATED county\b(?! and)/);
+    expect(c.identifyCard({ LABEL: "R1" }).rows[0].text).toMatch(/Orchard Hill/);
+  });
+  it("conservation: every common published access value prints, an unreadable code does not", () => {
+    const acc = (v) => (GEORGIA_LAYERS.ga_conservation.identifyCard({ Unit_Nm: "U", Category: "Fee", Pub_Access: v }).rows.find((r) => r.label === "Public access") || {}).text;
+    expect(acc("No Public Access")).toBe("No public access"); expect(acc("Open Access")).toBe("Open to the public"); expect(acc("OA")).toBe("Open to the public"); expect(acc("Closed Access")).toBe("No public access");
+    expect(acc("3")).toBeUndefined(); expect(acc("Unknown")).toBeUndefined();
+  });
+  it("recharge: the NAME field is not always an aquifer, so the row says 'Mapped as'", () => {
+    const c = GEORGIA_LAYERS.ga_recharge.identifyCard({ NAME: "PROBABLE AREAS OF THICK SOILS" });
+    expect(c.rows[0].label).toBe("Mapped as"); expect(c.rows[0].text).toBe("Probable Areas Of Thick Soils");
   });
 });
 
