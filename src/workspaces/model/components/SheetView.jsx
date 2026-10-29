@@ -54,6 +54,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 // Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
+import { cellPadX, canSpill, spillSpanWidth } from "../lib/cellTextLayout.js";
 import ContextMenu from "./ContextMenu.jsx";
 import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
 import { pinDragCursor } from "../../../shared/ui/controls.jsx";
@@ -896,8 +897,12 @@ const SheetView = forwardRef(function SheetView({
           // clip instead, matching Excel). The spilled span is `pointer-events: none` so the
           // empty cells underneath stay their own real click targets — spilling is purely
           // visual, never a merge. A merged anchor never spills — it already owns real width.
+          // The gate (`canSpill`) and the text inset (`padX`) are shared with the non-spill path,
+          // so clearing or refilling a neighbour changes how FAR a label runs, never where it starts.
+          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
+          const padX = cellPadX(cellStyle.indent, zoom);
           let spillCols = 0;
-          if (!merge && row && cell.kind === "text" && !cell.empty && !isEditing) {
+          if (row && canSpill({ kind: cell.kind, empty: cell.empty, merged: !!merge, editing: isEditing, align: hAlign, wrap: cellStyle.wrap })) {
             for (let cc = c + 1; cc < cols.length && row[cc] && row[cc].empty; cc++) spillCols++;
           }
           const w = merge ? (() => { let sum = 0; for (let k = merge.c1; k <= merge.c2; k++) sum += renderColW(k); return sum; })() : renderColW(c);
@@ -905,7 +910,6 @@ const SheetView = forwardRef(function SheetView({
           // Explicit style overrides the kind-based default alignment; an ABSENT valign still
           // means vertically CENTERED — this app's own existing default for every cell, not
           // Excel's "bottom" (see Ribbon.jsx's AlignmentGroup for why that distinction matters).
-          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
           const vAlign = cellStyle.valign === "top" ? "flex-start" : cellStyle.valign === "bottom" ? "flex-end" : "center";
           const border = cellStyle.border || {};
           const edgeCSS = (token) => (token === "double" ? `${3 * zoom}px double var(--text-primary)` : token === "thin" ? `${1.5 * zoom}px solid var(--text-primary)` : "1px solid var(--border-default)");
@@ -929,7 +933,6 @@ const SheetView = forwardRef(function SheetView({
           if (!merge && cell.kind === "number" && cell.display !== "" && formatAt(sheet, r, c) == null) {
             const rawNum = Number(cell.display);
             if (Number.isFinite(rawNum)) {
-              const padX = (6 + (cellStyle.indent || 0) * 14) * zoom;
               // -1 for the cell's own right border, and a little slack so a canvas-measured
               // "fits" doesn't land 1-2px inside the DOM's own actual (slightly different font
               // hinting) rendered width and still trip the ellipsis below.
@@ -974,7 +977,7 @@ const SheetView = forwardRef(function SheetView({
                 boxSizing: "border-box",
                 display: "flex", alignItems: vAlign,
                 justifyContent: hAlign === "right" ? "flex-end" : hAlign === "center" ? "center" : "flex-start",
-                padding: isEditing ? 0 : `0 ${(6 /* SPACE.sm literal — see designTokens.js note above */ + (cellStyle.indent || 0) * 14) * zoom}px`,
+                padding: isEditing ? 0 : `0 ${padX}px`, // padX = CELL_PAD_PX (SPACE.sm literal — see designTokens.js note above) + indent
                 borderTop: border.top ? edgeCSS(border.top) : undefined,
                 borderLeft: border.left ? edgeCSS(border.left) : undefined,
                 borderRight: border.right ? edgeCSS(border.right) : "1px solid var(--border-default)",
@@ -1025,7 +1028,7 @@ const SheetView = forwardRef(function SheetView({
                   style={{ width: "100%", height: "100%", boxSizing: "border-box", border: "none", padding: "0 7px", font: "inherit", fontVariantNumeric: "tabular-nums", background: "transparent", color: "inherit", textAlign: "inherit" }}
                 />
               ) : spillCols > 0 ? (
-                <span style={{ position: "absolute", left: 8 * zoom, top: 0, height: "100%", display: "flex", alignItems: "center", width: spillWidth - 16 * zoom, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
+                <span style={{ position: "absolute", left: padX, top: 0, height: "100%", display: "flex", alignItems: vAlign, width: spillSpanWidth(spillWidth, padX), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
               ) : (
                 // B1076480 — this cell's own text-clipping wrapper (see the outer box's `overflow`
                 // comment above): `minWidth: 0` is required for a flex child to actually shrink
