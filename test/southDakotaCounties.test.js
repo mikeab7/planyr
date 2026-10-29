@@ -75,8 +75,13 @@ describe("the wired South Dakota rows", () => {
     }
   });
   it("no two rows share a layer, and none is the Pennington copy another county's org republishes", () => {
+    // a shared service (Tripp + Todd) is allowed only when every row on it carries its own scope
+    const keys = SD_ROWS.map((r) => r[2] + "|" + (r[5] || ""));
+    expect(new Set(keys).size).toBe(keys.length);
+    const by = {};
+    for (const r of SD_ROWS) (by[r[2]] = by[r[2]] || []).push(r);
+    for (const rows of Object.values(by)) if (rows.length > 1) for (const r of rows) expect(r[5], r[0]).toBeTruthy();
     const urls = SD_ROWS.map((r) => r[2]);
-    expect(new Set(urls).size).toBe(urls.length);
     for (const u of urls) expect(u).not.toMatch(/PenningtonCountySDParcels|PenningtonParcels/);
   });
   it("Dewey excludes the tribal-trust polygons whose parcel id reads TRIBAL", () => {
@@ -94,10 +99,11 @@ describe("the wired South Dakota rows", () => {
     for (const [k] of SD_ROWS) expect(hand.has(k), k).toBe(false);
   });
   it("every row carries a dated verification record", () => {
-    for (const [k] of SD_ROWS) expect(SOUTH_DAKOTA_VERIFICATION["sd_" + k]?.verifiedOn, k).toBe("2026-10-19");
+    for (const [k] of SD_ROWS) expect(SOUTH_DAKOTA_VERIFICATION["sd_" + k]?.verifiedOn, k).toMatch(/^2026-10-(19|29)$/);
   });
-  it("Lincoln County (behind a Cloudflare bot challenge) and District III's counties are not wired on an unmeasured host", () => {
-    for (const [k, , u] of SD_ROWS) expect(u, k).not.toMatch(/lincolncountysd|districtiii\.org|beacon\.schneidercorp|equatorstudios/);
+  it("Lincoln County (behind a Cloudflare bot challenge) is not wired, and District III's counties are wired only on its NEW REST root (the old /arcgis path is the dead one)", () => {
+    for (const [k, , u] of SD_ROWS) expect(u, k).not.toMatch(/lincolncountysd|districtiii\.org\/arcgis|beacon\.schneidercorp|equatorstudios/);
+    for (const [k, , u] of SD_ROWS) if (/districtiii\.org/.test(u)) expect(u, k).toMatch(/^\/gis-proxy\/gis\.districtiii\.org\/server\/rest\/services\//);
   });
 });
 

@@ -4,7 +4,7 @@
  * no usable public service found and says so by name ("<County> — no parcel data wired here yet"): docs/STATEWIDE-PARCELS.md
  * "Georgia counties (2026-10-19)" has the per-county table and what was searched for every gap.
  * Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy), idField, addrField, scopeWhere, owner column?, centre lat, lng,
- * padded bbox]. Provenance prose lives in gaProvenance.js (build-time only, never shipped to the browser). */
+ * padded bbox, help text?]. The optional last cell replaces the default help (a layer that covers only part of its county says so there). Provenance prose lives in gaProvenance.js (build-time only, never shipped to the browser). */
 export const GA_ROWS = [
   ["appling","Appling","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Appling_County_Wide_View/FeatureServer/19","PIN",null,null,0,31.719,-82.299,[31.458,-82.568,31.98,-82.03]],
   ["atkinson","Atkinson","/gis-proxy/www.sgrcmaps.com/alma/rest/services/Atkinson/PropertyInformation/MapServer/1","PARCEL_NO",null,null,1,31.299,-82.8815,[31.162,-83.159,31.436,-82.604]],
@@ -19,6 +19,11 @@ export const GA_ROWS = [
   ["decatur","Decatur","https://services1.arcgis.com/uCLHikoEKcQwv9tD/arcgis/rest/services/Tax_Parcels/FeatureServer/7","PARCEL_ID","SITUS",null,1,30.888,-84.6155,[30.674,-84.883,31.102,-84.348]],
   ["dodge","Dodge","https://services5.arcgis.com/HHvUPZ2XuLOAJxjR/arcgis/rest/services/Dodge_County_Wide_View/FeatureServer/38","PIN",null,null,0,32.172,-83.118,[31.883,-83.395,32.461,-82.841]],
   ["douglas","Douglas","/gis-proxy/maps.douglascountyga.gov/arcgis/rest/services/CountyLayers/Parcels/MapServer/15","ParcelNo","PropertyAddress",null,1,33.6895,-84.7375,[33.551,-84.919,33.828,-84.556]],
+  ["berrien","Berrien","/gis-proxy/www.sgrcmaps.com/arcgis/rest/services/Berrien/TaxParcelBoundaries/MapServer/2","PARCEL_NO",null,null,1,31.2535,-83.231,[30.928, -83.53, 31.579, -82.932]],
+  ["carroll","Carroll","https://services1.arcgis.com/T9kPZugHsZ2SNOXt/arcgis/rest/services/COUNTY_PARCEL/FeatureServer/0","Parcel_no",null,null,1,33.6208,-85.0747,[33.325, -85.435, 33.916, -84.714]],
+  ["macon","Macon","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Parcels12_2018/FeatureServer/0","Parcel_Num","Address",null,1,32.3473,-84.0393,[32.078, -84.35, 32.617, -83.728]],
+  ["early","Early","https://services3.arcgis.com/aYlIod9kh71mtnDG/arcgis/rest/services/Parcels/FeatureServer/0","Parcel_No",null,null,0,31.3,-84.866,[30.976,-85.203,31.624,-84.529]],
+  ["catoosa","Catoosa","https://services5.arcgis.com/UWegEIVn0JwnAZjA/arcgis/rest/services/ZoningFeatureLayer_withDescriptions_Feb2026_view/FeatureServer/83","Parcel_No",null,null,0,34.876,-85.118,[34.659,-85.368,35.093,-84.868],"Catoosa County parcels (the county GIS's zoning layer, one polygon per lot with its parcel number) \u2014 unincorporated Catoosa only; lots inside Ringgold and Fort Oglethorpe are not on this layer. Search by parcel number."],
   ["elbert","Elbert","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Elbert_County_and_Municipalities_2027_FDM/FeatureServer/2","Parcel_ID",null,null,0,34.125,-82.8385,[33.939,-83.123,34.311,-82.554]],
   ["floyd","Floyd","https://services2.arcgis.com/nV67H1IJR8GS6SAA/ArcGIS/rest/services/Current_Parcels/FeatureServer/5","PARCEL","PROP_ADDR",null,1,34.3365,-85.2325,[34.066,-85.48,34.607,-84.985]],
   ["franklin","Franklin","https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Rose_Hill_Updated_Web_Map_05152023_WFL1/FeatureServer/8","JJGPin",null,null,0,34.3875,-83.225,[34.22,-83.415,34.555,-83.035]],
@@ -58,9 +63,9 @@ export const GA_ROWS = [
   ["wilkinson","Wilkinson","https://services1.arcgis.com/ue5fMdTkPeHLCobS/arcgis/rest/services/Wilkinson_GA_gdb/FeatureServer/0","ParcelID","PropertyAddress",null,1,32.7935,-83.179,[32.559,-83.426,33.028,-82.932]],
   ["worth","Worth","https://services2.arcgis.com/PYn6bWCjT6bhw1z3/arcgis/rest/services/Worth_Heirs_Concentration_Census_Block_WFL1/FeatureServer/4","Parcel_No",null,null,1,31.5855,-83.8385,[31.299,-84.052,31.872,-83.625]],
 ];
-export const gaRaw = () => Object.fromEntries(GA_ROWS.map(([k, n, url, id, addr, scope]) => ["ga_" + k, {
+export const gaRaw = () => Object.fromEntries(GA_ROWS.map(([k, n, url, id, addr, scope, , , , , note]) => ["ga_" + k, {
   state: "GA", label: n + " County, GA", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}), ...(scope ? { scopeWhere: scope } : {}),
-  help: n + " County parcels. Search by parcel number" + (addr ? " or a site address." : "."),
+  help: note || n + " County parcels. Search by parcel number" + (addr ? " or a site address." : "."),
 }]));
 export const gaMap = () => Object.fromEntries(GA_ROWS.map(([k, n, url, id, addr, scope, ow, la, ln, bb]) => ["ga_" + k, {
   state: "GA", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url, ...(scope ? { scopeWhere: scope } : {}),

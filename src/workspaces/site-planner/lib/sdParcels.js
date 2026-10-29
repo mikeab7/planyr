@@ -1,7 +1,7 @@
 /* NEW-1 (B2343936, 2026-10-19) — SOUTH DAKOTA county parcel sources beyond the three hand-written rows already in counties.js (sd_pennington, sd_minnehaha,
  * sd_siouxfalls). South Dakota has NO statewide parcel layer (the State GIS server — sdgis.sd.gov — publishes boundaries, PLSS and tax-match districts, no
  * parcels); counties publish through (a) the First District Association of Local Governments' ArcGIS Server (www.1stdistrict.org — one folder per county),
- * (b) their own ArcGIS Online orgs, (c) Planning District III's server (gis.districtiii.org — answers the relay with a WAF 404/403, so NOT wired), and
+ * (b) their own ArcGIS Online orgs, (c) Planning District III's server (gis.districtiii.org — it MOVED: since 2026-10-20 the REST root is /server/rest/services, not /arcgis; the 2026-10-29 second pass wired its 32 county layers), and
  * (d) Beacon / Equator viewers (no public REST). A county absent from this table AND from counties.js has no measured public service and says so by name
  * ("<County> — no parcel data wired here yet"): docs/STATEWIDE-PARCELS.md "South Dakota counties (2026-10-19)" has the per-county table and what was searched.
  * Keys are `sd_`-prefixed. Row: [slug, county name, layer (non-arcgis.com hosts ride /gis-proxy), idField, addrField, scopeWhere, owner column?, centre lat, lng,
@@ -22,6 +22,42 @@ export const SD_ROWS = [
   ["miner","Miner","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Miner/minermapnetpro/MapServer/2","RECORD","PROP_STREE",null,1,44.02,-97.615,[43.814, -97.886, 44.225, -97.343]],
   ["moody","Moody","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Moody/moodymapnet/MapServer/7","PIN",null,null,1,44.022,-96.674,[43.815, -96.922, 44.229, -96.427]],
   ["roberts","Roberts","/gis-proxy/www.1stdistrict.org/arcgis/rest/services/Roberts/robertsmapnetpro/MapServer/3","PARCEL_ID",null,null,1,45.619,-96.855,[45.272, -97.263, 45.967, -96.448]],
+  /* Second pass 2026-10-29 (B2504800): Planning District III counties on its NEW REST root (gis.districtiii.org/server/rest/services), Yankton from the county Office of Emergency Management's own org, Lake and Meade from Schneider Geospatial's anonymous public county feed (a vendor copy of the county roll). */
+  ["aurora","Aurora","/gis-proxy/gis.districtiii.org/server/rest/services/AURORA_COUNTY_WEB_LAYERS/MapServer/8","PARCEL_ID","SITE_ADDRESS",null,1,43.7152,-98.57,[43.398, -98.91, 44.033, -98.23]],
+  ["bennett","Bennett","/gis-proxy/gis.districtiii.org/server/rest/services/BENNETT_COUNTY_WEB_LAYERS/MapServer/4","PARCEL_ID","SITE_ADDRESS","(PARCEL_ID IS NULL OR PARCEL_ID <> 'TRIBAL')",1,43.1908,-101.6747,[42.887, -102.218, 43.495, -101.131]],
+  ["bonhomme","Bon Homme","/gis-proxy/gis.districtiii.org/server/rest/services/BON_HOMME_COUNTY_WEB_LAYERS2/MapServer/1","PARCEL_ID","TC_SITE_ADDRESS",null,1,42.9693,-97.9015,[42.667, -98.268, 43.272, -97.535]],
+  ["brule","Brule","/gis-proxy/gis.districtiii.org/server/rest/services/BRULE_COUNTY_WEB_LAYERS/MapServer/12","PARCEL_ID","TC_SITE_ADDRESS",null,1,43.7163,-99.1318,[43.401, -99.565, 44.032, -98.699]],
+  ["buffalo","Buffalo","/gis-proxy/gis.districtiii.org/server/rest/services/BUFFALO_COUNTY_WEB_LAYERS/MapServer/20","PARCEL_ID","SITEADDRES",null,1,44.065,-99.254,[43.831, -99.678, 44.3, -98.83]],
+  ["butte","Butte","/gis-proxy/gis.districtiii.org/server/rest/services/BUTTE_COUNTY_WEB_LAYERS2/MapServer/3","PARCEL_ID","TC_SITE_ADDRESS",null,1,44.8937,-103.511,[44.474, -104.16, 45.313, -102.862]],
+  ["campbell","Campbell","/gis-proxy/gis.districtiii.org/server/rest/services/CAMPBELL_COUNTY_WEB_LAYERS/MapServer/22","PARCEL_ID","SITE_ADDRESS",null,1,45.77,-100.1165,[45.496, -100.615, 46.044, -99.618]],
+  ["charlesmix","Charles Mix","/gis-proxy/gis.districtiii.org/server/rest/services/CHARLES_MIX_WEB_LAYERS3/MapServer/6","Parcelid","TC_SITE_ADDRESS","(Parcelid IS NULL OR Parcelid NOT IN ('RW','RR RW','CITY RW'))",1,43.1713,-98.69,[42.739, -99.403, 43.603, -97.977]],
+  ["davison","Davison","/gis-proxy/gis.districtiii.org/server/rest/services/DAVISON_COUNTY_WEB_LAYERS1/MapServer/4","PARCEL_ID","SITE_ADDRESS",null,1,43.6707,-98.1485,[43.397, -98.431, 43.944, -97.866]],
+  ["day","Day","/gis-proxy/gis.districtiii.org/server/rest/services/DAY_COUNTY_WEB_LAYERS/MapServer/7","PARCEL_ID","TC_SITE_ADDRESS","(PARCEL_ID IS NULL OR PARCEL_ID <> 'TRIBAL')",1,45.3725,-97.6072,[45.056, -98.085, 45.69, -97.129]],
+  ["douglas","Douglas","/gis-proxy/gis.districtiii.org/server/rest/services/DOUGLAS_COUNTY_WEB_LAYERS/MapServer/3","PARCEL_ID","CAMA_SITE_ADDRESS",null,1,43.348,-98.4135,[43.096, -98.813, 43.599, -98.014]],
+  ["faulk","Faulk","/gis-proxy/gis.districtiii.org/server/rest/services/FAULK_COUNTY_WEB_LAYERS/MapServer/3","PARCEL_ID","SITE_ADDRESS",null,1,45.0718,-99.1485,[44.791, -99.675, 45.352, -98.622]],
+  ["gregory","Gregory","/gis-proxy/gis.districtiii.org/server/rest/services/GREGORY_COUNTY_WEB_LAYERS/MapServer/5","PID","CAMA_SITE_ADDRESS",null,1,43.248,-99.0157,[42.892, -99.634, 43.604, -98.398]],
+  ["haakon","Haakon","/gis-proxy/gis.districtiii.org/server/rest/services/HAAKON_COUNTY_WEB_LAYERS/MapServer/15","PARCELID","SITE_ADDRESS",null,1,44.3715,-101.5295,[43.893, -102.113, 44.849, -100.946]],
+  ["hanson","Hanson","/gis-proxy/gis.districtiii.org/server/rest/services/HANSON_COUNTY_WEB_LAYERS/MapServer/4","PARCEL_ID","SITE_ADDRESS",null,1,43.6707,-97.7887,[43.397, -98.067, 43.944, -97.511]],
+  ["hughes","Hughes","/gis-proxy/gis.districtiii.org/server/rest/services/HUGHES_COUNTY_WEB_LAYERS/MapServer/2","PARCEL_ID","CAMA_SITE_ADDRESS","(PARCEL_ID IS NULL OR PARCEL_ID NOT IN ('TRIBAL','CORP','GFP','RIVER'))",1,44.3287,-100.0983,[44.008, -100.692, 44.65, -99.504]],
+  ["hutchinson","Hutchinson","/gis-proxy/gis.districtiii.org/server/rest/services/HUTCHINSON_COUNTY_WEB_LAYERS2/MapServer/14","PARCEL_ID","SITE_ADDRESS",null,1,43.3342,-97.7578,[43.072, -98.216, 43.597, -97.299]],
+  ["jackson","Jackson","/gis-proxy/gis.districtiii.org/server/rest/services/JACKSON_COUNTY_WEB_LAYERS2/MapServer/42","PARCEL_ID","SITE_ADDRESS","(PARCEL_ID IS NULL OR PARCEL_ID NOT IN ('TRIBAL','HWY','RAIL','ROAD','ALLEY'))",1,43.6942,-101.6075,[43.293, -102.247, 44.096, -100.968]],
+  ["jerauld","Jerauld","/gis-proxy/gis.districtiii.org/server/rest/services/JERAULD_COUNTY_WEB_LAYERS/MapServer/9","PARCEL_ID","CAMA_SITE_ADDRESS",null,1,44.065,-98.6335,[43.831, -99.031, 44.3, -98.236]],
+  ["jones","Jones","/gis-proxy/gis.districtiii.org/server/rest/services/JONES_COUNTY_WEB_LAYERS/MapServer/8","PARCEL_ID","SITE_ADDRESS",null,1,43.9483,-100.707,[43.62, -101.17, 44.276, -100.244]],
+  ["lyman","Lyman","/gis-proxy/gis.districtiii.org/server/rest/services/LYMAN_COUNTY_WEB_LAYERS/MapServer/0","RECORD_NUM","CAMA_SITE_ADDRESS",null,1,43.8623,-99.829,[43.403, -100.472, 44.322, -99.186]],
+  ["marshall","Marshall","/gis-proxy/gis.districtiii.org/server/rest/services/MARSHALL_COUNTY_WEB_LAYERS/MapServer/3","PARCEL_ID","SITE_ADDRESS",null,1,45.7475,-97.6047,[45.459, -98.079, 46.037, -97.13]],
+  ["mcpherson","McPherson","/gis-proxy/gis.districtiii.org/server/rest/services/MCPHERSON_COUNTY_WEB_LAYERS/MapServer/2","PARCEL_ID","SITE_ADDRESS",null,1,45.7695,-99.2275,[45.496, -99.825, 46.043, -98.631]],
+  ["mellette","Mellette","/gis-proxy/gis.districtiii.org/server/rest/services/MELLETTE_COUNTY_WEB_LAYERS/MapServer/5","PARCEL_ID","CAMA_SITE_ADDRESS","(PARCEL_ID IS NULL OR PARCEL_ID <> 'TRIBAL')",1,43.6283,-100.724,[43.294, -101.331, 43.962, -100.117]],
+  ["potter","Potter","/gis-proxy/gis.districtiii.org/server/rest/services/POTTER_COUNTY_WEB_LAYERS/MapServer/2","PARCEL_ID","CAMA_SITE_ADDRESS",null,1,45.0748,-100.001,[44.797, -100.528, 45.353, -99.474]],
+  ["sanborn","Sanborn","/gis-proxy/gis.districtiii.org/server/rest/services/SANBORN_COUNTY_WEB_LAYERS/MapServer/13","PARCEL_ID","CAMA_SITE_ADDRESS",null,1,44.021,-98.0968,[43.744, -98.438, 44.298, -97.756]],
+  ["stanley","Stanley","/gis-proxy/gis.districtiii.org/server/rest/services/STANLEY_COUNTY_WEB_LAYERS/MapServer/2","PARCEL_ID","CAMA_SITE_ADDRESS",null,1,44.4772,-100.5365,[44.073, -101.277, 44.882, -99.796]],
+  ["sully","Sully","/gis-proxy/gis.districtiii.org/server/rest/services/SULLY_COUNTY_WEB_LAYERS/MapServer/2","PARCEL_ID","CAMA_SITE_ADDRESS",null,1,44.723,-100.2028,[44.448, -100.831, 44.998, -99.575]],
+  ["todd","Todd","/gis-proxy/gis.districtiii.org/server/rest/services/TRIPP_TODD_WEB_LAYERS/MapServer/6","TRIPP_TODD_PARCEL_ID","TC_SITE_ADDRESS","TRIPP_TODD_COUNTY = 'TODD COUNTY'",1,43.1908,-100.7147,[42.887, -101.331, 43.495, -100.098]],
+  ["tripp","Tripp","/gis-proxy/gis.districtiii.org/server/rest/services/TRIPP_TODD_WEB_LAYERS/MapServer/6","TRIPP_TODD_PARCEL_ID","TC_SITE_ADDRESS","TRIPP_TODD_COUNTY = 'TRIPP COUNTY'",1,43.3768,-99.8835,[42.891, -100.334, 43.863, -99.433]],
+  ["turner","Turner","/gis-proxy/gis.districtiii.org/server/rest/services/TURNER_COUNTY_LAYERS/MapServer/4","parcel_id","SITE_ADDRESS",null,1,43.2938,-97.1612,[42.986, -97.502, 43.602, -96.82]],
+  ["ziebach","Ziebach","/gis-proxy/gis.districtiii.org/server/rest/services/ZIEBACH_COUNTY_WEB_LAYERS/MapServer/3","PARCEL_ID",null,"(PARCEL_ID IS NULL OR PARCEL_ID <> 'TRIBAL')",1,44.9965,-101.5693,[44.416, -102.103, 45.577, -101.035]],
+  ["yankton","Yankton","https://services6.arcgis.com/Iz7mflZV1DVFSE2G/arcgis/rest/services/PARCELS/FeatureServer/0","PARCEL_ID","Site_Addre","FEATURE_TY = 'PARCEL'",1,42.9847,-97.399,[42.698, -97.736, 43.271, -97.062]],
+  ["lake","Lake","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/CityofMadisonSD_FEATURE/MapServer/0","ParcelID","Location",null,1,44.0198,-97.133,[43.744, -97.474, 44.296, -96.791]],
+  ["meade","Meade","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/MeadeCountySD_REST/MapServer/1","PARCELID","ADDRESS",null,1,44.5945,-102.7897,[44.045, -103.678, 45.144, -101.901]],
 ];
 export const sdRaw = () => Object.fromEntries(SD_ROWS.map(([k, n, url, id, addr, scope]) => ["sd_" + k, {
   state: "SD", label: n + " County, SD", layerUrl: url, idField: id, ...(addr ? { addrField: addr } : {}), ...(scope ? { scopeWhere: scope } : {}),

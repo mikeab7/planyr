@@ -38,7 +38,7 @@ beforeAll(async () => {
 describe("every unwired county has a recorded reason or is admitted never-researched (B2486192)", () => {
   it("the join is not vacuous — hundreds of counties are unwired, and South Dakota's are among them", () => {
     expect(unwired.length).toBeGreaterThan(300);
-    expect(unwired.filter((r) => r.state === "SD").length).toBe(49);
+    expect(unwired.filter((r) => r.state === "SD").length).toBe(14); // 49 until the 2026-10-29 second pass wired 35 (District III's server had moved)
   });
 
   it("no unwired county falls to the default without a row (or a NEVER_RESEARCHED entry)", () => {
@@ -46,10 +46,10 @@ describe("every unwired county has a recorded reason or is admitted never-resear
   });
 
   it("red-proof: a county in neither place IS reported, and listing it as never-researched clears it", () => {
-    const fake = [{ name: "Aurora County", state: "SD" }, { name: "Atlantis County", state: "SD" }];
+    const fake = [{ name: "Harding County", state: "SD" }, { name: "Atlantis County", state: "SD" }];
     expect(unresearchedCounties(fake, PARCEL_GAPS, [])).toEqual(["sd_atlantis"]);
     expect(unresearchedCounties(fake, PARCEL_GAPS, ["sd_atlantis"])).toEqual([]);
-    expect(unresearchedCounties(fake, {}, [])).toEqual(["sd_aurora", "sd_atlantis"]);
+    expect(unresearchedCounties(fake, {}, [])).toEqual(["sd_harding", "sd_atlantis"]);
   });
 
   it("NEVER_RESEARCHED overlaps nothing in the table and names only real unwired counties", () => {
