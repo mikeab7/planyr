@@ -1282,7 +1282,7 @@ export default function ModelApp({
   // never a silent no-op and never "acts on the last range only".
   const refuseMulti = () => {
     if (!isMulti(liveRef.current.selRange)) return false;
-    showNotice(MULTI_SELECTION_MESSAGE);
+    onNotice(MULTI_SELECTION_MESSAGE); // the same banner the grid's own multi-range refusals use (model-file-notice)
     return true;
   };
 
