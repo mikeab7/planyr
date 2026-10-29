@@ -9,7 +9,7 @@
  * can't leak into a neighbouring county.
  */
 import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
-import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
+import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER, pointOrderByForUrl } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
 import { isPlaceholderValue, countyRecord } from "./appraisal.js";
 import { normalizeIdFor } from "./tnParcelId.js";
@@ -115,7 +115,13 @@ async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere
   const idField = resolveSearchField(meta.fields, "id", idHint, pinId);
   const addrField = resolveSearchField(meta.fields, "address", addrHint, pinAddr);
   const where = buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere });
-  const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326, timeoutMs }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
+  // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot (counties.js `pointOrderBy`) is asked newest-first, and one lot is listed once.
+  const orderBy = pointOrderByForUrl(layerUrl);
+  let feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326, timeoutMs, ...(orderBy ? { orderBy } : {}) }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
+  if (orderBy && idField) {
+    const seen = new Set();
+    feats = feats.filter((f) => { const k = String((f.attributes || {})[idField]); if (seen.has(k)) return false; seen.add(k); return true; });
+  }
   return { feats, layerUrl, idField, addrField };
 }
 

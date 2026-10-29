@@ -920,6 +920,14 @@ kbd {
    the same scale as everything else rather than from a vendor default. Scoped to the control we
    place; Leaflet's other widgets are untouched. */
 .leaflet-control-zoom.leaflet-bar { border-radius: var(--radius-md); overflow: hidden; }
+/* NEW-1 (DeSoto / Olive Branch, B2507057) — the pipe-size label on a utility line (layers.js buildFeatureLayer, cfg.lineLabel): bare text with a halo of the
+   surface colour so it reads over aerial imagery in both themes; no box, no pointer events. */
+.leaflet-tooltip.pf-line-label {
+  background: transparent; border: 0; box-shadow: none; padding: 0; pointer-events: none;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px; color: var(--text-primary); /* design-exempt: map ink, sized to sit on a 2px line */
+  text-shadow: 0 0 2px var(--planner-raised), 0 0 2px var(--planner-raised), 0 0 3px var(--planner-raised), 0 0 3px var(--planner-raised);
+}
+.leaflet-tooltip.pf-line-label::before { display: none; }
 /* The buttons keep NO radius of their own — the container is rounded and clips them, so one
    curve is defined in one place. Leaflet's own 2px on each button is invisible under that clip
    but still reads as an off-scale value to anything auditing computed style, and a corner that

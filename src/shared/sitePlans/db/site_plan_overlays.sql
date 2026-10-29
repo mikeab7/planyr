@@ -79,7 +79,9 @@ create table if not exists public.site_plan_overlays (
   updated_at     timestamptz not null default now(),
 
   primary key (id),
-  foreign key (review_id) references public.doc_reviews(id) on delete cascade,
+  -- NEW-2: RESTRICT, not cascade — matches production since B972512-HARDENING (see
+  -- site_plan_overlays_review_fk_restrict.sql). A review with an overlay must never be deletable.
+  foreign key (review_id) references public.doc_reviews(id) on delete restrict,
   constraint site_plan_overlays_ft_per_px_positive check (ft_per_px is null or ft_per_px > 0)
 );
 

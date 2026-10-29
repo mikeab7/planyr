@@ -7,6 +7,12 @@
 -- The data blob is generated from e2e/fixtures/sites/dense-testfit.fixture.json — regenerate that fixture
 -- (node scripts/build-fixtures.mjs) and re-emit this file if the fixture bumps.
 
+-- NEW-6 (data-risk 2026-10-29): soft-delete first — sites_block_delete_live_group refuses a hard delete
+-- of a LIVE row (PLYR1) and must not be bypassed. Same two steps as ui-audit/lib/liveFixtures.mjs.
+with u as (select id from auth.users where email = 'e2e@planyr.test')
+update public.sites set deleted_at = now()
+where id = 'e2e-fixture-testfit' and user_id in (select id from u) and deleted_at is null;
+
 with u as (select id from auth.users where email = 'e2e@planyr.test')
 delete from public.sites
 where id = 'e2e-fixture-testfit' and user_id in (select id from u);
