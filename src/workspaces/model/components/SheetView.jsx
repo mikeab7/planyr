@@ -1327,6 +1327,7 @@ const SheetView = forwardRef(function SheetView({
       ref={outerRef}
       tabIndex={0}
       data-testid="model-sheet"
+      data-letters-are-text=""
       onPointerDown={(e) => { pointerIdRef.current = e.pointerId; }}
       onKeyDown={onKeyDown}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}

@@ -353,8 +353,8 @@ const GLOBAL_ITEMS = [
   }),
   item({
     id: "global.fullscreen-bare", label: "Toggle full screen", combo: ["f"],
-    note: "Only where nothing editable is on screen (the map, or a drawing).",
-    evidence: [{ file: "src/shared/ui/AppHeader.jsx", pattern: '(e.key === "f" || e.key === "F") && !e.altKey && !writeableDocumentOnScreen()' }],
+    note: "Only where nothing editable is on screen (the map, or a drawing) — never on the Spreadsheet or a comp sheet.",
+    evidence: [{ file: "src/shared/ui/AppHeader.jsx", pattern: 'bareFullscreenAllowed({' }],
   }),
 ];
 

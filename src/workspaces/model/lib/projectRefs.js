@@ -159,8 +159,8 @@ export function openPlanId(projectId) {
 
 /** The open concept/scheme's own NAME (e.g. "Concept A (copy)") — never the project's name, which
  *  is a separate field (`site.site`, see storage.js's `siteNameOf`). Exposed so a caller outside
- *  this module (ModelApp.jsx's header — spreadsheet-concept-crumb, NEW-1) can show which scheme is
- *  feeding `Site.*`/`Plan.*` without a second "which plan is open" resolution to drift from this
+ *  this module can show which scheme is
+ *  feeding `Site.*`/`Plan.*` (its only header use, the Spreadsheet's plan crumb, was removed 2026-10-29 — only the Site tab is plan-scoped) without a second "which plan is open" resolution to drift from this
  *  one. `null` when there is no project, no plan resolved, or the resolved plan has no site record
  *  at all — a project that has never touched the Site Planner (lazy `sites` row creation). */
 export function openConceptName(projectId) {
