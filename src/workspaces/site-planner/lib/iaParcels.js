@@ -13,6 +13,7 @@ export const IA_ROWS = [
   ["buchanan","Buchanan","https://services2.arcgis.com/tYzMC5F5v21mpREX/arcgis/rest/services/Buchanan_Parcels/FeatureServer/0","PIN","SitusAddress",1,42.465,-91.8975,[42.285, -92.098, 42.654, -91.589]],
   ["buenavista","Buena Vista","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/BuenaVistaCountyIA_WFS/MapServer/1","PIN",null,1,42.7385,-95.231,[42.549, -95.411, 42.924, -94.91]],
   ["butler","Butler","https://services9.arcgis.com/jIUaDZdgfolKpFKx/arcgis/rest/services/Parcels_Backfilled/FeatureServer/0","Name",null,0,42.732,-92.8505,[42.542, -93.041, 42.924, -92.548]],
+  ["carroll","Carroll","https://services.arcgis.com/MDnKSa5jEPrGeZAc/arcgis/rest/services/ParcelPoly1/FeatureServer/0","PIN","ADDRESS",1,42.03,-94.931,[41.85,-95.111,42.219,-94.627]],
   ["cass","Cass","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/CassCountyIA_WFS/MapServer/0","ParcelID","location",1,41.3315,-94.994,[41.151, -95.174, 41.517, -94.697]],
   ["cedar","Cedar","https://services.arcgis.com/PFvIQefqmvWD9XbB/arcgis/rest/services/Cedar_County_IA_Parcels_and_Muni/FeatureServer/1","PARCELPIN","ADDRESS",1,41.7745,-91.191,[41.584, -91.381, 41.959, -90.891]],
   ["cerrogordo","Cerro Gordo","https://services7.arcgis.com/qyyoWTywHfayX67L/arcgis/rest/services/Tax_Parcels_Feature_Service/FeatureServer/0","PARCELID","Tyler_FullSitus",1,43.0785,-93.333,[42.898, -93.513, 43.265, -93.016]],
@@ -33,6 +34,7 @@ export const IA_ROWS = [
   ["harrison","Harrison","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/HarrisonCountyIA_WFS/MapServer/0","PARCELID","LOCATION",1,41.688,-95.8155,[41.498, -96.145, 41.872, -95.493]],
   ["humboldt","Humboldt","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/HumboldtCountyIA_WFS/MapServer/0","PIN","location",1,42.7775,-94.325,[42.638, -94.465, 42.923, -93.968]],
   ["iowa","Iowa","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/IowaCountyIA_WFS/MapServer/0","PID","Address",1,41.6785,-92.1315,[41.498, -92.312, 41.87, -91.819]],
+  ["jackson","Jackson","https://services9.arcgis.com/MwhmgVod3RReV4Us/arcgis/rest/services/Parcels/FeatureServer/0","PIN","location",1,42.1635,-90.769,[42.023,-90.909,42.399,-90.14]],
   ["jasper","Jasper","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/JasperCountyIA_WFS/MapServer/12","ParcelID","FullSitus",1,41.68,-93.1535,[41.5, -93.363, 41.874, -92.75]],
   ["jefferson","Jefferson","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/JeffersonCountyIA_WFS/MapServer/37","PIN",null,1,41.027,-92.056,[40.887, -92.196, 41.172, -91.706]],
   ["johnson","Johnson","https://services1.arcgis.com/kinOpEPqSpu5VOlu/arcgis/rest/services/Parcels/FeatureServer/0","PPN","PropertyAddress",1,41.674,-91.6545,[41.414, -91.845, 41.867, -91.358]],
@@ -45,12 +47,14 @@ export const IA_ROWS = [
   ["marshall","Marshall","https://services7.arcgis.com/Q3OrXXlwkXgDadxe/arcgis/rest/services/Marshall_County_Parcels/FeatureServer/0","formatted_",null,1,42.033,-93.0625,[41.853, -93.253, 42.218, -92.759]],
   ["mills","Mills","https://services1.arcgis.com/20XE3PmEegLQbaze/arcgis/rest/services/parcels_iworq/FeatureServer/0","PIN","Location",1,41.031,-95.709,[40.891, -95.889, 41.174, -95.384]],
   ["mitchell","Mitchell","https://services.arcgis.com/4YineAQdtmx0tv46/arcgis/rest/services/Parcel_MitchellIA/FeatureServer/0","PIN","Address",1,43.3525,-92.889,[43.202, -93.039, 43.512, -92.548]],
+  ["monroe","Monroe","https://services3.arcgis.com/rPGIngGsuNJl5jbk/arcgis/rest/services/Monroe_Features/FeatureServer/43","PIN","ADDRESS",1,41.0305,-92.9705,[40.891,-93.11,41.171,-92.632],{ pointOrderBy: "OBJECTID DESC" }],
   ["monona","Monona","https://services.arcgis.com/4YineAQdtmx0tv46/arcgis/rest/services/Parcels_Monona/FeatureServer/0","GIS_Parcel_Number","TSC_Site_Address",1,42.0315,-95.9735,[41.851, -96.374, 42.224, -95.667]],
   ["muscatine","Muscatine","/gis-proxy/magic-gis.com/arcgis/rest/services/MAGIC_Landbase/Countywide_ParcelLayers/MapServer/44","PIN","ADDRESS",1,41.465,-91.2415,[41.325, -91.381, 41.606, -90.769]],
   ["osceola","Osceola","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/OsceolaCountyIA_WFS/MapServer/1","parcelid","location",1,43.374,-95.749,[43.244, -95.879, 43.511, -95.387]],
   ["pottawattamie","Pottawattamie","/gis-proxy/gis.pottcounty-ia.gov/arcgis/rest/services/PublicDataEnterprise/PublicData_Parcels/FeatureServer/0","PIN","ADDRESS",1,41.3315,-95.6935,[41.151, -96.023, 41.521, -95.152]],
   ["scott","Scott","https://services.arcgis.com/ovln19YRWV44nBqV/arcgis/rest/services/Cadastral/FeatureServer/3","PIN","PropertyAddress",1,41.64,-90.562,[41.44, -90.912, 41.785, -90.316]],
   ["story","Story","https://services6.arcgis.com/AledtxqV5ouP1iUf/arcgis/rest/services/Parcels_Esri/FeatureServer/0","PARCELID","FullSitus",1,42.0315,-93.5355,[41.851, -93.716, 42.217, -93.222]],
+  ["vanburen","Van Buren","https://services7.arcgis.com/LyehP2GGSSSIG2rN/arcgis/rest/services/Master/FeatureServer/17","PIN","ADDRESS",1,40.7535,-92.043,[40.583,-92.203,40.911,-91.706]],
   ["wapello","Wapello","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/WapelloCountyIA_WFS/MapServer/0","PIN","ADDRESS",1,41.0305,-92.5135,[40.891, -92.654, 41.172, -92.174]],
   ["warren","Warren","https://services.arcgis.com/lcU85Lh3UvDs5Naw/arcgis/rest/services/Parcels051622/FeatureServer/0","PARCELID","ADDRESS",1,41.3305,-93.63,[41.15, -93.81, 41.52, -93.319]],
   ["wayne","Wayne","https://services5.arcgis.com/JzjHkPYdZx3hBL2l/arcgis/rest/services/WayneCoParcelsJan2023_view/FeatureServer/1","PARCELPIN","ADDRESS",1,40.7405,-93.403,[40.571, -93.573, 40.911, -93.09]],
@@ -61,10 +65,46 @@ export const IA_ROWS = [
   ["worth","Worth","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/WorthCountyIA_WFS/MapServer/0","PIN",null,0,43.3725,-93.383,[43.242, -93.513, 43.512, -93.017]],
   ["wright","Wright","/gis-proxy/wfs.schneidercorp.com/arcgis/rest/services/WrightCountyIA_WFS/MapServer/2","PIN","PROPERTYADDRESS",1,42.7335,-93.799,[42.543, -93.989, 42.923, -93.49]],
 ];
-export const iaRaw = () => Object.fromEntries(IA_ROWS.map(([k, n, url, id, addr]) => ["ia_" + k, {
-  state: "IA", label: n + " County, IA", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}),
+export const iaRaw = () => Object.fromEntries(IA_ROWS.map(([k, n, url, id, addr, , , , , extra]) => ["ia_" + k, {
+  state: "IA", label: n + " County, IA", layerUrl: url, idField: id, pinIdField: true, ...(addr ? { addrField: addr, pinAddrField: true } : {}), ...(extra || {}),
   help: n + " County parcels (county GIS). Search by parcel number" + (addr ? " or a site address." : "."),
 }]));
-export const iaMap = () => Object.fromEntries(IA_ROWS.map(([k, , url, , , , la, ln, bb]) => ["ia_" + k, {
-  state: "IA", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url,
+export const iaMap = () => Object.fromEntries(IA_ROWS.map(([k, , url, , , , la, ln, bb, extra]) => ["ia_" + k, {
+  state: "IA", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: url, ...(extra && extra.pointOrderBy ? { pointOrderBy: extra.pointOrderBy } : {}),
+}]));
+
+/* NEW-1 (Iowa second pass, B2499376, 2026-10-29) — the COPY rows. Owner rule 2026-10-28/29: a county with no source of its own gets the best non-official COPY that exists, labelled
+ * as a copy with the date of its data ("older is fine if it's the best there is"). For Iowa that is the Iowa Department of Homeland Security & Emergency Management's statewide
+ * parcel compilation, republished on ArcGIS Online by the University of Iowa (item d653c883…, "Iowa Statewide Parcel Data, 2017"): one polygon layer holding all 99 counties,
+ * parcels as of 2 November 2017 ("deprecated … not current", the publisher says so itself), carrying the parcel number (PARCELNUMB) and the deed holder (DEEDHOLDER) and no
+ * address. Each row rides that ONE layer filtered to its own county (`scopeWhere` on COUNTYNAME — the Idaho / Mississippi shape `sharedLayerUrlConflicts` sanctions), and the
+ * parcel card reads parcelCopies.js and says "Copy of … as of November 2017 — not the county's own". A county's OWN or newer source REPLACES its row here the day one turns up.
+ * Row: [slug, county name, COUNTYNAME value exactly as the layer spells it, centre lat, lng, padded bbox]. */
+export const IA_STATE_COPY_URL = "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0";
+export const IA_COPY_ROWS = [
+  ["appanoose","Appanoose","APPANOOSE",40.7445,-92.941,[40.574,-93.111,40.911,-92.632]],
+  ["calhoun","Calhoun","CALHOUN",42.388,-94.6905,[42.198,-94.931,42.572,-94.398]],
+  ["cherokee","Cherokee","CHEROKEE",42.743,-95.689,[42.553,-95.879,42.926,-95.387]],
+  ["clarke","Clarke","CLARKE",41.031,-93.8895,[40.891,-94.029,41.173,-93.553]],
+  ["desmoines","Des Moines","DES MOINES",40.9255,-91.2345,[40.696,-91.414,41.084,-90.945]],
+  ["greene","Greene","GREENE",42.038,-94.463,[41.848,-94.653,42.219,-94.158]],
+  ["hancock","Hancock","HANCOCK",43.0805,-93.8095,[42.9,-93.99,43.264,-93.49]],
+  ["henry","Henry","HENRY",40.981,-91.5465,[40.801,-91.726,41.171,-91.364]],
+  ["howard","Howard","HOWARD",43.355,-92.4185,[43.205,-92.568,43.511,-92.068]],
+  ["ida","Ida","IDA",42.36,-95.538,[42.2,-95.758,42.573,-95.324]],
+  ["lucas","Lucas","LUCAS",41.021,-93.4335,[40.891,-93.574,41.171,-93.09]],
+  ["madison","Madison","MADISON",41.3305,-94.0805,[41.15,-94.261,41.52,-93.789]],
+  ["obrien","O'Brien","O' BRIEN",43.084,-95.709,[42.904,-95.879,43.268,-95.39]],
+  ["paloalto","Palo Alto","PALO ALTO",43.073,-94.751,[42.903,-94.931,43.262,-94.445]],
+  ["plymouth","Plymouth","PLYMOUTH",42.744,-96.3105,[42.554,-96.651,42.926,-95.858]],
+  ["tama","Tama","TAMA",42.08,-92.5595,[41.85,-92.789,42.304,-92.292]],
+  ["washington","Washington","WASHINGTON",41.3305,-91.7765,[41.15,-91.957,41.521,-91.471]],
+];
+const iaCopyScope = (scope) => "COUNTYNAME='" + scope.replace(/'/g, "''") + "'";
+export const iaCopyRaw = () => Object.fromEntries(IA_COPY_ROWS.map(([k, n, scope]) => ["ia_" + k, {
+  state: "IA", label: n + " County, IA", layerUrl: IA_STATE_COPY_URL, idField: "PARCELNUMB", pinIdField: true, scopeWhere: iaCopyScope(scope),
+  help: n + " County parcels (a 2017 statewide copy — see the note on the lot). Search by parcel number.",
+}]));
+export const iaCopyMap = () => Object.fromEntries(IA_COPY_ROWS.map(([k, , scope, la, ln, bb]) => ["ia_" + k, {
+  state: "IA", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: IA_STATE_COPY_URL, scopeWhere: iaCopyScope(scope), displayMinZoom: 16,
 }]));

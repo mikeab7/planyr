@@ -1,0 +1,499 @@
+{
+"recorded": "2026-10-29",
+"note": "One real attribute bag per COPY-row county: the 2017 statewide layer (Iowa_Parcels_2017) read live at the first spread point that returned a lot, with the live measurement (5 spread + 4 county-line points; the filtered COUNTYNAME count; the extent of that county's rows). The layer was last re-saved 2024-05; its data is frozen at 2017-11-02.",
+"rows": {
+"Appanoose County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-93.098,
+40.584,
+-92.638,
+40.899
+],
+"count": 21672
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 38894,
+"COUNTYNAME": "APPANOOSE",
+"STATEPARID": "04-010121004220000",
+"UNPARCELID": "01001012100422000000",
+"PARCELNUMB": "010121004220000",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "Wells  Josh R.  Trust  undiv. 1/2 int &",
+"Shape__Area": 285678.33203125,
+"Shape__Length": 2137.9962147399647
+}
+},
+"Calhoun County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 4,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-94.915,
+42.209,
+-94.397,
+42.56
+],
+"count": 17722
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 2440043,
+"COUNTYNAME": "CALHOUN",
+"STATEPARID": "13-883333400002",
+"UNPARCELID": "883333400002",
+"PARCELNUMB": "883333400002",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "BURLEY  CHARLES FAMILY TRUST;",
+"Shape__Area": 295204.2421875,
+"Shape__Length": 2173.393817088062
+}
+},
+"Cherokee County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-95.861,
+42.561,
+-95.388,
+42.91
+],
+"count": 16870
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 350578,
+"COUNTYNAME": "CHEROKEE",
+"STATEPARID": "18-06100000063320000300",
+"UNPARCELID": "06100000063320000300",
+"PARCELNUMB": "06100000063320000300",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "Hind  Robert D & Jean",
+"Shape__Area": 299219.734375,
+"Shape__Length": 2188.760289100528
+}
+},
+"Clarke County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-94.015,
+40.897,
+-93.557,
+41.162
+],
+"count": 12054
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 373208,
+"COUNTYNAME": "CLARKE",
+"STATEPARID": "20-06907",
+"UNPARCELID": "RWD/MC-06907                    ",
+"PARCELNUMB": "06907",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "MILETICH, JAMES M & SHARON L  ",
+"Shape__Area": 282593.36328125,
+"Shape__Length": 2127.6174220986927
+}
+},
+"Des Moines County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-91.409,
+40.698,
+-90.945,
+41.074
+],
+"count": 28855
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 582547,
+"COUNTYNAME": "DES MOINES",
+"STATEPARID": "29-0629100013",
+"UNPARCELID": "0629100013",
+"PARCELNUMB": "0629100013",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "WISCHMEIER GREGORY J",
+"Shape__Area": 206679.078125,
+"Shape__Length": 1962.655251932295
+}
+},
+"Greene County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-94.629,
+41.863,
+-94.164,
+42.21
+],
+"count": 15367
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 755286,
+"COUNTYNAME": "GREENE",
+"STATEPARID": "37-0633400004",
+"UNPARCELID": "0633400004",
+"PARCELNUMB": "0633400004",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "GARNETT  CARL F",
+"Shape__Area": 244302.90625,
+"Shape__Length": 2166.822414853157
+}
+},
+"Hancock County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-93.971,
+42.908,
+-93.498,
+43.256
+],
+"count": 15863
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 820567,
+"COUNTYNAME": "HANCOCK",
+"STATEPARID": "41-1104226000",
+"UNPARCELID": "1104226000",
+"PARCELNUMB": "1104226000",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "HEIMENDINGER  RICHARD B TRUST",
+"Shape__Area": 396888.7265625,
+"Shape__Length": 2543.956267322813
+}
+},
+"Henry County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-91.719,
+40.813,
+-91.37,
+41.164
+],
+"count": 16283
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 877352,
+"COUNTYNAME": "HENRY",
+"STATEPARID": "44-000000080908000",
+"UNPARCELID": "41200000008090800000",
+"PARCELNUMB": "000000080908000",
+"PARCELCLAS": "RESIDENTIAL",
+"DEEDHOLDER": "Messer  Michael S & Jane A",
+"Shape__Area": 2020.16015625,
+"Shape__Length": 183.48948687588143
+}
+},
+"Howard County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 4,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-92.554,
+43.213,
+-92.08,
+43.501
+],
+"count": 13569
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 897733,
+"COUNTYNAME": "HOWARD",
+"STATEPARID": "45-090310611000000",
+"UNPARCELID": "09009031061100000000",
+"PARCELNUMB": "090310611000000",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "Flugge  Keith H Etal",
+"Shape__Area": 305255.015625,
+"Shape__Length": 2210.009064985459
+}
+},
+"Ida County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-95.742,
+42.211,
+-95.322,
+42.562
+],
+"count": 11626
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 929204,
+"COUNTYNAME": "IDA",
+"STATEPARID": "47-0807426   ",
+"UNPARCELID": "0807426",
+"PARCELNUMB": "0807426   ",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "HOFMANN  PAUL M REV TRUST & JEAN HOFMANN REV TRUST",
+"Shape__Area": 69380.55859375,
+"Shape__Length": 2281.1030913077057
+}
+},
+"Lucas County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-93.558,
+40.897,
+-93.098,
+41.161
+],
+"count": 12535
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 1312755,
+"COUNTYNAME": "LUCAS",
+"STATEPARID": "59-0619300002",
+"UNPARCELID": "RWBCC -0619300002               ",
+"PARCELNUMB": "0619300002",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "LUCAS FARM LLC                ",
+"Shape__Area": 280234.2421875,
+"Shape__Length": 2117.5267800958454
+}
+},
+"Madison County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 3,
+"edgeOf": 4,
+"extent": [
+-94.242,
+41.157,
+-93.789,
+41.512
+],
+"count": 17559
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 1335860,
+"COUNTYNAME": "MADISON",
+"STATEPARID": "61-340063384010000",
+"UNPARCELID": "34034006338401000000",
+"PARCELNUMB": "340063384010000",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "JACKSON  HELEN M REV TRUST 6/9/08 (1/2) &",
+"Shape__Area": 268148.171875,
+"Shape__Length": 2072.2386827495966
+}
+},
+"O'Brien County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-95.862,
+42.909,
+-95.388,
+43.258
+],
+"count": 18267
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 1538829,
+"COUNTYNAME": "O' BRIEN",
+"STATEPARID": "71-0011051200",
+"UNPARCELID": "0011051200",
+"PARCELNUMB": "0011051200",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "J & J TRUST I  JON E PROEHL TRUSTEE",
+"Shape__Area": 304643.015625,
+"Shape__Length": 2207.8552051351953
+}
+},
+"Palo Alto County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-94.914,
+42.908,
+-94.443,
+43.255
+],
+"count": 16218
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 1582895,
+"COUNTYNAME": "PALO ALTO",
+"STATEPARID": "74-000170004003010",
+"UNPARCELID": "17000017000400301000",
+"PARCELNUMB": "000170004003010",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "Crippen Corner Farms  LP",
+"Shape__Area": 258304.87890625,
+"Shape__Length": 2034.2383593181983
+}
+},
+"Plymouth County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-96.64,
+42.561,
+-95.859,
+42.91
+],
+"count": 29915
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 1597158,
+"COUNTYNAME": "PLYMOUTH",
+"STATEPARID": "75-000001132100003",
+"UNPARCELID": "37000000113210000300",
+"PARCELNUMB": "000001132100003",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "Oetken  Warren E",
+"Shape__Area": 293359.4609375,
+"Shape__Length": 2166.9309847979976
+}
+},
+"Tama County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 5,
+"of": 5,
+"edgeHits": 4,
+"edgeOf": 4,
+"extent": [
+-92.768,
+41.862,
+-92.298,
+42.297
+],
+"count": 22837
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 2112934,
+"COUNTYNAME": "TAMA",
+"STATEPARID": "86-1014400006",
+"UNPARCELID": "R500  -1014400006               ",
+"PARCELNUMB": "1014400006",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "BRO, FRANKLIN W & ORA MAE     ",
+"Shape__Area": 273624.28515625,
+"Shape__Length": 2106.9534997074247
+}
+},
+"Washington County": {
+"url": "https://services3.arcgis.com/kd9gaiUExYqUbnoq/arcgis/rest/services/Iowa_Parcels_2017/FeatureServer/0",
+"idField": "PARCELNUMB",
+"measured": {
+"hits": 4,
+"of": 5,
+"edgeHits": 3,
+"edgeOf": 4,
+"extent": [
+-91.947,
+41.161,
+-91.484,
+41.512
+],
+"count": 21611
+},
+"lastEdit": 1715358321440,
+"attrs": {
+"OBJECTID": 2243423,
+"COUNTYNAME": "WASHINGTON",
+"STATEPARID": "92-1004400006",
+"UNPARCELID": "1004400006",
+"PARCELNUMB": "1004400006",
+"PARCELCLAS": "AGRICULTURAL",
+"DEEDHOLDER": "WEHR  RONALD J. & CAROL A.",
+"Shape__Area": 398987.25,
+"Shape__Length": 2580.4490230533847
+}
+}
+}
+}
