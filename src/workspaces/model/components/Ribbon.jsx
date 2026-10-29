@@ -52,7 +52,7 @@
  * reason. `radius.js`, by contrast, IS imported here — it's already pulled into the app's shared
  * entry chunk by Shell.jsx/AppHeader.jsx, so a Model-only importer adds nothing new to any route.
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { MenuItem, menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -219,13 +219,13 @@ function IconMore() {
 /** A button that opens an AnchoredMenu, showing a TEXT label + a trailing "▾" — used only where
  *  the control's whole point is to show the current VALUE (font family, font size, number
  *  format): the label isn't decoration, it's the readout. Clicking anything inside auto-closes. */
-function DropdownButton({ label, title, width = 190, minWidth, children }) {
+function DropdownButton({ label, title, width = 190, minWidth, keytip, children }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
       <button
-        type="button" ref={anchorRef} title={title} aria-label={title} aria-haspopup="true"
+        type="button" ref={anchorRef} data-keytip={keytip} title={title} aria-label={title} aria-haspopup="true"
         onClick={() => setOpen((o) => !o)}
         style={ribbonBtnStyle(open, { minWidth: minWidth || CTRL_H, padding: "0 6px" })}
       >
@@ -243,12 +243,12 @@ function DropdownButton({ label, title, width = 190, minWidth, children }) {
  *  control the owner's brief named explicitly (Merge, Freeze, Insert, Delete, the Borders
  *  "More") is built from this one shape, so they read as ONE family of trigger, not one-off
  *  buttons that happen to open menus. */
-function IconDropdownButton({ icon, title, width = 190, children }) {
+function IconDropdownButton({ icon, title, width = 190, keytip, children }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
-      <button type="button" ref={anchorRef} title={title} aria-label={title} aria-haspopup="true" onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(open, { gap: 2 })}>
+      <button type="button" ref={anchorRef} data-keytip={keytip} title={title} aria-label={title} aria-haspopup="true" onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(open, { gap: 2 })}>
         {icon}
         <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
       </button>
@@ -268,20 +268,43 @@ function IconDropdownButton({ icon, title, width = 190, children }) {
  *  paint-bucket) plus the current colour as a swatch bar underneath. "No fill" / default text
  *  colour is the trailing swatch in each palette (a transparent checkerboard) rather than a
  *  seventh colour. */
-function ColorSwatchButton({ label, icon, title, value, palette, onPick, defaultSwatchLabel }) {
+function ColorSwatchButton({ label, icon, title, value, palette, onPick, defaultSwatchLabel, which, keytip }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
+  // Alt H H / Alt H F C (lib/keyTips.js -> ctx.onOpenColorMenu) open this palette without a click:
+  // the event names which menu; the matching button opens and puts focus on its first swatch so the
+  // arrow keys + Enter finish the job from the keyboard. `claimed` tells the sender (Ribbon) that a
+  // mounted button took it — if none did (the control is folded into More), the Ribbon opens More.
+  useEffect(() => {
+    const onOpen = (e) => {
+      if (e.detail?.which !== which) return;
+      e.detail.claimed = true;
+      setOpen(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector("[data-color-swatch]")?.focus()));
+    };
+    window.addEventListener("model-open-color-menu", onOpen);
+    return () => window.removeEventListener("model-open-color-menu", onOpen);
+  }, [which]);
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
-      <button type="button" ref={anchorRef} title={title} aria-label={title} aria-haspopup="true" onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(false, { flexDirection: "column", gap: 0, padding: "1px 4px", width: CTRL_H })}>
+      <button type="button" ref={anchorRef} data-keytip={keytip} title={title} aria-label={title} aria-haspopup="true" onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(false, { flexDirection: "column", gap: 0, padding: "1px 4px", width: CTRL_H })}>
         {icon || <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1 }}>{label}</span>}
         <span aria-hidden="true" style={{ width: 15, height: 3, marginTop: 2, background: value || "var(--border-default)", border: value ? "none" : "1px solid var(--border-default)" }} />
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={148}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 22px)", gap: 4, padding: 6 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "repeat(5, 22px)", gap: 4, padding: 6 }}
+          onKeyDown={(e) => {
+            const items = [...e.currentTarget.querySelectorAll("[data-color-swatch]")];
+            const i = items.indexOf(document.activeElement);
+            const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 5, ArrowUp: -5 }[e.key];
+            if (i >= 0 && step) { e.preventDefault(); items[Math.max(0, Math.min(items.length - 1, i + step))].focus(); }
+            else if (e.key === "Escape") { setOpen(false); }
+          }}
+        >
           {palette.map((hex) => (
             <button
-              key={hex} type="button" title={hex === "transparent" ? defaultSwatchLabel : hex} aria-label={hex === "transparent" ? defaultSwatchLabel : hex}
+              key={hex} type="button" data-color-swatch="" title={hex === "transparent" ? defaultSwatchLabel : hex} aria-label={hex === "transparent" ? defaultSwatchLabel : hex}
               onClick={() => { onPick(hex === "transparent" ? null : hex); setOpen(false); }}
               style={{
                 width: 22, height: 22, borderRadius: RADIUS.sm, cursor: "pointer",
@@ -318,9 +341,9 @@ function ActionsGroup({ ctx }) {
         onClick={ctx.onUndo} disabled={!ctx.canUndo} style={ribbonBtnStyle(false)}><IconUndo /></button>
       <button type="button" data-testid="ribbon-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"
         onClick={ctx.onRedo} disabled={!ctx.canRedo} style={ribbonBtnStyle(false)}><IconRedo /></button>
-      <button type="button" data-testid="ribbon-format-painter" title="Format Painter — copy this cell's look onto another" aria-label="Format Painter"
+      <button type="button" data-testid="ribbon-format-painter" data-keytip="HFP" title="Format Painter — copy this cell's look onto another" aria-label="Format Painter"
         onClick={ctx.onFormatPainterToggle} aria-pressed={ctx.painterArmed} style={ribbonBtnStyle(ctx.painterArmed)}><IconPaint /></button>
-      <button type="button" data-testid="ribbon-clear-format" title="Clear Formatting" aria-label="Clear Formatting"
+      <button type="button" data-testid="ribbon-clear-format" data-keytip="HEF" title="Clear Formatting" aria-label="Clear Formatting"
         onClick={ctx.onClearFormatting} style={ribbonBtnStyle(false)}><IconEraser /></button>
     </span>
   );
@@ -330,12 +353,12 @@ function FontFaceGroup({ ctx }) {
   const s = ctx.activeStyle;
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <DropdownButton label={FONT_FAMILIES.find((f) => f.id === s.fontFamily)?.label || "Default"} title="Font family" width={160} minWidth={72}>
+      <DropdownButton label={FONT_FAMILIES.find((f) => f.id === s.fontFamily)?.label || "Default"} title="Font family" width={160} minWidth={72} keytip="HFF">
         {FONT_FAMILIES.map((f) => (
           <MenuItem key={f.id} active={s.fontFamily === f.id} style={{ fontFamily: f.id }} onClick={() => ctx.onSetCellStyle({ fontFamily: f.id === FONT_FAMILIES[0].id ? null : f.id })}>{f.label}</MenuItem>
         ))}
       </DropdownButton>
-      <DropdownButton label={String(s.fontSize || 12.5)} title="Font size" width={80} minWidth={40}>
+      <DropdownButton label={String(s.fontSize || 12.5)} title="Font size" width={80} minWidth={40} keytip="HFS">
         {FONT_SIZES.map((sz) => (
           <MenuItem key={sz} active={s.fontSize === sz} onClick={() => ctx.onSetCellStyle({ fontSize: sz === 12.5 ? null : sz })}>{sz}</MenuItem>
         ))}
@@ -348,9 +371,9 @@ function FontStyleGroup({ ctx }) {
   const s = ctx.activeStyle;
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <button type="button" data-testid="ribbon-bold" title="Bold" aria-label="Bold" aria-pressed={!!s.bold} onClick={() => ctx.onSetCellStyle(toggleBoldPatch(s))} style={ribbonBtnStyle(!!s.bold, { fontWeight: 800 })}>B</button>
-      <button type="button" data-testid="ribbon-italic" title="Italic" aria-label="Italic" aria-pressed={!!s.italic} onClick={() => ctx.onSetCellStyle(toggleItalicPatch(s))} style={ribbonBtnStyle(!!s.italic, { fontStyle: "italic" })}>I</button>
-      <button type="button" data-testid="ribbon-underline" title="Underline" aria-label="Underline" aria-pressed={!!s.underline} onClick={() => ctx.onSetCellStyle(toggleUnderlinePatch(s))} style={ribbonBtnStyle(!!s.underline, { textDecoration: "underline" })}>U</button>
+      <button type="button" data-testid="ribbon-bold" data-keytip="H1" title="Bold" aria-label="Bold" aria-pressed={!!s.bold} onClick={() => ctx.onSetCellStyle(toggleBoldPatch(s))} style={ribbonBtnStyle(!!s.bold, { fontWeight: 800 })}>B</button>
+      <button type="button" data-testid="ribbon-italic" data-keytip="H2" title="Italic" aria-label="Italic" aria-pressed={!!s.italic} onClick={() => ctx.onSetCellStyle(toggleItalicPatch(s))} style={ribbonBtnStyle(!!s.italic, { fontStyle: "italic" })}>I</button>
+      <button type="button" data-testid="ribbon-underline" data-keytip="H3" title="Underline" aria-label="Underline" aria-pressed={!!s.underline} onClick={() => ctx.onSetCellStyle(toggleUnderlinePatch(s))} style={ribbonBtnStyle(!!s.underline, { textDecoration: "underline" })}>U</button>
       <button type="button" data-testid="ribbon-strike" title="Strikethrough" aria-label="Strikethrough" aria-pressed={!!s.strike} onClick={() => ctx.onSetCellStyle(toggleStrikePatch(s))} style={ribbonBtnStyle(!!s.strike, { textDecoration: "line-through" })}>S</button>
     </span>
   );
@@ -360,8 +383,8 @@ function ColorGroup({ ctx }) {
   const s = ctx.activeStyle;
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <ColorSwatchButton label="A" title="Text colour" value={s.color} palette={TEXT_PALETTE} defaultSwatchLabel="Default text colour" onPick={(hex) => ctx.onSetCellStyle({ color: hex })} />
-      <ColorSwatchButton icon={<IconBucket />} title="Fill colour" value={s.fill} palette={FILL_PALETTE} defaultSwatchLabel="No fill" onPick={(hex) => ctx.onSetCellStyle({ fill: hex })} />
+      <ColorSwatchButton which="font" keytip="HFC" label="A" title="Text colour" value={s.color} palette={TEXT_PALETTE} defaultSwatchLabel="Default text colour" onPick={(hex) => ctx.onSetCellStyle({ color: hex })} />
+      <ColorSwatchButton which="fill" keytip="HH" icon={<IconBucket />} title="Fill colour" value={s.fill} palette={FILL_PALETTE} defaultSwatchLabel="No fill" onPick={(hex) => ctx.onSetCellStyle({ fill: hex })} />
       {/* STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour convention toggle, ON by
           default. A manual font colour (the "A" swatch above) always wins over this regardless
           of the toggle's state — SheetView.jsx's own render decides that precedence. */}
@@ -378,19 +401,19 @@ function AlignmentGroup({ ctx }) {
   const s = ctx.activeStyle;
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <button type="button" data-testid="ribbon-align-left" title="Align left" aria-label="Align left" aria-pressed={s.align === "left"} onClick={() => ctx.onSetCellStyle({ align: "left" })} style={ribbonBtnStyle(s.align === "left")}><AlignGlyph align="left" /></button>
-      <button type="button" data-testid="ribbon-align-center" title="Align center" aria-label="Align center" aria-pressed={s.align === "center"} onClick={() => ctx.onSetCellStyle({ align: "center" })} style={ribbonBtnStyle(s.align === "center")}><AlignGlyph align="center" /></button>
-      <button type="button" data-testid="ribbon-align-right" title="Align right" aria-label="Align right" aria-pressed={s.align === "right"} onClick={() => ctx.onSetCellStyle({ align: "right" })} style={ribbonBtnStyle(s.align === "right")}><AlignGlyph align="right" /></button>
+      <button type="button" data-testid="ribbon-align-left" data-keytip="HAL" title="Align left" aria-label="Align left" aria-pressed={s.align === "left"} onClick={() => ctx.onSetCellStyle({ align: "left" })} style={ribbonBtnStyle(s.align === "left")}><AlignGlyph align="left" /></button>
+      <button type="button" data-testid="ribbon-align-center" data-keytip="HAC" title="Align center" aria-label="Align center" aria-pressed={s.align === "center"} onClick={() => ctx.onSetCellStyle({ align: "center" })} style={ribbonBtnStyle(s.align === "center")}><AlignGlyph align="center" /></button>
+      <button type="button" data-testid="ribbon-align-right" data-keytip="HAR" title="Align right" aria-label="Align right" aria-pressed={s.align === "right"} onClick={() => ctx.onSetCellStyle({ align: "right" })} style={ribbonBtnStyle(s.align === "right")}><AlignGlyph align="right" /></button>
       {/* This app's own existing default (every cell, always) is vertically CENTERED — "Middle"
           is the implicit/default option (valign: null), never "Bottom" (Excel's own default, but
           adopting it here would silently reflow every already-typed cell in the whole app). */}
-      <IconDropdownButton icon={<IconValign />} title="Vertical alignment" width={110}>
+      <IconDropdownButton icon={<IconValign />} title="Vertical alignment" width={110} keytip="HA">
         {VALIGN_OPTIONS.map((v) => <MenuItem key={v.id} active={(s.valign || "middle") === v.id} onClick={() => ctx.onSetCellStyle({ valign: v.id === "middle" ? null : v.id })}>{v.label}</MenuItem>)}
       </IconDropdownButton>
-      <button type="button" data-testid="ribbon-wrap" title="Wrap text" aria-label="Wrap text" aria-pressed={!!s.wrap} onClick={() => ctx.onSetCellStyle(toggleWrapPatch(s))} style={ribbonBtnStyle(!!s.wrap)}><IconWrap /></button>
-      <button type="button" data-testid="ribbon-indent-dec" title="Decrease indent" aria-label="Decrease indent" onClick={() => ctx.onSetCellStyle(decreaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentDec /></button>
-      <button type="button" data-testid="ribbon-indent-inc" title="Increase indent" aria-label="Increase indent" onClick={() => ctx.onSetCellStyle(increaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentInc /></button>
-      <IconDropdownButton icon={<IconMerge />} title="Merge cells" width={170}>
+      <button type="button" data-testid="ribbon-wrap" data-keytip="HW" title="Wrap text" aria-label="Wrap text" aria-pressed={!!s.wrap} onClick={() => ctx.onSetCellStyle(toggleWrapPatch(s))} style={ribbonBtnStyle(!!s.wrap)}><IconWrap /></button>
+      <button type="button" data-testid="ribbon-indent-dec" data-keytip="H5" title="Decrease indent" aria-label="Decrease indent" onClick={() => ctx.onSetCellStyle(decreaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentDec /></button>
+      <button type="button" data-testid="ribbon-indent-inc" data-keytip="H6" title="Increase indent" aria-label="Increase indent" onClick={() => ctx.onSetCellStyle(increaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentInc /></button>
+      <IconDropdownButton icon={<IconMerge />} title="Merge cells" width={170} keytip="HM">
         <MenuItem onClick={ctx.onMergeToggle}>{ctx.mergedHere ? "Unmerge Cells" : "Merge Cells"}</MenuItem>
       </IconDropdownButton>
     </span>
@@ -400,16 +423,16 @@ function AlignmentGroup({ ctx }) {
 function NumberGroup({ ctx }) {
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <DropdownButton label={formatLabelFor(ctx.activeFormat)} title="Number format" width={210} minWidth={86}>
+      <DropdownButton label={formatLabelFor(ctx.activeFormat)} title="Number format" width={210} minWidth={86} keytip="HN">
         {NUMBER_FORMATS.map((f) => (
           <MenuItem key={f.id} active={(f.token || null) === (ctx.activeFormat || null)} onClick={() => ctx.onApplyFormat(f.token)}>{f.label}</MenuItem>
         ))}
       </DropdownButton>
-      <button type="button" data-testid="ribbon-pct" title="Percent style" aria-label="Percent style" onClick={() => ctx.onApplyFormat("0.0%")} style={ribbonBtnStyle(false)}>%</button>
+      <button type="button" data-testid="ribbon-pct" data-keytip="HP" title="Percent style" aria-label="Percent style" onClick={() => ctx.onApplyFormat("0.0%")} style={ribbonBtnStyle(false)}>%</button>
       <button type="button" data-testid="ribbon-currency" title="Currency style" aria-label="Currency style" onClick={() => ctx.onApplyFormat("$#,##0.00")} style={ribbonBtnStyle(false)}>$</button>
-      <button type="button" data-testid="ribbon-comma" title="Thousands separator" aria-label="Thousands separator" onClick={() => ctx.onNumberFormatOp("toggleThousands")} style={ribbonBtnStyle(false)}>,</button>
-      <button type="button" data-testid="ribbon-dec-inc" title="Increase decimal" aria-label="Increase decimal" onClick={() => ctx.onNumberFormatOp("increaseDecimals")} style={ribbonBtnStyle(false, { fontSize: 10.5 })}>.0→</button>
-      <button type="button" data-testid="ribbon-dec-dec" title="Decrease decimal" aria-label="Decrease decimal" onClick={() => ctx.onNumberFormatOp("decreaseDecimals")} style={ribbonBtnStyle(false, { fontSize: 10.5 })}>→.0</button>
+      <button type="button" data-testid="ribbon-comma" data-keytip="HK" title="Thousands separator" aria-label="Thousands separator" onClick={() => ctx.onNumberFormatOp("toggleThousands")} style={ribbonBtnStyle(false)}>,</button>
+      <button type="button" data-testid="ribbon-dec-inc" data-keytip="H0" title="Increase decimal" aria-label="Increase decimal" onClick={() => ctx.onNumberFormatOp("increaseDecimals")} style={ribbonBtnStyle(false, { fontSize: 10.5 })}>.0→</button>
+      <button type="button" data-testid="ribbon-dec-dec" data-keytip="H9" title="Decrease decimal" aria-label="Decrease decimal" onClick={() => ctx.onNumberFormatOp("decreaseDecimals")} style={ribbonBtnStyle(false, { fontSize: 10.5 })}>→.0</button>
     </span>
   );
 }
@@ -417,15 +440,15 @@ function NumberGroup({ ctx }) {
 function CellsGroup({ ctx }) {
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <IconDropdownButton icon={<IconInsert />} title="Insert rows or columns" width={160}>
+      <IconDropdownButton icon={<IconInsert />} title="Insert rows or columns" width={160} keytip="HI">
         <MenuItem onClick={ctx.onInsertRow}>Row above</MenuItem>
         <MenuItem onClick={ctx.onInsertColumn}>Column left</MenuItem>
       </IconDropdownButton>
-      <IconDropdownButton icon={<IconDelete />} title="Delete rows or columns" width={140}>
+      <IconDropdownButton icon={<IconDelete />} title="Delete rows or columns" width={140} keytip="HD">
         <MenuItem onClick={ctx.onDeleteRow}>Row</MenuItem>
         <MenuItem onClick={ctx.onDeleteColumn}>Column</MenuItem>
       </IconDropdownButton>
-      <IconDropdownButton icon={<IconFreeze />} title="Freeze panes" width={190}>
+      <IconDropdownButton icon={<IconFreeze />} title="Freeze panes" width={190} keytip="WF">
         <MenuItem onClick={ctx.onSetFreezeTopRow}>Freeze top row</MenuItem>
         <MenuItem onClick={ctx.onSetFreezeFirstColumn}>Freeze first column</MenuItem>
         <MenuItem onClick={ctx.onSetFreezeAtSelection}>Freeze panes (at selection)</MenuItem>
@@ -511,9 +534,10 @@ const GROUP_RENDER = {
  *  content (the SAME GROUP_RENDER component used inline) stacks inside this ONE popover, each
  *  under its own small uppercase heading, so a narrow window still reaches everything from one
  *  predictable place instead of hunting across several tiny triggers. */
-function MoreMenu({ overflowKeys, ctx }) {
+function MoreMenu({ overflowKeys, ctx, forceOpen = 0 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
+  useEffect(() => { if (forceOpen > 0) setOpen(true); }, [forceOpen]);
   if (overflowKeys.length === 0) return null;
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
@@ -556,6 +580,7 @@ function MoreMenu({ overflowKeys, ctx }) {
 // header for the rest of that argument.
 export default function Ribbon({ ctx }) {
   const outerRef = useRef(null);
+  const [moreNonce, setMoreNonce] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
 
   useLayoutEffect(() => {
@@ -569,6 +594,21 @@ export default function Ribbon({ ctx }) {
   }, []);
 
   const { visibleKeys, overflowKeys } = computeRibbonLayout(containerWidth, RIBBON_GROUPS, MORE_BUTTON_WIDTH);
+
+  // A colour-menu request nobody claimed means the colour buttons are folded into More: open More (the
+  // buttons mount inside it) and ask again once they exist.
+  useEffect(() => {
+    const onOpen = (e) => {
+      if (e.detail?.retried) return;
+      queueMicrotask(() => {
+        if (e.detail.claimed || overflowKeys.length === 0) return;
+        setMoreNonce((n) => n + 1);
+        setTimeout(() => window.dispatchEvent(new CustomEvent("model-open-color-menu", { detail: { which: e.detail.which, retried: true } })), 60);
+      });
+    };
+    window.addEventListener("model-open-color-menu", onOpen);
+    return () => window.removeEventListener("model-open-color-menu", onOpen);
+  }, [overflowKeys.length]);
 
   return (
     <div
@@ -602,7 +642,7 @@ export default function Ribbon({ ctx }) {
       {overflowKeys.length > 0 && (
         <span style={{ display: "inline-flex", alignItems: "center" }}>
           {visibleKeys.length > 0 && <Divider />}
-          <MoreMenu overflowKeys={overflowKeys} ctx={ctx} />
+          <MoreMenu overflowKeys={overflowKeys} ctx={ctx} forceOpen={moreNonce} />
         </span>
       )}
     </div>

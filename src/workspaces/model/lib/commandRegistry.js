@@ -20,6 +20,7 @@
 import { NUMBER_FORMATS } from "./numberFormats.js";
 import { zoomStepButton, DEFAULT_ZOOM, MIN_ZOOM, MAX_ZOOM } from "./sheetZoom.js";
 import { RIBBON_GROUPS } from "./ribbonLayout.js";
+import { CHORDS } from "./keymap.js";
 
 // ---- Shared style-patch helpers — the SAME toggle computation Ribbon.jsx's own FontStyleGroup/
 // AlignmentGroup buttons use (imported there, not reimplemented) and the palette commands below
@@ -46,6 +47,8 @@ export const COMMAND_GROUPS = {
   find: "Find & Replace",
   sheet: "Sheet",
   file: "Import & Export",
+  edit: "Edit",
+  structure: "Rows & Columns",
   view: "View & Zoom",
 };
 
@@ -143,11 +146,64 @@ export const COMMANDS = [
   { id: "import-xlsx", label: label("Import Excel File"), group: "file", keywords: kw("upload open xlsx"), run: (ctx) => ctx.onOpenImportXlsx() },
   { id: "import-csv", label: label("Import CSV File"), group: "file", keywords: kw("upload open"), run: (ctx) => ctx.onOpenImportCsv() },
 
+  // ---- Excel shortcuts block (2026-10-29): every chord in lib/keymap.js and every leaf in
+  // lib/keyTips.js names one of these ids, so a key, a key-tip sequence, the palette and the ribbon
+  // all call the SAME ctx handler. ----
+  { id: "number-comma-style", label: label("Number with Commas"), group: "number", keywords: kw("thousands 1,000.00"), run: (ctx) => ctx.onApplyFormat("#,##0.00") },
+  { id: "number-format-dialog", label: label("Number Format…"), group: "number", keywords: kw("format cells dialog custom"), run: (ctx) => ctx.onOpenDialog("number-format") },
+  { id: "border-thick-box", label: label("Thick Box Border"), group: "borders", run: (ctx) => ctx.onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: "thick", mode: "outline" }) },
+  { id: "fill-color-menu", label: label("Fill Colour…"), group: "color", keywords: kw("background paint"), run: (ctx) => ctx.onOpenColorMenu("fill") },
+  { id: "font-color-menu", label: label("Font Colour…"), group: "color", keywords: kw("text"), run: (ctx) => ctx.onOpenColorMenu("font") },
+  { id: "merge-cells", label: label("Merge Cells"), group: "alignment", disabled: (ctx) => !!ctx.mergedHere, run: (ctx) => ctx.onMergeToggle() },
+  { id: "merge-center", label: label("Merge & Center"), group: "alignment", run: (ctx) => ctx.onMergeCenter() },
+  { id: "unmerge-cells", label: label("Unmerge Cells"), group: "alignment", disabled: (ctx) => !ctx.mergedHere, run: (ctx) => ctx.onMergeToggle() },
+  { id: "freeze-toggle", label: (ctx) => ((ctx.freezeRows > 0 || ctx.freezeCols > 0) ? "Unfreeze Panes" : "Freeze Panes"), group: "cells", keywords: kw("pin lock"), run: (ctx) => ((ctx.freezeRows > 0 || ctx.freezeCols > 0) ? ctx.onUnfreeze() : ctx.onSetFreezeAtSelection()) },
+  { id: "copy", label: label("Copy"), group: "edit", shortcut: "Ctrl+C", run: (ctx) => ctx.onClipboardCommand("copy") },
+  { id: "cut", label: label("Cut"), group: "edit", shortcut: "Ctrl+X", keywords: kw("move"), run: (ctx) => ctx.onClipboardCommand("cut") },
+  { id: "paste", label: label("Paste"), group: "edit", shortcut: "Ctrl+V", run: (ctx) => ctx.onClipboardCommand("paste") },
+  { id: "cancel-cut", label: label("Cancel Cut"), group: "edit", run: (ctx) => ctx.onCancelCut() },
+  { id: "fill-right", label: label("Fill Right"), group: "edit", keywords: kw("copy left cell across"), run: (ctx) => ctx.onFillRight() },
+  { id: "insert-date", label: label("Insert Current Date"), group: "edit", run: (ctx) => ctx.onInsertDate() },
+  { id: "insert-time", label: label("Insert Current Time"), group: "edit", run: (ctx) => ctx.onInsertTime() },
+  { id: "copy-above-formula", label: label("Copy Formula from Cell Above"), group: "edit", run: (ctx) => ctx.onCopyAbove("formula") },
+  { id: "copy-above-value", label: label("Copy Value from Cell Above"), group: "edit", run: (ctx) => ctx.onCopyAbove("value") },
+  { id: "autosum", label: label("AutoSum"), group: "edit", keywords: kw("total add sum"), run: (ctx) => ctx.onAutoSum() },
+  { id: "repeat-last", label: label("Repeat Last Action"), group: "edit", run: (ctx) => ctx.onRepeatLast() },
+  { id: "clear-all", label: label("Clear All"), group: "edit", keywords: kw("contents formats"), run: (ctx) => ctx.onClearAll() },
+  { id: "clear-contents", label: label("Clear Contents"), group: "edit", keywords: kw("delete blank"), run: (ctx) => ctx.onClearContents() },
+  { id: "insert-cells", label: label("Insert…"), group: "structure", keywords: kw("row column cells"), run: (ctx) => ctx.onInsertCells() },
+  { id: "delete-cells", label: label("Delete…"), group: "structure", keywords: kw("row column cells"), run: (ctx) => ctx.onDeleteCells() },
+  { id: "hide-rows", label: label("Hide Rows"), group: "structure", run: (ctx) => ctx.onHide("rows") },
+  { id: "unhide-rows", label: label("Unhide Rows"), group: "structure", run: (ctx) => ctx.onUnhide("rows") },
+  { id: "hide-columns", label: label("Hide Columns"), group: "structure", run: (ctx) => ctx.onHide("columns") },
+  { id: "unhide-columns", label: label("Unhide Columns"), group: "structure", run: (ctx) => ctx.onUnhide("columns") },
+  { id: "autofit-column", label: label("Autofit Column Width"), group: "structure", keywords: kw("fit widest"), run: (ctx) => ctx.onAutofit("columns") },
+  { id: "autofit-row", label: label("Autofit Row Height"), group: "structure", keywords: kw("fit wrap"), run: (ctx) => ctx.onAutofit("rows") },
+  { id: "column-width", label: label("Column Width…"), group: "structure", run: (ctx) => ctx.onOpenDialog("column-width") },
+  { id: "row-height", label: label("Row Height…"), group: "structure", run: (ctx) => ctx.onOpenDialog("row-height") },
+  { id: "sheet-prev", label: label("Previous Sheet"), group: "sheet", keywords: kw("tab"), disabled: (ctx) => ctx.sheetCount <= 1, run: (ctx) => ctx.onSheetStep(-1) },
+  { id: "sheet-next", label: label("Next Sheet"), group: "sheet", keywords: kw("tab"), disabled: (ctx) => ctx.sheetCount <= 1, run: (ctx) => ctx.onSheetStep(1) },
+  { id: "save-now", label: label("Save Now"), group: "file", keywords: kw("saved state"), run: (ctx) => ctx.onSaveNow() },
+
   // ---- View & Zoom ----
   { id: "zoom-in", label: label("Zoom In"), group: "view", keywords: kw("magnify bigger"), disabled: (ctx) => ctx.zoom >= MAX_ZOOM, run: (ctx) => ctx.onZoomChange(zoomStepButton(ctx.zoom, 1)) },
   { id: "zoom-out", label: label("Zoom Out"), group: "view", keywords: kw("magnify smaller"), disabled: (ctx) => ctx.zoom <= MIN_ZOOM, run: (ctx) => ctx.onZoomChange(zoomStepButton(ctx.zoom, -1)) },
   { id: "zoom-reset", label: label("Reset Zoom to 100%"), group: "view", run: (ctx) => ctx.onZoomChange(DEFAULT_ZOOM) },
 ];
+
+// The chord text beside a command (palette + help) comes from the ONE key table, never typed twice.
+{
+  const chordLabel = Object.fromEntries(CHORDS.map(([id, combo]) => [id, combo]));
+  for (const cmd of COMMANDS) if (!cmd.shortcut && chordLabel[cmd.id]) cmd.shortcut = chordLabel[cmd.id];
+}
+
+/** Run a command by id against `ctx`. Returns whether it ran (false: unknown id or disabled). */
+export function runCommandById(id, ctx) {
+  const cmd = COMMANDS.find((c) => c.id === id);
+  if (!cmd || isCommandDisabled(cmd, ctx)) return false;
+  cmd.run(ctx);
+  return true;
+}
 
 export function resolveLabel(cmd, ctx) {
   return typeof cmd.label === "function" ? cmd.label(ctx) : cmd.label;

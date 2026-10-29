@@ -15,5 +15,13 @@ file…"). ONE source of truth: the Library file's stored bytes ARE the document
 
 **Chrome is FLAT and edge to edge (NEW-1, B2517376, owner-approved mockup 2026-10-29).** The toolbar (`components/Ribbon.jsx`), the formula bar (`components/FormulaBar.jsx`), the grid (`components/SheetView.jsx`) and the sheet-tab strip (`components/TabStrip.jsx`) are full-width strips with single hairlines — no floating card, margin, rounded corners or shadow anywhere. Do not bring the card back. Guard: the repo-root ui-audit harness named verify-spreadsheet-flat-chrome.
 
+**Excel keyboard shortcuts, Alt key-tips, header selection and the real clipboard (NEW-1, 2026-10-29 — B2455072–B2455075).** Excel for Windows is the spec; ONE command registry (`lib/commandRegistry.js`) is what keys, key-tips, palette, ribbon and menus all run.
+- `lib/keymap.js` — keystroke → command id (`CHORDS`, edit-mode subset, `navAction`); matched on `e.key` only. Ctrl+C/X/V are NOT here: they are native clipboard EVENTS.
+- `lib/keyTips.js` — the Alt tree + pure state machine; `components/KeyTipOverlay.jsx` draws the badges (`data-keytip` on Ribbon controls) and the next-key strip. Alt starts only on a bare Alt keyup (`ModelApp.jsx`, capture-phase listeners).
+- `lib/selection.js` — THE whole-row / whole-column / whole-sheet selection model (a range, never a cell walk); header clicks, drag, Shift+click, corner, Shift+Space/Ctrl+Space/Ctrl+A, the Name Box (`C:C`, `5:5`) and the structural keys all use it. **Headers are fixed labels** (`columnHeaderLabel` = the position's letter) — no rename route exists; `column.name` stays in the data only so old `[Name]` formulas keep resolving. Multi-range selection is deliberately not supported.
+- `lib/clipboardIO.js` — pure: build text/plain + text/html (Planyr marker), parse Planyr / Excel-HTML / TSV, `applyClip`, `pasteMoveSameSheet` (cut = move; `lib/formulaMove.js` re-points references). Listeners live in `ModelApp.jsx` and are scoped off any text control. Fixture: `test/fixtures/spreadsheet/excel-range.html`.
+- `lib/autofit.js` (column + wrapped-row autofit), `lib/editShortcuts.js` (F4, Alt+Enter, Ctrl+;), `components/ShortcutDialog.jsx`, hidden rows/columns (`sheet.hiddenRows`, `column.hidden`).
+- Guards: repo-root `test/` **modelKeymap**, **modelKeyTips**, **modelSelection**, **modelClipboardIO**, **modelAutofit**, **modelHiddenRowsCols**; real-keystroke harness (the repo-root ui-audit file named verify-spreadsheet-keyboard; run it against main to see what each check protects).
+
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the lines above in the same commit.
      The doc-pointer-audit check fails CI on a stale reference. -->
