@@ -36,8 +36,11 @@ describe("which counties gain a state fallback — the pinned list", () => {
   it("New York: no state fallback anywhere (the 24 county rows are exactly the counties the state layer lacks); Niagara alone has a town-level one", () => {
     expect(list.filter((r) => r.state === "NY").map((r) => [r.county, r.fallbacks])).toEqual([["ny_niagara", ["Town of Cambria’s layer"]]]);
   });
+  it("DeSoto County MS: MARIS (statewide) first, then the 2024 copy of the county roll — the county's own server is the primary (B2507056)", () => {
+    expect(list.filter((r) => r.state === "MS").map((r) => [r.county, r.fallbacks])).toEqual([["ms_desoto", ["Mississippi statewide layer (MARIS)", "June 2024 copy of the county roll (Tristate Consulting)"]]]);
+  });
   it("no other state has a county row AND a statewide layer, so no other state gains one (statewide-only states have no county row to fall back from)", () => {
-    expect([...new Set(list.map((r) => r.state))].sort()).toEqual(["CO", "NY", "TX"]);
+    expect([...new Set(list.map((r) => r.state))].sort()).toEqual(["CO", "MS", "NY", "TX"]);
   });
 });
 

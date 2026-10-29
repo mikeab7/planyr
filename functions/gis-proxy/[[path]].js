@@ -238,6 +238,12 @@ export const ALLOWED_HOSTS = new Set([
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;
+
+/* The upstream statuses worth exactly one more try: gateway errors and Cloudflare's own origin-failure family (520 unknown, 521 down, 522 connect timeout,
+ * 523 unreachable, 524 timeout, 525 SSL handshake failed, 526 invalid cert, 527 railgun). Pure — unit-tested. */
+export function isTransientStatus(status) {
+  return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 527);
+}
 const USER_AGENT = "planyr-gis-proxy";
 
 function jsonResponse(body, status) {
@@ -279,15 +285,24 @@ export async function onRequest(context) {
     headers["content-type"] = request.headers.get("content-type") || "application/x-www-form-urlencoded";
   }
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
+  /* ONE retry on a transient upstream failure (B2507056, 2026-10-29). Measured through planyr.io: gis.desotocountyms.gov (itself fronted by Cloudflare) answers
+   * ~10% of identical, idempotent queries with a 525 ("SSL handshake failed" to ITS origin) and the very next request succeeds (4 of 40). The relay carries only
+   * read-only ArcGIS queries, so asking once more is safe, and it turns a 10% outage into ~1% instead of leaving every caller to notice and retry. Only the
+   * transient classes retry (502/503/504 and Cloudflare's 520-527); a 4xx, a 500 with a body, or an abort is returned as it came. */
+  const attempt = async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
+    try { return await fetch(resolved.url, { method, headers, body, signal: ctrl.signal }); } finally { clearTimeout(timer); }
+  };
   let res;
   try {
-    res = await fetch(resolved.url, { method, headers, body, signal: ctrl.signal });
+    res = await attempt();
+    if (isTransientStatus(res.status)) {
+      try { await res.body?.cancel(); } catch (_e) { /* discarding the failed body */ }
+      res = await attempt();
+    }
   } catch (_e) {
     return jsonResponse({ error: `Upstream GIS request to ${resolved.host} failed or timed out.`, host: resolved.host }, 502);
-  } finally {
-    clearTimeout(timer);
   }
 
   // Pass through the body + Content-Type; deliberately copy NOTHING else from the upstream

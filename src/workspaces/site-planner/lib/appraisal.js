@@ -450,6 +450,12 @@ export const APPR_FIELDS = [
   // untouched (only a "value"-labeled row gets $ formatting) and `InfoRow` (ParcelInfoCard.jsx)
   // renders an http(s) value as a link rather than plain text.
   [/^website$/i, "County record"],
+  // NEW-1 (DeSoto County MS, B2507056) — the county's own per-parcel document links (all http(s), so `InfoRow` renders each as a link): the recorded plat, the warranty deed, the FEMA flood map, the tax-info page and the tax map.
+  [/^plat_?link$/i, "Plat"],
+  [/^wd_?link$/i, "Warranty deed"],
+  [/^fema_?link$/i, "FEMA map"],
+  [/^tax_?info$/i, "Tax info"],
+  [/^tax_?map$/i, "Tax map"],
   // ...|^legal matches CCAD's Legal1–Legal4 (first match, Legal1, wins).
   [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
 ];

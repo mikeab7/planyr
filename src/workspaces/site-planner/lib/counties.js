@@ -837,12 +837,13 @@ const COUNTIES_RAW = {
     help: "Jefferson County (Louisville) PVA parcels (LOJIC open data). Search by parcel ID or a site address.",
   },
   ms_desoto: {
-    // VERIFIED LIVE 2026-09-10 from this sandbox: 80,950 parcel polygons, count query 830ms,
-    // 55 populated fields.
+    // NEW-1 (B2507056, 2026-10-29) — the COUNTY'S OWN server is the primary now ("Tax Parcels", BaseLayers/MapServer/1 on gis.desotocountyms.gov, relayed because the host
+    // is not reachable from the build sandbox); Mississippi's statewide MARIS layer stands in when it does not answer (parcelFallbacks.js COUNTY_EXTRA_FALLBACKS), then the
+    // 2024 Esri-hosted ETR / Tristate copy this row used to point at (kept as the last resort; it answered from anywhere with the old PARNO / SITEADD schema).
     state: "MS", label: "DeSoto County, MS",
-    layerUrl: "https://services5.arcgis.com/nbwtrV1EDhKfIQhm/arcgis/rest/services/DESOTO_PARCELS/FeatureServer/0",
-    idField: "PARNO", addrField: "SITEADD",
-    help: "DeSoto County parcels (county GIS, Esri-hosted). Search by parcel number or a site address.",
+    layerUrl: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/1",
+    idField: "PIN", addrField: "FULL_ADDR",
+    help: "DeSoto County parcels (the county's own GIS server). Search by parcel number (PIN) or a site address.",
   },
   /* NEW-1 (Memphis 100-mile radius, 2026-10-15) — the 24 Mississippi counties inside the radius other than DeSoto
    * (which keeps its own, fresher county service above). SOURCE: MARIS (Mississippi Automated Resource Information

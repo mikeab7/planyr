@@ -21,7 +21,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 
 import { SERVICE_AREAS } from "../src/workspaces/site-planner/lib/serviceAreaData.js";
 import { _setServiceAreas } from "../src/workspaces/site-planner/lib/serviceAreas.js";
-import { ALL_LAYERS, defaultOverlayState, syncOverlayLayers, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
+import { ALL_LAYERS, defaultOverlayState, syncOverlayLayers, layerVintage, identifyOverlaysAt } from "../src/workspaces/site-planner/lib/layers.js";
 import { siteState } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { layerAvailableHere, drawnOverlaysOf } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
 import { lineLabelText } from "../src/workspaces/site-planner/lib/layerRequest.js";
@@ -186,7 +186,7 @@ describe("requests actually issued — DeSoto / Olive Branch URLs fire at Olive 
       for (const id of IDS) all[id] = { on: true, opacity: 0.5 };
       const drawn = drawnOverlaysOf(all, { scope: scopeOf(point), layers: ALL_LAYERS });
       syncOverlayLayers(fakeMap(), drawn, {}, { onStatus() {}, onError() {} });
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 250)); // the hover/identify chunk (and the zoning row's warm-up of the municipal limits) attach on a dynamic import — let them land INSIDE this run's window
     } finally { globalThis.fetch = realFetch; }
     const mine = (u) => /VGtdH6iTQlVulSnr|desotocountyms/.test(u);
     return { fetched: fetched.filter(mine), built: featureLayerCalls.filter(mine) };
@@ -195,10 +195,28 @@ describe("requests actually issued — DeSoto / Olive Branch URLs fire at Olive 
     const r = await run(OLIVE_BRANCH);
     expect(r.fetched.length).toBeGreaterThan(0);
     expect(r.built.length).toBe(IDS.length);
+    expect(r.fetched.some((u) => /desotocountyms/.test(u)), "the county server is asked (health probes, the zoning row's municipal-limits warm-up)").toBe(true);
   });
   it.each(Object.entries(ELSEWHERE))("at %s: zero requests to the Olive Branch org or the DeSoto County server", async (_k, p) => {
     const r = await run(p);
     expect(r.fetched).toEqual([]);
     expect(r.built).toEqual([]);
+  });
+});
+
+describe("identifyOverlaysAt — several layers answering with the same card collapse to one", () => {
+  it("the four PSC layers ON → ONE 'Who serves this site' item, not four", () => {
+    const PSC = ["ms_psc_electric", "ms_psc_gas", "ms_psc_water", "ms_psc_sewer"];
+    const card = { title: "Who serves this site", rows: [], note: null, sourceName: "x", dedupeKey: "ms-psc-providers" };
+    const refs = Object.fromEntries(PSC.map((id) => [id, { identifyAt: () => ({ ...card }) }]));
+    const overlays = Object.fromEntries(PSC.map((id) => [id, { on: true, opacity: 0.4 }]));
+    const items = identifyOverlaysAt(refs, overlays, { lat: 34.96, lng: -89.83 });
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toBe("Who serves this site");
+  });
+  it("hits without a dedupeKey are never collapsed", () => {
+    const refs = { ms_ob_water_main: { identifyAt: () => ({ title: "a", rows: [] }) }, ms_ob_gas_main: { identifyAt: () => ({ title: "b", rows: [] }) } };
+    const overlays = { ms_ob_water_main: { on: true }, ms_ob_gas_main: { on: true } };
+    expect(identifyOverlaysAt(refs, overlays, { lat: 34.96, lng: -89.83 })).toHaveLength(2);
   });
 });

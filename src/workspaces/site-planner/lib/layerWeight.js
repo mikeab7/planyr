@@ -124,10 +124,22 @@ export const LAYER_TIER = {
   ms_ob_gas_main: "reference",
   ms_dcrua_main: "reference",
   ms_dcrua_structures: "reference",
+  ms_desoto_zoning: "reference",
+  ms_psc_electric: "reference",
+  ms_psc_gas: "reference",
+  ms_psc_water: "reference",
+  ms_psc_sewer: "reference",
+  ms_dcrua_easements: "reference",
+  ms_dcrua_service_area: "reference",
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
   ms_ob_planning_area: "context",   // B2507059 — a planning line
+  ms_desoto_city: "context",
+  ms_desoto_flu: "context",
+  ms_desoto_thoroughfare: "context",
+  ms_desoto_future_subd: "context",
+  ms_desoto_discover: "context",
   jur_city: "context",
   jur_etj: "context",
   jur_isd: "context",
