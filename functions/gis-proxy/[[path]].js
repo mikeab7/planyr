@@ -148,6 +148,15 @@ export const ALLOWED_HOSTS = new Set([
   "okmaps.onenet.net", // OneNet-hosted state GIS server
   "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
   "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
+  /* NEW-1 (Oklahoma second pass, B2497472, 2026-10-29) — hosts the second search of the 61 "none" counties named, added so each can be MEASURED through this relay before any county is wired to it:
+   * INCOG's newer ArcGIS Server (map11 carries Parcels_OsageCo / _CreekCo / _RogersCo / _TulsaCo / _WagonerCo — map8 / map9 above refuse the relay), the DataCrossPoint platform behind
+   * MapView Online (app.datacrosspoint.com/browse/oklahoma, "Oklahoma County Assessor Data"), and the City of Ada's ArcGIS Server (Pontotoc County). Nothing here is wired yet. */
+  "map11.incog.org",
+  "app.datacrosspoint.com", "datacrosspoint.com", "www.datacrosspoint.com", "gis.datacrosspoint.com", "maps.datacrosspoint.com", "api.datacrosspoint.com",
+  "maps.adaok.com", "maps.adaok.com:6443", "maps.adaok.com:6080",
+  /* okmaps.org — the GeoServer behind ArcGIS Online's "Parcels - OK - Statewide" item (the Property Records Preservation statewide mosaic, published as WMS at okmaps.org/geoserver/wms). The first pass tried
+   * okmaps.onenet.net only; GeoServer normally also serves WFS (queryable features), which is what is being measured here. */
+  "okmaps.org", "www.okmaps.org",
   /* NEW-1 (Arizona, 2026-10-19) — Mohave County's own GIS server (Mohave is the one Arizona county neither the ADWR compile nor an ArcGIS Online layer covers).
    * The build sandbox cannot reach it, so it is relayed and MEASURED through here (on the PR preview) before the county is wired to it. */
   "mcgis.mohave.gov", // Mohave County GIS — PARCELS MapServer
@@ -186,6 +195,16 @@ export const ALLOWED_HOSTS = new Set([
   "gis.aumentumtech.com", // Tyler / Aumentum LGIS — Scott, Lane and Meade county viewers
   "doniphangis.integritygis.com", // Integrity GIS Geocortex pool — Doniphan and Cherokee county public sites
   "services.kansasgis.org", // Kansas DASC statewide ORKA parcel layer (Cheyenne, Rawlins, Sherman, Thomas)
+  /* NEW-1 (Kansas second pass, 2026-10-29) — DISCOVERY hosts: each Kansas "none" county's own website / appraiser page and the ORKA portal, read through this relay (the build sandbox reaches
+   * none of them) to find the viewer or service each one actually uses. Temporary: the PR that wires the winners prunes every host nothing uses. */
+  "allencounty.org", "www.allencounty.org", "www.bartoncounty.org", "www.bourboncountyks.org", "www.brcoks.org", "www.chautauquacountyks.com",
+  "www.claycountykansas.org", "www.comanchecoks.org", "www.crawfordcountykansas.org", "www.dccoks.org", "govecountyks.gov", "greeleycounty.org", "www.grantcoks.org",
+  "www.greenwoodcounty.org", "www.haskellcounty.org", "www.hodgemancountyks.com", "www.jacksoncountyks.com", "jewellcountykansas.net", "kiowacountyks.org",
+  "www.kearnycountykansas.com", "www.kingmancoks.org", "www.marioncoks.net", "www.mitchellcountykansas.com", "www.morriscountyks.org", "www.mtcoks.com",
+  "www.neoshocountyks.org", "www.nortoncountyks.gov", "www.osbornecounty.org", "www.phillipscountyks.org", "www.prattcounty.org", "www.ricecounty.us",
+  "www.rookscounty.net", "www.stantoncountyks.com", "www.stevenscoks.org", "www.tregocountyks.com", "wallacecountyks.gov", "washingtoncountyks.gov", "www.wbcounty.org",
+  "www.wichitacounty.org", "chasecountyks.com", "ks283.cichosting.com", "ks497.cichosting.com", "ks1495.cichosting.com", "ks1497.cichosting.com", "www.kansasgis.org", "apps.kansasgis.org", "orkahub.kansasgis.org", "kansasgis.org", "data.kansasgis.org",
+  "www.gray.kansasgov.com", "osborne.kansasgov.com",
   /* NEW-1 (New York, 2026-10-20) — county / city parcel hosts this build sandbox's egress blocks (CONNECT 403), so their layers could only be
    * measured through this relay on the PR preview; relayed server-side so the app never depends on their ACAO header. */
   "maps2.cattco.org", // Cattaraugus County GIS (ArcGIS Enterprise web adaptor)

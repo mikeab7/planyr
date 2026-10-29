@@ -113,7 +113,8 @@ for (const [id, g] of Object.entries(GEN_ZONES)) {
   };
 }
 
-/* Coarse zone envelopes, used ONLY when no county is known (a raw lat/lon with no identify yet).
+/* Coarse zone envelopes, used ONLY when no county is known (a raw lat/lon with no identify yet) — and, since NEW-2, only AFTER the
+ * point-in-county locator (`setPointZoneLocator`) has had its say.
  *
  * DELIBERATELY COARSE, AND THE RESULT SAYS SO (`coarse:true`). Colorado's zone boundaries follow
  * COUNTY LINES, not parallels, and along the Front Range those lines interleave: Jefferson
@@ -169,8 +170,16 @@ export function hawaiiZoneId(lat, lon) {
   return null;
 }
 
+/* NEW-2 — the point→county→zone locator. The county polygons (public/geo/county-polygons.json, 1.5 MB) and the county table are NOT
+ * part of this lean module (they would ride the Site route's boot path), so whoever loads them installs a locator here:
+ * `{ forPoint(lat, lon) → { zone, nearEdge? } | null }`. Until one is installed (or for a point outside every county) `zoneForPoint`
+ * falls back to the coarse boxes, flagged `coarse:true`. The installer lives in site-planner/lib/pointZoneLocator.js. */
+let POINT_LOCATOR = null;
+export function setPointZoneLocator(locator) { POINT_LOCATOR = locator && typeof locator.forPoint === "function" ? locator : null; }
+export const hasPointZoneLocator = () => POINT_LOCATOR != null;
+
 /* The zone for a bare point, when no county has been identified. Coarse by design and flagged `coarse:true`.
- * Order: the two legacy envelopes (Houston / Front Range, unchanged) → Alaska's meridian bands → each zone's EPSG area-of-use
+ * Order: the point-in-county locator when one is installed (NEW-2) → the two legacy envelopes (Houston / Front Range, unchanged) → Alaska's meridian bands → each zone's EPSG area-of-use
  * box, the one the point sits DEEPEST inside winning where several contain it (`ambiguous:true` says more than one did; measured over the
  * 3,144 county centres: 89.7% the exact zone, 3.2% a neighbouring zone of the right state, 7.2% a neighbour state — docs/incidents/STATE-PLANE-AUDIT.md §5). Near a state line a
  * box can hold the neighbour's ground — that is exactly what `coarse` warns about; a county answer always beats it.
@@ -178,6 +187,14 @@ export function hawaiiZoneId(lat, lon) {
 export function zoneForPoint(lat, lon, state = null) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const st = state ? stateCode(state) : null;
+  // NEW-2 (STATE-PLANE-STATUTE) — THE COUNTY THE POINT IS IN COMES FIRST, never a box. Zone lines ARE county lines, so a point-in-county
+  // answer is the legally defined zone; the legacy envelopes below (Houston box, Front Range box) cover Conroe, Liberty and Beaumont-area
+  // Texas Central counties and the interleaved Colorado counties, so they may only answer when no county answer exists (locator not
+  // loaded yet, point outside every county, or the state in the call disagrees with the county found).
+  const byCounty = POINT_LOCATOR ? POINT_LOCATOR.forPoint(lat, lon) : null;
+  if (byCounty && byCounty.zone && (!st || byCounty.zone.state === st)) {
+    return { ...byCounty.zone, via: "county-point", ...(byCounty.nearEdge ? { nearEdge: true } : {}) };
+  }
   for (const e of ZONE_EXTENTS) {
     if (st && SP_ZONES[e.zone].state !== st) continue;
     if (lat >= e.latMin && lat <= e.latMax && lon >= e.lonMin && lon <= e.lonMax) {
