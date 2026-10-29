@@ -47,7 +47,7 @@ import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
-import { createTrigger, feedFrame, feedBootTask, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
+import { createTrigger, feedFrame, feedBootTask, feedFreeze, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
 import { buildCapture, encodeCapture, encodeSupplements, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
@@ -132,6 +132,7 @@ const ENV_MAX = 24;
 let _envMarks = [];                  // [t, code, a, b]
 let _lastEnvSize = "";               // "dpr|w|h" last recorded, so a resize storm records only real changes
 let _lastTickAt = 0;                 // when the counter timer last FIRED (visible or not)
+let _hiddenAt = -1;                  // B2319137 ×2 — when the page last went hidden (a frame spanning it is not a freeze)
 
 const now = () => { try { return _win.performance.now(); } catch (_) { return 0; } };
 
@@ -148,6 +149,9 @@ function onFrame(t) {
   _activeMs += dt;
   _lastFrameT = t;
   pushFrame(_frames, t, dt);
+  /* B2319137 ×2 — a frame that took a second or more to come while the page stayed visible is a FREEZE, which `feedFrame`
+   * would drop as "not a frame". `_hiddenAt` is a number, so this stays allocation-free; the fire branch is the rare one. */
+  if (dt >= _trig.cfg.freezeMs && !(_hiddenAt >= prev)) return feedFreeze(_trig, t, dt, "frame");
   return feedFrame(_trig, t, dt);
 }
 
@@ -282,6 +286,8 @@ function observeTasks() {
      * signal that can actually see a genuinely idle boot — see perfTrigger.js's feedBootTask
      * header for the full reasoning. */
     try { if (feedBootTask(_trig, t, dur)) capture("auto"); } catch (_) { /* a recorder fault must never break the frame */ }
+    /* B2319137 ×2 — one entry a second or longer is a freeze at ANY time, not only during boot (perfTrigger.feedFreeze). */
+    try { if (feedFreeze(_trig, t, dur, "task")) capture("auto"); } catch (_) { /* ignore */ }
   };
   let loaf = false;
   try {
@@ -371,6 +377,7 @@ export function capture(reason) {
      * the boot judgment's own facts instead. Gated on `kind === "auto"` for the same reason the
      * steady-state fields above are — a manual capture must never inherit a stale verdict. */
     const isBootVerdict = kind === "auto" && v.source === "boot";
+    const isFreezeVerdict = kind === "auto" && v.source === "freeze";
 
     const cap = buildCapture({
       kind,
@@ -395,6 +402,8 @@ export function capture(reason) {
       bootTrigger: isBootVerdict ? v.trigger : null,
       bootTaskMs: isBootVerdict ? v.taskMs : null,
       bootTaskCount: isBootVerdict ? v.taskCount : null,
+      freezeMs: isFreezeVerdict ? v.freezeMs : null,
+      freezeVia: isFreezeVerdict ? v.via : null,
       worstWindowMeanMs: worst ? worst.meanMs : null,
       worstWindowSlowFraction: worst ? worst.slowFraction : null,
       worstWindowRatio: worst && ts.baselineMs ? worst.meanMs / ts.baselineMs : null,
@@ -573,7 +582,7 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
   try {
     win.document.addEventListener("visibilitychange", () => {
       envMark(win.document.visibilityState === "visible" ? ENV_VISIBLE : ENV_HIDDEN);
-      if (win.document.visibilityState !== "visible") { _activeUntil = 0; _prevFrameT = 0; }
+      if (win.document.visibilityState !== "visible") { _activeUntil = 0; _prevFrameT = 0; _hiddenAt = now(); }
     }, { passive: true });
     win.addEventListener("resize", envSize, { passive: true });
   } catch (_) { /* ignore */ }
@@ -625,7 +634,7 @@ export function __resetPerfRecorder(win) {
   _frames = _tasks = _counters = _strings = _trig = _scratch = null;
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
   _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
-  _sent = 0; _manual = 0; _manualAt = []; _sentAt = []; _refusal = null; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0;
+  _sent = 0; _manual = 0; _manualAt = []; _sentAt = []; _refusal = null; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0; _hiddenAt = -1;
   _lastDelivery = null; _undelivered = 0; _suppressed = 0;
   bindPerfRecorder(null);
   bindPerfDelivery(null);

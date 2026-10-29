@@ -48,6 +48,8 @@ export const CAPTURE_NUMERIC_KEYS = [
   /* NEW-3 — the boot-window judgment's own facts (perfTrigger.feedBootTask). Absent from every
    * ordinary steady-state capture; present only when a boot capture fired. */
   "bootTaskMs", "bootTaskCount",
+  /* B2319137 ×2 — the freeze judgment's own fact (perfTrigger.feedFreeze): how long the one frame that never came lasted. */
+  "freezeMs",
   /* NEW-2 (this session) — the WORST window found anywhere in the retained frame history, not
    * just the live sustain window above. See perfTrigger.js's worstWindow() header for why this
    * exists: a manual capture pressed just after a lag ends must not report a clean "right now"
@@ -83,6 +85,7 @@ export const CAPTURE_ENUM_KEYS = [
 
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
   "bootTrigger", // NEW-3 — "single" | "cumulative", which bar the boot judgment tripped; see BOOT_TRIGGER_VOCAB
+  "freezeVia",   // B2319137 ×2 — "frame" | "task", which signal saw the freeze; see FREEZE_VIA_VOCAB
   "part",        // NEW-2 (B1317824) — a supplement row's series: "f" frames | "c" counters | "t" tasks; see PART_VOCAB
 ];
 
@@ -91,6 +94,9 @@ export const PART_VOCAB = ["f", "c", "t"];
 
 /* A capture's `bootTrigger` may only ever be one of these — same discipline as NOTE_VOCAB. */
 export const BOOT_TRIGGER_VOCAB = ["", "single", "cumulative"];
+
+/* A capture's `freezeVia` may only ever be one of these. */
+export const FREEZE_VIA_VOCAB = ["", "frame", "task"];
 
 /* A capture's `note` may only ever be one of these. It exists so a capture can say something
  * about itself ("baseline never sealed") without opening a free-text channel.
@@ -188,6 +194,9 @@ export function buildCapture(parts) {
   num("bootTaskMs", p.bootTaskMs, 1);
   num("bootTaskCount", p.bootTaskCount);
   enu("bootTrigger", p.bootTrigger);
+  /* B2319137 ×2 — present only on a freeze capture (perfTrigger.feedFreeze's verdict). */
+  num("freezeMs", p.freezeMs);
+  enu("freezeVia", p.freezeVia);
   /* NEW-2 — the worst sub-window found anywhere in the retained frame history. Omitted (not just
    * zero) when there wasn't enough retained history to find one — `num()` already does that for
    * any non-finite value, so a capture with no worst window simply carries none of these keys. */
@@ -311,6 +320,7 @@ export function assertCaptureClean(cap) {
       else if (v.length > 48) bad.push(`${k}: over-long`);
       else if (k === "note" && !NOTE_VOCAB.includes(v)) bad.push(`note: outside the fixed vocabulary`);
       else if (k === "bootTrigger" && !BOOT_TRIGGER_VOCAB.includes(v)) bad.push(`bootTrigger: outside the fixed vocabulary`);
+      else if (k === "freezeVia" && !FREEZE_VIA_VOCAB.includes(v)) bad.push(`freezeVia: outside the fixed vocabulary`);
       else if (k === "part" && !PART_VOCAB.includes(v)) bad.push(`part: outside the fixed vocabulary`);
       else if (k === "plan" && !/^[A-Za-z0-9_-]*$/.test(v)) bad.push(`plan: unsanitised`);
       else if (k === "layers" && !/^[a-z0-9_,+]*$/i.test(v)) bad.push(`layers: unsanitised`);

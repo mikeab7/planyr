@@ -135,7 +135,8 @@ function Harness({ data }) {
   window.__harnessExistAt = existAt;
   window.__harness = { els, model, setSel, gradeSurface, limitEdit, setLimitEdit, ring,
     // a real gesture's shape: dragging=true, one assembly move per pointer step, then release (dragging=false + a final commit)
-    dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings };
+    dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings,
+    zoomBy: (m) => setZoomMul((z) => z * m) };
   const PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
   // ROUND 5 (NEW-4) — `?zoom=site|bldg|ne|nw` frames the 1400×1000 canvas on the parcel, the (first) building, or one zoom
   // closer at the building's NE corner — the three pictures the harness judges. `?ppf=` is the older explicit scale.
@@ -153,8 +154,11 @@ function Harness({ data }) {
     const rx = ring.map((p) => p.x), ry = ring.map((p) => p.y);
     return fitBox(Math.min(...rx), Math.min(...ry), Math.max(...rx), Math.max(...ry), 40);
   }, [qs.get("zoom"), els.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ppf = frame.ppf;
-  const f2p = (p) => ({ x: p.x * ppf + frame.ox, y: p.y * ppf + frame.oy });
+  // round 8 (perf): a live zoom about the canvas centre — `window.__harness.zoomBy(1.25)` is one wheel-notch-sized step
+  const [zoomMul, setZoomMul] = useState(1);
+  const ppf = frame.ppf * zoomMul;
+  const ox = CW / 2 - (CW / 2 - frame.ox) * zoomMul, oy = CH / 2 - (CH / 2 - frame.oy) * zoomMul;
+  const f2p = (p) => ({ x: p.x * ppf + ox, y: p.y * ppf + oy });
   // the EXISTING contours (what the app's Contour-lines layer draws): traced off the DEM on a 6 ft lattice over the parcel,
   // then — while the proposed contours are on — kept OUTSIDE the graded area with the same clipper the worker uses
   const existing = useMemo(() => {

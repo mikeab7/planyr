@@ -264,7 +264,7 @@ try {
   check("moving toward the boundary raises the setback flag", flagged === 1, JSON.stringify(used));
   if (flagged) {
     const title = await page.textContent('[data-grading-flag="1"] > div');
-    check("flag names a compass side", /Slope crosses (the setback · (North|South|East|West|North-east|North-west|South-east|South-west)|the property line)/.test(title), title);
+    check("flag names a compass side", /Slope (crosses|runs past) (the setback|the property line|the buffer|the grading margin) · (North|South|East|West|North-east|North-west|South-east|South-west)|Slope crosses the property line/.test(title), title);
     await page.waitForFunction(() => { const b = document.querySelector('[data-fix="ffe"]'); return b && !/Finding/.test(b.textContent); }, null, { timeout: 90000 });
     const ffeBtn = await page.textContent('[data-fix="ffe"]'), mvBtn = await page.textContent('[data-fix="move"]');
     check("fix buttons offered", /(Raise|Lower) FFE to|No finish elevation clears it/.test(ffeBtn) && /Move building|No move/.test(mvBtn), `${ffeBtn} | ${mvBtn}`);
@@ -322,8 +322,10 @@ try {
   // ---- edit outline: a stored ring, vertex count, reset
   await page.click('[data-limit-action="edit"]');
   await page.waitForSelector("[data-grading-limit-edit]", { timeout: 10000 });
+  // the panel's Done / Reset follow the model one redraw later (the surface work now yields to frames) — wait for them
+  await page.waitForSelector('[data-limit-action="done"]', { timeout: 10000 }).catch(() => {});
   const edited = await page.evaluate(() => ({ ring: (window.__harness.model && window.__harness.model.limit.source), editing: !!window.__harness.limitEdit, done: !!document.querySelector('[data-limit-action="done"]'), reset: !!document.querySelector('[data-limit-action="reset"]') }));
-  check("Edit outline stores the auto ring on the plan (source 'edited'), shows Done + Reset to auto and the dashed edit ring", edited.editing && edited.done && edited.reset);
+  check("Edit outline stores the auto ring on the plan (source 'edited'), shows Done + Reset to auto and the dashed edit ring", edited.editing && edited.done && edited.reset, JSON.stringify(edited));
   await page.waitForFunction(() => window.__harness.model && window.__harness.model.limit.source === "edited", null, { timeout: 30000 });
   check("the graded-area line now reads 'limit edited'", /limit edited/.test(await page.textContent("[data-graded-area-line]")));
   await page.click('[data-limit-action="reset"]');
@@ -371,21 +373,21 @@ try {
   });
   // ROUND 6 (NEW-3): no plateau — the open ground inside the setback follows the pavement's fall, never flat at the FFE and never above it
   check("boundary mode: the limit is the setback, NO plateau, the open ground inside follows the pavement (not flat at the FFE, never above it)", bnd.mode === "boundary" && bnd.plateaus.length === 0 && bnd.infill > 0 && bnd.flatInfill * 10 < bnd.infill && bnd.aboveFfe === 0, JSON.stringify({ ...bnd, plateaus: bnd.plateaus.length }));
-  check("the graded-area line reads the setback and the acreage grew past the layout's", /^Graded area · \d+\.\d AC · the setback$/.test(bnd.gradedLine || "") && bnd.areaAc > lim.areaAc, `${bnd.gradedLine} vs ${lim.areaAc.toFixed(1)}`);
+  check("ROUND 8: the graded-area line reads the property line and the acreage grew past the layout's", /^Graded area · \d+\.\d AC · to the property line \(\d+ ft margin(, \d+ ft buffer)?\)$/.test(bnd.gradedLine || "") && bnd.areaAc > lim.areaAc, `${bnd.gradedLine} vs ${lim.areaAc.toFixed(1)}`);
   check("no Edit outline in boundary mode; mode control shows 'To the boundary'", !bnd.editBtn && bnd.modeAttr === "boundary");
   // B2376240 (owner live check 2026-10-20): the limit IS the setback and the slope is thrown INWARD from it — no graded cell
   // outside the setback, the setback flag cannot fire (the north-edge "runs 16 ft past the setback" flag is absent), and the
   // dotted daylight line is the setback itself (one ring per limit ring, holes included)
   const bndOut = await page.evaluate(async () => {
     const { pointInRing } = await import("/src/workspaces/site-planner/lib/pondGeom.js");
-    const s = window.__harness.gradeSurface, L = s.grid.limit; const rings = window.__harness.model.setback.rings;
+    const s = window.__harness.gradeSurface, L = s.grid.limit; const rings = L.limitRegions.map((r) => r.outer);   // ROUND 8: the limit is the property line inset, never the setback
     const outsideCells = s.grid.cells.filter((c) => !rings.some((r) => pointInRing(c, r))).length;
     const sameRing = (a, b) => a.length === b.length && a.every((p, i) => Math.abs(p.x - b[i].x) < 1e-6 && Math.abs(p.y - b[i].y) < 1e-6);
     return { outsideCells, outCount: s.grid.outside ? s.grid.outside.count : -1, flag: document.querySelectorAll('[data-grading-flag="1"]').length,
       clear: document.querySelectorAll('[data-grading-flag="clear"]').length, daylight: s.daylight.length, limitRings: L.limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0),
       daylightIsLimit: s.daylight.length > 0 && sameRing(s.daylight[0].ring, L.limitRegions[0].outer), slopeCells: s.grid.cells.filter((c) => c.wedge).length };
   });
-  check("B2376240: boundary mode grades nothing outside the setback and the setback flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.flag === 0 && bndOut.clear >= 1 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
+  check("B2376240 / ROUND 8: boundary mode grades nothing outside the limit and the limit flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.flag === 0 && bndOut.clear >= 1 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
   check("B2376240: the daylight line in boundary mode IS the setback (one ring per limit ring)", bndOut.daylight === bndOut.limitRings && bndOut.daylightIsLimit, JSON.stringify({ daylight: bndOut.daylight, limitRings: bndOut.limitRings, daylightIsLimit: bndOut.daylightIsLimit }));
   // ROUND 6 (NEW-2): nothing inside the setback is left ungraded — every probe inside the limit (off the pond) answers a value
   const cover = await page.evaluate(async () => {

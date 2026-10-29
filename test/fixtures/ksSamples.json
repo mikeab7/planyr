@@ -158,6 +158,55 @@
     ]
    }
   },
+  "Chase County": {
+   "idField": "PID",
+   "attrs": {
+    "OBJECTID": 2844,
+    "PID": "1162400000002000",
+    "KSPID": "0091162400000002000",
+    "OWNER1": "BFP4, LTD",
+    "PropertyAddress": "00000 P RD, Cottonwood Falls, KS  66845",
+    "TaxYr1": 2025,
+    "TaxYr2": 2025,
+    "PropertyTypeCode": "A",
+    "PropertyTypeDesc": "Agricultural Use",
+    "PropertyStatusDesc": "Active",
+    "TaxingUnitGroupDesc": "060 BAZAAR-W76-284",
+    "NeighborhoodCode": "500.0",
+    "PrimaryOwner": 1,
+    "LegalDescription": "S24, T20, R07E, ACRES 239.5, S/2 NE/4; SE/4; LS RW",
+    "Acres": "239.5",
+    "PropertyID": 2952,
+    "QuickRefID": "R2952",
+    "TownshipSection": "24",
+    "TownshipRange": "07E",
+    "Township": "20",
+    "StreetNumber": "00000",
+    "PartyAddress": "4465 FM 1796\nD'HANIS, TX 78850",
+    "Subdivision": null,
+    "CountyCode": "009",
+    "TaxUnit": "060",
+    "City": null,
+    "LBCS": "9010",
+    "LBCSDesc": "Farming / ranch land (no improvements)",
+    "FinalLand": 21520,
+    "FinalBuilding": 0,
+    "FinalTotal": 21520,
+    "futilities": "8",
+    "Shape__Area": 1576398.1171875,
+    "Shape__Length": 5132.434249662181
+   },
+   "measured": {
+    "hits": 9,
+    "edgeHits": 4,
+    "extent": [
+     -96.841,
+     38.086,
+     -96.354,
+     38.523
+    ]
+   }
+  },
   "Cherokee County": {
    "idField": "PIN",
    "attrs": {
@@ -216,7 +265,7 @@
     "KSPID": "0121441900000001000",
     "CO_ABBR": "CN",
     "DATEPARCELS": 1786665600000,
-    "Shape__Area": 6.6293676974207e-05,
+    "Shape__Area": 0.000066293676974207,
     "Shape__Length": 0.032856252187727
    },
    "measured": {
@@ -310,7 +359,7 @@
     "edgeHits": 3,
     "extent": [
      -100.107,
-     37.0,
+     37,
      -99.541,
      37.475
     ]
@@ -490,9 +539,9 @@
     "SitusAddress": "00000 190TH RD, Troy, KS  66087",
     "LegalDescription": "S20, T03, R20E, ACRES 155.06, NW1/4  EXCEPT   BEG. NW COR. W 1/2 NE 1/4, TH E 40",
     "CalcAcres": 155.05763245,
-    "FinalLand": 155370.0,
-    "FinalBuild": 6810.0,
-    "FinalTotal": 162180.0,
+    "FinalLand": 155370,
+    "FinalBuild": 6810,
+    "FinalTotal": 162180,
     "flbcsfunc": "9010",
     "fzoning": "A-1",
     "fpropclass": "A",
@@ -507,7 +556,7 @@
     "fparkquan": "0",
     "fparkprox": "0",
     "SaleDate": 1673481600000,
-    "Price": 850000.0,
+    "Price": 850000,
     "TransferValidityDesc": "Change After Sale - 3",
     "Book": "332",
     "Page": "194",
@@ -783,14 +832,14 @@
     "OCity": "Garden City",
     "OState": "KS",
     "OZip": "67846-7010",
-    "TownshipSection": 30.0,
-    "Township": 23.0,
+    "TownshipSection": 30,
+    "Township": 23,
     "TownshipRange": "32W",
-    "FinalBuilding": 0.0,
-    "FinalLand": 43480.0,
-    "FinalTotal": 43950.0,
+    "FinalBuilding": 0,
+    "FinalLand": 43480,
+    "FinalTotal": 43950,
     "TaxinUnitGroupDesc": "090 01 GC 457",
-    "NeighborhoodCode": 115.0,
+    "NeighborhoodCode": 115,
     "GlobalID": "{6CEF6B90-D866-4BB1-A399-5798040E0644}",
     "last_edited_user": "SHONDA.SAUSEDA",
     "last_edited_date": 1773716103000,
@@ -1306,6 +1355,39 @@
     ]
    }
   },
+  "Lincoln County": {
+   "idField": "PID",
+   "attrs": {
+    "FID": 63497,
+    "PARCNUM": null,
+    "PID": "0531220400000001000",
+    "Calc_Acre": 159.3,
+    "OWNERNAME": "LYNE FAMILY TR, CLAYTON A & DARLENE L",
+    "OWNERADD": "1357 N 195TH RD \nLINCOLN, KS 67455-8959",
+    "OWNERCITYS": " ",
+    "TAXINGUNIT": 111,
+    "SUBDIV": " ",
+    "CAREOF": null,
+    "TRACT": "S04, T12, R07, ACRES 159.3, NE4 LESS RD R/W SECTION 04 TOWNSHIP 12 RANGE 07",
+    "AGUSE": 0,
+    "QUICKREFID": "R2471",
+    "Shape__Area": 1070224.078125,
+    "Shape__Length": 4139.751523978381,
+    "SiteAddress": "2153 E MILO DR, ELKHORN TWP, KS  67455",
+    "LAT_X": null,
+    "LONG_Y": null
+   },
+   "measured": {
+    "hits": 8,
+    "edgeHits": 3,
+    "extent": [
+     -98.49,
+     38.87,
+     -97.928,
+     39.22
+    ]
+   }
+  },
   "Logan County": {
    "idField": "PID",
    "attrs": {
@@ -1451,9 +1533,53 @@
     "edgeHits": 4,
     "extent": [
      -100.653,
-     37.0,
+     37,
      -100.089,
      37.475
+    ]
+   }
+  },
+  "Mitchell County": {
+   "idField": "PIN",
+   "attrs": {
+    "OBJECTID": 5033,
+    "PIN": "0621220400000001000",
+    "PARCEL_NUMBER": "1",
+    "ACREAGE": 159.385392537364,
+    "SCALE": "400",
+    "QuickRefID": "R5513",
+    "PropertyNumber": "062-122-04-0-00-00-001.00-0",
+    "PropNumberSearch": "0621220400000001000",
+    "SitusAddress": "00000 BLOOMFIELD, Beloit, KS  67420",
+    "LegalDescription": "S04, T08, R07W, ACRES 159.39, NE4, EX ROW",
+    "TownshipSection": "04",
+    "Township": "08",
+    "TownshipRange": "07W",
+    "fpropclass": "A",
+    "PropTypeDesc": "Agricultural Use",
+    "TaxUnitGroupCode": "124",
+    "TaxUnitGroupDesc": "124 - BLOOMFIELD TWP",
+    "SchoolTaxingUnits": "SG273",
+    "NbhdCode": "914",
+    "vproplevel_TotAgAcres": "159.390000",
+    "PartyName": "ELDER, PHILLIP LEE JR",
+    "Address1": "870 320 RD",
+    "Address2": "",
+    "City": "BELOIT",
+    "State": "KS",
+    "ZIP": "67420",
+    "CODE": "0",
+    "Shape__Area": 6942799.927642822,
+    "Shape__Length": 10545.788795714006
+   },
+   "measured": {
+    "hits": 7,
+    "edgeHits": 2,
+    "extent": [
+     -98.493,
+     39.218,
+     -97.929,
+     39.568
     ]
    }
   },
@@ -1476,7 +1602,7 @@
     "Situs": "0000  CR 3850  ",
     "SitusCity": "Independence",
     "SitusState": "KS",
-    "Shape__Area": 1.1551428359360405e-05,
+    "Shape__Area": 0.000011551428359360405,
     "Shape__Length": 0.013710817848032544
    },
    "measured": {
@@ -1650,7 +1776,7 @@
     "KSPID": "0771761300000004000",
     "CO_ABBR": "RA",
     "DATEPARCELS": 1788220800000,
-    "Shape__Area": 6.558383058738e-05,
+    "Shape__Area": 0.00006558383058738,
     "Shape__Length": 0.032655959627638405
    },
    "measured": {
@@ -1739,7 +1865,7 @@
     "Acres": 119.6,
     "TotalAgAcres": 119.6,
     "TotalAgAcresDR": 101.44,
-    "TotalAgAcresIR": 0.0,
+    "TotalAgAcresIR": 0,
     "TotalAgAcresNG": 14.8,
     "TotalAgAcresTG": 3.36,
     "PropertyTypeDesc": "Agricultural Use",

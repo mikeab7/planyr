@@ -254,6 +254,42 @@ describe("fetchVectorFeatures — paging loop + caps", () => {
     expect(truncated).toBe(false);
   });
 
+  // NEW-2 — a server whose record cap is below the page size returns SHORT pages while still
+  // flagging exceededTransferLimit. The offset must advance by what actually arrived, or the rows in
+  // between are never asked for (1000 of 1800 came back, truncated:false).
+  it("a server that returns short pages (500-row cap) still yields every feature", async () => {
+    const TOTAL = 1800, SERVER_CAP = 500;
+    const seenOffsets = [];
+    const fetchJson = fakeFetch({
+      [FEMA]: (url) => {
+        const off = Number(new URL(url).searchParams.get("resultOffset"));
+        seenOffsets.push(off);
+        const n = Math.max(0, Math.min(SERVER_CAP, TOTAL - off));
+        const feats = Array.from({ length: n }, (_, i) => ({ attributes: { i: off + i }, geometry: { rings: [square(off + i, 0, 1)] } }));
+        return { features: feats, exceededTransferLimit: off + n < TOTAL };
+      },
+    });
+    const { features, truncated } = await fetchVectorFeatures(VECTOR_SOURCES.fema, BBOX, { fetchJson, maxFeatures: 5000 });
+    expect(seenOffsets).toEqual([0, 500, 1000, 1500]);
+    expect(features).toHaveLength(TOTAL);
+    expect(truncated).toBe(false);
+  });
+
+  it("an empty page that still claims more is never looped on and reads as truncated", async () => {
+    const fetchJson = fakeFetch({
+      [FEMA]: (url) => {
+        const off = Number(new URL(url).searchParams.get("resultOffset"));
+        return off === 0
+          ? { features: [{ attributes: { i: 0 }, geometry: { rings: [square(0, 0, 1)] } }], exceededTransferLimit: true }
+          : { features: [], exceededTransferLimit: true };
+      },
+    });
+    const { features, truncated } = await fetchVectorFeatures(VECTOR_SOURCES.fema, BBOX, { fetchJson });
+    expect(fetchJson.calls).toBe(2);
+    expect(features).toHaveLength(1);
+    expect(truncated).toBe(true);
+  });
+
   it("hard-caps at maxFeatures and flags truncated", async () => {
     // Every page reports more available; cap at 5 across pages of 2.
     const fetchJson = fakeFetch({
