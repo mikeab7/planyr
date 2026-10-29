@@ -44,3 +44,34 @@ export function dismissDraftNotice(r) {
   const msg = r.error.message || (typeof r.error === "string" ? r.error : "");
   return `Couldn't dismiss that draft — ${msg || "the cloud didn't answer"}. It's still here; try again.`;
 }
+
+/* ---- import title (NEW-1) ------------------------------------------------------------------
+ * A KML placemark's <name> is the one reliable field in the format, so it ALWAYS is the comp's
+ * title when it has any text. The description is read for deal terms only. When <name> is empty a
+ * title may be derived from the description (its property or address) — but never a lone
+ * deal-type word: a description that opens "Lease" / "Sale, 3.2 AC, …" used to hand the parser's
+ * leading fragment to the title ("Lease"). */
+const LONE_DEAL_WORD_RE = /^(?:for\s+)?(?:(?:ground|land|building|bldg|industrial|retail|office)\s+)?(?:leases?|leased|leasing|sales?|sold|purchase[ds]?|comps?)(?:\s+(?:comps?|deal|transaction))?$/i;
+
+/** True when `text` is nothing but a deal-type word ("Lease", "Sale", "Land Sale", "Leased"…). */
+export function isLoneDealWord(text) {
+  const t = String(text || "").trim().replace(/^[\s\-–—:;,./]+|[\s\-–—:;,./]+$/g, "");
+  return !!t && LONE_DEAL_WORD_RE.test(t);
+}
+
+/** The ONE title rule for an imported placemark: its (already entity-decoded) name when
+ *  non-empty; otherwise the title the description parse derived, unless that is a lone deal-type
+ *  word; otherwise "". */
+export function resolveImportTitle(name, derivedTitle) {
+  const n = String(name ?? "").trim();
+  if (n) return n;
+  const d = String(derivedTitle ?? "").trim();
+  return d && !isLoneDealWord(d) ? d : "";
+}
+
+/** The title a draft shows in import review and promotes with — computed from the draft's own
+ *  `rawName` every time, so a draft staged before this rule (proposed.title = "Lease") reads
+ *  right too, and nothing re-parsed from the description can displace the name. */
+export function draftTitleFor(draft) {
+  return resolveImportTitle(draft?.rawName, draft?.proposed?.title);
+}

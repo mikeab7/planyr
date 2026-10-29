@@ -26,6 +26,7 @@
  * becomes one draft row for the caller to show and confirm.
  */
 import { parseSingleRecord } from "./compParse.js";
+import { resolveImportTitle } from "./compDrafts.js";
 
 // NEW-1 — also numeric references (&#38; / &#x26;), and applied to placemark NAMES too: a name
 // "Dircks Moving &amp; Logistics" used to be saved as the comp title verbatim.
@@ -159,7 +160,11 @@ export function placemarkToDraftRow(placemark, { sourceFile } = {}) {
     raw_name: placemark.name,
     raw_description: placemark.description || null,
     raw_geometry: rawGeometry,
-    proposed: parsed ? { ...parsed.draft, title: parsed.draft.title || placemark.name || "", cellFlags: parsed.cellFlags } : { title: placemark.name || "", cellFlags: {} },
+    // NEW-1 — the placemark <name> always wins; the description only ever supplies deal terms (and,
+    // when the name is empty, a property/address title — never a lone "Lease"/"Sale").
+    proposed: parsed
+      ? { ...parsed.draft, title: resolveImportTitle(placemark.name, parsed.draft.title), cellFlags: parsed.cellFlags }
+      : { title: resolveImportTitle(placemark.name, ""), cellFlags: {} },
     status: "pending",
   };
 }

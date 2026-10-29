@@ -1,6 +1,6 @@
 /* V1861056 / B2428112 — a county with no parcel data says why and offers "Email Michael to request it", on the real deploy, signed in
  * as the throwaway test account.
- *   E2E_LOGIN_KEY=… node ui-audit/verify-parcel-gap-request-live.mjs [https://planyr.io] [expectedBuildPrefix]
+ *   E2E_LOGIN_KEY=… node ui-audit/verify-parcel-gap-request-live.mjs [https://planyr.io] [expectedBuildPrefix] [sd]
  * Reads /version.json IN THE SAME CALL as every assertion (merged ≠ live). Click-only: nothing is created, so there is nothing to clean up.
  * Known-good arm: Pike KY (paywall) must show its exact sentence — if it does not, the run is VOID, not scored. */
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -8,13 +8,23 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const base = process.argv[2] || "https://planyr.io";
 const wantBuild = process.argv[3] || null;
-const CASES = [
+const CASES_B2428112 = [
   ["Pike County", "KY", 37.4791, -82.5188, /Pike County keeps its parcel map behind a paid subscription/, true],
   ["Bath County", "KY", 38.1456, -83.7646, /Bath County keeps its parcel map behind a paid subscription/],
   ["Breckinridge County", "KY", 37.7798, -86.4605, /Breckinridge County has a parcel map, but it isn't open to the public/],
   ["Boyle County", "KY", 37.6456, -84.7694, /Boyle County's parcel map server isn't reachable from Planyr right now/],
   ["Alcona County", "MI", 44.6852, -83.6154, /Planyr hasn't found a public parcel map it can use for Alcona County/],
 ];
+/* B2486192 / B2486193 (V1936416): the South Dakota gaps + a Schneider county. Run with a 4th argument: `… https://planyr.io <build> sd`.
+ * Pike KY stays as the known-good arm — if it does not show its exact sentence the run is VOID. */
+const CASES_SD = [
+  CASES_B2428112[0],
+  ["Aurora County", "SD", 43.7164, -98.4872, /Aurora County's parcel map server isn't reachable from Planyr right now/],
+  ["Hughes County", "SD", 44.3683, -100.351, /Hughes County keeps its parcel map behind a paid subscription/],
+  ["Adams County", "IA", 41.0114, -94.7377, /Adams County has a parcel map, but it isn't open to the public/],
+  ["Harding County", "SD", 45.5886, -103.5463, /Planyr hasn't found a public parcel map it can use for Harding County/],
+];
+const CASES = process.argv[4] === "sd" ? CASES_SD : CASES_B2428112;
 const rows = [];
 const rec = (r) => { rows.push(r); console.log(`  [${r.pass ? "PASS" : "FAIL"}] ${r.name} — ${r.detail}`); };
 
