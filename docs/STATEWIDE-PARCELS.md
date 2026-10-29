@@ -2806,6 +2806,8 @@ Owner request "wire up all cities in NJ, NY", New York only (NJ is a sibling ses
 
 So for a click in Lockport, Niagara Falls NY, Lewiston, Wilson … when the county server fails, the answer is the honest *"Niagara County's parcel server didn't answer"* with Try again (never "No lot here"); in Cambria the town's layer answers.
 
+**County first, the state's layer when the county does not answer (B2475216, 2026-10-28).** A lot click asks the county; if the county was SILENT (error / timeout, not "no lot") `lib/parcelFallbacks.js` supplies the stand-in. Counties with one today: **Texas** harris, fortbend, chambers, montgomery, brazoria, galveston, liberty, austintx (TxGIO; waller IS TxGIO) · **Colorado** co_adams, co_broomfield, co_denver, co_larimer, co_weld (OIT composite) · **New York** Niagara only, a town layer (Cambria). None elsewhere, by measurement: Florida's county rows are parked on the state layer; the 24 NY and 9 TN county rows are exactly the counties the state layer lacks; NJ, OH, UT, NC are statewide-only (no county row to fall back from).
+
 **Caveats for the owner (not blockers).**
 - Four counties are not county publications: Chenango and Herkimer are consultant working layers built on Regrid-sourced data (they could be removed, and Regrid's licence on redistribution is the owner's call); Nassau is a land trust's republish of the 2020 roll; Dutchess is an unconfirmed account. Each is labelled `third-party` in `nyProvenance.js`. Swap when the county publishes.
 - No owner column: Columbia, Dutchess, Fulton, Madison, Monroe (the public layers omit it; a click returns the lot, id and acreage).
