@@ -19,6 +19,7 @@ import {
 } from "../src/workspaces/site-planner/lib/floodplainMitigation.js";
 import { assessBuildability, NO_RISE_CERT_DEF } from "../src/workspaces/site-planner/lib/buildableEnvelope.js";
 import { sizePondForTargets } from "../src/workspaces/site-planner/lib/pondSizing.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const AC = 43560;
 const SQ = (s = 200) => [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }];
@@ -127,7 +128,7 @@ describe("K3 — berm fill below the flood level folds into the mitigation requi
 });
 
 describe("K5 — the absolute floodway 'no fill' copy is gone from the pond path", () => {
-  const sp = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const sp = plannerSource();
   const copy = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/pondInspectorCopy.js", import.meta.url)), "utf8");
   it("SitePlanner no longer carries the removed pond-floodway sentences", () => {
     expect(sp.includes("no fill is allowed in the regulatory floodway")).toBe(false);

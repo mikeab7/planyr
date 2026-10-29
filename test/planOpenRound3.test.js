@@ -13,6 +13,7 @@ import { createSiteModel, READ_NORMALIZE } from "../src/workspaces/site-planner/
 import { healDockAxes } from "../src/workspaces/site-planner/lib/dockZones.js";
 import { createTilePacer } from "../src/workspaces/site-planner/lib/tileLifecycle.js";
 import { polyIntersectArea, triangulate } from "../src/workspaces/site-planner/lib/polyClip.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const fixture = (f) => JSON.parse(readFileSync(new URL(`../ui-audit/fixtures/plan-load/${f}.json`, import.meta.url), "utf8"));
 const FIELDS = ["els", "parcels", "markups", "measures", "callouts"];
@@ -53,7 +54,7 @@ describe("one read normalization for both read paths (the rows seed no longer re
     expect(src).toMatch(/function normalizedEls\([^)]*\) \{[\s\S]{0,800}READ_NORMALIZE\.els\(normalizeBondedChildren\(migrateRoads\(objArr\(raw\)\), onHeal\)\)/);
   });
   it("the seed commits what it normalized instead of adopting the raw row back (exempt from rows-canonical) and warms before seeding", () => {
-    const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const sp = plannerSource();
     const body = sp.slice(sp.indexOf("const refetchReplace = async (eng) => {"), sp.indexOf("/* Plan-switch first-write loss"));
     expect(body).toMatch(/READ_NORMALIZE\[field\]/);
     expect(body).toMatch(/eng\.reconcile\(shown, \{ busy: false, afterSeed: true, exempt: new Set\(\[\.\.\.healed\.map\(\(h\) => "el:" \+ h\.id\), \.\.\.normKeys\]\)/);
@@ -90,7 +91,7 @@ describe("tile loads are paced (a whole grid never answers in one burst)", () =>
     expect(b.src).toBe(""); expect(c.src).toBe("c"); expect(p.stats.dropped).toBe(1);
   });
   it("is wired to BOTH planner basemap layers", () => {
-    const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/paceTileLoads\(bf\)/); expect(sp).toMatch(/paceTileLoads\(t\)/);
   });
 });
@@ -109,7 +110,7 @@ describe("parcel pair areas are memoised by ring identity (same answer, asked on
 
 describe("the planner's first render frames like fit() does (one derivation)", () => {
   it("fit() and the first render both go through framingPoints + framedViewFor", () => {
-    const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/const pts = framingPoints\(hiddenGroups, parcels, els, sheetOverlays\);/);
     expect(sp).toMatch(/setView\(framedViewFor\(box2, pts\)\)/);
     expect(sp).toMatch(/framedViewFor\(lastMeasuredCanvas\.box, framingPoints\(settings\.hidden, parcels, els, restored\?\.sheetOverlays \|\| \[\]\)\)/);

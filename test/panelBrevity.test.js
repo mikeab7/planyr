@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { measurePanels, checkBudgets, loadBudgets, REGIONS } from "../ui-audit/panel-copy-budget.mjs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("every panel region stays inside its visible-copy budget", () => {
   const { ok, rows } = checkBudgets();
@@ -51,7 +52,7 @@ describe("the guard itself cannot silently measure nothing", () => {
   });
 
   it("progressive disclosure is genuinely exempt — that is the escape valve the rule wants used", () => {
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     const before = measurePanels(src)["yield-detention-detail"].chars;
     // Wrapping a sentence in a Collapse must reduce the count; leaving it inline must not.
     const inline = src.replace(
@@ -67,7 +68,7 @@ describe("the guard itself cannot silently measure nothing", () => {
   });
 
   it("hover-only and method-note copy is exempt, so moving detail there is rewarded", () => {
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     const before = measurePanels(src)["yield-detention-detail"].chars;
     const asMethod = src.replace(
       "const detVisible = (() => {",

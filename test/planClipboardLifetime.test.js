@@ -23,6 +23,7 @@ import {
 } from "../src/workspaces/site-planner/lib/planClipboardStore.js";
 import { resolveClipFrame, clipPlacement, CLIP_FRAME_MAX_SMEAR_FT } from "../src/workspaces/site-planner/lib/planClipboard.js";
 import { lngLatToFeet, feetToLatLngPair } from "../src/workspaces/site-planner/lib/mapLock.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const payload = (n = 1) => ({
   items: Array.from({ length: n }, (_, i) => ({ kind: "markup", obj: { id: `m${i}`, pts: [{ x: 0, y: 0 }] } })),
@@ -218,7 +219,7 @@ describe("clipPlacement — the ONE placement decision both Ctrl+V paths use", (
 /* The defect was WHERE the payload is held, so the source guard is part of the fix, not decoration:
  * a `useRef` clipboard reads as perfectly ordinary React and would come back on the next edit. */
 describe("source guard — the payload is not owned by the component again", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
 
   it("SitePlanner declares no clipboard ref of its own", () => {
     expect(src).not.toMatch(/const\s+clip\s*=\s*useRef/);

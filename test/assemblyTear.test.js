@@ -22,6 +22,7 @@ import { rowsToModel } from "../src/workspaces/site-planner/lib/elementRows.js";
 import { commitElements } from "../src/workspaces/site-planner/lib/elementApi.js";
 import { strandedFromHost, normalizeBondedChildren, offAnchor } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -155,7 +156,7 @@ describe("NEW-1 — a gesture that moves a host and its bonded children commits 
 
 describe("NEW-2 — an undo/redo is a gesture boundary and commits immediately", () => {
   const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("restoring a snapshot and flushing commits NOW — it never rides the debounce", async () => {
     const h = makeHarness();
@@ -286,7 +287,7 @@ describe("NEW-1 — a late echo of an undone commit can never re-tear the assemb
 
   it("a buffered REMOVE survives a snapshot — a remote delete is not undone by a local undo", () => {
     // The SitePlanner-side rule, asserted on the shipped source (the buffer lives in the component).
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     const idx = src.indexOf("const applySnapshot = (s) => {");
     const block = src.slice(idx, src.indexOf("\n  };", idx));
     expect(block).toMatch(/pendingRemoteRef\.current\.filter\(\(i\) => i && i\.action === "remove"\)/);
@@ -797,7 +798,7 @@ describe("B1120 — the p_atomic REQUEST BODY, with the real transport in the lo
   });
 
   it("the shipped adapter forwards opts (anti-drift source guard)", () => {
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     // A fixed-arity adapter is the exact shape of the bug; require the two-parameter form.
     expect(src).toMatch(/commit:\s*\(ops,\s*opts\)\s*=>\s*commitElements\(supabase,\s*siteId,\s*ops,\s*opts\)/);
     expect(src).not.toMatch(/commit:\s*\(ops\)\s*=>\s*commitElements/);

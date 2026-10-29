@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const calls = { sync: 0, steps: 0 };
 vi.mock("../src/workspaces/site-planner/lib/proposedSurface.js", async (orig) => {
@@ -68,7 +69,7 @@ describe("the off-render build", () => {
 });
 
 describe("source guards", () => {
-  const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const sp = plannerSource();
   it("SitePlanner takes gradeSurface from useGradeSurface, with grading as the off-render switch", () => {
     expect(sp).toMatch(/const gradeSurface = useGradeSurface\(\{[\s\S]{0,300}offRender: grOn/);
     expect(sp).not.toMatch(/useMemo\(\(\) => \{[^}]*buildProposedSurface\(gsInputs\)/);

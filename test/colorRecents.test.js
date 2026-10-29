@@ -6,6 +6,7 @@ import {
   loadRecents, saveRecents, getRecents, pushRecent, subscribeRecents, _resetRecentsCache,
   notePick, commitPick, pendingPickValue,
 } from "../src/shared/ui/colorRecents.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const store = new Map();
 globalThis.localStorage = {
@@ -171,7 +172,7 @@ describe("a live picking session records exactly ONE colour, at commit", () => {
 describe("SitePlanner wires the wheel through the session, not straight to the list", () => {
   it("livePick notes live values and commits on blur; it never pushes per event", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     const body = src.slice(src.indexOf("const livePick ="), src.indexOf("const colorCtl ="));
     expect(body).toContain("notePick(e.target.value)");
     expect(body).toContain("commitPick()");

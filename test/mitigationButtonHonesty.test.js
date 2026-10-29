@@ -11,8 +11,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("NEW-18 — the mitigation shortfall routes to 'See mitigation options', never a no-op ⚡", () => {
   it("the drainage object exposes onSeeMitigationOptions, opening the pond's Sizing assistant", () => {
