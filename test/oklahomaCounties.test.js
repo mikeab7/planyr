@@ -2,8 +2,8 @@
  * ("<County> — no parcel data wired here yet.") that carries a recorded, re-searched reason. Never a county that is silently empty.
  *
  * RED-PROOF: on main only Oklahoma and Tulsa counties had rows, so the 14 counties wired here fell through to no-source; `git stash`-ing counties.js's okRaw/okMap spreads
- * turns every "wired" case below red. The county list is the Census-derived polygon asset (fixture header), never hand-picked. Oklahoma has no free statewide parcel layer,
- * so a gap must not borrow one. Adding a county to gaps is a claim (docs/STATEWIDE-PARCELS.md "Oklahoma counties (2026-10-19)" records what was searched). */
+ * turns every "wired" case below red. The county list is the Census-derived polygon asset (fixture header), never hand-picked. The state's statewide parcel mosaic is WMS-only (no ArcGIS layer),
+ * so a gap must not borrow one; the second pass (B2497472) wired every former gap — 52 to that mosaic through /okparcels. Adding a county to gaps is a claim (docs/STATEWIDE-PARCELS.md "Oklahoma counties (2026-10-19)" records what was searched). */
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { COUNTIES, COUNTIES_MAP, countyIdentity, noParcelSourceNote } from "../src/workspaces/site-planner/lib/counties.js";
@@ -35,7 +35,7 @@ describe("the computed county list", () => {
   });
   it("every gap records WHY, after a re-search — a bare 'no source' is not a reason", () => {
     for (const [n, g] of Object.entries(FX.gaps)) {
-      expect(g.kind, n).toMatch(/^(none-found|no-public-service|viewer-no-rest|tax-roll-only|partial-coverage)$/);
+      expect(g.kind, n).toMatch(/^(none-found|no-public-service|viewer-no-rest|tax-roll-only|partial-coverage|token-required)$/);
       expect(g.reason.length, n).toBeGreaterThan(80);
     }
   });
@@ -71,18 +71,18 @@ describe("spread and county-line points land on the county they belong to", () =
 describe("the wired Oklahoma rows", () => {
   it("the table and the registry agree on which counties are wired", () => {
     expect(new Set(wiredKeys)).toEqual(new Set([...OK_ROWS.map(([k]) => "ok_" + k), ...[...HAND].map((n) => "ok_" + n.toLowerCase())]));
-    expect(OK_ROWS).toHaveLength(14);
+    expect(OK_ROWS).toHaveLength(75); // 14 from the first pass + 61 from the second (B2497472): no Oklahoma gap is left
   });
-  it("a host that is not *.arcgis.com rides the relay, and the relay allows it", () => {
+  it("a host that is not *.arcgis.com rides the relay (and the relay allows it) or is the state-layer adapter (/okparcels, our own Pages Function)", () => {
     for (const [k, , u] of OK_ROWS) {
-      if (/^https:\/\/[^/]*arcgis\.com\//.test(u)) continue;
+      if (/^https:\/\/[^/]*arcgis\.com\//.test(u) || u.startsWith("/okparcels/")) continue;
       expect(u, k).toMatch(/^\/gis-proxy\//);
       expect(ALLOWED_HOSTS.has(u.split("/")[2]), `${k} → ${u.split("/")[2]}`).toBe(true);
     }
   });
-  it("no two counties share a layer", () => {
-    const urls = OK_ROWS.map((r) => r[2]);
-    expect(new Set(urls).size).toBe(urls.length);
+  it("no two counties share a layer AND a scope (a shared layer is scoped per county — test/oklahomaSecondPass.test.js)", () => {
+    const keys = OK_ROWS.map((r) => r[2] + "|" + (r[9] || ""));
+    expect(new Set(keys).size).toBe(keys.length);
   });
   it("each county's bbox contains its centre point, and every row pins its measured id column", () => {
     for (const [k, n, , , , , la, ln, bb] of OK_ROWS) {
@@ -94,10 +94,11 @@ describe("the wired Oklahoma rows", () => {
     for (const [k] of OK_ROWS) {
       const v = OKLAHOMA_VERIFICATION["ok_" + k];
       expect(v, k).toBeTruthy();
-      expect(v.verifiedOn, k).toBe("2026-10-19");
+      expect(["2026-10-19", "2026-10-29"], k).toContain(v.verifiedOn);
       expect(v.publisherName.length, k).toBeGreaterThan(5);
     }
-    expect(OKLAHOMA_VERIFICATION.ok_garfield.publisherName).toMatch(/2015/);
+    // Garfield's 2015 county copy was replaced 2026-10-29 by the City of Enid's current layer (B2497472)
+    expect(OKLAHOMA_VERIFICATION.ok_garfield.publisherName).toMatch(/City of Enid/);
   });
 });
 
