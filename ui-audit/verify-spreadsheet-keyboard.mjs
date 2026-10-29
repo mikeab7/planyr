@@ -74,7 +74,18 @@ const cell = (r, c) => page.locator(`[data-testid="model-sheet"] [data-row="${r}
 const header = (c) => page.getByTestId(`model-col-header-${c}`);
 const rowHeader = (r) => page.getByTestId(`model-row-header-${r}`);
 const display = async (r, c) => (await cell(r, c).innerText()).trim();
-const nameBox = () => page.getByTestId("model-name-box").inputValue();
+// The Name Box is updated by an effect AFTER the keypress/click renders, so a read taken the same instant can be stale (measured on the
+// deployed build: the same Shift+Space read "C3" then "3:3"). Read it only once two consecutive reads agree.
+const nameBox = async () => {
+  let prev = null;
+  for (let i = 0; i < 40; i++) {
+    const v = await page.getByTestId("model-name-box").inputValue();
+    if (v === prev) return v;
+    prev = v;
+    await page.waitForTimeout(40);
+  }
+  return prev;
+};
 const letters = (c) => { let n = c + 1, s = ""; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
 // The grid is virtualised: bring a cell into the DOM through the REAL Name Box (type the address, Enter) when it is not rendered.
 const ensure = async (r, c) => {
