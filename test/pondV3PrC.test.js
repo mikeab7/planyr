@@ -50,11 +50,11 @@ describe("C2 — SUPERSEDED by PR-D (D5): the Max berm (ft) input is REMOVED; th
 
 describe("C5 — every ac-ft the toast / detention message states is 1dp (fmtAcFt), never 2dp", () => {
   it("the detention design messages format required volumes through fmtAcFt", () => {
-    expect(dp).toContain("fmtAcFt(detTargetCf / 43560)");
-    expect(dp).toContain("fmtAcFt(mitTargetCf / 43560)");
+    expect(dp).toContain("fmtAcFt(detTargetCf / CF_PER_ACFT)");
+    expect(dp).toContain("fmtAcFt(mitTargetCf / CF_PER_ACFT)");
     // no raw 2dp ac-ft on the design-pond volumes
-    expect(dp.includes("f2(detTargetCf / 43560)")).toBe(false);
-    expect(dp.includes("f2(mitTargetCf / 43560)")).toBe(false);
+    expect(dp.includes("f2(detTargetCf / CF_PER_ACFT)")).toBe(false);
+    expect(dp.includes("f2(mitTargetCf / CF_PER_ACFT)")).toBe(false);
   });
 });
 

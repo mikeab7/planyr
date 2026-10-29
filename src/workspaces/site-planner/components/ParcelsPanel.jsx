@@ -21,6 +21,7 @@ import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { measureListOverflow } from "../lib/parcelListOverflow.js";
 import ParcelContextMenu from "./ParcelContextMenu.jsx";
 import { isRenameable } from "../lib/parcelMenu.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 export const LINE = "1px solid var(--border-default)";
 export const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -106,7 +107,7 @@ export function overlapAcres(rows, siteAcres) {
 /* "Parcel 4 (12.3 ac), Tract A (1.2 ac)" for a row's hover, or "" when it overlaps nothing. */
 export function overlapNamesOf(row, byId) {
   const list = (row.overlaps || []).map((o) => ({ ...o, other: byId.get(o.id) })).filter((o) => o.other);
-  return list.map((o) => `${rowText(o.other).label} (${fmt(o.sqft / 43560)} ac)`).join(", ");
+  return list.map((o) => `${rowText(o.other).label} (${fmt(o.sqft / SQFT_PER_ACRE)} ac)`).join(", ");
 }
 
 /* The row's label + its optional second line. An unnamed COUNTY lot is labelled by its account (no second line — the

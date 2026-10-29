@@ -36,7 +36,7 @@ describe("NEW-15 — the detention explainer matches the numbers above it (parti
     expect(src).toContain('${d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : ""}');
     // rimRaiseFeasible is computed on the drainage object from dead-but-upland ponds
     expect(src).toContain("rimRaiseFeasible: pondLedgerEntries.some((p) => {");
-    expect(src).toContain("return holds - counts > 0.05 * 43560 && !p.inTrigger;");
+    expect(src).toContain("return holds - counts > 0.05 * CF_PER_ACFT && !p.inTrigger;");
     // the old unconditional "Raising the rim fixes this." claim is gone
     expect(src.includes("so none counts yet. Raising the rim fixes this.")).toBe(false);
   });

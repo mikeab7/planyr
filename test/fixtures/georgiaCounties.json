@@ -2087,7 +2087,6 @@
   "Jones",
   "Lamar",
   "Lincoln",
-  "Long",
   "Madison",
   "Marion",
   "McDuffie",
@@ -2432,6 +2431,12 @@
    "county": "Macon County",
    "lat": 32.46814,
    "lng": -83.88836
+  },
+  {
+   "name": "Long — just inside its own line",
+   "county": "Long County",
+   "lat": 31.56,
+   "lng": -81.62
   }
  ]
 }

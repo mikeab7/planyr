@@ -72,6 +72,7 @@ import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.
 import { RADIUS } from "../../shared/ui/radius.js";
 import { pinDragCursor } from "../../shared/ui/controls.jsx";
 import { viewportCursor, vertexGripAt, gripCursorFor, gripHoverCursor, fileDropEffect } from "./lib/reviewCursor.js";
+import { commaInt as f0, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -2378,8 +2379,6 @@ export default function DocReview({
   const totals = rollup(markups, calByPage);
 
   /* ---------------- render ---------------- */
-  const f0 = (n) => Math.round(n).toLocaleString();
-  const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Right-hand value for a row in the per-sheet markup list (B376): a measurement shows its
   // measured value; a text note shows its words; a redline shape has none. Every markup is listed
   // so it can always be found + deleted from the panel, independent of clicking it on the canvas.

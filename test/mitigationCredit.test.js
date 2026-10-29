@@ -156,6 +156,6 @@ describe("NEW-26 / 22 / 23 — SitePlanner wiring (source scan)", () => {
 
   it("NEW-23 — the per-pond 'holds' chip reads the DRAWN-ring gross (ties out to the explainer)", () => {
     expect(src).toContain("drawnGrossCf: detentionStorage(ringOf(e), e.det?.depth ?? 8, e.det?.freeboard ?? 1, e.det?.slope ?? 3).vol,");
-    expect(src).toContain("holdsAcFt: (p.drawnGrossCf != null ? p.drawnGrossCf : (p.grossCf || 0)) / 43560,");
+    expect(src).toContain("holdsAcFt: (p.drawnGrossCf != null ? p.drawnGrossCf : (p.grossCf || 0)) / CF_PER_ACFT,");
   });
 });

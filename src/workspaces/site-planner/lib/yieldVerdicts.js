@@ -17,7 +17,7 @@
  *   sortRank 0 SHORT · 1 loading · 2 OK  (the strip sorts by this: shortfalls first)
  */
 
-const AC_FT = 43560;
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 const EPS = 0.005; // an ac-ft residue inside display precision is "met", never a phantom SHORT
 // NEW-16 — a MATERIALITY floor for a mitigation requirement. Below this the "requirement" is
 // grid-cell crumbs at a flood-zone edge (≈0.05 ac-ft ≈ 80 yd³ — engineering noise), not a real
@@ -151,7 +151,7 @@ const pondFactsUnknownRow = (key, label) => finish({ key, label, pill: "…", to
 // already carries that affordance for this exact state.
 const unresolvedMitigationRow = (reason, provided) => {
   const provCf = provided && Number.isFinite(provided.creditedCf) ? provided.creditedCf : null;
-  const provAcFt = provCf != null ? provCf / AC_FT : null;
+  const provAcFt = provCf != null ? provCf / CF_PER_ACFT : null;
   const knowsProvided = provAcFt != null && provAcFt > TRACE_ACFT;
   const combinedReason = knowsProvided
     ? `${fmtAcFt(provAcFt)} AC-FT already provided${reason ? `; ${reason}` : ""}`
@@ -262,7 +262,7 @@ function noCriteriaDetentionRow(req) {
 
 function detentionVerdict(d) {
   const req = d.req;
-  const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / AC_FT;
+  const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / CF_PER_ACFT;
   const inundated = d.pondFullyInundated && usableAcFt != null && usableAcFt < 1e-6;
   // Checked BEFORE the numeric branches: an unavailable requirement has no number to compare, and
   // falling through to them is what produced the permanent "checking flood data".
@@ -353,7 +353,7 @@ function mitigationVerdict(d) {
     if (mitV.flags && mitV.flags.includes("floodway_intersect")) {
       return finish({ key: "mit", label: "Mitigation", pill: "SHORT", tone: "danger", sentence: "fill in the floodway (stop)", short: true, action: true, sortRank: 0 });
     }
-    const provAcFt = provCf / AC_FT;
+    const provAcFt = provCf / CF_PER_ACFT;
     const row = pairRow("mit", "Mitigation", provAcFt, mitV.volumeAcFt, provAcFt < mitV.volumeAcFt - EPS, { thinOverrides: d.thinMarginPct, pctFloorAcFt: d.marginPctFloorAcFt });
     // NEW-3 — a total that ties is NOT compliance: FBC's offset is hydraulically equivalent, an
     // elevation-matched test. A band ledger that fails demotes the row to SHORT even when the
@@ -482,9 +482,9 @@ function applyReconciliation(rows, d) {
       ...r,
       pill: "FAIL", tone: "danger", short: true, action: true, sortRank: -1,
       reconcileFail: {
-        overlapAcFt: rec.overlapCf != null ? rec.overlapCf / AC_FT : null,
-        physicalAcFt: rec.physicalCf != null ? rec.physicalCf / AC_FT : null,
-        claimedAcFt: rec.claimedCf != null ? rec.claimedCf / AC_FT : null,
+        overlapAcFt: rec.overlapCf != null ? rec.overlapCf / CF_PER_ACFT : null,
+        physicalAcFt: rec.physicalCf != null ? rec.physicalCf / CF_PER_ACFT : null,
+        claimedAcFt: rec.claimedCf != null ? rec.claimedCf / CF_PER_ACFT : null,
         ponds: (rec.offenders && rec.offenders.length ? rec.offenders : rec.undeclared || []).map((p) => p.name || p.id),
         undeclared: (rec.undeclared || []).length > 0,
         primary,
@@ -496,10 +496,10 @@ function applyReconciliation(rows, d) {
       // provided/required pair so it can WRAP. Concatenated into one nowrap headline it was
       // clipped mid-word at the panel edge ("…12.2 ac-ft counted twi").
       suffix: rec.overlapCf > 0
-        ? `${fmtAcFt(rec.overlapCf / AC_FT)} AC-FT counted twice`
+        ? `${fmtAcFt(rec.overlapCf / CF_PER_ACFT)} AC-FT counted twice`
         : "duty split not declared",
       sentence: rec.overlapCf > 0
-        ? `${r.sentence} — ${fmtAcFt(rec.overlapCf / AC_FT)} AC-FT counted twice`
+        ? `${r.sentence} — ${fmtAcFt(rec.overlapCf / CF_PER_ACFT)} AC-FT counted twice`
         : `${r.sentence} — duty split not declared`,
     };
     return { ...v, text: `${v.label}: ${v.sentence}` };

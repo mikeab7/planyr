@@ -29,7 +29,7 @@ import { loadTerrain } from "./terrainLazy.js";
 import { getContourInterval, subscribeContourInterval } from "./contourIntervalPref.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureBaseStyle, featureRetryDecision,
-  wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable,
+  wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable, countVertices, FEATURE_VERTEX_BUDGET, FEATURE_VERTEX_TOTAL,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
 // One-line predicate, needed synchronously when a layer is built — see featureHoverAttach.js for
@@ -1544,6 +1544,10 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
+  // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
+  lyr.on("overbudget", (e) => {
+    onStatus && onStatus(k, "failed", `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+  });
   lyr.on("requesterror", (e) => {
     const code = e && e.error && (e.error.code ?? e.error.httpStatus);
     const { retry, delayMs } = featureRetryDecision(code, tries, max);
@@ -1581,6 +1585,35 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
     ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
   }));
+  // B2507064 (NEW-9) — the draw budget: a batch of features over the vertex budget is NOT handed to Leaflet (that is what froze the tab); the layer says so instead.
+  {
+    const origCreate = lyr.createLayers;
+    let drawn = 0;
+    const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
+    lyr.createLayers = function (features) {
+      const v = countVertices(features, Math.max(cap, total));
+      if (v > cap || drawn + v > total) {
+        try { this.fire("overbudget", { vertices: v, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
+        return undefined;
+      }
+      drawn += v;
+      return origCreate.call(this, features);
+    };
+    lyr.on("remove", () => { drawn = 0; });
+    // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
+    if (cfg.simplifyFactor) {
+      let fetchedAt = null;
+      const onZoom = () => {
+        const z = lyr._map && lyr._map.getZoom();
+        if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
+        fetchedAt = z; drawn = 0;
+        try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
+      };
+      lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });
+      lyr.on("add", () => { if (lyr._map) lyr._map.on("zoomend", onZoom); });
+      lyr.on("remove", () => { fetchedAt = null; try { lyr._map && lyr._map.off("zoomend", onZoom); } catch (_) { /* map already gone */ } });
+    }
+  }
   if (cfg.lineLabel) {
     const syncLabels = () => {
       const want = wantLabels(lyr);
@@ -1600,6 +1633,8 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   }
   return lyr;
 }
+
+export { buildFeatureLayer as buildFeatureLayerForTest }; // B2507064: the draw-budget guard is unit-tested through the real builder (test/layerDrawBudget)
 
 /* Which currently-ON layers can answer a RASTER identify at a point (NEW-2)? Pure selector,
  * so both surfaces (the map finder's mousemove and the planner's canvas cursor) resolve the

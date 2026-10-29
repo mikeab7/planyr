@@ -46,6 +46,8 @@
  * Pure — no DOM, no storage, no clock. Unit-tested in `test/splitIntegrity.test.js`.
  */
 import ClipperLib from "clipper-lib";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { SQFT_PER_ACRE };
 
 /* Shoelace area (absolute) of a ring in the planner's feet frame. */
 export function ringAreaSqft(pts) {
@@ -60,7 +62,6 @@ export function ringAreaSqft(pts) {
   return Math.abs(a / 2);
 }
 
-export const SQFT_PER_ACRE = 43560;
 export const ringAreaAcres = (pts) => ringAreaSqft(pts) / SQFT_PER_ACRE;
 
 /* ⛔ THE DEFINITION THE WHOLE INVARIANT RESTS ON. A parcel counts toward the land the plan claims

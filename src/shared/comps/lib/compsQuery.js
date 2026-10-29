@@ -24,8 +24,9 @@
  */
 import { annualLeaseRate, buildingPricePerSf, landPricePerSf, landSizeSf, parseLeaseTermYears, sortCompsByRecency } from "./comps.js";
 import { compSizeSf, countyLabel } from "../../../workspaces/dashboard/lib/compsCardModel.js";
+import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
+export { SQFT_PER_ACRE as SF_PER_ACRE };
 
-export const SF_PER_ACRE = 43560;
 export const DATE_WINDOW_DAYS = { "3mo": 90, "6mo": 180, "12mo": 365 };
 export const SORT_OPTIONS = [
   { key: "newest", label: "Newest" },
@@ -170,7 +171,7 @@ export function dateBounds(date, now = new Date()) {
 export function landAcres(comp) {
   if (comp?.compType !== "land") return null;
   const sf = landSizeSf(comp.landSizeValue, comp.landSizeUnit);
-  return sf == null ? null : sf / SF_PER_ACRE;
+  return sf == null ? null : sf / SQFT_PER_ACRE;
 }
 /** $/SF for a sale — building or land — through the model's own helpers; null for a lease. */
 export function salePsf(comp) {

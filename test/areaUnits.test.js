@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { globSync } from "node:fs";
-import { AC, SF, AC_FT, fmtSf, fmtAc, fmtAcFromSf, SQFT_PER_ACRE } from "../src/shared/units/areaUnits.js";
+import { AC, SF, AC_FT, fmtSf, fmtAc, fmtAcFromSf, SQFT_PER_ACRE, CF_PER_ACFT } from "../src/shared/units/areaUnits.js";
 import { fmtSf as measureFmtSf, fmtAcres as measureFmtAc } from "../src/workspaces/site-planner/lib/measureLabel.js";
 
 describe("the shared spelling", () => {
@@ -112,5 +112,73 @@ describe("no surface spells an area unit in lowercase", () => {
       LOWER_UNIT.lastIndex = 0;
       expect(LOWER_UNIT.test(s), s).toBe(false);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ one home for the constant + formatters (NEW-1) */
+
+/* The acre constant and the number formatters each had a private copy at 30+ call sites — 34
+ * separate `= 43560` under six names, 28 private f0/f1/f2 in three styles. They live in
+ * `shared/units/areaUnits.js` (SQFT_PER_ACRE, CF_PER_ACFT) and `shared/units/numberFormat.js`.
+ * The sweep below is what keeps the thirty-fifth from being written next week.
+ *
+ * ESCAPE, for a justified exception only: put `// acre-const-ok: <why>` (or `// fmt-ok: <why>`) on
+ * the offending line or the line directly above it. The reason is required by the regex, so a bare
+ * marker does not pass. Comments are not scanned — a doc comment may still say "÷ 43,560". */
+const ONE_HOME = new Set(["src/shared/units/areaUnits.js"]);
+const SWEEP = [...globSync("src/**/*.{js,jsx}"), ...globSync("functions/**/*.js")]
+  .map((f) => f.split("\\").join("/"))
+  .filter((f) => !ONE_HOME.has(f));
+
+const ACRE_LITERAL = /(?<![\d.])43[_,]?560(?![\d_])/;
+const PRIVATE_FORMATTER = /(?:^|[^.\w$])(?:const|let|var|function)\s+(f[012])\b\s*(?:=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>|=\s*function\b|\()/;
+const escaped = (raw, i, tag) => {
+  const re = new RegExp(`//\\s*${tag}:\\s*\\S`);
+  return re.test(raw[i]) || (i > 0 && re.test(raw[i - 1]));
+};
+function sweepFor(pattern, tag) {
+  const hits = [];
+  for (const f of SWEEP) {
+    const raw = readFileSync(f, "utf8").split("\n");
+    const code = stripComments(raw.join("\n")).split("\n");
+    code.forEach((line, i) => {
+      if (pattern.test(line) && !escaped(raw, i, tag)) hits.push(`${f}:${i + 1}  ${line.trim().slice(0, 110)}`);
+    });
+  }
+  return hits;
+}
+
+describe("the acre constant and the number formatters have one home", () => {
+  it("exports both names of 43,560", () => {
+    expect(SQFT_PER_ACRE).toBe(43560);
+    expect(CF_PER_ACFT).toBe(43560);
+  });
+  it("no source file types the acre literal", () => {
+    const hits = sweepFor(ACRE_LITERAL, "acre-const-ok");
+    expect(hits, `a bare 43560 — import SQFT_PER_ACRE (area) or CF_PER_ACFT (volume) from src/shared/units/areaUnits.js, or add "// acre-const-ok: <why>":\n${hits.join("\n")}`).toEqual([]);
+  });
+  it("no source file defines its own f0 / f1 / f2", () => {
+    const hits = sweepFor(PRIVATE_FORMATTER, "fmt-ok");
+    expect(hits, `a private f0/f1/f2 — pick the style it already uses from src/shared/units/numberFormat.js, or add "// fmt-ok: <why>":\n${hits.join("\n")}`).toEqual([]);
+  });
+
+  /* TEETH — the exact shapes that shipped, so a regex that matches nothing cannot pass forever. */
+  it("the sweeps reject the shapes that shipped", () => {
+    for (const s of ["const SQFT_PER_ACRE = 43560;", "export const CF_PER_ACFT = 43560;", "const AC_FT = 43560;",
+                     "acres: sqft / 43560,", "if (x > 0.05 * 43560) {"]) expect(ACRE_LITERAL.test(s), s).toBe(true);
+    for (const s of ["const f0 = (n) => Math.round(n).toLocaleString();",
+                     "export const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);",
+                     "  const f2 = n => n.toFixed(2);", "const f1 = (v) => v.toFixed(1);", "function f0(n) { return n; }"]) expect(PRIVATE_FORMATTER.test(s), s).toBe(true);
+  });
+  it("…and leave things that only look like them alone", () => {
+    for (const s of ["const x = 435600;", "const y = 0.43560;", "const a = 1.43560;", "const SQFT = SQFT_PER_ACRE;"]) expect(ACRE_LITERAL.test(s), s).toBe(false);
+    for (const s of ["import { commaInt as f0 } from \"./numberFormat.js\";", "export const f1 = plainDec1;", "const f1 = w.flush();",
+                     "const { f0 } = fmt;", "obj.f0 = (n) => n;", "const f10 = (n) => n;"]) expect(PRIVATE_FORMATTER.test(s), s).toBe(false);
+  });
+  it("the escape needs a reason", () => {
+    expect(escaped(["const a = 43560; // acre-const-ok: matches a county table"], 0, "acre-const-ok")).toBe(true);
+    expect(escaped(["// fmt-ok: quoted verbatim", "const f0 = (n) => n;"], 1, "fmt-ok")).toBe(true);
+    expect(escaped(["const a = 43560; // acre-const-ok:"], 0, "acre-const-ok")).toBe(false);
+    expect(escaped(["const a = 43560;"], 0, "acre-const-ok")).toBe(false);
   });
 });

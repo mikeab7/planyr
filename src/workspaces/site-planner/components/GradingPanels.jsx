@@ -27,6 +27,7 @@ import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRAD
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
 import { gradingPanelView, limitBasisPhrase } from "../lib/gradingPanelModel.js";
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 const sectionLabel = {
   fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)",
@@ -41,7 +42,6 @@ const TONE = {
   amber: { ink: "var(--warn-text)", bar: "var(--warn-text)" },
   red: { ink: "var(--danger-text)", bar: "var(--danger)" },
 };
-const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
 const f100 = (v) => (Math.round(v / 100) * 100).toLocaleString("en-US");
 
 /* A number field that follows the editor-exit contract (text class): Enter / Tab / click-away COMMIT, Escape

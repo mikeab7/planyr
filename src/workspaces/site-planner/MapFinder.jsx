@@ -167,6 +167,7 @@ import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
 import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
 import { lockstepZoomAnimation } from "../../shared/map/lockstepZoom.js";
+import { SQFT_PER_ACRE } from "../../shared/units/areaUnits.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -464,7 +465,7 @@ function computeAssembly(selected, exportBase) {
   const padLat = Math.max((latMax - latMin) * 0.4, 0.001);
   const bbox = { lonMin: lonMin - padLon, lonMax: lonMax + padLon, latMin: latMin - padLat, latMax: latMax + padLat };
   const underlay = { ...aerialPlacement(bbox, lon0, lat0, { exportBase }), opacity: 1, locked: true, fromMap: true };
-  return { parcels, underlay, totalAc: totalSqft / 43560, origin: { lat: lat0, lon: lon0 } };
+  return { parcels, underlay, totalAc: totalSqft / SQFT_PER_ACRE, origin: { lat: lat0, lon: lon0 } };
 }
 
 // Total acreage across every outer ring of a lon/lat parcel feature (multipart-safe).
@@ -472,7 +473,7 @@ function ringsAcres(rings) {
   if (!rings || !rings.length) return null;
   try {
     const lon0 = rings[0][0][0], lat0 = rings[0][0][1];
-    return rings.reduce((sum, r) => sum + shoelace(lngLatRingToFeet(r, lon0, lat0)), 0) / 43560;
+    return rings.reduce((sum, r) => sum + shoelace(lngLatRingToFeet(r, lon0, lat0)), 0) / SQFT_PER_ACRE;
   } catch (_) { return null; }
 }
 

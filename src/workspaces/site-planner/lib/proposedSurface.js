@@ -66,6 +66,8 @@ export function drainSteps(gen) {
 }
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
 import { resolveGradingLimit, pointInRegions, regionsAreaSf } from "./gradingLimit.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+import { plainDec2 as f2 } from "../../../shared/units/numberFormat.js";
 
 export const TIE_DROP_FT = 0.15;   // threshold tie: paving meets the doors just below slab FF
 export const DOCK_BREAK_FT = 0.75; // adjoining-pavement step at a court edge a truck can't cross
@@ -1124,7 +1126,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     cells, owners: graded, pondRings, apronsOn, zOf, shoulderFt: 0,
     grading: { slopeRatio: apronRatio, shoulderFt: spec.shoulderFt ?? G.shoulderFt, ramp: false },
     limit: {
-      mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / 43560,
+      mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / SQFT_PER_ACRE,
       grewIds: limit.grewIds, plateaus, reachFt: reach, basis: spec.basis || null, pitFill,
       drain: { nx: dnx, ny: dny, cellFt: dh, x0: dbx0, y0: dby0, filled: dZ, bare: dZb, region: dK }, shoulderFt: limit.shoulderFt, cornerRadiusFt: limit.cornerRadiusFt,
       regions_stats: regionStats.map((r) => ({ cutCy: r.cutCf / CF_PER_CY, fillCy: r.fillCf / CF_PER_CY, areaSf: r.areaSf, slopeSf: r.slopeSf })),
@@ -1296,8 +1298,6 @@ export function daylightRings({ planes, els = [], existAt = null, apronRatio = G
 const SEAM_WORD = { dockApron: "The court", trailerParking: "The trailer row", carParkingGeneral: "The lot", carParkingAccessible: "The lot", driveAisles: "The paving" };
 const seamName = (planes, id) => { const p = planes && planes.get ? planes.get(id) : null; const w = p ? SEAM_WORD[p.classId] : null; return w || "The pavement"; };
 /* ---- violations — data WITH copy (short ≤ the B823 one-line cap, detail = the ⓘ) ---- */
-const SQFT_PER_ACRE = 43560;
-const f2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 export function surfaceViolations({ planes, grid } = {}) {
   const out = [];
   const byBound = { legalMax: [], min: [], max: [] };

@@ -604,6 +604,8 @@ import {
   BringToFrontIcon, BringForwardIcon, SendBackwardIcon, SendToBackIcon,
   PondSettingsIcon, PondSizingIcon, RoadBranchIcon, SwapIcon,
 } from "./components/elementMenuIcons.jsx";
+import { CF_PER_ACFT } from "../../shared/units/areaUnits.js";
+import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 
 /* NEW-1 — render-loop probe identities. Module-scope constants so naming a run costs no allocation
  * (see src/app/renderLoopProbe.js for why this is recorded unconditionally). The dep NAMES are what
@@ -1449,7 +1451,6 @@ function nearestPointOnSeg(p, a, b) {
 }
 
 /* ------------------------------ format ----------------------------- */
-const f0 = (n) => Math.round(n).toLocaleString();
 // The plan-view span of a drawn ring, in feet. Five label/LOD call sites had grown their own
 // copy of this loop (three as inline IIFEs); one derivation is both smaller and one thing to fix.
 const ringSpanFt = (pts) => {
@@ -1459,8 +1460,6 @@ const ringSpanFt = (pts) => {
 };
 // …and its SHORT plan dimension, which is what every zoom/LOD gate keys off.
 const ringMinSpanFt = (pts) => { const s = ringSpanFt(pts); return Math.min(s.w, s.h); };
-const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // NEW-1 — the pond's area line is the ACREAGE and nothing else ("6.58 ac"), per the owner:
 // "get rid of footprint and get rid of square feet, leave the acreage." It used to be a
 // reflowable two-atom spec ("footprint 6.58 ac · 286,648 sf") that the fit ladder had to stack
@@ -14867,8 +14866,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       freeboardFt: Number.isFinite(d.freeboard) ? d.freeboard : 0,
       slopeRatio: Number.isFinite(d.slope) ? d.slope : null,
       wseFt, wseEst, outletInvertFt, tailwaterFt, tailwaterEst, groundwaterFt, groundwaterEst,
-      deadAcFt: Number.isFinite(split.deadCf) ? split.deadCf / 43560 : null,
-      usableAcFt: Number.isFinite(split.usableCf) ? split.usableCf / 43560 : null,
+      deadAcFt: Number.isFinite(split.deadCf) ? split.deadCf / CF_PER_ACFT : null,
+      usableAcFt: Number.isFinite(split.usableCf) ? split.usableCf / CF_PER_ACFT : null,
       bermFillCy, cutCy,
       purpose: roleInfo.role === "mitigation" ? "mitigation" : "detention",
     };
@@ -15131,7 +15130,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           wedgePriced: !!wedgeMit,
           wedgeAcFt: wedgeMit ? wedgeMit.volumeAcFt : 0,
           wedgeUnknownSf: wedgeMit ? wedgeMit.unknownSf : 0,
-          bermAcFt: pondBermFloodCf / 43560,
+          bermAcFt: pondBermFloodCf / CF_PER_ACFT,
           bermAcres: bermFloodAcres,
           // NEW-5 (B1036) — WHY the berm contribution is what it is, so a confident 0.0 and an
           // unpriceable one never look alike.
@@ -15140,7 +15139,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ...(pondBermUnknown ? { flags: bermFlags } : {}),
           ...(known && addCf > 0 ? {
             volumeCf: fmResult.volumeCf + addCf,
-            volumeAcFt: (fmResult.volumeCf + addCf) / 43560,
+            volumeAcFt: (fmResult.volumeCf + addCf) / CF_PER_ACFT,
             cutCy: (fmResult.volumeCf + addCf) / 27,
           } : {}),
           ...(wedgeFloodwayAcres > 0 ? {
@@ -15774,8 +15773,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pEarthRaw = (settings.prices || {}).earthworkCy;
     const earthPerCy = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
     return rankLedgerMoves({
-      detention: { requiredAcFt: detReq.requiredAcFt, providedUsableAcFt: providedUsableCf / 43560, rateAcFtPerAc: detReq.rateAcFtPerAc ?? null, acres: acresActive },
-      mitigation: { requiredAcFt: fmResultView?.volumeAcFt ?? null, providedAcFt: pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / 43560 : null },
+      detention: { requiredAcFt: detReq.requiredAcFt, providedUsableAcFt: providedUsableCf / CF_PER_ACFT, rateAcFtPerAc: detReq.rateAcFtPerAc ?? null, acres: acresActive },
+      mitigation: { requiredAcFt: fmResultView?.volumeAcFt ?? null, providedAcFt: pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / CF_PER_ACFT : null },
       ponds: pondLedgerEntries,
       parcels: parcelsIn,
       buildings: buildingsIn,
@@ -15810,7 +15809,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The applied raise materializes the berm (NEW-6) — heat map / land take / earthwork all move.
   const fmInundatedBermApply = (() => {
     if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0) || providedUsableCf == null) return null;
-    const deficitCf = detReq.requiredAcFt * 43560 - providedUsableCf;
+    const deficitCf = detReq.requiredAcFt * CF_PER_ACFT - providedUsableCf;
     if (!(deficitCf > 0)) return null;
     const inund = pondLedgerEntries.filter((p) => p.bands && p.bands.fullyInundated && p.ring && p.ring.length >= 3 && p.det && Number.isFinite(p.det.tobElev) && Number.isFinite(p.wseFt));
     if (!inund.length) return null;
@@ -15828,7 +15827,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!(hFt > 0) || !(gainAt(hFt) > 0)) return null;
     const perPond = inund.map((p) => ({ id: p.id, name: p.displayName || p.name, addCf: usableAt(p, hFt) - usableAt(p, 0), tobTargetFt: Math.round((p.det.tobElev + hFt) * 100) / 100, depthTargetFt: (Number.isFinite(p.det.depth) ? p.det.depth : 8) + hFt }));
     const gain = gainAt(hFt);
-    return { payload: { hFt, perPond }, preview: { hFt, diff: `Raise TOB +${(Math.round(hFt * 10) / 10).toFixed(1)}′ on ${inund.length} inundated pond${inund.length > 1 ? "s" : ""} → +${(gain / 43560).toFixed(2)} AC-FT usable${closes ? " (site closes)" : " (partial; the +15′ screening clamp still leaves it short)"}. The berm becomes modeled fill; one Ctrl+Z reverts it all.` } };
+    return { payload: { hFt, perPond }, preview: { hFt, diff: `Raise TOB +${(Math.round(hFt * 10) / 10).toFixed(1)}′ on ${inund.length} inundated pond${inund.length > 1 ? "s" : ""} → +${(gain / CF_PER_ACFT).toFixed(2)} AC-FT usable${closes ? " (site closes)" : " (partial; the +15′ screening clamp still leaves it short)"}. The berm becomes modeled fill; one Ctrl+Z reverts it all.` } };
   })();
   // B750 — plain-English authority label from the shared choice list (never a raw id).
   const authLabelFor = (id) => (DETENTION_AUTHORITY_CHOICES.find((c) => c.id === id) || {}).label || id || null;
@@ -15997,7 +15996,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const earthRaw = (settings.prices || {}).earthworkCy;
     return optimizePond({
       baseRing: ringOf(el), det,
-      requiredCf: requiredAcFt * 43560,
+      requiredCf: requiredAcFt * CF_PER_ACFT,
       groundwaterMaxDepthFt: depthCeilingFt,
       depthsFt,
       maintBermFt: critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 30,
@@ -16025,7 +16024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ---- 1. What's actually short, site-wide? ----
     const requiredDetAcFt = detReq && (detReq.kind === "point" || detReq.kind === "band")
       ? (detReq.kind === "point" ? detReq.requiredAcFt : detReq.bandAcFt[1]) : null;
-    const detRequiredCf = requiredDetAcFt > 0 && providedUsableCf != null ? requiredDetAcFt * 43560 : null;
+    const detRequiredCf = requiredDetAcFt > 0 && providedUsableCf != null ? requiredDetAcFt * CF_PER_ACFT : null;
     const needsDet = detRequiredCf != null && providedUsableCf < detRequiredCf;
 
     const mit = drainMitDisplay;
@@ -16159,9 +16158,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     const beforeSnapshot = !isNew ? snapshotOf(baseEl) : null;
     const siteDetReqAcFt = needsDet ? requiredDetAcFt : null;
-    const siteDetProvidedOtherAcFt = otherLedger.usableCf != null ? otherLedger.usableCf / 43560 : 0;
-    const siteMitReqAcFt = needsMit ? mit.volumeCf / 43560 : null;
-    const siteMitProvidedOtherAcFt = otherLedger.creditedMitCf != null ? otherLedger.creditedMitCf / 43560 : 0;
+    const siteDetProvidedOtherAcFt = otherLedger.usableCf != null ? otherLedger.usableCf / CF_PER_ACFT : 0;
+    const siteMitReqAcFt = needsMit ? mit.volumeCf / CF_PER_ACFT : null;
+    const siteMitProvidedOtherAcFt = otherLedger.creditedMitCf != null ? otherLedger.creditedMitCf / CF_PER_ACFT : 0;
     const finishSummary = (finalEl, infeasible, proposal) => {
       if (isNew) return; // nothing to diff for a brand-new pond — the flash message covers it
       setDesignChangeSummary({
@@ -16235,10 +16234,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const nowUsableCf = floodAffected ? (pass1.bands ? pass1.bands.usableCf : (splitProbe.usableCf ?? 0)) : (splitProbe.usableCf ?? 0);
           const metNow = Number.isFinite(nowUsableCf) && nowUsableCf >= detTargetCf - 1;
           if (metNow) {
-            detMsg = `This pond already covers the required ${fmtAcFt(detTargetCf / 43560)} AC-FT of detention.`;
+            detMsg = `This pond already covers the required ${fmtAcFt(detTargetCf / CF_PER_ACFT)} AC-FT of detention.`;
           } else {
             // Rim already at the computed drainage/geometric cap and still short — nothing to add.
-            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: Number.isFinite(nowUsableCf) ? nowUsableCf : 0, avgDepthFt });
+            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / CF_PER_ACFT, providedUsableCf: Number.isFinite(nowUsableCf) ? nowUsableCf : 0, avgDepthFt });
             detGapNote = bermCapProposalNote({
               binding: bermBinding === "drainage" ? "drainage" : "geometry",
               bermFt: 0,
@@ -16257,7 +16256,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           finalEl = applyPondSizingActions({ ...finalEl, det: effDetProbe }, pass1.actions);
           detApplied = true;
           if (!raiseA.partial) {
-            detMsg = `This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} AC-FT of detention.`;
+            detMsg = `This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / CF_PER_ACFT)} AC-FT of detention.`;
           } else if (isNew) {
             // Creation-time exemption ONLY — nothing is user-owned yet, so this one act may
             // still grow the footprint as a last resort (never again after this click).
@@ -16269,15 +16268,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const growS = solvePondExpansion({ requiredCf: detTargetCf, volumeAt: grownVolumeAt });
             finalEl = grownCandidateEl(growS.ok ? growS.expandFt : 0) || finalEl;
             detMsg = growS.ok
-              ? `This pond's rim was raised to its safe limit and its footprint grown to reach the required ${fmtAcFt(detTargetCf / 43560)} AC-FT of detention.`
-              : `This pond's rim was raised and its footprint grown as far as this site allows, but it's still short of the required ${fmtAcFt(detTargetCf / 43560)} AC-FT of detention.`;
+              ? `This pond's rim was raised to its safe limit and its footprint grown to reach the required ${fmtAcFt(detTargetCf / CF_PER_ACFT)} AC-FT of detention.`
+              : `This pond's rim was raised and its footprint grown as far as this site allows, but it's still short of the required ${fmtAcFt(detTargetCf / CF_PER_ACFT)} AC-FT of detention.`;
           } else {
             // C1/D5 — existing pond: the elevation solve hit the COMPUTED berm cap and a gap
             // remains. The berm IS applied and the footprint stays as drawn; the toast names the
             // BINDING constraint (drainage vs geometry) in plain English so the owner knows WHY it
             // can't berm higher and what would close the rest.
             const achievedCf = (floodAffected ? (pass1.bands ? pass1.bands.usableCf : 0) : (splitProbe.usableCf ?? 0)) + raiseA.addCf;
-            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: achievedCf, avgDepthFt });
+            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / CF_PER_ACFT, providedUsableCf: achievedCf, avgDepthFt });
             detGapNote = bermCapProposalNote({
               binding: bermBinding === "drainage" ? "drainage" : "geometry",
               bermFt: raiseA.hFt,
@@ -16302,7 +16301,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt, coincidentStorm });
       // G4 — a mitigation requirement that ROUNDS TO 0 at the 1dp we display carries no
       // meaningful "already covers the required 0.0 ac-ft" filler; drop the message entirely.
-      const mitReqShown = mitTargetCf / 43560 >= 0.05;
+      const mitReqShown = mitTargetCf / CF_PER_ACFT >= 0.05;
       if (!pass2.ok) {
         mitMsg = `Mitigation couldn't be sized automatically: ${pass2.reason}.`;
       } else if (pass2.mitigation.gated) {
@@ -16314,24 +16313,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ? "This pond has no outfall to the floodplain, so the flood can't reach its below-flood cut and it doesn't count as mitigation. Add an open outfall connection, or provide the mitigation in a connected basin."
           : "This pond's outfall is marked gated (a flap valve keeps the flood out), so its below-flood cut doesn't count as mitigation. Turn off the outfall-gated setting if the outlet is open, or provide the mitigation elsewhere.";
       } else if (pass2.mitigation.covered && !pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
-        mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.` : "";
+        mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / CF_PER_ACFT)} AC-FT of mitigation.` : "";
       } else {
         const needsGrow = pass2.actions.some((a) => a.kind === "grow" || a.kind === "grow-infeasible");
         if (!needsGrow) {
           finalEl = applyPondSizingActions(finalEl, pass2.actions);
           mitApplied = true;
-          mitMsg = `This pond was sized toward the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.`;
+          mitMsg = `This pond was sized toward the required ${fmtAcFt(mitTargetCf / CF_PER_ACFT)} AC-FT of mitigation.`;
         } else if (isNew) {
           finalEl = applyPondSizingActions(finalEl, pass2.actions);
           mitApplied = true;
           mitMsg = pass2.actions.some((a) => a.kind === "grow-infeasible")
-            ? `This pond was deepened and grown as far as its footprint allows, but it's still short of the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.`
-            : `This pond was sized toward the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.`;
+            ? `This pond was deepened and grown as far as its footprint allows, but it's still short of the required ${fmtAcFt(mitTargetCf / CF_PER_ACFT)} AC-FT of mitigation.`
+            : `This pond was sized toward the required ${fmtAcFt(mitTargetCf / CF_PER_ACFT)} AC-FT of mitigation.`;
         } else {
           // C1 — existing pond: apply any elevation-only floor work the solve included; a grow
           // (footprint) is never applied. Name the footprint gap.
           const elevActions = pass2.actions.filter((a) => a.kind === "deepen");
-          if (elevActions.length) { finalEl = applyPondSizingActions(finalEl, elevActions); mitApplied = true; mitMsg = `This pond was deepened toward the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.`; }
+          if (elevActions.length) { finalEl = applyPondSizingActions(finalEl, elevActions); mitApplied = true; mitMsg = `This pond was deepened toward the required ${fmtAcFt(mitTargetCf / CF_PER_ACFT)} AC-FT of mitigation.`; }
           const growA = pass2.actions.find((a) => a.kind === "grow");
           mitGapNote = gapProposalNote({ bermFt: null, extraAcres: growA?.addAcres ?? null });
         }
@@ -16574,7 +16573,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     cutCf: Number.isFinite(pondExcavationCf) ? pondExcavationCf : null,
     fillCf: gradeSurface && gradeSurface.grid && Number.isFinite(gradeSurface.grid.fillCf) ? gradeSurface.grid.fillCf : null,
     shrinkFactor: Number.isFinite(fmSettings.shrinkFactor) ? fmSettings.shrinkFactor : 1,
-    requiredCf: detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * 43560 : null,
+    requiredCf: detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * CF_PER_ACFT : null,
     providedCf: providedUsableCf,
   });
 
@@ -16612,16 +16611,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       label: p.displayName || p.name || `Pond ${i + 1}`,
       // NEW-1 (B1032) — "counts" is the DETENTION share of the exclusive duty split, so a pond
       // whose below-flood cut is dedicated to compensating storage never counts it twice.
-      countsAcFt: p.usableCf == null ? null : (p.duty ? p.duty.detentionCf : p.usableCf) / 43560,
-      mitAcFt: p.duty ? p.duty.mitigationCf / 43560 : 0,
+      countsAcFt: p.usableCf == null ? null : (p.duty ? p.duty.detentionCf : p.usableCf) / CF_PER_ACFT,
+      mitAcFt: p.duty ? p.duty.mitigationCf / CF_PER_ACFT : 0,
       // NEW-23 — "holds" is the DRAWN-ring gross (the full footprint hold), the SAME number the
       // site total + the partial-dead explainer show, so "X counts · holds Y" never renders a
       // mismatched pair (the chip used the inward crest gross before, reading holds == counts).
-      holdsAcFt: (p.drawnGrossCf != null ? p.drawnGrossCf : (p.grossCf || 0)) / 43560,
+      holdsAcFt: (p.drawnGrossCf != null ? p.drawnGrossCf : (p.grossCf || 0)) / CF_PER_ACFT,
       // NEW-1 (B1032) — the storage the BERMED model actually holds. The drawn ring can hold far
       // more than the inward-berm crest column does (Tsakiris: 80.8 drawn vs 63.4 modeled), and
       // the panel used to attribute that whole gap to "sits below the flood level".
-      modelHoldsAcFt: (p.grossCf || 0) / 43560,
+      modelHoldsAcFt: (p.grossCf || 0) / CF_PER_ACFT,
     })),
     onSelectPond: (id) => revealPondInspector(id),
     // NEW-15 — is "raising the rim fixes this" an honest suggestion? Only when at least one
@@ -16631,7 +16630,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     rimRaiseFeasible: pondLedgerEntries.some((p) => {
       const holds = p.grossCf != null ? p.grossCf : 0;
       const counts = p.usableCf != null ? p.usableCf : 0;
-      return holds - counts > 0.05 * 43560 && !p.inTrigger;
+      return holds - counts > 0.05 * CF_PER_ACFT && !p.inTrigger;
     }),
     req: detReq, reqCandidates: detReqCandidates,
     // NEW-8 — the Colorado regime rides the bag like every other fact the panel renders, so the
@@ -17811,14 +17810,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const detOverText = (() => {
         if (d.providedUsableCf == null) return "";
         const cx = critAll;
-        const over = overdugAcFt(d.providedUsableCf / 43560, reqAcFt, { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value });
+        const over = overdugAcFt(d.providedUsableCf / CF_PER_ACFT, reqAcFt, { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value });
         const pRaw = (settings.prices || {}).earthworkCy;
         const op = overProvision(over, { earthPerCy: pRaw == null || pRaw === "" || !Number.isFinite(+pRaw) ? null : +pRaw });
         return op ? ` — ${op.text.replace(/\.$/, "")}` : "";
       })();
       pairs.push(["Det. req / prov (usable)", d.providedUsableCf == null
         ? `${f2(reqAcFt)} / UNKNOWN — re-check (usable split not saved)`
-        : `${f2(reqAcFt)} / ${f1(d.providedUsableCf / 43560)} AC-FT${caution}${detOverText}`]);
+        : `${f2(reqAcFt)} / ${f1(d.providedUsableCf / CF_PER_ACFT)} AC-FT${caution}${detOverText}`]);
     }
     const mit = d && d.mitigation;
     const geoFailed = d && d.floodGeo && d.floodGeo.state === "failed";
@@ -17851,7 +17850,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (provCf == null) {
           pairs.push(["Mit. req / prov (credited)", `${f2(mit.volumeAcFt)} / UNKNOWN — re-check`]);
         } else {
-          const provAcFt = provCf / 43560;
+          const provAcFt = provCf / CF_PER_ACFT;
           const bal = provAcFt - mit.volumeAcFt;
           // NEW-2 (PDF-PARITY): "over-dug" is retired here too — a surplus prints "covered".
           const balTag = bal < 0 ? ` — ${f2(Math.abs(bal))} SHORT` : " — covered";
@@ -18355,7 +18354,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // the panel + verdict report (pondSplitFor.usableCf), NOT the gross geometric tub volume
             // (which over-stated it ~4x). Depth is the rim-to-floor the SECTION shows (det.depth), so
             // the map, the panel, and the section can never disagree. 1dp everywhere (matches the panel).
-            const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / 43560 : null;
+            const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / CF_PER_ACFT : null;
             const rimToFloorFt = Number.isFinite(dw.depth) ? dw.depth : null;
             if (usableAcFt != null && usableAcFt >= 0.05 && rimToFloorFt != null) {
               lines.push({ parts: [`Holds ${f1(usableAcFt)} AC-FT usable`, `${f1(rimToFloorFt)}′ rim to floor`], sep: " · ", keep: 1 });
@@ -29109,7 +29108,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (det.depth != null) return null; // manual depth — nothing to suggest
                   if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
                   const otherCf = Math.max(0, providedDetCf - r.vol);
-                  const targetCf = detReq.requiredAcFt * 43560 - otherCf;
+                  const targetCf = detReq.requiredAcFt * CF_PER_ACFT - otherCf;
                   if (!(targetCf > 0)) return null;
                   return solvePondDepth({
                     requiredCf: targetCf,
@@ -29192,7 +29191,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const sc_mitReqAcFt = drainMitDisplay && drainMitDisplay.volumeCf > 0 && drainMitDisplay.volumeAcFt >= 0.05 ? drainMitDisplay.volumeAcFt : null;
                 const statusCards = (() => {
                   const split = pondSplitFor(selEl);
-                  const thisHoldsAcFt = r.vol / 43560;
+                  const thisHoldsAcFt = r.vol / CF_PER_ACFT;
                   const thisInundated = !!(split.mode === "anchored" && split.bands && split.bands.fullyInundated);
                   const floodLevel = split.mode === "anchored" && split.wseFt != null ? split.wseFt : null;
                   const floodEst = !!(split.mode === "anchored" && isEstimatedWseSrc(split.wseSrc));
@@ -29201,7 +29200,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const mitReqAcFt = sc_mitReqAcFt;
                   const out = [];
                   if (detReqAcFt != null && providedUsableCf != null) {
-                    const provAcFt = providedUsableCf / 43560;
+                    const provAcFt = providedUsableCf / CF_PER_ACFT;
                     const short = provAcFt < detReqAcFt - 0.005;
                     // PR-K — GREEN "Buildable" requires (1) the volume met, (2) no HARD envelope limit
                     // broken (rim above the drainage cap, outlet below the 100-yr receiving water), and
@@ -29251,7 +29250,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     out.push({ ...dv, body });
                   }
                   if (mitReqAcFt != null && pondLedger.creditedMitCf != null) {
-                    const provMitAcFt = pondLedger.creditedMitCf / 43560;
+                    const provMitAcFt = pondLedger.creditedMitCf / CF_PER_ACFT;
                     out.push({ ...mitigationVerdict({ providedAcFt: provMitAcFt, requiredAcFt: mitReqAcFt }), body: "" });
                   }
                   return out;
@@ -29271,7 +29270,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const g_footprintSf = g_inward.footprintSf;      // FIXED drawn footprint = land take
                 const g_waterSf = g_bermH > 0 ? g_inward.waterSf : g_footprintSf; // shrinking water surface
                 const g_bermRingSf = g_inward.bermRingSf;        // interior berm ring (0 with no berm)
-                const g_holdsAcFt = (g_split && g_split.grossCf != null ? g_split.grossCf : r.vol) / 43560;
+                const g_holdsAcFt = (g_split && g_split.grossCf != null ? g_split.grossCf : r.vol) / CF_PER_ACFT;
                 const g_roleInfo = effectivePondRole(det, g_split);
                 // PR-I (I1) — COMPUTE, don't interrogate: every engineering criterion the developer
                 // can't know gets a pre-filled screening ESTIMATE from data the app already holds, so
@@ -29484,8 +29483,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                         Nothing materially better → NOTHING renders. Silence is information. */}
                     {(() => {
-                      const provAcFt = providedUsableCf != null ? providedUsableCf / 43560 : null;
-                      const provMitAcFt = pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / 43560 : null;
+                      const provAcFt = providedUsableCf != null ? providedUsableCf / CF_PER_ACFT : null;
+                      const provMitAcFt = pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / CF_PER_ACFT : null;
                       const aff = optimizeAffordance({
                         hasRing: Array.isArray(ring) && ring.length >= 3,
                         detRequiredAcFt: sc_detReqAcFt,
@@ -29676,7 +29675,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
                       {tobEff != null && pondRow("Pond floor", `${f1(tobEff - depth)}′ NAVD88`,
                         det.tobElev != null ? { code: "yours" } : { code: "survey", basis: "Top of bank ≈ existing grade — site 3DEP elevation median." })}
-                      {pondRow("Stored volume", `${f1(r.vol / 43560)} AC-FT`, { code: "plan", basis: `${f0(r.vol)} cf. Prismoidal (average-end-area) volume off this pond's drawn top-of-bank footprint; the basin tapers ${slope}:1 to its floor.` })}
+                      {pondRow("Stored volume", `${f1(r.vol / CF_PER_ACFT)} AC-FT`, { code: "plan", basis: `${f0(r.vol)} cf. Prismoidal (average-end-area) volume off this pond's drawn top-of-bank footprint; the basin tapers ${slope}:1 to its floor.` })}
                     </div>
                     {!r.feasible && (
                       <div style={{ fontSize: 10.5, color: PAL.danger, lineHeight: 1.4, marginTop: 4, fontWeight: 700 }}>
@@ -29708,9 +29707,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if (split.mode === "anchored" && split.bands && split.wseFt != null) {
                         out.push(
                           <div key="split" style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} AC-FT`)}
-                            {pondRow("Below flood WSE", `${f1(split.bands.mitigationCandidateCf / 43560)} AC-FT`)}
-                            {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f1(split.bands.poolDeadCf / 43560)} AC-FT`)}
+                            {pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / CF_PER_ACFT)} AC-FT`)}
+                            {pondRow("Below flood WSE", `${f1(split.bands.mitigationCandidateCf / CF_PER_ACFT)} AC-FT`)}
+                            {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f1(split.bands.poolDeadCf / CF_PER_ACFT)} AC-FT`)}
                           </div>
                         );
                         // FINAL UI SPEC A2 — the flood-WSE caption, the ESTIMATE warning, and the
@@ -29722,7 +29721,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         // unknown, and the gross figure above must not read as usable.
                         out.push(warnLine("Remembered check — this pond's usable/dead split wasn't saved with it. Usable detention is unknown until the next live check; the gross number above OVERSTATES usable.", "split-unknown", false));
                       } else if (split.mode === "anchored" && split.bands && split.bands.poolDeadCf > 0) {
-                        out.push(noteLine(`Permanent pool below ${f1(det.poolElev)}′ holds ${f2(split.bands.poolDeadCf / 43560)} AC-FT of dead storage (no detention credit). Groundwater can hold a wet bottom near mapped channels.`, "pool-note"));
+                        out.push(noteLine(`Permanent pool below ${f1(det.poolElev)}′ holds ${f2(split.bands.poolDeadCf / CF_PER_ACFT)} AC-FT of dead storage (no detention credit). Groundwater can hold a wet bottom near mapped channels.`, "pool-note"));
                       } else if (split.inTrigger) {
                         // B822 — an auto-anchored pond (3DEP TOB) reaches here only when the reach's
                         // flood elevation is unknown; the truly-unanchored copy fires only when there
@@ -29797,7 +29796,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if (matBerm && matBerm.maxHeightFt > 0.25) {
                         // NEW-6 — the berm is now MODELED dirt: crest at TOB, per-cell height off the
                         // grade grid, priced into the fill heat map + earthwork + (in-trigger) mitigation.
-                        out.push(warnLine(`Bermed basin: crest ${f1(matBerm.crestElevFt)}′ NAVD88, up to ${f1(matBerm.maxHeightFt)}′ above existing grade. The berm is modeled fill (~${f0(matBerm.volCf / 27)} cy)${matBerm.floodCf > 0 ? `, ~${f2((matBerm.floodCf * (fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1)) / 43560)} AC-FT of it below the flood WSE; 1:1 offset applies` : ""}.`, "berm-fill", false));
+                        out.push(warnLine(`Bermed basin: crest ${f1(matBerm.crestElevFt)}′ NAVD88, up to ${f1(matBerm.maxHeightFt)}′ above existing grade. The berm is modeled fill (~${f0(matBerm.volCf / 27)} cy)${matBerm.floodCf > 0 ? `, ~${f2((matBerm.floodCf * (fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1)) / CF_PER_ACFT)} AC-FT of it below the flood WSE; 1:1 offset applies` : ""}.`, "berm-fill", false));
                         if (split.inTrigger) {
                           // Waller §A(9) note + the conveyance caution (a ring levee in the floodplain
                           // can block flow — engineer's check).
@@ -29839,7 +29838,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <button key="berm-chip" style={{ ...chip, width: "100%", marginTop: 8, padding: "7px 10px", fontWeight: 700, textAlign: "center" }} title={bermMove.info}
                             onClick={() => applyBermMove(bermMove.apply)}>{bermMove.label} — Apply</button>
                         );
-                        out.push(<div key="berm-note" style={smallNote}>Applies jointly to {bermMove.apply.perPond.length} upland detention pond{bermMove.apply.perPond.length > 1 ? "s" : ""} (one shared height — volume lands in proportion to area); this pond takes +{f2((mine?.addCf || 0) / 43560)} AC-FT. The berm itself is fill.</div>);
+                        out.push(<div key="berm-note" style={smallNote}>Applies jointly to {bermMove.apply.perPond.length} upland detention pond{bermMove.apply.perPond.length > 1 ? "s" : ""} (one shared height — volume lands in proportion to area); this pond takes +{f2((mine?.addCf || 0) / CF_PER_ACFT)} AC-FT. The berm itself is fill.</div>);
                       }
                       const excl = bal.bermExcluded && bal.bermExcluded.find((x) => x.id === selEl.id);
                       if (excl && excl.reason === "floodplain-fringe") {
@@ -29861,7 +29860,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // Bands only exist on an anchored pond with a water surface — the assistant
                       // refuses (with the reason) rather than designing off gross (LOUD-FAILURE).
                       const mitReqCf = fmResultView && fmResultView.volumeCf != null ? fmResultView.volumeCf : null;
-                      const detReqCf = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * 43560 : null;
+                      const detReqCf = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * CF_PER_ACFT : null;
                       if (mitReqCf == null && detReqCf == null) return null; // nothing to solve toward
                       if (split.wseFt == null && !split.inTrigger) return null; // upland pond — no bands; the B633 auto-size covers detention-only sizing
                       const mineCredited = split.mode === "anchored" && split.bands ? split.bands.mitigationCandidateCf : 0;
@@ -29897,7 +29896,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         // FINAL UI SPEC A2 — the "mitigation covered ✓" status is redundant with the
                         // status card at the top of the inspector; keep only the detention status.
                         const detTxt = detTargetCf > 0 || detReqCf != null
-                          ? `detention ${assist.detention.covered ? "covered ✓" : `short ${f2(assist.detention.shortCf / 43560)} AC-FT`}`
+                          ? `detention ${assist.detention.covered ? "covered ✓" : `short ${f2(assist.detention.shortCf / CF_PER_ACFT)} AC-FT`}`
                           : null;
                         // v3 A4 — the bare no-target fallback line is deleted; render the status
                         // line only when there is a detention target to speak to.
@@ -29928,17 +29927,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           else if (a.kind === "raise-tob") {
                             const newTob = effDet.tobElev + a.hFt;
                             const newBermH = grade != null ? newTob - grade : null;
-                            const mitAdd = a.bermFillBelowWseCf ? (a.bermFillBelowWseCf * ratio) / 43560 : 0;
-                            const preview = `TOB ${f1(effDet.tobElev)} → ${f1(newTob)}${newBermH != null ? ` · berm ${f1(newBermH)}′ above grade` : ""} · usable ${f2(use0 / 43560)} → ${f2((use0 + a.addCf) / 43560)} AC-FT${mitAdd > 0.005 ? ` · mitigation req +${f2(mitAdd)} AC-FT (berm fill)` : ""}. One Ctrl+Z reverts.`;
+                            const mitAdd = a.bermFillBelowWseCf ? (a.bermFillBelowWseCf * ratio) / CF_PER_ACFT : 0;
+                            const preview = `TOB ${f1(effDet.tobElev)} → ${f1(newTob)}${newBermH != null ? ` · berm ${f1(newBermH)}′ above grade` : ""} · usable ${f2(use0 / CF_PER_ACFT)} → ${f2((use0 + a.addCf) / CF_PER_ACFT)} AC-FT${mitAdd > 0.005 ? ` · mitigation req +${f2(mitAdd)} AC-FT (berm fill)` : ""}. One Ctrl+Z reverts.`;
                             const onApply = () => setDet({ tobElev: Math.round(newTob * 100) / 100, depth: (Number.isFinite(effDet.depth) ? effDet.depth : depth) + a.hFt, tobBerm: { h: a.hFt, applied: Math.round(newTob * 100) / 100 } });
-                            body.push(actApply(`→ raise the top of bank +${f1(a.hFt)}′ (berm) → +${f2(a.addCf / 43560)} AC-FT usable${a.partial ? `; the +${f1(a.maxRaiseFt)}′ screening clamp still leaves it short` : ""}${a.bermFillBelowWseCf ? `; the berm prism below the WSE is NEW fill (~${f2(a.bermFillBelowWseCf / 43560)} AC-FT) folded into the mitigation requirement` : ""}.`, "assist-tob", false, applyChip(onApply, preview, false)));
+                            body.push(actApply(`→ raise the top of bank +${f1(a.hFt)}′ (berm) → +${f2(a.addCf / CF_PER_ACFT)} AC-FT usable${a.partial ? `; the +${f1(a.maxRaiseFt)}′ screening clamp still leaves it short` : ""}${a.bermFillBelowWseCf ? `; the berm prism below the WSE is NEW fill (~${f2(a.bermFillBelowWseCf / CF_PER_ACFT)} AC-FT) folded into the mitigation requirement` : ""}.`, "assist-tob", false, applyChip(onApply, preview, false)));
                           }
                           else if (a.kind === "deepen") {
-                            const preview = `depth ${f1(Number.isFinite(effDet.depth) ? effDet.depth : depth)}′ → ${f1(a.depthFt)}′ · below-WSE +${f2(a.addCf / 43560)} AC-FT (pinch-off ceiling ${f1(a.maxDepthFt)}′). One Ctrl+Z reverts.`;
+                            const preview = `depth ${f1(Number.isFinite(effDet.depth) ? effDet.depth : depth)}′ → ${f1(a.depthFt)}′ · below-WSE +${f2(a.addCf / CF_PER_ACFT)} AC-FT (pinch-off ceiling ${f1(a.maxDepthFt)}′). One Ctrl+Z reverts.`;
                             const onApply = () => setDet({ depth: a.depthFt });
-                            body.push(actApply(`→ deepen the floor to ${f1(a.depthFt)}′ design depth → +${f2(a.addCf / 43560)} AC-FT below the WSE (pinch-off ceiling ${f1(a.maxDepthFt)}′).`, "assist-deepen", false, applyChip(onApply, preview, false)));
+                            body.push(actApply(`→ deepen the floor to ${f1(a.depthFt)}′ design depth → +${f2(a.addCf / CF_PER_ACFT)} AC-FT below the WSE (pinch-off ceiling ${f1(a.maxDepthFt)}′).`, "assist-deepen", false, applyChip(onApply, preview, false)));
                           }
-                          else if (a.kind === "pinch-off") body.push(actLine(`→ ${a.label}: the floor can only add ${f2((a.ceilingCf || 0) / 43560)} AC-FT more.`, "assist-pinch", true));
+                          else if (a.kind === "pinch-off") body.push(actLine(`→ ${a.label}: the floor can only add ${f2((a.ceilingCf || 0) / CF_PER_ACFT)} AC-FT more.`, "assist-pinch", true));
                           else if (a.kind === "grow") {
                             const candRing = scaleRing(ring, a.factor);
                             const hits = els.filter((e2) => e2.id !== selEl.id && ["building", "parking", "trailer"].includes(e2.type) && ringsOverlap(candRing, ringOf(e2)));
@@ -30041,7 +30040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             property-line warnings) to review and press Done. */}
                         {(() => {
                           if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
-                          const requiredCf = detReq.requiredAcFt * 43560;
+                          const requiredCf = detReq.requiredAcFt * CF_PER_ACFT;
                           // Regime B (B632): the permanent pool below the static water surface
                           // stores nothing — and it GROWS with the footprint (fixed water
                           // surface, bigger basin), so the solver must target USABLE volume =
@@ -30102,7 +30101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               const detNext = { ...det, depth, freeboard: fb, slope, expandFt: s.expandFt, baseline };
                               if (selEl.points) setSelEl({ points: expandPolygon(ring, s.expandFt), det: detNext });
                               else setSelEl({ w: selEl.w + 2 * s.expandFt, h: selEl.h + 2 * s.expandFt, det: detNext });
-                              flashWarn(`Sized for required detention: banks pushed out ${s.expandFt}′ (+${f2((s.achievedCf - thisUsableCf) / 43560)} AC-FT usable). Review the ghost, then press Done to keep it.`, 7000);
+                              flashWarn(`Sized for required detention: banks pushed out ${s.expandFt}′ (+${f2((s.achievedCf - thisUsableCf) / CF_PER_ACFT)} AC-FT usable). Review the ghost, then press Done to keep it.`, 7000);
                             } else if (s.reason === "already-sufficient") {
                               flashWarn("This pond already covers the site's required detention.", 4000);
                             } else {
@@ -30129,10 +30128,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           return (
                             <div style={{ marginTop: 8 }}>
                               <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
-                                ⇱ Size for required detention ({f2(shortfallUsableCf / 43560)} AC-FT short)
+                                ⇱ Size for required detention ({f2(shortfallUsableCf / CF_PER_ACFT)} AC-FT short)
                               </button>
                               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / 43560)} AC-FT permanent pool grows with the footprint and stays uncredited; Regime B)` : ""}, then lets you review before keeping it.
+                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / CF_PER_ACFT)} AC-FT permanent pool grows with the footprint and stays uncredited; Regime B)` : ""}, then lets you review before keeping it.
                               </div>
                               {regimeUnsure && (
                                 <div style={{ fontSize: 10, color: PAL.warn || PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
@@ -30165,12 +30164,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
                           <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
                           <div style={{ marginTop: 8, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Existing storage", `${f2(baseVol / 43560)} AC-FT`, { code: "plan" })}
-                            {pondRow("Proposed storage", `${f2(r.vol / 43560)} AC-FT`, { code: "plan" })}
+                            {pondRow("Existing storage", `${f2(baseVol / CF_PER_ACFT)} AC-FT`, { code: "plan" })}
+                            {pondRow("Proposed storage", `${f2(r.vol / CF_PER_ACFT)} AC-FT`, { code: "plan" })}
                             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
                               <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
-                              <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / 43560)} AC-FT</span>
+                              <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / CF_PER_ACFT)} AC-FT</span>
                             </div>
                             {pondRow("", `${sign}${f0(mag)} cf`)}
                           </div>
@@ -34445,10 +34444,10 @@ function DrainagePanel({
               );
             }
             const req = d.req;
-            const providedAcFt = d.providedCf / 43560;
+            const providedAcFt = d.providedCf / CF_PER_ACFT;
             // NEW-9 — null = the usable split is UNKNOWN (restored check without the
             // per-pond facts): every consumer below must render "re-check", never gross.
-            const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / 43560; // Regime B: minus permanent-pool dead storage
+            const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / CF_PER_ACFT; // Regime B: minus permanent-pool dead storage
             const out = [];
             // B788/B791 — a remembered or stale check must read PAST tense with its date;
             // only a live check this session may claim present-tense "detected".
@@ -34714,7 +34713,7 @@ function DrainagePanel({
                 "This remembered check predates the per-pond split record (or a pond was drawn after it). How much of the gross volume is usable for detention (above the flood water surface and the permanent pool) is unknown until the next live check — so no surplus/short verdict is shown."));
             } else if (d.deadCf > 0) {
               detR.push(infoRow("Detention provided", `${f1(providedAcFt)} AC-FT`,
-                `Usable ${f1(usableAcFt)} AC-FT after ${f1(d.deadCf / 43560)} AC-FT sits below the flood WSE / permanent pool; dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
+                `Usable ${f1(usableAcFt)} AC-FT after ${f1(d.deadCf / CF_PER_ACFT)} AC-FT sits below the flood WSE / permanent pool; dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
                 { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}`, tag: { code: "plan" } }));
             } else {
               detR.push(row("Detention provided", `${f1(providedAcFt)} AC-FT`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn", false, { code: "plan" }));
@@ -34738,9 +34737,9 @@ function DrainagePanel({
             // usable/mit-candidate boundary (the below-WSE cumulative), so with usable = 0 it pins to
             // the RIGHT edge (everything is below the flood surface), not far left. Site-level aggregate.
             if (d.providedUsableCf != null && d.deadCf > 0 && d.pondCount > 0) {
-              const usAf = d.providedUsableCf / 43560;
-              const mitAf = d.mitProvided && d.mitProvided.creditedCf != null ? d.mitProvided.creditedCf / 43560 : 0;
-              const deadRemAf = Math.max(0, d.deadCf / 43560 - mitAf);
+              const usAf = d.providedUsableCf / CF_PER_ACFT;
+              const mitAf = d.mitProvided && d.mitProvided.creditedCf != null ? d.mitProvided.creditedCf / CF_PER_ACFT : 0;
+              const deadRemAf = Math.max(0, d.deadCf / CF_PER_ACFT - mitAf);
               const splitLayout = stackedBarLayout({ segments: [{ key: "dead", value: deadRemAf }, { key: "mit", value: mitAf }, { key: "usable", value: usAf }], markerValue: deadRemAf + mitAf });
               const swatch = (c) => <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: c, marginRight: 3, verticalAlign: "middle" }} />;
               detR.push(
@@ -34779,7 +34778,7 @@ function DrainagePanel({
                 for (const [cls, bucket] of Object.entries(mit.perClass || {})) {
                   if (!(bucket.acres > 0)) continue;
                   const clsLbl = cls === "1pct" ? "1% (100-yr) floodplain fill" : cls === "02pct" ? "0.2% (500-yr) band fill" : "Regulatory FLOODWAY fill";
-                  mitR.push(row(clsLbl, `${f2(bucket.acres)} AC`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f1(bucket.volumeCf / 43560)} AC-FT` : "· UNKNOWN"));
+                  mitR.push(row(clsLbl, `${f2(bucket.acres)} AC`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f1(bucket.volumeCf / CF_PER_ACFT)} AC-FT` : "· UNKNOWN"));
                 }
                 if (mit.volumeCf != null) mitR.push(row("Required compensating storage", `${f1(mit.volumeAcFt)} AC-FT`, `· ${f2(mit.cutCy)} cy`, false, { code: "code" }));
                 // NEW-8 — the Provided/Balance ledger: below-WSE cut CREDITED from ponds whose
@@ -34792,7 +34791,7 @@ function DrainagePanel({
                   if (provCf == null) {
                     mitR.push(row("Provided (credited pond cut)", "unknown — ↻ re-check"));
                   } else {
-                    const provAcFt = provCf / 43560;
+                    const provAcFt = provCf / CF_PER_ACFT;
                     const nProv = d.mitProvided.pondCount;
                     mitR.push(infoRow("Provided (credited pond cut)", `${f1(provAcFt)} AC-FT`,
                       "Below-WSE cut in ponds whose purpose is Mitigation or Hybrid — set each pond's purpose in its inspector. Below the flood WSE the flood already occupies the volume at design stage: no detention credit, but it IS candidate compensating storage for fill. Credit is a screening call: the cut must be hydraulically connected to the floodplain at flood stages and sit in the same watershed; your engineer confirms both.",
@@ -34813,8 +34812,8 @@ function DrainagePanel({
                     // no credit (the SAME shared gate the verdict + Optimize card use), name WHY + the
                     // fix, so "0.0 provided" over a real cut is never left unexplained. Post-NEW-26 the
                     // only reason is a GATED / absent outfall (the default is connected → credits).
-                    if (bal < 0 && d.mitProvided.uncreditedCf > 0.02 * 43560 && d.mitProvided.gatedReason) {
-                      const uncAcFt = d.mitProvided.uncreditedCf / 43560;
+                    if (bal < 0 && d.mitProvided.uncreditedCf > 0.02 * CF_PER_ACFT && d.mitProvided.gatedReason) {
+                      const uncAcFt = d.mitProvided.uncreditedCf / CF_PER_ACFT;
                       mitR.push(warnNote(
                         d.mitProvided.gatedReason === "no-outfall"
                           ? `A pond has ${f1(uncAcFt)} AC-FT of below-flood cut that earns NO credit: it has no outfall to the floodplain, so the flood can't reach it. Add an open outfall connection, or provide the mitigation in a connected basin.`
@@ -34903,7 +34902,7 @@ function DrainagePanel({
                 if (mit.flags.includes("unstudied_a")) mitR.push(warnNote("Unstudied Zone A on the site — BFE undetermined from the map.", "mit-unstudied-a", "FEMA publishes no BFE for this zone; a flood study or the effective model sets the governing elevation."));
                 if (mit.flags.includes("datum_mismatch")) mitR.push(warnNote("A zone publishes a non-NAVD88 datum — convert before comparing.", "mit-datum", "Mixed datums are a multi-foot silent error in the Houston area (subsidence): convert NGVD29 values to NAVD88 before entering or comparing."));
                 if (d.floodGeo?.bfeLineFlags && d.floodGeo.bfeLineFlags.usable === 0 && d.floodGeo.bfeLineFlags.datumExcluded > 0) mitR.push(warnNote("FEMA BFE lines here publish a non-NAVD88 datum — no auto-derive; enter one manually.", "mit-bfe-datum", "Deriving from a mixed datum would be a multi-foot silent error, so the tool refuses. Convert the published lines to NAVD88 and enter a BFE below."));
-                if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f1(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
+                if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f1(c.result.volumeCf / CF_PER_ACFT) + " ac-ft" : "unknown"}`).join(" · ")}.`));
                 if (mit.expertBypass) mitR.push(keyedNote("Expert bypass in use — volume = intersect area × the entered average fill depth.", "mit-bypass"));
                 // ── NEW-4 — WHICH flood line this requirement was computed from. Fort Bend owes the
                 // offset up to the pre-Atlas-14 500-yr line, not the 100-yr; the reader must be able
@@ -34956,7 +34955,7 @@ function DrainagePanel({
                           <div key={`bnd-${b.loFt}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 11, color: Y.rowLabel, lineHeight: 1.6 }}>
                             <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f1(b.loFt)}′–{f1(b.hiFt)}′</span>
                             <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: Y.dangerText, whiteSpace: "nowrap" }}>
-                              {f1(b.createdCf / 43560)} given back of {f1(b.requiredCf / 43560)} taken
+                              {f1(b.createdCf / CF_PER_ACFT)} given back of {f1(b.requiredCf / CF_PER_ACFT)} taken
                             </span>
                           </div>
                         ))}
@@ -34965,7 +34964,7 @@ function DrainagePanel({
                       </div>
                     );
                   }
-                  if (bl.excludedBelowBottomCf > 0.05 * 43560) mitR.push(keyedNote(`${f1(bl.excludedBelowBottomCf / 43560)} AC-FT was dug below the bottom of the floodplain — useful dirt, but it replaces no floodwater, so it earns no credit here.`, "mit-below-bottom"));
+                  if (bl.excludedBelowBottomCf > 0.05 * CF_PER_ACFT) mitR.push(keyedNote(`${f1(bl.excludedBelowBottomCf / CF_PER_ACFT)} AC-FT was dug below the bottom of the floodplain — useful dirt, but it replaces no floodwater, so it earns no credit here.`, "mit-below-bottom"));
                   if (bl.unanchoredIds.length) mitR.push(warnNote(`${bl.unanchoredIds.length} pond${bl.unanchoredIds.length === 1 ? " has" : "s have"} no top-of-bank elevation set.`, "mit-band-unanchored", "A pond with no top-of-bank elevation has no known position in the column, so it can contribute nothing to the level-by-level check. Set its top-of-bank elevation in the pond inspector."));
                 } else if (d.mitBands && d.mitBands.known === false) {
                   mitR.push(keyedNote("The level-by-level check can't run yet — it needs the governing flood level and a top-of-bank elevation on each pond.", "mit-bands-unk"));
@@ -34980,11 +34979,11 @@ function DrainagePanel({
                 // flat), and the grid's own flags surface one line each (the B823 cap).
                 if (mit.gradeBasis === "median") mitR.push(keyedNote("Flat-grade estimate — one median grade priced every cell.", "mit-flat", "The per-cell 3DEP grid was unavailable this check (or the check predates it) — every cell priced at the site-median grade. ↻ Re-check to fetch the grid; a typed grade always overrides."));
                 if (mit.flags.includes("grid-voids")) mitR.push(warnNote("Over 5% of the priced footprint sits on DEM voids — those cells priced nothing.", "mit-voids", "The 3DEP grid has no ground return under part of the footprint (water, structures, data gaps). Void cells are EXCLUDED from the volume — treat the number as a floor there and confirm grades before design."));
-                if (mit.flags.includes("grid-median-delta") && mit.volumeFlatCf != null) mitR.push(warnNote(`Terrain relief moved this volume >15% vs the flat-grade estimate.`, "mit-delta", `Per-cell grid: ${f1(mit.volumeAcFt)} AC-FT vs flat median: ${f1(mit.volumeFlatCf / 43560)} AC-FT. The old single-grade number was silently wrong on this site — the per-cell figure stands (screening).`));
+                if (mit.flags.includes("grid-median-delta") && mit.volumeFlatCf != null) mitR.push(warnNote(`Terrain relief moved this volume >15% vs the flat-grade estimate.`, "mit-delta", `Per-cell grid: ${f1(mit.volumeAcFt)} AC-FT vs flat median: ${f1(mit.volumeFlatCf / CF_PER_ACFT)} AC-FT. The old single-grade number was silently wrong on this site — the per-cell figure stands (screening).`));
                 // NEW-8 — what remains a footnote is only the UNCREDITED remainder (below-WSE
                 // cut sitting in detention-role ponds); the credited share now lives in the
                 // Provided row above instead of being footnoted away.
-                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-purpose ponds: ${f1(d.mitProvided.uncreditedCf / 43560)} AC-FT — uncredited.`, "mit-cand",
+                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * CF_PER_ACFT) mitR.push(warnNote(`Below-WSE cut in detention-purpose ponds: ${f1(d.mitProvided.uncreditedCf / CF_PER_ACFT)} AC-FT — uncredited.`, "mit-cand",
                   "This volume sits below the flood WSE in ponds whose purpose is Detention, so it is credited to neither ledger (it earns no detention credit either). Set a pond's purpose to Mitigation or Hybrid in its inspector to credit its below-WSE cut here."));
                 // B833 — transition wedges + in-floodplain pond berms are REAL fill: when the
                 // proposed surface priced them, the required volume above already includes
@@ -35672,8 +35671,8 @@ function DrainagePanel({
               // adds a "re-check" clause: the header's own freshness line already carries that
               // affordance for this exact state (PANEL-BREVITY).
               const mitProvCf0 = d.mitProvided ? d.mitProvided.creditedCf : null;
-              if (mitProvCf0 != null && mitProvCf0 / 43560 > ACFT_EPS) {
-                mitVerdict = `providing ${f1(mitProvCf0 / 43560)} AC-FT`; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "requirement unknown";
+              if (mitProvCf0 != null && mitProvCf0 / CF_PER_ACFT > ACFT_EPS) {
+                mitVerdict = `providing ${f1(mitProvCf0 / CF_PER_ACFT)} AC-FT`; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "requirement unknown";
               } else {
                 mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "";
               }
@@ -35692,11 +35691,11 @@ function DrainagePanel({
                   // B909 round 3 polish — the epsilon gate (not a strict >0) also catches a
                   // requirement that rounds to 0.00 (floating-point residue from the berm-fill
                   // credit math), so it never reads as a genuine "SHORT -0.00 ac-ft req 0.00".
-                  const provAcFt = provCf / 43560;
+                  const provAcFt = provCf / CF_PER_ACFT;
                   mitVerdict = "not required for this plan"; mitTone = null; mitChip = "NOT REQUIRED";
                   mitSub = provAcFt > ACFT_EPS ? `${f1(provAcFt)} AC-FT credited anyway` : "";
                 } else {
-                  const provAcFt = provCf / 43560;
+                  const provAcFt = provCf / CF_PER_ACFT;
                   const bal = provAcFt - mitV.volumeAcFt;
                   const short = bal < -ACFT_EPS;
                   // NEW-2 — "OVER-DUG" is retired: an over-provided cut just reads COVERED (a
@@ -35711,8 +35710,8 @@ function DrainagePanel({
                 // NEW-5 — same reasoning as the mitStalePending branch above: the requirement volume
                 // never resolved (missing elevation input), but a known PROVIDED figure may still exist.
                 const mitProvCf0 = d.mitProvided ? d.mitProvided.creditedCf : null;
-                if (mitProvCf0 != null && mitProvCf0 / 43560 > ACFT_EPS) {
-                  mitVerdict = `providing ${f1(mitProvCf0 / 43560)} AC-FT`; mitTone = "warn"; mitChip = "UNKNOWN";
+                if (mitProvCf0 != null && mitProvCf0 / CF_PER_ACFT > ACFT_EPS) {
+                  mitVerdict = `providing ${f1(mitProvCf0 / CF_PER_ACFT)} AC-FT`; mitTone = "warn"; mitChip = "UNKNOWN";
                   mitSub = mitTag ? `requirement unknown · ${mitTag}` : "requirement unknown";
                 } else {
                   mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = mitTag;
@@ -35792,13 +35791,13 @@ function DrainagePanel({
                     </button>
                     <span style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
                       <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: Y.text, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS }}>{p.countsAcFt == null ? "usable unknown" : `${f1(p.countsAcFt)} AC-FT counts`}</span>
-                      <span title={`${f0(p.holdsAcFt * 43560)} cf stored`} style={{ fontSize: 10.5, color: Y.muted, cursor: "help" }}>holds {f1(p.holdsAcFt)}</span>
+                      <span title={`${f0(p.holdsAcFt * CF_PER_ACFT)} cf stored`} style={{ fontSize: 10.5, color: Y.muted, cursor: "help" }}>holds {f1(p.holdsAcFt)}</span>
                     </span>
                   </div>
                 );
               }
-              const siteCounts = d.providedUsableCf == null ? null : d.providedUsableCf / 43560;
-              const siteHolds = (d.providedCf || 0) / 43560;
+              const siteCounts = d.providedUsableCf == null ? null : d.providedUsableCf / CF_PER_ACFT;
+              const siteHolds = (d.providedCf || 0) / CF_PER_ACFT;
               const gapAcFt = siteCounts != null ? siteHolds - siteCounts : null;
               // NEW-1 (B1032) — the explainer must ACCOUNT for the gap, not blame all of it on the
               // flood. Before this it read "17.4 of its 80.8 ac-ft sits below the flood level" on a
@@ -35807,11 +35806,11 @@ function DrainagePanel({
               // owner's own diagnosis after the wrong number. Each term renders only when it is
               // real, and together they equal the gap by construction.
               if (siteCounts != null && gapAcFt != null && gapAcFt > ACFT_EPS) {
-                const modelHolds = d.modelGrossCf != null ? d.modelGrossCf / 43560 : null;
+                const modelHolds = d.modelGrossCf != null ? d.modelGrossCf / CF_PER_ACFT : null;
                 const bermAcFt = modelHolds != null ? Math.max(0, siteHolds - modelHolds) : 0;
-                const deadAcFt = d.deadCf != null ? d.deadCf / 43560 : 0;
-                const mitAcFt = d.mitDedicatedCf != null ? d.mitDedicatedCf / 43560 : 0;
-                const unusedAcFt = d.unusedCf != null ? d.unusedCf / 43560 : 0;
+                const deadAcFt = d.deadCf != null ? d.deadCf / CF_PER_ACFT : 0;
+                const mitAcFt = d.mitDedicatedCf != null ? d.mitDedicatedCf / CF_PER_ACFT : 0;
+                const unusedAcFt = d.unusedCf != null ? d.unusedCf / CF_PER_ACFT : 0;
                 // NEW-2 (2026-07-28) — PANEL-BREVITY. B1032's explainer was RIGHT and stays whole; it
                 // was just spent as prose in the default view ("Of the 80.8 ac-ft the outline could
                 // hold, 17.4 is taken up by the earthen berm ring built inside the outline, 29.6 is
@@ -35853,7 +35852,7 @@ function DrainagePanel({
                     </span>
                     <span style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
                       <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: bad ? Y.dangerText : "var(--success-text)" }}>
-                        {f1(rc.claimedCf / 43560)} claimed / {f1(rc.physicalCf / 43560)} exists
+                        {f1(rc.claimedCf / CF_PER_ACFT)} claimed / {f1(rc.physicalCf / CF_PER_ACFT)} exists
                       </span>
                     </span>
                   </div>
@@ -35925,7 +35924,7 @@ function DrainagePanel({
                   const g = m.gravity;
                   const parts = [];
                   if (g.detention.pass === false) parts.push(`gravity drains only ${Math.round((g.detention.share || 0) * 100)}% of detention storage (rule: ${Math.round((d.gravityShareRequired || 0.5) * 100)}%)`);
-                  if (g.mitigation.pass === false) parts.push(`${f1(g.mitigation.deadCf / 43560)} AC-FT of mitigation storage sits below the outlet, so it earns no credit`);
+                  if (g.mitigation.pass === false) parts.push(`${f1(g.mitigation.deadCf / CF_PER_ACFT)} AC-FT of mitigation storage sits below the outlet, so it earns no credit`);
                   rows.push(warnNote(`${m.name}: ${parts.join("; ")}.`, `grav-${m.id}`, g.detention.basis + " " + g.mitigation.basis));
                 }
                 if (gravUnknown.length && !gravFails.length) {

@@ -23,8 +23,8 @@
 import { detentionStorage, excavationVolume, pointInRing } from "./pondGeom.js";
 import { scaleRing } from "./pondSizing.js";
 import { offsetOutward, ringsArea, maxInwardOffset } from "./pondOffset.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
-const SQFT_PER_ACRE = 43560;
 const CF_PER_CY = 27;
 const num = (v) => (Number.isFinite(v) ? v : null);
 

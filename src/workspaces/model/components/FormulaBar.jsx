@@ -9,7 +9,6 @@ import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
-import { RADIUS } from "../../../shared/ui/radius.js";
 
 function colLabel(colIndex) {
   let n = colIndex + 1, s = "";
@@ -55,10 +54,10 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
   };
 
   return (
-    // Round 3 (B1087904) — sits as the SECOND row inside ModelApp's toolbar card now (the
-    // ribbon is the first, divided from this one by the ribbon's own bottom border); no border or
-    // background of its own any more, since the card supplies both.
-    <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 10px" }}>
+    // NEW-1 (2026-10-29) — a flat, full-width strip flush under the toolbar: the name box on the left,
+    // divided from the fx field by one thin line; no shaded pills or inset boxes (the Round 3 card's
+    // bordered, rounded inputs are gone). One hairline bottom border separates it from the grid.
+    <div style={{ flex: "none", display: "flex", alignItems: "stretch", height: 28, background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
       <input
         {...NO_AUTOFILL}
         ref={nameBoxRef}
@@ -80,14 +79,15 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
         }}
         onBlur={() => { setNameFocused(false); setNameValue(address); }}
         style={{
-          flex: "none", width: 64, textAlign: "center", fontSize: 11, fontWeight: 700,
+          flex: "none", width: 84, boxSizing: "border-box", textAlign: "center", fontSize: 11, fontWeight: 700,
           color: "var(--text-primary)", fontVariantNumeric: "tabular-nums",
-          border: `1px solid ${invalid ? "var(--danger)" : "var(--border-default)"}`,
-          borderRadius: RADIUS.sm, padding: "3px 4px", background: "var(--surface-page)",
-          transition: "border-color 0.15s ease",
+          border: "none", borderRight: "1px solid var(--border-default)", padding: "0 6px", background: "transparent",
+          // A rejected address still flashes red (B1007280) — an inset outline now, since there is no box border to recolour.
+          outline: invalid ? "1px solid var(--danger)" : undefined, outlineOffset: -1,
+          transition: "outline-color 0.15s ease",
         }}
       />
-      <span aria-hidden="true" style={{ flex: "none", fontSize: 12, fontWeight: 700, fontStyle: "italic", color: "var(--text-tertiary)" }}>fx</span>
+      <span aria-hidden="true" style={{ flex: "none", display: "flex", alignItems: "center", padding: "0 8px 0 10px", fontSize: 12, fontWeight: 700, fontStyle: "italic", color: "var(--text-tertiary)" }}>fx</span>
       <input
         {...NO_AUTOFILL}
         data-testid="model-formula-bar"
@@ -98,7 +98,7 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
           else if (e.key === "Escape") { e.preventDefault(); setValue(formulaBarText(sheet, row, col)); e.currentTarget.blur(); }
         }}
         onBlur={commit}
-        style={{ flex: 1, minWidth: 0, border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, padding: "3px 8px", font: "inherit", fontSize: 12.5, fontVariantNumeric: "tabular-nums", background: "var(--surface-page)", color: "var(--text-primary)" }}
+        style={{ flex: 1, minWidth: 0, border: "none", padding: "0 8px 0 0", font: "inherit", fontSize: 12.5, fontVariantNumeric: "tabular-nums", background: "transparent", color: "var(--text-primary)" }}
       />
     </div>
   );

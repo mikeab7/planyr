@@ -20,6 +20,7 @@
  * 2026-07-24: "I want CY, not truckloads"), on the Earthwork "Net dirt" row.
  */
 
+import { fixedDec1 as f1 } from "../../../shared/units/numberFormat.js";
 /* Solve the balance-optimal finished floor. Inputs:
  *   netAtFfe(ffeFt) → net dirt CY at that trial floor (+ import / − export), or null when
  *                     the surface can't be priced (no ground elevation). MUST be monotone
@@ -115,7 +116,6 @@ export function ffeDualDisplay({ ffeFt = null, regMinFfeFt = null } = {}) {
   const eff = Number.isFinite(ffeFt) ? Math.round(ffeFt * 10) / 10 : floorFt;
   const raiseFt = Math.round((eff - floorFt) * 10) / 10;
   const hasRaise = raiseFt > 0.05;
-  const f1 = (v) => v.toFixed(1);
   const ffeText = `FFE ${f1(eff)}′`;
   const floorText = `code floor ${f1(floorFt)}′`;
   const raiseText = hasRaise ? `+${f1(raiseFt)}′ for earthwork balance` : "";

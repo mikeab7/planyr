@@ -25,6 +25,7 @@
  * on-screen face, so line extents match the sheet.
  */
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 /* ---------------------------------------------------------------- numbers */
 const n3 = (v) => { const s = String(Math.round(v * 1000) / 1000); return s === "-0" ? "0" : s; };
 
@@ -541,7 +542,7 @@ export function measureDictFor(mode, chipLines, ftPerPt) {
     R: `1 in = ${r} ft`,
     X: { U: "ft", C: ftPerPt, D: 1 },
     D: { U: "ft", C: 1, D: 1 },
-    A: acres ? { U: "ac", C: 1 / 43560, D: 100 } : { U: "sq ft", C: 1, D: 1 },
+    A: acres ? { U: "ac", C: 1 / SQFT_PER_ACRE, D: 100 } : { U: "sq ft", C: 1, D: 1 },
   };
 }
 const numberFormat = (f) => `<< /Type /NumberFormat /U (${f.U}) /C ${n6(f.C)} /F /D /D ${f.D} /RT (,) /RD (.) /SS ( ) /O /S >>`; // "2,100 ft", "5.74 ac" — Planyr's own grouping

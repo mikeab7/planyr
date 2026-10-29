@@ -154,7 +154,7 @@ describe("NEW-1/NEW-2 — the panel and the print sheet read ONE source (PDF-PAR
 
   it("the print sheet prints the same over-provision off the same helper + the same criteria slack", () => {
     expect(src).toContain("const detOverText = (() => {");
-    expect(src).toContain("const over = overdugAcFt(d.providedUsableCf / 43560, reqAcFt, { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value });");
+    expect(src).toContain("const over = overdugAcFt(d.providedUsableCf / CF_PER_ACFT, reqAcFt, { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value });");
     expect(src).toContain("${caution}${detOverText}");
   });
 

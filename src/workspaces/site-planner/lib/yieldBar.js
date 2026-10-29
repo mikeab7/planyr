@@ -19,6 +19,7 @@
  * "covered"). Zero-required renders the provided bar with an explicit microcopy instead of two
  * orphaned numbers. Pure — no DOM, no theme, no React; colours are resolved by each renderer. */
 
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
 // FINAL UI SPEC B3 — ac-ft renders to ONE decimal, with a sub-0.05 residue collapsed to a
@@ -26,7 +27,6 @@ const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const _f2 = (n) => { const v = Math.abs(n) < 0.05 ? 0 : n; return (Math.round(v * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }); };
 // Signed 1-decimal for a delta — a near-zero magnitude reads "+0.0", never "−0.0".
 const _signed = (n) => { const v = Math.abs(n) < 0.05 ? 0 : n; const mag = (Math.round(Math.abs(v) * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }); return `${v < 0 ? "−" : "+"}${mag}`; };
-const CF_PER_ACFT = 43560;
 // Display-precision epsilon (2-decimal ac-ft, same as _f2): a requirement or shortfall this
 // small is floating-point residue (e.g. a berm-fill credit computed to a near-zero remainder),
 // never a real obligation — treat it as met/none-required so a badge never reads "SHORT -0.00

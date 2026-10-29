@@ -3570,6 +3570,29 @@
     "Ac1": "1.01 Ac.",
     "Curr_Val": 54976
    }
+  },
+  "Long": {
+   "url": "/gis-proxy/portal.segrass.org/crcarcgis/rest/services/Long/Property_Data/MapServer/0",
+   "point": [
+    31.8071,
+    -81.6984
+   ],
+   "idField": "PARCEL_NO",
+   "addrField": null,
+   "expectOwner": false,
+   "attrs": {
+    "OBJECTID": 2540626,
+    "PARCEL_NO": "062    011",
+    "GIS_Acres": 4.60649107,
+    "GlobalID": "{00517358-F045-4369-9AF0-9695F1EC5346}",
+    "created_user": "CRC_GIS",
+    "created_date": 1792868423000,
+    "last_edited_user": "CRC_GIS",
+    "last_edited_date": 1792868460000,
+    "GIS_Parcel_No": "062011",
+    "Shape.STArea()": 200658.75083042998,
+    "Shape.STLength()": 1966.4817226883451
+   }
   }
  }
 }

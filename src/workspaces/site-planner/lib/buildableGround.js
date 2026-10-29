@@ -24,10 +24,11 @@
  * Lattice = { x0, y0, nx, ny, cell, z: Float32Array(nx*ny) }  — cell (i,j) centre is
  * (x0 + (i + .5)·cell, y0 + (j + .5)·cell); y grows SOUTH like the planner's feet frame. */
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { SQFT_PER_ACRE };
 export const CELL_FT = 10;            // the brief: 20 ft is too coarse for the daylight test, 4 ft is too slow
 export const DEFAULT_SLOPE = 2;       // 2:1
 export const DEFAULT_MAX_DEPTH_FT = 12;
-export const SQFT_PER_ACRE = 43560;
 
 /* ---- lattice sampling helpers ---- */
 

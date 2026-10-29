@@ -5,6 +5,11 @@
  * edit in this module already uses (row/column delete), so there is deliberately no confirm
  * dialog here either — one more inconsistent new pattern is worse than reusing the existing one.
  *
+ * ⛔ NEW-1 (2026-10-29) SUPERSEDES the "grid card's bottom section" geometry below: the grid is edge to edge now,
+ * so this strip is a flat full-width band too (no side/bottom inset, no radius, no shadow, one top hairline).
+ * Everything below about corners/shadow/margins is HISTORY; the tab idiom itself (flat tabs, active tab
+ * carrying the grid's surface) is unchanged.
+ *
  * ⛔ B1157360 (owner chat block 2026-09-04) — CHROME REBUILT: "attached tab" idiom, not floating
  * pills. MEASURED live on the deployed build this replaced: the grid card ended at its own
  * rounded bottom edge, then a bare 16px band of plain page ground, THEN this strip's own pill
@@ -169,12 +174,11 @@ const TabStrip = forwardRef(function TabStrip({ sheets, activeSheetId, onSelect,
       data-testid="model-tab-strip"
       style={{
         flex: "none", height: TAB_H, display: "flex", alignItems: "stretch", gap: TAB_GAP,
-        margin: "0 8px 8px", // SPACE.md literal — left/right/bottom only; zero top margin is what lets the active tab join the grid card above with no seam
+        // NEW-1 (2026-10-29) — flat, full-width bottom strip like the toolbar above the grid: no side/bottom
+        // inset, no rounded corners, no shadow; one hairline on top is the seam against the grid.
         background: "var(--surface-page)",
-        borderLeft: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)",
-        borderBottomLeftRadius: RADIUS.lg, borderBottomRightRadius: RADIUS.lg,
-        boxShadow: "0 2px 6px rgba(0,0,0,0.10)", // design-exempt: no shadow-color token yet repo-wide — moved here from SheetView.jsx's card: this strip is now the assembly's true bottom edge
-        overflow: "hidden", // clips a flush, full-height tab to the rounded bottom corners instead of poking a square corner past the curve
+        borderTop: "1px solid var(--border-default)",
+        overflow: "hidden",
       }}
     >
       <div style={{ flex: "1 1 auto", minWidth: 0, display: "flex", alignItems: "stretch", gap: TAB_GAP, overflowX: "auto", overflowY: "hidden", scrollbarWidth: "thin", padding: `0 ${STRIP_PAD}px` }}>

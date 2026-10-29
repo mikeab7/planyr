@@ -1288,39 +1288,16 @@ export default function ModelApp({
               onUseCloud={onUseCloudCopy}
             />
           )}
-          {/* Round 3 visual pass (B1087904, owner verbatim: "rerun the loop to make it
-              pretty, also i dont like the square edging"). The ribbon and formula bar used to be
-              two full-bleed strips running edge to edge with 90-degree corners, separated by
-              hairline rules — the owner's own read: "reads as stacked strips bolted to a window,
-              not as a document inside an application." They are tightly coupled (the name box
-              and formula bar both act on whatever the ribbon is formatting), so they join into
-              ONE contained chrome card here — panel radius, inset from the window edges with the
-              SAME margin the sheet card below uses, sitting on the app background rather than
-              bleeding into it — with a single hairline divider marking the seam between the two
-              rows inside it. `overflow: hidden` is load-bearing: it's what clips the ribbon's own
-              square content to the card's rounded top corners (CHROME-NEVER-EATS-A-PRESS is not
-              at issue here — nothing inside is chrome floating OVER content).
-              ⛔ Round 4 — MEASURED live that this card and the sheet card below it were flush,
-              0px gap, not detached. Round 3's own bottom margin here was 0 (see the sibling
-              comment in SheetView.jsx, corrected in the same commit as this one) on the theory
-              that the sheet card's own top margin would supply the seam — but these two cards are
-              siblings inside ModelApp's ROOT FLEX COLUMN, and flex items never collapse margins
-              against each other the way ordinary block siblings do, so two zeros summed to a real,
-              visible zero: doubled hairlines pressed edge to edge, not two objects. The gap is now
-              carried entirely by THIS card's own bottom margin (SPACE.md) — the sheet card's own
-              top margin stays 0, so there is still exactly one gap, never a doubled one. */}
+          {/* NEW-1 (2026-10-29, owner-approved mockup) — the toolbar and formula bar are FLAT, full-width strips
+              directly under the module tabs. They replace the Round 3/4 (B1087904) floating card — rounded
+              corners, drop shadow, an 8px margin on every side over the page-grey band — which the owner read as
+              wasted space ("I want it back for rows"). One wrapper only so the two strips stay one unit in this
+              flex column (find-bar / name-manager flow siblings sit below it): no margin, no radius, no shadow,
+              no outer border; each strip carries its own single hairline bottom border (Ribbon.jsx, FormulaBar.jsx).
+              `data-testid="model-toolbar-card"` is kept for the existing specs. */}
           <div
             data-testid="model-toolbar-card"
-            style={{
-              flex: "none", margin: 8, overflow: "hidden", // SPACE.md literal (all four sides) — see designTokens.js note above
-              background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
-              // Round 4 — the LIGHTER of the module's two card shadow levels (design-exempt: no
-              // shadow-color token yet repo-wide). Round 3 gave this card and the sheet card
-              // below it the SAME shadow, which reads as one flat weight rather than "tools you
-              // are holding, floating above the paper" — the sheet card (SheetView.jsx, same
-              // reasoning) now carries the stronger of the two.
-              boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide
-            }}
+            style={{ flex: "none", background: "var(--surface-raised)" }}
           >
           <Ribbon ctx={ctx} />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} focusGrid={focusGrid} />
