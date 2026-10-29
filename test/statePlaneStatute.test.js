@@ -164,7 +164,9 @@ describe("3 · a `decided:true` assignment is allowed only where the statute is 
 
   it("the ONLY decided rows are the ones the audit lists (a new decision is a deliberate, documented act)", () => {
     const decided = new Set([...Object.entries(COUNTY_ZONE).filter(([, v]) => v.decided).map(([k]) => k), ...Object.keys(DECIDED_COUNTIES), ...Object.keys(SPLIT_COUNTIES)]);
-    expect([...decided].sort()).toEqual(["CO:broomfield", "NV:carson", "WA:grant", ...Object.keys(DECIDED_COUNTIES).filter((k) => /^(VA|HI):/.test(k))].sort());
+    // Carson City (NRS 327.010(2)) and the 23 Virginia independent cities (Va. Code 1-601) are NAMED by their statutes, so they are plain table
+    // rows now (B2494337 NEW-3); Billings County, ND is the one statute-silent county the generator carries.
+    expect([...decided].sort()).toEqual(["CO:broomfield", "ND:billings", "WA:grant", ...Object.keys(DECIDED_COUNTIES).filter((k) => /^HI:/.test(k))].sort());
     expect(decided.has("TX:montgomery")).toBe(false);
   });
 });
