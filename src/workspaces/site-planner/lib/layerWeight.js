@@ -35,6 +35,8 @@
  * Pure: no React, no Leaflet, no DOM.
  */
 
+import { OK_LAYER_TIERS } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
+
 export const TIERS = ["constraint", "reference", "context"];
 
 /* Opacity ceiling per tier. A layer may ship QUIETER than its ceiling (several do — a big
@@ -165,6 +167,7 @@ export const LAYER_TIER = {
   txdot_aadt: "context",
   co_aadt: "context",
   faa_airports: "context",
+  ...OK_LAYER_TIERS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
 };
 
 /* Terrain is exempt from the VOLUME ceilings — it is the ground the plan sits on, and a contour

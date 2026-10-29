@@ -27,6 +27,7 @@
  * Plain JS (the stack is plain JS/JSX — the brief's `.ts` sketch maps to .js here).
  */
 
+import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
 export const NON_PRODUCTION_URL_PATTERNS = [
@@ -2360,6 +2361,7 @@ export const GIS_SOURCES = {
     // Live 2026-08-05: 13,773 statewide · Commerce City 4. Sparse by nature (an outfall is a
     // structure, not a network), so the fixture sits where one genuinely is.
   },
+  ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
 };
 
 /* NEW-2 — WHICH STATES A ROW CAN ANSWER IN.
@@ -2623,6 +2625,7 @@ export const SOURCE_FIXTURE_REACH = {
   // FEMA InFRM BLE is Region 6, and deliberately publishes NOTHING over studied areas, so its
   // fixtures are a mix of in-coverage values and by-design no-data points.
   femaEbfe: ["regional", "FEMA Region 6 Base Level Engineering — published only over UNSTUDIED reaches, so most of the state is no-data by design."],
+  ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
 };
 
 /* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.

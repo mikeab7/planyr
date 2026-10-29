@@ -21,7 +21,10 @@
  *   fixtures[]       — { label, point|bbox, expectMinCount, layer? }  (a /query count)
  *   sampleFixtures[] — { label, point, expectValueRange|expectNoData, serviceUrl? }  (a raster probe)
  */
+import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
+
 export const SOURCE_FIXTURES = {
+  ...OK_FIXTURES,
   flood: {
   fixtures: [
     // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
@@ -855,6 +858,7 @@ export function fixturesFor(key) {
  * `monitored-exception` row with no reason still fails the audit. The words just no longer
  * travel to the browser to prove it. */
 export const SOURCE_DOCS = {
+  ...OK_DOCS,
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",
   },

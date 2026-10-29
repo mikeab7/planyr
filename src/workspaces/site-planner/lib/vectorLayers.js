@@ -21,13 +21,14 @@
  */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { OK_VECTOR_SOURCES } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county";
-export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city"
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ok_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county";
+export const isCityLimitsId = (id) => id === "jur_city" || id === "ok_city" || id === "ga_city" || id === "ca_city"
   || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
@@ -801,6 +802,7 @@ export const VECTOR_SOURCES = {
     },
     note: "Brookshire–Katy Drainage District recorded drainage easements.",
   },
+  ...OK_VECTOR_SOURCES, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
 };
 
 // ---------------------------------------------------------------------------
