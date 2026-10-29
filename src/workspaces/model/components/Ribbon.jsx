@@ -576,7 +576,7 @@ export default function Ribbon({ ctx }) {
       data-testid="model-ribbon"
       style={{
         display: "flex", alignItems: "center", flexWrap: "nowrap", overflow: "hidden",
-        gap: 0, padding: "5px 8px", minHeight: 36,
+        gap: 0, padding: "3px 8px", minHeight: 32,
         background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)",
       }}
     >
