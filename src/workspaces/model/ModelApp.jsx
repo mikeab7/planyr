@@ -59,7 +59,7 @@ import {
   commitCellText, blankRange, renameColumn, setNumberFormat, addColumn,
   formatAt, padRowCount, sheetsDiverge, rawAt,
   setColumnWidth, setRowHeight, setFreeze,
-  styleAt, setCellStyle, applyBorder, clearFormatting,
+  styleAt, setCellStyle, adjustIndent, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
   isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
 } from "./lib/sheetModel.js";
@@ -1054,6 +1054,9 @@ export default function ModelApp({
   const onSetCellStyle = useCallback((patch) => {
     applyActive(setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch);
   }, [applyActive, selRange]);
+  const onAdjustIndent = useCallback((delta) => {
+    applyActive(adjustIndent, selRange.r1, selRange.r2, selRange.c1, selRange.c2, delta);
+  }, [applyActive, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
     applyActive(applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode });
   }, [applyActive, selRange]);
@@ -1141,7 +1144,7 @@ export default function ModelApp({
     activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
     painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
     canUndo, canRedo, onUndo: undo, onRedo: redo,
-    onSetCellStyle, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
+    onSetCellStyle, onAdjustIndent, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
     onFormatPainterToggle, onMergeToggle,
     onInsertRow: onRibbonInsertRow, onInsertColumn: onRibbonInsertColumn, onDeleteRow: onRibbonDeleteRow, onDeleteColumn,
     canDeleteColumn: sheet.columns.length > 1,
