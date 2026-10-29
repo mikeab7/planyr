@@ -15,6 +15,7 @@
 import { solveBalanceFfeSteps, evalSteps } from "./ffeBalance.js";
 export { evalSteps };
 import { hostBuildingIdOf, assemblyIds } from "./gradingMembership.js";
+import { limitCrossPlace } from "./gradingPanelModel.js";
 
 export const CF_PER_CY = 27;
 export const BALANCE_TOL_CY = 500;     // "CY net, balanced" when |net| is under this
@@ -123,6 +124,19 @@ export function describeFlag(surface, ids, { buildingCentre, elements = [], slop
     const over = Math.max(1, Math.round(worst.maxPastFt));
     const property = out.beyondParcel > 0;
     const edge = `the ${side} edge of the graded area`;
+    // ROUND 8 (NEW-2): the line is the property line less the grading margin / buffer — never the setback
+    const basis = surface.grid.limit.basis;
+    if (basis && basis.kind === "property") {
+      const place = limitCrossPlace(basis, property);
+      return {
+        side: cap(side), over, kind, property, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
+        span: { pt: centroid, radiusFt: Math.max(60, Math.sqrt(out.sf) / 2) },
+        text: {
+          title: `Slope runs ${place} · ${cap(side)}`,
+          body: `The ${kind} slope on ${edge} runs ${over} ft ${place} at ${slopeRatio}:1. Pick a fix:`,
+        },
+      };
+    }
     return {
       side: cap(side), over, kind, property, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
       span: { pt: centroid, radiusFt: Math.max(60, Math.sqrt(out.sf) / 2) },

@@ -47,7 +47,7 @@ import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
-import { buildOverlayVectorFragment, esriPrintFeatures, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
+import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId } from "./vectorLayers.js";
 import { gisCache } from "./gisCache.js";
@@ -860,14 +860,15 @@ export function createExportSheet(ctx) {
     const kind = cfg.kind;
     if (kind === "esriFeature") { // every esriFeature row: lines + points + polygons (B2081252)
       if (typeof ref.eachFeature !== "function") return { features: [] };
-      const features = [];
+      const features = [], labels = [];
       ref.eachFeature((l) => {
         const gj = l && l.feature;
         if (!gj || !gj.geometry) return;
         // B2081252 — lines, POINTS and POLYGONS, same symbology as the screen (the pure rule lives in overlayVectorSvg).
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
+        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) labels.push(...esriLineLabels(gj, cfg)); // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY)
       });
-      return { features };
+      return { features, labels };
     }
     if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)
       if (typeof ref.getExportMode === "function" && ref.getExportMode() !== "vector") return { features: [] }; // image mode → Class A raster handles it

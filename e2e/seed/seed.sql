@@ -18,6 +18,17 @@
 -- HANDOFF-onconflict.md in this folder for the full diagnosis.
 
 -- 1) Clear any prior fixture row for this user (scoped — cannot hit real data).
+-- NEW-6 (data-risk 2026-10-29): a LIVE sites row cannot be hard-deleted — sites_block_delete_live_group
+-- refuses it (PLYR1) by design, and this script must not weaken or bypass that. Soft-delete the prior
+-- fixture first (the same two steps ui-audit/lib/liveFixtures.mjs takes), then the delete is allowed.
+with u as (
+  select id from auth.users where email = 'e2e@planyr.test'
+)
+update public.sites set deleted_at = now()
+where id = 'e2e-fixture-site'
+  and user_id in (select id from u)
+  and deleted_at is null;
+
 with u as (
   select id from auth.users where email = 'e2e@planyr.test'
 )

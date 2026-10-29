@@ -111,9 +111,23 @@ export const LAYER_TIER = {
   bts_truck_network: "reference",  // B2081249 — federal truck-route reference
   hpms_aadt: "reference",          // B2081249 — federal traffic volumes       // B2081251 — shallow rock is a cost flag (excavation, trenching), not a stop
   ga_stream_buffers: "constraint", // 25/50/75 ft of land taken off each side of a stream
+  // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
+  ms_ob_water_main: "reference",
+  ms_ob_hydrants: "reference",
+  ms_ob_water_service: "reference",
+  ms_ob_sewer_gravity: "reference",
+  ms_ob_sewer_force: "reference",
+  ms_ob_manholes: "reference",
+  ms_ob_lift_stations: "reference",
+  ms_ob_wwtp: "reference",
+  ms_ob_sewer_service: "reference",
+  ms_ob_gas_main: "reference",
+  ms_dcrua_main: "reference",
+  ms_dcrua_structures: "reference",
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
+  ms_ob_planning_area: "context",   // B2507059 — a planning line
   jur_city: "context",
   jur_etj: "context",
   jur_isd: "context",

@@ -73,6 +73,9 @@ function Harness({ data }) {
   const [settings, setSettings] = useState({ grading: { enabled: new URLSearchParams(location.search).get("off") !== "1",
     // round 4: the limit MODE (?mode=boundary), the proposed contours (?contours=1)
     limitMode: new URLSearchParams(location.search).get("mode") === "boundary" ? "boundary" : "layout",
+    // round 8: the grading margin inside the property line (?margin=, default 10) and the undisturbed buffer (?buffer=)
+    ...(new URLSearchParams(location.search).get("margin") != null ? { gradingMarginFt: +new URLSearchParams(location.search).get("margin") } : {}),
+    ...(new URLSearchParams(location.search).get("buffer") != null ? { undisturbedBufferFt: +new URLSearchParams(location.search).get("buffer") } : {}),
     layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: new URLSearchParams(location.search).get("cutfill") !== "0", contours: new URLSearchParams(location.search).get("contours") === "1",
       paper: new URLSearchParams(location.search).get("paper") !== "0" } } });
   const [limitEdit, setLimitEdit] = useState(null);
@@ -95,12 +98,12 @@ function Harness({ data }) {
   });
   const hostBuildings = els.filter((e) => e.type === "building" && !hosts.has(e.id));
   const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: gradingPack(cfg, setback) };
-  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + cfg.openGroundSlopePct + JSON.stringify(cfg.limitRing || null);
+  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + cfg.openGroundSlopePct + cfg.gradingMarginFt + cfg.undisturbedBufferFt + JSON.stringify(cfg.limitRing || null);
   const anyFfe = gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   // SitePlanner's wiring: the grading layer builds the surface OFF the render path and holds it while a drag is in flight.
   const dragRef = React.useRef(false);
   const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
-  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
   const qs = new URLSearchParams(location.search);
   const rockFt = qs.get("rock") ? +qs.get("rock") : null, pondCy = +(qs.get("pond") || 0);
@@ -134,7 +137,7 @@ function Harness({ data }) {
     // a real gesture's shape: dragging=true, one assembly move per pointer step, then release (dragging=false + a final commit)
     dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings };
   const PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
-  // ROUND 5 (NEW-4) — `?zoom=site|bldg|ne` frames the 1400×1000 canvas on the parcel, the (first) building, or one zoom
+  // ROUND 5 (NEW-4) — `?zoom=site|bldg|ne|nw` frames the 1400×1000 canvas on the parcel, the (first) building, or one zoom
   // closer at the building's NE corner — the three pictures the harness judges. `?ppf=` is the older explicit scale.
   const CW = 1400, CH = 1000;
   const frame = useMemo(() => {
@@ -145,6 +148,8 @@ function Harness({ data }) {
     const bx = b.map((p) => p.x), by = b.map((p) => p.y);
     if (zoom === "bldg") return fitBox(Math.min(...bx), Math.min(...by), Math.max(...bx), Math.max(...by), 220);
     if (zoom === "ne") { const cx = Math.max(...bx), cy = Math.min(...by); return fitBox(cx - 180, cy - 180, cx + 180, cy + 180, 0); }
+    // ROUND 8 (NEW-3): the owner's view — the NW corner of the whole layout (the north car lot's west end) out to the limit
+    if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
     const rx = ring.map((p) => p.x), ry = ring.map((p) => p.y);
     return fitBox(Math.min(...rx), Math.min(...ry), Math.max(...rx), Math.max(...ry), 40);
   }, [qs.get("zoom"), els.length]); // eslint-disable-line react-hooks/exhaustive-deps

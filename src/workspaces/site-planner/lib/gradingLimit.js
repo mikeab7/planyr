@@ -247,6 +247,32 @@ export function autoGradingLimit({ rings, shoulderFt = LIMIT_DEFAULTS.shoulderFt
   return regions;
 }
 
+/* ---- ROUND 8 (NEW-2) — the limit of disturbance: the PROPERTY LINE, inset by a grading margin and any undisturbed buffer ----
+ * A building setback restricts STRUCTURES, not earthwork, so it never bounds the grading. What does: the property line
+ * (no grading on the neighbour's land without an easement), a working margin inside it for silt fence and equipment
+ * (`marginFt`, default 10), and any undisturbed buffer the zoning sets along the adjoining property (`bufferFt`, default 0,
+ * applied along every parcel edge). Both insets are one mitred offset of the union of the active parcels (straight edges stay
+ * straight); a save-and-except carve-out grows by the same distance. Returns { rings, holes } — the outers and the holes of
+ * the inset region(s); a parcel the inset swallows entirely contributes nothing. Cached by value. */
+export const PROPERTY_LIMIT_DEFAULTS = Object.freeze({ marginFt: 10, bufferFt: 0 });
+const plCache = new Map();
+export function propertyLimit({ parcelRings = [], holes = [], marginFt = PROPERTY_LIMIT_DEFAULTS.marginFt, bufferFt = PROPERTY_LIMIT_DEFAULTS.bufferFt } = {}) {
+  const m = Number.isFinite(marginFt) && marginFt > 0 ? marginFt : 0, b = Number.isFinite(bufferFt) && bufferFt > 0 ? bufferFt : 0;
+  const d = m + b;
+  const rings = (parcelRings || []).filter(isRing), hs = (holes || []).filter(isRing);
+  const key = [d, rings.map(ringHash).join(","), hs.map(ringHash).join(",")].join("~");
+  const hit = plCache.get(key);
+  if (hit) return hit;
+  let regions = unionRings(rings);
+  if (d > 0 && regions.length) regions = regionsOf(offsetPaths(regionsToPaths(regions), -d, "miter"));
+  let holeRings = hs;
+  if (d > 0 && hs.length) holeRings = bufferRings(hs, d).map((r) => r.outer);
+  const out = { rings: regions.map((r) => r.outer), holes: regions.flatMap((r) => r.holes).concat(holeRings), marginFt: m, bufferFt: b, insetFt: d };
+  plCache.set(key, out);
+  if (plCache.size > CACHE_MAX) plCache.delete(plCache.keys().next().value);
+  return out;
+}
+
 /* ---- the boundary limit ("Grade to the boundary") ---- */
 export function boundaryGradingLimit({ setbackRings, setbackHoles = [], pondRings = [], bufferRings = [] } = {}) {
   let regions = unionRings(setbackRings);
