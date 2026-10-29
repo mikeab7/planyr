@@ -10,7 +10,8 @@ import { COUNTIES, COUNTIES_MAP, countyIdentity, noParcelSourceNote } from "../s
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 import { countyRecord, ownerName } from "../src/workspaces/site-planner/lib/appraisal.js";
 import { idAttrFor } from "../src/workspaces/site-planner/lib/parcelQuery.js";
-import { IA_ROWS } from "../src/workspaces/site-planner/lib/iaParcels.js";
+import { IA_ROWS, IA_COPY_ROWS } from "../src/workspaces/site-planner/lib/iaParcels.js";
+import { PARCEL_COPIES } from "../src/workspaces/site-planner/lib/parcelCopies.js";
 import { IOWA_VERIFICATION } from "../src/workspaces/site-planner/lib/iaProvenance.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";
 
@@ -81,8 +82,10 @@ describe("every county in Iowa resolves to a source or an explicit gap", () => {
 describe("the wired Iowa rows", () => {
   const ROW_KEYS = IA_ROWS.map(([k]) => "ia_" + k);
   it("the table and the registry agree on which counties are wired", () => {
-    expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...hand]));
-    expect(IA_ROWS).toHaveLength(55);
+    // NEW-1 (second pass, 2026-10-29): + the 16 COPY rows of the 2017 statewide compilation (test/iowaSecondPass.test.js owns their assertions)
+    expect(new Set(wiredKeys)).toEqual(new Set([...ROW_KEYS, ...IA_COPY_ROWS.map(([k]) => "ia_" + k), ...hand]));
+    expect(IA_ROWS).toHaveLength(60);
+    expect(IA_COPY_ROWS).toHaveLength(16);
   });
   it("a host that cannot be reached cross-origin rides the relay, and the relay allows it", () => {
     for (const k of ROW_KEYS) {
@@ -100,8 +103,10 @@ describe("the wired Iowa rows", () => {
       expect(u, k).not.toMatch(/token|key=/i);
     }
   });
-  it("the 2017 statewide layer and the Iowa_Parcels_Demo subset are not used by any row", () => {
+  it("the 2017 statewide layer is used ONLY by the labelled COPY rows (never by a county-source row), and the Iowa_Parcels_Demo subset by none", () => {
     for (const k of ROW_KEYS) expect(COUNTIES[k].layerUrl, k).not.toMatch(/Iowa_Parcels_(2017|Demo)|Parcels_20171102/);
+    for (const [k] of IA_COPY_ROWS) expect(COUNTIES["ia_" + k].layerUrl, k).toMatch(/Iowa_Parcels_2017/);
+    for (const k of wiredKeys) expect(COUNTIES[k].layerUrl, k).not.toMatch(/Iowa_Parcels_Demo/);
   });
   it("each county's bbox contains its interior point, and every row pins its measured id column", () => {
     for (const [k, n, , , , , la, ln, bb] of IA_ROWS) {
@@ -113,13 +118,19 @@ describe("the wired Iowa rows", () => {
     for (const k of ROW_KEYS) {
       const v = IOWA_VERIFICATION[k];
       expect(v, k).toBeTruthy();
-      expect(v.publisher, k).toMatch(/^(own|third-party)$/);
+      expect(v.publisher, k).toMatch(/^(own|third-party|unverified)$/);
       expect(v.publisherName.length, k).toBeGreaterThan(5);
-      expect(v.verifiedOn, k).toBe("2026-10-19");
+      expect(v.verifiedOn, k).toMatch(/^2026-10-(19|29)$/); // 29 = the second pass (B2499376)
     }
   });
-  it("no row rests on a layer last edited before 2020 (the currency floor)", () => {
-    for (const [name, s] of Object.entries(SAMPLES)) if (s.lastEdit) expect(s.lastEdit, name).toBeGreaterThanOrEqual(Date.UTC(2020, 0, 1));
+  it("a row on a layer last edited before 2020 is a LABELLED COPY with its date (the first pass's hard 2020 floor was replaced by the owner's copy rule, 2026-10-28)", () => {
+    for (const [name, s] of Object.entries(SAMPLES)) {
+      if (s.lastEdit && s.lastEdit < Date.UTC(2020, 0, 1)) {
+        const entry = PARCEL_COPIES[keyOf(name)];
+        expect(entry, `${name}: an old layer must carry its copy line`).toBeTruthy();
+        expect(entry[1], `${name}: and the date of its data`).toMatch(/^20(1\d)/);
+      }
+    }
   });
 });
 

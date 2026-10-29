@@ -65,7 +65,7 @@ import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklah
 import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
 import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
 import { nyRaw, nyMap, NY_UNCOVERED } from "./nyParcels.js"; // NEW-1 (New York, 2026-10-20) — the New York county rows beyond the statewide public layer
-import { iaRaw, iaMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
+import { iaRaw, iaMap, iaCopyRaw, iaCopyMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
 import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
@@ -1002,6 +1002,7 @@ const COUNTIES_RAW = {
   ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
   ...nyRaw(), // NEW-1 (New York 2026-10-20) — ny_* county rows (the statewide public layer holds the other 38 counties)
   ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
+  ...iaCopyRaw(), // NEW-1 (Iowa second pass, B2499376) — the 2017 statewide COPY for the Iowa counties with no source of their own
   ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
   ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
   ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
@@ -3171,6 +3172,7 @@ const COUNTIES_MAP_RAW = {
   ...waMap(), // NEW-1 (B2349360)
   ...okMap(), // NEW-1 (Oklahoma)
   ...iaMap(),
+  ...iaCopyMap(), // NEW-1 (Iowa second pass, B2499376)
   ...kyMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
@@ -4133,6 +4135,14 @@ export const POINT_VIA_ENVELOPE_LAYER_URLS = Object.freeze(
   Object.values(COUNTIES_MAP).filter((c) => c.pointViaEnvelope).map((c) => trimLayerUrl(c.layerUrl)),
 );
 export const isPointViaEnvelopeLayerUrl = (url) => POINT_VIA_ENVELOPE_LAYER_URLS.includes(trimLayerUrl(url));
+
+/* NEW-1 (Iowa second pass, B2499376) — a layer that stacks SEVERAL ROWS ON ONE LOT (Monroe County IA's published "Parcels_Join" carries each parcel twice: the original export, rows 1–16,599, with the previous owner,
+ * and the re-import, rows 16,600+, with the current one) must hand back the NEWEST row, not whichever the server lists first (a bare query returns them in OBJECTID order — the old owner). Declared once on the
+ * config entry as `pointOrderBy` (an ArcGIS `orderByFields` clause) and keyed by URL exactly like pointViaEnvelope, so `queryAtPoint` and the id/address search (which are handed a URL, not a county key) can ask it. */
+export const POINT_ORDER_BY_LAYERS = Object.freeze(
+  Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointOrderBy).map((c) => [trimLayerUrl(c.layerUrl), c.pointOrderBy])),
+);
+export const pointOrderByForUrl = (url) => POINT_ORDER_BY_LAYERS[trimLayerUrl(url)] || null;
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a
