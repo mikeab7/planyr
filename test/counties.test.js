@@ -798,8 +798,8 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
     expect(sharedLayerUrlConflicts()).toEqual([]);
   });
 
-  it("Long and Walton stay unwired (no usable public parcel source, per this session's own record)", () => {
-    expect(COUNTIES_MAP.ga_long).toBeUndefined();
+  it("Walton stays unwired (no usable public parcel source, per this session's own record); Long was wired later, 2026-10-29 (B2504800)", () => {
+    expect(COUNTIES_MAP.ga_long).toBeDefined();
     expect(COUNTIES_MAP.ga_walton).toBeUndefined();
   });
 
