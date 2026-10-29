@@ -78,6 +78,16 @@ export function pasteRange(sheet, targetR, targetC, clip, selR2 = targetR, selC2
   return s;
 }
 
+/** Ctrl+Enter: write one typed value into EVERY cell in `cells` (`[{r, c}]`) — the cell it was typed in
+ *  keeps the text verbatim, every other cell gets it relocated like a fill (a formula's relative references
+ *  shift by the cell's offset, exactly as Excel's Ctrl+Enter and a paste do). One pure sheet → sheet function,
+ *  so the whole fill is one undo step. */
+export function fillTextToCells(sheet, cells, text, fromR, fromC) {
+  let s = sheet;
+  for (const { r, c } of cells) s = setRaw(s, r, c, relocateText(text, fromR, fromC, r, c));
+  return s;
+}
+
 /** Ctrl+D: fill the selection's TOP row down through every row beneath it in the same
  *  selection, shifting relative references per row exactly like dragging Excel's fill handle. */
 export function fillDown(sheet, r1, r2, c1, c2) {

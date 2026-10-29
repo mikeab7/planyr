@@ -9,10 +9,9 @@
  * "5:5") and every structural key (Ctrl+- / Ctrl++, hide / unhide) all go through the helpers below,
  * so they cannot disagree about what "the whole column" means.
  *
- * Multi-range selection (Ctrl+click to add a second, separate row/column) is NOT supported: the
- * grid's selection is a single rectangle by design, and faking a second range would make every
- * range-wide command act on the wrong cells. A Ctrl+click on a header therefore behaves like a
- * plain click.
+ * These helpers each return ONE rectangle. Ctrl+click on a header ADDS such a rectangle to the multi-range
+ * selection (lib/selectionModel.js, B2530689); every helper here reads only the active rectangle, so they
+ * compose with it untouched.
  *
  * Pure and DOM-free — unit-tested in the repo-root test/ suite modelSelection.
  */

@@ -65,7 +65,7 @@ describe("zoningRows — labelled by the jurisdiction the SITE falls in, never b
   const props = { ZONE: "M-1", PREV_ZONE: "A-R", CASE_NO: "RZN-26-0003", DATE_APPROVED: Date.UTC(2026, 7, 18, 12), ORDINANCE: "https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR", NAME: "Hacks Cross Logistics" };
   it("shows zone, jurisdiction, previous zone, case, approval date, ordinance link and name", () => {
     expect(zoningRows(props, "Olive Branch")).toEqual([
-      { label: "Zone", text: "M-1" },
+      { label: "Zone", text: "M-1 · Light Industrial" },
       { label: "Jurisdiction", text: "Olive Branch" },
       { label: "Previously", text: "A-R" },
       { label: "Case", text: "RZN-26-0003" },

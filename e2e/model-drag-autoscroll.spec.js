@@ -83,10 +83,13 @@ test.describe("Spreadsheet — drag-select autoscroll", () => {
     expect((await anchorOf(page)).row).toBe(2);       // the anchor row never moved
     await page.mouse.up();
     const done = await read(page);
-    await hold(page, 500);
+    await hold(page, 300);
+    const settled = await read(page);                 // rendered rows lag a scroll by a frame or two
+    await hold(page, 600);
     const after = await read(page);
-    expect(after.top).toBe(done.top);                 // release stops it immediately — no runaway
-    expect(after.maxRow).toBe(done.maxRow);
+    expect(settled.top).toBe(done.top);               // release stops it immediately — no runaway
+    expect(after.top).toBe(done.top);
+    expect(after.maxRow).toBe(settled.maxRow);
   });
 
   test("the farther past the edge, the faster it scrolls", async ({ page }) => {
@@ -197,14 +200,19 @@ test.describe("Spreadsheet — drag-select autoscroll", () => {
     await page.mouse.up(); // released over the tab strip — outside the grid element entirely
     const done = await read(page);
     expect(done.maxRow).toBeGreaterThan(5);
-    await hold(page, 500);
+    await hold(page, 300);
+    const settled = await read(page);
+    await hold(page, 600);
     const after = await read(page);
+    expect(settled.top).toBe(done.top);
     expect(after.top).toBe(done.top);
-    expect(after.maxRow).toBe(done.maxRow);
+    expect(after.maxRow).toBe(settled.maxRow);
     // and a later plain move (no button) must not resurrect the drag
     await page.mouse.move(a.x + 30, a.y + 200);
     await hold(page, 200);
-    expect((await read(page)).maxRow).toBe(done.maxRow);
+    const later = await read(page);
+    expect(later.top).toBe(done.top);
+    expect(later.maxRow).toBe(settled.maxRow);
   });
 
   test("column-header drag past the right edge selects more columns", async ({ page }) => {

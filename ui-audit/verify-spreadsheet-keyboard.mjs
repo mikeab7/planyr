@@ -186,7 +186,10 @@ try {
       const rowSpan = await nameBox();
       await header(7).click({ modifiers: ["Control"] });
       const ctrlClick = await nameBox();
-      ok("H4", "drag D->F = D:F; Shift+click B->E = B:E; rows 3->7 = 3:7; Ctrl+click is a plain single-column click", drag === "D:F" && shiftSpan === "B:E" && rowSpan === "3:7" && ctrlClick === "H:H", `drag='${drag}' shift='${shiftSpan}' rows='${rowSpan}' ctrl='${ctrlClick}'`);
+      // Ctrl+click ADDS the column as a second range (main's multi-range model): the earlier rows 3:7 stay selected.
+      const stillRows = await page.locator('[data-row="3"][data-col="0"][data-selected="true"]').count();
+      const addedCol = await page.locator('[data-row="3"][data-col="7"][data-selected="true"]').count();
+      ok("H4", "drag D->F = D:F; Shift+click B->E = B:E; rows 3->7 = 3:7; Ctrl+click on H adds H:H beside the rows", drag === "D:F" && shiftSpan === "B:E" && rowSpan === "3:7" && ctrlClick === "H:H" && stillRows === 1 && addedCol === 1, `drag='${drag}' shift='${shiftSpan}' rows='${rowSpan}' ctrl='${ctrlClick}' rowsKept=${stillRows} colAdded=${addedCol}`);
     });
     await tryCheck("H5", "corner box selects the whole sheet", async () => {
       await page.getByTestId("model-corner").click();

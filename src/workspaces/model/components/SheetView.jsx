@@ -46,6 +46,9 @@ import { wholeColumns, wholeRows, wholeSheet, selectionKind, extendFromHeader, c
 import { navAction } from "../lib/keymap.js";
 import { autofitColumnWidth, autofitRowHeight, canvasMeasure } from "../lib/autofit.js";
 import { insertAtCaret, cycleReferenceAtCaret, todayIso, timeText } from "../lib/editShortcuts.js";
+import {
+  rangesOf, isMulti, selContains, withActive, addRange, toggleCellOut, cellsOf, makeSelection, MULTI_SELECTION_MESSAGE,
+} from "../lib/selectionModel.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { axisVelocity, axisIndexAt } from "../lib/dragAutoscroll.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
@@ -201,8 +204,13 @@ const measureTextWidth = canvasMeasure; // the ONE shared canvas measurer (lib/a
 const SheetView = forwardRef(function SheetView({
   sheet, sheetName, evalResult, totalRows,
   selRange, setSelRange,
-  onCommit, onBlankRange, onAddColumn,
+  onCommit, onAddColumn,
   onFillDown,
+  // NEW-2 (multi-range selection) — the commands that act on EVERY selected range, each one undo step:
+  // `onBlankRanges([{r1,r2,c1,c2}])` (Delete / Clear contents), `onFillDownRanges(ranges)` (Ctrl+D),
+  // `onFillText(cells, text, fromR, fromC)` (Ctrl+Enter). `onNotice(text)` shows Excel's "This action won't
+  // work on multiple selections" for the commands that cannot (insert/delete, freeze, sort).
+  onBlankRanges, onFillDownRanges, onFillText, onNotice,
   onInsertRowAt, onDeleteRowAt, onInsertColumnAt, onDeleteColumnAt,
   onSetColumnWidth, onSetRowHeight, onSetFreeze,
   zoom = DEFAULT_ZOOM, onZoomChange,
@@ -235,8 +243,8 @@ const SheetView = forwardRef(function SheetView({
   onApplyBorder, onSort, onToggleNameManager,
   // Excel shortcuts block (2026-10-29): `onCommand(id)` runs a registry command (the SAME ones the
   // palette, ribbon and key chords run) so a header/cell menu item and its key are one function;
-  // `onFillSelection` is Ctrl+Enter in the editor; `cutRange` draws the Ctrl+X marching outline.
-  onCommand, onFillSelection, cutRange = null,
+  // `cutRange` draws the Ctrl+X / Ctrl+C marching outline.
+  onCommand, cutRange = null,
 }, ref) {
   const outerRef = useRef(null);
   // B1290496 — Name Box / Find / Name Manager navigation happens from an input OUTSIDE this
@@ -473,6 +481,12 @@ const SheetView = forwardRef(function SheetView({
   const c2 = selRange ? Math.max(selRange.c1, selRange.c2) : 0;
   const activeR = selRange ? selRange.r1 : 0;
   const activeC = selRange ? selRange.c1 : 0;
+  // NEW-2 — every selected range (active last), normalised once per render; a cell / header is "selected" if
+  // ANY of them holds it. r1..c2 above stay the ACTIVE range (fill handle, Ctrl+C/V, shift-extend).
+  const selRanges = rangesOf(selRange);
+  const inAnySel = (rr, cc) => { for (const g of selRanges) if (rr >= g.r1 && rr <= g.r2 && cc >= g.c1 && cc <= g.c2) return true; return false; };
+  const rowInAnySel = (rr) => { for (const g of selRanges) if (rr >= g.r1 && rr <= g.r2) return true; return false; };
+  const colInAnySel = (cc) => { for (const g of selRanges) if (cc >= g.c1 && cc <= g.c2) return true; return false; };
 
   // Keep the active cell on screen after keyboard navigation — a frozen row/column is ALWAYS
   // visible by construction, so this only ever needs to move the scrolling body. Without this,
@@ -545,13 +559,17 @@ const SheetView = forwardRef(function SheetView({
     const col = colAt(sheet, c);
     if (!col) return;
     // The selection is KEPT when the edited cell is already inside it (Excel: F2 / typing on a multi-cell selection edits
-    // the active cell and leaves the highlight, which is what lets Ctrl+Enter fill the whole selection).
-    if (!(selRange && r >= r1 && r <= r2 && c >= c1 && c <= c2)) setSelRange({ r1: r, r2: r, c1: c, c2: c });
+    // the active cell and leaves the highlight, which is what lets Ctrl+Enter fill the whole selection). A single
+    // cell outside it collapses to the edited cell; a multi-range selection is always kept (NEW-2).
+    if (!selContains(selRange, r, c) && !isMulti(selRange)) setSelRange({ r1: r, r2: r, c1: c, c2: c });
     setEdit({ r, c });
     const original = rawAt(sheet, r, c);
     editHistoryRef.current = createEditHistory(original);
     putEditValue(seed != null ? seed : original);
-  }, [sheet, setSelRange, putEditValue, selRange, r1, r2, c1, c2]);
+  }, [sheet, setSelRange, putEditValue, selRange]);
+
+  /** Excel's "this can't act on several ranges" — a visible message, never a silent no-op. */
+  const refuseMulti = () => { onNotice?.(MULTI_SELECTION_MESSAGE); };
 
   const cellClick = (r, c, e) => {
     // B1076480 — a RIGHT mousedown landing INSIDE an already-selected multi-cell range must
@@ -562,14 +580,33 @@ const SheetView = forwardRef(function SheetView({
     // openCellMenu's own "act on the selection" logic ever saw it, and "Delete rows"/"Clear
     // contents" from that menu then hit the wrong range. Matches Excel/Sheets: a right-click
     // outside the current selection still starts a fresh single-cell one, same as a left-click.
-    if (e.button === 2 && r >= r1 && r <= r2 && c >= c1 && c <= c2) return;
+    // (NEW-2: "inside" means inside ANY of the selected ranges.)
+    if (e.button === 2 && selContains(selRange, r, c)) return;
     outerRef.current?.focus();
     if (edit) commitEdit(null);
+    if (e.button === 0 && (e.ctrlKey || e.metaKey)) {
+      // NEW-2 — Ctrl+click adds this cell (the whole span of a merged cell) as a NEW range; Ctrl+drag grows
+      // it. A Ctrl+press on an already-selected cell is a toggle, decided on release: no drag = take it OUT.
+      const merge = mergeAt(sheet, r, c);
+      const c0 = merge ? merge.c1 : c, c9 = merge ? merge.c2 : c;
+      const prev = selRange;
+      const wasSel = selContains(prev, r, c0);
+      const base = rangesOf(prev);
+      let movedOff = false;
+      setSelRange(addRange(prev, { r1: r, r2: r, c1: c0, c2: c9 }));
+      beginRangeDrag("cell", e, (rr, cc) => {
+        if (rr !== r || cc !== c0) movedOff = true;
+        setSelRange(makeSelection({ r1: r, r2: rr, c1: c0, c2: cc === c0 ? c9 : cc }, base));
+      }, (reason) => { if (reason === "up" && wasSel && !movedOff) setSelRange(toggleCellOut(prev, r, c0)); });
+      return;
+    }
     const anchor = e.shiftKey && selRange ? { r: selRange.r1, c: selRange.c1 } : { r, c };
-    if (e.shiftKey && selRange) { setSelRange({ r1: selRange.r1, r2: r, c1: selRange.c1, c2: c }); revealCell(r, c); }
+    // Shift extends ONLY the most recent range (earlier ones stay); a plain click collapses to one range.
+    const base = e.shiftKey && selRange ? selRange.extra : undefined;
+    if (e.shiftKey && selRange) { setSelRange(withActive(selRange, { r1: selRange.r1, r2: r, c1: selRange.c1, c2: c })); revealCell(r, c); }
     else setSelRange({ r1: r, r2: r, c1: c, c2: c });
     if (e.button === 0) {
-      beginRangeDrag("cell", e, (rr, cc) => setSelRange({ r1: anchor.r, r2: rr, c1: anchor.c, c2: cc }));
+      beginRangeDrag("cell", e, (rr, cc) => setSelRange(makeSelection({ r1: anchor.r, r2: rr, c1: anchor.c, c2: cc }, base)));
     }
   };
 
@@ -659,20 +696,25 @@ const SheetView = forwardRef(function SheetView({
 
   // ⛔ NEW-2 (2026-10-29) — HEADER SELECTION. Click a column letter / row number = the whole column /
   // row (a RANGE from lib/selection.js, never a walk over cells); drag across headers = a run;
-  // Shift+click grows from the anchor; the corner box = the whole sheet. Ctrl+click is a plain click
-  // (the grid has ONE selection rectangle — no second range). The resize strip on a header border
-  // stops propagation, so a press on the border resizes and never reaches these.
+  // Shift+click grows the newest range from its anchor; the corner box = the whole sheet. Ctrl+click adds the
+  // whole line as ANOTHER range (lib/selectionModel.js, B2530689) and a drag then extends just that one.
+  // The resize strip on a header border stops propagation, so a press on the border resizes and never
+  // reaches these.
   const headerPress = (axis, idx, e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     outerRef.current?.focus();
     if (edit) commitEdit(null);
-    const extend = e.shiftKey && selRange;
+    const whole = (a, b) => (axis === "col" ? wholeColumns(sheet, a, b) : wholeRows(sheet, a, b));
+    const adding = (e.ctrlKey || e.metaKey) && !!selRange;
+    const extend = e.shiftKey && !adding && selRange;
+    const base = adding ? rangesOf(selRange) : extend ? (selRange.extra || []) : undefined;
     const anchor = extend ? (axis === "col" ? selRange.c1 : selRange.r1) : idx;
-    setSelRange(extend ? extendFromHeader(sheet, selRange, axis, idx) : (axis === "col" ? wholeColumns(sheet, idx) : wholeRows(sheet, idx)));
+    const first = extend ? extendFromHeader(sheet, selRange, axis, idx) : whole(idx);
+    setSelRange(adding ? addRange(selRange, first) : extend ? withActive(selRange, first) : first);
     // dragging across headers extends the run — the ONE autoscrolling drag session every range gesture shares (B2452528)
-    if (axis === "col") beginRangeDrag("col", e, (_r, cc) => setSelRange(wholeColumns(sheet, anchor, cc)));
-    else beginRangeDrag("row", e, (rr) => setSelRange(wholeRows(sheet, anchor, rr)));
+    if (axis === "col") beginRangeDrag("col", e, (_r, cc) => setSelRange(makeSelection(wholeColumns(sheet, anchor, cc), base)));
+    else beginRangeDrag("row", e, (rr) => setSelRange(makeSelection(wholeRows(sheet, anchor, rr), base)));
   };
   const cornerPress = (e) => {
     if (e.button !== 0) return;
@@ -769,13 +811,15 @@ const SheetView = forwardRef(function SheetView({
       // whole cell) — everything below acts on the open editor's own text.
       const modKey = e.ctrlKey || e.metaKey;
       if (e.key === "Enter" && e.altKey && !modKey) { e.preventDefault(); insertIntoEditor("\n"); return; }
+      // NEW-2 — Ctrl+Enter commits the typed value into EVERY selected cell (all ranges), one undo step, and
+      // leaves the selection where it is (Excel).
       if (e.key === "Enter" && modKey) {
-        // Ctrl+Enter — fill the whole selection with what is typed, and stay on the cell.
         e.preventDefault();
-        const text = editValueRef.current;
+        const cells = cellsOf(selRange);
+        if (!cells.some((x) => x.r === edit.r && x.c === edit.c)) cells.push({ r: edit.r, c: edit.c });
+        onFillText(cells, editValueRef.current, edit.r, edit.c);
         setEdit(null);
         outerRef.current?.focus();
-        onFillSelection?.(r1, r2, c1, c2, text);
         return;
       }
       if (e.key === "F4" && !e.altKey && !modKey) {
@@ -830,15 +874,17 @@ const SheetView = forwardRef(function SheetView({
         const dc = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
         const hasContent = (rr, cc) => rawAt(sheet, rr, cc) !== "";
         const target = ctrlArrowTarget(hasContent, sheet.rowCount, cols.length, activeR, activeC, dr, dc);
-        if (shift) { setSelRange({ r1: activeR, c1: activeC, r2: target.r, c2: target.c }); revealCell(target.r, target.c); }
+        if (shift) { setSelRange(withActive(selRange, { r1: activeR, c1: activeC, r2: target.r, c2: target.c })); revealCell(target.r, target.c); }
         else jumpTo(target.r, target.c);
         return;
       }
       // Ctrl+C / Ctrl+X / Ctrl+V are deliberately NOT handled here: the key is left alone so the browser fires the
       // native copy / cut / paste EVENT, which ModelApp's document listeners turn into a real system-clipboard
-      // write / read (lib/clipboardIO.js). preventDefault-ing the key is what used to keep everything internal.
-      if (k === "d" && !shift) { e.preventDefault(); onFillDown(r1, r2, c1, c2); return; }
-      return; // leave every other Ctrl/Cmd chord (the app's own undo/redo, Find, the Excel shortcut chords) to ModelApp
+      // write / read (lib/clipboardIO.js; a multi-range selection gets Excel's "won't work on multiple selections"
+      // notice there). preventDefault-ing the key is what used to keep everything internal.
+      // Fill-down runs down every range.
+      if (k === "d") { e.preventDefault(); if (isMulti(selRange)) onFillDownRanges(rangesOf(selRange)); else onFillDown(r1, r2, c1, c2); return; }
+      return; // leave every other Ctrl/Cmd chord (the app's own undo/redo, Find, the Excel shortcut chords) to ModelApp — undo/redo only reach ModelApp here, with NO cell editor open (see the edit branch above)
     }
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
@@ -847,7 +893,7 @@ const SheetView = forwardRef(function SheetView({
       if (shift) {
         const base = selRange || { r1: 0, r2: 0, c1: 0, c2: 0 };
         const er = dr ? stepRowVis(base.r2, dr) : base.r2, ec = dc ? stepColVis(base.c2, dc) : base.c2;
-        setSelRange({ r1: base.r1, c1: base.c1, r2: er, c2: ec });
+        setSelRange(withActive(base, { r1: base.r1, c1: base.c1, r2: er, c2: ec })); // only the newest range grows
         revealCell(er, ec); // the moving END of the range, not the anchor the effect watches
       } else {
         const nr = dr ? stepRowVis(activeR, dr) : activeR;
@@ -859,7 +905,7 @@ const SheetView = forwardRef(function SheetView({
     if (e.key === "Tab") { e.preventDefault(); const c = stepColVis(activeC, shift ? -1 : 1); setSelRange({ r1: activeR, r2: activeR, c1: c, c2: c }); return; }
     if (e.key === "Enter" && !e.altKey) { e.preventDefault(); const r = stepRowVis(activeR, shift ? -1 : 1); setSelRange({ r1: r, r2: r, c1: activeC, c2: activeC }); return; }
     if (e.key === "F2") { e.preventDefault(); startEdit(activeR, activeC, null); return; }
-    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onBlankRange(r1, r2, c1, c2); return; }
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onBlankRanges(rangesOf(selRange)); return; }
     if (e.key.length === 1 && !e.altKey) { e.preventDefault(); startEdit(activeR, activeC, e.key); }
   };
 
@@ -964,27 +1010,31 @@ const SheetView = forwardRef(function SheetView({
 
   const openCellMenu = (e, r, c) => {
     e.preventDefault();
-    const inSel = r >= r1 && r <= r2 && c >= c1 && c <= c2;
+    const inSel = selContains(selRange, r, c);
     if (!inSel) setSelRange({ r1: r, r2: r, c1: c, c2: c });
+    const multi = inSel && isMulti(selRange);
+    const only = (fn) => () => { if (multi) refuseMulti(); else fn(); }; // one-range-only actions say so on a multi-selection
     const rr1 = inSel ? r1 : r, rr2 = inSel ? r2 : r, cc1 = inSel ? c1 : c, cc2 = inSel ? c2 : c;
+    const clearRanges = inSel ? rangesOf(selRange) : [{ r1: r, r2: r, c1: c, c2: c }];
     const items = [
-      // Same code path as Ctrl+C / Ctrl+X / Ctrl+V (ModelApp's clipboard handlers).
+      // Same code path as Ctrl+C / Ctrl+X / Ctrl+V (ModelApp's clipboard handlers; a multi-range selection is
+      // refused there with Excel's notice).
       { key: "cut", label: "Cut", onClick: () => onCommand?.("cut") },
       { key: "copy", label: "Copy", onClick: () => onCommand?.("copy") },
       { key: "paste", label: "Paste", onClick: () => onCommand?.("paste") },
       "divider",
-      { key: "insRowAbove", label: "Insert row above", onClick: () => onInsertRowAt(r) },
-      { key: "insRowBelow", label: "Insert row below", onClick: () => onInsertRowAt(r + 1) },
-      { key: "insColLeft", label: "Insert column left", onClick: () => onInsertColumnAt(c) },
-      { key: "insColRight", label: "Insert column right", onClick: () => onInsertColumnAt(c + 1) },
+      { key: "insRowAbove", label: "Insert row above", onClick: only(() => onInsertRowAt(r)) },
+      { key: "insRowBelow", label: "Insert row below", onClick: only(() => onInsertRowAt(r + 1)) },
+      { key: "insColLeft", label: "Insert column left", onClick: only(() => onInsertColumnAt(c)) },
+      { key: "insColRight", label: "Insert column right", onClick: only(() => onInsertColumnAt(c + 1)) },
       "divider",
-      { key: "delRow", label: rr2 > rr1 ? "Delete rows" : "Delete row", onClick: () => { for (let i = rr2; i >= rr1; i--) onDeleteRowAt(i); } },
-      { key: "delCol", label: cc2 > cc1 ? "Delete columns" : "Delete column", onClick: () => { for (let i = cc2; i >= cc1; i--) onDeleteColumnAt(i); }, disabled: cols.length - (cc2 - cc1 + 1) < 1 },
-      { key: "clear", label: "Clear contents", onClick: () => onBlankRange(rr1, rr2, cc1, cc2) },
+      { key: "delRow", label: rr2 > rr1 ? "Delete rows" : "Delete row", onClick: only(() => { for (let i = rr2; i >= rr1; i--) onDeleteRowAt(i); }) },
+      { key: "delCol", label: cc2 > cc1 ? "Delete columns" : "Delete column", onClick: only(() => { for (let i = cc2; i >= cc1; i--) onDeleteColumnAt(i); }), disabled: cols.length - (cc2 - cc1 + 1) < 1 },
+      { key: "clear", label: "Clear contents", onClick: () => onBlankRanges(clearRanges) },
       "divider",
       freezeLabel
         ? { key: "unfreeze", label: freezeLabel, onClick: () => onSetFreeze(0, 0) }
-        : { key: "freeze", label: "Freeze panes", onClick: () => onSetFreeze(r, c) },
+        : { key: "freeze", label: "Freeze panes", onClick: only(() => onSetFreeze(r, c)) },
       // ⛔ NEW-1 (command palette + reduced Home ribbon) — the same three action families the
       // ribbon used to render as their own groups, reached here now that they're occasional
       // rather than daily. Calls the SAME onApplyBorder/onSort/onToggleNameManager handlers the
@@ -994,8 +1044,8 @@ const SheetView = forwardRef(function SheetView({
       { key: "borderAll", label: "All borders", onClick: () => onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: "thin", mode: "all" }) },
       { key: "borderNone", label: "No border", onClick: () => onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: null, mode: "all" }) },
       "divider",
-      { key: "sortAsc", label: "Sort A to Z", onClick: () => onSort("asc") },
-      { key: "sortDesc", label: "Sort Z to A", onClick: () => onSort("desc") },
+      { key: "sortAsc", label: "Sort A to Z", onClick: only(() => onSort("asc")) },
+      { key: "sortDesc", label: "Sort Z to A", onClick: only(() => onSort("desc")) },
       "divider",
       { key: "nameManager", label: "Name Manager…", onClick: () => onToggleNameManager() },
     ];
@@ -1088,7 +1138,7 @@ const SheetView = forwardRef(function SheetView({
   // except how the ROW ITSELF is positioned (see the file header for why sticky/absolute can't
   // both apply to one element). `posStyle` supplies that one difference.
   const renderRowCells = (r, posStyle, rowZ) => {
-    const inRowRange = r >= r1 && r <= r2;
+    const inRowRange = rowInAnySel(r);
     const row = rowCells.get(r);
     const h = renderRowH(r);
     // B1007282 — a filtered-out row renders NOTHING (rowOffsets already gave it zero pixels of
@@ -1145,7 +1195,7 @@ const SheetView = forwardRef(function SheetView({
           const merge = mergeAt(sheet, r, c);
           if (merge && merge.c1 !== c) return null;
           const isActive = r === activeR && c === activeC;
-          const isSel = inRowRange && c >= c1 && c <= c2;
+          const isSel = inRowRange && inAnySel(r, c);
           const isEditing = edit && edit.r === r && edit.c === c;
           const cell = row ? row[c] : { display: "", kind: "blank", empty: true, style: {} };
           const cellStyle = cell.style || {};
@@ -1424,7 +1474,7 @@ const SheetView = forwardRef(function SheetView({
             if (col.hidden) return null; // a hidden column draws nothing (Ctrl+0); its stored width is kept
             const frozenCol = c < freezeCols;
             const w = renderColW(c);
-            const inColRange = c >= c1 && c <= c2;
+            const inColRange = colInAnySel(c);
             return (
               <div
                 key={col.id}
