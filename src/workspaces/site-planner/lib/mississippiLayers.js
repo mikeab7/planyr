@@ -26,11 +26,15 @@ export function relayed(url) {
 const str = (v) => (v == null ? "" : String(v).trim());
 const has = (v) => { const t = str(v); return !!t && !/^(null|none|n\/?a|<null>)$/i.test(t); };
 /* A publisher's SHOUTED text ("MAYWOOD SUBDIVISION - SYLVAN LAKE DAM") reads as words; mixed-case text is left exactly as written. Corporate / place suffixes stay upper. */
-const KEEP_UP = new Set(["LLC", "INC", "LP", "LLP", "LTD", "USA", "US", "MS", "TN", "AL", "LA", "AR", "II", "III", "IV", "WWTP", "NRCS", "EPA", "MDEQ", "CO", "FM", "HWY"]);
+const KEEP_UP = new Set(["LLC", "LP", "LLP", "LTD", "USA", "US", "MS", "TN", "II", "III", "IV", "WWTP", "NRCS", "EPA", "MDEQ", "NE", "NW", "SE", "SW"]);
 export const soft = (v) => {
   const t = str(v);
   if (!t || /[a-z]/.test(t)) return t;
-  return t.toLowerCase().replace(/[a-z][a-z.']*/g, (w, i) => (KEEP_UP.has(w.toUpperCase().replace(/\.$/, "")) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)));
+  return t.toLowerCase()
+    .replace(/[a-z][a-z.']*/g, (w) => (KEEP_UP.has(w.toUpperCase().replace(/\.$/, "")) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .replace(/\b(\d+)(St|Nd|Rd|Th)\b/g, (_m, n, o) => n + o.toLowerCase()) // 4th, 25th — never "4Th"
+    .replace(/\bMc([a-z])/g, (_m, c) => "Mc" + c.toUpperCase()) // McComb, McDowell
+    .replace(/\b([OD])'([a-z]{2,})/g, (_m, a, rest) => a + "'" + rest.charAt(0).toUpperCase() + rest.slice(1)); // O'Neal, D'Iberville (a possessive — McClinton's — keeps its lower s)
 };
 const row = (label, v, extra) => (has(v) ? { label, text: str(v), ...(extra || {}) } : null);
 const link = (label, href) => (/^https?:\/\//i.test(str(href)) ? { label, text: "Open", href: str(href) } : null);
@@ -38,7 +42,7 @@ const clean = (rows) => rows.filter(Boolean);
 const num1 = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? (n >= 100 ? Math.round(n).toLocaleString("en-US") : String(Math.round(n * 10) / 10)) : null; };
 /* MDEQ shouts county names ("DESOTO", "DE SOTO" never occurs; Mississippi's one camel-case county is DeSoto). */
 const countyName = (v) => { const t = titleCase(v); return /^de\s?soto$/i.test(t) ? "DeSoto" : t; };
-const place = (...parts) => parts.map(str).filter((t) => t && !/^null$/i.test(t)).join(", ");
+const place = (...parts) => parts.map(str).filter((t) => has(t)).join(", ");
 
 /* ---------------- the colour rules (legend and map read the same table) ---------------- */
 
@@ -100,7 +104,7 @@ export function gardCard(p) {
   return {
     title: str(p.SITENAME) || "Contaminated site",
     rows: clean([
-      row("Address", place(p.SITEADDRESS, p.SITECITY)),
+      row("Address", place(soft(p.SITEADDRESS), soft(p.SITECITY))),
       row("County", p.SITECOUNTY),
       row("Program", gardProgram(p.TYPECLEAN)),
       row("State status", p.STATESTATUS),
@@ -129,7 +133,7 @@ export function landfillCard(p) {
   p = p || {};
   return {
     title: str(p.Facility_N) || "Solid-waste facility",
-    rows: clean([row("Type", p.Facility_T), row("Status", p.Status), row("County", p.County), row("Acres", num1(p.Acres)), row("Permit", p.Permit__)]),
+    rows: clean([row("Type", p.Facility_T), row("Status", p.Status), row("County", p.County), row("Acres", num1(p.Acres)), row("Permit", /^no permit$/i.test(str(p.Permit__)) ? null : p.Permit__)]),
   };
 }
 export function wellCard(p) {
@@ -197,7 +201,7 @@ export const MISSISSIPPI_LAYERS = {
     source: "Mississippi Statewide Governmental Boundaries Layer (MARIS)", color: "#1d4ed8", weight: 1.6,
     styleFn: (_p, opacity) => ({ color: "#1d4ed8", weight: CITY_LINE_MIN_WEIGHT, opacity, fill: true, fillColor: "#1d4ed8", fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit" }),
     lineLabel: { field: "Name", minZoom: 9, declutter: true, format: (v) => str(v) || null },
-    identifyCard: (p) => ({ title: `${str(p && p.Name) || "City"} city limits`, rows: clean([row("County", p && p.County), row("Population", p && p.Population ? Number(p.Population).toLocaleString("en-US") : null), row("Incorporated", p && p.Year_Incor)]) }),
+    identifyCard: (p) => ({ title: `${str(p && p.Name) || "City"} ${/^(town|village)$/i.test(str(p && p.Classifica)) ? str(p.Classifica).toLowerCase() : "city"} limits`, rows: clean([row("County", p && p.County), row("Population", p && p.Population ? Number(p.Population).toLocaleString("en-US") : null), row("Incorporated", p && p.Year_Incor)]) }),
     note: "Mississippi's 300 incorporated places (MARIS statewide governmental boundaries, 2025). Inside = in the city; outside = unincorporated county — confirm with the city and county planning offices which government's zoning governs a site near a limit. DeSoto County's five cities come from the county's own layer.",
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel. Each city's boundary was last updated in a different year (the layer records it); MARIS also publishes a short supplemental list of recent annexations that is not drawn here, so a very recent annexation may be missing.",
   }),
@@ -206,8 +210,8 @@ export const MISSISSIPPI_LAYERS = {
     source: "U.S. Bureau of Indian Affairs — land area representations", color: "#9a3412", weight: 1.6,
     simplifyFactor: 0.75, styleFn: outline("#9a3412", 1.6, 0.18),
     lineLabel: { field: "LARName", minZoom: 9, format: (v) => str(v).replace(/\s+LAR$/i, "") || null },
-    identifyCard: (p) => ({ title: str(p && p.LARName).replace(/\s+LAR$/i, "") || "Tribal land", rows: clean([row("Acres", num1(p && p.GISAcres))]), note: "Federal and tribal jurisdiction apply on tribal trust land." }),
-    note: "Federally recognized tribal land boundaries (BIA). In Mississippi these are the Mississippi Band of Choctaw's trust lands in the east-central and southern counties. Tribal and federal law, not county zoning, governs on this land.",
+    identifyCard: (p) => ({ title: str(p && p.LARName).replace(/\s+LAR$/i, "") || "Tribal land", rows: clean([row("Acres", num1(p && p.GISAcres))]), note: "Tribal and federal law may apply on tribal trust land within this boundary." }),
+    note: "Federally recognized tribal land boundaries (BIA). In Mississippi these are the Mississippi Band of Choctaw's trust lands in the east-central and southern counties. Tribal and federal law, not county zoning, may govern on tribal trust land within it.",
     infoCaveat: "BIA land area representations — a mapped representation, not a survey. Confirm the status of any parcel near a boundary with the Bureau and the Tribe.",
   }),
   /* ---- Environmental ---- */
@@ -251,7 +255,7 @@ export const MISSISSIPPI_LAYERS = {
     color: "#b45309", weight: 1.2, pointRadius: 3.5,
     pointStyleFn: pointFn(WELL_CLASSES, wellClass), legend: legendOf(WELL_CLASSES), identifyCard: wellCard,
     note: "Wells regulated by the State Oil and Gas Board — producing, injection, dry holes and plugged wells. Purple = orphaned, or plugged with no record: the wells most likely to be a surprise on a development site.",
-    infoCaveat: "Surface locations from the Board's July 2025 data, republished by MARIS (the Board publishes no open map service). A plugged well is still a setback and re-entry issue — confirm with the Board and on the title.",
+    infoCaveat: "Surface locations from the Board's July 2025 data, republished by MARIS (the Board's own newer data is a download, not a map service). A plugged well is still a setback and re-entry issue — confirm with the Board and on the title.",
   }),
   ms_deq_og_fields: feature("msDeqOgFields", {
     ...MS, label: "Oil & Gas Fields", role: "area", group: "environmental", order: 36, minZoom: 9, source: "MDEQ — Office of Geology",
@@ -280,7 +284,7 @@ export const MISSISSIPPI_LAYERS = {
     color: "#6d28d9", weight: 1.5, pointRadius: 4,
     identifyCard: (p) => ({ title: str(p && p.RESNAME) || "Historic place", rows: clean([row("Type", p && p.ResType), row("City", p && p.City), row("County", p && p.County)]) }),
     note: "National Register listings — one point per listing (a district is one point, not its boundary). Mississippi's own historic-resources inventory (MDAH) is not an open service, so recorded-but-unlisted sites are NOT here. A flag to check with MDAH, not a clearance.",
-    infoCaveat: "NPS listings through Esri Federal Data. A federal permit or federal funding on a listed property triggers Section 106 review; state review is a separate MDAH matter.",
+    infoCaveat: "NPS listings through Esri Federal Data. A federal permit, licence or funding affecting a listed or eligible property triggers Section 106 review; state review is a separate MDAH matter.",
   }),
   ms_cemeteries: feature("msCemeteries", {
     ...MS, label: "Cemeteries", role: "point", group: "environmental", order: 40, minZoom: 12, source: "USGS — GNIS cemeteries",
@@ -292,8 +296,8 @@ export const MISSISSIPPI_LAYERS = {
   ms_crit_habitat: feature("msCritHabitat", {
     ...MS, label: "Critical Habitat", role: "area", group: "environmental", order: 42, minZoom: 9, source: "U.S. Fish & Wildlife Service",
     color: "#15803d", weight: 1.5, simplifyFactor: 10, vertexBudget: 150000, styleFn: outline("#15803d", 1.5, 0.5),
-    identifyCard: (p) => ({ title: str(p && p.comname) || "Critical habitat", rows: clean([row("Species", p && p.sciname), row("Listing", p && p.listing_status)]) }),
-    note: "USFWS final critical habitat (Mississippi has the gopher frog, pearl darter, black pinesnake, sandhill crane and several mussels). It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. Drawn generalised — the Gulf sturgeon and piping plover units are whole-river and whole-coast polygons with over a million vertices; USFWS IPaC is the authoritative species list.",
+    identifyCard: (p) => ({ title: (has(p && p.comname) && !/^no common name$/i.test(str(p.comname)) ? str(p.comname) : str(p && p.sciname)) || "Critical habitat", rows: clean([row("Species", p && p.sciname), row("Listing", p && p.listing_status)]) }),
+    note: "USFWS final critical habitat (Mississippi has the gopher frog, pearl darter, black pinesnake, sandhill crane and several mussels). It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. Drawn generalised (about 15 px off the true line on a laptop screen) — the Gulf sturgeon and piping plover units are whole-river and whole-coast polygons with over a million vertices, so on a phone held upright the Gulf coast says too detailed at the closest zooms. USFWS IPaC is the authoritative species list.",
     infoCaveat: "A screen, not a species survey.",
   }),
   ms_303d: feature("ms303d", {

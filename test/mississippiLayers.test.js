@@ -154,11 +154,29 @@ describe("click cards — recorded attribute bags, cleaned the way the app clean
     expect(soft("ACME FUEL LLC")).toBe("Acme Fuel LLC");
     expect(soft("Watson Residence")).toBe("Watson Residence");
     expect(soft("")).toBe("");
+    // real Mississippi names the first cut damaged (2,322 live shouted values were reviewed)
+    expect(soft("236 4TH STREET")).toBe("236 4th Street");
+    expect(soft("2120 25TH AV")).toBe("2120 25th Av");
+    expect(soft("MCCOMB")).toBe("McComb");
+    expect(soft("MCDOWELL RD")).toBe("McDowell Rd");
+    expect(soft("MCCLINTON'S")).toBe("McClinton's");
+    expect(soft("D'IBERVILLE")).toBe("D'Iberville");
+    expect(soft("O'NEAL ROAD")).toBe("O'Neal Road");
+    expect(soft("BAYOU LA TERRE")).toBe("Bayou La Terre");
+    expect(soft("410 8TH STREET NE")).toBe("410 8th Street NE");
+    expect(soft("HWY 51 ACME INC")).toBe("Hwy 51 Acme Inc");
     expect(rowsOf(damCard({ DAMNAME: "X LAKE DAM", CONDITION: "SATISFACTORY" })).Condition).toBe("Satisfactory");
     expect(NRCS_PROGRAM.WRP).toMatch(/Wetlands Reserve/);
     expect(cleanCard(ALL_LAYERS.ms_303d.identifyCard({ WATER_BODY_NAME: "SAND CREEK", POLLUTANT: "202-BIOLOGICAL IMPAIRMENT", LOCATION: "NEAR CANTON", BASIN: "BIG BLACK RIVER" })).rows.map((r) => r.text)).toEqual(["Biological Impairment", "Near Canton", "Big Black River"]);
     expect(cleanCard(ALL_LAYERS.ms_nrcs_easements.identifyCard({ Program: "WRP", County: "DESOTO", CalcAcres: 40 })).rows.map((r) => r.text)).toEqual(["Wetlands Reserve Program", "DeSoto", "40"]);
     expect(cleanCard(ALL_LAYERS.ms_desoto_drainage.identifyCard({ District: "Short Fork Drainage District" })).title).toBe("Short Fork Drainage District");
+  });
+  it("an address never prints N/A, and 'NO PERMIT' is not a permit number; a town reads as a town", () => {
+    expect(Object.fromEntries(cleanCard(gardCard({ SITENAME: "S", SITEADDRESS: "N/A", SITECITY: "Hattiesburg" })).rows.map((r) => [r.label, r.text])).Address).toBe("Hattiesburg");
+    expect(cleanCard(landfillCard({ Facility_N: "L", Permit__: "NO PERMIT" })).rows.find((r) => r.label === "Permit")).toBeUndefined();
+    expect(ALL_LAYERS.ms_city.identifyCard({ Name: "Abbeville", Classifica: "Town" }).title).toBe("Abbeville town limits");
+    expect(ALL_LAYERS.ms_city.identifyCard({ Name: "Jackson", Classifica: "City" }).title).toBe("Jackson city limits");
+    expect(ALL_LAYERS.ms_crit_habitat.identifyCard({ comname: "No common name", sciname: "Pleurobema curtum" }).title).toBe("Pleurobema curtum");
   });
   it("FEMA letters: case numbers and links, no more than are there", () => {
     const lomr = cleanCard(lomrCard({ CASE_NO: "21-04-0112P", EFF_DATE: 1613088000000, LINK_1: "https://msc.fema.gov/a.pdf", LINK_2: null, LINK_3: " " }));
@@ -258,7 +276,7 @@ describe("every Mississippi row is registered whole, sourced, and scoped", () =>
     expect(featureLayerOptions(ALL_LAYERS.ms_dam_inundation, 1, "p").isModern).toBe(false);
     expect(featureLayerOptions(ALL_LAYERS.ms_nrhp, 1, "p").isModern).toBeUndefined();
   });
-  it("Critical habitat is generalised hard and has a budget that fits its measured coastal cells (~135k vertices at z16)", () => {
+  it("Critical habitat is generalised hard and has a budget that fits its measured coastal cells (87k at z16 / 137k at z17 on a 1400x900 window; a phone held upright is refused at the closest coastal zooms — stated in the row's note)", () => {
     expect(ALL_LAYERS.ms_crit_habitat.simplifyFactor).toBeGreaterThanOrEqual(8);
     expect(ALL_LAYERS.ms_crit_habitat.vertexBudget).toBeGreaterThanOrEqual(150000);
   });
