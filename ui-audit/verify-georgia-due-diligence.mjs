@@ -41,13 +41,19 @@ const LAYERS = [
   { id: "ga_opportunity_zones", group: "jur", lat: 33.75, lon: -84.39, zoom: 11, needle: "Federal_Opportunity_Zones" },
   { id: "ga_jtc_tiers", group: "jur", lat: 33.25, lon: -84.26, zoom: 8, needle: "JTC_Counties_2026" },
   { id: "ga_spalding_zoning", group: "jur", lat: 33.265, lon: -84.28, zoom: 13, needle: "Spalding_County_Zoning" },
+  // the relay rows: GDOT / DNR / USGS on the Georgia GIS Clearinghouse and Bartow County, read through /gis-proxy
+  { id: "ga_road_ownership", group: "jur", lat: 33.75, lon: -84.39, zoom: 15, needle: "GDOT_FunctionalClass/MapServer/20" },
+  { id: "ga_rare_species", group: "env", lat: 31.58, lon: -84.16, zoom: 11, needle: "Conservation/MapServer/1" },
+  { id: "ga_mineral", group: "env", lat: 34.17, lon: -84.8, zoom: 12, needle: "PhysicalGeography/MapServer/0" },
+  { id: "ga_bartow_zoning", group: "jur", lat: 34.25, lon: -84.9, zoom: 13, needle: "BartowZoning/MapServer/0" },
 ];
 const NEW_ROW_IDS = [...LAYERS.map((l) => l.id), "ga_swsw", "ga_swsw_protected", "ga_mrpa_corridor"].filter((v, i, a) => a.indexOf(v) === i);
 const POINTS = [
-  { key: "savannah", label: "Savannah (coast, outside the metro District and Spalding)", lat: 32.08, lon: -81.10, expect: { shown: ["ga_recharge", "ga_karst", "ga_jtc_tiers", "ga_conservation", "ga_dams"], hidden: ["ga_mrpa", "ga_water_supply", "ga_spalding_zoning", "ga_protected_mountains"] } },
+  { key: "savannah", label: "Savannah (coast, outside the metro District and Spalding)", lat: 32.08, lon: -81.10, expect: { shown: ["ga_recharge", "ga_karst", "ga_jtc_tiers", "ga_conservation", "ga_dams"], hidden: ["ga_mrpa", "ga_water_supply", "ga_spalding_zoning", "ga_protected_mountains", "ga_bartow_zoning"] } },
   { key: "roswell", label: "Roswell (on the Chattahoochee, in the metro District)", lat: 33.9982, lon: -84.3348, expect: { shown: ["ga_mrpa", "ga_water_supply", "ga_recharge"], hidden: ["ga_spalding_zoning"] } },
   { key: "dahlonega", label: "Dahlonega (north Georgia mountains)", lat: 34.53, lon: -83.98, expect: { shown: ["ga_protected_mountains", "ga_recharge"], hidden: ["ga_mrpa", "ga_spalding_zoning"] } },
-  { key: "griffin", label: "Griffin (Spalding County)", lat: 33.2468, lon: -84.2641, expect: { shown: ["ga_spalding_zoning", "ga_dams"], hidden: ["ga_mrpa"] } },
+  { key: "griffin", label: "Griffin (Spalding County)", lat: 33.2468, lon: -84.2641, expect: { shown: ["ga_spalding_zoning", "ga_dams", "ga_road_ownership"], hidden: ["ga_mrpa", "ga_bartow_zoning"] } },
+  { key: "adairsville", label: "Adairsville (Bartow County)", lat: 34.37, lon: -84.93, expect: { shown: ["ga_bartow_zoning", "ga_mineral", "ga_rare_species"], hidden: ["ga_spalding_zoning", "ga_mrpa"] } },
   { key: "houston", label: "Houston (known-good arm: Texas rows still listed, no new Georgia row)", lat: 29.7604, lon: -95.3698, expect: { shown: [], hidden: NEW_ROW_IDS } },
 ];
 
@@ -74,6 +80,11 @@ if (live) {
   browser = await chromium.launch(launch);
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   page = await ctx.newPage();
+  // `vite preview` has no Cloudflare Functions: stand the /gis-proxy relay in with planyr.io's own (what the app reaches in production)
+  await page.route(/\/gis-proxy\//, async (route) => {
+    const u = new URL(route.request().url());
+    try { const r = await route.fetch({ url: "https://planyr.io" + u.pathname + u.search }); await route.fulfill({ response: r }); } catch (e) { await route.abort(); }
+  });
   await page.addInitScript((j) => { try { localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify({ [PLAN.id]: PLAN }));
   close = () => browser.close();
 }

@@ -92,6 +92,11 @@ if (want("ga_blue_ridge")) {
   const e = j.extent, PAD = 0.05, x0 = round(e.xmin - PAD), y0 = round(e.ymin - PAD), x1 = round(e.xmax + PAD), y1 = round(e.ymax + PAD);
   areas.ga_blue_ridge = { label: "North Georgia mountains (DCA protected-mountain data extent)", source: "Georgia DCA EnvironmentalPlanning layer 3 (ProtectedMountainAreas) extent, padded 0.05°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
+if (want("bartow_ga")) {
+  const rec = index.counties.find((c) => c.state === "GA" && /^bartow$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Bartow County GA not found in the county polygon asset");
+  areas.bartow_ga = { label: "Bartow County, GA", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
 if (want("spalding_ga")) {
   const rec = index.counties.find((c) => c.state === "GA" && /^spalding$/i.test(c.name.replace(/ county$/i, "")));
   if (!rec) throw new Error("Spalding County GA not found in the county polygon asset");

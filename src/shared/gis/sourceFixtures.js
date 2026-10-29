@@ -428,6 +428,34 @@ export const SOURCE_FIXTURES = {
     { label: "Spalding County \u2014 east", point: [-84.14, 33.3], expectMinCount: 1 }, // live 2026-10-29: 1
   ],
   },
+  gaRoadOwnership: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.4, 33.74, -84.38, 33.76], expectMinCount: 1 }, // live 2026-10-29: 141
+    { label: "Savannah", bbox: [-81.11, 32.07, -81.09, 32.09], expectMinCount: 1 }, // live 2026-10-29: 181
+    { label: "Albany", bbox: [-84.17, 31.57, -84.15, 31.59], expectMinCount: 1 }, // live 2026-10-29: 73
+  ],
+  },
+  gaRareSpecies: {
+  fixtures: [
+    { label: "Savannah (Chatham)", bbox: [-81.105, 32.075, -81.095, 32.085], expectMinCount: 1 }, // live 2026-10-29: 7
+    { label: "Albany (Dougherty)", bbox: [-84.165, 31.575, -84.155, 31.585], expectMinCount: 1 }, // live 2026-10-29: 12
+    { label: "Rome (Floyd)", bbox: [-85.165, 34.255, -85.155, 34.265], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  gaMineral: {
+  fixtures: [
+    { label: "Cartersville (Bartow)", bbox: [-84.9, 34.07, -84.7, 34.27], expectMinCount: 1 }, // live 2026-10-29: 328
+    { label: "Rome (Floyd)", bbox: [-85.26, 34.16, -85.06, 34.36], expectMinCount: 1 }, // live 2026-10-29: 26
+    { label: "Augusta (Richmond)", bbox: [-82.07, 33.37, -81.87, 33.57], expectMinCount: 1 }, // live 2026-10-29: 17
+  ],
+  },
+  gaBartowZoning: {
+  fixtures: [
+    { label: "Adairsville (incorporated, 'Incorporated' polygons)", bbox: [-84.94, 34.36, -84.92, 34.38], expectMinCount: 1 }, // live 2026-10-29: 902
+    { label: "rural Bartow \u2014 south", bbox: [-84.71, 34.19, -84.69, 34.21], expectMinCount: 1 }, // live 2026-10-29: 28
+    { label: "rural Bartow \u2014 west", bbox: [-84.91, 34.24, -84.89, 34.26], expectMinCount: 1 }, // live 2026-10-29: 79
+  ],
+  },
   countyCa: {
   fixtures: [
     // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
@@ -1401,6 +1429,22 @@ export const SOURCE_DOCS = {
   gaSpaldingZoning: {
   notes:
     "Spalding County's own zoning polygons: the unincorporated county and the town of Orchard Hill (the City of Griffin zones itself and is not in the layer; confirm any other city with the county). The county's description field disagrees with itself for several codes, so Planyr shows the zone CODE only; the Spalding County zoning ordinance defines each district. Edited 2025-08-11.",
+  },
+  gaRoadOwnership: {
+  notes:
+    "GDOT's own road-ownership layer (as of August 2022), published on the Georgia GIS Data Clearinghouse: State / County / City / Other owned. Ownership is who maintains and permits access to the road; a private or unlisted road reads 'Other'. Updated yearly by GDOT — a road built or transferred since is not in it. Entity codes are not shown (unreadable numbers).",
+  },
+  gaRareSpecies: {
+  notes:
+    "DNR Natural Heritage rare-species RECORDS, generalised to a quarter-quad cell (about 4 miles): the layer shows records with a federal status (Endangered / Threatened / Candidate) or state protection (Endangered / Threatened). A cell means 'recorded somewhere in this ~4-mile cell', never 'on the site', and an empty map is NOT an all-clear: unrecorded habitat is not on it. DNR's Natural Heritage review is the real check.",
+  },
+  gaMineral: {
+  notes:
+    "USGS MRDS / MAS-MILS mineral-resource records for Georgia (2005 digest): producers, past producers, plants, prospects and occurrences. A point per record with commodities; no boundary and no reclamation status. A past quarry or pit nearby is a voids / fill / blasting flag.",
+  },
+  gaBartowZoning: {
+  notes:
+    "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. ZONINGTEXT is the county's own note (case numbers, conditions) and is shown as published.",
   },
   countyCa: {
   notes:
