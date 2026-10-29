@@ -40,7 +40,9 @@ const EIA_NOT_TX = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
 const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_ust", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope",
   // NEW-1 (Georgia due-diligence gaps, 2026-10-29) — georgiaLayers.js
   "ga_recharge", "ga_gw_susceptibility", "ga_protected_rivers", "ga_protected_mountains", "ga_swsw", "ga_swsw_protected", "ga_karst", "ga_solid_waste", "ga_brownfields", "ga_dams",
-  "ga_impaired_streams", "ga_conservation", "ga_mrpa_corridor", "ga_mrpa_buffer_150", "ga_mrpa_buffer_50", "ga_mrpa_buffer_35", "ga_opportunity_zones", "ga_jtc_tiers", "ga_spalding_zoning"];
+  "ga_impaired_streams", "ga_conservation", "ga_mrpa_corridor", "ga_mrpa_buffer_150", "ga_mrpa_buffer_50", "ga_mrpa_buffer_35", "ga_opportunity_zones", "ga_jtc_tiers", "ga_spalding_zoning",
+  // follow-up: hosts reached through the /gis-proxy relay
+  "ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning"];
 const idsWhere = (pred) => Object.entries(ALL_LAYERS).filter(([, c]) => pred(c)).map(([k]) => k);
 
 describe("the layer registry's state coverage", () => {
@@ -107,7 +109,7 @@ describe("every Georgia layer row is complete (a row an inline comment swallowed
 describe("the Georgia GIS registry rows", () => {
   const KEYS = ["countyGa", "cityGa", "hsiGa", "ustGa", "troutGa", "mngwpd", "critHabitat", "gopherTortoiseGa", "nrhp", "cemeteries",
     "gaRecharge", "gaPollutionSusc", "gaProtectedRiver", "gaProtectedMountain", "gaCarbonate", "gaSolidWaste", "gaBrownfields", "gaConservation", "gaDams", "gaImpaired", "gaOpportunityZones", "gaJobTaxCredit",
-    "gaMrpaCorridor", "gaMrpaVegBuffer", "gaMrpaImpBuffer", "gaMrpaTributaryBuffer", "gaSwsw", "gaSwswProtected", "gaSpaldingZoning"];
+    "gaMrpaCorridor", "gaMrpaVegBuffer", "gaMrpaImpBuffer", "gaMrpaTributaryBuffer", "gaSwsw", "gaSwswProtected", "gaSpaldingZoning", "gaRoadOwnership", "gaRareSpecies", "gaMineral", "gaBartowZoning"];
   it("each is Georgia-scoped, production-tier, and not on a test/staging path", () => {
     for (const k of KEYS) {
       const s = GIS_SOURCES[k];

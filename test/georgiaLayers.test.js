@@ -18,7 +18,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 import { ALL_LAYERS, MERGE_GROUPS, LAYER_GROUP_ORDER, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import {
   GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE, susceptibilityStyle, SUSCEPTIBILITY_COLORS, conservationStyle, conservationKind, CONSERVATION_COLORS,
-  jtcStyle, JTC_COLORS, causeWords, spaldingZoneClass, SPALDING_COLORS, spaldingStyle, impairedCategories, solidWasteType, sentence,
+  jtcStyle, JTC_COLORS, causeWords, relayUrl, roadOwnerStyle, roadOwnerGroup, ROAD_OWNER_COLORS, bartowZoneClass, BARTOW_COLORS, bartowStyle, spaldingZoneClass, SPALDING_COLORS, spaldingStyle, impairedCategories, solidWasteType, sentence,
 } from "../src/workspaces/site-planner/lib/georgiaLayers.js";
 import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
 import { _setServiceAreas } from "../src/workspaces/site-planner/lib/serviceAreas.js";
@@ -36,8 +36,8 @@ const DAHLONEGA = { lat: 34.53, lng: -83.98 }, HOUSTON = { lat: 29.76, lng: -95.
 const shown = (id, loc) => layerAvailableHere(ALL_LAYERS[id], { loc });
 
 describe("every Georgia due-diligence row is declared complete and Georgia-only", () => {
-  it("the module registers nineteen rows and every one reaches ALL_LAYERS", () => {
-    expect(IDS.length).toBe(19);
+  it("the module registers twenty-three rows and every one reaches ALL_LAYERS", () => {
+    expect(IDS.length).toBe(23);
     for (const id of IDS) expect(ALL_LAYERS[id], id).toBe(GEORGIA_LAYERS[id]);
   });
   it("each row is states:[GA], an esriFeature, in a real panel group, with a label, source, note, role and order", () => {
@@ -63,13 +63,15 @@ describe("every Georgia due-diligence row is declared complete and Georgia-only"
       ga_swsw_protected: "gaSwswProtected", ga_karst: "gaCarbonate", ga_solid_waste: "gaSolidWaste", ga_brownfields: "gaBrownfields", ga_dams: "gaDams", ga_impaired_streams: "gaImpaired",
       ga_conservation: "gaConservation", ga_mrpa_corridor: "gaMrpaCorridor", ga_mrpa_buffer_150: "gaMrpaImpBuffer", ga_mrpa_buffer_50: "gaMrpaVegBuffer", ga_mrpa_buffer_35: "gaMrpaTributaryBuffer",
       ga_opportunity_zones: "gaOpportunityZones", ga_jtc_tiers: "gaJobTaxCredit", ga_spalding_zoning: "gaSpaldingZoning",
+      ga_road_ownership: "gaRoadOwnership", ga_rare_species: "gaRareSpecies", ga_mineral: "gaMineral", ga_bartow_zoning: "gaBartowZoning",
     };
     expect(Object.keys(KEY).sort()).toEqual([...IDS].sort());
     for (const [id, key] of Object.entries(KEY)) {
-      expect(GEORGIA_LAYERS[id].url, id).toBe(GIS_SOURCES[key].serviceUrl);
+      // a relay row (a host the build sandbox cannot reach) is read through the same-origin /gis-proxy, derived from the registry's upstream URL — never typed twice
+      expect(GEORGIA_LAYERS[id].url, id).toBe(GIS_SOURCES[key].relay ? relayUrl(GIS_SOURCES[key].serviceUrl) : GIS_SOURCES[key].serviceUrl);
       expect(GEORGIA_LAYERS[id].where, id).toBe(GIS_SOURCES[key].where);
       expect(GIS_SOURCES[key].states, key).toEqual(["GA"]);
-      expect(GIS_SOURCES[key].serviceUrl, key).toMatch(/^https:\/\/services\d*\.arcgis\.com\//); // an agency's ArcGIS Online org: hosted, https, CORS-open
+      expect(GIS_SOURCES[key].serviceUrl, key).toMatch(GIS_SOURCES[key].relay ? /^https:\/\/(maps\.itos\.uga\.edu|www\.bartowgis\.org)\// : /^https:\/\/services\d*\.arcgis\.com\//); // an agency's ArcGIS Online org (hosted, https, CORS-open) or a relayed state / county server
     }
   });
   it("the three filtered rows keep their filter (an unfiltered carbonate / impaired / susceptibility layer would be a different, wrong map)", () => {
@@ -106,10 +108,20 @@ describe("a row is never offered where its source cannot answer", () => {
     const regional = IDS.filter((id) => GEORGIA_LAYERS[id].regions);
     for (const id of IDS.filter((x) => !regional.includes(x))) { expect(shown(id, ATLANTA), id).toBe(true); expect(shown(id, SAVANNAH), id).toBe(true); }
   });
-  it("the metro-Atlanta rows (MRPA corridor, water-supply watersheds) are hidden at Savannah and Griffin, shown on the Chattahoochee", () => {
-    const metro = IDS.filter((id) => (GEORGIA_LAYERS[id].regions || []).includes("mngwpd"));
-    expect(metro.length).toBe(6);
-    for (const id of metro) { expect(shown(id, SAVANNAH), `${id} @ Savannah`).toBe(false); expect(shown(id, GRIFFIN), `${id} @ Griffin`).toBe(false); expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true); }
+  it("the Chattahoochee MRPA rows (corridor + 3 buffers) are offered on and near the river only — NOT at Adairsville / Cartersville (Bartow is a District county, 70 miles away), Griffin or Savannah", () => {
+    const mrpa = IDS.filter((id) => (GEORGIA_LAYERS[id].regions || []).includes("mrpa_corridor"));
+    expect(mrpa.length).toBe(4);
+    const ADAIRSVILLE = { lat: 34.37, lng: -84.93 }, CARTERSVILLE = { lat: 34.17, lng: -84.8 };
+    for (const id of mrpa) {
+      for (const p of [ADAIRSVILLE, CARTERSVILLE, GRIFFIN, SAVANNAH, HOUSTON]) expect(shown(id, p), `${id} @ ${JSON.stringify(p)}`).toBe(false);
+      expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true);
+      expect(shown(id, { lat: 33.5733, lng: -84.8021 }), `${id} @ the south Fulton reach`).toBe(true);
+    }
+  });
+  it("the water-supply watershed rows are offered across the District (Bartow's Adairsville included — a District county), not at Savannah or Griffin", () => {
+    const ws = IDS.filter((id) => (GEORGIA_LAYERS[id].regions || []).includes("mngwpd"));
+    expect(ws.length).toBe(2);
+    for (const id of ws) { expect(shown(id, SAVANNAH), `${id} @ Savannah`).toBe(false); expect(shown(id, GRIFFIN), `${id} @ Griffin`).toBe(false); expect(shown(id, ROSWELL), `${id} @ Roswell`).toBe(true); expect(shown(id, { lat: 34.37, lng: -84.93 }), `${id} @ Adairsville`).toBe(true); }
   });
   it("protected mountains: offered in the north Georgia mountains only — not on a Savannah, Macon, Columbus, Augusta or Atlanta site", () => {
     expect(shown("ga_protected_mountains", DAHLONEGA)).toBe(true);
@@ -155,10 +167,12 @@ describe("the click cards print plain words — never a raw field, 'null' or 'un
     ga_conservation: { Unit_Nm: "Wormsloe Easement", Own_Name: "Private with Easement or Covenant", Category: "Easement", EsmtHldr: "Georgia Department of Natural Resources", Pub_Access: "Closed" },
     ga_mrpa_corridor: {}, ga_mrpa_buffer_150: {}, ga_mrpa_buffer_50: {}, ga_mrpa_buffer_35: {},
     ga_opportunity_zones: { NAMELSAD10: "Census Tract 78.05", County: "Fulton" }, ga_jtc_tiers: { fullName: "Spalding County", Tier26: "Tier 2", Rank26: 72, Tier25: "Tier 1" }, ga_spalding_zoning: { LABEL: "C2", DESCRIPTION: "MANUFACTURING--LIGHT" },
+    ga_road_ownership: { Group_Name: "County Owned", OWNERSHIP_ENTITY: "7340", route_id: "00001" }, ga_rare_species: { SCOMNAME: "Mountain Witch-alder", SNAME: "Fothergilla major", USESA: " ", SPROT: "T", GROUP_: "Plants" },
+    ga_mineral: { site_name: "OLD QUARRY", dev_stat: "Past Producer", commod1: "Granite", oper_type: "Surface", county: "Bartow" }, ga_bartow_zoning: { STZONECODE: "A-1", ZONINGTEXT: "Existing Industrial Use" },
   };
   it("every row has a sample and a card", () => { expect(Object.keys(samples).sort()).toEqual([...IDS].sort()); for (const id of IDS) expect(typeof GEORGIA_LAYERS[id].identifyCard, id).toBe("function"); });
   it("no card prints a raw field name, a null, or an undefined — and every card has a title", () => {
-    const RAW = /\b(OBJECTID|FENAME|GRIDCODE|CLASS|NAMELSAD10|LOLIssueDate|Dam_Height|Facility_Name|Interest_Type|Tier26|Rank26|SYS_NAME|DrH2Osrce|UNIT_NAME|Unit_Nm|EsmtHldr|Pub_Access)\b/;
+    const RAW = /\b(OBJECTID|STZONECODE|ZONINGTEXT|SCOMNAME|SNAME|USESA|SPROT|Group_Name|site_name|dev_stat|FENAME|GRIDCODE|CLASS|NAMELSAD10|LOLIssueDate|Dam_Height|Facility_Name|Interest_Type|Tier26|Rank26|SYS_NAME|DrH2Osrce|UNIT_NAME|Unit_Nm|EsmtHldr|Pub_Access)\b/;
     for (const id of IDS) {
       const c = GEORGIA_LAYERS[id].identifyCard(samples[id], { lat: 33, lng: -84 });
       const all = [c.title, ...c.rows.map((r) => `${r.label}: ${r.text}`), c.note || ""].join(" | ");
@@ -229,6 +243,21 @@ describe("card wording that the adversarial review caught", () => {
     expect(c.note).toMatch(/Orchard Hill/); expect(c.note).toMatch(/Griffin zones itself/); expect(c.note).not.toMatch(/UNINCORPORATED county\b(?! and)/);
     expect(c.identifyCard({ LABEL: "R1" }).rows[0].text).toMatch(/Orchard Hill/);
   });
+  it("Bartow card shows the county's REZONING case reference as its own row and never claims a CU / (wC) code always has a case on file", () => {
+    const c = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "A1CU", REZONING: "CU-2162-17", ZONINGTEXT: " " });
+    expect(c.rows.find((r) => r.label === "Rezoning / case").text).toBe("CU-2162-17");
+    expect(c.note).toMatch(/usually has a case/); expect(c.note).not.toMatch(/has a case on file|means conditions/);
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.infoCaveat).not.toMatch(/is in the county's file/);
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.note).not.toMatch(/rezoning case numbers, conditions/);
+  });
+  it("mineral card drops EPD/USGS 'Unknown' filler rows (constraint #45) and keeps real values", () => {
+    const c = GEORGIA_LAYERS.ga_mineral.identifyCard({ site_name: "Q", dev_stat: "Unknown", oper_type: "Unknown", commod1: "Granite", county: "Bartow" });
+    expect(c.rows.map((r) => r.label)).toEqual(["Commodities", "County"]);
+    expect(GEORGIA_LAYERS.ga_mineral.note).toMatch(/Alabama, Florida/);
+  });
+  it("road ownership: a consolidated city-county (GDOT files it under County) is worded as such", () => {
+    expect(GEORGIA_LAYERS.ga_road_ownership.identifyCard({ Group_Name: "County Owned" }).rows[0].text).toMatch(/consolidated city-county/);
+  });
   it("conservation: every common published access value prints, an unreadable code does not", () => {
     const acc = (v) => (GEORGIA_LAYERS.ga_conservation.identifyCard({ Unit_Nm: "U", Category: "Fee", Pub_Access: v }).rows.find((r) => r.label === "Public access") || {}).text;
     expect(acc("No Public Access")).toBe("No public access"); expect(acc("Open Access")).toBe("Open to the public"); expect(acc("OA")).toBe("Open to the public"); expect(acc("Closed Access")).toBe("No public access");
@@ -237,6 +266,54 @@ describe("card wording that the adversarial review caught", () => {
   it("recharge: the NAME field is not always an aquifer, so the row says 'Mapped as'", () => {
     const c = GEORGIA_LAYERS.ga_recharge.identifyCard({ NAME: "PROBABLE AREAS OF THICK SOILS" });
     expect(c.rows[0].label).toBe("Mapped as"); expect(c.rows[0].text).toBe("Probable Areas Of Thick Soils");
+  });
+});
+
+describe("the relay rows (GDOT road ownership, DNR rare species, USGS mineral sites, Bartow zoning)", () => {
+  const RELAY = ["ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning"];
+  it("each reads through /gis-proxy, never the upstream host directly, and the host is on the relay's allow-list", async () => {
+    const { ALLOWED_HOSTS } = await import("../functions/gis-proxy/[[path]].js");
+    for (const id of RELAY) {
+      const u = GEORGIA_LAYERS[id].url;
+      expect(u, id).toMatch(/^\/gis-proxy\//);
+      expect(ALLOWED_HOSTS.has(u.split("/")[2]), `${id} → ${u.split("/")[2]}`).toBe(true);
+    }
+    expect(relayUrl("https://maps.itos.uga.edu/arcgis/rest/services/X/MapServer/0")).toBe("/gis-proxy/maps.itos.uga.edu/arcgis/rest/services/X/MapServer/0");
+  });
+  it("rare species keeps only protected records (federal status or state E/T) — an unfiltered layer would paint every watch-list species", () => {
+    expect(GEORGIA_LAYERS.ga_rare_species.where).toMatch(/USESA IN \('LE','LT','C'\)/); expect(GEORGIA_LAYERS.ga_rare_species.where).toMatch(/SPROT IN \('E','T'\)/);
+  });
+  it("Bartow zoning shows in Bartow (Adairsville, Cartersville) and not in Atlanta, Savannah, Griffin or neighbouring Floyd/Paulding", () => {
+    for (const p of [{ lat: 34.37, lng: -84.93 }, { lat: 34.17, lng: -84.8 }, { lat: 34.25, lng: -84.9 }]) expect(shown("ga_bartow_zoning", p), JSON.stringify(p)).toBe(true);
+    for (const p of [ATLANTA, SAVANNAH, GRIFFIN, { lat: 34.26, lng: -85.16 }]) expect(shown("ga_bartow_zoning", p), JSON.stringify(p)).toBe(false);
+  });
+  it("road ownership: GDOT's owner group picks the colour (Texas palette), 'Other' is dashed and an unknown group reads as Other", () => {
+    expect(roadOwnerStyle({ Group_Name: "State Owned" }, 1).color).toBe(ROAD_OWNER_COLORS["State Owned"]);
+    expect(roadOwnerStyle({ Group_Name: "County Owned" }, 1).color).toBe(ROAD_OWNER_COLORS["County Owned"]);
+    expect(roadOwnerStyle({ Group_Name: "Other" }, 1).dashArray).toBeTruthy(); expect(roadOwnerStyle({ Group_Name: "State Owned" }, 1).dashArray).toBeUndefined();
+    expect(roadOwnerGroup({ Group_Name: "Weird" })).toBe("Other"); expect(roadOwnerGroup({})).toBe("Other");
+    const c = GEORGIA_LAYERS.ga_road_ownership.identifyCard({ Group_Name: "City Owned", OWNERSHIP_ENTITY: "7340", route_id: "1234" });
+    expect(JSON.stringify(c)).not.toMatch(/7340|1234/); // the entity code and route id are unreadable numbers — never shown
+    expect(GEORGIA_LAYERS.ga_road_ownership.minZoom).toBeGreaterThanOrEqual(14); // z13 cells hit the service's 1,000-feature cap and silently truncate (measured 1,282–1,346)
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.minZoom, "z12–z14 cells hold 3,393–14,406 parcels against the county server's 2,000 cap — silent truncation (measured)").toBeGreaterThanOrEqual(15);
+    expect(GEORGIA_LAYERS.ga_rare_species.minZoom, "the z9 coastal cell holds 1,121 records against the 1,000 cap").toBeGreaterThanOrEqual(10);
+  });
+  it("rare species card: status in words (LE → Federally endangered, T → State threatened); an unrecorded status prints nothing", () => {
+    const c = GEORGIA_LAYERS.ga_rare_species.identifyCard({ SCOMNAME: "Cylindrical Lioplax", SNAME: "Lioplax cyclostomaformis", USESA: "LE", SPROT: " ", GROUP_: "Snails" });
+    expect(c.rows.find((r) => r.label === "Status").text).toBe("Federally endangered");
+    const d = GEORGIA_LAYERS.ga_rare_species.identifyCard({ SCOMNAME: "X", USESA: " ", SPROT: "T" });
+    expect(d.rows.find((r) => r.label === "Status").text).toBe("State threatened");
+    expect(GEORGIA_LAYERS.ga_rare_species.identifyCard({ SCOMNAME: "Y" }).rows.some((r) => r.label === "Status")).toBe(false);
+    expect(GEORGIA_LAYERS.ga_rare_species.note).toMatch(/NOT an all-clear/);
+  });
+  it("Bartow zoning: codes class by letter (never a district name); 'Incorporated' means a city zones it and says so; unknown is neutral", () => {
+    for (const [code, k] of [["A-1", "agricultural"], ["A1CU", "agricultural"], ["A1 (wC)", "agricultural"], ["R-4", "residential"], ["RE2CU", "residential"], ["R3 (wC)", "residential"], ["C-1", "commercial"], ["CN", "commercial"], ["BPD (wC)", "other"], ["BPD", "other"], ["O/I", "commercial"], ["I-2", "industrial"], ["M1 (wC)", "industrial"], ["I1CU", "industrial"], ["PUD (wC)", "planned"], ["Incorporated", "city"], ["", "other"], [null, "other"], ["ZZ9", "other"]]) expect(bartowZoneClass(code), String(code)).toBe(k);
+    const c = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "Incorporated", ZONINGTEXT: "Annexed 2006" });
+    expect(c.title).toBe("Inside a city"); expect(c.rows[0].text).toMatch(/city zones this ground/); expect(c.rows.find((r) => r.label === "County note").text).toBe("Annexed 2006");
+    const z = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "I-1", ZONINGTEXT: " " });
+    expect(z.title).toBe("Zone I-1"); expect(z.rows.some((r) => r.label === "County note")).toBe(false);
+    expect(bartowStyle({ STZONECODE: "Incorporated" }, 1).dashArray).toBeTruthy(); expect(bartowStyle({ STZONECODE: "I-1" }, 1).fillColor).toBe(BARTOW_COLORS.industrial);
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.note).toMatch(/District names are not shown/); expect(GEORGIA_LAYERS.ga_bartow_zoning.note).toMatch(/Adairsville and Cartersville/);
   });
 });
 
