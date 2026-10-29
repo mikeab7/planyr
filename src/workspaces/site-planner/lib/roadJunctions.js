@@ -129,11 +129,25 @@ export function buildingRunLimit(els, P, u, nOpen, reach) {
   return { pos: Math.max(0, pos - BUILDING_CLEAR_FT), neg: Math.max(0, neg - BUILDING_CLEAR_FT) };
 }
 
-// Every Paving/Parking-typed element on the plan — the candidate pool GEOMETRIC detection searches
-// when a road carries no (or a stale) `driveTee`. A target must still be attached to nothing (not
-// itself bonded to a host) — same constraint an explicit connect already implies.
+/* ⛔ NEW-1 (road → parking, every approach) — ONE PREDICATE FOR "CAN A ROAD CONNECT TO THIS?", read by BOTH the connect gesture
+ * (SitePlanner.jsx `driveTargetKind` / `driveTargetsOf`) and the geometric fallback below.
+ *
+ * They used to disagree. The gesture accepted any visible parking / paving element, bonded to a building or not; the geometric
+ * fallback (what rebuilds the junction when a road's stored `driveTee` is missing or stale — a field moved or re-laid, a pasted
+ * copy with fresh ids, a road drawn overlapping it without the snap) EXCLUDED anything with `attachedTo`. Employee parking is
+ * very often bonded to a building, so a bonded field connected at placement and then LOST its junction the moment the stored
+ * tee went stale. Measured on main by test/driveParkingMatrix.test.js: every bonded cell with no stored tee had no junction.
+ * Returns "parking" | "truckcourt" | null — the kind that picks car or truck geometry (a drive into a car field never gets the
+ * truck flare). A target needs a real footprint: a rect (cx/cy/w/h) or a free-drawn ring of 3+ points. */
+export function driveTargetKindOf(el) {
+  if (!el || el.id == null) return null;
+  const shaped = Array.isArray(el.points) ? el.points.length >= 3 : (typeof el.cx === "number" && el.w > 0 && el.h > 0);
+  if (!shaped) return null;
+  return el.type === "parking" ? "parking" : el.type === "paving" ? "truckcourt" : null;
+}
+// Every drive-target element on the plan — the candidate pool GEOMETRIC detection searches when a road carries no (or a stale) `driveTee`.
 function drivePaveTargets(els) {
-  return (els || []).filter((e) => e && (e.type === "paving" || e.type === "parking") && !e.attachedTo && e.id != null);
+  return (els || []).filter((e) => driveTargetKindOf(e));
 }
 
 function targetEdges(T) {
@@ -146,13 +160,13 @@ function targetEdges(T) {
 // Best (endpoint, hit) for road S against ONE candidate target T — the exact proximity test the
 // connect gesture (and the pre-extraction code) already used: within DRIVE_TEE_SNAP_FT of an edge,
 // or literally inside/on the target.
-function bestHitAgainst(S, T) {
+function bestHitAgainst(S, T, onlyIdx) {
   const te = targetEdges(T);
   if (!te) return null;
   const { isPoly, edges } = te;
   const containsPoint = (p) => (isPoly ? polygonContainsPoint(p, T.points) : rectContainsPointLocal(p, edges));
   let best = null;
-  for (const idx of [0, S.pts.length - 1]) {
+  for (const idx of onlyIdx == null ? [0, S.pts.length - 1] : [onlyIdx]) {
     const h = nearestRectEdge(S.pts[idx], edges, { facingOnly: false });
     if (h && (h.dist <= DRIVE_TEE_SNAP_FT || containsPoint(S.pts[idx])) && (!best || h.dist < best.hit.dist)) {
       best = { ei: idx, hit: h, edges, isPoly };
@@ -167,6 +181,31 @@ function rectContainsPointLocal(P, edges) {
   return edges.every((e) => (e.outN.x * (P.x - e.mid.x) + e.outN.y * (P.y - e.mid.y)) <= 1e-6);
 }
 
+/* ⛔ NEW-1 (road → parking) / B1756546 — A DRIVE THAT SKIMS A FIELD'S EDGE BUILDS NO CURB RETURN.
+ *
+ * The fillet's corner is where the drive's own edge LINE meets the field's face line, and as the approach flattens that point
+ * runs away without bound (a 26 ft drive at 85° off perpendicular puts it 155 ft along the face; at 89°, 780 ft). The reach
+ * clamp then either degrades to a SHARP wedge from the junction out to that far corner or builds a full return out there:
+ * pavement hundreds of feet from where the drive actually touches the field. A return is a rounding of a corner between two
+ * surfaces that MEET; a drive within `SKIM_MAX_PHI_DEG` of the face is not meeting it, it is running alongside it.
+ * PRODUCT CALL (B1756546's open question, decided here and recorded on that item): below 10° between the drive and the face
+ * there is NO return — the pavement simply lies against the field for the stretch it really lies against it, and the field's
+ * outline is open exactly there (the "mouth" is that stretch). 10° is where the corner is still within ~6 drive half-widths of
+ * the junction (hw / sin 10° = 5.8·hw), which is the farthest a return can sit and still read as part of the junction. */
+export const SKIM_MAX_PHI_DEG = 10;
+const SKIM_SIN = Math.sin((SKIM_MAX_PHI_DEG * Math.PI) / 180);
+function skimGeometry({ junctionPt: J, edge, sideU, halfS, run, runNeg, runPos }) {
+  const along = sideU.x * edge.dir.x + sideU.y * edge.dir.y;                 // which way along the face the drive lies
+  const dirToward = { x: edge.dir.x * (along >= 0 ? 1 : -1), y: edge.dir.y * (along >= 0 ? 1 : -1) };
+  const sinPhi = Math.abs(sideU.x * edge.dir.y - sideU.y * edge.dir.x);
+  const cosPhi = Math.abs(along);
+  const reach = Math.max(1, Math.min(halfS / Math.max(sinPhi, 1e-6), (run || Infinity) * Math.max(cosPhi, 1e-6) , along >= 0 ? runPos : runNeg));
+  const back = Math.min(along >= 0 ? runNeg : runPos, halfS * sinPhi + 0.5);   // the cap's other corner sits a hair behind the junction
+  const a = { x: J.x - dirToward.x * back, y: J.y - dirToward.y * back };
+  const b = { x: J.x + dirToward.x * reach, y: J.y + dirToward.y * reach };
+  return { R: 0, throatWidth: Math.hypot(b.x - a.x, b.y - a.y), corners: [], throughTangents: [a, b], sideTangents: [], returns: [], wedges: [], coverPolys: [], cover: [], throatMid: { x: J.x, y: J.y }, nTee: { x: edge.outN.x, y: edge.outN.y }, skim: true };
+}
+
 /* B955/NEW-1 — road → parking-drive / truck-court junctions for the clean-intersection render. Reads
  * el.driveTee when present (kind + any per-junction returnR/flare override survive); otherwise finds
  * the connect GEOMETRICALLY, the same way a road-to-road tee always has (B1703665 NEW-2 — see this
@@ -178,19 +217,35 @@ export function driveJunctionsOf(els, settings) {
   const nodes = teeNodeIndicesOf(els);
   for (const S of els || []) {
     if (!isCenterlineRoad(S) || S.attachedTo) continue;
-    const stored = S.driveTee ? byId.get(S.driveTee.targetId) : null;
-    let T = stored, found = stored ? bestHitAgainst(S, stored) : null;
-    if (!found) {
-      // Stored target missing/stale, or no driveTee at all — search every paving/parking element on
-      // the plan geometrically, exactly as teeTargetOf does for a road-to-road tee. The nearest valid
-      // hit across every candidate wins.
-      for (const cand of paveTargets) {
-        if (cand === stored) continue; // already tried above
-        const hit = bestHitAgainst(S, cand);
-        if (hit && (!found || hit.hit.dist < found.hit.dist)) { found = hit; T = cand; }
+    /* NEW-1 (road → parking) — EACH END of a road finds its own target. A road used to get at most ONE junction (the nearer end's), so a drive linking two
+     * parking fields — or a road tee'd to a road at one end and parked at the other — connected only one of them. The stored records are `driveTee` (the
+     * historic one) and `driveTee2` (the other end's, when it names a different target); both are only the user's kind / radius choice — geometry decides
+     * which end meets which field, exactly as before. If both ends meet the SAME target only the nearer one is kept (the old, single-junction behaviour). */
+    const records = [S.driveTee, S.driveTee2].filter((r) => r && r.targetId != null);
+    const ends = S.pts.length >= 2 ? [0, S.pts.length - 1] : [];
+    const picks = [];
+    for (const idx of ends) {
+      let T = null, found = null, rec = null;
+      for (const r of records) {
+        const cand = byId.get(r.targetId);
+        const hit = cand ? bestHitAgainst(S, cand, idx) : null;
+        if (hit && (!found || hit.hit.dist < found.hit.dist)) { found = hit; T = cand; rec = r; }
       }
+      if (!found) {
+        // Stored target missing/stale, or no driveTee at all — search every paving/parking element on the plan geometrically, exactly as teeTargetOf does for a
+        // road-to-road tee. The nearest valid hit across every candidate wins.
+        for (const cand of paveTargets) {
+          if (records.some((r) => r.targetId === cand.id)) continue; // already tried above
+          const hit = bestHitAgainst(S, cand, idx);
+          if (hit && (!found || hit.hit.dist < found.hit.dist)) { found = hit; T = cand; rec = null; }
+        }
+      }
+      if (T && found) picks.push({ T, found, rec });
     }
-    if (!T || !found) continue;
+    const kept = picks.length === 2 && picks[0].T.id === picks[1].T.id
+      ? [picks[0].found.hit.dist < picks[1].found.hit.dist ? picks[0] : picks[1]]
+      : picks;
+    for (const { T, found, rec: stored } of kept) {
     const { ei, hit, edges, isPoly } = found;
     const P = S.pts[ei];                                            // the road's welded endpoint
     // NEW-1 — run ALONG the drive's polyline (skipping sub-tolerance vertex clutter) rather than
@@ -206,16 +261,17 @@ export function driveJunctionsOf(els, settings) {
     // An explicit stored driveTee's `kind` always wins (matches the pre-extraction contract exactly:
     // "truckcourt" only on an exact match, "parking" otherwise) — it is the user's own connect-time
     // choice. Only when nothing was stored for THIS target does the target's own type decide.
-    const kind = S.driveTee && S.driveTee.targetId === T.id
-      ? (S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking")
+    const rec = stored && stored.targetId === T.id ? stored : null;
+    const kind = rec
+      ? (rec.kind === "truckcourt" ? "truckcourt" : "parking")
       : (T.type === "paving" ? "truckcourt" : "parking");
     const clsDrive = roadClassOf(settings, S.roadClass);
     const Rclass = classReturnRadius(clsDrive);
-    const storedReturnR = S.driveTee && S.driveTee.targetId === T.id ? S.driveTee.returnR : 0;
+    const storedReturnR = rec ? rec.returnR : 0;
     const Rseed = storedReturnR > 0
       ? storedReturnR
       : (kind === "truckcourt" ? Math.max(Rclass, DRIVE_RETURN_SEED.truckcourt) : Rclass);
-    const flare = S.driveTee && S.driveTee.targetId === T.id && S.driveTee.flare > 0 ? S.driveTee.flare : 0;
+    const flare = rec && rec.flare > 0 ? rec.flare : 0;
     const perpDepth = isPoly
       ? polygonDepthBehind(T.points, junctionPt, { x: -junctionEdge.outN.x, y: -junctionEdge.outN.y })
       : (junctionEdge.axis === "y" ? T.h : T.w);
@@ -232,7 +288,16 @@ export function driveJunctionsOf(els, settings) {
       ? polygonEdgeRunFrom(edges, junctionEdgeIdx, junctionPt, -1)
       : (junctionPt.x - junctionEdge.a.x) * junctionEdge.dir.x + (junctionPt.y - junctionEdge.a.y) * junctionEdge.dir.y;
     const obstacle = buildingRunLimit(els, junctionPt, junctionEdge.dir, junctionEdge.outN, Rseed);   // NEW-4 — never under a building
-    const geom = teeGeometry({
+    const sideLenU = Math.hypot(sideDir.x, sideDir.y) || 1;
+    const phiSin = Math.abs((sideDir.x / sideLenU) * junctionEdge.dir.y - (sideDir.y / sideLenU) * junctionEdge.dir.x);
+    /* …or when the corner lies BEYOND THE DRIVE'S OWN FAR END (`hw / sin φ` > the run the drive has): a return built there is pavement past where the drive stops —
+     * B1756546's "351 ft along the edge, 50 ft past the drive's own far end". A short drive at a moderate angle still gets its returns; a long thin skim does not. */
+    const driveRun = Math.max(0, sideRun.dist - insideRunFt);
+    const cornerFt = roadOuterHalf(S) / Math.max(phiSin, 1e-6);
+    const geom = phiSin < SKIM_SIN || cornerFt > Math.max(driveRun, 2 * roadOuterHalf(S)) ? skimGeometry({
+      junctionPt, edge: junctionEdge, sideU: { x: sideDir.x / sideLenU, y: sideDir.y / sideLenU }, halfS: roadOuterHalf(S),
+      run: Math.max(0, sideRun.dist - insideRunFt), runNeg: Math.max(0, Math.min(edgeRunNeg, obstacle.neg)), runPos: Math.max(0, Math.min(edgeRunPos, obstacle.pos)),
+    }) : teeGeometry({
       T: { x: junctionPt.x, y: junctionPt.y }, throughDir: junctionEdge.dir, sideDir,
       phT: 0, phS: roadOuterHalf(S),
       R: Math.min(Rseed, Math.max(1, perpDepth)), flare, curbT: 0.5, curbS: roadCurbWidth(S),
@@ -242,7 +307,19 @@ export function driveJunctionsOf(els, settings) {
     });
     if (geom) {
       const sL = Math.hypot(sideDir.x, sideDir.y) || 1;
-      out.push({ sideId: S.id, targetId: T.id, kind, geom, junctionPt: { x: junctionPt.x, y: junctionPt.y }, sideU: { x: sideDir.x / sL, y: sideDir.y / sL }, halfS: roadOuterHalf(S) });
+      /* NEW-1 (road → parking) — the KEEP-OUT behind the face: the road's pavement ends at the field's face, so nothing of it may run on past the face PLANE beside the field.
+       * The pad subtraction alone only removes what lies inside the field's own footprint; a drive wider than the face it enters, or an endpoint dropped inside it near a
+       * corner, left a tongue of pavement hanging off the field's side (the lopsided entrance on the owner's Tsakiris plan: a 24 ft drive into a 24 ft lane that sits 7.6 ft
+       * off-centre). Skipped for a skim (that drive lies ALONGSIDE the face by definition). World ring: a quad on the field's side of the face, wide enough to cover the strip
+       * at any approach and deep enough to cover the road's cap inside. */
+      let keepOut = null;
+      if (!geom.skim) {
+        const hwS = roadOuterHalf(S), lat = 3 * hwS + 8, depth = insideRunFt + hwS + 2, inN = { x: -junctionEdge.outN.x, y: -junctionEdge.outN.y }, u = junctionEdge.dir;
+        const c = (a, b) => ({ x: junctionPt.x + u.x * a + inN.x * b, y: junctionPt.y + u.y * a + inN.y * b });
+        keepOut = [c(-lat, 0), c(lat, 0), c(lat, depth), c(-lat, depth)];
+      }
+      out.push({ sideId: S.id, targetId: T.id, kind, geom, junctionPt: { x: junctionPt.x, y: junctionPt.y }, sideU: { x: sideDir.x / sL, y: sideDir.y / sL }, halfS: roadOuterHalf(S), endIdx: ei, keepOut });
+    }
     }
   }
   return out;
