@@ -3,6 +3,7 @@
 // `patchFloodplainRule` / `patchEasementRule` / `pinnedFolderLabel` do not exist, and the
 // stale-bag scenario below (the real defect) reverts the other surface's key.
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // ---- in-memory localStorage + a tiny window (storage event) for the node environment
 function installBrowser() {
@@ -188,7 +189,7 @@ describe("no view keeps its own copy of the account prefs (source guard)", () =>
     const fs = await import("node:fs");
     const rd = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
     const mf = rd("../src/workspaces/site-planner/MapFinder.jsx");
-    const sp = rd("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     const bc = rd("../src/shared/ui/ProjectBreadcrumb.jsx");
     expect(mf).not.toMatch(/useState\(\(\) => readMirror\(\)\)/);
     expect(mf).toMatch(/useSyncExternalStore\(subscribePrefs/);

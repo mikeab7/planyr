@@ -18,6 +18,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { GRID_MIN_PPF, gridLinesVisible } from "../src/workspaces/site-planner/lib/buildingGrid.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("gridLinesVisible — pure function of ppf alone", () => {
   it("takes exactly one argument (ppf) — no building geometry parameter", () => {
@@ -72,11 +73,11 @@ describe("gridLinesVisible — pure function of ppf alone", () => {
 // identical on any single-building fixture); the live ui-audit harness proves the rendered
 // consequence, this proves the SOURCE didn't regress.
 const here = dirname(fileURLToPath(import.meta.url));
-const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const SP = plannerSource();
 
 describe("SitePlanner.jsx — column-grid reveal gate stays view-scale-only", () => {
   it("gridLinesVisible is imported from buildingGrid.js", () => {
-    expect(SP).toMatch(/import\s*\{[^}]*\bgridLinesVisible\b[^}]*\}\s*from\s*"\.\/lib\/buildingGrid\.js"/);
+    expect(SP).toMatch(/import\s*\{[^}]*\bgridLinesVisible\b[^}]*\}\s*from\s*"\.{1,2}\/lib\/buildingGrid\.js"/);
   });
 
   it("both grid-reveal call sites gate on gridLinesVisible(...)", () => {

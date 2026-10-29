@@ -6,6 +6,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 **Entry points**
 - `SitePlannerApp.jsx` — workspace root (lazy-loaded chunk).
 - `MapFinder.jsx` — map/site picker. `SitePlanner.jsx` — the hand-rolled SVG planner canvas.
+- **Code extracted from `SitePlanner.jsx` (B1064 step 1) — `components/YieldDrainagePanels.jsx` (the Yield + Drainage panels), `components/NumInput.jsx`, `components/elementRender.jsx` (`ElNode` / `renderElPx`), `lib/planRenderHelpers.jsx` + `lib/plannerShared.js` (what both sides share).** Pure text moves, byte-identical output (the ui-audit **capture-plan-html** harness diffs the real app's panel + SVG HTML). They never import back from `SitePlanner.jsx` (circular). **A source-scan test reads the planner through the repo-root `test/` helper **plannerSource** (`plannerSource()` = the main file + every extracted module), never `SitePlanner.jsx` alone** — a negative assertion on a file whose code moved passes vacuously. A new extraction: carry `@planner-extract` in the module header, add it to `PLANNER_EXTRACTED` (the **plannerSource** suite fails on either half missing), and add it to the sweeps that list files by name (`design-drift-audit` `DRAWING_SURFACE_FILES`, `audit-hidden-content-reads` `SWEPT_FILES`).
 
 **Key `lib/` (canonical, read-before-edit)**
 - `siteModel.js` — the per-plan schema (`createSiteModel`, `SITE_MODEL_VERSION`); read via

@@ -19,6 +19,7 @@ import {
   resolvedLayoutInputs, viewValuesEqual, mapBoxInset, mapBoxCenterX, basemapWrapPoint,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { lngLatRingToFeet, feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // The Katy-area origin the app lives on, and the Tomball-edge latitude the drift was measured at.
 const ORIGIN = { lat: 29.7858, lon: -95.8244 };
@@ -261,7 +262,7 @@ describe("resolvedLayoutInputs — retiring the cached stale verdict after a re-
 
   it("is wired into the resize branch of the basemap registration effect (source guard — red on the unfixed effect)", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     const branch = src.slice(src.indexOf("if (sizeChanged) {"), src.indexOf("// A new gesture is happening: drop any lingering snapshot"));
     expect(branch).toContain("invalidateSize({ animate: false, pan: false })");
     expect(branch).toContain("geoLayoutInputsRef.current = resolvedLayoutInputs(geoLayoutInputsRef.current)");

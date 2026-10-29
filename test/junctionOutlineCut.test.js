@@ -29,6 +29,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { rectOutlineCutSegments } from "../src/workspaces/site-planner/lib/roadNetwork.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
@@ -128,7 +129,7 @@ describe("rectOutlineCutSegments — the interrupted outline is the element's re
  *     counter-rotated. This is the half that FAILED before the fix.
  * ---------------------------------------------------------------------------------------------- */
 describe("the outline-cut group counter-rotates, so the composed transform is the identity", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("renderElPx returns every rect element's parts inside a rotate(el.rot) group", () => {
     // The premise of the whole bug: `parts` is rotated by the element group on the way out.

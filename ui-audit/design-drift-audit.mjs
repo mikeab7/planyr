@@ -82,6 +82,14 @@ export const TOKEN_LAYER_FILES = [
  * ------------------------------------------------------------------------------------------- */
 export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/SitePlanner.jsx",
+  // B1064 — code extracted from SitePlanner.jsx keeps the file's standing exemption, so a pure move cannot change what this
+  // audit counts (the Yield/Drainage panels and NumInput were exempt as part of it; holding them to the chrome standard is a
+  // separate decision, not a side effect of a refactor).
+  "src/workspaces/site-planner/components/elementRender.jsx",
+  "src/workspaces/site-planner/components/NumInput.jsx",
+  "src/workspaces/site-planner/components/YieldDrainagePanels.jsx",
+  "src/workspaces/site-planner/lib/planRenderHelpers.jsx",
+  "src/workspaces/site-planner/lib/plannerShared.js",
   "src/workspaces/site-planner/lib/layers.js",
   "src/workspaces/site-planner/lib/desotoLayers.js", // B2507057 — registry rows of the same kind as layers.js: map ink for drawn utility lines
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome

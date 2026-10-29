@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { KIND_TO_FIELD } from "../src/workspaces/site-planner/lib/elementRows.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
@@ -102,7 +103,7 @@ describe("B784832 — undo must resurrect EVERY kind (el, markup, measure, callo
 });
 
 describe("B784832 — SitePlanner.applySnapshot's resurrect-staging is structurally generic over every kind", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("stages resurrect items from KIND_TO_FIELD, not from a single hardcoded `s.els` loop", () => {
     const idx = src.indexOf("if (e && e.allowResurrect) {");

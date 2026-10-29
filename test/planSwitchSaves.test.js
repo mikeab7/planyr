@@ -6,8 +6,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { sameSaveRecord, writeIsRedundant, mayWriteForAccount, SAVE_RECORD_KEYS } from "../src/workspaces/site-planner/lib/saveDedupe.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const sp = plannerSource();
 
 describe("saveDedupe — a flush of exactly the last write is skipped, and only then", () => {
   const rec = { id: "a", site: "S", name: "P", groupId: "g", county: "harris", origin: { lat: 1, lon: 2 }, parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {} };

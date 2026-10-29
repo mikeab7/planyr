@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createViewFramingGate } from "../src/workspaces/site-planner/lib/viewFramingGate.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 let g;
 beforeEach(() => { g = createViewFramingGate(); });
@@ -133,7 +134,7 @@ describe("⛔ B1234400 — a framing must be MEASURABLE, not just unowned", () =
 });
 
 describe("⛔ the STRUCTURAL guard — every framing path must go through the one door", () => {
-  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SRC = plannerSource();
 
   it("the boot reframe takes its ticket at REQUEST time and hands it to requestFit", () => {
     /* This is the assertion that stops the fix rotting back into the shape it replaced. A future

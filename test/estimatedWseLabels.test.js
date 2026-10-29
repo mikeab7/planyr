@@ -8,6 +8,7 @@ import {
   isEstimatedWseSrc, estWseNote, WSE_PROVIDER_LABEL, wseProvLabel, EST_WSE_SRCS,
   EST_EBFE_NOTE, EST_MAAPNEXT_NOTE, EST_BOUNDARY_WSE_NOTE, DERIVED_WSE100_DRAFT_NOTE,
 } from "../src/workspaces/site-planner/lib/floodplainMitigation.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("isEstimatedWseSrc", () => {
   it("recognizes every accepted-estimate provider tag", () => {
@@ -63,10 +64,7 @@ describe("WSE_PROVIDER_LABEL", () => {
 });
 
 describe("B895 — no caller re-wraps an already-ESTIMATED wseProvLabel result (the doubled-word bug)", () => {
-  const sitePlannerSrc = readFileSync(
-    fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)),
-    "utf8",
-  );
+  const sitePlannerSrc = plannerSource();
   it('no "ESTIMATED (${wseProvLabel(...)})" composition survives in SitePlanner.jsx', () => {
     expect(sitePlannerSrc).not.toMatch(/ESTIMATED \(\$\{wseProvLabel\(/);
   });

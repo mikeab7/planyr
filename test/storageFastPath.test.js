@@ -3,6 +3,7 @@
  * The e2e half (a real drag, counted writes, the settled position saved) is e2e/gesture-save-deferral.spec.js. */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { saveSite, loadSite, siteExistsLocally, readBackSite } from "../src/workspaces/site-planner/lib/storage.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const KEY = "planarfit:sites:v1";
 const bld = (id, cx = 0) => ({ id, type: "building", cx, cy: 0, w: 100, h: 100 });
@@ -77,7 +78,7 @@ describe("wiring", () => {
   it("the autosave effect uses both", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     expect(src).toContain("const fresh = !siteExistsLocally(siteId);");
     expect(src).toContain("const back = readBackSite(siteId);");
   });

@@ -32,9 +32,10 @@ import {
   FEAT_EDIT_REF_SPAN_FT, FEAT_EDIT_MAX_CANVAS_FRAC, FEAT_EDIT_FLOOR_MIN_PPF,
   featureEditFloorPpf, featureEditOpacity,
 } from "../src/workspaces/site-planner/lib/featureEditZoom.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const planner = plannerSource();
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 /* The owner's two real canvases, both taken from HIS measurements rather than invented: the

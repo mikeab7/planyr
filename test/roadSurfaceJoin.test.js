@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { roadSurfaceRing, ROAD_JOIN_MITER_LIMIT } from "../src/workspaces/site-planner/lib/roadNetwork.js";
 import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
 import { roadStripRing, roadCurbLines, roadDenseCenterline } from "../src/workspaces/site-planner/lib/siteGeometry.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // ---- shared geometry test helpers (self-contained — mirrors the pattern metesAndBounds.js's
 // own ringsOverlap / roadNetwork.js's dissolveRings tests already use for segment crossing) ----
@@ -308,15 +309,12 @@ describe("offsetPolylineMiterLimit — the proper mitered join, limited, falls b
  */
 describe("B1752240 — SitePlanner.jsx must call the SHARED, fixed roadCurbLines, never its own copy", () => {
   it("SOURCE SWEEP — no local roadCurbLines definition, and it is imported from lib/siteGeometry.js", () => {
-    const src = readFileSync(
-      fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)),
-      "utf8",
-    );
+    const src = plannerSource();
     // A re-introduced local shadow (const or function) is exactly the defect this guard exists for.
     expect(src).not.toMatch(/\bconst\s+roadCurbLines\s*=/);
     expect(src).not.toMatch(/\bfunction\s+roadCurbLines\s*\(/);
     // It must be pulled in from the same shared module every test in this file exercises.
-    const importsFromSiteGeometry = /\{[^}]*\broadCurbLines\b[^}]*\}\s*from\s*"\.\/lib\/siteGeometry\.js"/s;
+    const importsFromSiteGeometry = /\{[^}]*\broadCurbLines\b[^}]*\}\s*from\s*"\.{1,2}\/lib\/siteGeometry\.js"/s;
     expect(src).toMatch(importsFromSiteGeometry);
   });
 

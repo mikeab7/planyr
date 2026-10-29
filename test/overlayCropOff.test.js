@@ -15,6 +15,7 @@ import { visibleFrame, visibleCornersPx } from "../src/shared/overlay/overlayPla
 import { rowToOverlay, overlayToRow } from "../src/shared/sitePlans/lib/sitePlanOverlays.js";
 import { makeForeignCopy } from "../src/workspaces/site-planner/lib/siblingOverlays.js";
 import OverlaysPanel from "../src/workspaces/site-planner/components/OverlaysPanel.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const base = { id: "a", src: "data:image/png;base64,AA", imgW: 1000, imgH: 800, ftPerPx: 0.5, x: 0, y: 0, rotation: 0 };
 const RECT = { kind: "rect", x: 100, y: 50, w: 700, h: 600 };
@@ -163,7 +164,7 @@ describe("the panel", () => {
 });
 
 describe("wiring (source guard)", () => {
-  const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+  const src = plannerSource();
   const panel = readFileSync("src/workspaces/site-planner/components/OverlaysPanel.jsx", "utf8");
   it("the switch writes through the ONE crop writer (lock check + one undo frame), and Reset is gone", () => {
     expect(src).toMatch(/onCropSwitch: setOverlayCropOn/);
