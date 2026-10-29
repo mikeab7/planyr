@@ -66,10 +66,25 @@ const CASES = [
 const ROW_IDS = ["counties_cities", "ok_road", "ok_tribal", "ok_wells", "ok_pst", "ok_cleanup", "ok_waste", "ok_source_water", "ok_protected_waters", "ok_deq_303d", "ok_dams", "ok_nrhp", "ok_cemeteries", "ok_crit_habitat", "water_sewer"];
 const OK_ONLY_IDS = ROW_IDS.filter((r) => !["counties_cities", "water_sewer"].includes(r));
 
+/* --anon: a PR PREVIEW has no E2E_LOGIN_KEY (the e2e-session route answers 404 there), so arm A (the map finder, which works logged out) can be run before the merge;
+ * arms B and C need the signed-in test account and run on planyr.io after the deploy. */
+const ANON = args.includes("--anon");
 let s = null;
-for (let attempt = 1; attempt <= 6 && !s; attempt++) {
-  try { s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] }); }
-  catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 6) throw e; await new Promise((r) => setTimeout(r, 20000)); }
+if (ANON) {
+  const { chromium } = await import("@playwright/test");
+  const { existsSync } = await import("node:fs");
+  const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
+  const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });
+  const pg = await ctx.newPage();
+  await pg.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  s = { page: pg, proof: { email: "(anonymous — preview run, arm A only)" }, close: () => browser.close() };
+} else {
+  for (let attempt = 1; attempt <= 6 && !s; attempt++) {
+    try { s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] }); }
+    catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 6) throw e; await new Promise((r) => setTimeout(r, 20000)); }
+  }
 }
 const page = s.page;
 await assertMeasurable(page, "verify-oklahoma-live");
@@ -178,6 +193,7 @@ try {
   const bad = log.filter((e) => !e.req && typeof e.status === "number" && e.status >= 400 && OK_HOSTS.test(e.url));
   check("A · no request to an Oklahoma agency server failed (4xx/5xx)", bad.length === 0, bad.slice(0, 4).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
 
+  if (ANON) throw Object.assign(new Error("anon-done"), { anonDone: true });
   /* ── B. A LOCATED plan at the owner's real site area ───────────────────────────────────────── */
   const WASH = { lat: 36.9, lng: -95.85 }, HOUSTON = { lat: 29.8, lng: -95.54 };
   const okPlan = mkPlan(`${LIVE_PREFIX}ok-wash-${Date.now().toString(36)}`, WASH, "Washington Co OK");
@@ -223,6 +239,8 @@ try {
   await sleep(3000);
   check("C · the Houston plan issues ZERO requests to the Oklahoma agency servers or orgs", sent(OK_HOSTS).length === 0, `${sent(OK_HOSTS).length}: ${sent(OK_HOSTS).slice(0, 2).map((e) => e.url.slice(0, 90)).join(" | ")}`);
   check("no uncaught page error during the run", consoleErrors.length === 0, consoleErrors.slice(0, 2).join(" | "));
+} catch (e) {
+  if (!(e && e.anonDone)) { console.log("❌ harness error — " + (e && e.stack || e)); failed++; }
 } finally {
   for (const id of cleanupIds) {
     const r = await cleanupLive(page, { planId: id }).catch((e) => ({ error: String(e) }));
