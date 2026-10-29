@@ -33,6 +33,7 @@ export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || i
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
 import { ETJ_SOURCES, normalizeFeature } from "./jurisdiction.js";
+import { cityPolysFromGeoJson, netEtjFeatures } from "./etjNet.js";   // B2472945
 import { etjNamesOf } from "./etjNames.js";
 
 // ---------------------------------------------------------------------------
@@ -559,7 +560,11 @@ export const VECTOR_SOURCES = {
         id: r.id, url: r.url + "/query", bbox: r.bbox,
         nameCol: (r.fields && r.fields.name) || null, row: r,
       })),
-      keyRev: 2, // the list of sources changed — bust every earlier single-source entry
+      keyRev: 3, // 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
+      /* ⛔ B2472945 — THE DRAWN ETJ IS NET OF CITY LIMITS, the same rule the header applies (B2472944): an ETJ is the ground OUTSIDE every
+       * city's limits, so a published ETJ polygon is cut by the city layer's own limits (the `jur_city` source below — one source of
+       * truth for what a city's limits ARE, read through its own cache) before it is cached and drawn. `fetchCached` does the cut. */
+      netAgainst: "jur_city",
       outFields: ["CITY"],
       where: "1=1",
       pageSize: 1000,
@@ -1129,10 +1134,18 @@ function inRing(ring, lng, lat) {
   }
   return inside;
 }
-// A polygon = outer ring minus holes.
-const inPolygon = (rings, lng, lat) =>
-  Array.isArray(rings) && rings.length > 0 && inRing(rings[0], lng, lat)
-  && !rings.slice(1).some((h) => inRing(h, lng, lat));
+/* A polygon's rings, EVEN-ODD: a point is inside when an ODD number of rings contain it. This is the rule the map DRAWS by (Leaflet fills a
+ * polygon's ring list even-odd) and the rule the Esri flat ring list is written for — `featuresToGeoJson` stores an Esri feature's rings as
+ * ONE `Polygon` whether it has one part or twelve, so "ring 0 is the outer, the rest are holes" misreads every multi-part feature (the
+ * second PART was treated as a hole). B2472945 made that visible: cutting city limits out of an ETJ turns one polygon into parts + holes,
+ * and the click on plain ETJ ground answered nothing. For a well-formed outer + holes the two rules agree exactly, so nothing that hit
+ * before stops hitting; a hit-test must agree with the picture. */
+const inPolygon = (rings, lng, lat) => {
+  if (!Array.isArray(rings) || !rings.length) return false;
+  let n = 0;
+  for (const r of rings) if (inRing(r, lng, lat)) n++;
+  return n % 2 === 1;
+};
 
 // Squared distance from a point to a segment, in degrees (small-area planar is fine at
 // screening tolerances — a few feet across one tract).
@@ -1284,7 +1297,28 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
   const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features, truncated, sourceMs } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const pulled = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    let { features, truncated } = pulled;
+    const { sourceMs } = pulled;
+    let netNote = null;
+    if (source.query.netAgainst && features.length) {
+      /* B2472945 — cut the ETJ by the city layer's limits, read THROUGH ITS OWN CACHE ENTRY (`fetchCached` on the city source: the same
+       * simplified polygons the City limits line is drawn from). A city layer that cannot answer FAILS this pull — a partial answer
+       * would be cached for the full TTL as an ETJ drawn over a city, the very picture this item removes (LOUD-FAILURE). */
+      const citySource = VECTOR_SOURCES[source.query.netAgainst];
+      if (!citySource) throw new Error(`ETJ netting: no "${source.query.netAgainst}" source registered`);
+      let city;
+      try { city = await fetchCached(citySource, effBbox, { cache, fetchJson, now, zoom }); }
+      catch (e) { throw new Error(`ETJ could not be netted against city limits — the city layer did not answer (${(e && e.message) || e})`); }
+      const cityPolys = cityPolysFromGeoJson((city.data && city.data.features) || []);
+      const ref = effBbox ? [(effBbox.w + effBbox.e) / 2, (effBbox.s + effBbox.n) / 2] : [-95.4, 29.8];
+      // The two layers are generalised independently at this tier; a ribbon narrower than that mismatch is not ETJ ground.
+      const minWidthM = tier && tier.offsetDeg ? (tier.offsetDeg * 111320) / 2 : 1.5;
+      const net = netEtjFeatures(features, cityPolys, { ref, minWidthM });
+      features = net.features;
+      netNote = { touched: net.touched, dropped: net.dropped, cityFeatures: cityPolys.length };
+      if (city.data && city.data.truncated) truncated = true;   // an undercounted city layer means an incompletely netted ETJ
+    }
     const fc = featuresToGeoJson(features, { source });
     const out = tier ? fc : simplifyGeoJson(fc);
     // Surface the maxFeatures cap on the stored payload (B707): a capped pull is an
@@ -1292,6 +1326,7 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
     // "everything". Silent truncation is the fabricated-all-clear class.
     if (truncated) out.truncated = true;
     if (sourceMs) out.sourceMs = sourceMs;   // multi-source layers: how long each publisher took (rides the cached payload)
+    if (netNote) out.netted = netNote;        // B2472945: what the city-limits cut did, so it is reportable and testable
     return out;
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });
