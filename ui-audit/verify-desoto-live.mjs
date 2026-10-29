@@ -27,7 +27,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${
 
 const HOSTS = /desotocountyms\.gov|VGtdH6iTQlVulSnr/;
 const OB = { lat: 34.96147632, lng: -89.8298842, name: "Olive Branch (Giant Oil lot, PIN 106834002 0003800)" };
-const HOUSTON = { lat: 29.7604, lng: -95.3698 };
+const HOUSTON = { lat: 29.80, lng: -95.54 }; // west Houston (HCAD lots; the Memphis line-band harness's control)
 
 let s = null;
 for (let attempt = 1; attempt <= 6 && !s; attempt++) {
@@ -98,7 +98,12 @@ try {
   check("A · the parcel card shows owner, PIN and acreage as text", /GIANT OIL/i.test(a.text) && /106834002/.test(a.text) && /0\.8\d/.test(a.text), "");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/A-olive-branch-parcel.png` });
 
-  const h = await parcelsOnMap(HOUSTON, false);
+  // the control click must land on a real HCAD lot: try the west-Houston point and a few nudges (a click can land on a road)
+  let h = { held: [] };
+  for (const [dy, dx] of [[0, 0], [0.0015, 0.0015], [-0.0015, -0.0015], [0.003, -0.002], [-0.003, 0.002]]) {
+    h = await parcelsOnMap({ lat: HOUSTON.lat + dy, lng: HOUSTON.lng + dx }, false);
+    if (h.held.length) break;
+  }
   check("A · KNOWN-GOOD arm: a Houston lot IS selected by the same flow", h.held.length > 0, h.held.length ? "" : "nothing selected — the flow itself is broken, run VOID");
   if (!h.held.length) voided++;
   check("C · Map click in Houston issues ZERO requests to the county server or the Olive Branch org", sent(HOSTS).length === 0, `${sent(HOSTS).length} sent`);
@@ -147,6 +152,7 @@ try {
   const turnOn = async (group, id) => {
     await panel.getByTestId(`layer-group-${group}`).click(); await sleep(250);
     const cb = panel.locator(`[data-testid="layer-row-${id}"] input[type="checkbox"]`).first();
+    if (!(await cb.count())) { check(`B · row "${id}" has a checkbox to switch on`, false, "row not in this group"); return; }
     if (!(await cb.isChecked())) await cb.check();
   };
   for (const id of ["ms_ob_gas_main", "ms_psc_gas", "water_sewer", "electric"]) await turnOn("util", id);
