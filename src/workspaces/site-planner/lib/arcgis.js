@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { FEET_WKID, isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl } from "./counties.js";
+import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl } from "./counties.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
 // geometry without pulling in counties.js; imported (not bare re-exported) because functions below use them in scope.
@@ -134,10 +134,12 @@ export function isPaginationUnsupportedError(e) {
   );
 }
 
-// Query features, returning geometry in Texas State Plane feet (EPSG:2278).
+// Query features, returning geometry in the `outSR` the caller asks for. NEW-1 (STATE-PLANE-AUDIT): the default used to be
+// FEET_WKID (Texas South Central, EPSG:2278) — a silent Texas default for any county in any state. Both callers pass 4326
+// explicitly (lon/lat, projected later by the site's own frame), so the default is now WGS84 and never a state plane.
 export async function queryFeatures(
   layerUrl,
-  { where = "1=1", outFields = "*", count = 8, outSR = FEET_WKID, timeoutMs } = {}
+  { where = "1=1", outFields = "*", count = 8, outSR = 4326, timeoutMs } = {}
 ) {
   const url = trim(layerUrl) + "/query";
   try {
