@@ -162,33 +162,36 @@ try {
     const group = CASES.find((c) => c.row === row).group;
     check(`A · the finder at Tulsa offers "${row}" in ${group}`, finderRows[group].includes(row));
   }
-  const turnedOn = new Set();
+  /* One case at a time with the row OFF before and after: a merged row's members all fetch when it goes on, and esri-leaflet caches tiles, so a member checked at a
+   * second point would otherwise be answered from a tile an earlier member already loaded (no request, no fresh geometry) — an instrument artefact, not a layer fault. */
+  const setRow = async (c, on) => {
+    const btn = fp.getByTestId(`layer-group-${c.group}`);
+    if (await btn.count()) await btn.click(); else await fp.getByTestId("layer-group-select").selectOption(c.group);
+    await sleep(200);
+    const cb = fp.locator(`[data-testid="layer-row-${c.row}"] input[type="checkbox"]`).first();
+    if (!(await cb.count())) return false;
+    if ((await cb.isChecked()) !== on) { if (on) await cb.check(); else await cb.uncheck(); }
+    return true;
+  };
   for (const c of CASES) {
-    const panel = fp;
-    if (!turnedOn.has(c.row)) {
-      const btn = panel.getByTestId(`layer-group-${c.group}`);
-      if (await btn.count()) await btn.click(); else await panel.getByTestId("layer-group-select").selectOption(c.group);
-      await sleep(250);
-      const cb = panel.locator(`[data-testid="layer-row-${c.row}"] input[type="checkbox"]`).first();
-      if (!(await cb.count())) { check(`A · row "${c.row}" has a checkbox`, false, "missing"); continue; }
-      if (!(await cb.isChecked())) await cb.check();
-      turnedOn.add(c.row);
-      await sleep(400);
-    }
-    log = log.filter((e) => e.req);
-    const before = await geom();
+    if (!(await setRow(c, false))) { check(`A · row "${c.row}" has a checkbox`, false, "missing"); continue; }
     await page.evaluate(([la, ln, z]) => window.__mapFinderMap.setView([la, ln], z, { animate: false }), [c.lat, c.lng, c.z]);
+    await sleep(900);
+    const before = await geom();
+    log = log.filter((e) => e.req);
+    await setRow(c, true);
     let got = [];
-    for (let i = 0; i < 24 && !got.some((e) => e.status === 200 && e.features > 0); i++) { await sleep(750); got = answered(c.needle); }
+    for (let i = 0; i < 28 && !got.some((e) => e.status === 200 && e.features > 0); i++) { await sleep(750); got = answered(c.needle); }
     const ok = got.filter((e) => e.status === 200);
     const withFeat = ok.filter((e) => e.features > 0);
-    if (!got.length) { check(`A · ${c.label}: the layer asked its own service`, false, `no request matching ${c.needle} — ${log.slice(-3).map((e) => e.url.slice(0, 90)).join(" | ")}`); continue; }
+    if (!got.length) { check(`A · ${c.label}: the layer asked its own service`, false, `no request matching ${c.needle} — ${log.slice(-3).map((e) => e.url.slice(0, 90)).join(" | ")}`); await setRow(c, false); continue; }
     check(`A · ${c.label}: 200 with features at a point ON a registry fixture`, withFeat.length > 0, `${ok.length} ok / ${got.length} answered; features ${ok.map((e) => e.features).join(",")}`);
     await sleep(900);
     const after = await geom();
-    check(`A · ${c.label}: the map gained geometry`, after.paths + after.canvases + after.markers > 0 && (after.paths + after.markers + after.canvases >= before.paths + before.markers + before.canvases), `${before.paths}p/${before.markers}m → ${after.paths}p/${after.markers}m`);
+    check(`A · ${c.label}: the map gained geometry`, after.paths + after.canvases + after.markers > before.paths + before.canvases + before.markers, `${before.paths}p/${before.markers}m → ${after.paths}p/${after.markers}m`);
     check(`A · ${c.label}: no failure toast`, !FAIL_TOAST.test(after.text), (after.text.match(new RegExp(`[^\\n]*(${FAIL_TOAST.source})[^\\n]*`, "i")) || [""])[0]);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/A-${c.row}-${c.label.replace(/\W+/g, "-")}.png` });
+    await setRow(c, false);
   }
   const bad = log.filter((e) => !e.req && typeof e.status === "number" && e.status >= 400 && OK_HOSTS.test(e.url));
   check("A · no request to an Oklahoma agency server failed (4xx/5xx)", bad.length === 0, bad.slice(0, 4).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
