@@ -1578,12 +1578,12 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // setTimeout can't fire refresh() on a detached layer. Wrap onRemove (Leaflet calls it on
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;
-  lyr.onRemove = function (map) { clearTimeout(timer); clearTimeout(resetTimer); if (origOnRemove) return origOnRemove.call(this, map); };
+  lyr.onRemove = function (map) { clearTimeout(timer); clearTimeout(resetTimer); retryPending = false; if (origOnRemove) return origOnRemove.call(this, map); };
   /* B2521584 — a draw-budget refusal must SURVIVE the `load` that esri-leaflet fires right after it: the handler below reset the status to "loaded", or to "empty / No
    * features in this view" when nothing was drawn, so a layer that REFUSED to draw read as "no data here" (reproduced against esri-leaflet 3.0.19: failed ×4, then empty).
    * `refused` is raised by `overbudget` and cleared when the next request cycle starts ("loading"). */
-  let refused = false, resetTimer = null, cycleErr = false;
-  lyr.on("loading", () => { refused = false; cycleErr = false; });
+  let refused = false, resetTimer = null, cycleErr = false, gaveUp = false, retryPending = false;
+  lyr.on("loading", () => { refused = false; cycleErr = false; gaveUp = false; });
   lyr.on("load", () => {
     /* esri-leaflet fires `load` when the LAST of a cycle's parallel cell requests finishes, and for a request that failed it calls the callback (→ `load`) BEFORE firing `requesterror`
      * in the same tick — so resetting `tries` here wiped the count every cycle and a persistently failing service retried forever (simulated: 1,801 refreshes in 12 minutes). Two
@@ -1591,7 +1591,8 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
      * ANY error was seen in the cycle (`cycleErr`, cleared by the next "loading"), whichever order — no wall-clock window, so a service that hangs 30 s then 504s counts too. */
     clearTimeout(resetTimer);
     resetTimer = setTimeout(() => { if (!cycleErr) tries = 0; }, 0);
-    if (refused) return; // the "too detailed to draw" failure stays on the row
+    // a refusal, a retry-budget failure and a pending retry each OWN the row's status until the next request cycle: a slower cell finishing after a failed one must not flip it to "loaded"
+    if (refused || gaveUp || retryPending) return;
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
@@ -1610,8 +1611,10 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
       tries += 1;
       onStatus && onStatus(k, "loading", `${cfg.label}: service hiccup — retrying (${tries}/${max})…`);
       clearTimeout(timer);
-      timer = setTimeout(() => { try { lyr.refresh(); } catch (_) {} }, delayMs);
+      retryPending = true;
+      timer = setTimeout(() => { retryPending = false; try { lyr.refresh(); } catch (_) {} }, delayMs);
     } else {
+      gaveUp = true;
       onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
     }
   });
@@ -1653,9 +1656,12 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     lyr.createLayers = function (features) {
       let grow = 0, net = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what is on the map (judged against the layer total)
       const mine = [];
+      const inBatch = new Set();
       for (const f of features || []) {
         const fv = countVertices([f], Math.max(cap, total));
         const id = f && f.id != null ? f.id : null;
+        if (id != null && inBatch.has(id)) continue;   // the same id twice in ONE batch is one feature on the map
+        if (id != null) inBatch.add(id);
         if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - held.get(id); }
         else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
         else { grow += fv; net += fv; }

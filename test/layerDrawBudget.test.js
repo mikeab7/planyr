@@ -241,4 +241,107 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     lyr.createLayers([{ id: 9, ...poly(400000) }]);             // now tracked at 110k: +290k growth > the 120k cap
     expect(refused).toHaveLength(1);
   });
+  /* ---- the sixth review's gaps: each test below turns red under the named mutation of layers.js ---- */
+  const retryRig = async () => {
+    vi.resetModules(); mocks();
+    const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const handlers = {}; const rig = { refreshes: 0, out: [] };
+    rig.lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, refresh() { rig.refreshes++; }, _layers: {} };
+    attachFeatureRetry(rig.lyr, "k", { label: "Layer" }, (...a) => rig.out.push(a[1]));
+    rig.fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
+    return rig;
+  };
+  it("status: a slower cell finishing AFTER a failed one does not flip a failed (or retrying) row to 'loaded'", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      for (let i = 0; i < 6; i++) { r.fire("loading"); r.fire("requesterror", { code: 503 }); vi.advanceTimersByTime(300); r.fire("load"); vi.advanceTimersByTime(6000); }
+      expect(r.out[r.out.length - 1]).toBe("failed");                       // gaveUp owns the status
+      const r2 = await retryRig();
+      r2.fire("loading"); r2.fire("requesterror", { code: 503 }); r2.fire("load");   // error, then the slow cell: a retry is pending
+      expect(r2.out).toEqual(["loading"]);                                   // "retrying…" stays; "loaded" did not overwrite it
+    } finally { vi.useRealTimers(); }
+  });
+  it("status: a row that gave up reads 'loaded' again once the NEXT request cycle succeeds (gaveUp is cleared by 'loading')", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      for (let i = 0; i < 6; i++) { r.fire("loading"); r.fire("requesterror", { code: 503 }); vi.advanceTimersByTime(300); r.fire("load"); vi.advanceTimersByTime(6000); }
+      expect(r.out[r.out.length - 1]).toBe("failed");
+      r.fire("loading"); r.fire("load"); vi.advanceTimersByTime(10);                // the service is back
+      expect(r.out[r.out.length - 1]).not.toBe("failed");
+    } finally { vi.useRealTimers(); }
+  });
+  it("status: once the retry has FIRED, a clean load reports the row again (retryPending is cleared by the timer)", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      r.fire("loading"); r.fire("requesterror", { code: 503 }); r.fire("load");
+      vi.advanceTimersByTime(8000);                                                 // the retry fires (refresh)
+      expect(r.refreshes).toBe(1);
+      r.fire("load");                                                               // …and its cell answers cleanly, with no new "loading" seen
+      expect(r.out[r.out.length - 1]).not.toBe("loading");
+    } finally { vi.useRealTimers(); }
+  });
+  it("retries: a recovered blip + a healthy cycle start the count over (cycleErr is cleared by the next 'loading')", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      r.fire("loading"); r.fire("load"); r.fire("requesterror", { code: 503 }); vi.advanceTimersByTime(5000);   // a blip: 1 retry used
+      r.fire("loading"); r.fire("load"); vi.advanceTimersByTime(5000);                                             // healthy cycle → reset
+      r.refreshes = 0;
+      for (let i = 0; i < 8; i++) { r.fire("loading"); r.fire("load"); r.fire("requesterror", { code: 503 }); vi.advanceTimersByTime(8000); }
+      expect(r.refreshes).toBe(3);                                            // the full budget again, not 2
+    } finally { vi.useRealTimers(); }
+  });
+  it("retries: the legacy `{ error: { code } }` shape still counts, and a 403 never retries", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = await retryRig();
+      r.fire("loading"); r.fire("load"); r.fire("requesterror", { error: { code: 403 } }); vi.advanceTimersByTime(8000);
+      expect(r.refreshes).toBe(0);
+      r.fire("loading"); r.fire("load"); r.fire("requesterror", { error: { code: 503 } }); vi.advanceTimersByTime(8000);
+      expect(r.refreshes).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+  it("budget: the held-growth term is clamped — a lighter held feature cannot offset a heavy NEW one in the same batch", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Clamp", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    lyr.createLayers([{ id: 1, ...poly(100000) }]);
+    lyr.createLayers([{ id: 1, ...poly(10000) }, { id: 2, ...poly(260000) }]);   // −90k and +260k: the batch cap judges the +260k, not the net +170k
+    expect(refused).toHaveLength(1);
+  });
+  it("budget: feature id 0 is a real id (tracked, so its repeats are free)", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Id zero", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    for (let i = 0; i < 8; i++) lyr.createLayers([{ id: 0, ...poly(100000) }]);   // 8 × 100k > the 500k total if each repeat were charged
+    expect(refused).toHaveLength(0);
+  });
+  it("budget: the same id twice in ONE batch is one feature (the total does not drift above what is held)", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Dup ids", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    for (let i = 0; i < 4; i++) lyr.createLayers([{ id: 5 + i, ...poly(100000) }, { id: 5 + i, ...poly(100000) }]);   // 4 distinct features = 400k < 500k (8 × 100k would refuse)
+    expect(refused).toHaveLength(0);
+  });
+  it("budget: after the 2-level zoom re-ask the total is what is still ON the map, not zero", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Re-ask", color: "#000", vertexBudget: 250000, simplifyFactor: 6 }, 1, "pane");
+    const map = { z: 10, h: {}, getZoom() { return this.z; }, on(n, h) { this.h[n] = h; }, off() {} };
+    lyr._map = map; lyr.refresh = () => {};
+    (lyr.handlers.add || []).forEach((h) => h()); (lyr.handlers.load || []).forEach((h) => h());   // fetched at z10
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    for (const id of [1, 2, 3]) lyr.createLayers([{ id, ...poly(100000) }]);                         // 300k on the map
+    map.z = 12; map.h.zoomend();                                                                      // the re-ask
+    lyr.createLayers([{ id: 4, ...poly(150000) }]);                                                   // 450k ≤ 500k
+    expect(refused).toHaveLength(0);
+    lyr.createLayers([{ id: 5, ...poly(100000) }]);                                                   // 550k > 500k — only if the total survived the re-ask
+    expect(refused).toHaveLength(1);
+  });
 });
