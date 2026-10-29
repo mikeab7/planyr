@@ -55,8 +55,8 @@ export const FLORIDA_FIXTURES = {
   },
   rowPermitsSfwmd: {
     fixtures: [
-      { label: "Broward right-of-way permits", bbox: [-80.45, 25.95, -80.1, 26.35], expectMinCount: 50 }, // live: 4,663
-      { label: "Western Palm Beach / Glades right-of-way permits", bbox: [-81.2, 26.4, -80.5, 26.9], expectMinCount: 50 }, // live: 837
+      { label: "Broward right-of-way permits", bbox: [-80.45, 25.95, -80.1, 26.35], expectMinCount: 50 }, // live (reviewStatus = 'FINAL'): 3,990
+      { label: "Western Palm Beach / Glades right-of-way permits", bbox: [-81.2, 26.4, -80.5, 26.9], expectMinCount: 50 }, // live (reviewStatus = 'FINAL'): 627
     ],
   },
   conEasementsSfwmd: {
