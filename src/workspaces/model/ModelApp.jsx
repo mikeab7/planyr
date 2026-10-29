@@ -50,6 +50,8 @@ import Ribbon, { AuditGroup } from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
+import { undoKeyKind, undoKeyOwner, CELL_EDITING_ATTR } from "./lib/undoKeyScope.js";
+import { isTextControl } from "../../shared/keyboard/keyScope.js";
 import {
   createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet, setActiveSheet,
   addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
@@ -694,6 +696,14 @@ export default function ModelApp({
       }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
+      // NEW-1 (2026-10-29) — undo/redo belong to the TEXT being typed (cell editor, formula bar,
+      // Name Box, column rename, Find bar…): leave the key to the field's own native undo, or to
+      // SheetView's editor history. Only with no text control owning the keyboard does the sheet's
+      // undo stack fire. See lib/undoKeyScope.js.
+      if (undoKeyKind(e) && undoKeyOwner({
+        textControl: isTextControl(e.target),
+        cellEditorOpen: !!(e.target instanceof Element && e.target.closest(`[${CELL_EDITING_ATTR}]`)),
+      }) === "text") return;
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }

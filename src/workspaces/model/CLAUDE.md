@@ -19,3 +19,5 @@ file…"). ONE source of truth: the Library file's stored bytes ARE the document
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the lines above in the same commit.
      The doc-pointer-audit check fails CI on a stale reference. -->
+
+- **Undo while typing (B2535792):** `lib/undoKeyScope.js` decides who owns Ctrl+Z/Y (a text control or an open cell editor owns it; the sheet stack only fires otherwise) and `lib/cellEditHistory.js` is the cell editor's own undo (nothing left → abandon back to the original value). ModelApp's window listener must keep asking `undoKeyOwner` before it calls `undo()`/`redo()`. Guards: repo-root `test/` **modelCellEditorUndo**; e2e **model-cell-editor-undo**.

@@ -45,6 +45,8 @@ import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
 import { editorHasFocus, fallbackEditAction, applyFallbackEdit } from "../lib/editorFallback.js";
+import { createEditHistory, recordEdit, undoEdit, redoEdit } from "../lib/cellEditHistory.js";
+import { undoKeyKind, CELL_EDITING_ATTR } from "../lib/undoKeyScope.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 // SPACE.sm / SPACE.md / CONTROL_H.md are used below as the LITERAL values 6 / 8 / 26
 // (src/shared/ui/designTokens.js), never imported — this file is lazy-loaded only on the
@@ -246,6 +248,15 @@ const SheetView = forwardRef(function SheetView({
   const [edit, setEdit] = useState(null);      // { r, c } | null
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef(null);
+  // NEW-1 (2026-10-29) — the editor's OWN undo (lib/cellEditHistory.js). `editValueRef` mirrors
+  // `editValue` synchronously so a burst of keystrokes can never read a stale value.
+  const editValueRef = useRef("");
+  const editHistoryRef = useRef(null);
+  const putEditValue = useCallback((next, record = true) => {
+    editValueRef.current = next;
+    setEditValue(next);
+    if (record) editHistoryRef.current = recordEdit(editHistoryRef.current, next);
+  }, []);
   const dragRef = useRef(null);                // { r, c } anchor while mouse-dragging a range
   const [renaming, setRenaming] = useState(null); // colIndex | null
   const [contextMenu, setContextMenu] = useState(null); // { point:{x,y}, items } | null
@@ -509,8 +520,10 @@ const SheetView = forwardRef(function SheetView({
     if (!col) return;
     setSelRange({ r1: r, r2: r, c1: c, c2: c });
     setEdit({ r, c });
-    setEditValue(seed != null ? seed : rawAt(sheet, r, c));
-  }, [sheet, setSelRange]);
+    const original = rawAt(sheet, r, c);
+    editHistoryRef.current = createEditHistory(original);
+    putEditValue(seed != null ? seed : original);
+  }, [sheet, setSelRange, putEditValue]);
 
   const cellClick = (r, c, e) => {
     // B1076480 — a RIGHT mousedown landing INSIDE an already-selected multi-cell range must
@@ -545,6 +558,23 @@ const SheetView = forwardRef(function SheetView({
     // after the very first keystroke.
     if (renaming != null) return;
     if (edit) {
+      // NEW-1 (2026-10-29) — Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while a cell is being edited act on the
+      // EDITOR'S text only (Excel). They must never reach the app's sheet-level undo in ModelApp,
+      // whether the key came from the input or — in the B1287888 window — the grid container.
+      // Nothing left to undo abandons the edit back to the cell's original value.
+      const undoKind = undoKeyKind(e);
+      if (undoKind) {
+        e.preventDefault(); e.stopPropagation();
+        if (undoKind === "undo") {
+          const u = undoEdit(editHistoryRef.current);
+          if (u.atStart) cancelEdit();
+          else { editHistoryRef.current = u.history; putEditValue(u.value, false); }
+        } else {
+          const rd = redoEdit(editHistoryRef.current);
+          if (rd.changed) { editHistoryRef.current = rd.history; putEditValue(rd.value, false); }
+        }
+        return;
+      }
       if (e.key === "Enter") { e.preventDefault(); commitEdit(e.shiftKey ? "up" : "down"); }
       else if (e.key === "Tab") { e.preventDefault(); commitEdit(e.shiftKey ? "left" : "right"); }
       else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
@@ -559,7 +589,7 @@ const SheetView = forwardRef(function SheetView({
       // falls through untouched. See lib/editorFallback.js for the full mechanism.
       else if (!editorHasFocus(e.target, inputRef.current)) {
         const action = fallbackEditAction(e.key, e);
-        if (action) { e.preventDefault(); setEditValue((v) => applyFallbackEdit(v, action, e.key)); }
+        if (action) { e.preventDefault(); putEditValue(applyFallbackEdit(editValueRef.current, action, e.key)); }
       }
       return;
     }
@@ -589,7 +619,7 @@ const SheetView = forwardRef(function SheetView({
       if (k === "c") { e.preventDefault(); onCopy(r1, r2, c1, c2); return; }
       if (k === "v") { e.preventDefault(); onPaste(activeR, activeC, r1, r2, c1, c2); return; }
       if (k === "d") { e.preventDefault(); onFillDown(r1, r2, c1, c2); return; }
-      return; // leave every other Ctrl/Cmd chord (the app's own undo/redo, Find, name-box Go To) alone
+      return; // leave every other Ctrl/Cmd chord (the app's own undo/redo, Find, name-box Go To) alone — undo/redo only reach ModelApp here, with NO cell editor open (see the edit branch above)
     }
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
@@ -1017,7 +1047,7 @@ const SheetView = forwardRef(function SheetView({
                   ref={inputRef}
                   autoFocus
                   value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
+                  onChange={(e) => putEditValue(e.target.value)}
                   // Caret at the END on focus, never select-all: type-to-edit already
                   // seeds editValue with JUST the typed character (the "replace" half of
                   // the contract), so selecting it here would make the VERY NEXT keystroke
@@ -1107,6 +1137,7 @@ const SheetView = forwardRef(function SheetView({
       ref={outerRef}
       tabIndex={0}
       data-testid="model-sheet"
+      {...{ [CELL_EDITING_ATTR]: edit ? "true" : undefined }}
       data-letters-are-text=""
       onMouseUp={stopDrag}
       onMouseLeave={stopDrag}
