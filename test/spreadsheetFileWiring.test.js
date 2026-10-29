@@ -167,3 +167,14 @@ describe("input-autofill house rule on the Spreadsheet's editors", () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe("render-time constants are declared before they are read (a TDZ crash took the live Spreadsheet down)", () => {
+  it("shownStatus is declared after fileMode and the file hook it reads", () => {
+    const m = read("../src/workspaces/model/ModelApp.jsx");
+    const at = (needle) => m.indexOf(needle);
+    expect(at("const shownStatus =")).toBeGreaterThan(at("const fileMode ="));
+    expect(at("const shownStatus =")).toBeGreaterThan(at("const fw = useFileWorkbook("));
+    // the render-time reads of the file hook all come after it
+    expect(at("fw.phase")).toBeGreaterThan(at("const fw = useFileWorkbook("));
+  });
+});
