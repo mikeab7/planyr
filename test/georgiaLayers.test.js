@@ -243,10 +243,11 @@ describe("card wording that the adversarial review caught", () => {
     expect(c.note).toMatch(/Orchard Hill/); expect(c.note).toMatch(/Griffin zones itself/); expect(c.note).not.toMatch(/UNINCORPORATED county\b(?! and)/);
     expect(c.identifyCard({ LABEL: "R1" }).rows[0].text).toMatch(/Orchard Hill/);
   });
-  it("Bartow card shows the county's REZONING case reference as its own row and asserts only that a CU / (wC) code has a case on file", () => {
+  it("Bartow card shows the county's REZONING case reference as its own row and never claims a CU / (wC) code always has a case on file", () => {
     const c = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "A1CU", REZONING: "CU-2162-17", ZONINGTEXT: " " });
     expect(c.rows.find((r) => r.label === "Rezoning / case").text).toBe("CU-2162-17");
-    expect(c.note).toMatch(/has a case on file/); expect(c.note).not.toMatch(/means conditions/);
+    expect(c.note).toMatch(/usually has a case/); expect(c.note).not.toMatch(/has a case on file|means conditions/);
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.infoCaveat).not.toMatch(/is in the county's file/);
     expect(GEORGIA_LAYERS.ga_bartow_zoning.note).not.toMatch(/rezoning case numbers, conditions/);
   });
   it("mineral card drops EPD/USGS 'Unknown' filler rows (constraint #45) and keeps real values", () => {

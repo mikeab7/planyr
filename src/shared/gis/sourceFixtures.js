@@ -1444,7 +1444,7 @@ export const SOURCE_DOCS = {
   },
   gaBartowZoning: {
   notes:
-    "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. ZONINGTEXT is the county's own note (case numbers, conditions) and is shown as published.",
+    "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. REZONING is the county's case reference; ZONINGTEXT is its free-text note (mostly ordinance ids). Both are shown as published.",
   },
   countyCa: {
   notes:

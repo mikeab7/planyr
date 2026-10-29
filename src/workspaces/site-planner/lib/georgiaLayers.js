@@ -447,10 +447,10 @@ export const GEORGIA_LAYERS = {
       return card(city ? "Inside a city" : `Zone ${code || "(code not published)"}`,
         [[{ label: "Jurisdiction", text: city ? "A city zones this ground — Bartow County's map does not carry the city's zoning (ask the city's planning office)" : "Bartow County's own zoning map (unincorporated county)" }],
           city ? [] : rowIf("Colour class", BARTOW_CLASS_LABEL[bartowZoneClass(code)]), rowIf("Rezoning / case", text(p.REZONING)), rowIf("County note", text(p.ZONINGTEXT))],
-        city ? "The county's case reference and note, if any, as the county typed them." : "The county's case reference and note are shown as published. A code ending 'CU' or '(wC)' has a case on file — read it for what applies.");
+        city ? "The county's case reference and note, if any, as the county typed them." : "The county's case reference and note are shown as published. A code ending 'CU' or '(wC)' usually has a case in the county's file; when none is shown here, ask the county.");
     },
     note: "Bartow County's own zoning districts, parcel by parcel (colour = a coarse use class; the code prints at close zoom). Land inside a city — Adairsville and Cartersville included — is marked INCORPORATED in the county's map and is zoned by the city; that zoning is not in this layer. The county's rezoning case reference and its free-text note are shown as typed. District names are not shown: a name comes from the ordinance. Confirm the district and any conditions with Bartow County Planning & Development.",
-    infoCaveat: "County-published polygons; a rezoning or condition may post later, and the case behind a 'CU' or '(wC)' code is in the county's file. Confirm with Bartow County.",
+    infoCaveat: "County-published polygons; a rezoning or condition may post later, and the case behind a 'CU' or '(wC)' code is usually, not always, shown here — ask the county. Confirm with Bartow County.",
   }),
 };
 
