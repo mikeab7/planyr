@@ -16,8 +16,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { sameCoverage } from "../src/workspaces/site-planner/lib/coverage.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const SRC = plannerSource();
 
 /* The pre-fix effect, verbatim from build 6000483 — the mutation check. */
 const PRE_FIX = `  useEffect(() => {

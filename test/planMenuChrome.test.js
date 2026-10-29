@@ -15,8 +15,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 const icons = readFileSync("src/workspaces/site-planner/components/icons.jsx", "utf8");
 // The plan crumb + its AnchoredMenu, from the declaration to the end of the JSX block.
 const crumb = (() => {

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { autofillStamp, keyboardBand, revealDelta, revealTarget, isTextEntry } from "../src/shared/ui/phoneTyping.js";
 import { keyboardInsetPx } from "../src/workspaces/site-planner/lib/propertiesSheet.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(REPO, rel), "utf8");
@@ -87,7 +88,7 @@ describe("the Site Planner phone sheet measures the keyboard like Food does (B20
   });
   it("is wired: installed once in main.jsx, SitePlanner uses the measured layout height", () => {
     expect(read("src/main.jsx")).toMatch(/installPhoneTyping\(window\)/);
-    expect(read("src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/vh = layoutViewportHeight\(window\)/);
+    expect(plannerSource()).toMatch(/vh = layoutViewportHeight\(window\)/);
     expect(read("src/workspaces/site-planner/lib/propertiesSheet.js")).toMatch(/const innerH = layoutViewportHeight\(win\)/);
   });
   it("the Food sheet opts out (it manages the keyboard itself)", () => {

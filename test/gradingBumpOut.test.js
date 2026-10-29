@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { hostIdMap } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { hostBuildingIdOf, isPadMember, assemblyIds } from "../src/workspaces/site-planner/lib/gradingMembership.js";
 import { withFfe } from "../src/workspaces/site-planner/lib/buildingGrade.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
 const els = [
@@ -42,7 +43,7 @@ describe("bump-outs are pad members of their host (NEW-1)", () => {
     expect(out.find((e) => e.id === "c1").padElevFt).toBeUndefined();
   });
   it("planner wiring: gsEls gives bump-outs the host's finish and the panel/selection use hosts only", () => {
-    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/grBuildingsAll = grOn \? els\.filter\(\(e\) => e\.type === "building" && !grHosts\.has\(e\.id\)\)/);
     expect(sp).toMatch(/\.type === "building" \? grHosts\.get\(r\.id\) \?\? r\.id/);
     expect(sp).toMatch(/const fs = grOn && e\.type === "building" && grHosts\.get\(e\.id\)/);

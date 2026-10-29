@@ -9,6 +9,7 @@ import {
 } from "../src/workspaces/site-planner/lib/parcelLook.js";
 import { createTrailingWriter } from "../src/workspaces/site-planner/lib/trailingWrite.js";
 import { _normalizePrefs, setParcelLookPref } from "../src/workspaces/site-planner/lib/userPrefsStore.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const THEME = { parcel: "#1d9e75", setback: "#7c3aed", ink: "#111111" };
 const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
@@ -233,7 +234,7 @@ describe("persisting the workspace default — failure is loud and reverts", asy
 });
 
 describe("source guards on the render rules", () => {
-  const src = read("src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
   it("boundary and setback ring strokes carry NO zoom factor (screen pixels, constant across zoom)", () => {
     const outline = src.slice(src.indexOf('data-testid="parcel-outline"'), src.indexOf('data-testid="parcel-outline"') + 900);
     expect(outline).toMatch(/strokeWidth=\{\(picked \|\| isSel\) \? Math\.max\(3, baseW\) : baseW\}/);

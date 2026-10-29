@@ -5,6 +5,7 @@ import {
   parcelsOnTop, lineHostZ, CANVAS_Z, MAP_STACK,
   PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR,
 } from "../src/workspaces/site-planner/lib/mapStack.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/" + rel, import.meta.url)), "utf8");
 
@@ -67,7 +68,7 @@ describe("NEW-1 — the model keeps its order; only the line host moves, and onl
 });
 
 describe("NEW-1 — the wiring (source guards; the browser spec proves it behaves)", () => {
-  const planner = read("SitePlanner.jsx");
+  const planner = plannerSource();
 
   it("the planner asks the ONE function, once, and every consumer reads that boolean", () => {
     expect(planner.match(/parcelsOnTop\(/g)).toHaveLength(1);

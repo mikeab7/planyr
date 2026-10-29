@@ -69,6 +69,23 @@ if (want("olivebranch")) {
   const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
   areas.olivebranch = { label: "Olive Branch, MS and its utility service area", source: "Union of the data extents of the City of Olive Branch ArcGIS Online utility, planning-area and annexation layers (services9.arcgis.com/VGtdH6iTQlVulSnr), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
+/* NEW-1 (Colorado due-diligence layers, B2528688): the county / city areas the Weld, Adams and Aurora rows are declared for.
+ *   co_weld, co_adams   the county, from the SAME bundled county polygons as `harris` (no network).
+ *   co_aurora           the union of the data extents of the City of Aurora's airport-noise, Buckley APZ, zoning and city-limits layers (ags.auroragov.org/aurora/rest/services/OpenData/MapServer
+ *                       layers 25, 26, 20, 41; returnExtentOnly, WGS84, measured 2026-10-29 through the planyr.io relay because the city's host is not reachable from a build sandbox), padded 0.02° —
+ *                       a rectangle, honestly "within or near Aurora and its airports' influence areas" (the noise contours run past the city limits to Denver International). */
+const COUNTY_AREA = (key, name, label) => {
+  const rec = index.counties.find((c) => c.state === "CO" && c.name.replace(/ county$/i, "").toLowerCase() === name);
+  if (!rec) throw new Error(`${label} not found in the county polygon asset`);
+  areas[key] = { label, source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+};
+if (want("co_weld")) COUNTY_AREA("co_weld", "weld", "Weld County, CO");
+if (want("co_adams")) COUNTY_AREA("co_adams", "adams", "Adams County, CO");
+if (want("co_aurora")) {
+  const ext = { xmin: -104.9029, ymin: 39.4922, xmax: -104.4683, ymax: 39.9156 }; // union of layers 25 / 26 / 20 / 41 (see above)
+  const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
+  areas.co_aurora = { label: "Aurora, CO and its airports' influence areas", source: "Union of the data extents of the City of Aurora open-data airport-noise, Buckley APZ, zoning and city-limits layers (ags.auroragov.org), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
+}
 /* NEW-1 (Georgia due-diligence gaps, 2026-10-29):
  *   mngwpd       the 15-county Metropolitan North Georgia Water Planning District (ARC's `MNGWPD_Boundary` layer 1 — the SAME outline the stream-buffer rule uses).
  *                The Chattahoochee MRPA corridor/buffers and the District's small water supply watersheds are declared for this area.

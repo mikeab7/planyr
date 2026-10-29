@@ -7,8 +7,9 @@
  * region" emission is removed, the shape of the next paint-order change that would silently bury it. */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SP = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const SP = plannerSource();
 
 describe("road cross-section decoration paints above its cluster's fill", () => {
   it("an in-network road's ordinary node paints only its hit target; decoration is a separate pass", () => {

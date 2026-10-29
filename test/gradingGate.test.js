@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { gradingEnabled } from "../src/workspaces/site-planner/lib/gradingGate.js";
 import { adminStatusStore } from "../src/workspaces/admin/lib/adminStatus.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const LIB = "../src/workspaces/site-planner/lib/";
@@ -59,7 +60,7 @@ describe("no second gate mechanism", () => {
 });
 
 describe("SitePlanner reaches the grading layer only through the gate, and lazily", () => {
-  const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const sp = plannerSource();
   it("the heavy grading modules are lazy imports, never static", () => {
     for (const m of ["GradingController", "GradingPanels"]) {
       expect(sp).toMatch(new RegExp(`lazy\\(\\(\\) => import\\("\\./components/${m}\\.jsx"\\)`));

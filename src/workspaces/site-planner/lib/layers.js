@@ -15,6 +15,7 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
@@ -1305,7 +1306,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1397,6 +1398,7 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
@@ -1664,7 +1666,13 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       try { lyr.eachFeature((l) => { const f = l && l.feature; if (f && f.geometry && (!l.getBounds || b.intersects(l.getBounds()))) feats.push(f); }); } catch (_) { return; }
       try { setViewLegend(id, cfg.viewLegend(feats, map)); } catch (_) { /* a legend never breaks the layer */ }
     };
-    lyr.on("load", publish);
+    // esri-leaflet fires "load" a beat before its features can be asked about their bounds, so the first publish can read an empty view (the legend stayed blank until the map moved): re-read shortly after
+    const publishSoon = () => { publish(); setTimeout(publish, 600); setTimeout(publish, 2500); };
+    lyr.on("load", publishSoon);
+    // features keep arriving AFTER the first "load" (the layer is fetched in pieces), so a legend taken at load can be empty: re-read, debounced, as each one is created
+    let createdTimer = null;
+    lyr.on("createfeature", () => { if (createdTimer) clearTimeout(createdTimer); createdTimer = setTimeout(publish, 500); });
+    lyr.on("remove", () => { if (createdTimer) clearTimeout(createdTimer); createdTimer = null; });
     lyr.on("add", () => { if (lyr._map) lyr._map.on("moveend", publish); });
     // the municipal limits (which government a zone belongs to) may land after the zones: re-publish when they do
     let unsub = null;
@@ -1790,6 +1798,15 @@ export function liveRefOpacities(ref) {
   };
   visit(ref);
   return out;
+}
+
+/* B2528688 — how many features a live vector layer has PAINTED right now (read-only, null for a layer with no features to count — a raster). The e2e hooks on both
+ * hosts expose it so a harness can assert "this row really drew N real features here" against ground truth asked separately, instead of inferring it from the DOM. */
+export function liveRefFeatureCount(ref) {
+  if (!ref || ref === "pending" || typeof ref.eachFeature !== "function") return null;
+  let n = 0;
+  try { ref.eachFeature(() => { n += 1; }); } catch (_e) { return null; }
+  return n;
 }
 
 /* NEW-1 — per-surface memory of WHICH BAND each live layer was built into, so a "Show above

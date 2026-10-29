@@ -4,8 +4,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("NEW-20(a) — the re-check affordances show a BUSY state", () => {
   it("derives a single drainRefreshing flag from a live-busy OR auto-revalidating fetch", () => {

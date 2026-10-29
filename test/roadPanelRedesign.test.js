@@ -2,8 +2,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { costRollup, roadQuantities } from "../src/workspaces/site-planner/lib/costTakeoff.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const SRC = plannerSource();
 const roadBranch = (() => {
   const a = SRC.indexOf('selEl.type === "road" ? (() => {');
   const b = SRC.indexOf("})() : isDockLayerEl(selEl) ? (() => {", a);

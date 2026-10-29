@@ -4,8 +4,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("NEW-15 — the detention explainer matches the numbers above it (partial vs total dead)", () => {
   // NEW-2 (2026-07-28, PANEL-BREVITY) — the explainer is no longer a SENTENCE with a partial /
@@ -46,7 +47,7 @@ describe("NEW-16 — a trace mitigation requirement carries its raw ac-ft in the
   it("imports the materiality floor and renders a trace ⓘ with the raw value", () => {
     // NEW-7 added fmtMargin to the same import — assert the SYMBOLS, not the exact line, so a
     // later addition to this import can't fail a test about the trace ⓘ.
-    expect(src).toMatch(/import \{[^}]*\byieldVerdictStrip\b[^}]*\bTRACE_ACFT\b[^}]*\} from "\.\/lib\/yieldVerdicts\.js";/);
+    expect(src).toMatch(/import \{[^}]*\byieldVerdictStrip\b[^}]*\bTRACE_ACFT\b[^}]*\} from "\.{1,2}\/lib\/yieldVerdicts\.js";/);
     expect(src).toContain("{v.trace && v.traceAcFt != null && (");
     expect(src).toContain("about ${v.traceAcFt.toFixed(3)} AC-FT of storage");
     expect(src).toContain("below the ${TRACE_ACFT.toFixed(2)}-ac-ft materiality floor");

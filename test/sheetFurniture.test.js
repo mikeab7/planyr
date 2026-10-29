@@ -4,6 +4,7 @@ import { pickScaleBar, screenFurniturePlates } from "../src/workspaces/site-plan
 // export chunk instead of the Site route's boot chunk (see sheetFurnitureLayout.js's header).
 // Same functions, moved — every assertion below is unchanged.
 import { furnitureLayout, buildSheetFurnitureSvg, buildScreenFurnitureSvg, chooseFurnitureCorners } from "../src/workspaces/site-planner/lib/sheetFurnitureLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const NICE = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
 
@@ -459,7 +460,7 @@ describe("canvasPillBottom — the toast clears the north arrow, scale bar and c
 describe("the Standards Apply toast is anchored to the canvas, not the viewport", () => {
   it("renders absolutely inside the pane, low and to one side", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     const i = src.indexOf('data-testid="standards-apply-toast"');
     expect(i).toBeGreaterThan(-1);
     const block = src.slice(i, src.indexOf("</div>", i));
@@ -533,7 +534,7 @@ describe("mapChromeCardStyle — the badge's chrome literally equals the scale-b
 describe("the calibration badge — one dot, chrome container, no stray literals (source guard)", () => {
   it("the badge's JSX block uses mapChromeCardStyle for its container, not a hardcoded fill/RADIUS.pill", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     const commentStart = src.indexOf("calibration / accuracy badge");
     expect(commentStart).toBeGreaterThan(-1);
     // Scope the CODE checks below to the `cfg`/JSX body only — the preceding explanatory

@@ -17,6 +17,7 @@ import {
   planDelete, resolveRef, bondedSubtree,
   DELETE_ENTRIES, REF_FIELD,
 } from "../src/workspaces/site-planner/lib/deletePlan.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // A plan shaped like the owner's Colorado site: three buildings, one carrying a bonded assembly.
 const state = () => ({
@@ -231,7 +232,7 @@ describe("SILENCE IS IMPOSSIBLE", () => {
  * wiring, because the recurrence was never in the maths — it was a call site that quietly opted out
  * of the contract. A new Delete button that forgets its entry id goes red here, not in production. */
 describe("every delete entry point in SitePlanner.jsx is wired to the contract", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   // Prose describing the wiring (this file is heavily commented on purpose) is not wiring.
   const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
 
