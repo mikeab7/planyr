@@ -283,6 +283,10 @@ export const PARCEL_COPIES = {
   pa_lehigh: [null, "2026-10"],
   pa_somerset: [null, "2026-10"],
 
+  // SD
+  sd_lake: ["Schneider Geospatial", null],
+  sd_meade: ["Schneider Geospatial", "2024"],
+
   // SC
   sc_greenville: [null, "2024-09"],
 
