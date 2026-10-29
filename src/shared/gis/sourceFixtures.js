@@ -238,6 +238,109 @@ export const SOURCE_FIXTURES = {
     { label: "Epps Mill Rd, Rutherford", point: [-86.3194, 35.7299], expectMinCount: 1 }, // live: 10+ within 800 m (I-24 State Highway Agency)
   ],
   },
+  /* NEW-1 (Tennessee industrial due-diligence layers, B2521584) · every count is the number of features inside the ±0.01° box the
+   * verifier queries, measured live 2026-10-29 against the service itself. Spread Memphis ↔ Nashville/Murfreesboro ↔ Knoxville/Chattanooga
+   * (≥200 km) so a county- or metro-clipped copy fails. */
+  drycleanersTn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 3
+    { label: "Nashville (Davidson)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 1
+    { label: "Chattanooga (Hamilton)", point: [-85.3097, 35.0456], expectMinCount: 1 }, // live: 1
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  ms4Tn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 2
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 1
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  wqaTn: {
+  fixtures: [
+    { label: "Memphis area streams", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 1
+    { label: "Christiana (Rutherford) — Stones River basin", point: [-86.3436, 35.7425], expectMinCount: 1 }, // live: 3
+    { label: "Knoxville streams", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  pwsTn: {
+  fixtures: [
+    { label: "Memphis — Memphis Light, Gas & Water", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 1
+    { label: "Christiana — Consolidated Utility District of Rutherford County", point: [-86.3436, 35.7425], expectMinCount: 1 }, // live: 1 (TN0000791)
+    { label: "Nashville — Metro Water Services", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 1 (TN0000494)
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  snaTn: {
+  fixtures: [
+    { label: "Auntney Hollow SNA (Lewis/Maury)", point: [-87.4393, 35.5137], expectMinCount: 1 }, // live: 1
+    { label: "Pogue Creek Canyon SNA (Fentress/Pickett)", point: [-84.8578, 36.5239], expectMinCount: 1 }, // live: 1
+    { label: "Hampton Creek Cove SNA (Carter/Johnson)", point: [-82.0447, 36.1424], expectMinCount: 1 }, // live: 1
+    { label: "Rutherford cedar glades (Christiana area)", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 4 }, // live: 11 in the wider box
+  ],
+  },
+  scenicTn: {
+  fixtures: [
+    { label: "Collins Scenic River (Grundy/Warren)", point: [-85.604, 35.4307], expectMinCount: 1 }, // live: 1
+    { label: "French Broad Scenic River (Sevier/Jefferson)", point: [-83.0506, 35.9491], expectMinCount: 1 }, // live: 1
+    { label: "Harpeth Scenic River (Davidson/Williamson)", bbox: [-87.0, 35.9, -86.6, 36.3], expectMinCount: 1 }, // live: 2 near Nashville
+  ],
+  },
+  nrhpTn: {
+  fixtures: [
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 37
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 41
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 32
+  ],
+  },
+  critHabitatTn: {
+  fixtures: [
+    { label: "Hardin / Wayne counties — Tennessee River mussels, west TN (wide box)", bbox: [-88.3, 35.0, -87.5, 35.6], expectMinCount: 1 }, // live: 3
+    { label: "Hancock / Hawkins — Clinch & Holston, east TN (wide box, kept south of the Virginia line)", bbox: [-83.6, 36.3, -83.0, 36.5], expectMinCount: 1 }, // live: 11
+    { label: "Christiana / Murfreesboro (Stones River mussels) — wide box", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 1 }, // live: 4
+    { label: "Knoxville / Clinch-Holston mussels — wide box", bbox: [-84.22, 35.66, -83.62, 36.26], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  cemeteriesTn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 4
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 2
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  dorSitesTn: {
+  fixtures: [
+    // measured 2026-10-29 straight from TDEC's ArcGIS Online org: 825 OPEN sites statewide.
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 3
+    { label: "Nashville (Davidson)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 19
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 7
+  ],
+  },
+  landfillsTn: {
+  fixtures: [
+    // measured THROUGH planyr.io's relay 2026-10-29 (maps.tdec.tn.gov is unreachable from the build environment): 111 facilities; each point is a real facility.
+    { label: "Milan Army Ammunition Plant landfill (Gibson, west TN)", point: [-88.713215, 35.896768], expectMinCount: 1 }, // live: 1
+    { label: "Mueller Company landfill (Hamilton)", point: [-85.254573, 35.086244], expectMinCount: 1 }, // live: 1
+    { label: "Volunteer Regional Landfill (Scott)", point: [-84.488425, 36.545536], expectMinCount: 1 }, // live: 1
+    { label: "Carter County / Elizabethton landfill (east TN)", point: [-82.194389, 36.371859], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  thcSitesTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 186,319 survey points; the inventory is partial (0 at Christiana), so the fixtures sit in surveyed towns.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 777
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 495
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 1534
+  ],
+  },
+  nrhpBoundsTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 2,047 boundary polygons.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 55
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 44
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 37
+  ],
+  },
   /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
    * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
    * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
@@ -1488,6 +1591,75 @@ export const SOURCE_DOCS = {
   notes:
     "The Tennessee counterpart of `road`. TDOT's Road Segment inventory (updated monthly): GOVT_CTRL says who owns/maintains each " +
     "segment (State / County / Municipal Highway Agency …). Local-road coverage is TDOT's — an honest 'Unknown' beats a wrong guess.",
+  },
+  drycleanersTn: {
+  notes:
+    "TDEC Division of Remediation's Drycleaner Environmental Response Program (DCERP): every drycleaner registered since 1996 (pick-up-only " +
+    "shops are not on it), edited 2026-02-26. COMMENTS says whether TDEC has worked a release there (\"DCERP Response Site\") or only holds the " +
+    "registration. A Phase I ESA flag — solvent (PCE) releases are the classic drycleaner contamination — never a finding about a neighbour.",
+  },
+  ms4Tn: {
+  notes:
+    "TDEC DWR's MS4 NPDES permit areas (88): the cities and counties whose own stormwater, post-construction and stream-buffer rules apply " +
+    "ON TOP of the state's Construction General Permit. Inside an area, ask the permittee for its design manual; outside, the state CGP governs alone.",
+  },
+  wqaTn: {
+  notes:
+    "TDEC DWR 2026 Water Quality Assessment, stream assessment units (edited 2026-08-13). The spatial companion of the EPA-approved Tennessee " +
+    "2026 List of Impaired and Threatened Streams; the cause of an impairment is in TDEC's Potential Sources table, not on the line.",
+  },
+  pwsTn: {
+  notes:
+    "TDEC DWR public water system service areas (447; edited 2024-10-01): the permitted system whose declared territory holds the point (PWSID, " +
+    "owner type, population served, link to its Drinking Water Watch page). A territory, NOT proof of a main at the property line.",
+  },
+  snaTn: {
+  notes:
+    "TDEC Division of Natural Areas — State Natural Areas designated under the Natural Areas Preservation Act of 1971 (93; edited 2026-10-13). " +
+    "A designated area is a hard constraint on the land itself; the cedar-glade areas around Christiana/Murfreesboro host federally listed plants.",
+  },
+  scenicTn: {
+  notes:
+    "TDEC Division of Natural Areas — State Scenic Rivers (Tennessee Scenic Rivers Act of 1968; 25 corridor polygons, edited 2023-09-13) with the " +
+    "Act's river class. The corridor is a planning designation; the Act's management plan for the river governs what is allowed inside it.",
+  },
+  nrhpTn: {
+  notes:
+    "The Tennessee reading of the NPS National Register (Esri Federal Data copy; one point per listing — a district is one point, not its boundary). " +
+    "The Tennessee Historical Commission's own inventory of recorded-but-unlisted sites is not public GIS, so an empty map is never proof of none.",
+  },
+  critHabitatTn: {
+  notes:
+    "USFWS final critical habitat read at Tennessee sites (mussels and fish in the Stones, Clinch, Holston and Duck systems; plants on the cedar glades). " +
+    "It binds FEDERAL actions, not private land directly — but a Corps wetlands/stream permit is a federal action. USFWS IPaC is the authoritative species list.",
+  },
+  cemeteriesTn: {
+  notes:
+    "USGS GNIS recorded cemeteries read at Tennessee sites — INCOMPLETE by construction: an unrecorded family burial ground is not on it, so an empty " +
+    "map is never proof of none. Tennessee law protects every known burial site; have the property surveyed and ask the county.",
+  },
+  dorSitesTn: {
+  notes:
+    "TDEC Division of Remediation's register of sites in a remediation program (825 OPEN sites): voluntary cleanup, State Superfund (state-funded or liable-party-funded), " +
+    "EPA NPL and non-NPL, Department of Defense, pre-remedial evaluation and the drycleaner program. The register was last edited 2024-06-25, so a site opened since is " +
+    "not on it. A flag for a Phase I ESA — pull TDEC's file — never a finding about a neighbour, and a missing site is not proof of none.",
+  },
+  landfillsTn: {
+  notes:
+    "TDEC's permitted Tennessee landfills (111 operating facilities, Class I–IV by the kind of waste accepted) with the TDEC site id, county and status. " +
+    "A landfill beside the site is a flag (gas, leachate, truck traffic, a closed-cell buffer) — ask TDEC's Division of Solid & Hazardous Waste Management. " +
+    "Closed and unpermitted dumps are NOT on it, so an empty map is never proof of none.",
+  },
+  thcSitesTn: {
+  notes:
+    "The Tennessee Historical Commission's recorded historic-sites survey (186,319 points): buildings and sites surveyed over decades, most of them NOT on the " +
+    "National Register. The service says the paper-to-digital conversion is in progress, so the inventory is partial statewide — an empty map is never proof of " +
+    "none. A flag to check with the Commission (Section 106 review applies where a federal permit is involved).",
+  },
+  nrhpBoundsTn: {
+  notes:
+    "National Register of Historic Places boundaries for Tennessee from the State Historic Preservation Office (2,047 polygons): the footprint of a listed " +
+    "property or district, where the NPS point layer gives one point. Fixed-width padded text from the source is trimmed in the card.",
   },
   hsiGa: {
   notes:
