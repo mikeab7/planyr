@@ -80,7 +80,7 @@ const wellStyle = (props, opacity) => { const w = wellClassOf(props && props.sym
 /* =============================================================== Dams (Water Resources Board) =============================================================== */
 /* The inventory's hazard field is a mix of words and letters (High / H, Significant / S, Low / L, Decommissioned/Drained / D, Unknown / U / Non-Jurisdictional). */
 export const DAM_CLASSES = [
-  { key: "High", label: "High hazard — occupied dwellings downstream", color: "#b91c1c", radius: 6 },
+  { key: "High", label: "High hazard", color: "#b91c1c", radius: 6 },
   { key: "Significant", label: "Significant hazard", color: "#d97706", radius: 5 },
   { key: "Low", label: "Low hazard", color: "#6b7280", radius: 4 },
   { key: "Other", label: "Drained, decommissioned or unclassified", color: "#9ca3af", radius: 3.5 },
@@ -108,7 +108,7 @@ const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T:
 
 /* =============================================================== Tribal areas =============================================================== */
 const TRIBAL = {
-  otsa: { key: "otsa", label: "Tribal statistical area (Census) — not a legal boundary", color: "#7c3aed" },
+  otsa: { key: "otsa", label: "Tribal statistical area (Census) — not a legal boundary", color: "#7c3aed", dash: true },
   osage: { key: "osage", label: "Osage Reservation (Census)", color: "#0f766e" },
   trust: { key: "trust", label: "Trust land (Census)", color: "#a16207" },
   cherokee: { key: "cherokee", label: "Cherokee Nation reservation (the Nation's own file)", color: "#b45309", dash: true },
@@ -141,10 +141,18 @@ const IC_PROGRAM = { SCAP: "Site Cleanup Assistance", VCP: "Voluntary Cleanup", 
 
 /* =============================================================== Water =============================================================== */
 const SRC_WATER = { whpa: { label: "Wellhead protection area (DEQ-modelled)", color: "#0891b2" }, buffer: { label: "Public well 300-ft buffer", color: "#0e7490" }, intake: { label: "Surface-water intake", color: "#1d4ed8" } };
-const PROTECTED = { areaT1: { label: "Appendix B area — parks, forests, wildlife areas", color: "#15803d" }, areaT2: { label: "Appendix B area — federally listed species", color: "#166534", dash: true }, stream: { label: "Appendix B stream", color: "#15803d" }, sens: { label: "Sensitive watershed — OKR10 stormwater permit", color: "#7e22ce", dash: true } };
+export const SPECIAL_WS = [
+  { key: "SR", label: "Scenic River watershed (OWRB)", color: "#0e7490" },
+  { key: "ORW", label: "Outstanding Resource Waters watershed", color: "#047857" },
+  { key: "HQW", label: "High Quality Waters watershed", color: "#65a30d" },
+  { key: "NLW", label: "Nutrient-Limited watershed", color: "#ca8a04" },
+  { key: "SWS", label: "Sensitive water-supply watershed", color: "#2563eb" },
+];
+const specialWsOf = (t) => SPECIAL_WS.find((w) => w.key === String(t || "").trim().toUpperCase()) || null;
+const PROTECTED = { scenic: { label: "Scenic River (OWRB)", color: "#0e7490" }, areaT1: { label: "Appendix B area — parks, forests, wildlife areas", color: "#15803d" }, areaT2: { label: "Appendix B area — federally listed species", color: "#166534", dash: true }, stream: { label: "Appendix B stream", color: "#15803d" }, sens: { label: "Sensitive watershed — OKR10 stormwater permit", color: "#7e22ce", dash: true } };
 export const IMPAIRED = [
   { key: "5a", label: "Impaired — TMDL needed (5a)", color: "#c2410c" },
-  { key: "5b", label: "Impaired — review pending (5b)", color: "#b45309" },
+  { key: "5b", label: "Impaired — category 5b", color: "#b45309" },
   { key: "5c", label: "Impaired — more data needed (5c)", color: "#ca8a04" },
   { key: "4a", label: "Impaired — TMDL complete (4a)", color: "#9ca3af" },
 ];
@@ -159,7 +167,7 @@ export const OK_LAYER_TIERS = {
   ok_deq_superfund: "reference", ok_deq_rcra: "reference", ok_deq_restrictions: "reference", ok_deq_vcp: "reference", ok_deq_scap: "reference", ok_deq_brownfields: "reference", ok_occ_brownfields: "reference",
   ok_deq_solid_waste: "reference", ok_deq_haz_waste: "reference",
   ok_deq_whpa: "reference", ok_deq_well_buffers: "reference", ok_deq_intakes: "reference",
-  ok_deq_appb_areas: "reference", ok_deq_appb_streams: "reference", ok_deq_sensitive: "reference", ok_deq_303d: "reference",
+  ok_deq_appb_areas: "reference", ok_deq_appb_streams: "reference", ok_owrb_scenic: "reference", ok_owrb_special_ws: "reference", ok_deq_sensitive: "reference", ok_deq_303d: "reference",
   ok_dams: "reference", ok_nrhp: "reference", ok_cemeteries: "reference", ok_crit_habitat: "reference", ok_water_systems: "reference",
 };
 
@@ -174,13 +182,13 @@ export const OK_MERGE_GROUPS = {
   ok_cleanup: { label: "Cleanup Sites (DEQ & OCC)", note: "Every Oklahoma cleanup program that publishes a map: DEQ Superfund, RCRA corrective action, Voluntary Cleanup, Cleanup Assistance, Brownfields and recorded land-use restrictions, plus the Corporation Commission's petroleum Brownfields. A Phase I ESA pre-screen, not a substitute for one." },
   ok_waste: { label: "Landfills & Waste Facilities", note: "DEQ-permitted landfills and solid-waste facilities, and hazardous-waste permit sites." },
   ok_source_water: { label: "Drinking-Water Sources", note: "Where public drinking water comes from: DEQ-modelled wellhead protection areas, the fixed 300-ft circle around each public well, and surface-water intakes." },
-  ok_protected_waters: { label: "Protected Waters", note: "Waters Oklahoma protects beyond the ordinary: Water Quality Standards Appendix B areas and streams, and the sensitive watersheds the OKR10 construction stormwater permit singles out." },
+  ok_protected_waters: { label: "Protected Waters", note: "Waters Oklahoma protects beyond the ordinary: Water Quality Standards Appendix B areas and streams, Scenic Rivers and the special-provision watersheds, and the sensitive watersheds the OKR10 construction stormwater permit singles out." },
 };
 
 const CLEANUP_LEGEND = legendOf(Object.values(CLEANUP).map((c) => ({ label: c.label, color: c.color })));
-const TRIBAL_LEGEND = legendOf([TRIBAL.otsa, TRIBAL.osage, TRIBAL.cherokee, TRIBAL.land]);
+const TRIBAL_LEGEND = legendOf([TRIBAL.otsa, TRIBAL.osage, TRIBAL.trust, TRIBAL.cherokee, TRIBAL.land]);
 const WATER_LEGEND = legendOf([SRC_WATER.whpa, SRC_WATER.buffer, SRC_WATER.intake]);
-const PROTECTED_LEGEND = legendOf([PROTECTED.areaT1, PROTECTED.areaT2, PROTECTED.stream, PROTECTED.sens]);
+const PROTECTED_LEGEND = legendOf([PROTECTED.areaT1, PROTECTED.areaT2, PROTECTED.stream, PROTECTED.sens, PROTECTED.scenic, ...SPECIAL_WS]);
 
 const OCC_NOTE_SRC = "Oklahoma Corporation Commission";
 const DEQ = "Oklahoma DEQ";
@@ -191,14 +199,14 @@ export const OK_LAYERS = {
     kind: "vector", label: "County Boundaries (Oklahoma)", mergeGroup: "counties_cities", source: "Oklahoma Department of Transportation",
     url: GIS_SOURCES.okCounty.serviceUrl, ...OKS,
     minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
-    note: "Oklahoma county lines (ODOT, all 77 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
+    note: "Oklahoma county lines (ODOT, all 77 counties). Outside city limits, ask the county what land-use rules apply — Oklahoma counties vary. A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
   ok_city: {
     kind: "vector", label: "City Limits (Oklahoma)", mergeGroup: "counties_cities", source: "Oklahoma Department of Transportation (from the Oklahoma Tax Commission)",
     url: GIS_SOURCES.okCity.serviceUrl, ...OKS,
     minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
-    note: "Oklahoma city and town limits (ODOT, collected from the Oklahoma Tax Commission; 597 places). Inside = in the city; outside = unincorporated county. Oklahoma has no ETJ. NOT proof of utility service.",
+    note: "Oklahoma city and town limits (ODOT, collected from the Oklahoma Tax Commission; 597 places). Inside = in the city; outside = unincorporated county. ETJ is not mapped for Oklahoma. NOT proof of utility service.",
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
     role: "line", group: "jurisdiction", order: 2,
   },
@@ -229,7 +237,7 @@ export const OK_LAYERS = {
     hoverTitle: "Tribal area", hoverSource: "U.S. Census Bureau",
     identifyCard: card("Tribal area", (p) => [rowOf("Name", String(p.NAME || "").replace(/\s+OTSA$/i, " (statistical area)"), { raw: true })],
       "Census Oklahoma Tribal Statistical Areas are statistical areas the Bureau draws with each tribe — they are not legal boundaries and not a ruling on jurisdiction. Whether a parcel is 'Indian country' for a criminal, civil, tax or regulatory purpose is a legal question; ask counsel and the tribal government early."),
-    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas (OTSAs, dashed — statistical, NOT legal boundaries; they overlap where tribes share ground), the Osage Reservation and the Shawnee trust land.",
+    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — statistical, NOT legal boundaries; they overlap where tribes share ground), the Osage Reservation and the Shawnee trust land.",
     infoCaveat: "Since McGirt v. Oklahoma (2020) several Nations' historic reservations are recognized for some purposes. What that means for a given parcel — criminal, civil, tax, regulatory — is a legal question no map answers. In Osage County the Osage Nation also owns the minerals below the ground (the Osage Mineral Estate); excavation there can need the Nation's and the BIA's sign-off (U.S. v. Osage Wind, 10th Cir. 2017).",
     group: "jurisdiction", order: 21,
   }),
@@ -257,15 +265,14 @@ export const OK_LAYERS = {
   /* ---------------------------------------------------------------- Environmental & hazards ---------------------------------------------------------------- */
   ok_wells: pointRow({
     label: "Oil & Gas Wells (Oklahoma)", source: OCC_NOTE_SRC,
-    url: urlFor("okWells"), fields: ["symbol_class", "well_name", "well_num", "operator", "welltype", "county"],
+    url: urlFor("okWells"), fields: ["symbol_class", "well_name", "well_num", "operator", "county"],
     minZoom: 13, color: "#1f2937", weight: 1.5, pointRadius: 4, styleFn: wellStyle, legend: legendOf(WELL_CLASSES),
     hoverTitle: "Oil & gas well", hoverSource: "OCC",
     identifyCard: card("Oil & gas well", (p) => {
       const w = wellClassOf(p.symbol_class);
       return [
         rowOf("Well", [clean(p.well_name), clean(p.well_num)].filter(Boolean).join(" ")),
-        rowOf("Status", w.label, { raw: true }),
-        rowOf("Type", p.welltype),
+        clean(p.symbol_class) ? rowOf("Status", w.label, { raw: true }) : null,
         rowOf("Operator", p.operator),
         rowOf("County", p.county),
       ];
@@ -441,6 +448,28 @@ export const OK_LAYERS = {
     infoCaveat: "DEQ's own description of the layer; the permit text governs. A site inside one needs the permit's endangered-species review.",
     group: "environmental", order: 37,
   }),
+  ok_owrb_scenic: lineRow({
+    label: "Scenic Rivers", mergeGroup: "ok_protected_waters", source: "Oklahoma Water Resources Board — Water Quality Standards",
+    url: urlFor("okScenicRivers"), fields: ["name", "wqs_name", "remark"], minZoom: 8, color: PROTECTED.scenic.color, weight: 2,
+    styleFn: flat(stroke(PROTECTED.scenic.color, 2)),
+    hoverTitle: "Scenic River", hoverSource: "OWRB",
+    identifyCard: card("Scenic River", (p) => [rowOf("River", pick(p, "name")), rowOf("Reach", pick(p, "wqs_name"), { raw: true })].filter(Boolean),
+      "Oklahoma's Scenic Rivers carry the strictest protection in the state's water-quality standards. The Scenic Rivers Commission and OWRB say what applies on the land beside one."),
+    note: "The Scenic Rivers named in the Oklahoma Water Quality Standards (the Illinois River, Barren Fork, Flint Creek, Little Lee Creek and the Upper Mountain Fork; 182 segments, OWRB).",
+    infoCaveat: "The stream line only. The watershed above it is in the Special-Provision Watersheds row.",
+    group: "environmental", order: 36.5,
+  }),
+  ok_owrb_special_ws: areaRow({
+    label: "Special-Provision Watersheds", mergeGroup: "ok_protected_waters", source: "Oklahoma Water Resources Board — Water Quality Standards",
+    url: urlFor("okSpecialWatersheds"), fields: ["name", "type", "type_def"], simplifyFactor: 0.5, minZoom: 8, color: "#0e7490", weight: 1.2,
+    styleFn: (p, opacity) => { const w = specialWsOf(p && p.type); return area(w ? w.color : "#6b7280", 0.14, 1.2)(opacity); },
+    hoverTitle: "Special-provision watershed", hoverSource: "OWRB",
+    identifyCard: card("Special-provision watershed", (p) => [rowOf("Name", p.name), rowOf("Kind", pick(p, "type_def"), { raw: true })].filter(Boolean),
+      "Where the Oklahoma Water Quality Standards add a special provision for the watershed (scenic river, outstanding resource, high quality, nutrient-limited or sensitive water supply). Ask OWRB and DEQ what it means for a new discharge, including stormwater."),
+    note: "Watersheds where the Oklahoma Water Quality Standards add a special provision: Scenic River, Outstanding Resource Waters, High Quality Waters, Nutrient-Limited Watershed, and Sensitive Public and Private Water Supply (190 polygons, OWRB's own types).",
+    infoCaveat: "Nutrient-limited and scenic-river watersheds cover much of northeast Oklahoma's Illinois River basin.",
+    group: "environmental", order: 36.6,
+  }),
   ok_deq_303d: lineRow({
     label: "Impaired Waters (303(d))", source: DEQ + " — 2024 Integrated Report",
     url: urlFor("ok303d"), fields: ["Name", "Category"], simplifyFactor: 0.5, minZoom: 9, color: "#c2410c", weight: 2,
@@ -454,18 +483,19 @@ export const OK_LAYERS = {
 
   ok_dams: pointRow({
     label: "Dams by Hazard Class", source: "Oklahoma Water Resources Board — Dam Safety",
-    url: GIS_SOURCES.okDams.serviceUrl, fields: ["dam_name", "hazard", "owner_name", "owner_type", "county", "river", "year_completed", "dam_height"],
+    url: GIS_SOURCES.okDams.serviceUrl, fields: ["dam_name", "hazard", "owner_name", "owner_type", "county", "river", "year_completed", "dam_height", "inundation_map_created"],
     minZoom: 10, color: "#6b7280", weight: 1.5, pointRadius: 4, styleFn: damStyle, legend: legendOf(DAM_CLASSES),
     hoverTitle: "Dam", hoverSource: "OWRB",
     identifyCard: card("Dam", (p) => [
       rowOf("Name", p.dam_name),
-      rowOf("Hazard class", ({ High: "High — occupied dwellings downstream", Significant: "Significant", Low: "Low", Other: "Drained, decommissioned or unclassified" })[damHazardOf(p.hazard)], { raw: true }),
+      rowOf("Hazard class", ({ High: "High", Significant: "Significant", Low: "Low", Other: "Drained, decommissioned or unclassified" })[damHazardOf(p.hazard)], { raw: true }),
       rowOf("Owner", p.owner_name), rowOf("Owner type", damOwnerType(p.owner_type), { raw: true }),
       rowOf("Stream", p.river), rowOf("County", p.county), rowOf("Built", p.year_completed, { raw: true }),
       Number(p.dam_height) > 0 ? rowOf("Height", `${Number(p.dam_height).toLocaleString("en-US", { maximumFractionDigits: 1 })} ft`, { raw: true }) : null,
+      /^y(es)?$/i.test(String(p.inundation_map_created || "").trim()) ? rowOf("Inundation map", "On file with OWRB — ask for it", { raw: true }) : null,
     ].filter(Boolean), "The hazard class describes the consequence of a failure downstream, not the dam's condition."),
-    note: "The Oklahoma Dam Inventory (OWRB; 4,900+ dams, including NRCS flood-control and federal dams) by hazard class. High hazard = occupied dwellings immediately downstream.",
-    infoCaveat: "No dam-break inundation map is published. A site downstream of a high or significant hazard dam is a question for the dam's owner and OWRB.",
+    note: "The Oklahoma Dam Inventory (OWRB; 4,900+ dams, including NRCS flood-control and federal dams) by hazard class. OWRB describes a High hazard dam as one with occupied dwellings immediately downstream.",
+    infoCaveat: "The inventory flags the 107 dams that have an inundation map on file with OWRB (the map itself is OWRB's to give); for any other dam none is published. A site downstream of a high or significant hazard dam is a question for the dam's owner and OWRB.",
     group: "environmental", order: 39,
   }),
 
@@ -473,7 +503,7 @@ export const OK_LAYERS = {
     label: "Historic Places", source: "National Park Service — National Register of Historic Places",
     url: GIS_SOURCES.okNrhp.serviceUrl, minZoom: 11, color: "#6d28d9", weight: 2, pointRadius: 4,
     hoverTitle: "Historic place", hoverSource: "NPS National Register",
-    identifyCard: card("Historic place", (p) => [rowOf("Name", pick(p, "RESNAME")), rowOf("Type", pick(p, "ResType"), { raw: true }), rowOf("City", pick(p, "City")), rowOf("County", pick(p, "County"))].filter(Boolean)),
+    identifyCard: card("Historic place", (p) => [rowOf("Name", pick(p, "RESNAME")), rowOf("Type", String(pick(p, "ResType") || "").replace(/^./, (c) => c.toUpperCase()), { raw: true }), rowOf("City", pick(p, "City")), rowOf("County", pick(p, "County"))].filter(Boolean)),
     note: "National Register listings — one point per listing (a district is one point, not its boundary). The State Historic Preservation Office's own inventory is not public, so recorded-but-unlisted sites are NOT here. A flag to check with the Oklahoma SHPO.",
     group: "environmental", order: 40,
   }),
@@ -520,7 +550,7 @@ export const OK_VECTOR_SOURCES = {
     labelZoom: { min: 6, max: 11 },
     nameTemplate: "{name} County",
     titleCaseLabel: true,
-    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits, ask it what land-use rules apply; Oklahoma counties vary. A boundary is not a utility service area. Screening only.",
     sourceName: "Oklahoma DOT",
     liveFallback: true,
     query: {
@@ -546,7 +576,7 @@ export const OK_VECTOR_SOURCES = {
     labelZoom: { min: 10, max: 13 },
     nameTemplate: "{name} — city limits",
     titleCaseLabel: true,
-    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. Oklahoma has no ETJ. NOT proof of utility service. Screening only.",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. ETJ is not mapped for Oklahoma. NOT proof of utility service. Screening only.",
     sourceName: "Oklahoma DOT (Oklahoma Tax Commission)",
     liveFallback: true,
     query: {

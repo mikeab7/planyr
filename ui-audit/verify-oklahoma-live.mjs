@@ -54,6 +54,8 @@ const CASES = [
   R("env", "ok_protected_waters", "Appendix B areas", "WaterQWeb/MapServer/15/query", 36.22283, -95.79879, 13),
   R("env", "ok_protected_waters", "Appendix B streams", "WaterQWeb/MapServer/16/query", 36.3393, -95.69846, 13),
   R("env", "ok_protected_waters", "Stormwater sensitive watersheds", "WaterQWeb/MapServer/1/query", 35.95506, -95.4752, 12),
+  R("env", "ok_protected_waters", "Scenic Rivers", "Standards/MapServer/0/query", 36.20347, -94.70473, 13),
+  R("env", "ok_protected_waters", "Special-provision watersheds", "Standards/MapServer/9/query", 36.22015, -95.92554, 12),
   R("env", "ok_deq_303d", "Impaired waters", "WaterQWeb/MapServer/19/query", 36.1455, -96.00993, 14),
   R("env", "ok_dams", "Dams", "Dam_Hazard_Classification_AGOL", 36.12085, -95.98778, 14),
   R("env", "ok_nrhp", "Historic places", "nrhp_points_v1", 36.15338, -95.9928, 14),

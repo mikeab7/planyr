@@ -21,7 +21,8 @@
  *   · Osage Mineral Estate — the Census' Osage Reservation shape (in `okTribal`) is the only public polygon; the Osage Minerals Council publishes no boundary service.
  *   · Muscogee (Creek) / Choctaw / Chickasaw / Seminole / Osage nation reservation files — the Nations' services are "limited usage" (utility.arcgis.com), a
  *     third-party university copy, or absent; the Census OTSA layer in `okTribal` covers every Nation consistently.
- *   · Scenic Rivers (Illinois, Flint, Barren Fork …) and Outstanding Resource / High Quality / Sensitive Water Supply designations — OWRB publishes no polygon service for them.
+ *   · (Scenic Rivers and the Outstanding Resource / High Quality / Nutrient-Limited / Sensitive Water Supply watersheds ARE built — OWRB's Water Quality Standards MapServer, found by the adversarial review; an earlier draft wrongly said they were unpublished.)
+ *   · Fault lines (OWRB, 26,000 lines) — published, but a geologic-map fault is not a development constraint at screening scale (the Texas growth-fault layer exists because Houston faults move; Oklahoma's mapped faults are not that).
  *   · SHPO Landmarks Inventory / archaeological sites — restricted; the National Register points (okNrhp) are the public part.
  *   · Karst / gypsum sinkholes, abandoned coal mines — the Geological Survey publishes no service; ODOT's "Coal_Mines" file states no provenance and is a 1979 vintage.
  *   · NFIP community participation (OWRB) — city POINTS only, not an area; FEMA's flood row already answers the question a site-wide lender asks.
@@ -33,6 +34,7 @@ const OK = (key, o) => ({ key, coverage: "oklahoma", states: ["OK"], tier: "prod
 const ODOT = "https://services6.arcgis.com/RBtoEUQ2lmN0K3GY/arcgis/rest/services";
 const OCC = "https://gis.occ.ok.gov/server/rest/services/Hosted";
 const DEQ_LAND = "https://gis.deq.ok.gov/server/rest/services/LandWeb/MapServer";
+const OWRB_STD = "https://owrb.csa.ou.edu/server/rest/services/Surface_Water/Standards/MapServer";
 const DEQ_WATER = "https://gis.deq.ok.gov/server/rest/services/WaterQWeb/MapServer";
 const CHEROKEE = "https://services3.arcgis.com/jmdMqrrIb2yaWJJ6/arcgis/rest/services";
 
@@ -170,6 +172,14 @@ export const OK_SOURCES = {
     serviceUrl: "https://services2.arcgis.com/fI5CUOPa2wdhkCHV/arcgis/rest/services/Dam_Hazard_Classification_AGOL/FeatureServer/0",
     geometryType: "point", fields: { name: "dam_name", hazard: "hazard", owner: "owner_name", ownerType: "owner_type", county: "county", river: "river", year: "year_completed", height: "dam_height", kind: "gis_type" }, dataLastEdited: "2026-09-22",
   }),
+  okScenicRivers: OK("okScenicRivers", {
+    label: "Scenic Rivers (Oklahoma Water Resources Board)", provider: "Oklahoma Water Resources Board — Water Quality Standards, Scenic Rivers",
+    serviceUrl: OWRB_STD, layerId: 0, geometryType: "line", fields: { name: "name", wqs: "wqs_name", remark: "remark" },
+  }),
+  okSpecialWatersheds: OK("okSpecialWatersheds", {
+    label: "Special-provision watersheds (Oklahoma Water Resources Board)", provider: "Oklahoma Water Resources Board — Water Quality Standards, Special Provision Watersheds (detail)",
+    serviceUrl: OWRB_STD, layerId: 9, geometryType: "polygon", fields: { name: "name", type: "type", def: "type_def" },
+  }),
   okWaterSystems: OK("okWaterSystems", {
     label: "Public water-system service areas, approximate (Oklahoma Water Resources Board)", provider: "Oklahoma Water Resources Board — Public Water Supply Approximate System Service Areas",
     serviceUrl: "https://owrb.csa.ou.edu/server/rest/services/Water_Supply/Water_Systems/MapServer", layerId: 0, geometryType: "polygon", fields: { name: "name", pwsid: "pwsid", county: "county" },
@@ -198,5 +208,6 @@ export const OK_FIXTURE_REACH = {
   okCherokeeRes: ["regional", "One polygon: the Cherokee Nation's reservation (northeast Oklahoma) — probing it in Guymon would assert a guaranteed zero."],
   okCherokeeLand: ["regional", "Cherokee Nation tribal land tracts — the Nation's fourteen-county area in northeast Oklahoma."],
   okAppendixBLine: ["regional", "Fourteen stream lines in all (DEQ Appendix B Table 1/2 streams), clustered in the Ouachita and Osage hills — there is no statewide spread to probe."],
+  okScenicRivers: ["regional", "OWRB's Scenic Rivers are the Illinois River, Barren Fork, Flint Creek, Little Lee Creek and the Upper Mountain Fork — all in the east of the state; there is no statewide spread to probe."],
   okSensitiveWaters: ["regional", "Fifty-two HUC-11 watersheds, all in the east-central half of the state — the fixtures sit on two of them, far apart."],
 };

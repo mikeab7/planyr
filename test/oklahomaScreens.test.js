@@ -12,7 +12,7 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVe
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
 import { ALL_LAYERS, MERGE_GROUPS } from "../src/workspaces/site-planner/lib/layers.js";
-import { OK_LAYERS, OK_MERGE_GROUPS, OK_VECTOR_SOURCES, OK_LAYER_TIERS, WELL_CLASSES, wellClassOf, DAM_CLASSES, damHazardOf, ROAD_CLASSES, IMPAIRED, urlFor, viaRelay, registryUrl, clean, tc } from "../src/workspaces/site-planner/lib/oklahomaLayers.js";
+import { SPECIAL_WS, OK_LAYERS, OK_MERGE_GROUPS, OK_VECTOR_SOURCES, OK_LAYER_TIERS, WELL_CLASSES, wellClassOf, DAM_CLASSES, damHazardOf, ROAD_CLASSES, IMPAIRED, urlFor, viaRelay, registryUrl, clean, tc } from "../src/workspaces/site-planner/lib/oklahomaLayers.js";
 import { VECTOR_SOURCES } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
@@ -36,7 +36,7 @@ describe("the Oklahoma rows are offered in Oklahoma and nowhere else", () => {
     for (const [k, s] of Object.entries(ELSEWHERE)) expect(s.state, k).not.toBe("OK");
   });
   it("every row declares exactly states:[OK] and is available at the owner's real site", () => {
-    expect(ids.length).toBe(29);
+    expect(ids.length).toBe(31);
     for (const id of ids) {
       expect(ALL_LAYERS[id], id).toBeTruthy();
       expect(ALL_LAYERS[id].states, id).toEqual(["OK"]);
@@ -141,7 +141,7 @@ describe("endpoints: the registry decides, and the relay is allow-listed", () =>
     for (const id of ids.filter((i) => !relayed.includes(i) && ALL_LAYERS[i].kind === "esriFeature")) expect(ALL_LAYERS[id].url, id).toMatch(/^https:\/\/(services\d*\.arcgis\.com|carto\.nationalmap\.gov)\//);
   });
   it("the row URL is the registry URL (+ the sub-layer id) — never a second, hand-typed endpoint", () => {
-    const pairs = { ok_wells: "okWells", ok_pst: "okPst", ok_deq_superfund: "okSuperfund", ok_deq_rcra: "okRcra", ok_deq_restrictions: "okInstControl", ok_deq_vcp: "okVcp", ok_deq_scap: "okScap", ok_deq_brownfields: "okBrownfieldDeq", ok_occ_brownfields: "okBrownfieldOcc", ok_deq_solid_waste: "okSolidWaste", ok_deq_haz_waste: "okHazWaste", ok_deq_whpa: "okWhpa", ok_deq_well_buffers: "okWellBuffer", ok_deq_intakes: "okPwsIntake", ok_deq_appb_areas: "okAppendixBArea", ok_deq_appb_streams: "okAppendixBLine", ok_deq_sensitive: "okSensitiveWaters", ok_deq_303d: "ok303d", ok_dams: "okDams", ok_water_systems: "okWaterSystems", ok_nrhp: "okNrhp", ok_cemeteries: "okCemeteries", ok_crit_habitat: "okCritHabitat", ok_road: "okRoad", ok_tribal: "okTribal", ok_cherokee_res: "okCherokeeRes", ok_cherokee_land: "okCherokeeLand" };
+    const pairs = { ok_wells: "okWells", ok_pst: "okPst", ok_deq_superfund: "okSuperfund", ok_deq_rcra: "okRcra", ok_deq_restrictions: "okInstControl", ok_deq_vcp: "okVcp", ok_deq_scap: "okScap", ok_deq_brownfields: "okBrownfieldDeq", ok_occ_brownfields: "okBrownfieldOcc", ok_deq_solid_waste: "okSolidWaste", ok_deq_haz_waste: "okHazWaste", ok_deq_whpa: "okWhpa", ok_deq_well_buffers: "okWellBuffer", ok_deq_intakes: "okPwsIntake", ok_deq_appb_areas: "okAppendixBArea", ok_deq_appb_streams: "okAppendixBLine", ok_deq_sensitive: "okSensitiveWaters", ok_deq_303d: "ok303d", ok_owrb_scenic: "okScenicRivers", ok_owrb_special_ws: "okSpecialWatersheds", ok_dams: "okDams", ok_water_systems: "okWaterSystems", ok_nrhp: "okNrhp", ok_cemeteries: "okCemeteries", ok_crit_habitat: "okCritHabitat", ok_road: "okRoad", ok_tribal: "okTribal", ok_cherokee_res: "okCherokeeRes", ok_cherokee_land: "okCherokeeLand" };
     for (const [id, key] of Object.entries(pairs)) expect(ALL_LAYERS[id].url.replace(/^(\/gis-proxy\/[^/]+|https:\/\/[^/]+)/, ""), id).toBe(registryUrl(key).replace(/^https:\/\/[^/]+/, ""));
     expect(Object.keys(pairs).length + 2).toBe(ids.length); // + the two vector rows
     expect(urlFor("okWells")).toMatch(/^\/gis-proxy\/gis\.occ\.ok\.gov\//);
@@ -162,8 +162,8 @@ describe("endpoints: the registry decides, and the relay is allow-listed", () =>
 
 describe("the Oklahoma registry rows", () => {
   const keys = Object.keys(OK_SOURCES);
-  it("29 rows, each Oklahoma-scoped, production-tier, https, not on a test/staging path, with a provider and a verified date", () => {
-    expect(keys.length).toBe(29);
+  it("31 rows, each Oklahoma-scoped, production-tier, https, not on a test/staging path, with a provider and a verified date", () => {
+    expect(keys.length).toBe(31);
     for (const k of keys) {
       const s = GIS_SOURCES[k];
       expect(s, k).toBe(OK_SOURCES[k]);
@@ -286,6 +286,66 @@ describe("the Counties & Cities row learns Oklahoma", () => {
     const { isCountyLinesId, isCityLimitsId } = await import("../src/workspaces/site-planner/lib/vectorLayers.js");
     expect(isCountyLinesId("ok_county")).toBe(true);
     expect(isCityLimitsId("ok_city")).toBe(true);
-    expect(ALL_LAYERS.ok_city.note).toMatch(/no ETJ/);
+    expect(ALL_LAYERS.ok_city.note).toMatch(/ETJ is not mapped/);
+  });
+});
+
+describe("adversarial-review findings, pinned (each was a confirmed defect)", () => {
+  it("OWRB's Scenic Rivers and special-provision watersheds ARE offered, in Protected Waters, and the 'not built' header no longer says otherwise", async () => {
+    expect(ALL_LAYERS.ok_owrb_scenic.mergeGroup).toBe("ok_protected_waters");
+    expect(ALL_LAYERS.ok_owrb_special_ws.mergeGroup).toBe("ok_protected_waters");
+    const fs = await import("node:fs");
+    const hdr = fs.readFileSync(new URL("../src/shared/gis/sourcesOk.js", import.meta.url), "utf8").split("export const OK_SOURCES")[0];
+    expect(hdr).not.toMatch(/OWRB publishes no polygon service for them/);
+  });
+  it("the special-watershed ink matches its legend, type by type", () => {
+    for (const w of SPECIAL_WS) {
+      expect(ALL_LAYERS.ok_deq_appb_areas.legend).toContainEqual({ label: w.label, color: w.color });
+      expect(ALL_LAYERS.ok_owrb_special_ws.styleFn({ type: w.key }, 1).color, w.key).toBe(w.color);
+    }
+  });
+  it("the tribal key lists the Shawnee trust land the map draws, and the dashed OTSA swatch is dashed", () => {
+    const k = ALL_LAYERS.ok_tribal.legend;
+    expect(k.find((e) => /Trust land/i.test(e.label))).toBeTruthy();
+    expect(k.find((e) => /statistical/i.test(e.label)).dash).toBe(true);
+    expect(ALL_LAYERS.ok_tribal.styleFn({ NAME: "Shawnee Trust Land" }, 1).color).toBe(k.find((e) => /Trust land/i.test(e.label)).color);
+  });
+  it("a well card never prints a raw well-type code, and a well with no class carries no Status row", () => {
+    const rows = ALL_LAYERS.ok_wells.identifyCard({ well_name: "X", symbol_class: "", welltype: "NT", operator: "A B" }).rows;
+    expect(rows.find((r) => r.label === "Type")).toBeUndefined();
+    expect(rows.find((r) => r.label === "Status")).toBeUndefined();
+    expect(ALL_LAYERS.ok_wells.fields).not.toContain("welltype");
+  });
+  it("dam copy: the High definition is OWRB's, the inundation maps are acknowledged, and the card shows one when the inventory says it exists", () => {
+    const t = [ALL_LAYERS.ok_dams.note, ALL_LAYERS.ok_dams.infoCaveat].join(" ");
+    expect(t).not.toMatch(/No dam-break inundation map is published/);
+    expect(t).toMatch(/107 dams/);
+    expect(t).toMatch(/OWRB describes/);
+    expect(ALL_LAYERS.ok_dams.legend[0].label).toBe("High hazard");
+    const y = ALL_LAYERS.ok_dams.identifyCard({ dam_name: "A", hazard: "H", inundation_map_created: "Y" }).rows;
+    expect(y.find((r) => r.label === "Inundation map")).toBeTruthy();
+    expect(ALL_LAYERS.ok_dams.identifyCard({ dam_name: "A", hazard: "H", inundation_map_created: "false" }).rows.find((r) => r.label === "Inundation map")).toBeUndefined();
+    expect(ALL_LAYERS.ok_dams.fields).toContain("inundation_map_created");
+  });
+  it("no row asserts an uncited legal conclusion: no 'no ETJ', no 'county is the zoning authority', no invented 5b meaning", () => {
+    for (const id of ids) {
+      const c = ALL_LAYERS[id];
+      const text = [c.note, c.infoCaveat, c.identifyNote].join(" ");
+      expect(text, id).not.toMatch(/has no ETJ|zoning and permitting authority|review pending/i);
+    }
+    expect(OK_SOURCES.okCity.fullPurposeOnly).toBe(true);
+  });
+  it("the quoted tribal counts say 25 areas plus four joint-use areas", () => {
+    expect(ALL_LAYERS.ok_tribal.note).toMatch(/25 Oklahoma Tribal Statistical Areas plus four joint-use areas/);
+  });
+  it("city labels keep the Mc prefix capital (McAlester, McKinney)", async () => {
+    const { titleCaseName } = await import("../src/workspaces/site-planner/lib/boundaryLabels.js");
+    expect(titleCaseName("MCALESTER")).toBe("McAlester");
+    expect(titleCaseName("MCKINNEY")).toBe("McKinney");
+    expect(titleCaseName("SAND SPRINGS")).toBe("Sand Springs");
+    expect(titleCaseName("MACKVILLE")).toBe("Mackville");
+  });
+  it("the NRHP card capitalises the type", () => {
+    expect(ALL_LAYERS.ok_nrhp.identifyCard({ RESNAME: "X", ResType: "building" }).rows.find((r) => r.label === "Type").text).toBe("Building");
   });
 });

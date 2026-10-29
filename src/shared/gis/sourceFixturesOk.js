@@ -131,6 +131,16 @@ export const OK_FIXTURES = {
     { label: "Panhandle", point: [-101.72444, 36.66492], expectMinCount: 1 }, // live: 1
     { label: "Durant area (south)", point: [-96.38776, 33.98309], expectMinCount: 1 }, // live: 1
   ] },
+  okScenicRivers: { fixtures: [
+    { label: "Illinois River / Flint Creek area (Delaware Co.)", point: [-94.70473, 36.20347], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Upper Mountain Fork area (McCurtain Co.)", point: [-94.69189, 34.3918], expectMinCount: 1 }, // live: 3
+  ] },
+  okSpecialWatersheds: { fixtures: [
+    { label: "Tulsa area", point: [-95.92554, 36.22015], expectMinCount: 1 }, // live: 1
+    { label: "Oklahoma City area", point: [-97.52537, 35.48439], expectMinCount: 1 }, // live: 1
+    { label: "Wichita Mountains area", point: [-98.32997, 34.77142], expectMinCount: 1 }, // live: 1
+    { label: "McAlester area", point: [-95.888, 34.86412], expectMinCount: 1 }, // live: 1
+  ] },
   okDams: { fixtures: [
     { label: "Tulsa", point: [-95.98778, 36.12085], expectMinCount: 1 }, // live: 1
     { label: "Oklahoma City", point: [-97.56699, 35.45791], expectMinCount: 1 }, // live: 1
@@ -162,8 +172,8 @@ export const OK_FIXTURES = {
 };
 
 export const OK_DOCS = {
-  okCounty: { notes: "ODOT's County Boundaries (77 counties, edited 2026-08-11). The county is the zoning and permitting authority outside city limits; a boundary is a jurisdiction line, not a service area." },
-  okCity: { notes: "ODOT's city limits (597 places), collected from the Oklahoma Tax Commission, edited 2026-10-05 — an annexation after that date is not in it. Oklahoma has no ETJ, so there is no ETJ row. Inside a line is the city's jurisdiction; it is NOT proof of utility service." },
+  okCounty: { notes: "ODOT's County Boundaries (77 counties, edited 2026-08-11). Outside city limits, ask the county what land-use rules apply — they vary; a boundary is a jurisdiction line, not a service area." },
+  okCity: { notes: "ODOT's city limits (597 places), collected from the Oklahoma Tax Commission, edited 2026-10-05 — an annexation after that date is not in it. ETJ is not mapped for Oklahoma. Inside a line is the city's jurisdiction; it is NOT proof of utility service." },
   okRoad: { notes: "ODOT's linear-referencing Roadways layer, narrowed to the state system (Interstate, US highway, state highway, turnpike) by ODOTROUTECLASS. On these the Department (or the Turnpike Authority) permits access; off them the county or city does — an absent line is NOT 'unmaintained'." },
   okTribal: { notes: "Census Bureau American Indian / Alaska Native / Native Hawaiian Areas, Oklahoma rows only. The 25 Oklahoma Tribal Statistical Areas are STATISTICAL areas drawn by the Bureau with each tribe — they are not legal boundaries and not a jurisdiction ruling; the Osage Reservation is the Bureau's legal federal reservation. Whether land is 'Indian country' for a criminal, civil, tax or regulatory purpose is a legal question no map answers." },
   okCherokeeRes: { notes: "The Cherokee Nation's own reservation polygon, published by the Nation on its ArcGIS Online org (edited 2026-09-24). The Nation's depiction of its boundary; the legal consequence for a given parcel is a question for counsel and the Nation." },
@@ -186,7 +196,9 @@ export const OK_DOCS = {
   okAppendixBLine: { notes: "Oklahoma Water Quality Standards, Appendix B streams (14 lines, OAC 252:730) — the stream segments of the Appendix B areas." },
   okSensitiveWaters: { notes: "DEQ's sensitive waters and watersheds harboring threatened and endangered species (52 HUC-11 watersheds) as used by the OKR10 Construction General Stormwater Permit (the layer's own DEQ description)." },
   ok303d: { notes: "DEQ's 2024 Integrated Report 303(d) waterbodies (839 stream segments) by category: 4a impaired, TMDL complete · 5a impaired, TMDL needed · 5b · 5c impaired, more data needed." },
-  okDams: { notes: "OWRB's Oklahoma Dam Inventory (4,980 dams, edited 2026-09-22) by hazard class — High means occupied dwellings immediately downstream. The hazard class describes the consequence of failure, not the dam's condition; no inundation map is published." },
+  okScenicRivers: { notes: "OWRB Water Quality Standards, Scenic Rivers (182 stream segments): the Illinois River, Barren Fork, Flint Creek, Little Lee Creek and the Upper Mountain Fork. The scenic-river designation carries the strictest protection in the state's water-quality standards; the Scenic Rivers Commission and OWRB say what applies on the land beside one." },
+  okSpecialWatersheds: { notes: "OWRB Water Quality Standards, Special Provision Watersheds (detail; 190 polygons): the watersheds where the standards add a special provision — Scenic River (SR), Nutrient-Limited (NLW), Outstanding Resource Waters (ORW), High Quality Waters (HQW) and Sensitive Public and Private Water Supply (SWS). The type names are OWRB's own legend." },
+  okDams: { notes: "OWRB's Oklahoma Dam Inventory (4,980 dams, edited 2026-09-22) by hazard class — OWRB describes a High hazard dam as one with occupied dwellings immediately downstream. The hazard class describes the consequence of failure, not the dam's condition; the inventory flags the 107 dams that have an inundation map on file (ask OWRB for it)." },
   okWaterSystems: { notes: "OWRB's approximate service areas for public water systems (720 polygons) — towns and rural water districts. APPROXIMATE: not a certificated territory and not a commitment to serve; confirm availability and size with the system." },
   okNrhp: { notes: "National Register of Historic Places listings — one point each (a district is one point). The State Historic Preservation Office's landmark inventory is not public." },
   okCemeteries: { notes: "USGS GNIS recorded cemeteries. INCOMPLETE by construction — unrecorded family burial grounds are not on it." },
