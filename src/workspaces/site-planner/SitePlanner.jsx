@@ -191,6 +191,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
+import { crumbFloor } from "../../shared/ui/crumbScope.js";
 import RotationStepper, { normalizeDeg, formatDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
@@ -22327,13 +22328,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: FONT_SIZE.control, fontWeight: 500, color: "var(--chrome-text)",
-          maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
+          maxWidth: 200, minWidth: crumbFloor(planLabel, CRUMB_MIN_W), whiteSpace: "nowrap",
         }}
         onClick={() => setPlanMenu((o) => { const next = !o; if (next) refreshDeletedPlansHere(); return next; })}
         title="Switch or rename plan"
         data-testid="plan-crumb"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
+        <span title={planLabel} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); setPlanPurgeArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>

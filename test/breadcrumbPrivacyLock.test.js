@@ -102,6 +102,6 @@ describe("NEW-1 — the breadcrumb's project-privacy padlock is gone", () => {
     // Nothing but the opening of the name's own <span> and (stripped) comments should remain
     // here — EXCEPT the NEW-4/B1343203 compact-crumb ternary, which is a real, deliberate branch
     // (not a leftover), so it's allowed to precede the span rather than banned outright.
-    expect(between.replace(/\s+/g, " ").trim()).toMatch(/^(\{\/\*[\s\S]*?\*\/\}\s*)*(\{crumbCompact \? \( <CollapsedCrumbIcon \/> \) : \( )?<span style=\{\{ overflow:/);
+    expect(between.replace(/\s+/g, " ").trim()).toMatch(/^(\{\/\*[\s\S]*?\*\/\}\s*)*(\{crumbCompact \? \( <CollapsedCrumbIcon \/> \) : \( )?<span (?:data-testid="[^"]*" )?(?:title=\{[^}]*\} )?style=\{\{ overflow:/);
   });
 });

@@ -66,6 +66,7 @@ import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule, prefetchModuleWhenQuiet } from "../../app/modulePrefetch.js";
 import { ORG_CAPABLE_MODULES } from "../../app/route.js";
+import { trailingCrumbFor } from "./crumbScope.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 import { bareFullscreenAllowed, insideLettersAreText } from "../keyboard/bareLetterGate.js";
 import { MODULE_TAB_LABEL } from "./moduleTabLabel.js";
@@ -1244,7 +1245,7 @@ export default function AppHeader({
                 cross={cross}
                 org={org}
                 onSelectOrg={onSelectOrg}
-                planSlot={planSlot}
+                planSlot={trailingCrumbFor(module, planSlot)}
                 narrow={narrow}
                 rowRef={rowRef}
               />
