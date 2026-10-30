@@ -61,6 +61,7 @@ describe("landmarks the review measured", () => {
     // reach's Key ring and its Gulf lobe overlapped, and an even-odd union turned the overlap into a hole. USGS and Esri both put each of these in Florida.
     ["Perdido Key FL, Gulf-shore strip (was a hole)", 30.2845, -87.4935, "FL"], ["Perdido Key FL, Gulf-shore strip, west", 30.282, -87.51, "FL"],
     ["Perdido Key FL, Gulf-shore strip, mid", 30.2835, -87.502, "FL"], ["Perdido Key FL, Gulf-shore strip, east", 30.285, -87.491, "FL"],
+    ["Gulf water off the Key's shore, between the lobe and the Key ring (a ~100 m sliver read AL; USGS: Florida)", 30.2895, -87.4635, "FL"], ["Gulf water off the Key's shore, mid", 30.2875, -87.472, "FL"],
     ["Alabama Point, Gulf side of the line (USGS: Alabama; the lobe edge was 150 m west of the line)", 30.28, -87.52, "AL"],
     // the Chattahoochee, where the old Georgia outline overruled up to 2.9 km: Alabama towns beside the river read Alabama
     ["Phenix City AL", 32.4709, -85.0008, "AL"], ["Valley AL", 32.8057, -85.1713, "AL"], ["Lanett AL", 32.8668, -85.1913, "AL"],

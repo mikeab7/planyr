@@ -9,6 +9,9 @@
  * (Census TIGER/Line itself and the 1:500k cartographic files sit on hosts the build sandbox's egress policy blocks — www2.census.gov, tigerweb.geo.census.gov —
  * so the USGS service is the reachable fine-scale source; it is stated here so the choice is not mistaken for a convenience.)
  *
+ * WATER IS NOT GATED: the state line runs through Perdido Bay and the Gulf and the two layers legitimately draw it differently there, so water cells are only counted
+ * (`waterDisagree`). The Gulf lobe (a reach component that exists for water) is therefore covered by landmarks in test/stateLineReaches.test.js, not by this gate.
+ * The fixture step checks the FIXTURE against USGS (is the ground truth itself right); the grid step is what exercises `siteState`.
  * WHAT IT DOES, for the two reach windows (Perdido: 30.2–30.56 N, -87.53…-87.36; Chattahoochee: 31.0–32.95 N, -85.3…-84.85):
  *   1. every fixture sample (county land, both banks of both reaches) must be in the state the fixture says, per USGS;
  *   2. a grid over each window (0.0005° Perdido, 0.001° Chattahoochee) — for every cell USGS holds in AL / FL / GA, `siteState` must agree; every disagreement is
@@ -46,14 +49,19 @@ async function fetchLand(w) {
   const q = new URLSearchParams({ where: "STATE_ABBR IN ('AL','FL','GA')", geometry: w.env.join(","), geometryType: "esriGeometryEnvelope", inSR: "4326", outSR: "4326", outFields: "STATE_ABBR", maxAllowableOffset: "0.00002", f: "geojson" });
   const r = await fetch(`${LAND}?${q}`, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!r.ok) throw new Error(`land mask ${r.status}`);
-  writeFileSync(join(DATA, w.file.replace("usgs_state_", "landmask_")), await r.text());
+  const txt = await r.text();
+  /* a truncated mask would silently turn land into "water" and exempt it from every fault — refuse it */
+  if (/exceededTransferLimit/.test(txt)) throw new Error("land mask truncated (exceededTransferLimit) — instrument void");
+  writeFileSync(join(DATA, w.file.replace("usgs_state_", "landmask_")), txt);
 }
 async function fetchWindow(w) {
   const q = new URLSearchParams({ where: "1=1", geometry: w.env.join(","), geometryType: "esriGeometryEnvelope", inSR: "4326", outSR: "4326", outFields: "state_name", f: "geojson" });
   const r = await fetch(`${BASE}?${q}`, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!r.ok) throw new Error(`USGS govunits ${r.status}`);
   mkdirSync(DATA, { recursive: true });
-  writeFileSync(join(DATA, w.file), await r.text());
+  const txt = await r.text();
+  if (/exceededTransferLimit/.test(txt)) throw new Error("USGS state polygons truncated (exceededTransferLimit) — instrument void");
+  writeFileSync(join(DATA, w.file), txt);
 }
 
 /* a polygon set with per-latitude edge buckets so a 900 k-cell grid stays cheap */

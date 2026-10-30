@@ -47,8 +47,8 @@ const SOURCES = {
 };
 const CHATTAHOOCHEE = { box: [31.0, -85.3, 32.95, -84.85], tol: 0.0003, grow: 0.003 };
 const PERDIDO = { box: [30.2, -87.53, 30.56, -87.36], grow: 0.0005, tol: 0.0002,
-  /* the Gulf lobe [lng, lat…]: west edge on the Alabama Point line (-87.5186 — where the Escambia / Baldwin county line meets the Gulf; it was -87.52, 150 m into Alabama's water, per the independent USGS cross-check), top edge just south of the beach */
-  lobe: [[-87.5186, 30.2], [-87.4, 30.2], [-87.4, 30.298], [-87.5186, 30.281]] };
+  /* the Gulf lobe [lng, lat…]: west edge on the Alabama Point line (-87.5186 — where the Escambia / Baldwin county line meets the Gulf; it was -87.52, 150 m into Alabama's water, per the independent USGS cross-check), top edge 0.0015° (~165 m) INTO the Key's land so it overlaps the grown Key ring instead of leaving a ~100 m sliver of Florida Gulf water between them (the fourth-review reviewer found it; the union is non-zero now, and the later `less Baldwin land` step keeps any Alabama land out) */
+  lobe: [[-87.5186, 30.2], [-87.4, 30.2], [-87.4, 30.2995], [-87.5186, 30.2825]] };
 
 async function fetchAll() {
   mkdirSync(SRC, { recursive: true });
