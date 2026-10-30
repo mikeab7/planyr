@@ -63,29 +63,12 @@ async function clickEnd(needle) {
 }
 const enterAt = async (needle) => { await clickEnd(needle); await page.waitForTimeout(650); await clickEnd(needle); await page.keyboard.press("End"); };
 
+let got;
 try {
-  console.log("\n[1] a Word outline pasted on blank paper; Enter at levels 1, 3 and 4");
-  const at = await page.evaluate(() => { const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect(); return { x: r.left + r.width * 0.08, y: r.top + r.height * 0.15 }; });
-  await page.mouse.dblclick(at.x, at.y); await page.waitForTimeout(500);
-  ok("a double-click on blank paper armed a caret", await page.evaluate(() => !!document.querySelector('[data-testid="note-pending-caret"]')));
-  const html = fs.readFileSync(path.join(FX, "word-outline-table.html"), "utf8"), text = fs.readFileSync(path.join(FX, "word-outline-table.txt"), "utf8");
-  await page.evaluate(([h, t]) => { const dt = new DataTransfer(); dt.setData("text/html", h); dt.setData("text/plain", t); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); }, [html, text]);
-  await page.waitForTimeout(1800);
-  let got = await lists();
-  ok("the outline pasted as real nested lists", got[0] === "• Soft costs" && got.includes("    • Fee by building size, per square foot"), JSON.stringify(got));
-  for (const [needle, depth] of [["Hard costs", 0], ["Impact fees are charged per lot", 2], ["Fees step down as the building gets larger", 3]]) {
-    await enterAt(needle); await page.keyboard.press("Enter"); await page.keyboard.type("NEW" + depth, { delay: 25 }); await page.waitForTimeout(500);
-    got = await lists();
-    const i = got.findIndex((l) => l.endsWith(needle));
-    ok(`Enter at the end of the level-${depth + 1} item makes a level-${depth + 1} sibling`, i >= 0 && got[i + 1] === `${"  ".repeat(depth)}• NEW${depth}`, JSON.stringify(got.slice(Math.max(0, i - 1), i + 3)));
-  }
-  await page.screenshot({ path: `${SHOT}-1-word-enter.png` });
-
-  console.log("\n[2] a note holding the OLD paste's shape (paragraphs that begin with the glyph)");
-  await page.keyboard.press("Escape");
+  console.log("\n[1] a note holding the OLD paste's shape (paragraphs that begin with the glyph)");
   const GAP = " ".repeat(7);
   const fake = (g, w) => ({ type: "paragraph", content: [{ type: "text", text: g }, { type: "text", text: GAP }, { type: "text", text: w }] });
-  const inserted = await page.evaluate((nodes) => window.__noteEditor ? window.__noteEditor.runCommand("insertContent", nodes) : "nohook", [{ type: "noteAnchor", attrs: { x: 40, y: 700, w: 460, h: null, aid: "legacy1" }, content: [fake("•", "LEED"), fake("○", "1M SF - $90K"), fake("§", "Third level"), fake("□", "Fourth level"), fake("•", "Next")] }]);
+  const inserted = await page.evaluate((nodes) => window.__noteEditor ? window.__noteEditor.runCommand("insertContent", nodes) : "nohook", [{ type: "noteAnchor", attrs: { x: 40, y: 40, w: 460, h: null, aid: "legacy1" }, content: [fake("•", "LEED"), fake("○", "1M SF - $90K"), fake("§", "Third level"), fake("□", "Fourth level"), fake("•", "Next")] }]);
   ok("the legacy-shaped box was placed on the throwaway page", inserted === true, String(inserted));
   await page.waitForTimeout(2500);                                        // the save debounce + a cloud push
   await open();                                                           // re-open: the normaliser runs on read
@@ -107,6 +90,23 @@ try {
   const after = await lists();
   const k = after.findIndex((l) => l === "  • 1M SF - $90K");
   ok("after a RELOAD the new item is still a real level-2 list item", k >= 0 && after[k + 1] === "  • 400K SF - $85K", JSON.stringify(after));
+  console.log("\n[2] a Word outline pasted on blank paper; Enter at levels 1, 3 and 4");
+  const at = await page.evaluate(() => { const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect(); return { x: r.left + r.width * 0.08, y: r.top + r.height * 0.7 }; });
+  await page.mouse.dblclick(at.x, at.y); await page.waitForTimeout(500);
+  ok("a double-click on blank paper armed a caret", await page.evaluate(() => !!document.querySelector('[data-testid="note-pending-caret"]')));
+  const html = fs.readFileSync(path.join(FX, "word-outline-table.html"), "utf8"), text = fs.readFileSync(path.join(FX, "word-outline-table.txt"), "utf8");
+  await page.evaluate(([h, t]) => { const dt = new DataTransfer(); dt.setData("text/html", h); dt.setData("text/plain", t); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); }, [html, text]);
+  await page.waitForTimeout(1800);
+  got = await lists();
+  ok("the outline pasted as real nested lists", got.includes("• Soft costs") && got.includes("  • Design and engineering") && got.includes("    • Fee by building size, per square foot"), JSON.stringify(got));
+  for (const [needle, depth] of [["Hard costs", 0], ["Impact fees are charged per lot", 2], ["Fees step down as the building gets larger", 3]]) {
+    await enterAt(needle); await page.keyboard.press("Enter"); await page.keyboard.type("NEW" + depth, { delay: 25 }); await page.waitForTimeout(500);
+    got = await lists();
+    const i = got.findIndex((l) => l.endsWith(needle));
+    ok(`Enter at the end of the level-${depth + 1} item makes a level-${depth + 1} sibling`, i >= 0 && got[i + 1] === `${"  ".repeat(depth)}• NEW${depth}`, JSON.stringify(got.slice(Math.max(0, i - 1), i + 3)));
+  }
+  await page.screenshot({ path: `${SHOT}-1-word-enter.png` });
+
 } finally {
   console.log("\n[cleanup] deleting the throwaway page");
   try {
