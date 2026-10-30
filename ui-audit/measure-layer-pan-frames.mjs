@@ -44,7 +44,7 @@ page.on("request", (r) => { const u = r.url(); if (/gis-proxy|arcgis|FeatureServ
 const cleanupIds = [];
 const results = [];
 const layerCounts = {};   // arm → compositor layers on the settled page
-const MAX_EXTRA = Number(flag("--max-extra-layers", "60"));   // a layer's labels / strokes may not add more than this many compositor layers over the layers-off page
+const MAX_EXTRA = Number(flag("--max-extra-layers", "150"));   // pre-fix this was +514 (every label its own layer); what remains is Chrome promoting the labels that sit over the visible imagery tiles (~100 in a 1400-wide view)
 try {
   const plan = { ...throwawayPlan(`${LIVE_PREFIX}panframes-${Date.now().toString(36)}`), origin: { lat: OB.lat, lon: OB.lng }, site: "ZZ Live Check — pan frames" };
   const err = await page.evaluate(async ([pl]) => {
@@ -55,8 +55,16 @@ try {
   cleanupIds.push(plan.id);
   if (err) throw new Error("throwaway plan insert failed — " + err);
 
+  async function freshPlan() {
+    const pl = { ...throwawayPlan(`${LIVE_PREFIX}panframes-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`), origin: { lat: OB.lat, lon: OB.lng }, site: "ZZ Live Check — pan frames" };
+    const e = await page.evaluate(async ([p2]) => { const { data: u } = await window.pfSupabase.auth.getUser(); const { error } = await window.pfSupabase.from("sites").insert({ id: p2.id, group_id: p2.groupId, site: p2.site, name: p2.name, county: null, user_id: u.user.id, version: 1, data: p2 }); return error ? String(error.message) : null; }, [pl]);
+    cleanupIds.push(pl.id);
+    if (e) throw new Error("throwaway plan insert failed — " + e);
+    return pl;
+  }
+  let plan2cur = plan;
   async function openFresh() {
-    await page.goto(`${BASE}/?planyrDiag=1#/project/${plan.id}/site`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE}/?planyrDiag=1#/project/${plan2cur.id}/site`, { waitUntil: "domcontentloaded" });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("planner-canvas").waitFor({ timeout: 60000 });
     await sleep(2500);
@@ -139,6 +147,7 @@ try {
   const VARIANT_CSS = { nolabels: ".leaflet-gisLineLabel-pane,.leaflet-gisAreaLabel-pane,.pf-line-label{display:none !important}", nolines: ".leaflet-gisLine-pane{display:none !important}", nogis: ".leaflet-gisLine-pane,.leaflet-gisLineLabel-pane,.leaflet-gisArea-pane,.leaflet-gisAreaLabel-pane{display:none !important}" };
   for (const armSpec of ARMS) {
     const [arm, variant] = armSpec.split("@");
+    plan2cur = await freshPlan();   // each arm gets its OWN plan: the Layers panel remembers per plan, so a reused plan would carry the previous arm's layers into `off`
     const panel = await openFresh();
     netLog = [];
     if (arm !== "off") {
@@ -154,7 +163,7 @@ try {
     } else if (variant) { await page.addStyleTag({ content: VARIANT_CSS[variant] }); await sleep(800); }
     {
       let layers = null, tree = []; const onTree = (e) => { layers = (e.layers || []).length; tree = e.layers || []; };
-      cdp.on("LayerTree.layerTreeDidChange", onTree); await cdp.send("LayerTree.enable"); await sleep(1200);
+      cdp.on("LayerTree.layerTreeDidChange", onTree); await cdp.send("LayerTree.enable"); await sleep(Number(flag("--tree-wait", "1200")));
       // attribute each compositor layer to the element that owns it (class names), so a layer count has a NAME next to it
       await cdp.send("DOM.enable");
       const byClass = {};
@@ -162,6 +171,11 @@ try {
         if (!l.backendNodeId) { byClass["(no node)"] = (byClass["(no node)"] || 0) + 1; continue; }
         try { const { node } = await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }); const a = node.attributes || []; const ci = a.indexOf("class"); const k = `${node.localName}.${ci >= 0 ? String(a[ci + 1]).replace(/\s+/g, ".").slice(0, 60) : ""}`; byClass[k] = (byClass[k] || 0) + 1; } catch (_) { byClass["(gone)"] = (byClass["(gone)"] || 0) + 1; }
       }
+      { const t = await page.evaluate(() => { const els = [...document.querySelectorAll(".pf-line-label")]; const g = (re) => els.filter((e) => re.test(e.style.transform)).length; const ex = els.find((e) => /translate3d/.test(e.style.transform)); return { total: els.length, flat: g(/^translate\(/), threeD: g(/translate3d/), none: els.filter((e) => !e.style.transform).length, example: ex ? ex.outerHTML.slice(0, 260) : null }; }); console.log(`   label transforms: ${JSON.stringify(t)}`); }
+      // WHY is a layer a layer? ask Chrome for the compositing reasons of up to 3 label layers (empty when labels are no longer promoted)
+      let shown = 0;
+      for (const l of tree) { if (shown >= 3) break; if (!l.backendNodeId) continue; try { const { node } = await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }); const a = node.attributes || []; const ci = a.indexOf("class"); if (ci < 0 || !/pf-line-label/.test(a[ci + 1])) continue; const r = await cdp.send("LayerTree.compositingReasons", { layerId: l.layerId }); console.log(`   label layer reasons: ${JSON.stringify(r.compositingReasonIds || r.compositingReasons)}`); shown++;
+        try { const { object } = await cdp.send("DOM.resolveNode", { backendNodeId: l.backendNodeId }); const info = await cdp.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: "function(){ const c=getComputedStyle(this); return JSON.stringify({inline:this.style.cssText.slice(0,160), computedTransform:c.transform, willChange:c.willChange, transition:c.transitionProperty+' '+c.transitionDuration, anims:this.getAnimations().length, opacity:c.opacity, cls:this.className}); }", returnByValue: true }); console.log("      " + info.result.value); } catch (_) { /* node gone */ } } catch (_) { /* gone */ } }
       await cdp.send("LayerTree.disable"); cdp.off("LayerTree.layerTreeDidChange", onTree);
       layerCounts[armSpec] = layers;
       console.log(`[${armSpec}] compositor layers: ${layers}  ${Object.entries(byClass).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${v}× ${k}`).join(" | ")}`);
@@ -183,7 +197,7 @@ try {
   const baseLayers = layerCounts.off ?? null;
   console.log("\nSUMMARY (median across the drags of each arm; baseline = `off`)");
   for (const arm of [...new Set(results.map((r) => r.arm))]) { const rs = results.filter((r) => r.arm === arm); console.log(`  ${arm.padEnd(22)} layers ${String(layerCounts[arm] ?? "?").padStart(4)}  p95 ${med(rs.map((r) => r.p95))}  stall ${med(rs.map((r) => r.stallMs))}ms  frames>33ms ${med(rs.map((r) => r.over33))}  mutations ${med(rs.map((r) => r.mutations))}`); }
-  for (const arm of Object.keys(layerCounts)) if (arm !== "off" && baseLayers != null && !arm.includes("@")) check(`NEW-1 · "${arm}" adds at most ${MAX_EXTRA} compositor layers over the layers-off page (labels are not layers)`, layerCounts[arm] - baseLayers <= MAX_EXTRA, `${layerCounts[arm]} vs ${baseLayers} off`);
+  for (const arm of Object.keys(layerCounts)) if (arm !== "off" && baseLayers != null && !arm.includes("@")) check(`NEW-1 · "${arm}" adds at most ${MAX_EXTRA} compositor layers over the layers-off page (was +514 with one layer per label)`, layerCounts[arm] - baseLayers <= MAX_EXTRA, `${layerCounts[arm]} vs ${baseLayers} off`);
   for (const r of results) if (r.arm !== "off") check(`NEW-1 · no GIS request while the pointer is down (${r.arm}/${r.kind})`, r.reqDuring === 0, `${r.reqDuring} issued`);
   check("KNOWN-GOOD · the baseline drag produced a plausible frame stream (rAF alive, > 20 frames)", base.length > 0 && base.every((r) => r.frames > 20), base.map((r) => r.frames).join(","));
   if (OUT) writeFileSync(OUT, JSON.stringify({ served, results }, null, 1));

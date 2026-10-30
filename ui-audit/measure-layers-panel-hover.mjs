@@ -194,17 +194,23 @@ try {
         const k = first.naturalWidth / window.innerWidth;   // screencast scale vs CSS px
         const reg = { x: Math.round(box.x * k), y: Math.round(box.y * k), w: Math.round(box.width * k), h: Math.round(box.height * k) };
         const px = async (im) => { const c = document.createElement("canvas"); c.width = reg.w; c.height = reg.h; const g = c.getContext("2d"); g.drawImage(im, reg.x, reg.y, reg.w, reg.h, 0, 0, reg.w, reg.h); return g.getImageData(0, 0, reg.w, reg.h).data; };
-        const base = await px(first); let worst = 0, differing = 0; const per = [];
+        // INK, not colour: the hovered tab is TINTED by design, so a colour diff would flag the fix itself. A glyph that moves or re-snaps changes which pixels are dark.
+        const ink = (d) => { const m = new Uint8Array(d.length / 4); for (let j = 0, i = 0; j < d.length; j += 4, i++) m[i] = d[j] + d[j + 1] + d[j + 2] < 150 ? 1 : 0; return m; };
+        const xor = (a, b) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
+        const base = ink(await px(first)); let worst = 0, differing = 0;
+        // KNOWN-GOOD: the same ink shifted one pixel to the right must read as a change, or this pass cannot see a trembling glyph
+        const shifted = new Uint8Array(base.length); for (let y = 0; y < reg.h; y++) for (let x = 1; x < reg.w; x++) shifted[y * reg.w + x] = base[y * reg.w + x - 1];
+        const selfCheck = xor(base, shifted);
         for (let i = 1; i < frames.length; i++) {
-          const cur = await px(await load(frames[i])); let n = 0;
-          for (let j = 0; j < base.length; j += 4) if (Math.abs(base[j] - cur[j]) + Math.abs(base[j + 1] - cur[j + 1]) + Math.abs(base[j + 2] - cur[j + 2]) > 24) n++;
-          per.push(n); worst = Math.max(worst, n); if (n > 0) differing++;
+          const n = xor(base, ink(await px(await load(frames[i]))));
+          worst = Math.max(worst, n); if (n > Math.floor(selfCheck * 0.02)) differing++;   // a tint re-anti-aliases a handful of edge pixels (measured 6); a moved glyph flips hundreds (a 1 px shift flags ~860)
         }
-        return { frames: frames.length, worst, differing, scale: k, reg };
+        return { frames: frames.length, worst, differing, scale: k, reg, selfCheck };
       }, [frames, navBox]);
-      console.log(`[layers ${a}] PIXEL PASS: ${res.frames} composited frames at ${res.scale.toFixed(2)}x · nav strip differs from frame 0 in ${res.differing} frames (worst ${res.worst} px)`);
+      console.log(`[layers ${a}] PIXEL PASS: ${res.frames} composited frames at ${res.scale.toFixed(2)}x · nav strip INK differs from frame 0 in ${res.differing} frames (worst ${res.worst})`);
       check(`KNOWN-GOOD · the screencast delivered ≥ 3 frames (${a})`, res.frames >= 3, `${res.frames}`); if (res.frames < 3) voided++;
-      check(`NEW-2 · the composited nav strip is pixel-identical frame to frame while hovered (${a})`, res.differing === 0, `${res.differing} frames differ, worst ${res.worst} px`);
+      check(`KNOWN-GOOD · the ink comparison sees a glyph shifted by one pixel (${a})`, res.selfCheck > 50, `${res.selfCheck} ink pixels flagged`); if (!(res.selfCheck > 50)) voided++;
+      check(`NEW-2 · the nav strip's text ink is identical frame to frame while the pointer crosses it (${a})`, res.differing === 0, `${res.differing} frames differ, worst ${res.worst} ink px`);
     }
     // POSITIVE CONTROL: the instrument must see a forced 1 px nudge of the panel itself
     await arm();
