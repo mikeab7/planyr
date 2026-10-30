@@ -19,7 +19,8 @@
  * (carry-forward trap 6); the 600 ms save debounce is polled, never slept past.
  */
 import { chromium } from "playwright";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:4173";
 const TREE_KEY = "planyr:notes:tree:v1:local";
