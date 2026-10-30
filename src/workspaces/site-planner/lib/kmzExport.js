@@ -26,6 +26,7 @@ import { isBuilding, buildingNumbers } from "./siteModel.js";
 import { effectiveBuildingProps, normalizeRules } from "./buildingProps.js";
 import { dockSidesFor } from "./dockZones.js";
 import { placeDockDoors } from "./buildingGrid.js";
+import { rampBeltSpans, doorsAfterRamps, dockHeightInOf } from "./driveInRamp.js";
 
 export const KMZ_MIME = "application/vnd.google-earth.kmz";
 const US_FT_M = 1200 / 3937; // 1 US survey foot in metres (matches the EPSG:2278 grid)
@@ -153,6 +154,7 @@ function buildingDockDoorRuns(el, els, settings) {
   const doorOC = Math.max(2, +settings.doorOC || 12);
   const doorWidth = Math.max(1, +settings.doorWidth || 9);
   const dogEars = arr(els).filter((x) => x && x.attachedTo === el.id && x.dogEar);
+  const rampSpans = rampBeltSpans(arr(els).filter((x) => x && x.attachedTo === el.id && x.type === "driveInRamp"), dockSides, dockHeightInOf(settings));
   const hw = el.w / 2, hh = el.h / 2;
   const r = ((el.rot || 0) * Math.PI) / 180, cos = Math.cos(r), sin = Math.sin(r);
   const toWorld = (lx, ly) => ({ x: el.cx + lx * cos - ly * sin, y: el.cy + lx * sin + ly * cos });
@@ -163,7 +165,8 @@ function buildingDockDoorRuns(el, els, settings) {
     const bump = (sign) => { const d = dogEars.find((x) => x.dogEar.side === side && x.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
     const startF = bump(-1), endF = L - bump(1);
     if (endF - startF < doorWidth) continue;
-    const doors = placeDockDoors(startF, endF, [], { doorOC, doorWidth });
+    // a drive-in ramp on this wall takes the doors under its footprint out of the belt, exactly as on the canvas (NEW-1, 2026-10-30)
+    const doors = doorsAfterRamps(placeDockDoors(startF, endF, [], { doorOC, doorWidth }), doorWidth, rampSpans[side]);
     if (!doors.length) continue;
     // The run spans the full door openings, so a side carrying a single door still gets a real
     // line (one door wide) rather than a degenerate zero-length one.

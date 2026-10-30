@@ -10,6 +10,7 @@ import { commaInt as f0, commaDec1 as f1 } from "../../../shared/units/numberFor
 import { frameBBox, dockSegExtent, clipSegmentToRing } from "../lib/footprintEdit.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "../lib/buildingGrid.js";
 import { dogEarSize, isDogEarSide } from "../lib/dogEar.js";
+import { rampParts, rampLabel, rampBeltSpans, doorsAfterRamps, dockHeightInOf } from "../lib/driveInRamp.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from "../lib/dimSlide.js";
 import { dockSidesFor, footprintDepth, footprintLength, footprintAxes } from "../lib/dockZones.js";
 import { elStyle } from "../lib/planStyle.js";
@@ -114,7 +115,7 @@ function pondContourEls(el, f2p, ppf, keyPfx = "", lf = null) {
 // plus the door centres placed to fall BETWEEN columns. Shared by the canvas (renderElPx)
 // and the panel door count so the two NEVER disagree — including the dog-ear case, where
 // a bump on the dock face shortens the door run. `g` = resolveGridSettings(el, settings).
-export function dockDoorRun(el, side, dogEars, lengthLines, g) {
+export function dockDoorRun(el, side, dogEars, lengthLines, g, rampSpans = null) {
   const horiz = side === "top" || side === "bottom";
   const L = horiz ? el.w : el.h; // wall length (ft)
   let startF, endF;
@@ -131,8 +132,17 @@ export function dockDoorRun(el, side, dogEars, lengthLines, g) {
     startF = bumpAlong(-1);
     endF = L - bumpAlong(1);
   }
-  const doors = endF - startF < g.doorWidth ? [] : placeDockDoors(startF, endF, lengthLines, { doorOC: g.doorOC, doorWidth: g.doorWidth });
-  return { startF, endF, horiz, doors };
+  const placed = endF - startF < g.doorWidth ? [] : placeDockDoors(startF, endF, lengthLines, { doorOC: g.doorOC, doorWidth: g.doorWidth });
+  // Drive-in ramps on this wall take the dock doors under their footprint out of the belt (NEW-1, 2026-10-30) — `rampSpans` is this wall's
+  // [{u0,u1}] along the wall from its start (lib/driveInRamp rampBeltSpans), the same axis the door centres are measured on.
+  const doors = doorsAfterRamps(placed, g.doorWidth, rampSpans);
+  return { startF, endF, horiz, doors, displaced: placed.length - doors.length };
+}
+/** The ramp spans of one building's wall — the 6th argument of dockDoorRun. `ramps` = the driveInRamp elements attached to the building. */
+export function rampSpansOnSide(ramps, side, dockSides, settings) {
+  if (!ramps || !ramps.length) return null;
+  const by = rampBeltSpans(ramps, dockSides, dockHeightInOf(settings));
+  return by[side] || null;
 }
 
 // Corner bump-outs of a host building as [{sign, along}] measured along its length axis — the
@@ -183,13 +193,18 @@ export function resolveElNeighbors(allEls, settings) {
   const wantDock = !!(settings && (settings.showDocks || settings.showGrid));
   for (const el of list) {
     const dogEars = list.filter((x) => x.attachedTo === el.id && x.dogEar);
+    const ramps = el.type === "building" ? list.filter((x) => x.attachedTo === el.id && x.type === "driveInRamp") : [];
+    const rampHost = el.type === "driveInRamp" ? (list.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || null) : null;
     out.set(el.id, {
+      ramps,
+      rampHost,
+      rampHostDockSides: rampHost ? dockSidesFor(rampHost).dockSides : null,
       // A bump-out (dog-ear) renders with its HOST building's resolved style — see the styleEl note below.
       styleEl: el.dogEar ? (list.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el,
       curbEdges: curbEdgesOf(el, list),
       dogEars,
       dimSlide: dimSlideFor(el, list),
-      dockPlan: wantDock ? resolveDockPlan(el, settings, dogEars) : null,
+      dockPlan: wantDock ? resolveDockPlan(el, settings, dogEars, ramps) : null,
     });
   }
   return out;
@@ -220,7 +235,7 @@ export function resolveElNeighbors(allEls, settings) {
  * reshape (`el.footEdit`) recomputes its grid from the LIVE `frameBBox` every frame ON PURPOSE, so
  * the grid tracks the drag frame-by-frame. Do not "unify" that into this record.
  */
-function resolveDockPlan(el, settings, dogEars) {
+function resolveDockPlan(el, settings, dogEars, ramps = null) {
   if (!el || el.type !== "building") return null;
   const dock = el.dock || "cross";
   const { dside, dockSides } = dockSidesFor(el);
@@ -229,9 +244,59 @@ function resolveDockPlan(el, settings, dogEars) {
   const axes = footprintAxes(el);
   const lenOffsets = grid.lengthLines.map((l) => l.at);
   const runs = {};
-  for (const s of dockSides) runs[s] = dockDoorRun(el, s, dogEars, lenOffsets, g);
+  for (const s of dockSides) runs[s] = dockDoorRun(el, s, dogEars, lenOffsets, g, rampSpansOnSide(ramps, s, dockSides, settings));
   return { dock, dside, dockSides, g, grid, axes, runs };
 }
+/* ---- Drive-in ramp (NEW-1/NEW-3, 2026-10-30) -------------------------------------------------------------------------------------------
+ * ONE `el:` group, so the editable PDF lifts it as ONE Bluebeam annotation (footprint first — the walker takes the first filled path as the body
+ * and the largest closed filled path as the outline — then the wing walls, the doubled door line, the bollards, the slope arrow and the label).
+ * Every number comes from `rampParts(host, ramp)` (lib/driveInRamp.js), the same call the tests and the grading plane make. A ramp whose host is
+ * gone (a lone paste) draws its stored box as a plain footprint. Drawn in pixel space off world feet, so there is no group rotation to undo. */
+function renderRampPx(el, st, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, onElContext, lfK, editingCorners) {
+  const host = nb ? nb.rampHost : null;
+  const marker = !!host && !!el.ramp && !(nb.rampHostDockSides || []).includes(el.ramp.side);
+  const ppf = Math.hypot(f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, f2p({ x: 1, y: 0 }).y - f2p({ x: 0, y: 0 }).y);
+  const P = (q) => f2p(q);
+  const pts = (ring) => ring.map((q) => { const z = P(q); return `${z.x},${z.y}`; }).join(" ");
+  const line = (k, a, b, stroke, sw, extra = {}) => { const A = P(a), B = P(b); return <line key={k} x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={stroke} strokeWidth={sw} strokeLinecap="butt" {...extra} />; };
+  const out = [];
+  let parts = null;
+  if (host && el.ramp) {
+    try { parts = rampParts(host, el.ramp, { marker, dockHeightIn: dockHeightInOf(settings) }); } catch (_) { parts = null; }
+  }
+  const ring = parts ? parts.ring : [{ x: el.cx - el.w / 2, y: el.cy - el.h / 2 }, { x: el.cx + el.w / 2, y: el.cy - el.h / 2 }, { x: el.cx + el.w / 2, y: el.cy + el.h / 2 }, { x: el.cx - el.w / 2, y: el.cy + el.h / 2 }]
+    .map((q) => { const r = rot2(q.x - el.cx, q.y - el.cy, el.rot || 0); return { x: el.cx + r.x, y: el.cy + r.y }; });
+  const ink = st.stroke, wallInk = "#2f3338";
+  out.push(<polygon key="fp" points={pts(ring)} fill={marker ? "none" : st.fill} fillOpacity={st.fillOpacity ?? 1} stroke={ink} strokeWidth={(isSel ? 2 : 1) * lfK} strokeDasharray={marker ? `${3 * lfK} ${2 * lfK}` : undefined} />);
+  if (parts) {
+    parts.wings.forEach((w, i) => out.push(line(`wg${i}`, w[0], w[1], wallInk, 2.4 * lfK, { pointerEvents: "none" })));
+    parts.door.forEach((d, i) => out.push(line(`dr${i}`, d[0], d[1], wallInk, 1.4 * lfK, { pointerEvents: "none" })));
+    parts.bollards.forEach((b, i) => { const z = P(b); out.push(<circle key={`bl${i}`} cx={z.x} cy={z.y} r={Math.min(4 * lfK, Math.max(1.6 * lfK, 0.9 * ppf))} fill={wallInk} stroke="#fff" strokeWidth={0.6 * lfK} pointerEvents="none" />); });
+    if (parts.arrow) {
+      const A = P(parts.arrow.from), B = P(parts.arrow.to), dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, hl = Math.min(8 * lfK, L * 0.35);
+      out.push(<g key="ar" pointerEvents="none" stroke={wallInk} strokeWidth={1.2 * lfK} fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} />
+        <polyline points={`${B.x - ux * hl + uy * hl * 0.6},${B.y - uy * hl - ux * hl * 0.6} ${B.x},${B.y} ${B.x - ux * hl - uy * hl * 0.6},${B.y - uy * hl + ux * hl * 0.6}`} />
+      </g>);
+    }
+    // the label rides the footprint's LONG axis, upright (folded into -90..90), long form when it fits, short form when it does not, nothing when neither does
+    const r0 = P(ring[0]), r1 = P(ring[1]), r3 = P(ring[3]);
+    const e1 = { x: r1.x - r0.x, y: r1.y - r0.y }, e3 = { x: r3.x - r0.x, y: r3.y - r0.y };
+    const longV = Math.hypot(e1.x, e1.y) >= Math.hypot(e3.x, e3.y) ? e1 : e3, longPx = Math.hypot(longV.x, longV.y), shortPx = Math.min(Math.hypot(e1.x, e1.y), Math.hypot(e3.x, e3.y));
+    let ang = (Math.atan2(longV.y, longV.x) * 180) / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+    const fs = 9 * lfK, cw = fs * 0.62;
+    const full = rampLabel(el.ramp, { marker }), short = rampLabel(el.ramp, { short: true, marker });
+    const txt = (full.length * cw + 8 <= longPx && fs + 4 <= shortPx) ? full : (short.length * cw + 8 <= longPx && fs + 4 <= shortPx ? short : null);
+    if (txt) {
+      const cz = P(parts.centre);
+      out.push(<text key="lb" data-ramp-label x={cz.x} y={cz.y} transform={`rotate(${ang} ${cz.x} ${cz.y})`} textAnchor="middle" dominantBaseline="central" fontSize={fs} fontFamily="Inter, system-ui, sans-serif" fontWeight="600" fill={wallInk} stroke="#fff" strokeWidth={2.4 * lfK} paintOrder="stroke" pointerEvents="none">{txt}</text>);
+    }
+  }
+  return <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} data-ramp-marker={marker ? "1" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? "pointer" : "crosshair" }}
+    onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
+    onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{out}</g>;
+}
+
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center.
    ⚠ B1352 — `nb` is this element's RESOLVED NEIGHBOUR RECORD (resolveElNeighbors above), NOT the
@@ -269,6 +334,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   // a pond never reads as redline — selection is shown by a thicker teal stroke + the vertex
   // handles, not a colour change.
   const waterFill = st.cartoWater ? "url(#grad-water)" : st.fill;
+  if (el.type === "driveInRamp") return renderRampPx(el, st, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, onElContext, lfK, editingCorners);
   const waterOp = st.cartoWater ? 0.8 : fillOp;
   // NEW-8 — a pond's cartographic outline is a fixed 2 px (3 selected) UNTIL the element, or its type
   // default, carries an explicit outline width; then that width wins (+1 while selected).
@@ -777,7 +843,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
      * inline fallback keeps this function total for any caller with no resolved record; it is the
      * identical computation, so the two branches cannot draw different pictures. */
     const dockPlanDogEars = nb ? nb.dogEars : [];
-    const plan = (nb && nb.dockPlan) || resolveDockPlan(el, settings, dockPlanDogEars);
+    const plan = (nb && nb.dockPlan) || resolveDockPlan(el, settings, dockPlanDogEars, nb ? nb.ramps : null);
     const { dock, dside: side, dockSides, g, grid, axes: fax } = plan;
     const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
     const lengthHoriz = fax.length === "w";     // the length axis runs along x
@@ -834,7 +900,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       const leaf = g.doorWidth * ppf;
       dockSides.forEach((s) => {
         // NEW-3 — the door run for this side, resolved with the dock plan above (see resolveDockPlan).
-        const { startF, endF, horiz, doors } = plan.runs[s] || dockDoorRun(el, s, dockPlanDogEars, grid.lengthLines.map((l) => l.at), g);
+        const { startF, endF, horiz, doors } = plan.runs[s] || dockDoorRun(el, s, dockPlanDogEars, grid.lengthLines.map((l) => l.at), g, rampSpansOnSide(nb ? nb.ramps : null, s, dockSides, settings));
         if (!doors.length) return;
         if (horiz) {
           const by = s === "bottom" ? h - Dpx : 0;
