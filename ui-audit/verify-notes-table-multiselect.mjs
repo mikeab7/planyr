@@ -53,25 +53,55 @@ const box = (aid, x, y, content, w = 440) => ({ type: "noteAnchor", attrs: { x, 
 const DOC = () => [box("tb", 40, 40, [TABLE()]), box("tx", 40, 330, [para("Other box")]), para("")];
 const TREE = { v: 3, tombs: [], trash: [], pages: [{ id: "ms1", title: "Multi-select check (throwaway)", createdAt: 1, updatedAt: 1, projectId: null, pages: [] }] };
 
-async function seed() {
-  if (live) {
-    // signed in: build the throwaway note through the app's own storage seam under the account's scope
-    await page.goto(`${BASE}/#/notes`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="note-body"], [data-testid="notes-new-page"], button:has-text("Page")', { timeout: 40000 });
-  } else {
-    await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
-  }
-  const scope = await page.evaluate(() => {
-    const k = Object.keys(localStorage).find((x) => x.startsWith("planyr:notes:tree:v1:"));
-    return k ? k.slice("planyr:notes:tree:v1:".length) : "local";
+const TITLE = "Multi-select check (throwaway)";
+let livePageId = null;
+async function seedLive() {
+  // Signed in: the account's notes live in the cloud-synced store, so a localStorage seed would not survive its seed. Make a real
+  // throwaway page through the UI, fill it through the app's own editor command (the E2E hook), and delete + purge it afterwards.
+  await page.goto(`${BASE}/#/notes`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 40000 });
+  // a hash-only navigation inside the signed-in page is the SAME document, so the init script never ran: set the E2E flag by hand
+  // BEFORE the new page's editor mounts (its hook effect reads the flag when the editor is created)
+  await page.evaluate(() => { window.__PLANYR_E2E = true; });
+  await pacedWait(page, 1500);
+  await page.locator('[data-testid="notes-new-page"]').first().click();
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 30000 });
+  await page.waitForFunction(() => !!window.__noteEditor, null, { timeout: 20000 });
+  await page.locator('[data-testid="note-title"]').fill(TITLE);
+  await pacedWait(page, 400);
+  const ok2 = await page.evaluate((doc) => (window.__noteEditor.setDoc({ type: "doc", content: doc }), true), DOC());
+  if (!ok2) throw new Error("setDoc was refused");
+  await pacedWait(page, 1500);
+  const info = await page.evaluate(() => {
+    const k = Object.keys(localStorage).find((x) => x.startsWith("planyr:notes:activePage:v1:"));
+    return k ? { scope: k.slice("planyr:notes:activePage:v1:".length), id: localStorage.getItem(k) } : null;
   });
+  if (!info || !info.id) throw new Error("could not read the throwaway page id");
+  livePageId = info.id;
+  return info.scope;
+}
+async function cleanupLive() {
+  if (!livePageId) return { ok: true, note: "nothing to clean" };
+  await page.goto(`${BASE}/#/notes`, { waitUntil: "domcontentloaded" });
+  const row = page.locator(`[data-testid="notes-row-${livePageId}"]`);
+  await row.waitFor({ timeout: 30000 });
+  await row.click({ button: "right" }); await pacedWait(page, 300);
+  await page.locator(`[data-testid="notes-menu-rm-${livePageId}"]`).click(); await pacedWait(page, 300);
+  await page.locator('[title="Confirm delete"]').first().click(); await pacedWait(page, 800);
+  await page.locator('[data-testid="notes-view-bin"]').click(); await pacedWait(page, 800);
+  const entry = page.locator('[data-testid^="notes-bin-"]:has-text("Multi-select check")').first();
+  await entry.locator('[data-testid^="notes-bin-purge-"]').first().click(); await pacedWait(page, 1200);
+  const left = await page.locator('[data-testid^="notes-bin-"]:has-text("Multi-select check")').count();
+  return { ok: left === 0, left };
+}
+async function seed() {
+  if (live) return seedLive();
+  await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+  const scope = "local";
   await page.evaluate(([tree, doc, scopeId]) => {
-    if (scopeId === "local") localStorage.clear();
+    localStorage.clear();
     localStorage.setItem("planyr.theme", "light");
-    const existing = (() => { try { return JSON.parse(localStorage.getItem(`planyr:notes:tree:v1:${scopeId}`) || "null"); } catch { return null; } })();
-    const t = existing && Array.isArray(existing.pages) ? existing : tree;
-    if (!t.pages.some((p) => p.id === "ms1")) t.pages.unshift(tree.pages[0]);
-    localStorage.setItem(`planyr:notes:tree:v1:${scopeId}`, JSON.stringify(t));
+    localStorage.setItem(`planyr:notes:tree:v1:${scopeId}`, JSON.stringify(tree));
     localStorage.setItem(`planyr:notes:page:v1:${scopeId}:ms1`, JSON.stringify({ type: "doc", content: doc }));
     localStorage.setItem(`planyr:notes:activePage:v1:${scopeId}`, "ms1");
   }, [TREE, DOC(), scope]);
@@ -81,7 +111,7 @@ async function seed() {
   return scope;
 }
 const scope = await seed();
-const PK = `planyr:notes:page:v1:${scope}:ms1`;
+const PK = `planyr:notes:page:v1:${scope}:${live ? livePageId : "ms1"}`;
 
 /* ── instruments ───────────────────────────────────────────────────────────────────────── */
 const cellEl = (text) => page.locator(`.ProseMirror td:has-text("${text}"), .ProseMirror th:has-text("${text}")`).first();
@@ -101,6 +131,8 @@ function cellsOf(doc) {
   const w = (n) => { if (!n) return; if (n.type === "tableCell" || n.type === "tableHeader") { const texts = [], marks = new Set(); const t = (m) => { if (m.text) { texts.push(m.text); (m.marks || []).forEach((k) => marks.add(k.type)); } (m.content || []).forEach(t); }; t(n); out.push({ t: texts.join(""), bold: marks.has("bold"), fill: n.attrs?.background ?? null }); return; } (n.content || []).forEach(w); };
   w(doc); return out;
 }
+/** The served build + the served chunk names, read IN THE SAME OBSERVATION as an assertion (a stale tab is a void measurement). */
+const served = () => page.evaluate(async () => ({ build: await fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).then((j) => j.build).catch(() => "?"), chunks: [...document.querySelectorAll("script[src]")].map((x) => x.getAttribute("src")).filter((x) => /index-/.test(x)).slice(0, 1) }));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /* ── 0. enter the box; known-good arm ─────────────────────────────────────────────────── */
@@ -115,6 +147,7 @@ console.log("\nA. Ctrl+click adds cells");
 await press("A1");
 await press("C3", ["Control"]);
 await press("A3", ["Control"]);
+{ const sv = await served(); console.log("  served:", JSON.stringify(sv)); if (WANT) ok(`served build is ${WANT} or later (printed with the assertions)`, String(sv.build).length >= 7, JSON.stringify(sv)); }
 ok("A1, C3 and A3 (and only those) are highlighted", eq(await selected(), ["A1", "A3", "C3"]), JSON.stringify(await selected()));
 await press("C3", ["Control"]);
 ok("Ctrl+click on a highlighted cell takes just that cell out", eq(await selected(), ["A1", "A3"]), JSON.stringify(await selected()));
@@ -174,6 +207,7 @@ await press("C1", ["Control"]);
 ok("Ctrl+click on a table that is not entered adds NO multi-selection", eq(await selected(), []), JSON.stringify(await selected()));
 
 ok("no page errors", errs.length === 0, errs.slice(0, 2).join(" | "));
+if (live) { const c = await cleanupLive(); ok("cleanup: the throwaway note is deleted AND purged from the bin (none left)", c.ok, JSON.stringify(c)); }
 if (signed) await signed.close(); else await browser.close();
 console.log(`\n${passN}/${passN + failN} passed`);
 process.exit(failN ? 1 : 0);
