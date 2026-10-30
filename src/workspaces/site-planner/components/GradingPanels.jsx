@@ -316,7 +316,7 @@ export function GradedAreaLine({ limit, actions }) {
   const src = limit.mode === "boundary" ? limitBasisPhrase(limit.basis) : limit.source === "edited" ? "limit edited" : "limit auto";
   const layout = limit.mode !== "boundary";
   return (
-    <div data-graded-area="1" data-limit-mode={limit.mode} data-limit-source={limit.source} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0 0 8px" }}>
+    <div data-graded-area="1" data-limit-mode={limit.mode} data-limit-source={limit.source} data-limit-sig={limit.sig || ""} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0 0 8px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <span data-graded-area-line="1" style={{ fontVariantNumeric: "tabular-nums" }}>Graded area · {ac} · {src}</span>
         <SegmentedControl options={LIMIT_MODE_OPTIONS} value={limit.mode} onChange={(m) => actions.setLimitMode && actions.setLimitMode(m)} aria-label="Grading limit mode" data-testid="grading-limit-mode" />
@@ -437,7 +437,7 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
         </g>
       )}
       {cutfill && cutfill.dataUrl && (
-        <g data-layer="cutfill" data-band-ready={cutfill.bandReady ? "1" : "0"} data-band-source={cutfill.bandSource || ""}>
+        <g data-layer="cutfill" data-band-ready={cutfill.bandReady ? "1" : "0"} data-band-source={cutfill.bandSource || ""} data-band-limit={cutfill.bandLimitSig || ""}>
           {cutfill.outlineD ? (
             <>
               {/* legacy (no grading limit): the per-cell picture and its cell outline */}
@@ -465,7 +465,7 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
       )}
       {/* ROUND 4 (B2349122) — the proposed contours: bold brown lines, index lines heavier and labelled, clipped to daylight */}
       {contours && contours.levels && contours.levels.length > 0 && (
-        <g data-layer="contours" data-contour-interval={contours.interval} data-contour-index-only={drawPlan.indexOnly ? "1" : "0"} data-contour-levels-drawn={drawPlan.levels.length}>
+        <g data-layer="contours" data-contour-limit={contours.limitSig || ""} data-contour-interval={contours.interval} data-contour-index-only={drawPlan.indexOnly ? "1" : "0"} data-contour-levels-drawn={drawPlan.levels.length}>
           {drawPlan.levels.map((lv) => (
             <g key={lv.level} data-contour-level={lv.level} data-contour-index={lv.isIndex ? "1" : "0"}
               transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>
@@ -523,10 +523,10 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
               );
             })}
             {L.corners.map((k, i) => {
-              // NEW-2 (2026-10-30): the tag is placed by lib/padCornerTag — in its usual spot, or (building selected) slid along the
-              // wall clear of the purple bump-out / dock buttons with a leader to the exact corner. Non-interactive either way.
+              // NEW-2 / NEW-5 (2026-10-30): the tag is placed by lib/padCornerTag — ALWAYS wholly inside the footprint, with a leader to the exact
+              // corner when it sits away from it; every edit button lies outside the walls (lib/buildingButtons), so the two cannot meet. Non-interactive.
               const quad = L.quad ? L.quad.map((q) => f2p(q)) : null;
-              const t = quad ? placeCornerTag(quad, k.idx, k.text, !!L.selected) : null;
+              const t = quad ? placeCornerTag(quad, k.idx, k.text) : null;
               const p = f2p(k.pt);
               let x, y;
               if (t) { x = t.x; y = t.y; } else {

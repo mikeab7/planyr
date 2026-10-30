@@ -26,6 +26,12 @@
  *       tint reaches the outline (no gaps: ≥ 97% of samples ≥ 3 px inside the band carry tint);
  *   (k) the contours read over the tint — inside the band, contour-brown pixels outnumber tint pixels as heavy as a stroke
  *       (alpha ≥ 0.3) at the building and corner zooms, and the tint never exceeds a quarter opacity.
+ * ROUND 9 adds two (B2500224 ×2, owner live check 2026-10-30 on Concept A, "To the boundary", NE corner at the 50-ft scale), on the
+ * owner's current layout (`owner=2`) at the building's NE (cut) and SW (fill) corners:
+ *   (n) nothing but grading between the band and the limit — zero existing-contour vertices inside the limit, graded ground within
+ *       one lattice cell of the line on every walk inward, the band painted is the one composed against the panel's limit, and on
+ *       the owner's own path (open "Around the layout", choose "To the boundary") no frame paints the old limit's band or contours;
+ *   (o) the drawn band contours are evenly spaced along every transect across a straight run (within 10%).
  * A KNOWN-GOOD ARM runs first: the pixel probe must see the proposed contours it is about to judge (a run that cannot
  * see the ink would pass (a) vacuously), or the whole run is VOID. ROUND 6: every view must carry ink — the open ground
  * inside the limit now falls at 2%, so there is no flat plateau left to excuse an empty view.
@@ -410,6 +416,123 @@ try {
     }
   }
   check("(j) known-good coverage: the clip was judged on a view carrying the band in BOTH limit modes", (bandJudged.layout || 0) > 0 && (bandJudged.boundary || 0) > 0, JSON.stringify(bandJudged));
+  // the top-of-bank straightness test for (o): offsets along the line (ft) and the worst deviation from the least-squares line
+  const STRAIGHT_OFFS = [-40, -32, -24, -16, -8, 0, 8, 16, 24, 32, 40];
+  const straightDev = (xs, ys) => { const mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    const sl = xs.reduce((a, x, k) => a + (x - mx) * (ys[k] - my), 0) / xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    return Math.max(...xs.map((x, k) => Math.abs(ys[k] - (my + sl * (x - mx))))); };
+  // ---- ROUND 9 (B2500224 ×2, owner live check 2026-10-30): the owner's Concept A (`owner=2`), "To the boundary", the NE (cut) and SW
+  // (fill) corners of the building at about the 50-ft scale — and the owner's own path: open in "Around the layout", switch.
+  {
+    const verts = (d) => d.split("M").filter(Boolean).map((seg) => [...seg.matchAll(/[ML]?(-?[\d.]+) (-?[\d.]+)/g)].map((q) => ({ x: +q[1], y: +q[2] })));
+    for (const zoom of ["ne50", "sw50"]) {
+      const tag = `boundary-${zoom}-conceptA`;
+      const page = await open(`?buildable=0&contours=1&zoom=${zoom}&mode=boundary&owner=2`);
+      try { await waitPicture(page); } catch (e) { fails.push(`✗ ${tag}: the picture never settled — ${e.message.split("\n")[0]}`); await page.close(); continue; }
+      await page.locator("#canvas").screenshot({ path: `${OUT}${tag}.png` });
+      notes.push(`  · wrote ${OUT}${tag}.png`);
+      const r = await page.evaluate(() => {
+        const m = window.__harness.model, gs = window.__harness.gradeSurface, L = gs.grid.limit;
+        const inR = (pt, ring) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j]; if ((a.y > pt.y) !== (b.y > pt.y) && pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
+        const inLimit = (pt) => L.limitRegions.some((rg) => inR(pt, rg.outer) && !rg.holes.some((h) => inR(pt, h)));
+        const segD = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1; let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2; t = Math.max(0, Math.min(1, t)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
+        const toLimit = (p) => { let d = Infinity; for (const rg of L.limitRegions) for (const ring of [rg.outer, ...rg.holes]) for (let i = 0; i < ring.length; i++) d = Math.min(d, segD(p, ring[i], ring[(i + 1) % ring.length])); return d; };
+        // existing contour vertices more than a foot inside the limit (the cut leaks)
+        let ex = 0, exIn = 0;
+        for (const ln of window.__harnessExisting || []) for (const p of ln.pts) { ex++; if (inLimit(p) && toLimit(p) > 1) exIn++; }
+        // a paper-only strip inside the limit: walk inward from the limit along its normals at every 25 ft — the first point the
+        // probe calls band (or graded ground) must come within one lattice cell of the line
+        const cell = m.contours && m.contours.cellFt ? m.contours.cellFt : 6;
+        let walks = 0, gaps = [];
+        for (const rg of L.limitRegions) {
+          const ring = rg.outer;
+          for (let i = 0; i < ring.length; i++) {
+            const a = ring[i], b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
+            if (len < 60) continue;
+            let n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            if (!inLimit({ x: mid.x + n.x * 3, y: mid.y + n.y * 3 })) n = { x: -n.x, y: -n.y };
+            for (let s2 = 25; s2 < len - 25; s2 += 25) {
+              const o = { x: a.x + (b.x - a.x) * s2 / len, y: a.y + (b.y - a.y) * s2 / len };
+              walks++;
+              let first = null;
+              for (let d = 0.5; d < 4 * cell; d += 0.5) { const q = gs.grid.probe({ x: o.x + n.x * d, y: o.y + n.y * d }); if (q.status === "value") { first = d; break; } }
+              if (first == null || first > cell) gaps.push({ x: Math.round(o.x), y: Math.round(o.y), first });
+            }
+          }
+        }
+        // the band's DRAWN contours along transects normal to the long limit edges: consecutive spacings of the levels drawn
+        const drawn = [...document.querySelectorAll('[data-layer="contours"] g[data-contour-level]')].map((g) => ({ level: +g.getAttribute("data-contour-level"), d: g.querySelector("path").getAttribute("d") }));
+        return { ex, exIn, walks, gaps: gaps.slice(0, 8), nGaps: gaps.length, cell, drawn, limit: L.limitRegions.map((rg) => rg.outer), bandLimit: document.querySelector("[data-layer=cutfill]")?.getAttribute("data-band-limit"), panelLimit: document.querySelector("[data-graded-area]")?.getAttribute("data-limit-sig") };
+      });
+      check(`(n) ${tag}: zero existing-contour vertices inside the limit (known-good: there is existing ink outside it)`, r.ex > 100 && r.exIn === 0, `${r.exIn} inside of ${r.ex}`);
+      check(`(n) ${tag}: no paper-only strip inside the limit — graded ground starts within one lattice cell (${r.cell} ft) of the line on every walk`, r.walks > 20 && r.nGaps === 0, `${r.nGaps} of ${r.walks} walks · ${JSON.stringify(r.gaps)}`);
+      check(`(n) ${tag}: the band painted is the one composed against the limit the panel names`, !!r.bandLimit && r.bandLimit === r.panelLimit, `band ${String(r.bandLimit).slice(0, 40)} · panel ${String(r.panelLimit).slice(0, 40)}`);
+      // (o) evenly spaced band contours, read off the drawn paths: along normals into the band from each long straight limit edge,
+      // consecutive crossings of DRAWN levels are equal within 10% (the bank body; the last three crossings are the toe)
+      const pieces = r.drawn.flatMap((lv) => verts(lv.d).map((pc) => ({ level: lv.level, pc })));
+      // a transect is judged where the line's own ground is straight across ±40 ft (within 0.4 ft of its least-squares line): there the bank is
+      // a plane and its contours must be parallel and even; where the ground bends along the line (a ravine meeting it) the bank's
+      // contours bend with it — correct — and are skipped (counted). Tolerance: 10%, or 0.15 of the contour lattice's cell, the
+      // tracer's own resolution, whichever is larger.
+      const gAt = await page.evaluate((pts) => pts.map((p) => window.__harnessExistAt(p)), r.limit.flatMap((ring) => ring.flatMap((a, i) => {
+        const b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 250) return [];
+        const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len;
+        return [0.35, 0.5, 0.65].flatMap((t) => STRAIGHT_OFFS.map((o) => ({ x: a.x + (b.x - a.x) * t + tx * o, y: a.y + (b.y - a.y) * t + ty * o })));
+      })));
+      let gk = 0, skippedBent = 0;
+      const runs = [];
+      for (const ring of r.limit) for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 250) continue;
+        const nIn = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+        for (const t of [0.35, 0.5, 0.65]) {
+          const g = gAt.slice(gk, gk + STRAIGHT_OFFS.length); gk += STRAIGHT_OFFS.length;
+          if (g.some((v) => v == null) || straightDev(STRAIGHT_OFFS, g) > 0.4) { skippedBent++; continue; }
+          for (const sg of [1, -1]) {
+          const o = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, e = { x: o.x + sg * nIn.x * 90, y: o.y + sg * nIn.y * 90 };
+          const hits = [];
+          for (const { pc } of pieces) for (let k = 1; k < pc.length; k++) {
+            const p = pc[k - 1], q = pc[k];
+            const d1 = (e.x - o.x) * (p.y - o.y) - (e.y - o.y) * (p.x - o.x), d2 = (e.x - o.x) * (q.y - o.y) - (e.y - o.y) * (q.x - o.x);
+            const d3 = (q.x - p.x) * (o.y - p.y) - (q.y - p.y) * (o.x - p.x), d4 = (q.x - p.x) * (e.y - p.y) - (q.y - p.y) * (e.x - p.x);
+            if (d1 * d2 < 0 && d3 * d4 < 0) { const tt = d3 / (d3 - d4); hits.push(Math.hypot((e.x - o.x) * tt, (e.y - o.y) * tt)); }
+          }
+          hits.sort((x, y) => x - y);
+          // the bank's body: the first crossing is where a line weaves along the limit itself (the daylight), the last three the toe
+          const sp = hits.slice(1).map((h, k) => h - hits[k]).slice(1, -3);
+          if (sp.length >= 3) runs.push(sp);
+          }
+        }
+      }
+      const tolOf = (med) => Math.max(0.1 * med, 0.15 * r.cell);
+      const uneven = runs.filter((sp) => { const med = [...sp].sort((x, y) => x - y)[sp.length >> 1]; return sp.some((v) => Math.abs(v - med) > tolOf(med)); });
+      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 10% / 0.15 cell)`, runs.length >= 2 && uneven.length === 0, `${runs.length} transects judged · ${skippedBent} skipped where the line's ground bends · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
+      await page.close();
+    }
+    // the owner's path: the plan opens "Around the layout", then "To the boundary" is chosen in the panel — at NO moment after the
+    // panel names the boundary may the map paint a band or contours traced against the layout limit (the measured defect)
+    {
+      const page = await open(`?buildable=0&contours=1&zoom=ne50&mode=layout&owner=2`);
+      await waitPicture(page);
+      const layoutSig = await page.evaluate(() => document.querySelector("[data-graded-area]").getAttribute("data-limit-sig"));
+      await page.locator('[data-testid="grading-limit-mode"]').getByText("To the boundary").click();
+      await page.waitForFunction(() => document.querySelector("[data-graded-area]")?.getAttribute("data-limit-mode") === "boundary", null, { timeout: 120000 });
+      const seen = [];
+      for (let k = 0; k < 60; k++) {
+        seen.push(await page.evaluate(() => ({ panel: document.querySelector("[data-graded-area]")?.getAttribute("data-limit-sig"),
+          band: document.querySelector("[data-layer=cutfill]")?.getAttribute("data-band-limit") || "", src: document.querySelector("[data-layer=cutfill]")?.getAttribute("data-band-source") || "",
+          contours: document.querySelector("[data-layer=contours]")?.getAttribute("data-contour-limit") || "" })));
+        if (seen[seen.length - 1].band && seen[seen.length - 1].contours) break;
+        await page.waitForTimeout(250);
+      }
+      const bad = seen.filter((x) => (x.band && x.band !== x.panel) || (x.contours && x.contours !== x.panel) || x.src === "contours");
+      check("(n) mode switch layout → boundary: no frame after the switch paints the layout limit's band or contours under the boundary label", layoutSig && bad.length === 0 && seen.length > 0, `${seen.length} samples · bad ${bad.length}${bad.length ? " " + JSON.stringify(bad[0]).slice(0, 160) : ""}`);
+      check("(n) mode switch: the boundary picture lands (band + contours traced against the new limit)", !!seen.length && !!seen[seen.length - 1].band && !!seen[seen.length - 1].contours, JSON.stringify(seen[seen.length - 1] || {}).slice(0, 160));
+      await page.close();
+    }
+  }
   // the paper checkbox turns it off (one arm)
   {
     const page = await open(`?buildable=0&contours=1&zoom=bldg&mode=layout`);

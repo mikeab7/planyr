@@ -307,6 +307,13 @@ export function resolveGradingLimit({ els = [], extraRings = [], spec = {} } = {
     setbackRings.map(ringHash).join(","), setbackHoles.map(ringHash).join(","), pondRings.map(ringHash).join(","), bufferRings.map(ringHash).join(",")].join("~");
   const hit = cache.get(sig);
   if (hit) return hit;
+  // ROUND 9 (B2500224 ×2): the limit's DEFINITION — what changes it as a limit, not as geometry. Boundary mode: the property limit
+  // and its carve-outs (the elements never move it). Layout mode: auto vs the owner's edited ring + the rules it is grown by (an
+  // element move re-grows the same definition). A picture traced against one definition is never painted under another
+  // (gradingPicture.js); within one definition the previous picture may stay up while the next is traced.
+  const defSig = (mode === "boundary"
+    ? ["boundary", setbackRings.map(ringHash).join(","), setbackHoles.map(ringHash).join(","), pondRings.map(ringHash).join(","), bufferRings.map(ringHash).join(",")]
+    : ["layout", edited ? ringHash(edited) : "auto", sh, R, aisle, setbackRings.map(ringHash).join(","), setbackHoles.map(ringHash).join(",")]).join("~");
   let regions = [], grewIds = [], source = "auto";
   if (mode === "boundary") {
     regions = boundaryGradingLimit({ setbackRings, setbackHoles, pondRings, bufferRings });
@@ -330,7 +337,7 @@ export function resolveGradingLimit({ els = [], extraRings = [], spec = {} } = {
     }
   }
   const areaSf = regionsAreaSf(regions);
-  const out = { mode, source, regions, areaSf, areaAc: areaSf / SQFT_PER_ACRE, grewIds, sig, shoulderFt: sh, cornerRadiusFt: R };
+  const out = { mode, source, regions, areaSf, areaAc: areaSf / SQFT_PER_ACRE, grewIds, sig, defSig, shoulderFt: sh, cornerRadiusFt: R };
   cache.set(sig, out);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return out;

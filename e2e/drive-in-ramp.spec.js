@@ -87,8 +87,15 @@ test.describe("drive-in ramps on dock walls", () => {
 
     // 1 — the buttons: ramp "+" glyphs exist (wall + corner), and no two on-building discs overlap
     const btns = await rampButtons(page);
-    expect(btns.length).toBeGreaterThanOrEqual(2);
-    expect(btns.some((b) => b.title === "Add drive-in ramp")).toBe(true);
+    // NEW-5: exactly one ramp "+" per DOCK wall and one beside each of its two purple corner "+" — three per dock wall, none on the other walls
+    const dockWalls = bl.dock === "cross" ? 2 : bl.dock === "none" ? 0 : 1;
+    expect(btns.map((b) => b.title)).toEqual(Array(3 * dockWalls).fill("Add drive-in ramp"));
+    // …and every edit button sits OUTSIDE the building's footprint (the grading corner tags are inside it), clear of the wall by its own radius
+    const rect = await page.evaluate((id) => { const r = document.querySelector(`[data-el-id="${id}"]`).getBoundingClientRect(); return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height }; }, bl.id);
+    for (const d of await allButtonDiscs(page)) {
+      const inside = d.x + d.r > rect.x0 && d.x - d.r < rect.x1 && d.y + d.r > rect.y0 && d.y - d.r < rect.y1;
+      expect(inside, `a button at (${Math.round(d.x)}, ${Math.round(d.y)}) touches the footprint`).toBe(false);
+    }
     const discs = await allButtonDiscs(page);
     for (let i = 0; i < discs.length; i++) for (let j = i + 1; j < discs.length; j++) {
       expect(Math.hypot(discs[i].x - discs[j].x, discs[i].y - discs[j].y), `buttons ${i} and ${j} overlap`).toBeGreaterThanOrEqual(discs[i].r + discs[j].r - 0.5);
