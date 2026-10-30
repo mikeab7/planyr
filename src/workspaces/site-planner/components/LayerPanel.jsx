@@ -735,7 +735,7 @@ export default function LayerPanel({
   ) : <span style={{ flex: 1, fontWeight: 700 }}>Imagery &amp; Layers</span>;
 
   return (
-    <div ref={rootRef} data-testid="layer-panel" data-surface={surface} data-narrow={narrow ? "1" : "0"} style={{ fontSize: TEXT, color: INK }}>
+    <div ref={rootRef} className="layer-panel-steady" data-testid="layer-panel" data-surface={surface} data-narrow={narrow ? "1" : "0"} style={{ fontSize: TEXT, color: INK }}>
       <div data-testid="layers-header" style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 0 8px" }}>
         {title}
         <ToggleChip active={hidden} aria-pressed={hidden} data-testid="layers-hide-toggle" onClick={() => setLayersHidden(!hidden)}

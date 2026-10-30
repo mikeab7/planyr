@@ -1089,7 +1089,7 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
           data-testid="nt-spacing-panel"
           onMouseDown={stop}
           style={{
-            padding: 10, width: 236,
+            padding: 10, width: 236, maxWidth: "calc(100vw - 16px)", boxSizing: "border-box",
             display: "flex", flexDirection: "column", gap: 10,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
@@ -1098,7 +1098,9 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
         >
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 5 }}>Line spacing</div>
-            <div style={{ display: "flex", gap: 3 }}>
+            {/* Three across, two down: six choices in one row would be ~34px each, which only fits by
+                shrinking the numbers (NEW-1/NEW-2, 2026-10-30). A grid keeps the type at its size. */}
+            <div data-testid="nt-spacing-line-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 4 }}>
               {SPACING_LINE_OPTIONS.map((o) => {
                 const selected = lh === o.value;
                 return (
@@ -1110,26 +1112,29 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
                     onMouseDown={stop}
                     onClick={() => onPick({ lineHeight: o.value })}
                     style={{
-                      flex: 1, padding: "5px 2px", borderRadius: RADIUS.control, cursor: "pointer",
+                      padding: "6px 2px", borderRadius: RADIUS.control, cursor: "pointer",
                       border: `1px solid ${selected ? "var(--accent-notes)" : "var(--border-default)"}`,
                       background: selected ? "var(--accent-notes)" : "var(--surface-page)",
                       color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
                       font: "inherit", fontSize: 12, fontWeight: 650,
                     }}
-                  >{o.value.toFixed(o.value % 1 ? 2 : 1)}</button>
+                  >{o.label}</button>
                 );
               })}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 5 }}>Space between paragraphs</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>Before</span>
+            {/* ⛔ BEFORE AND AFTER EACH GET THEIR OWN LINE (NEW-2, 2026-10-30). Side by side they needed
+                ~260px of a 216px content box, so the last "+" hung over the page. Stacked, the label sits
+                left and the stepper right, and the type stays at its size. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Before</span>
                 <Stepper testid="nt-spacing-before" value={before} big={big} onChange={(n) => onPick({ spaceBefore: n || null })} />
               </span>
-              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>After</span>
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>After</span>
                 <Stepper testid="nt-spacing-after" value={after} big={big} onChange={(n) => onPick({ spaceAfter: n || null })} />
               </span>
             </div>
