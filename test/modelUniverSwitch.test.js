@@ -48,7 +48,7 @@ describe("the owner-only switch", () => {
   });
   it("ModelApp hands the File menu the switch ONLY when the gate is open, so every other account sees today's menu", () => {
     const app = read("src/workspaces/model/ModelApp.jsx");
-    expect(app).toMatch(/univerSwitch=\{univer\.available \? \{ on: univer\.on, setOn: univer\.setOn \} : null\}/);
+    expect(app).toMatch(/univerSwitch=\{univer\.available \? \{ on: univer\.on, setOn: setUniverOn \} : null\}/);
     const menu = read("src/workspaces/model/components/FileMenu.jsx");
     expect(menu).toMatch(/\{univerSwitch && \(/);
   });
@@ -103,7 +103,9 @@ describe("the old grid keeps working exactly as before", () => {
     expect(app).not.toMatch(/if \(!isActive\) return undefined;/);
   });
   it("edits come back through the ONE commit path, so persistence / file mode / org workbooks are unchanged", () => {
-    expect(app).toMatch(/onChange=\{\(next\) => \{ commit\(\(\) => next\);/);
+    // NEW-2: the callback is `onUniverChange` (persist synchronously when urgent, then the ONE `commit`); see test/modelUniverSave.test.js
+    expect(app).toMatch(/onChange=\{onUniverChange\}/);
+    expect(app).toMatch(/const onUniverChange = [^]*?commit\(\(\) => next\);/);
   });
 });
 
