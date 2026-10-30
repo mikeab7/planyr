@@ -12,12 +12,18 @@
  *     so any overrule that exists is inside the probe — and requires `siteState === realStateAt` except inside a named reach or the Hudson;
  *   · it carries a KNOWN-GOOD ARM that must report its known answer (a reach that flips Columbus GA) and a vacuity guard (a scan that probed
  *     nothing, or a reach that never fired, fails rather than printing a score);
+ *   · THIRD REVIEW (main 3ba5c0c3): the reaches are now county-LAND polygons (scripts/build-state-reaches.mjs → stateReachData.js), not a tuned outline in a
+ *     box + band. The old Perdido reach (coarse FL outline, band 0.07°) read Ono Island, Bear Point and the Perdido Bay north shore — all Alabama — as
+ *     Florida (1,241 Alabama land points), and the old Georgia reach (three straight vertices) read Phenix City / Valley AL as Georgia. `GROUND`
+ *     (fixtures/stateReachGroundTruth.json) is county-land samples for both banks of both reaches, so the claim is measured, not asserted;
  *   · the 0.003° grid scans the issue asked for run over the three strips it measured (AL|FL line, AL|GA line, the Red River) — same rule.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { siteState, realStateAt, realBoundaryRings, TUNED_REACHES, STATE_POLYGONS, TEXAS_OUTLINE } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { trustRegionOf } from "../src/workspaces/site-planner/lib/siteChecks.js";
 
+const GROUND = JSON.parse(readFileSync(new URL("./fixtures/stateReachGroundTruth.json", import.meta.url), "utf8"));
 const st = (lat, lng) => siteState({ lat, lng });
 const inBox = (la, lo, [s, w, n, e]) => la >= s && la <= n && lo >= w && lo <= e;
 /* A disagreement between the real polygon and `siteState` is allowed only if it is a documented reach, or the Hudson / Arthur Kill settlement. */
@@ -45,6 +51,15 @@ describe("landmarks the review measured", () => {
     ["Texarkana TX", 33.4251, -94.0477, "TX"], ["Texarkana AR", 33.4418, -94.0377, "AR"], ["Fulton AR", 33.6137, -93.8135, "AR"],
     ["Houston TX", 29.7604, -95.3698, "TX"], ["Tallahassee FL", 30.4383, -84.2807, "FL"], ["Atlanta GA", 33.749, -84.388, "GA"],
     ["Pensacola FL", 30.4213, -87.2169, "FL"], ["Orange Beach AL", 30.2943, -87.5736, "AL"], ["Foley AL", 30.4066, -87.6836, "AL"],
+    // the third review's Perdido stretch: Alabama on the island and shore NORTH of the Key, Florida on the Key
+    ["Ono Island AL (GNIS)", 30.2975, -87.479, "AL"], ["Ono Island AL (the review's point)", 30.2985, -87.485, "AL"],
+    ["Ono Island east end AL", 30.296, -87.465, "AL"], ["Bear Point AL", 30.329, -87.515, "AL"],
+    ["Perdido Bay north shore AL", 30.346, -87.525, "AL"], ["Perdido Bay AL shore", 30.35, -87.5, "AL"], ["Perdido Bay water, AL side", 30.34, -87.47, "AL"],
+    ["Perdido Key FL, west end (NE says AL)", 30.292, -87.4785, "FL"], ["Perdido Key FL, at the Flora-Bama line", 30.2835, -87.515, "FL"],
+    ["Perdido Key FL, east of Ono", 30.2995, -87.4465, "FL"],
+    // the Chattahoochee, where the old Georgia outline overruled up to 2.9 km: Alabama towns beside the river read Alabama
+    ["Phenix City AL", 32.4709, -85.0008, "AL"], ["Valley AL", 32.8057, -85.1713, "AL"], ["Lanett AL", 32.8668, -85.1913, "AL"],
+    ["West Point GA", 32.877, -85.18, "GA"], ["Fort Benning GA", 32.35, -84.95, "GA"],
     ["Chattanooga TN", 35.0456, -85.3097, "TN"], ["Fort Oglethorpe GA", 34.9484, -85.2569, "GA"], ["Southaven MS", 34.9889, -90.0126, "MS"],
     ["Memphis TN", 35.1495, -90.049, "TN"], ["Huntsville AL", 34.7304, -86.5861, "AL"], ["Pulaski TN", 35.1998, -87.0309, "TN"],
     ["Corinth MS", 34.9343, -88.5223, "MS"], ["Savannah TN", 35.2251, -88.249, "TN"],
@@ -81,29 +96,74 @@ describe("every TUNED_REACHES entry is documented, bounded and live", () => {
       expect(st(r.tunedSide[1], r.tunedSide[2]), `${r.id}: ${r.tunedSide[0]}`).toBe(r.tuned);
       expect(realStateAt(r.tunedSide[1], r.tunedSide[2]), `${r.id}: ${r.tunedSide[0]} is a point the real polygon gets wrong`).toBe(r.real);
       expect(st(r.realSide[1], r.realSide[2]), `${r.id}: ${r.realSide[0]}`).toBe(r.real);
+      // the landmark that was missing: a real-side point INSIDE the affected band (Eufaula / Orange Beach sit where the old reach changed nothing)
+      expect(inBox(r.realSideInBand[1], r.realSideInBand[2], r.box), `${r.id}: ${r.realSideInBand[0]} sits in the box`).toBe(true);
+      expect(st(r.realSideInBand[1], r.realSideInBand[2]), `${r.id}: ${r.realSideInBand[0]}`).toBe(r.real);
     }
   });
   it("PINNED: each reach's box and band are exactly the measured ones — widening one is a decision, not a drift", () => {
     // The scan below reads the boxes from TUNED_REACHES itself, so it cannot police them; this is the pin.
-    expect(TUNED_REACHES.map((r) => [r.id, r.tuned, r.real, r.box, r.band ?? null])).toEqual([
-      ["chattahoochee", "GA", "AL", [31.0, -85.3, 32.95, -84.85], null],
-      ["perdido-key", "FL", "AL", [30.2, -87.53, 30.36, -87.35], 0.07],
+    expect(TUNED_REACHES.map((r) => [r.id, r.tuned, r.real, r.box])).toEqual([
+      ["chattahoochee", "GA", "AL", [31.0, -85.3, 32.95, -84.85]],
+      ["perdido-key", "FL", "AL", [30.2, -87.53, 30.36, -87.4]],
     ]);
   });
   it("no reach for Tennessee, Texas or Colorado: their outlines never overrule", () => {
     for (const r of TUNED_REACHES) expect(["GA", "FL"]).toContain(r.tuned);
   });
-  it("DOCUMENTED LIMIT (pinned so it cannot drift): within ~1.3 km of the Chattahoochee the other bank can answer Georgia", () => {
-    // These are Alabama towns that read GA because the two banks sit closer together than Natural Earth's error. Kept on the Georgia side on purpose.
-    for (const [la, lo] of [[32.4709, -85.0008], [32.3357, -85.0], [32.8057, -85.1713]]) expect(st(la, lo)).toBe("GA");
-    // ...and the Alabama towns a little further from the river are Alabama.
-    for (const [la, lo] of [[32.8668, -85.1913], [31.8913, -85.1455], [31.2918, -85.1119]]) expect(st(la, lo)).toBe("AL");
+  it("Alabama beside the Chattahoochee reads Alabama: Phenix City, Valley and a landmark inside the old overrule band (the third review's item 2)", () => {
+    // These three used to read GA — the Georgia outline was three straight vertices, 1.0–2.9 km west of the river (capped by a 0.012° band). Fort Mitchell's
+    // point is Russell County land per the county polygons; the old note listed (32.3357, -85.0) as an Alabama town, but that point is Chattahoochee County GA.
+    for (const [la, lo] of [[32.4709, -85.0008], [32.3293, -85.0127], [32.8057, -85.1713]]) expect(st(la, lo), `${la},${lo}`).toBe("AL");
+    for (const [la, lo] of [[32.8668, -85.1913], [31.8913, -85.1455], [31.2918, -85.1119]]) expect(st(la, lo), `${la},${lo}`).toBe("AL");
+    for (const [la, lo] of [[32.461, -84.9877], [32.35, -84.95], [32.877, -85.18]]) expect(st(la, lo), `${la},${lo}`).toBe("GA");
   });
-  it("KNOWN-GOOD ARM: the Chattahoochee reach still gives Columbus GA its Georgia answer, and the real polygon alone would not", () => {
+  it("GROUND TRUTH, Chattahoochee: every sampled Georgia-county point reads GA; the reach adds NO Alabama-county point reading GA", () => {
+    const [ga, al] = [GROUND.chattahoochee.ga, GROUND.chattahoochee.al];
+    expect(ga.length, "vacuous: no Georgia samples").toBeGreaterThan(150);
+    expect(al.length, "vacuous: no Alabama samples").toBeGreaterThan(150);
+    expect(ga.filter(([la, lo]) => st(la, lo) !== "GA")).toEqual([]);
+    // Natural Earth itself still calls a few hundred metres of Alabama beside the river Georgia (32.83–32.85N, the lake shore at Eufaula…). That is NE's
+    // error, not the reach's: every Alabama-county point that reads GA must be one the REAL polygon already calls GA. (Drawing the reach the other way
+    // too would fix them for ~5 KB of bundle — left as a documented limit.)
+    const wrong = al.filter(([la, lo]) => st(la, lo) !== "AL");
+    expect(wrong.filter(([la, lo]) => realStateAt(la, lo) !== "GA"), "the reach itself put Alabama ground in Georgia").toEqual([]);
+    expect(wrong.length, "NE's own residual error grew").toBeLessThanOrEqual(10);
+  });
+  it("GROUND TRUTH, Perdido: every Escambia-county (Florida) point reads FL and every Baldwin-county (Alabama) point reads AL", () => {
+    const { al, fl } = GROUND.perdido;
+    expect(al.length).toBeGreaterThan(10); expect(fl.length).toBeGreaterThan(25);
+    expect(fl.filter(([la, lo]) => st(la, lo) !== "FL")).toEqual([]);
+    expect(al.filter(([la, lo]) => st(la, lo) !== "AL")).toEqual([]);
+  });
+  it("every point in the Perdido window that the review named reads Alabama, and a 0.001° scan of the island finds no Alabama landmark in Florida", () => {
+    let flipped = 0;
+    for (let la = 30.2; la <= 30.36; la += 0.001) for (let lo = -87.53; lo <= -87.4; lo += 0.001) {
+      if (realStateAt(la, lo) === "AL" && st(la, lo) === "FL") flipped++;
+    }
+    expect(flipped, "the reach must still pull the Key's western end to Florida").toBeGreaterThan(100);
+    // ...and none of those flips may be north of the Key: Ono Island / Bear Point / the north shore all sit above 30.294 at their longitudes
+    for (const [la, lo] of [[30.2985, -87.485], [30.296, -87.465], [30.329, -87.515], [30.346, -87.525], [30.34, -87.47], [30.35, -87.5]]) expect(st(la, lo)).toBe("AL");
+  });
+  it("a point no real polygon holds answers the NEAREST real state before any tuned outline (Bear Point, the Perdido Bay north shore)", () => {
+    // realStateAt is null for these — the old order answered from the coarse FL outline and said Florida.
+    for (const [la, lo] of [[30.329, -87.515], [30.34, -87.47]]) { expect(realStateAt(la, lo)).toBeNull(); expect(st(la, lo)).toBe("AL"); }
+  });
+  it("KNOWN-GOOD ARM: the reaches still give Columbus GA and the Key their answers, and the real polygon alone would not", () => {
     expect(realStateAt(32.461, -84.9877)).toBe("AL");
     expect(st(32.461, -84.9877)).toBe("GA");
-    expect(realStateAt(30.3, -87.45)).toBe("AL");
-    expect(st(30.3, -87.45)).toBe("FL");
+    expect(realStateAt(30.292, -87.4785)).toBe("AL");
+    expect(st(30.292, -87.4785)).toBe("FL");
+  });
+  it("a reach's ring is a real polygon inside its own box and the committed data matches the reach definition", () => {
+    for (const r of TUNED_REACHES) {
+      expect(r.ring.length).toBeGreaterThan(0);
+      const [s0, w, n, e] = r.box;
+      for (const ring of r.ring) {
+        expect(ring.length).toBeGreaterThanOrEqual(3);
+        for (const [x, y] of ring) expect(y >= s0 - 1e-4 && y <= n + 1e-4 && x >= w - 1e-4 && x <= e + 1e-4, `${r.id}: vertex ${x},${y} outside box`).toBe(true);
+      }
+    }
   });
   it("a reach does not extend past its box: the straight AL|GA line north of West Point is the real polygon's", () => {
     expect(st(34.0, -85.42)).toBe("AL");

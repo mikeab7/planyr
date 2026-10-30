@@ -12,7 +12,7 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVe
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
 import { ALL_LAYERS, MERGE_GROUPS } from "../src/workspaces/site-planner/lib/layers.js";
-import { SPECIAL_WS, OK_VINTAGE as OK_VINT, OK_LAYERS, OK_MERGE_GROUPS, OK_VECTOR_SOURCES, OK_LAYER_TIERS, WELL_CLASSES, wellClassOf, DAM_CLASSES, damHazardOf, ROAD_CLASSES, IMPAIRED, urlFor, viaRelay, registryUrl, clean, tc } from "../src/workspaces/site-planner/lib/oklahomaLayers.js";
+import { TRIBAL_COURTS, SPECIAL_WS, OK_VINTAGE as OK_VINT, OK_LAYERS, OK_MERGE_GROUPS, OK_VECTOR_SOURCES, OK_LAYER_TIERS, WELL_CLASSES, wellClassOf, DAM_CLASSES, damHazardOf, ROAD_CLASSES, IMPAIRED, urlFor, viaRelay, registryUrl, clean, tc } from "../src/workspaces/site-planner/lib/oklahomaLayers.js";
 import { VECTOR_SOURCES } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
@@ -243,14 +243,22 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
     const courts = (nm) => (t.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Courts") || {}).text || "";
     const t = ALL_LAYERS.ok_tribal;
     expect(courts("Creek OTSA")).toMatch(/McGirt v\. Oklahoma \(U\.S\. Supreme Court, 2020\), a criminal-jurisdiction case, held that Congress never disestablished/);
-    for (const n of ["Cherokee", "Chickasaw", "Choctaw", "Seminole", "Quapaw"]) expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": in (a )?criminal cases? the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished"));
-    expect(courts("Kickapoo OTSA")).toMatch(/criminal case.*held in 2023 that the reservation was disestablished/);
+    // THIRD REVIEW: every holding carries its case. A court sentence with no cite is a holding we cannot support, so the table is pinned name by name.
+    const CITE = { Cherokee: "Hogner v. State, 2021 OK CR 4", Chickasaw: "Bosse v. State, 2021 OK CR 3", Choctaw: "Sizemore v. State, 2021 OK CR 6", Seminole: "Grayson v. State, 2021 OK CR 8", Quapaw: "State v. Lawhorn, 2021 OK CR 37" };
+    for (const n of Object.keys(CITE)) {
+      expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": in (a )?criminal cases? the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished \\(" + CITE[n].replace(/[.()]/g, "\\$&") + "\\)\\.$"));
+    }
+    expect(courts("Kickapoo OTSA")).toMatch(/criminal case.*held in 2023 that the reservation was disestablished \(Buck v\. State, 2023 OK CR 2\)\.$/);
+    expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).toMatch(/held in 2021 that the reservation was disestablished \(Martinez v\. State, No\. PCD-2020-612\)\.$/);
+    expect(courts("Osage Reservation")).toMatch(/Osage Nation v\. Irby, 597 F\.3d 1117 \(2010\).*McCauley v\. State, 2024 OK CR 8/);
+    // no court sentence anywhere that is not one of the cited ones: every TRIBAL_COURTS line and OSAGE_COURTS ends in a case name or McGirt
+    for (const [, line] of TRIBAL_COURTS) expect(line, line).toMatch(/McGirt v\. Oklahoma|\((?:\w+ v\. \w+|State v\. \w+)[^)]*\)\.$/);
     expect(courts("Creek OTSA")).toMatch(/a criminal-jurisdiction case/);
     expect(courts("Creek/Seminole joint-use OTSA")).toMatch(/Muscogee \(Creek\).*Seminole:/);
     expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).toMatch(/was disestablished/);
     expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).not.toMatch(/not disestablished/);
     expect(courts("Caddo-Wichita-Delaware OTSA")).toBe("No court ruling is cited here for this area; that does not mean none exists.");
-    expect(courts("Osage Reservation")).toMatch(/Osage Nation v\. Irby \(2010\).*disestablished.*in 2024.*criminal case.*Osage Nation disputes/);
+    expect(courts("Osage Reservation")).toMatch(/Osage Nation v\. Irby, 597 F\.3d 1117 \(2010\).*disestablished.*in 2024.*criminal case.*Osage Nation disputes/);
   });
   it("per area type: OTSAs are Census tribal areas, the Osage Reservation and Shawnee trust land are legal areas in Census's classification", () => {
     const type = (nm) => ALL_LAYERS.ok_tribal.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Type").text;

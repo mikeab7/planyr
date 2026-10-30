@@ -236,6 +236,21 @@ export function streamBufferBands({ nhd = null, trout = null, district = null, r
   return bands;
 }
 
+/* The status line when a supporting source of the buffer layer failed (NEW-1 third review, 2026-10-30): which sources were lost and what that does to the picture. Pure.
+ *   · a lost trout / District / protected-river source makes a band NARROWER than the rule (no 50 ft trout tier, no 75 ft District tier, no 100 ft river tier);
+ *   · a lost MRPA corridor makes the Chattahoochee band WIDER than the rule — nothing can be cut where the Metropolitan River Protection Act governs;
+ *   · a lost protected-river source ALSO leaves the river's unnamed flowlines uncut (the cut that follows DCA's centreline needs the lines — `makeRiverIndex` is null), so the
+ *     District's 75-ft band is drawn along the Chattahoochee INSIDE the corridor too. Either of the two therefore says the river/District bands may be drawn along the reach.
+ * `failed` = { trout, district, rivers, mrpa } booleans; returns "" when nothing failed. */
+export function streamBufferLossNote(label, failed = {}) {
+  const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline", failed.rivers && "the protected-river lines", failed.mrpa && "the Chattahoochee MRPA corridor"].filter(Boolean);
+  if (!lost.length) return "";
+  const narrower = failed.trout || failed.district || failed.rivers;
+  const inCorridor = failed.mrpa || failed.rivers;
+  const effect = [narrower && "the bands shown may be narrower than the rule", inCorridor && "river or District bands may be drawn along the Chattahoochee reach, inside the corridor where the Metropolitan River Protection Act's buffers govern instead"].filter(Boolean).join("; ");
+  return `${label}: couldn't load ${lost.join(" and ")} — ${effect}. NOT the full answer (screening only).`;
+}
+
 /* The legend/ⓘ line — one sentence per tier actually present in the bands (so a Savannah view never advertises a
  * mountain trout rule). Pure. */
 export function bufferLegend(bands) {
