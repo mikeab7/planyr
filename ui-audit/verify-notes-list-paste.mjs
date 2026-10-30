@@ -23,13 +23,14 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:5199";
-const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+/* CI leaves PW_CHROME unset on purpose: chromium.launch() then resolves the revision `playwright install` fetched */
+const EXEC = process.env.PW_CHROME || undefined;
 const FX = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../test/fixtures/clipboard-lists");
 const TREE_KEY = "planyr:notes:tree:v1:local";
 const PAGE_KEY = "planyr:notes:page:v1:local:p1";
 const load = (n) => ({ html: fs.readFileSync(path.join(FX, `${n}.html`), "utf8"), text: fs.readFileSync(path.join(FX, `${n}.txt`), "utf8") });
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox"] });
 const page = await (await browser.newContext({ viewport: { width: 1500, height: 950 } })).newPage();
 const errs = [];
 page.on("pageerror", (e) => errs.push(e.message));
