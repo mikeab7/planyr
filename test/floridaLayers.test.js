@@ -245,7 +245,7 @@ describe("review findings (adversarial pass 1) stay fixed", () => {
 
 describe("click-card wording", () => {
   it("prints agency ALL-CAPS in words and leaves mixed case alone", () => {
-    expect(niceCase("CITY OF SUNRISE-SPRINGTREE GOLF COURSE")).toBe("City Of Sunrise-Springtree Golf Course");
+    expect(niceCase("CITY OF SUNRISE-SPRINGTREE GOLF COURSE")).toBe("City of Sunrise-Springtree Golf Course");
     expect(niceCase("8350 SPRINGTREE DRIVE")).toBe("8350 Springtree Drive");
     expect(niceCase("NW 44TH ST LLC")).toBe("NW 44th St LLC");
     expect(niceCase("One Price Dry Cleaning")).toBe("One Price Dry Cleaning");
@@ -336,8 +336,14 @@ describe("review pass 5 stays fixed — one acronym-aware formatter for every sh
       "NLWCD CANAL": "NLWCD Canal", "NSLRWCD C-24D": "NSLRWCD C-24D", "LWDD L-35": "LWDD L-35", "CBRWCD S-12": "CBRWCD S-12", "FPFWCD": "FPFWCD",
       "USACE": "USACE", "USACE/SFWMD": "USACE/SFWMD", "715 FARMS DD": "715 Farms DD", "BCB": "BCB", "US 27/SR 25": "US 27/SR 25", "SR 826": "SR 826",
       "NW 44TH ST LLC": "NW 44th St LLC", "FT L  PROSPECT": "Ft L Prospect", "WESTSIDE": "Westside", "HIATUS RD": "Hiatus Rd", "NORTH NEW RIVER CANAL": "North New River Canal",
-      "ACME IMPROVEMENT DISTRICT": "Acme Improvement District", "CITY OF SUNRISE-SPRINGTREE GOLF COURSE": "City Of Sunrise-Springtree Golf Course",
+      "ACME IMPROVEMENT DISTRICT": "Acme Improvement District", "CITY OF SUNRISE-SPRINGTREE GOLF COURSE": "City of Sunrise-Springtree Golf Course",
     };
+    Object.assign(cases, {
+      // pass 6 — the live canal / permit / site-name shapes
+      "STA-1E": "STA-1E", "C-44 STA CELL 1": "C-44 STA Cell 1", "SIRWCD": "SIRWCD", "CSID": "CSID", "EBWCD": "EBWCD", "HDPE": "HDPE", "CATV": "CATV", "FPL'S": "FPL's", "FDOT'S": "FDOT's",
+      "J&J": "J&J", "FP&L": "FP&L", "M&O": "M&O", "SR 821/HEFT": "SR 821/HEFT", "CHEVRON BLDG 3046": "Chevron Bldg 3046", "DADE CNTY SCHOOL BD": "Dade Cnty School Bd", "ANDERSON, ERIC MR. AND MRS.": "Anderson, Eric Mr. and Mrs.",
+      "JEA SUBSTATION": "JEA Substation", "YMCA OF NORTH FLORIDA": "YMCA of North Florida", "CITY OF BOCA RATON": "City of Boca Raton", "O'KNIGHT": "O'Knight", "TODD ADDISON": "Todd Addison", "KEENE'S": "Keene's",
+    });
     for (const [raw, want] of Object.entries(cases)) expect(niceCase(raw), raw).toBe(want);
     expect(niceCase("Already Mixed Case")).toBe("Already Mixed Case");
   });
