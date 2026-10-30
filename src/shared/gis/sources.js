@@ -1526,7 +1526,7 @@ export const GIS_SOURCES = {
   },
   /* The 2,000-ft Chattahoochee River Corridor of the Metropolitan River Protection Act (O.C.G.A. 12-5-440 et seq.), published by the District/ARC (item
    * `smiller_arc`; copyright line 'Metropolitan North Georgia Water Planning District, Atlanta Regional Commission'). ONE polygon from Buford Dam to the
-   * downstream limit of Fulton/Douglas counties (-84.85..-84.07, 33.51..34.17): the 1973 Act's 48 miles (Buford Dam → Peachtree Creek) plus the 36 miles added in
+   * downstream limit of Fulton/Douglas counties (extent -84.8507..-84.0696, 33.5113..34.1668 — the baked outline in gaMrpaReach.js): the 1973 Act's 48 miles (Buford Dam → Peachtree Creek) plus the 36 miles added in
    * 1998 (atlantaregional.org/natural-resources/water/metropolitan-river-protection-act, read 2026-10-29). ARC's item text still says 'to Peachtree Creek' — the
    * geometry is the longer, current corridor. Live 2026-10-29: Chattahoochee vertices at -84.3348,33.9982 and -84.8021,33.5733. */
   gaMrpaCorridor: {

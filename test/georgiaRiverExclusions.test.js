@@ -11,8 +11,8 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({
 }));
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
-import { streamBufferBands, keepRuns } from "../src/workspaces/site-planner/lib/georgiaStreamBuffers.js";
-import { inTidalReach, riverExclusionAt, inMrpaReachBox, MRPA_REACH_BOX } from "../src/workspaces/site-planner/lib/georgiaRiverExclusions.js";
+import { streamBufferBands, keepRuns, clipOutside } from "../src/workspaces/site-planner/lib/georgiaStreamBuffers.js";
+import { inTidalReach, riverExclusionAt, inMrpaReachBox, inMrpaReach, MRPA_REACH_BOX } from "../src/workspaces/site-planner/lib/georgiaRiverExclusions.js";
 import { GA_TIDAL_CELLS, GA_TIDAL_CELL_DEG } from "../src/workspaces/site-planner/lib/gaTidalReaches.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 
@@ -86,6 +86,7 @@ describe("the Protected Rivers click card", () => {
   it("MRPA reach: the Act's corridor governs — no 100-ft protected-river rule is printed", () => {
     expect(inMrpaReachBox(-84.3348, 33.9982)).toBe(true);
     expect(MRPA_REACH_BOX.latMax).toBeGreaterThan(34.1);
+    expect(MRPA_REACH_BOX.latMax, "the outline's own bounding box, not a padded round number").toBeLessThan(34.17);
     const t = text(card("Chattahoochee River", { lat: 33.9982, lng: -84.3348 }));
     expect(t).toMatch(/Metropolitan River Protection Act/);
     expect(t).not.toMatch(/100-ft river corridor/);
@@ -126,5 +127,62 @@ describe("the Protected Rivers click card", () => {
     expect(ALL_LAYERS.ga_protected_rivers.note).toMatch(/Metropolitan River Protection Act/);
     expect(ALL_LAYERS.ga_protected_rivers.note).toMatch(/Coastal Marshlands Protection Act/);
     expect(ALL_LAYERS.ga_stream_buffers.note).toMatch(/understates/);
+  });
+});
+
+/* NEW-1 (second adversarial review of main e370ff91, 2026-10-30, finding 2) — the MRPA corridor plan governs the Chattahoochee inside the corridor, so the District's 75-ft model buffer is not drawn
+ * along the river there either; the cut is geometric (not whole vertices); and the click card's "reach" is the corridor outline, not a box that reaches over the impounded river at Buford Dam. */
+describe("the MRPA corridor governs the Chattahoochee's 75-ft District band too, and every cut is geometric", () => {
+  const MRPA_RING = [[-84.9, 33.5], [-84.2, 33.5], [-84.2, 34.1], [-84.9, 34.1], [-84.9, 33.5]];
+  const DISTRICT = fc(poly([[-85.5, 33.0], [-83.5, 33.0], [-83.5, 34.6], [-85.5, 34.6], [-85.5, 33.0]]));
+  const nhd = (name, coords) => ({ type: "Feature", properties: { gnis_name: name, ftype: 460, fcode: 46006 }, geometry: { type: "LineString", coordinates: coords } });
+  const tier = (bands, id) => bands.filter((b) => b.tier.id === id);
+  const lats = (b) => b.ring.map((p) => p[1]);
+  it("red on the unfixed code: a Chattahoochee NHD line through the corridor kept a 75-ft District band along the whole reach", () => {
+    const r = nhd("Chattahoochee River", [[-84.5, 33.6], [-84.5, 33.9], [-84.5, 34.05], [-84.5, 34.3], [-84.5, 34.5]]);
+    const bands = streamBufferBands({ nhd: fc(r), district: DISTRICT, mrpa: fc(poly(MRPA_RING)) });
+    const d = tier(bands, "district");
+    expect(d.length).toBe(1);
+    expect(Math.min(...lats(d[0])), "only the part north of the corridor edge (34.1, less the ~150 m tolerance) is drawn").toBeGreaterThan(34.095);
+  });
+  it("a tributary inside the corridor keeps its band (it is not the river)", () => {
+    const t = nhd("Peachtree Creek", [[-84.5, 33.6], [-84.5, 33.9]]);
+    expect(tier(streamBufferBands({ nhd: fc(t), district: DISTRICT, mrpa: fc(poly(MRPA_RING)) }), "district").length).toBe(1);
+  });
+  it("without the corridor polygon (it failed to load) nothing is cut", () => {
+    const r = nhd("Chattahoochee River", [[-84.5, 33.6], [-84.5, 33.9]]);
+    expect(tier(streamBufferBands({ nhd: fc(r), district: DISTRICT, mrpa: null }), "district").length).toBe(1);
+  });
+  it("the cut is GEOMETRIC: a two-vertex segment from inside the corridor to far outside it keeps the part outside, ending at the edge (whole-vertex dropping lost the segment entirely)", () => {
+    const r = line("Chattahoochee River", [[-84.5, 34.0], [-84.5, 34.5]]);
+    const bands = riverBands(streamBufferBands({ rivers: fc(r), mrpa: fc(poly(MRPA_RING)) }));
+    expect(bands.length).toBe(1);
+    const ys = lats(bands[0]);
+    expect(Math.min(...ys)).toBeGreaterThan(34.095);
+    expect(Math.min(...ys)).toBeLessThan(34.105);
+    expect(Math.max(...ys)).toBeGreaterThan(34.49);
+  });
+  it("clipOutside: finds a small excluded area a long segment dips through, and splits there", () => {
+    const inBox = ([x, y]) => x > 1 && x < 2 && y > -1 && y < 1;
+    const runs = clipOutside([[0, 0], [4, 0]], inBox, 0.1);
+    expect(runs).toHaveLength(2);
+    expect(runs[0][runs[0].length - 1][0]).toBeGreaterThan(0.99);
+    expect(runs[0][runs[0].length - 1][0]).toBeLessThanOrEqual(1);
+    expect(runs[1][0][0]).toBeGreaterThanOrEqual(2);
+    expect(runs[1][0][0]).toBeLessThan(2.01);
+  });
+  it("the card's reach is the corridor outline: every real DCA Chattahoochee vertex of the reach is in it, and the lake side of Buford Dam (inside the old bounding box) is not", () => {
+    // live 2026-10-30: the dam end of DCA's line, a mid-reach vertex, the downstream end, and 2-120 m-outside vertices
+    for (const [lng, lat] of [[-84.0766, 34.1605], [-84.3348, 33.9982], [-84.8021, 33.5733], [-84.0979, 34.1232]]) expect(inMrpaReach(lng, lat), `${lng},${lat}`).toBe(true);
+    for (const [lng, lat] of [[-84.079, 34.169], [-84.0705, 34.1695]]) {
+      expect(lng >= -84.85 && lng <= -84.07 && lat >= 33.51 && lat <= 34.17, "inside the OLD hand-rounded box (-84.85..-84.07, 33.51..34.17)").toBe(true);
+      expect(inMrpaReach(lng, lat), "but not on the reach").toBe(false);
+      expect(riverExclusionAt("Chattahoochee River", { lat, lng })).toBe(null);
+    }
+  });
+  it("the reach test (the baked outline, strip-indexed) is fast enough for a click or a whole view", () => {
+    const t0 = performance.now();
+    for (let i = 0; i < 2000; i++) inMrpaReach(-84.3 + (i % 50) * 0.001, 33.99 + Math.floor(i / 50) * 0.001);
+    expect(performance.now() - t0).toBeLessThan(1500);
   });
 });

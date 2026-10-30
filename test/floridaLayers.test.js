@@ -166,6 +166,14 @@ describe("the numbers on screen are the publisher's, and a legend is what the ma
     expect(c.legend.map((l) => l.color)).toEqual([1, 2, 3].map((z) => BROWARD_WELLFIELD_RAMP[z]));
     for (const z of [1, 2, 3]) expect(browardWellfieldStyle({ ZONE: z }, 0.4).fillColor).toBe(BROWARD_WELLFIELD_RAMP[z]);
   });
+  it("NEW-1 second review: the OFW rule is cited as 'Rule 62-302.700, F.A.C.' (never 's.'), and Broward's distances point at the Code the county's description quotes", () => {
+    expect(ALL_LAYERS.fl_outstanding_florida_waters.note).toMatch(/Rule 62-302\.700, F\.A\.C\./);
+    for (const c of Object.values(ALL_LAYERS)) expect([c.note, c.infoCaveat].join(" "), c.label).not.toMatch(/\bs\. 62-/);
+    const n = ALL_LAYERS.fl_wellfield_broward.note;
+    expect(n).toMatch(/Broward County Code, Chapter 27, Article XIII/);
+    expect(n).toMatch(/June 2013/);
+    expect(n).not.toMatch(/tightest nearest the well/); // an inference no source states
+  });
   it("Miami-Dade's note names Chapter 24 and the 10 / 30 / 100 / 210-day contours, and its legend is the style ramp", () => {
     const c = ALL_LAYERS.fl_wellfield_miamidade;
     expect(c.note).toMatch(/Chapter 24/);

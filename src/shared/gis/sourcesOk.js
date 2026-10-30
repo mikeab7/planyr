@@ -148,7 +148,7 @@ export const OK_SOURCES = {
     serviceUrl: DEQ_WATER, layerId: 8, geometryType: "polygon", fields: { zone: "ZONE" },
   }),
   okWellBuffer: OK("okWellBuffer", {
-    label: "Public water-supply well 300-ft buffers (Oklahoma DEQ)", provider: "Oklahoma Department of Environmental Quality — Water Quality, WHPA 300-ft Buffer (OAC 252:626-7-4)",
+    label: "Public water-supply well 300-ft buffers (Oklahoma DEQ)", provider: "Oklahoma Department of Environmental Quality — Water Quality, WHPA 300-ft Buffer (rule cited by DEQ: OAC 252:626-7-4)",
     serviceUrl: DEQ_WATER, layerId: 11, geometryType: "polygon", fields: { system: "SYSTEM", source: "SOURCE_NAM", type: "SOURCE_TYP", pop: "POP_SERVED", county: "COUNTY" },
   }),
   okPwsIntake: OK("okPwsIntake", {

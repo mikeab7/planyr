@@ -112,11 +112,37 @@ const ROAD_MAINT = { C: "City", K: "County", P: "Private", S: "State (ODOT)", T:
 
 /* =============================================================== Tribal areas =============================================================== */
 const TRIBAL = {
-  otsa: { key: "otsa", label: "Tribal statistical area (Census) — not a legal boundary", color: "#7c3aed", dash: true },
+  otsa: { key: "otsa", label: "Census tribal area (OTSA)", color: "#7c3aed", dash: true },
   osage: { key: "osage", label: "Osage Reservation (Census)", color: "#0f766e" },
   trust: { key: "trust", label: "Trust land (Census)", color: "#a16207" },
   cherokee: { key: "cherokee", label: "Cherokee Nation reservation (the Nation's own file)", color: "#b45309", dash: true },
   land: { key: "land", label: "Cherokee Nation tribal land tracts", color: "#92400e" },
+};
+/* WHAT A CARD MAY SAY ABOUT THE COURTS (NEW-1 second review, 2026-10-30). The Census OTSAs are drawn with each tribe and, for several, follow a historic reservation — so a blanket "statistical, not a
+ * legal boundary" read as "no reservation here", which courts have said is wrong for the Muscogee (Creek), Cherokee, Chickasaw, Choctaw, Seminole and Quapaw. But the reverse blanket is wrong too: the
+ * Kiowa, Comanche and Apache reservation and the Osage Reservation have been held DISESTABLISHED. So the card states only a ruling it can name, per nation, and never says a site IS or IS NOT under tribal
+ * jurisdiction — that is a fact-specific question for counsel and the Nation. Sources read 2026-10-30 (court and year only; case names for the 2021 decisions were not verifiable from a primary source):
+ * McGirt v. Oklahoma (U.S. 2020) · Oklahoma Court of Criminal Appeals 2021 for the Cherokee, Chickasaw, Choctaw, Seminole and the Quapaw · the OCCA's Kiowa-Comanche-Apache ruling · Osage Nation v. Irby,
+ * 597 F.3d 1117 (10th Cir. 2010), cert. denied 2011, which the Osage Nation now asks courts to revisit after McGirt. */
+export const TRIBAL_COURTS = [
+  [/\bcreek\b/i, "Muscogee (Creek): McGirt v. Oklahoma (U.S. Supreme Court, 2020), a criminal-jurisdiction case, held that Congress never disestablished the reservation."],
+  [/\bcherokee\b/i, "Cherokee: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bchickasaw\b/i, "Chickasaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bchoctaw\b/i, "Choctaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bseminole\b/i, "Seminole: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bquapaw\b/i, "Quapaw: in a criminal case the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bkiowa\b/i, "Kiowa, Comanche and Apache: in a criminal case the Oklahoma Court of Criminal Appeals held that the reservation was disestablished."],
+  [/\bkickapoo\b/i, "Kickapoo: in a criminal case the Oklahoma Court of Criminal Appeals held in 2023 that the reservation was disestablished."],
+];
+export const OSAGE_COURTS = "The Tenth Circuit held in Osage Nation v. Irby (2010) that Congress disestablished the reservation, and in 2024 the Oklahoma Court of Criminal Appeals followed it in a criminal case; the Osage Nation disputes that after McGirt v. Oklahoma (2020).";
+const COUNSEL = "The rulings cited are criminal-jurisdiction decisions; they do not by themselves settle civil, regulatory or tax questions. What a ruling, or an area on this map, means for a site's jurisdiction — civil, regulatory or tax — is unsettled and fact-specific. Ask counsel and the Nation; this map does not say whether a site is or is not under tribal jurisdiction.";
+const courtLinesFor = (name) => TRIBAL_COURTS.filter(([re]) => re.test(String(name || ""))).map(([, t]) => t);
+const tribalCard = (props) => {
+  const p = props || {}, name = clean(p.NAME), kind = tribalCensusKind(name);
+  if (kind === "osage") return { title: "Tribal area", rows: [rowOf("Name", name, { raw: true }), rowOf("Type", "Reservation, as shown by Census (a legal area in Census's classification)", { raw: true }), rowOf("Courts", OSAGE_COURTS, { raw: true })].filter(Boolean), note: COUNSEL + " The Osage Nation's mineral estate is a separate question for the Nation." };
+  if (kind === "trust") return { title: "Tribal area", rows: [rowOf("Name", name, { raw: true }), rowOf("Type", "Off-reservation trust land, as shown by Census (a legal area in Census's classification)", { raw: true })].filter(Boolean), note: COUNSEL };
+  const lines = courtLinesFor(name);
+  return { title: "Tribal area", rows: [rowOf("Name", name.replace(/\s+OTSA$/i, " (Census tribal area)"), { raw: true }), rowOf("Type", "Oklahoma Tribal Statistical Area (OTSA) — the Census representation of the area, drawn with the tribe", { raw: true }), rowOf("Courts", lines.length ? lines.join(" ") : "No court ruling is cited here for this area; that does not mean none exists.", { raw: true })].filter(Boolean), note: COUNSEL };
 };
 const tribalCensusKind = (name) => /^osage reservation$/i.test(String(name || "")) ? "osage" : /trust land/i.test(String(name || "")) ? "trust" : "otsa";
 const tribalStyle = (props, opacity) => {
@@ -243,10 +269,9 @@ export const OK_LAYERS = {
     url: GIS_SOURCES.okTribal.serviceUrl, where: GIS_SOURCES.okTribal.where, simplifyFactor: 0.5,
     minZoom: 7, color: TRIBAL.otsa.color, weight: 1.2, styleFn: tribalStyle, legend: TRIBAL_LEGEND,
     hoverTitle: "Tribal area", hoverSource: "U.S. Census Bureau",
-    identifyCard: card("Tribal area", (p) => [rowOf("Name", String(p.NAME || "").replace(/\s+OTSA$/i, " (statistical area)"), { raw: true })],
-      "Census Oklahoma Tribal Statistical Areas are statistical areas the Bureau draws with each tribe — they are not legal boundaries and not a ruling on jurisdiction. Whether a parcel is 'Indian country' for a criminal, civil, tax or regulatory purpose is a legal question; ask counsel and the tribal government early."),
-    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — statistical, NOT legal boundaries), the Osage Reservation and the Shawnee trust land.",
-    infoCaveat: "What a tribal area or a reservation boundary means for a given parcel — criminal, civil, tax, regulatory — is a legal question no map answers. Ask counsel and the tribal government early.",
+    identifyCard: tribalCard,
+    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — areas Census draws with each tribe, in several cases following a historic reservation), the Osage Reservation and the Shawnee trust land. In criminal-jurisdiction cases, courts have held that the Muscogee (Creek) reservation (McGirt v. Oklahoma, 2020) and the Cherokee, Chickasaw, Choctaw, Seminole and Quapaw reservations (Oklahoma Court of Criminal Appeals, 2021) were not disestablished, and that the Kiowa, Comanche and Apache and the Kickapoo reservations were — as was the Osage Reservation, a ruling the Osage Nation disputes; other areas have their own cases. Click an area for its own line.",
+    infoCaveat: "A tribal boundary on a map does not say whether a site is under tribal jurisdiction. That is a legal question that turns on the facts — civil, regulatory and tax questions can differ. Ask counsel and the Nation early.",
     group: "jurisdiction", order: 21,
   }),
   ok_cherokee_res: areaRow({
@@ -428,12 +453,12 @@ export const OK_LAYERS = {
     group: "environmental", order: 32,
   }),
   ok_deq_well_buffers: areaRow({
-    label: "Public-Well 300-ft Buffers", mergeGroup: "ok_source_water", source: DEQ + " — Water Quality (OAC 252:626-7-4)",
+    label: "Public-Well 300-ft Buffers", mergeGroup: "ok_source_water", source: DEQ + " — Water Quality (rule cited by DEQ: OAC 252:626-7-4)",
     url: urlFor("okWellBuffer"), fields: ["SYSTEM", "SOURCE_NAM", "SOURCE_TYP", "POP_SERVED", "COUNTY"], minZoom: 13, color: SRC_WATER.buffer.color, weight: 1.2,
     styleFn: flat(area(SRC_WATER.buffer.color, 0.25, 1.2)),
     hoverTitle: "Public-well buffer", hoverSource: "Oklahoma DEQ",
     identifyCard: card("Public water-supply well", (p) => [rowOf("System", p.SYSTEM), rowOf("Source", p.SOURCE_NAM), rowOf("Serves", Number(p.POP_SERVED) > 0 ? `${Number(p.POP_SERVED).toLocaleString("en-US")} people` : "", { raw: true }), rowOf("County", p.COUNTY)].filter(Boolean),
-      "DEQ rule OAC 252:626-7-4: a public drinking-water well is not to be located within 300 feet of any existing or potential source of pollution."),
+      "DEQ's description of this layer, citing OAC 252:626-7-4: public drinking-water wells are not to be located within 300 feet horizontally of any existing or potential source of pollution."),
     note: "A fixed 300-ft circle around each public water-supply well, drawn by DEQ from its 2014 well layer. A fixed radius — where a modelled wellhead protection area exists it is the better guide.",
     group: "environmental", order: 33,
   }),
