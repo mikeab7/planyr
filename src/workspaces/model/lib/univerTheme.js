@@ -19,6 +19,13 @@ const hex = (s) => {
 };
 const toHex = (a) => `#${a.map((n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+/** Univer's dark-mode canvas colour transform (core `invertColorByMatrix`): out_i = in_i − 0.667·(r+g+b) + 1, normalised 0..1,
+ *  so it keeps each colour's chroma and flips its lightness. Its exact PRE-IMAGE: the input that lands on screen as `target`. */
+const invert = (a) => {
+  const t = a.map((v) => v / 255);
+  const sum = (3 - (t[0] + t[1] + t[2])) / 1.001;
+  return t.map((d) => (d + 0.667 * sum - 1) * 255);
+};
 
 /** A 50…900 scale around `accent` (500 = the accent itself): lighter steps mix toward white, darker toward black. */
 export function scaleFrom(accent) {
@@ -31,19 +38,37 @@ export function scaleFrom(accent) {
   return out;
 }
 
-/** `tokens` = { accent, border, surface, text } resolved colour strings. Returns a copy of `base` with the
- *  primary scale from the accent and the hairline grey (200) from Planyr's divider; a bad token leaves that part
- *  of the base theme alone (never throws, never a blank colour). */
-export function buildUniverTheme(base, tokens = {}) {
+/** `tokens` = { accent, border, surface, text } resolved colour strings; `dark` = the app is in its dark theme.
+ *
+ * Univer's gray scale is FIXED-DIRECTION in both modes (0 lightest … 900 darkest); its dark mode does not flip the scale,
+ * it swaps to `dark:` classes that pick the OTHER end of it — text becomes `gray.0`, the background `gray.800`, a hover or
+ * selected row `gray.600` / `gray.700` (read from its own bundles). So writing Planyr's dark surface into `gray.0` and its
+ * light text into `gray.900` (what the first cut did, correct only in the light theme) turns every dark-mode label and tool
+ * icon into dark-on-dark. Hence one rule per mode:
+ *   light  gray.0 = surface · gray.200 = hairline · gray.900 = text
+ *   dark   gray.0 = text    · gray.200 = hairline · gray.800 = surface · gray.700 / 600 = surface stepped toward the text
+ * Returns a copy of `base`; a bad token leaves that part of the base theme alone (never throws, never a blank colour). */
+export function buildUniverTheme(base, tokens = {}, { dark = false } = {}) {
   const theme = { ...base, primary: { ...base.primary }, gray: { ...base.gray } };
   const scale = scaleFrom(tokens.accent);
   if (scale) theme.primary = scale;
-  const border = hex(tokens.border);
-  if (border) theme.gray = { ...theme.gray, 200: toHex(border) };
-  const surface = hex(tokens.surface);
-  if (surface) theme.gray = { ...theme.gray, 0: toHex(surface) };
-  const text = hex(tokens.text);
-  if (text) theme.gray = { ...theme.gray, 900: toHex(text) };
+  const border = hex(tokens.border), surface = hex(tokens.surface), text = hex(tokens.text);
+  if (border) theme.gray[200] = toHex(border);
+  if (dark) {
+    // The canvas (grid lines, header strips) is painted through Univer's own colour INVERSION in dark mode, so those
+    // two steps are written pre-inverted: what lands on screen is the hairline / header tint we mean.
+    if (border) theme.gray[200] = toHex(invert(border));
+    if (surface && text) theme.gray[50] = toHex(invert(mix(surface, text, 0.06)));
+    if (text) theme.gray[0] = toHex(text);
+    if (surface) {
+      theme.gray[800] = toHex(surface);
+      theme.gray[900] = toHex(surface);
+      if (text) { theme.gray[700] = toHex(mix(surface, text, 0.1)); theme.gray[600] = toHex(mix(surface, text, 0.18)); }
+    }
+  } else {
+    if (surface) theme.gray[0] = toHex(surface);
+    if (text) theme.gray[900] = toHex(text);
+  }
   return theme;
 }
 

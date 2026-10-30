@@ -71,11 +71,12 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
     let disposed = false;
     const L = live.current;
     try {
-      const theme = buildUniverTheme(defaultTheme, readTokens());
+      const dark0 = isDark();
+      const theme = buildUniverTheme(defaultTheme, readTokens(), { dark: dark0 });
       const { univer, univerAPI } = createUniver({
         locale: LocaleType.EN_US,
         locales: { [LocaleType.EN_US]: mergeLocales(coreEnUS, sortEnUS, filterEnUS, findEnUS) },
-        theme, darkMode: isDark(),
+        theme, darkMode: dark0,
         presets: [
           UniverSheetsCorePreset({ container: hostRef.current, formula: { initialFormulaComputing: CalculationMode.WHEN_EMPTY } }),
           UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsFindReplacePreset(),
@@ -149,11 +150,20 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       if (L.onReady) L.onReady({ flush });
 
       // Follow the light / dark theme the rest of the app is in.
-      const mo = new MutationObserver(() => {
-        try { univerAPI.toggleDarkMode(isDark()); } catch (_) { /* theme only */ }
-      });
+      // The colour theme is REBUILT from the live tokens on every flip (the tokens differ per theme), then dark mode is set.
+      const applyTheme = () => {
+        try {
+          const dark = isDark();
+          univerAPI.setTheme(buildUniverTheme(defaultTheme, readTokens(), { dark }));
+          univerAPI.toggleDarkMode(dark);
+        } catch (_) { /* theme only */ }
+      };
+      const mo = new MutationObserver(applyTheme);
       mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       L.mo = mo;
+      const mq = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+      if (mq && mq.addEventListener) mq.addEventListener("change", applyTheme);
+      L.mq = mq; L.applyTheme = applyTheme;
 
       const onHide = () => { if (document.visibilityState === "hidden") flush(); };
       document.addEventListener("visibilitychange", onHide);
@@ -182,6 +192,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       clearTimeout(L.timer);
       try { L.off && L.off.dispose && L.off.dispose(); } catch (_) {}
       try { L.mo && L.mo.disconnect(); } catch (_) {}
+      try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
       try { L.univer && L.univer.dispose(); } catch (_) {}

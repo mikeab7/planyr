@@ -10,3 +10,7 @@
 .planyr-univer [class*="univer-formula-box"],
 .planyr-univer [class*="univer-footer"],
 .planyr-univer [class*="univer-sheet-bar"] { border-radius: 0 !important; box-shadow: none !important; }
+/* The Start / Formulas / Data / View strip is one flat full-width band: no pill, no rounded tab, no shadow (NEW-2). */
+.planyr-univer [data-u-comp="ribbon-header-menu"],
+.planyr-univer [data-u-comp="ribbon-header-menu"] * { border-radius: 0 !important; box-shadow: none !important; }
+.planyr-univer [data-u-comp="ribbon-header-menu"] { background: var(--surface-raised) !important; border-bottom: 1px solid var(--chrome-divider); }
