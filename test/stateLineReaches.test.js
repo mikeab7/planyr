@@ -83,8 +83,21 @@ describe("every TUNED_REACHES entry is documented, bounded and live", () => {
       expect(st(r.realSide[1], r.realSide[2]), `${r.id}: ${r.realSide[0]}`).toBe(r.real);
     }
   });
-  it("only the five tuned outlines can have a reach, and none is a Tennessee, Texas or Colorado reach", () => {
+  it("PINNED: each reach's box and band are exactly the measured ones — widening one is a decision, not a drift", () => {
+    // The scan below reads the boxes from TUNED_REACHES itself, so it cannot police them; this is the pin.
+    expect(TUNED_REACHES.map((r) => [r.id, r.tuned, r.real, r.box, r.band ?? null])).toEqual([
+      ["chattahoochee", "GA", "AL", [31.0, -85.3, 32.95, -84.85], null],
+      ["perdido-key", "FL", "AL", [30.2, -87.53, 30.36, -87.35], 0.07],
+    ]);
+  });
+  it("no reach for Tennessee, Texas or Colorado: their outlines never overrule", () => {
     for (const r of TUNED_REACHES) expect(["GA", "FL"]).toContain(r.tuned);
+  });
+  it("DOCUMENTED LIMIT (pinned so it cannot drift): within ~1.3 km of the Chattahoochee the other bank can answer Georgia", () => {
+    // These are Alabama towns that read GA because the two banks sit closer together than Natural Earth's error. Kept on the Georgia side on purpose.
+    for (const [la, lo] of [[32.4709, -85.0008], [32.3357, -85.0], [32.8057, -85.1713]]) expect(st(la, lo)).toBe("GA");
+    // ...and the Alabama towns a little further from the river are Alabama.
+    for (const [la, lo] of [[32.8668, -85.1913], [31.8913, -85.1455], [31.2918, -85.1119]]) expect(st(la, lo)).toBe("AL");
   });
   it("KNOWN-GOOD ARM: the Chattahoochee reach still gives Columbus GA its Georgia answer, and the real polygon alone would not", () => {
     expect(realStateAt(32.461, -84.9877)).toBe("AL");

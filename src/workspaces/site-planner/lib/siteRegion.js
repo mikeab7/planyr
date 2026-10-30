@@ -235,7 +235,8 @@ export const TUNED_REACHES = Object.freeze([
     tunedSide: ["Perdido Key FL", 30.3, -87.45], realSide: ["Orange Beach AL", 30.2943, -87.5736],
   }),
 ]);
-const TUNED_OUTLINES = { TX: TEXAS_OUTLINE, CO: CO_SURE, FL: STATE_POLYGONS.FL, GA: STATE_POLYGONS.GA, TN: STATE_POLYGONS.TN };
+/* The outlines a reach may name. Only FL and GA have reaches; a reach for another state adds its outline here AND a row in the test. */
+const TUNED_OUTLINES = { FL: STATE_POLYGONS.FL, GA: STATE_POLYGONS.GA };
 
 /* The state a hand-tuned outline puts a point in, or null — used ONLY for ground the real polygons do not hold. Texas / Colorado first, then
  * Florida / Georgia / Tennessee (they share the GA–TN and GA–FL lines exactly, so order does not matter). */
