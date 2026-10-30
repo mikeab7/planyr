@@ -466,12 +466,26 @@ try {
       // (o) evenly spaced band contours, read off the drawn paths: along normals into the band from each long straight limit edge,
       // consecutive crossings of DRAWN levels are equal within 10% (the bank body; the last three crossings are the toe)
       const pieces = r.drawn.flatMap((lv) => verts(lv.d).map((pc) => ({ level: lv.level, pc })));
+      // a transect is judged where the line's own ground is straight across ±24 ft (second difference ≤ 0.6 ft): there the bank is
+      // a plane and its contours must be parallel and even; where the ground bends along the line (a ravine meeting it) the bank's
+      // contours bend with it — correct — and are skipped (counted). Tolerance: 10%, or 0.15 of the contour lattice's cell, the
+      // tracer's own resolution, whichever is larger.
+      const gAt = await page.evaluate((pts) => pts.map((p) => window.__harnessExistAt(p)), r.limit.flatMap((ring) => ring.flatMap((a, i) => {
+        const b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 250) return [];
+        const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len;
+        return [0.35, 0.5, 0.65].flatMap((t) => [-24, 0, 24].map((o) => ({ x: a.x + (b.x - a.x) * t + tx * o, y: a.y + (b.y - a.y) * t + ty * o })));
+      })));
+      let gk = 0, skippedBent = 0;
       const runs = [];
       for (const ring of r.limit) for (let i = 0; i < ring.length; i++) {
         const a = ring[i], b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
         if (len < 250) continue;
         const nIn = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
-        for (const t of [0.35, 0.5, 0.65]) for (const sg of [1, -1]) {
+        for (const t of [0.35, 0.5, 0.65]) {
+          const [gm, g0, gp] = [gAt[gk], gAt[gk + 1], gAt[gk + 2]]; gk += 3;
+          if (gm == null || g0 == null || gp == null || Math.abs(gm + gp - 2 * g0) > 0.6) { skippedBent++; continue; }
+          for (const sg of [1, -1]) {
           const o = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, e = { x: o.x + sg * nIn.x * 90, y: o.y + sg * nIn.y * 90 };
           const hits = [];
           for (const { pc } of pieces) for (let k = 1; k < pc.length; k++) {
@@ -484,10 +498,12 @@ try {
           // the bank's body: the first crossing is where a line weaves along the limit itself (the daylight), the last three the toe
           const sp = hits.slice(1).map((h, k) => h - hits[k]).slice(1, -3);
           if (sp.length >= 3) runs.push(sp);
+          }
         }
       }
-      const uneven = runs.filter((sp) => { const med = [...sp].sort((x, y) => x - y)[sp.length >> 1]; return sp.some((v) => Math.abs(v - med) > 0.1 * med); });
-      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 10%)`, runs.length > 0 && uneven.length === 0, `${runs.length} transects · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
+      const tolOf = (med) => Math.max(0.1 * med, 0.15 * r.cell);
+      const uneven = runs.filter((sp) => { const med = [...sp].sort((x, y) => x - y)[sp.length >> 1]; return sp.some((v) => Math.abs(v - med) > tolOf(med)); });
+      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 10% / 0.15 cell)`, runs.length >= 3 && uneven.length === 0, `${runs.length} transects judged · ${skippedBent} skipped where the line's ground bends · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
       await page.close();
     }
     // the owner's path: the plan opens "Around the layout", then "To the boundary" is chosen in the panel — at NO moment after the
