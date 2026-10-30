@@ -15,20 +15,22 @@
  * instance and hands it back on conversion:
  *   · per sheet `columns`   — the ordered column objects (stable ids, names, extra fields). Univer columns
  *                             are positions only; the id at position i is how `cells["c7:3"]` keeps meaning.
- *   · per sheet `nextColId`, `indent`, `rawText`, `synth`, `dismissedInconsistencies`, `unsupportedFormulas`.
+ *   · per sheet `nextColId`, `rawText`, `synth`, `dismissedInconsistencies`, `unsupportedFormulas`.
  *   · workbook `nextSheetId` / `version`.
  * Every sidecar entry that is keyed by a cell is SELF-VALIDATING: it is applied on the way back only if
  * Univer's cell still means what the entry assumed (a literal's canonical text matches, a synthesised
  * pattern is still the pattern), so a sort or a drag that moved cells cannot make a stale entry lie.
  *
  * ⛔ WHAT IS GENUINELY LOSSY (listed in docs/SPREADSHEET-UNIVER-SPIKE.md, never silently dropped):
- *   · indent — Univer's cell model has no indent; Planyr's value is carried in the sidecar but not drawn.
+ *   (indent is NOT lossy any more: it rides ON the Univer cell style as `pd.l` (2 + 14·N) and is drawn by
+ *   lib/univerIndent.js — a style travels with its cell through insert/delete/sort/drag, so no sidecar entry is needed.)
  *   · vertical merges and any Univer-only feature (data validation, conditional formats, notes) — Planyr
  *     stores horizontal merges only, so a vertical merge is reported in `notes`, not saved.
  *   · `[Column]` same-row formulas and any Planyr-only function — Univer cannot evaluate them.
  *   · typed date TEXT ("1/15/2027") is text to Univer (Planyr types it as a date).
  *   · rich text inside a cell collapses to its plain text. */
 import { colLetterName, DEFAULT_ROW_H, migrateWorkbook } from "./sheetModel.js";
+import { indentOfStyle, storedIndentStyle } from "./univerIndent.js";
 
 export const BRIDGE_VERSION = 1;
 /** Resource-id prefix of the defined names the bridge adds for Site.* / Plan.* / Comp.* — never saved back. */
@@ -45,7 +47,7 @@ const BORDER_BACK = { 1: "thin", 7: "double" };
 const T_STRING = 1, T_NUMBER = 2, T_BOOL = 3;
 const BORDER_COLOR = "#000000";
 
-const MAPPED_STYLE_KEYS = new Set(["bold", "italic", "underline", "strike", "fontFamily", "fontSize", "color", "fill", "align", "valign", "wrap", "border"]);
+const MAPPED_STYLE_KEYS = new Set(["bold", "italic", "underline", "strike", "fontFamily", "fontSize", "color", "fill", "align", "valign", "wrap", "border", "indent"]);
 /** Does the remembered raw text still mean what Univer's cell holds? (A stale sidecar entry must never win.) */
 function sameLiteral(kept, cell, canon) {
   const typed = typeLiteral(kept);
@@ -125,6 +127,8 @@ function styleToUniver(style) {
   if (style.align && HT[style.align]) s.ht = HT[style.align];
   if (style.valign && VT[style.valign]) s.vt = VT[style.valign];
   if (style.wrap) s.tb = WRAP_ON;
+  const ind = storedIndentStyle(style.indent);
+  if (ind.pd) s.pd = ind.pd;
   if (isObj(style.border)) {
     const bd = {};
     for (const [edge, k] of [["top", "t"], ["right", "r"], ["bottom", "b"], ["left", "l"]]) {
@@ -136,7 +140,7 @@ function styleToUniver(style) {
   return s;
 }
 
-/** Univer style → the Planyr fields it expresses (`indent` and unknown fields are re-attached from the sidecar). */
+/** Univer style → the Planyr fields it expresses (unknown fields are re-attached from the sidecar). */
 function styleFromUniver(s) {
   const out = {};
   if (!s) return out;
@@ -151,6 +155,7 @@ function styleFromUniver(s) {
   if (HT_BACK[s.ht]) out.align = HT_BACK[s.ht];
   if (VT_BACK[s.vt]) out.valign = VT_BACK[s.vt];
   if (s.tb === WRAP_ON) out.wrap = true;
+  if (indentOfStyle(s)) out.indent = indentOfStyle(s);
   if (isObj(s.bd)) {
     const border = {};
     for (const [edge, k] of [["top", "t"], ["right", "r"], ["bottom", "b"], ["left", "l"]]) {
@@ -193,7 +198,7 @@ export function workbookToUniver(workbookIn, { name = "Planyr workbook", id = "p
     sheetOrder.push(entry.id);
     const colIndexById = new Map(sh.columns.map((c, i) => [c.id, i]));
     const sc = {
-      columns: clone(sh.columns), nextColId: sh.nextColId, indent: {}, rawText: {}, synth: {},
+      columns: clone(sh.columns), nextColId: sh.nextColId, rawText: {}, synth: {},
       dismissedInconsistencies: clone(sh.dismissedInconsistencies), unsupportedFormulas: clone(sh.unsupportedFormulas),
       rowHeights: clone(sh.rowHeights), styleExtra: {},
     };
@@ -220,7 +225,6 @@ export function workbookToUniver(workbookIn, { name = "Planyr workbook", id = "p
       const u = sh.styles[key] ? styleToUniver(sh.styles[key]) : {};
       if (sh.styles[key]) {
         sc.styleExtra[key] = clone(sh.styles[key]);
-        if (sh.styles[key].indent != null) sc.indent[key] = sh.styles[key].indent;
       }
       if (sh.formats[key]) u.n = { pattern: sh.formats[key] };
       else if (cell._pattern) u.n = { pattern: cell._pattern };
@@ -303,7 +307,7 @@ export function univerToWorkbook(data, { sidecar, activeSheetId, formulaOf } = {
   for (const id of data.sheetOrder || Object.keys(data.sheets || {})) {
     const u = data.sheets[id];
     if (!u) continue;
-    const sc = sc0.sheets[id] || { columns: [], nextColId: 0, indent: {}, rawText: {}, synth: {}, styleExtra: {}, rowHeights: {} };
+    const sc = sc0.sheets[id] || { columns: [], nextColId: 0, rawText: {}, synth: {}, styleExtra: {}, rowHeights: {} };
     const colCount = Math.max(u.columnCount || 0, 1);
     // Column identity: position i keeps sidecar.columns[i]; a column the sidecar never saw gets the next id.
     let nextColId = sc.nextColId || (sc.columns.length + 1);
@@ -357,7 +361,7 @@ export function univerToWorkbook(data, { sidecar, activeSheetId, formulaOf } = {
         }
       }
     }
-    // A cell whose whole style was fields Univer cannot draw (indent only) has no style in the snapshot.
+    // A cell whose whole style was fields Univer cannot hold has no style in the snapshot.
     for (const [key, original] of Object.entries(sc.styleExtra || {})) {
       if (styles[key] || !Object.keys(original).every((k) => !MAPPED_STYLE_KEYS.has(k))) continue;
       if (columns.some((c) => c.id === key.slice(0, key.lastIndexOf(":")))) styles[key] = clone(original);
@@ -433,7 +437,7 @@ export function sidecarAfterStructure(sidecar, sheetId, { op, index, count = 1 }
       if (r >= index && r < index + count) return null;
       return r >= index + count ? `${k.slice(0, i)}:${r - count}` : k;
     };
-    for (const f of ["indent", "rawText", "synth", "dismissedInconsistencies", "unsupportedFormulas", "styleExtra"]) {
+    for (const f of ["rawText", "synth", "dismissedInconsistencies", "unsupportedFormulas", "styleExtra"]) {
       const out = {};
       for (const [k, v] of Object.entries(sc[f] || {})) { const nk = shiftKey(k); if (nk) out[nk] = v; }
       next[f] = out;
