@@ -1041,6 +1041,13 @@ kbd {
 @media (hover: none) { .psw-row .psw-pin[data-pinned="0"] { visibility: hidden; } }
 .psw-row .psw-pin:hover { background: var(--hover-menu); color: var(--text-primary); }
 .psw-panel button:hover:not(:disabled) { filter: none; }
+/* NEW-2 (2026-10-30, owner: the Layers panel "shakes" when the pointer moves over its left group list) — the global button rules above put a `filter: brightness(.97)` on
+   every hovered button and a 0.5px `transform` on every pressed one. A filter makes the button its own effect surface: its text drops out of the panel's text rendering
+   and back as the pointer crosses each group, and a half-pixel nudge is a glyph re-snap — on a display at a fractional pixel ratio that reads as the list trembling. Nothing in
+   this panel may change size, position, text rendering or a half pixel on hover: the group tabs and the row chevrons get a plain background tint instead (colour only). */
+.layer-panel-steady button:hover:not(:disabled), .layer-panel-steady button:active:not(:disabled) { filter: none; transform: none; }
+.layer-panel-steady [role="tab"][aria-selected="false"]:hover:not(:disabled),
+.layer-panel-steady [data-testid^="layer-row-"] button:hover:not(:disabled) { background-color: var(--hover-ghost) !important; }
 
 
 /* NEW-1 — instant click acknowledgement (src/shared/ui/clickAck.js). Anchored at the cursor, holds

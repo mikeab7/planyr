@@ -13,6 +13,7 @@
  * server-side (export image) so each agency's standard symbology comes through.
  */
 import * as EL from "esri-leaflet";
+import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-30): a label positions with a 2D transform, not a layer-promoting 3D one
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
@@ -1656,10 +1657,12 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   let labelsOn = false;
   const labelOpts = () => ({ permanent: true, direction: "center", className: "pf-line-label", interactive: false, opacity: 1, ...(labelPane ? { pane: labelPane } : {}) });
   const wantLabels = (l) => !!(l && l._map && l._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17));
+  /* THE ONE WAY a label is bound: a tooltip positioned with a 2D transform (flatLabel.js — a 3D one made every label its own compositor layer and stalled a pan). */
+  const bindLabel = (l, text) => { if (!l || typeof l.bindTooltip !== "function") return; l.bindTooltip(text, labelOpts()); if (typeof l.getTooltip === "function") flattenTooltip(l.getTooltip()); };
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
     interactive: interactive && canHover,
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
-    ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
+    ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn) bindLabel(layer, text); } } : {}),
   }));
   /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
    * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
@@ -1766,7 +1769,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       const want = wantLabels(lyr);
       if (want === labelsOn) return;
       labelsOn = want;
-      try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) l.bindTooltip(l.__pfLabel, labelOpts()); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
+      try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) bindLabel(l, l.__pfLabel); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
     };
     /* A row that sets `lineLabel.declutter` (the municipal limits: one name per city) hides a name that would sit on top of a larger city's name — never two names piled up. */
     let ticks = [];
