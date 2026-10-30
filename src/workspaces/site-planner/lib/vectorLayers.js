@@ -27,9 +27,10 @@ import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ok_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county" || id === "ms_county_state" || id === "fl_county" || id === "ok_county";
 export const isCityLimitsId = (id) => id === "jur_city" || id === "ok_city" || id === "ga_city" || id === "ca_city"
-  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village"; // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
+  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village" // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
+  || id === "tn_city" || id === "fl_city"; // B2521584 (Tennessee)
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
@@ -297,6 +298,62 @@ export const VECTOR_SOURCES = {
     },
     note: "Georgia county lines (DCA).",
   },
+  /* NEW-1 (Florida, B2452976) — THE FLORIDA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.js rows (the Georgia lesson). Endpoints come from the GIS_SOURCES rows
+   * (floridaLayers.js reads the same ones). Probed live 2026-10-29: 67 counties in ONE statewide pull; the city limits (411 polygons, UF GeoPlan / FDOR 2021 tax rolls) tile in bbox cells. */
+  fl_county: {
+    id: "fl_county",
+    stateAbbr: "FL",
+    titleCaseLabel: true, // FDEM publishes ALL-CAPS names
+    label: "County boundaries (Florida)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "Florida Division of Emergency Management",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyFl.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Florida county lines (FDEM).",
+  },
+  fl_city: {
+    id: "fl_city",
+    titleCaseLabel: true, // UF GeoPlan publishes ALL-CAPS names
+    label: "City limits (Florida)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. Compiled from the 2021 tax rolls — a later annexation is not in it. NOT proof of utility service. Screening only.",
+    sourceName: "UF GeoPlan / Florida Department of Revenue",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityFl.serviceUrl + "/query",
+      outFields: ["NAME", "COUNTY"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Florida city limits (UF GeoPlan from the 2021 tax rolls).",
+  },
   tn_county: {
     id: "tn_county",
     stateAbbr: "TN",
@@ -346,6 +403,33 @@ export const VECTOR_SOURCES = {
     },
     note: "DeSoto County's own outline (county server).",
   },
+  /* NEW-1 (Mississippi) — MDEQ's statewide county layer, DeSoto left out (its own row draws the county server's outline). 82 polygons, one statewide pull at the wide tiers. */
+  ms_county_state: {
+    id: "ms_county_state",
+    stateAbbr: "MS",
+    label: "County boundaries (Mississippi)",
+    labelField: "CONAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "MDEQ — Office of Land and Water Resources",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/") + "/query",
+      outFields: ["CONAME"],
+      where: "UPPER(CONAME) <> 'DESOTO'", // MDEQ stores the name as "Desoto" — a plain <> 'DeSoto' excluded nothing and drew DeSoto's outline twice
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "all", offsetDeg: 0.0002, precision: 5 },
+      ],
+    },
+    note: "Mississippi county lines (MDEQ).",
+  },
   ga_city: {
     id: "ga_city",
     label: "City limits (Georgia)",
@@ -372,6 +456,37 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "Georgia city limits (DCA).",
+  },
+  /* B2521584 (Tennessee) — THE TENNESSEE ROWS' VECTOR SOURCES, registered in the SAME commit as their layers rows (the Georgia lesson;
+   * `vectorLayerRegistered` fails the build otherwise). Endpoints come from the GIS_SOURCES rows the jurisdiction identify uses (B176).
+   * Probed live 2026-10-29 with the loader's exact query: 95 counties in ONE statewide pull (250 KB at the statewide tier's tolerance — under
+   * the 512 KB entry cap); the 345-city roster is 474 KB statewide, too close to the cap for one entry, so cities take the same bbox-only
+   * tiering as the Texas / Georgia rows. Tennessee has no ETJ, so there is no ETJ source. */
+  tn_city: {
+    id: "tn_city",
+    label: "City limits (Tennessee)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. NOT proof of utility service. Screening only.",
+    sourceName: "State of Tennessee (STS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityTn.serviceUrl + "/query",
+      outFields: ["NAME"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Tennessee city limits (State of Tennessee).",
   },
   /* NEW-1 (California) — THE CALIFORNIA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.rows
    * (the Georgia rows shipped without this and drew nothing — B1990960 recurrence; `vectorLayerRegistered`
@@ -756,6 +871,28 @@ export const VECTOR_SOURCES = {
       maxAreaDeg: 0.35,
     },
     note: "Georgia DCA protected rivers — compute-only source for the stream-buffer layer.",
+  },
+  /* NEW-1 (B2535200 review) — ARC's Chattahoochee MRPA corridor polygon (the 2,000-ft river corridor, Buford Dam → the Fulton/Douglas line), the fifth compute-only source of the stream-buffer layer:
+   * a protected river does NOT include a segment covered by the Metropolitan River Protection Act (Rule 391-3-16-.04), so the 100-ft protected-river tier is cut out of it. */
+  ga_mrpa_corridor: {
+    id: "ga_mrpa_corridor",
+    label: "Chattahoochee MRPA corridor (ARC)",
+    style: "district",
+    geometryType: "polygon",
+    sourceName: GIS_SOURCES.gaMrpaCorridor.provider,
+    query: {
+      url: GIS_SOURCES.gaMrpaCorridor.serviceUrl + "/query",
+      outFields: ["*"],
+      where: "1=1",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 90 * 24 * 3600 * 1000, // the corridor changes by statute
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // one outline, answered the same way at every pan (like the District); ≈50 m generalisation — the river runs well inside a 2,000-ft corridor
+      tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 4 }],
+    },
+    note: "Chattahoochee River Corridor (Metropolitan River Protection Act) — compute-only source for the stream-buffer layer.",
   },
   ga_mngwpd: {
     id: "ga_mngwpd",

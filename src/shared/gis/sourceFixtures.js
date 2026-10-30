@@ -22,8 +22,10 @@
  *   sampleFixtures[] — { label, point, expectValueRange|expectNoData, serviceUrl? }  (a raster probe)
  */
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
+import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
 export const SOURCE_FIXTURES = {
+  ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
   flood: {
   fixtures: [
@@ -241,6 +243,109 @@ export const SOURCE_FIXTURES = {
     { label: "Epps Mill Rd, Rutherford", point: [-86.3194, 35.7299], expectMinCount: 1 }, // live: 10+ within 800 m (I-24 State Highway Agency)
   ],
   },
+  /* NEW-1 (Tennessee industrial due-diligence layers, B2521584) · every count is the number of features inside the ±0.01° box the
+   * verifier queries, measured live 2026-10-29 against the service itself. Spread Memphis ↔ Nashville/Murfreesboro ↔ Knoxville/Chattanooga
+   * (≥200 km) so a county- or metro-clipped copy fails. */
+  drycleanersTn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 3
+    { label: "Nashville (Davidson)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 1
+    { label: "Chattanooga (Hamilton)", point: [-85.3097, 35.0456], expectMinCount: 1 }, // live: 1
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  ms4Tn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 2
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 1
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  wqaTn: {
+  fixtures: [
+    { label: "Memphis area streams", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 1
+    { label: "Christiana (Rutherford) — Stones River basin", point: [-86.3436, 35.7425], expectMinCount: 1 }, // live: 3
+    { label: "Knoxville streams", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  pwsTn: {
+  fixtures: [
+    { label: "Memphis — Memphis Light, Gas & Water", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 1
+    { label: "Christiana — Consolidated Utility District of Rutherford County", point: [-86.3436, 35.7425], expectMinCount: 1 }, // live: 1 (TN0000791)
+    { label: "Nashville — Metro Water Services", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 1 (TN0000494)
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  snaTn: {
+  fixtures: [
+    { label: "Auntney Hollow SNA (Lewis/Maury)", point: [-87.4393, 35.5137], expectMinCount: 1 }, // live: 1
+    { label: "Pogue Creek Canyon SNA (Fentress/Pickett)", point: [-84.8578, 36.5239], expectMinCount: 1 }, // live: 1
+    { label: "Hampton Creek Cove SNA (Carter/Johnson)", point: [-82.0447, 36.1424], expectMinCount: 1 }, // live: 1
+    { label: "Rutherford cedar glades (Christiana area)", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 4 }, // live: 11 in the wider box
+  ],
+  },
+  scenicTn: {
+  fixtures: [
+    { label: "Collins Scenic River (Grundy/Warren)", point: [-85.604, 35.4307], expectMinCount: 1 }, // live: 1
+    { label: "French Broad Scenic River (Sevier/Jefferson)", point: [-83.0506, 35.9491], expectMinCount: 1 }, // live: 1
+    { label: "Harpeth Scenic River (Davidson/Williamson)", bbox: [-87.0, 35.9, -86.6, 36.3], expectMinCount: 1 }, // live: 2 near Nashville
+  ],
+  },
+  nrhpTn: {
+  fixtures: [
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 37
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 41
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 32
+  ],
+  },
+  critHabitatTn: {
+  fixtures: [
+    { label: "Hardin / Wayne counties — Tennessee River mussels, west TN (wide box)", bbox: [-88.3, 35.0, -87.5, 35.6], expectMinCount: 1 }, // live: 3
+    { label: "Hancock / Hawkins — Clinch & Holston, east TN (wide box, kept south of the Virginia line)", bbox: [-83.6, 36.3, -83.0, 36.5], expectMinCount: 1 }, // live: 11
+    { label: "Christiana / Murfreesboro (Stones River mussels) — wide box", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 1 }, // live: 4
+    { label: "Knoxville / Clinch-Holston mussels — wide box", bbox: [-84.22, 35.66, -83.62, 36.26], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  cemeteriesTn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 4
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 2
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  dorSitesTn: {
+  fixtures: [
+    // measured 2026-10-29 straight from TDEC's ArcGIS Online org: 825 OPEN sites statewide.
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 3
+    { label: "Nashville (Davidson)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 19
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 7
+  ],
+  },
+  landfillsTn: {
+  fixtures: [
+    // measured THROUGH planyr.io's relay 2026-10-29 (maps.tdec.tn.gov is unreachable from the build environment): 111 facilities; each point is a real facility.
+    { label: "Milan Army Ammunition Plant landfill (Gibson, west TN)", point: [-88.713215, 35.896768], expectMinCount: 1 }, // live: 1
+    { label: "Mueller Company landfill (Hamilton)", point: [-85.254573, 35.086244], expectMinCount: 1 }, // live: 1
+    { label: "Volunteer Regional Landfill (Scott)", point: [-84.488425, 36.545536], expectMinCount: 1 }, // live: 1
+    { label: "Carter County / Elizabethton landfill (east TN)", point: [-82.194389, 36.371859], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  thcSitesTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 186,319 survey points; the inventory is partial (0 at Christiana), so the fixtures sit in surveyed towns.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 777
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 495
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 1534
+  ],
+  },
+  nrhpBoundsTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 2,047 boundary polygons.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 55
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 44
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 37
+  ],
+  },
   /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
    * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
    * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
@@ -257,6 +362,165 @@ export const SOURCE_FIXTURES = {
     { label: "Adairsville (Bartow Co.)", bbox: [-84.95, 34.3, -84.85, 34.4], expectMinCount: 1 }, // live 2026-10-05: 14
     { label: "Atlanta (Fulton Co.)", bbox: [-84.45, 33.7, -84.35, 33.8], expectMinCount: 1 }, // live: 150
     { label: "Savannah (Chatham Co.)", bbox: [-81.15, 32.0, -81.05, 32.1], expectMinCount: 1 }, // live: 55
+  ],
+  },
+  msDeqUst: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8306, 34.959], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1806, 32.2987], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0903, 30.3694], expectMinCount: 1 },
+  ],
+  },
+  msDeqGard: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.7906, 34.9672], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1775, 32.3], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0897, 30.3707], expectMinCount: 1 },
+  ],
+  },
+  msDeqLandfills: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.7936, 34.9339], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1453, 32.3017], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1339, 30.3947], expectMinCount: 1 },
+  ],
+  },
+  msDeqSpa: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8306, 34.9571], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1787, 32.3117], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0886, 30.3654], expectMinCount: 1 },
+  ],
+  },
+  msDeqMines: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8738, 34.9424], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1406, 32.2939], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1539, 30.3952], expectMinCount: 1 },
+  ],
+  },
+  msDeqOgFields: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6942, 34.1269], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1424, 32.2681], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.2747, 31.2437], expectMinCount: 1 },
+  ],
+  },
+  msOgbWells: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6909, 34.1506], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1734, 32.3058], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.2657, 31.3653], expectMinCount: 1 },
+  ],
+  },
+  msNrcsEasements: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.7942, 34.8851], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.2742, 32.2371], expectMinCount: 1 },
+    { label: "Natchez (Adams Co.)", point: [-91.4898, 31.4914], expectMinCount: 1 },
+  ],
+  },
+  msDams: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8427, 34.9691], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.2027, 32.269], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1442, 30.4519], expectMinCount: 1 },
+  ],
+  },
+  msDamInundation: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8434, 34.969], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.2059, 32.2663], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.3448, 31.3018], expectMinCount: 1 },
+  ],
+  },
+  ms303d: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6351, 34.2752], expectMinCount: 1 },
+    { label: "Jackson area (Madison Co.)", point: [-90.0212, 32.5492], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1532, 30.4583], expectMinCount: 1 },
+  ],
+  },
+  msCounty: {
+  fixtures: [
+    { label: "DeSoto Co. edge", point: [-89.7242, 34.9953], expectMinCount: 1 },
+    { label: "Hinds Co. edge", point: [-90.5538, 32.5076], expectMinCount: 1 },
+    { label: "Harrison Co. edge", point: [-88.8845, 30.6773], expectMinCount: 1 },
+  ],
+  },
+  msCity: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6848, 34.2938], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1785, 32.2902], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0837, 30.3529], expectMinCount: 1 },
+  ],
+  },
+  msBrownfields: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8863, 34.8607], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1795, 32.3002], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0954, 30.3682], expectMinCount: 1 },
+  ],
+  },
+  msTribal: {
+  fixtures: [
+    { label: "Choctaw lands near Philadelphia (Neshoba Co.)", point: [-89.1806, 32.7505], expectMinCount: 1 },
+    { label: "Choctaw lands, south tract (Jackson Co. line)", point: [-89.0198, 31.7698], expectMinCount: 1 },
+  ],
+  },
+  msNrhp: {
+  fixtures: [
+    { label: "Olive Branch area (DeSoto Co.)", point: [-89.7793, 34.9245], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1805, 32.2994], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.091, 30.3694], expectMinCount: 1 },
+  ],
+  },
+  msCemeteries: {
+  fixtures: [
+    { label: "Olive Branch area (DeSoto Co.)", point: [-89.9374, 34.889], expectMinCount: 1 },
+    { label: "Jackson area (Hinds Co.)", point: [-90.1523, 32.2037], expectMinCount: 1 },
+    { label: "Biloxi (Harrison Co.)", point: [-88.9075, 30.3976], expectMinCount: 1 },
+  ],
+  },
+  msCritHabitat: {
+  fixtures: [
+    { label: "Jackson (Hinds Co.)", point: [-90.1787, 32.2902], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.2794, 31.3332], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0861, 30.3678], expectMinCount: 1 },
+  ],
+  },
+  msDesotoDrainage: {
+  fixtures: [
+    { label: "Olive Branch area", point: [-89.8571, 34.9405], expectMinCount: 1 },
+    { label: "Hernando", point: [-89.9894, 34.8127], expectMinCount: 1 },
+    { label: "Walls", point: [-90.1403, 34.9478], expectMinCount: 1 },
+  ],
+  },
+  msDesotoLevee: {
+  fixtures: [
+    { label: "North edge (Walls)", point: [-90.2394, 34.9999], expectMinCount: 1 },
+    { label: "South edge (Hernando area)", point: [-90.1963, 34.7208], expectMinCount: 1 },
+  ],
+  },
+  msDesotoLomr: {
+  fixtures: [
+    { label: "Olive Branch area", point: [-89.8386, 34.933], expectMinCount: 1 },
+    { label: "Hernando area", point: [-89.9678, 34.8339], expectMinCount: 1 },
+    { label: "Southaven area", point: [-89.9918, 34.9477], expectMinCount: 1 },
+  ],
+  },
+  msDesotoLoma: {
+  fixtures: [
+    { label: "Olive Branch", point: [-89.8422, 34.9635], expectMinCount: 1 },
+    { label: "Hernando", point: [-90.0185, 34.8191], expectMinCount: 1 },
+    { label: "Southaven", point: [-90.0078, 34.977], expectMinCount: 1 },
+  ],
+  },
+  msDesotoCemeteries: {
+  fixtures: [
+    { label: "Olive Branch", point: [-89.8227, 34.9552], expectMinCount: 1 },
+    { label: "Hernando", point: [-89.9917, 34.8185], expectMinCount: 1 },
+    { label: "Southaven", point: [-90.0043, 34.9926], expectMinCount: 1 },
   ],
   },
   troutGa: {
@@ -429,6 +693,34 @@ export const SOURCE_FIXTURES = {
     { label: "Spalding County \u2014 Pomona/AR1", point: [-84.28, 33.265], expectMinCount: 1 }, // live 2026-10-29: 1
     { label: "Spalding County \u2014 south", point: [-84.2, 33.18], expectMinCount: 1 }, // live 2026-10-29: 1
     { label: "Spalding County \u2014 east", point: [-84.14, 33.3], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaRoadOwnership: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.4, 33.74, -84.38, 33.76], expectMinCount: 1 }, // live 2026-10-29: 141
+    { label: "Savannah", bbox: [-81.11, 32.07, -81.09, 32.09], expectMinCount: 1 }, // live 2026-10-29: 181
+    { label: "Albany", bbox: [-84.17, 31.57, -84.15, 31.59], expectMinCount: 1 }, // live 2026-10-29: 73
+  ],
+  },
+  gaRareSpecies: {
+  fixtures: [
+    { label: "Savannah (Chatham)", bbox: [-81.105, 32.075, -81.095, 32.085], expectMinCount: 1 }, // live 2026-10-29: 7
+    { label: "Albany (Dougherty)", bbox: [-84.165, 31.575, -84.155, 31.585], expectMinCount: 1 }, // live 2026-10-29: 12
+    { label: "Rome (Floyd)", bbox: [-85.165, 34.255, -85.155, 34.265], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  gaMineral: {
+  fixtures: [
+    { label: "Cartersville (Bartow)", bbox: [-84.9, 34.07, -84.7, 34.27], expectMinCount: 1 }, // live 2026-10-29: 328
+    { label: "Rome (Floyd)", bbox: [-85.26, 34.16, -85.06, 34.36], expectMinCount: 1 }, // live 2026-10-29: 26
+    { label: "Augusta (Richmond)", bbox: [-82.07, 33.37, -81.87, 33.57], expectMinCount: 1 }, // live 2026-10-29: 17
+  ],
+  },
+  gaBartowZoning: {
+  fixtures: [
+    { label: "Adairsville (incorporated, 'Incorporated' polygons)", bbox: [-84.94, 34.36, -84.92, 34.38], expectMinCount: 1 }, // live 2026-10-29: 902
+    { label: "rural Bartow \u2014 south", bbox: [-84.71, 34.19, -84.69, 34.21], expectMinCount: 1 }, // live 2026-10-29: 28
+    { label: "rural Bartow \u2014 west", bbox: [-84.91, 34.24, -84.89, 34.26], expectMinCount: 1 }, // live 2026-10-29: 79
   ],
   },
   countyCa: {
@@ -1170,6 +1462,7 @@ export function fixturesFor(key) {
  * `monitored-exception` row with no reason still fails the audit. The words just no longer
  * travel to the browser to prove it. */
 export const SOURCE_DOCS = {
+...FLORIDA_DOCS,
   ...OK_DOCS,
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",
@@ -1465,6 +1758,75 @@ export const SOURCE_DOCS = {
     "The Tennessee counterpart of `road`. TDOT's Road Segment inventory (updated monthly): GOVT_CTRL says who owns/maintains each " +
     "segment (State / County / Municipal Highway Agency …). Local-road coverage is TDOT's — an honest 'Unknown' beats a wrong guess.",
   },
+  drycleanersTn: {
+  notes:
+    "TDEC Division of Remediation's Drycleaner Environmental Response Program (DCERP): every drycleaner registered since 1996 (pick-up-only " +
+    "shops are not on it), edited 2026-02-26. COMMENTS says whether TDEC has worked a release there (\"DCERP Response Site\") or only holds the " +
+    "registration. A Phase I ESA flag — solvent (PCE) releases are the classic drycleaner contamination — never a finding about a neighbour.",
+  },
+  ms4Tn: {
+  notes:
+    "TDEC DWR's MS4 NPDES permit areas (88): the cities and counties whose own stormwater, post-construction and stream-buffer rules apply " +
+    "ON TOP of the state's Construction General Permit. Inside an area, ask the permittee for its design manual; outside, the state CGP governs alone.",
+  },
+  wqaTn: {
+  notes:
+    "TDEC DWR 2026 Water Quality Assessment, stream assessment units (edited 2026-08-13). The spatial companion of the EPA-approved Tennessee " +
+    "2026 List of Impaired and Threatened Streams; the cause of an impairment is in TDEC's Potential Sources table, not on the line.",
+  },
+  pwsTn: {
+  notes:
+    "TDEC DWR public water system service areas (447; edited 2024-10-01): the permitted system whose declared territory holds the point (PWSID, " +
+    "owner type, population served, link to its Drinking Water Watch page). A territory, NOT proof of a main at the property line.",
+  },
+  snaTn: {
+  notes:
+    "TDEC Division of Natural Areas — State Natural Areas designated under the Natural Areas Preservation Act of 1971 (93; edited 2026-10-13). " +
+    "A designated area is a hard constraint on the land itself; the cedar-glade areas around Christiana/Murfreesboro host federally listed plants.",
+  },
+  scenicTn: {
+  notes:
+    "TDEC Division of Natural Areas — State Scenic Rivers (Tennessee Scenic Rivers Act of 1968; 25 corridor polygons, edited 2023-09-13) with the " +
+    "Act's river class. The corridor is a planning designation; the Act's management plan for the river governs what is allowed inside it.",
+  },
+  nrhpTn: {
+  notes:
+    "The Tennessee reading of the NPS National Register (Esri Federal Data copy; one point per listing — a district is one point, not its boundary). " +
+    "The Tennessee Historical Commission's own inventory of recorded-but-unlisted sites is not public GIS, so an empty map is never proof of none.",
+  },
+  critHabitatTn: {
+  notes:
+    "USFWS final critical habitat read at Tennessee sites (mussels and fish in the Stones, Clinch, Holston and Duck systems; plants on the cedar glades). " +
+    "It binds FEDERAL actions, not private land directly — but a Corps wetlands/stream permit is a federal action. USFWS IPaC is the authoritative species list.",
+  },
+  cemeteriesTn: {
+  notes:
+    "USGS GNIS recorded cemeteries read at Tennessee sites — INCOMPLETE by construction: an unrecorded family burial ground is not on it, so an empty " +
+    "map is never proof of none. Tennessee law protects every known burial site; have the property surveyed and ask the county.",
+  },
+  dorSitesTn: {
+  notes:
+    "TDEC Division of Remediation's register of sites in a remediation program (825 OPEN sites): voluntary cleanup, State Superfund (state-funded or liable-party-funded), " +
+    "EPA NPL and non-NPL, Department of Defense, pre-remedial evaluation and the drycleaner program. The register was last edited 2024-06-25, so a site opened since is " +
+    "not on it. A flag for a Phase I ESA — pull TDEC's file — never a finding about a neighbour, and a missing site is not proof of none.",
+  },
+  landfillsTn: {
+  notes:
+    "TDEC's permitted Tennessee landfills (111 operating facilities, Class I–IV by the kind of waste accepted) with the TDEC site id, county and status. " +
+    "A landfill beside the site is a flag (gas, leachate, truck traffic, a closed-cell buffer) — ask TDEC's Division of Solid & Hazardous Waste Management. " +
+    "Closed and unpermitted dumps are NOT on it, so an empty map is never proof of none.",
+  },
+  thcSitesTn: {
+  notes:
+    "The Tennessee Historical Commission's recorded historic-sites survey (186,319 points): buildings and sites surveyed over decades, most of them NOT on the " +
+    "National Register. The service says the paper-to-digital conversion is in progress, so the inventory is partial statewide — an empty map is never proof of " +
+    "none. A flag to check with the Commission (Section 106 review applies where a federal permit is involved).",
+  },
+  nrhpBoundsTn: {
+  notes:
+    "National Register of Historic Places boundaries for Tennessee from the State Historic Preservation Office (2,047 polygons): the footprint of a listed " +
+    "property or district, where the NPS point layer gives one point. Fixed-width padded text from the source is trimmed in the card.",
+  },
   hsiGa: {
   notes:
     "Georgia EPD Hazardous Site Inventory (HSI) — sites with a release of a regulated substance above the reportable " +
@@ -1476,6 +1838,98 @@ export const SOURCE_DOCS = {
     "Georgia EPD's REGISTER of underground storage tank facilities (name, address, facility type, status). It is not a " +
     "release list: leak, corrective-action and closure status are not in the layer (edited 2022-10-17), so a facility on it " +
     "is a flag to pull EPD's UST Management Program file, never a finding of contamination.",
+  },
+  msDeqUst: {
+  notes:
+    "MDEQ's own MUSTER repository of UST facilities (11,913 statewide, open + closed). RELEASE_STATUS 'Open Release' marks a tank site with an unresolved release; the register does not say how much or where on the lot.",
+  },
+  msDeqGard: {
+  notes:
+    "MDEQ's uncontrolled-sites / CERCLA list (2,280 sites): state and federal status per site, program (brownfield, voluntary evaluation), main contaminant. Status codes are MDEQ's as published.",
+  },
+  msDeqLandfills: {
+  notes:
+    "905 permitted solid-waste facilities incl. closed and inactive: municipal landfills, industrial/special-waste landfills, rubbish sites, tire sites. Point per facility, not the waste footprint.",
+  },
+  msDeqSpa: {
+  notes:
+    "Delineated protection areas around public water-supply sources (1,243). Polygons carry only the public water system ID.",
+  },
+  msDeqMines: {
+  notes:
+    "MDEQ surface-mining permit boundaries (1,106). Includes released permits; the polygons carry the permit number and acres only.",
+  },
+  msDeqOgFields: {
+  notes:
+    "Generalized outlines of Mississippi's oil and gas fields (1,175). A producing-area outline, not a surface restriction.",
+  },
+  msOgbWells: {
+  notes:
+    "25,200 Board-regulated wells with type and status descriptions (producing, injection, plugged, orphaned…). The Board's own Data Explorer is not an open service; MARIS is the state clearinghouse copy.",
+  },
+  msNrcsEasements: {
+  notes:
+    "698 NRCS easement polygons (wetland reserve and similar). Boundaries are NRCS's aggregate and approximate.",
+  },
+  msDams: {
+  notes:
+    "6,870 state-inventoried dams with hazard class (High / Significant / Low), height, condition, and links to emergency action plans and inspection reports where MDEQ posts them.",
+  },
+  msDamInundation: {
+  notes:
+    "322 modeled dam-failure inundation areas. Only dams MDEQ has studied have one; a dam with no polygon is unstudied, not safe.",
+  },
+  ms303d: {
+  notes:
+    "233 impaired stream reaches with pollutant and basin. The four impaired lakes (polygon layer) are not included.",
+  },
+  msCounty: {
+  notes:
+    "The 82 Mississippi counties.",
+  },
+  msCity: {
+  notes:
+    "300 incorporated places; each carries the year its boundary was last updated (Boundary_U), which varies by city.",
+  },
+  msBrownfields: {
+  notes:
+    "EPA's ACRES brownfield properties (683 in Mississippi; layer refreshed 2026-10-21). Federal brownfield grant / cleanup properties — the state's own program sites are on the MDEQ contaminated-sites layer.",
+  },
+  msTribal: {
+  notes:
+    "BIA land area representations (boundaries of federally recognized reservations and trust lands). A representation, not a survey; the Choctaw LAR is one multi-part feature.",
+  },
+  msNrhp: {
+  notes:
+    "NPS National Register listings (1,100 in Mississippi), one point per listing. Mississippi's own HRI (MDAH) is not an open service; recorded-but-unlisted sites are not here.",
+  },
+  msCemeteries: {
+  notes:
+    "USGS GNIS cemeteries (National Map structures). Recorded cemeteries only: an unrecorded family burial ground is not on the layer, so an empty map is never proof of none.",
+  },
+  msCritHabitat: {
+  notes:
+    "USFWS final critical habitat for listed species in Mississippi (gopher frog, pearl darter, black pinesnake, sandhill crane, mussels…).",
+  },
+  msDesotoDrainage: {
+  notes:
+    "The county's drainage districts (6).",
+  },
+  msDesotoLevee: {
+  notes:
+    "The part of the Yazoo–Mississippi Delta Levee District in DeSoto County.",
+  },
+  msDesotoLomr: {
+  notes:
+    "FEMA Letters of Map Revision the county has mapped (7), with the FEMA case number and links.",
+  },
+  msDesotoLoma: {
+  notes:
+    "FEMA Letters of Map Amendment (655): a lot FEMA has removed from the mapped floodplain.",
+  },
+  msDesotoCemeteries: {
+  notes:
+    "166 cemeteries the county has located; 'Confirmed' says whether the location was field-verified.",
   },
   troutGa: {
   notes:
@@ -1522,7 +1976,7 @@ export const SOURCE_DOCS = {
   },
   gaProtectedRiver: {
   notes:
-    "DCA's compiled protected-river lines (perennial streams averaging 400 cfs or more per USGS; O.C.G.A. 12-2-8, Rule 391-3-16-.04). The rule asks local governments for a river-corridor plan with a 100-ft natural vegetative buffer each side measured from the banks; the local ordinance governs. DCA's lines are a planning map, not a survey.",
+    "DCA's compiled protected-river lines (perennial streams averaging 400 cfs or more per USGS; O.C.G.A. 12-2-8, Rule 391-3-16-.04). The rule asks local governments for a river-corridor plan with a 100-ft natural vegetative buffer each side measured from the banks; the local ordinance governs. DCA's lines are a planning map, not a survey, and run through two reaches the rule EXCLUDES (the Chattahoochee under the Metropolitan River Protection Act; the tidal reaches under the Coastal Marshlands Protection Act). The Stream Buffers band is drawn from the centreline, so it understates the bank-measured buffer on a wide river.",
   },
   gaProtectedMountain: {
   notes:
@@ -1587,6 +2041,22 @@ export const SOURCE_DOCS = {
   gaSpaldingZoning: {
   notes:
     "Spalding County's own zoning polygons: the unincorporated county and the town of Orchard Hill (the City of Griffin zones itself and is not in the layer; confirm any other city with the county). The county's description field disagrees with itself for several codes, so Planyr shows the zone CODE only; the Spalding County zoning ordinance defines each district. Edited 2025-08-11.",
+  },
+  gaRoadOwnership: {
+  notes:
+    "GDOT's own road-ownership layer (as of August 2022), published on the Georgia GIS Data Clearinghouse: State / County / City / Other owned. Ownership is who maintains and permits access to the road; a private or unlisted road reads 'Other'. Updated yearly by GDOT — a road built or transferred since is not in it. Entity codes are not shown (unreadable numbers).",
+  },
+  gaRareSpecies: {
+  notes:
+    "DNR Natural Heritage rare-species RECORDS, generalised to a quarter-quad cell (about 4 miles): the layer shows records with a federal status (Endangered / Threatened / Candidate) or state protection (Endangered / Threatened). A cell means 'recorded somewhere in this ~4-mile cell', never 'on the site', and an empty map is NOT an all-clear: unrecorded habitat is not on it. DNR's Natural Heritage review is the real check.",
+  },
+  gaMineral: {
+  notes:
+    "USGS MRDS / MAS-MILS mineral-resource records for Georgia (2005 digest): producers, past producers, plants, prospects and occurrences. A point per record with commodities; no boundary and no reclamation status. A past quarry or pit nearby is a voids / fill / blasting flag.",
+  },
+  gaBartowZoning: {
+  notes:
+    "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. REZONING is the county's case reference; ZONINGTEXT is its free-text note (mostly ordinance ids). Both are shown as published.",
   },
   countyCa: {
   notes:

@@ -188,7 +188,7 @@ function applyCellStyle(cell, style) {
     const border = {};
     for (const edge of ["top", "right", "bottom", "left"]) {
       const token = style.border[edge];
-      if (token) border[edge] = { style: token === "double" ? "double" : "thin" };
+      if (token) border[edge] = { style: token === "double" ? "double" : token === "thick" ? "medium" : "thin" };
     }
     if (Object.keys(border).length) cell.border = border;
   }
@@ -256,10 +256,16 @@ export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) 
     const colIndexById = new Map(sheet.columns.map((c, i) => [c.id, i]));
     const evalForSheet = evalResult.get(entry.id);
 
-    ws.columns = sheet.columns.map((c) => ({ width: pxToExcelWidth(c.width) }));
+    ws.columns = sheet.columns.map((c) => (c.hidden ? { width: pxToExcelWidth(c.width), hidden: true } : { width: pxToExcelWidth(c.width) }));
     for (let r = 0; r < sheet.rowCount; r++) {
       const h = sheet.rowHeights[r];
       if (h != null) ws.getRow(r + 1).height = pxToPt(h);
+    }
+    // ExcelJS only writes a row that has cells or an explicit height, so an empty hidden row gets its height stated too.
+    for (const r of Object.keys(sheet.hiddenRows || {})) {
+      const row = ws.getRow(Number(r) + 1);
+      row.hidden = true;
+      if (row.height == null) row.height = pxToPt(sheet.rowHeights[r] || 22);
     }
 
     for (const key of collectWritableKeys(sheet)) {
@@ -393,7 +399,7 @@ function excelStyleToPlanyrStyle(cell) {
     const b = {};
     for (const edge of ["top", "right", "bottom", "left"]) {
       const e = border[edge];
-      if (e && e.style) b[edge] = e.style === "double" ? "double" : "thin";
+      if (e && e.style) b[edge] = e.style === "double" ? "double" : (e.style === "medium" || e.style === "thick") ? "thick" : "thin";
     }
     if (Object.keys(b).length) style.border = b;
   }
@@ -507,7 +513,10 @@ async function readWorkbookFile(arrayBuffer) {
     for (let c = 0; c < columns.length; c++) {
       const w = ws.getColumn(c + 1).width;
       if (w != null) columns[c].width = excelWidthToPx(w);
+      if (ws.getColumn(c + 1).hidden) columns[c].hidden = true;
     }
+    const hiddenRows = {};
+    for (let r = 1; r <= Math.max(maxRow, ws.rowCount); r++) if (ws.getRow(r).hidden) hiddenRows[r - 1] = true; // an empty hidden row past the data still counts
     const rowHeights = {};
     for (let r = 1; r <= maxRow; r++) {
       const h = ws.getRow(r).height;
@@ -520,7 +529,7 @@ async function readWorkbookFile(arrayBuffer) {
 
     const rawSheet = {
       version: SHEET_VERSION, nextColId: columns.length + 1, columns, rowCount: maxRow,
-      cells, formats, styles, rowHeights, freezeRows, freezeCols, merges,
+      cells, formats, styles, rowHeights, hiddenRows, freezeRows, freezeCols, merges,
       names: {}, dismissedInconsistencies: {}, unsupportedFormulas,
     };
     return { id, name: ws.name || `Sheet${i + 1}`, sheet: migrateSheet(rawSheet) };

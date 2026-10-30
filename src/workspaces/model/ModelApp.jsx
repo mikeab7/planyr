@@ -56,19 +56,32 @@ import {
   createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet, setActiveSheet,
   addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
   workbookInsertRowAt, workbookDeleteRowAt, workbookInsertColumnAt, workbookDeleteColumn,
-  commitCellText, blankRange, renameColumn, setNumberFormat, addColumn,
+  commitCellText, blankRange, setNumberFormat, addColumn,
   formatAt, padRowCount, sheetsDiverge, rawAt,
   setColumnWidth, setRowHeight, setFreeze,
   styleAt, setCellStyle, adjustIndent, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
   isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
+  setRowsHidden, setColumnsHidden, clearCellRange, DEFAULT_ROW_H,
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
 import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
 import { findInconsistencies } from "./lib/formulaConsistency.js";
-import { copyRange, pasteRange, fillDown, fillTextToCells, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
+import { fillDown, fillTextToCells, replaceAll, replaceInCellText, fillRight, autoSumPlan } from "./lib/sheetOps.js";
 import { rangesOf, applyToRanges, isMulti, collapse, MULTI_SELECTION_MESSAGE } from "./lib/selectionModel.js";
+// Excel keyboard shortcuts (2026-10-29): the key tables, the Alt key-tip machine, the selection model and
+// the real clipboard — all pure modules; this file only wires them to state.
+import { chordCommand } from "./lib/keymap.js";
+import { START as KEYTIP_START, beginKeyTips, stepKeyTips } from "./lib/keyTips.js";
+import { runCommandById } from "./lib/commandRegistry.js";
+import { selectionKind, clampSelection, wholeSelectionLabel } from "./lib/selection.js";
+import { autofitColumnWidth, autofitRowHeight, canvasMeasure } from "./lib/autofit.js";
+import { todayIso, timeText } from "./lib/editShortcuts.js";
+import { buildClip, clipToText, clipToHtml, parseClipboard, applyClip, pasteMoveSameSheet, clipIsEmpty } from "./lib/clipboardIO.js";
+import { NUMBER_FORMATS } from "./lib/numberFormats.js";
+import ShortcutDialog from "./components/ShortcutDialog.jsx";
+import KeyTipOverlay from "./components/KeyTipOverlay.jsx";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
@@ -350,9 +363,33 @@ export default function ModelApp({
     setStatus("diverged");
   }, []);
   const loadTokenRef = useRef(0);
-  // Ctrl+C/Ctrl+V's INTERNAL clipboard (item 6) — see lib/sheetOps.js's header for why this is
-  // deliberately not the OS clipboard. A ref, not state: copying never re-renders anything.
-  const clipboardRef = useRef(null);
+  // ⛔ CLIPBOARD (2026-10-29) — Ctrl+C / Ctrl+X / Ctrl+V use the REAL system clipboard through the browser's native
+  // copy / cut / paste events (lib/clipboardIO.js; the listeners are below the ctx bag). `internalClipRef` is only the
+  // FALLBACK for a browser that hands the event no clipboardData. `clipMark` is the dashed "marching" outline around the
+  // copied / cut range ({ sheetId, rect, mode, id }); `pendingCutRef` is the cut still waiting for its paste.
+  const internalClipRef = useRef(null);
+  const [clipMark, setClipMark] = useState(null);
+  const pendingCutRef = useRef(null);
+  const consumedCutsRef = useRef(new Set());
+  const clearClipMark = useCallback(() => { setClipMark(null); pendingCutRef.current = null; }, []);
+  // A one-line, auto-dismissing message for anything a shortcut could not do — LOUD-FAILURE: no silent no-op.
+  const [notice, setNotice] = useState(null);
+  const noticeTimer = useRef(null);
+  const showNotice = useCallback((msg) => {
+    setNotice(msg);
+    clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 7000);
+  }, []);
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
+  const [dialog, setDialog] = useState(null);       // ShortcutDialog spec | null
+  const [keyTip, setKeyTip] = useState(KEYTIP_START); // the Alt key-tip sequence in progress
+  const keyTipRef = useRef(KEYTIP_START);
+  const ctxRef = useRef(null);                      // the latest ctx bag — key handlers run commands against THIS
+  const liveRef = useRef(null);                     // the latest sheet / selection / eval for window-level listeners
+  const lastActionRef = useRef(null);               // F4 "repeat last action": { name, args } of a ctx handler
+  const clipFnsRef = useRef(null);                  // this render's copy / paste functions (the document listeners call THROUGH it)
+  const pushImmediateRef = useRef(false);           // Ctrl+S: the next cloud push fires with no debounce wait
+  const nextPushDelay = () => { const d = pushImmediateRef.current ? 0 : CLOUD_PUSH_DEBOUNCE_MS; pushImmediateRef.current = false; return d; };
   // ⛔ B891184-FOLLOWUP (live production finding, 2026-08-31): the toolbar overflowed a 729px
   // window — measured, the number-format picker's own box sat 22.7px past the viewport edge,
   // reachable to a script but not to a real click. Every formatting control (incl. Undo/Redo,
@@ -380,6 +417,7 @@ export default function ModelApp({
   // the grid's `selRange` moves but DOM focus is left on nothing (the box blurs to `document.body`)
   // and every keystroke typed right after is silently discarded.
   const sheetViewRef = useRef(null);
+  const formulaBarRef = useRef(null); // NEW-1 — its pending text is committed before a sheet change
   const focusGrid = useCallback(() => sheetViewRef.current?.focusGrid(), []);
   // STAGE 3 (NEW-1) — trace precedents/dependents. Plain view state, like `zoom`/`painter` below
   // — never through the undo stack, never synced to the cloud. `null` = no trace active; see
@@ -711,7 +749,7 @@ export default function ModelApp({
           if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
         },
       });
-    }, CLOUD_PUSH_DEBOUNCE_MS);
+    }, nextPushDelay());
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode, cloudSettled]);
@@ -766,6 +804,7 @@ export default function ModelApp({
       if (e.key === "Escape" && !e.ctrlKey && !e.metaKey) {
         if (e.target instanceof Element && e.target.closest('.menu, [role="dialog"]')) return;
         setTrace((t) => (t ? null : t));
+        clearClipMark(); // Escape also drops the copied / cut range outline (and cancels a pending cut)
         return;
       }
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -790,7 +829,7 @@ export default function ModelApp({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActive, undo, redo, onOpenFind, onOpenReplace]);
+  }, [isActive, undo, redo, onOpenFind, onOpenReplace, clearClipMark]);
 
   // STAGE 3 (NEW-1) — evaluated across the WHOLE WORKBOOK, always, regardless of which sheet is
   // currently visible: a cross-sheet formula on one sheet needs every OTHER sheet's cells (its
@@ -828,43 +867,65 @@ export default function ModelApp({
     [commit, activeSheetId],
   );
 
-  const onCommitCell = useCallback((r, c, text) => applyActive(commitCellText, r, c, text), [applyActive]);
+  const onCommitCell = useCallback((r, c, text) => {
+    clearClipMark(); // typing into a cell cancels a pending cut and drops the copy outline (Excel)
+    if (String(text).includes("\n")) {
+      // Alt+Enter new lines: Excel turns Wrap Text on for the cell and grows the row to show every line.
+      applyActive((s) => {
+        let n = setCellStyle(commitCellText(s, r, c, text), r, r, c, c, { wrap: true });
+        if (!n.rowHeights[r]) n = setRowHeight(n, r, Math.ceil(String(text).split("\n").length * 12.5 * 1.25 + 6));
+        return n;
+      });
+    } else applyActive(commitCellText, r, c, text);
+  }, [applyActive, clearClipMark]);
   // NEW-2 — a command on a multi-range selection is ONE commit (one undo step) that threads the sheet through
   // every selected range; `sel` is a selection ({r1..c2, extra?}) or an explicit list of ranges.
   const applyActiveRanges = useCallback((sel, fn, ...args) => {
     const rs = Array.isArray(sel) ? sel : rangesOf(sel);
     commit((wb) => applyToActiveSheet(setActiveSheet(wb, activeSheetId), (s) => applyToRanges(s, rs, fn, ...args)));
   }, [commit, activeSheetId]);
-  const onBlankRanges = useCallback((ranges) => applyActiveRanges(ranges, blankRange), [applyActiveRanges]);
+  const onBlankRanges = useCallback((ranges) => { clearClipMark(); applyActiveRanges(ranges, blankRange); }, [applyActiveRanges, clearClipMark]);
   const onFillDownRanges = useCallback((ranges) => applyActiveRanges(ranges, fillDown), [applyActiveRanges]);
-  const onFillText = useCallback((cells, text, fromR, fromC) => applyActive(fillTextToCells, cells, text, fromR, fromC), [applyActive]);
-  const onRenameColumn = useCallback((c, name) => applyActive(renameColumn, c, name), [applyActive]);
+  const onFillText = useCallback((cells, text, fromR, fromC) => { clearClipMark(); applyActive(fillTextToCells, cells, text, fromR, fromC); }, [applyActive, clearClipMark]);
   const onAddColumn = useCallback(() => applyActive(addColumn), [applyActive]);
 
   // STAGE 3 (NEW-1) — the sheet tab strip. `onSelectSheetTab` is pure navigation (see the
   // `activeSheetId` state's own header above — never through `commit`); the other four are real
   // content edits and go through the undo stack like everything else, syncing the view's
   // `activeSheetId` afterward since add/duplicate/delete all pick a new active sheet themselves.
+  // NEW-1 (2026-10-29) — every way of changing which sheet is showing first COMMITS whatever is
+  // half-typed (cell editor, formula bar) to the sheet being left, exactly like Excel. Without it
+  // the editor state outlived the tab change and the next Enter wrote the text into the NEW sheet.
+  // The commit goes through `applyActive`'s CURRENT `activeSheetId`, so this must run before any
+  // `setActiveSheetId` below; it is queued as an ordinary functional commit, so the sheet-changing
+  // commits after it compose on top of it (they build from the latest workbook, not `workbook`).
+  const commitPendingEntry = useCallback(() => {
+    sheetViewRef.current?.commitPending?.();
+    formulaBarRef.current?.commitPending?.();
+  }, []);
   // (NEW-2: a multi-range selection belongs to the sheet it was made on — switching tabs keeps the active cell only.)
-  const onSelectSheetTab = useCallback((id) => { setActiveSheetId(id); setSelRange((s) => collapse(s)); }, []);
+  const onSelectSheetTab = useCallback((id) => { commitPendingEntry(); setActiveSheetId(id); setSelRange((s) => collapse(s)); }, [commitPendingEntry]);
   const onAddSheetTab = useCallback(() => {
-    const next = addSheet(workbook);
-    commit(next);
-    setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook]);
-  const onDuplicateSheetTab = useCallback((id) => {
-    const next = duplicateSheet(workbook, id);
-    if (next === workbook) return;
-    commit(next);
-    setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook]);
+    commitPendingEntry();
+    const id = addSheet(workbook).activeSheetId; // ids come from `nextSheetId`, which a cell edit never moves
+    commit((wb) => addSheet(wb));
+    setActiveSheetId(id);
+  }, [commit, workbook, commitPendingEntry]);
+  const onDuplicateSheetTab = useCallback((sheetId) => {
+    if (duplicateSheet(workbook, sheetId) === workbook) return;
+    commitPendingEntry();
+    const id = duplicateSheet(workbook, sheetId).activeSheetId;
+    commit((wb) => duplicateSheet(wb, sheetId));
+    setActiveSheetId(id);
+  }, [commit, workbook, commitPendingEntry]);
   const onRenameSheetTab = useCallback((id, name) => commit((wb) => renameSheet(wb, id, name)), [commit]);
-  const onDeleteSheetTab = useCallback((id) => {
-    const next = deleteSheet(workbook, id);
+  const onDeleteSheetTab = useCallback((sheetId) => {
+    const next = deleteSheet(workbook, sheetId);
     if (next === workbook) return;
-    commit(next);
+    commitPendingEntry();
+    commit((wb) => deleteSheet(wb, sheetId));
     setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook]);
+  }, [commit, workbook, commitPendingEntry]);
   const onReorderSheetTab = useCallback((from, to) => commit((wb) => reorderSheet(wb, from, to)), [commit]);
   // NEW-1 (command palette) — "add/rename/duplicate/delete sheet" from the palette acts on the
   // CURRENTLY VIEWED sheet, calling the exact same onXSheetTab handlers TabStrip's own UI does
@@ -1027,11 +1088,6 @@ export default function ModelApp({
   // references by the destination delta, exactly like dragging Excel's fill handle. All three
   // operate on the ACTIVE sheet only — pasting a cross-sheet formula's qualifier rides through
   // untouched (rewriteFormulaForCopy preserves it — see formula.js's own header).
-  const onCopy = useCallback((r1, r2, c1, c2) => { clipboardRef.current = copyRange(sheet, r1, r2, c1, c2); }, [sheet]);
-  const onPaste = useCallback((targetR, targetC, selR1, selR2, selC1, selC2) => {
-    if (!clipboardRef.current) return;
-    applyActive(pasteRange, targetR, targetC, clipboardRef.current, selR2, selC2);
-  }, [applyActive]);
   const onFillDown = useCallback((r1, r2, c1, c2) => applyActive(fillDown, r1, r2, c1, c2), [applyActive]);
 
   // Stage 1 structural editing (context-menu driven — see SheetView.jsx's ContextMenu). Every
@@ -1098,9 +1154,10 @@ export default function ModelApp({
   // A cross-sheet marker click (SheetView.jsx) — pure navigation, the same "plain tab click,
   // never through commit" convention `onSelectSheetTab` above already uses.
   const onNavigateTrace = useCallback((sheetId, row, col) => {
+    commitPendingEntry(); // NEW-1 — leaving a sheet commits what was typed on it
     setActiveSheetId(sheetId);
     setSelRange({ r1: row, r2: row, c1: col, c2: col });
-  }, []);
+  }, [commitPendingEntry]);
   const renderedTrace = useMemo(() => renderableTrace(trace, graph, activeEntry.id), [trace, graph, activeEntry.id]);
 
   // STAGE 3 (NEW-2) — inconsistent-formula flags for the ACTIVE sheet, recomputed fresh on every
@@ -1216,8 +1273,10 @@ export default function ModelApp({
   // rowLayout.js's own header). Skipped entirely (null) the moment no column has an active
   // filter, so a sheet that never uses AutoFilter pays nothing for it.
   const hiddenRows = useMemo(() => {
-    if (columnFilters.size === 0) return null;
-    const hidden = new Set();
+    const manual = sheet.hiddenRows && Object.keys(sheet.hiddenRows).length > 0 ? sheet.hiddenRows : null; // Ctrl+9
+    if (columnFilters.size === 0 && !manual) return null;
+    const hidden = new Set(manual ? Object.keys(manual).map(Number) : []);
+    if (columnFilters.size === 0) return hidden;
     for (let r = 0; r < sheet.rowCount; r++) {
       for (const [colIndex, allowed] of columnFilters) {
         if (!allowed.has(displayFor(sheet, evalResult, r, colIndex))) { hidden.add(r); break; }
@@ -1225,6 +1284,318 @@ export default function ModelApp({
     }
     return hidden;
   }, [sheet, evalResult, columnFilters]);
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ⛔ EXCEL SHORTCUTS (owner, 2026-10-29: "muscle memory is the spec") — every handler below is a ctx entry the
+  // command registry runs; the key tables (lib/keymap.js, lib/keyTips.js) only pick WHICH one. Plain closures over
+  // this render's state: `ctxRef` (below) is re-pointed at every render, so a key handler always runs the latest.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  const selNorm = clampSelection(sheet, selRange);
+  const selKind = selectionKind(sheet, selRange);
+  const eachIndex = (a, b, fn) => { for (let i = a; i <= b; i++) fn(i); };
+  // NEW-2 (B2530689) — Excel's answer to a command that needs ONE rectangle when several ranges are selected: say so,
+  // never a silent no-op and never "acts on the last range only".
+  const refuseMulti = () => {
+    if (!isMulti(liveRef.current.selRange)) return false;
+    onNotice(MULTI_SELECTION_MESSAGE); // the same banner the grid's own multi-range refusals use (model-file-notice)
+    return true;
+  };
+
+  // ---- clipboard -------------------------------------------------------------------------------
+  // Scope: the grid / toolbar owns the clipboard events ONLY when no text control (cell editor, formula bar, name box,
+  // find bar, a dialog's field) has focus — native text copy / paste keeps working there — and no page text is selected.
+  const clipboardScopeOk = (e) => {
+    if (!isActive) return false;
+    const el = (document.activeElement && document.activeElement !== document.body ? document.activeElement : e.target);
+    if (el && el.closest) {
+      if (el.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="dialog"]')) return false;
+      if (!el.closest('[data-testid="model-root"]')) return false;
+    }
+    const sel = window.getSelection && window.getSelection();
+    if (sel && !sel.isCollapsed && String(sel).trim() !== "" && !(el && el.closest && el.closest('[data-testid="model-sheet"]'))) return false;
+    return true;
+  };
+
+  // The used-range clamp: a whole column / row / sheet copies its USED part (Excel does the same), never 1000 blank rows.
+  const clipSelection = () => {
+    const live = liveRef.current;
+    const s = clampSelection(live.sheet, live.selRange);
+    const kind = selectionKind(live.sheet, live.selRange);
+    const used = usedRangeEnd(live.sheet);
+    if (kind === "columns" || kind === "sheet") s.r2 = Math.max(s.r1, Math.min(s.r2, used ? used.row : s.r1));
+    if (kind === "rows" || kind === "sheet") s.c2 = Math.max(s.c1, Math.min(s.c2, used ? used.col : s.c1));
+    return s;
+  };
+
+  // Copy / cut: put text/plain (TSV of the displayed values) + text/html (styled table + Planyr marker) on the clipboard.
+  // `clipboardData` is the native event's; with none (a browser that refuses it) the async API, then the internal ref.
+  const performCopy = (clipboardData, cut) => {
+    if (refuseMulti()) return false;
+    const live = liveRef.current;
+    const sel = clipSelection();
+    const clip = buildClip(live.sheet, sel, { hiddenRows: live.hiddenRows });
+    const displayAt = (r, c) => displayFor(live.sheet, live.evalResult, r, c);
+    const text = clipToText(clip, displayAt), html = clipToHtml(clip, displayAt);
+    internalClipRef.current = clip;
+    let wrote = false;
+    if (clipboardData) {
+      try { clipboardData.setData("text/plain", text); clipboardData.setData("text/html", html); wrote = true; } catch { wrote = false; }
+    }
+    if (!wrote && navigator.clipboard && window.ClipboardItem) {
+      navigator.clipboard.write([new window.ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) })])
+        .catch(() => showNotice("Couldn't write to the system clipboard — pasting inside Planyr still works."));
+      wrote = true;
+    }
+    if (!wrote) showNotice("Couldn't write to the system clipboard — pasting inside Planyr still works.");
+    setClipMark({ sheetId: live.activeSheetId, rect: sel, mode: cut ? "cut" : "copy", id: clip.id });
+    pendingCutRef.current = cut ? { id: clip.id, sheetId: live.activeSheetId, rect: sel } : null;
+    return wrote;
+  };
+
+  // Paste: whatever arrived (a Planyr marker, an Excel / Docs / web table, or plain text) becomes one Clip and goes in at
+  // the selection — ONE undo step. A cut pasted in the window that cut it MOVES (source cleared, references follow).
+  const performPaste = ({ html = "", text = "", noClipboardData = false }) => {
+    if (refuseMulti()) return;
+    const live = liveRef.current;
+    let clip = parseClipboard({ html, text });
+    // The internal copy is a fallback for a browser that handed the event NO clipboardData at all — never for a clipboard
+    // that is merely empty or holds something else (that would paste a stale copy over what the user just copied elsewhere).
+    if (!clip && noClipboardData && internalClipRef.current) clip = internalClipRef.current;
+    if (!clip || clipIsEmpty(clip)) { showNotice("Nothing to paste — the clipboard holds no cells or text."); return; }
+    try {
+      const sel = clampSelection(live.sheet, live.selRange);
+      const cut = pendingCutRef.current;
+      const isMove = !!(cut && clip.id && clip.id === cut.id && !consumedCutsRef.current.has(cut.id));
+      let dest = null;
+      if (isMove && cut.sheetId === live.activeSheetId) {
+        commit((wb) => { const r = pasteMoveSameSheet(setActiveSheet(wb, live.activeSheetId), live.activeSheetId, clip, cut, sel); dest = r.dest; return r.workbook; });
+      } else if (isMove) {
+        // cut on another tab: the cells move here; formulas elsewhere that pointed at the old cells are NOT re-pointed
+        commit((wb) => {
+          const wb1 = setActiveSheet(wb, live.activeSheetId);
+          const r = applyToActiveSheet(wb1, (sh) => { const x = applyClip(sh, clip, sel); dest = x.dest; return x.sheet; });
+          return { ...r, sheets: r.sheets.map((e) => (e.id === cut.sheetId ? { ...e, sheet: clearCellRange(e.sheet, cut.rect.r1, cut.rect.r2, cut.rect.c1, cut.rect.c2) } : e)) };
+        });
+        showNotice("Moved to this sheet. Formulas that pointed at the old cells were not updated.");
+      } else {
+        applyActive((sh) => { const x = applyClip(sh, clip, sel); dest = x.dest; return x.sheet; });
+      }
+      if (isMove) { consumedCutsRef.current.add(cut.id); clearClipMark(); }
+      if (dest) setSelRange({ r1: dest.r1, r2: dest.r2, c1: dest.c1, c2: dest.c2 });
+    } catch (err) {
+      showNotice(`Paste failed: ${err && err.message ? err.message : "unknown error"}`); // LOUD-FAILURE
+    }
+  };
+
+  // Menu / palette entry points use the SAME functions: copy & cut ask the browser to run its own copy / cut (which fires the
+  // event the listener below handles); paste reads the clipboard asynchronously — if the browser refuses, say so.
+  const onClipboardCommand = (which) => {
+    sheetViewRef.current?.focusGrid();
+    if (which === "paste") {
+      if (!navigator.clipboard || !navigator.clipboard.read) { showNotice("Your browser won't let a menu read the clipboard — press Ctrl+V instead."); return; }
+      navigator.clipboard.read().then(async (items) => {
+        let html = "", text = "";
+        for (const item of items) {
+          if (item.types.includes("text/html")) html = await (await item.getType("text/html")).text();
+          if (item.types.includes("text/plain")) text = await (await item.getType("text/plain")).text();
+        }
+        performPaste({ html, text });
+      }).catch(() => showNotice("Your browser blocked reading the clipboard from the menu — press Ctrl+V instead."));
+      return;
+    }
+    let fired = false;
+    const probe = () => { fired = true; };
+    document.addEventListener(which, probe, true);
+    let ok = false;
+    try { ok = document.execCommand(which); } catch { ok = false; }
+    document.removeEventListener(which, probe, true);
+    if (!ok || !fired) performCopy(null, which === "cut"); // the browser would not run it: write through the async API
+  };
+
+  // ---- Alt+Enter wrap, Ctrl+Enter fill -----------------------------------------------------------
+  const onFillRight = () => applyActiveRanges(selRange, fillRight);
+
+  // ---- date / time / copy-from-above / autosum ------------------------------------------------------
+  const onInsertDate = () => {
+    const { r1: r, c1: c } = selNorm;
+    clearClipMark();
+    applyActive((s) => { const n = commitCellText(s, r, c, todayIso()); return formatAt(n, r, c) ? n : setNumberFormat(n, r, r, c, c, "mm/dd/yyyy"); });
+  };
+  const onInsertTime = () => { clearClipMark(); applyActive(commitCellText, selNorm.r1, selNorm.c1, timeText()); };
+  const onCopyAbove = (kind) => {
+    const { r1: r, c1: c } = selNorm;
+    if (r === 0) { showNotice("There is no cell above to copy from."); return; }
+    const raw = rawAt(sheet, r - 1, c);
+    const text = kind === "value" && raw.trim().startsWith("=") ? displayFor(sheet, evalResult, r - 1, c) : raw;
+    clearClipMark();
+    applyActive(commitCellText, r, c, text);
+  };
+  const onAutoSum = () => {
+    const plan = autoSumPlan(sheet, selNorm.r1, selNorm.r2, selNorm.c1, selNorm.c2);
+    if (plan.length === 0) { showNotice("AutoSum: no numbers above or to the left of this cell."); return; }
+    clearClipMark();
+    applyActive((s) => plan.reduce((acc, p) => commitCellText(acc, p.r, p.c, p.text), s));
+    setSelRange({ r1: plan[0].r, r2: plan[plan.length - 1].r, c1: plan[0].c, c2: plan[plan.length - 1].c });
+  };
+  const onRepeatLast = () => {
+    const last = lastActionRef.current;
+    const fn = last && ctxRef.current && ctxRef.current[last.name];
+    if (!fn) { showNotice("Nothing to repeat yet."); return; }
+    fn(...last.args);
+  };
+
+  // ---- clear -----------------------------------------------------------------------------------------
+  const onClearContents = () => onBlankRanges(rangesOf(selRange));
+  const onClearAll = () => { clearClipMark(); applyActiveRanges(selRange, clearCellRange); };
+
+  // ---- widths / heights / autofit -----------------------------------------------------------------------
+  const usedLastRow = () => { const u = usedRangeEnd(sheet); return u ? u.row : 0; };
+  const onAutofit = (axis) => {
+    if (refuseMulti()) return;
+    if (axis === "columns") {
+      const widths = [];
+      eachIndex(selNorm.c1, selNorm.c2, (c) => widths.push([c, autofitColumnWidth(sheet, evalResult, c, canvasMeasure)]));
+      applyActive((s) => widths.reduce((acc, [c, w]) => setColumnWidth(acc, c, w), s));
+    } else {
+      const last = selKind === "columns" || selKind === "sheet" ? Math.max(selNorm.r1, Math.min(selNorm.r2, usedLastRow())) : selNorm.r2;
+      const heights = [];
+      eachIndex(selNorm.r1, last, (r) => heights.push([r, autofitRowHeight(sheet, evalResult, r, (c) => (sheet.columns[c]?.width || 120), canvasMeasure)]));
+      applyActive((s) => heights.reduce((acc, [r, h]) => setRowHeight(acc, r, h), s));
+    }
+  };
+  const openDialog = (spec) => setDialog(spec);
+  const onOpenDialog = (kind) => {
+    if ((kind === "column-width" || kind === "row-height") && refuseMulti()) return;
+    if (kind === "column-width") {
+      openDialog({
+        title: "Column width", submitLabel: "OK",
+        fields: [{ key: "w", label: selNorm.c1 === selNorm.c2 ? "Width" : "Width (every selected column)", type: "number", min: 1, value: String(sheet.columns[selNorm.c1]?.width || 120) }],
+        run: ({ w }) => { const n = Number(w); if (Number.isFinite(n) && n > 0) applyActive((s) => { let acc = s; eachIndex(selNorm.c1, selNorm.c2, (c) => { acc = setColumnWidth(acc, c, n); }); return acc; }); },
+      });
+    } else if (kind === "row-height") {
+      openDialog({
+        title: "Row height", submitLabel: "OK",
+        fields: [{ key: "h", label: selNorm.r1 === selNorm.r2 ? "Height" : "Height (every selected row)", type: "number", min: 1, value: String(sheet.rowHeights[selNorm.r1] || DEFAULT_ROW_H) }],
+        run: ({ h }) => { const n = Number(h); if (Number.isFinite(n) && n > 0) applyActive((s) => { let acc = s; eachIndex(selNorm.r1, selNorm.r2, (r) => { acc = setRowHeight(acc, r, n); }); return acc; }); },
+      });
+    } else if (kind === "number-format") {
+      const cur = activeFormat || null;
+      const preset = NUMBER_FORMATS.find((f) => (f.token || null) === cur);
+      openDialog({
+        title: "Number format", submitLabel: "OK",
+        fields: [
+          { key: "preset", label: "Format", type: "select", value: preset ? preset.id : "custom", options: [...NUMBER_FORMATS.map((f) => ({ value: f.id, label: f.label })), { value: "custom", label: "Custom…" }] },
+          { key: "custom", label: "Custom format", type: "text", value: preset ? "" : (cur || ""), hint: "Used when Format is Custom — for example 0.0\"x\"" },
+        ],
+        run: ({ preset: p, custom }) => {
+          if (p === "custom") onApplyFormat(custom.trim() || null);
+          else onApplyFormat((NUMBER_FORMATS.find((f) => f.id === p) || NUMBER_FORMATS[0]).token);
+        },
+      });
+    }
+  };
+
+  // ---- hide / unhide --------------------------------------------------------------------------------------
+  const onHide = (axis) => {
+    if (refuseMulti()) return;
+    if (axis === "rows") {
+      if (selNorm.r1 === 0 && selNorm.r2 >= sheet.rowCount - 1) { showNotice("Can't hide every row."); return; }
+      applyActive(setRowsHidden, selNorm.r1, selNorm.r2, true);
+      let nr = selNorm.r2 + 1;
+      while (nr < sheet.rowCount && sheet.hiddenRows?.[nr]) nr++;
+      if (nr >= sheet.rowCount) { nr = selNorm.r1 - 1; while (nr > 0 && sheet.hiddenRows?.[nr]) nr--; }
+      nr = Math.max(0, nr);
+      setSelRange({ r1: nr, r2: nr, c1: selNorm.c1, c2: selNorm.c1 });
+    } else {
+      if (sheet.columns.every((col, i) => col.hidden || (i >= selNorm.c1 && i <= selNorm.c2))) { showNotice("Can't hide every column."); return; }
+      applyActive(setColumnsHidden, selNorm.c1, selNorm.c2, true);
+      let nc = selNorm.c2 + 1;
+      while (nc < sheet.columns.length && sheet.columns[nc].hidden) nc++;
+      if (nc >= sheet.columns.length) { nc = selNorm.c1 - 1; while (nc > 0 && sheet.columns[nc].hidden) nc--; }
+      nc = Math.max(0, nc);
+      setSelRange({ r1: selNorm.r1, r2: selNorm.r1, c1: nc, c2: nc });
+    }
+  };
+  // Unhide: the hidden rows / columns inside the selection; a single selected line also reaches the hidden run right beside it
+  // (a hidden row can't be selected, so Excel's "select around it" is offered by adjacency here).
+  const onUnhide = (axis) => {
+    if (refuseMulti()) return;
+    const isHidden = axis === "rows" ? (i) => !!sheet.hiddenRows?.[i] : (i) => !!sheet.columns[i]?.hidden;
+    const max = axis === "rows" ? sheet.rowCount - 1 : sheet.columns.length - 1;
+    let lo = axis === "rows" ? selNorm.r1 : selNorm.c1, hi = axis === "rows" ? selNorm.r2 : selNorm.c2;
+    if (lo === hi) { while (lo > 0 && isHidden(lo - 1)) lo--; while (hi < max && isHidden(hi + 1)) hi++; }
+    let any = false;
+    for (let i = lo; i <= hi; i++) if (isHidden(i)) { any = true; break; }
+    if (!any) { showNotice(`No hidden ${axis} here.`); return; }
+    if (axis === "rows") applyActive(setRowsHidden, lo, hi, false); else applyActive(setColumnsHidden, lo, hi, false);
+  };
+
+  // ---- insert / delete (Ctrl+Shift+= , Ctrl+-) ---------------------------------------------------------------
+  const insertRows = (at, n) => applyStructuralActive((wb) => { let acc = wb; for (let i = 0; i < n; i++) acc = workbookInsertRowAt(acc, at); return acc; });
+  const insertColumns = (at, n) => applyStructuralActive((wb) => { let acc = wb; for (let i = 0; i < n; i++) acc = workbookInsertColumnAt(acc, at); return acc; });
+  const deleteRows = (a, b) => applyStructuralActive((wb) => { let acc = wb; for (let i = b; i >= a; i--) acc = workbookDeleteRowAt(acc, i); return acc; });
+  const deleteColumns = (a, b) => {
+    if (sheet.columns.length - (b - a + 1) < 1) { showNotice("A sheet needs at least one column."); return; }
+    applyStructuralActive((wb) => { let acc = wb; for (let i = b; i >= a; i--) acc = workbookDeleteColumn(acc, i); return acc; });
+  };
+  const onInsertCells = () => {
+    if (refuseMulti()) return;
+    if (selKind === "rows") insertRows(selNorm.r1, selNorm.r2 - selNorm.r1 + 1);
+    else if (selKind === "columns") insertColumns(selNorm.c1, selNorm.c2 - selNorm.c1 + 1);
+    else if (selKind === "sheet") showNotice("Select a row, a column or some cells to insert at.");
+    else {
+      const s0 = { ...selNorm };
+      openDialog({
+        title: "Insert", submitLabel: "OK",
+        fields: [{ key: "what", type: "radio", value: "row", options: [{ value: "row", label: "Entire row" }, { value: "col", label: "Entire column" }] }],
+        run: ({ what }) => (what === "row" ? insertRows(s0.r1, s0.r2 - s0.r1 + 1) : insertColumns(s0.c1, s0.c2 - s0.c1 + 1)),
+      });
+    }
+  };
+  const onDeleteCells = () => {
+    if (refuseMulti()) return;
+    if (selKind === "rows") deleteRows(selNorm.r1, selNorm.r2);
+    else if (selKind === "columns") deleteColumns(selNorm.c1, selNorm.c2);
+    else if (selKind === "sheet") showNotice("Select a row, a column or some cells to delete.");
+    else {
+      const s0 = { ...selNorm };
+      openDialog({
+        title: "Delete", submitLabel: "OK",
+        fields: [{ key: "what", type: "radio", value: "row", options: [{ value: "row", label: "Entire row" }, { value: "col", label: "Entire column" }] }],
+        run: ({ what }) => (what === "row" ? deleteRows(s0.r1, s0.r2) : deleteColumns(s0.c1, s0.c2)),
+      });
+    }
+  };
+
+  // ---- sheets, save, merge & centre, colour menus ----------------------------------------------------------------
+  const onSheetStep = (dir) => {
+    const i = workbook.sheets.findIndex((e) => e.id === activeEntry.id);
+    const next = workbook.sheets[i + dir];
+    if (next) { commitPendingEntry(); setActiveSheetId(next.id); } // B2540736 — leaving a sheet commits what was typed on it
+  };
+  const onSaveNow = () => {
+    if (fileMode) { fw.flush?.(); showNotice(fw.cloudConfirmed ? "Saving the file…" : "Saving…"); return; }
+    if (userId && status !== "not-provisioned" && !divergedRef.current) {
+      // main's push effect only fires for edits not yet confirmed uploaded (dirtyRef) — say so when there are none
+      if (!dirtyRef.current) { showNotice("Everything is already saved to your account."); return; }
+      pushImmediateRef.current = true;
+      setPushNonce((n) => n + 1);
+      showNotice("Saving to your account…");
+    } else showNotice(userId ? "Saved on this device — the cloud copy is on hold (see the badge above)." : "Saved on this device — sign in to back it up to your account.");
+  };
+  const onMergeCenter = () => { if (!refuseMulti()) applyActive(mergeCenterPlan); };
+  const mergeCenterPlan = (s) => {
+    let acc = s;
+    for (let r = selNorm.r1; r <= selNorm.r2; r++) { if (!mergeAt(acc, r, selNorm.c1)) acc = mergeRange(acc, r, r, selNorm.c1, selNorm.c2); }
+    return setCellStyle(acc, selNorm.r1, selNorm.r2, selNorm.c1, selNorm.c2, { align: "center" });
+  };
+  const onOpenColorMenu = (which) => {
+    const detail = { which, claimed: false };
+    window.dispatchEvent(new CustomEvent("model-open-color-menu", { detail }));
+  };
+  // "repeat last action" (F4): the formatting / structure handlers below record themselves by NAME so the repeat runs the
+  // CURRENT version (with the current selection), not the one that was live when the action first ran.
+  const recd = (name, fn) => (...args) => { lastActionRef.current = { name, args }; return fn(...args); };
 
   // ⛔ NEW-1 (command palette, owner chat block) — THE ONE `ctx` BAG, built once per render and
   // handed to three consumers: the Ribbon (the reduced Home ribbon), the permanent Formula
@@ -1236,9 +1607,12 @@ export default function ModelApp({
     activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
     painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
     canUndo, canRedo, onUndo: undo, onRedo: redo,
-    onSetCellStyle, onAdjustIndent, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
-    onFormatPainterToggle, onMergeToggle,
-    onInsertRow: onRibbonInsertRow, onInsertColumn: onRibbonInsertColumn, onDeleteRow: onRibbonDeleteRow, onDeleteColumn,
+    onSetCellStyle: recd("onSetCellStyle", onSetCellStyle), onAdjustIndent: recd("onAdjustIndent", onAdjustIndent), onApplyBorder: recd("onApplyBorder", onApplyBorderCmd),
+    onApplyFormat: recd("onApplyFormat", onApplyFormat), onNumberFormatOp: recd("onNumberFormatOp", onNumberFormatOp),
+    onClearFormatting: recd("onClearFormatting", onClearFormattingCmd),
+    onFormatPainterToggle, onMergeToggle: recd("onMergeToggle", onMergeToggle),
+    onInsertRow: recd("onInsertRow", onRibbonInsertRow), onInsertColumn: recd("onInsertColumn", onRibbonInsertColumn),
+    onDeleteRow: recd("onDeleteRow", onRibbonDeleteRow), onDeleteColumn: recd("onDeleteColumn", onDeleteColumn),
     canDeleteColumn: sheet.columns.length > 1,
     onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
     onSort, onFilterToggle,
@@ -1252,7 +1626,115 @@ export default function ModelApp({
     onAddSheetTab, onDuplicateSheetCurrent, onRenameSheetCurrent, onDeleteSheetCurrent, sheetCount: workbook.sheets.length,
     onExportXlsx, onExportCsv, onOpenImportXlsx, onOpenImportCsv,
     zoom, onZoomChange,
+    // Excel shortcuts block (2026-10-29) — see the handler block above.
+    onClipboardCommand, onFillRight, onInsertDate, onInsertTime, onCopyAbove, onAutoSum, onRepeatLast,
+    onClearAll, onClearContents, onAutofit, onOpenDialog, onHide, onUnhide, onInsertCells, onDeleteCells,
+    onSheetStep, onSaveNow, onMergeCenter, onOpenColorMenu,
+    onCancelCut: clearClipMark,
   };
+  ctxRef.current = ctx;
+  clipFnsRef.current = { performCopy, performPaste, clipboardScopeOk };
+  liveRef.current = { sheet, workbook, activeSheetId: activeEntry.id, evalResult, selRange, hiddenRows };
+
+  /* ---- the window-level listeners (re-armed only when the workspace is shown / hidden) ---------------------------------
+   * Everything they run goes through `ctxRef` / `liveRef`, so they never close over a stale render. */
+  const runCommand = useCallback((id) => {
+    if (!ctxRef.current) return false;
+    return runCommandById(id, ctxRef.current);
+  }, []);
+
+  // (1) Excel's Ctrl / F-key / Alt+= chords -> registry commands (lib/keymap.js). Inside the in-cell editor only the four
+  // font-style chords fire; any other text control (formula bar, name box, find bar, a dialog) keeps every key.
+  useEffect(() => {
+    if (!isActive) return undefined;
+    const onKey = (e) => {
+      if (keyTipRef.current.active) return; // an Alt sequence owns the keyboard (handled in the capture listener below)
+      const t = e.target instanceof Element ? e.target : null;
+      const editing = !!(t && t.closest("[data-cell-editor]"));
+      if (!editing && t && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
+      const id = chordCommand(e, { editing });
+      if (!id) return;
+      e.preventDefault();
+      runCommand(id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isActive, runCommand]);
+
+  // (2) The Alt key-tip sequence. Press and release Alt ALONE -> the sequence opens; letters follow Excel's Home / View paths
+  // (lib/keyTips.js); Esc backs out a level; an unmatched key, a second Alt or any click cancels. Capture phase, so while a
+  // sequence is open NOTHING else (the grid's type-to-edit, a ribbon button) sees the letters. Alt+Enter / Alt+click / Alt+= are
+  // chords, not "Alt alone": any other key or a mouse press between Alt down and up cancels the arming.
+  useEffect(() => {
+    if (!isActive) return undefined;
+    let armed = false;
+    const setTip = (st) => { keyTipRef.current = st; setKeyTip(st); };
+    const scopeOk = (e) => {
+      const t = e.target instanceof Element ? e.target : null;
+      if (t && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return false;
+      return !t || !!t.closest('[data-testid="model-root"]') || t === document.body;
+    };
+    const down = (e) => {
+      if (e.key === "Alt") {
+        if (e.repeat) { if (keyTipRef.current.active || armed) e.preventDefault(); return; }
+        if (keyTipRef.current.active) { e.preventDefault(); e.stopPropagation(); setTip(KEYTIP_START); armed = false; return; }
+        armed = !e.ctrlKey && !e.metaKey && !e.shiftKey && scopeOk(e);
+        return;
+      }
+      armed = false;
+      if (!keyTipRef.current.active) return;
+      e.preventDefault(); e.stopPropagation();
+      const { state, run } = stepKeyTips(keyTipRef.current, e.key);
+      setTip(state);
+      if (run && !runCommand(run)) showNotice("That command isn't available right now.");
+    };
+    const up = (e) => {
+      if (e.key !== "Alt") return;
+      if (armed && !keyTipRef.current.active) {
+        // preventDefault on the Alt KEYUP is what stops Windows browsers focusing their own menu bar
+        e.preventDefault(); e.stopPropagation();
+        setTip(beginKeyTips());
+      } else if (keyTipRef.current.active) { e.preventDefault(); }
+      armed = false;
+    };
+    const cancel = () => { armed = false; if (keyTipRef.current.active) setTip(KEYTIP_START); };
+    window.addEventListener("keydown", down, true);
+    window.addEventListener("keyup", up, true);
+    window.addEventListener("mousedown", cancel, true);
+    window.addEventListener("blur", cancel);
+    return () => {
+      window.removeEventListener("keydown", down, true);
+      window.removeEventListener("keyup", up, true);
+      window.removeEventListener("mousedown", cancel, true);
+      window.removeEventListener("blur", cancel);
+      keyTipRef.current = KEYTIP_START;
+    };
+  }, [isActive, runCommand, showNotice]);
+
+  // (3) The real clipboard: native copy / cut / paste EVENTS (no permission prompt) — see lib/clipboardIO.js. The functions are
+  // reached through `clipFnsRef` (re-pointed every render) so a listener armed once never writes into a stale sheet / tab.
+  useEffect(() => {
+    if (!isActive) return undefined;
+    const onCopyEvent = (e, cut) => {
+      const F = clipFnsRef.current;
+      if (!F || !F.clipboardScopeOk(e)) return;
+      if (e.clipboardData) e.preventDefault();
+      F.performCopy(e.clipboardData, cut);
+    };
+    const onCopy = (e) => onCopyEvent(e, false);
+    const onCut = (e) => onCopyEvent(e, true);
+    const onPasteEvent = (e) => {
+      const F = clipFnsRef.current;
+      if (!F || !F.clipboardScopeOk(e)) return;
+      e.preventDefault();
+      const cd = e.clipboardData;
+      F.performPaste(cd ? { html: cd.getData("text/html"), text: cd.getData("text/plain") } : { noClipboardData: true });
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCut);
+    document.addEventListener("paste", onPasteEvent);
+    return () => { document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPasteEvent); };
+  }, [isActive]);
 
   const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
@@ -1373,7 +1855,7 @@ export default function ModelApp({
             style={{ flex: "none", background: "var(--surface-raised)" }}
           >
           <Ribbon ctx={ctx} />
-          <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} focusGrid={focusGrid} />
+          <FormulaBar ref={formulaBarRef} sheet={sheet} row={selRange.r1} col={selRange.c1} selRange={selRange} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} focusGrid={focusGrid} />
           </div>
           {/* NEW-1 (B1251888) — Find/Replace, Name Manager, and the Inconsistencies panel all
               render IN NORMAL FLOW here, below the header row and the ribbon/formula-bar card
@@ -1424,11 +1906,10 @@ export default function ModelApp({
             onFillDownRanges={onFillDownRanges}
             onFillText={onFillText}
             onNotice={onNotice}
-            onRenameColumn={onRenameColumn}
             onAddColumn={onAddColumn}
-            onCopy={onCopy}
-            onPaste={onPaste}
             onFillDown={onFillDown}
+            onCommand={runCommand}
+            cutRange={clipMark && clipMark.sheetId === activeEntry.id ? clipMark.rect : null}
             onInsertRowAt={onInsertRowAt}
             onDeleteRowAt={onDeleteRowAt}
             onInsertColumnAt={onInsertColumnAt}
@@ -1463,6 +1944,14 @@ export default function ModelApp({
             onReorder={onReorderSheetTab}
           />
           <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
+          <KeyTipOverlay state={keyTip} />
+          {dialog && <ShortcutDialog spec={dialog} onClose={() => { setDialog(null); focusGrid(); }} />}
+          {notice && (
+            <div
+              role="status" data-testid="model-notice"
+              style={{ position: "fixed", left: "50%", bottom: 48, transform: "translateX(-50%)", zIndex: 65, maxWidth: "calc(100vw - 32px)", padding: "6px 12px", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: RADIUS.md }}
+            >{notice}</div>
+          )}
         </>
       ) : orgMode ? (
         // ORG SCOPE (NEW-1) — Organization holds SEVERAL workbooks (unlike a project's one), so

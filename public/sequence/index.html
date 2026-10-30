@@ -3159,6 +3159,179 @@ function logMergeToastEvent(changedRows, changedPids, projects) {
   } catch (e) { /* telemetry must never throw into the app */ }
 }
 
+// ── Range selection (B2530690) — the SAME code the Spreadsheet and the Notes tables use (src/shared/selection/*),
+// inlined by scripts/sync-sequence-selection.mjs. Never edit between the markers; edit the source and run the sync.
+/* RANGE-SELECTION:START */
+/* Model workspace — the sheet's SELECTION MODEL (NEW-2, 2026-10-29): a list of rectangular ranges
+ * plus an active cell, replacing "one rectangle".
+ *
+ * SHAPE (kept backward-compatible on purpose): `{ r1, r2, c1, c2, extra? }`.
+ *  · `r1,c1` is the ACTIVE CELL / anchor of the MOST RECENT range; `r2,c2` is that range's moving end
+ *    (so `r1===r2 && c1===c2` is a single cell, exactly what every caller already assumed).
+ *  · `extra` (optional) is the list of EARLIER ranges, each normalised `{r1<=r2, c1<=c2}`. Absent / empty
+ *    = the ordinary single-rectangle selection every existing caller still gets.
+ * Everything that only knows about `selRange.r1..c2` keeps working and acts on the active range; the
+ * commands that must hit every range go through `rangesOf`.
+ *
+ * Excel-for-Windows rules this implements: Ctrl+click / Ctrl+drag ADDS a range and makes it active;
+ * Ctrl+click on an already-selected cell REMOVES that cell (splitting its range); Shift extends only the
+ * most recent range; a plain click collapses to one range. Pure and DOM-free — unit-tested.
+ */
+
+/** A range as a normalised plain rect (r1<=r2, c1<=c2), dropping the anchor direction and `extra`. */
+function normRect(g) {
+  return { r1: Math.min(g.r1, g.r2), r2: Math.max(g.r1, g.r2), c1: Math.min(g.c1, g.c2), c2: Math.max(g.c1, g.c2) };
+}
+
+/** The most recent (active) range, normalised. */
+function activeRect(sel) { return normRect(sel); }
+
+/** Every range in the selection, normalised, ACTIVE LAST. */
+function rangesOf(sel) {
+  const out = [];
+  if (sel && Array.isArray(sel.extra)) for (const g of sel.extra) out.push(normRect(g));
+  if (sel) out.push(normRect(sel));
+  return out;
+}
+
+/** True when more than one range is selected (the cases Excel answers with "won't work on multiple selections"). */
+function isMulti(sel) { return !!(sel && Array.isArray(sel.extra) && sel.extra.length > 0); }
+
+const rectHas = (g, r, c) => r >= g.r1 && r <= g.r2 && c >= g.c1 && c <= g.c2;
+
+/** Is (r, c) inside ANY selected range? */
+function selContains(sel, r, c) {
+  if (!sel) return false;
+  if (rectHas(normRect(sel), r, c)) return true;
+  if (Array.isArray(sel.extra)) for (const g of sel.extra) if (rectHas(g, r, c)) return true;
+  return false;
+}
+
+/** Does any selected range touch row `r` (resp. column `c`)? — the row-number gutter / column header tint. */
+function selTouchesRow(sel, r) { return rangesOf(sel).some((g) => r >= g.r1 && r <= g.r2); }
+function selTouchesCol(sel, c) { return rangesOf(sel).some((g) => c >= g.c1 && c <= g.c2); }
+
+/** Build a selection from an active range + the earlier ranges. */
+function makeSelection(active, extra) {
+  const sel = { r1: active.r1, r2: active.r2, c1: active.c1, c2: active.c2 };
+  if (extra && extra.length) sel.extra = extra.map(normRect);
+  return sel;
+}
+
+/** Same active range, earlier ranges untouched — what Shift+click / Shift+arrows / a drag in progress do. */
+function withActive(sel, active) {
+  return makeSelection(active, sel && sel.extra);
+}
+
+/** A plain click: one range only. */
+function collapse(sel) { return sel && sel.extra ? { r1: sel.r1, r2: sel.r2, c1: sel.c1, c2: sel.c2 } : sel; }
+
+/** Ctrl+click / Ctrl+drag: keep every existing range and add `rect` as the new ACTIVE one. */
+function addRange(sel, rect) {
+  return makeSelection(rect, rangesOf(sel));
+}
+
+/** The pieces of `g` left after removing the single cell (r, c) — up to four rectangles, none overlapping. */
+function subtractCell(g, r, c) {
+  if (!rectHas(g, r, c)) return [g];
+  const out = [];
+  if (r > g.r1) out.push({ r1: g.r1, r2: r - 1, c1: g.c1, c2: g.c2 });
+  if (c > g.c1) out.push({ r1: r, r2: r, c1: g.c1, c2: c - 1 });
+  if (c < g.c2) out.push({ r1: r, r2: r, c1: c + 1, c2: g.c2 });
+  if (r < g.r2) out.push({ r1: r + 1, r2: g.r2, c1: g.c1, c2: g.c2 });
+  return out;
+}
+
+/** Ctrl+click on an already-selected cell: take that cell out of the selection (Excel 365). The last
+ *  remaining piece becomes the active range. Deselecting the ONLY cell is refused (returns `sel`
+ *  unchanged — Excel always keeps an active cell). */
+function toggleCellOut(sel, r, c) {
+  const kept = [];
+  for (const g of rangesOf(sel)) for (const piece of subtractCell(g, r, c)) kept.push(piece);
+  if (kept.length === 0) return sel;
+  const active = kept[kept.length - 1];
+  return makeSelection(active, kept.slice(0, -1));
+}
+
+/** Every distinct ROW index touched by any range, ascending, clipped to [0, maxRow] — what a row-level command
+ *  (delete rows, copy rows) acts on when the selection is several blocks. */
+function selRowsOf(sel, maxRow) {
+  const seen = new Set();
+  for (const g of rangesOf(sel)) for (let r = Math.max(0, g.r1); r <= Math.min(maxRow, g.r2); r++) seen.add(r);
+  return [...seen].sort((a, b) => a - b);
+}
+
+/** Which sides of cell (r, c) lie on the outside edge of a selected range — for painting the selection outline
+ *  when several ranges are shown. A cell inside two ranges gets the edges of both. */
+function selEdgesAt(sel, r, c) {
+  const e = { top: false, bottom: false, left: false, right: false };
+  for (const g of rangesOf(sel)) {
+    if (!rectHas(g, r, c)) continue;
+    if (r === g.r1) e.top = true;
+    if (r === g.r2) e.bottom = true;
+    if (c === g.c1) e.left = true;
+    if (c === g.c2) e.right = true;
+  }
+  return e;
+}
+
+/** Does the selection span more than one cell (several ranges, or one range bigger than a cell)? */
+function selIsRange(sel) {
+  if (!sel) return false;
+  if (isMulti(sel)) return true;
+  return sel.r1 !== sel.r2 || sel.c1 !== sel.c2;
+}
+
+/** Every distinct cell across all ranges, row-major per range, de-duplicated — for "do this to each cell". */
+function cellsOf(sel) {
+  const seen = new Set();
+  const out = [];
+  for (const g of rangesOf(sel)) {
+    for (let r = g.r1; r <= g.r2; r++) {
+      for (let c = g.c1; c <= g.c2; c++) {
+        const key = r * 100003 + c;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ r, c });
+      }
+    }
+  }
+  return out;
+}
+
+/** Excel's wording for a command that can't act on several ranges at once. */
+const MULTI_SELECTION_MESSAGE = "This action won’t work on multiple selections.";
+
+/** Run a per-range sheet mutator `fn(sheet, r1, r2, c1, c2, ...args)` over EVERY range, threading the sheet
+ *  through — so a whole multi-range command is ONE pure sheet → sheet function, i.e. one undo step. */
+function applyToRanges(sheet, ranges, fn, ...args) {
+  let s = sheet;
+  for (const g of ranges) s = fn(s, g.r1, g.r2, g.c1, g.c2, ...args);
+  return s;
+}
+
+/* Edge-scroll speed for a held drag-select (B2452528; shared by the Spreadsheet, the Schedule grid — inlined by
+ * scripts/sync-sequence-selection.mjs — and the Notes tables, B2530690). Pure and DOM-free. All positions are in
+ * the scroll container's VIEWPORT space.
+ */
+/** Scroll starts when the pointer is within this many px of the edge of the cell area (or past it). */
+const EDGE_SLOP = 2;
+/** px/second right at the edge — slow enough to land on one row. */
+const MIN_SPEED = 240;
+/** Extra px/second per px the pointer is past the edge — Excel's near = slow, far = fast ramp. */
+const SPEED_PER_PX = 14;
+const MAX_SPEED = 2600;
+
+/** Signed px/second to scroll along ONE axis. `pos` is the pointer in viewport px, `lo` the near
+ *  edge of the scrolling cell area (just past the sticky header / frozen band), `hi` its far edge
+ *  (the viewport size). Negative = toward the start. 0 = pointer comfortably inside. */
+function axisVelocity(pos, lo, hi) {
+  if (pos < lo + EDGE_SLOP) return -Math.min(MAX_SPEED, MIN_SPEED + Math.max(0, lo - pos) * SPEED_PER_PX);
+  if (pos > hi - EDGE_SLOP) return Math.min(MAX_SPEED, MIN_SPEED + Math.max(0, pos - hi) * SPEED_PER_PX);
+  return 0;
+}
+/* RANGE-SELECTION:END */
+
 // ── Constants ─────────────────────────────────────────────
 let ROW_H = 24;
 // NEW-1 (Schedule grid, one light full grid) — THE one cell-line rule for every grid cell, ID and TASK
@@ -5677,9 +5850,11 @@ const flatOrderWithLevel = (tasks) => {
 //    independently. Adjacent root rows sharing the same current parent move together as one batch
 //    (see outdentSelection below for why: moving them one at a time re-derives the insertion point
 //    off the shrinking remainder and scrambles their relative order).
-//  - Non-contiguous selection (e.g. rows 11, 14, 16 with gaps) cannot occur: the app's selection
-//    model (`selRange`) is a single rectangle of rows × columns — there is no ctrl-click or other
-//    discontiguous multi-select anywhere in this codebase. Nothing here needs to special-case it.
+//  - Non-contiguous selection (e.g. rows 11, 14, 16 with gaps) DOES occur since B2530690 (Ctrl+click adds
+//    ranges to `selRange`, the shared model in the RANGE-SELECTION block). These functions still assume ONE
+//    contiguous block, so every caller refuses a multi-range selection with a visible message
+//    (`blockOnlyTargets`) instead of acting on part of it. Delete, copy/cut, clear and formatting DO take
+//    every range — they never go through here.
 
 const indentSelection = (tasks, selectedIds) => {
   const flatOrder = flatOrderWithLevel(tasks);
@@ -5878,6 +6053,7 @@ const rowFloatAtPointer = (clientY, rectTop, scrollTop, zoom, headerH, rowH) =>
 // move is a plain click and selects that one row (GridView's startRowDrag onClick).
 const idPressMovesRows = (selRange, ri, colCount) => {
   if (!selRange) return false;
+  if (isMulti(selRange)) return false;   // B2530690 — several blocks selected: a plain press collapses to this row (Excel), it never picks them up
   const r1 = Math.min(selRange.r1, selRange.r2), r2 = Math.max(selRange.r1, selRange.r2);
   const c1 = Math.min(selRange.c1, selRange.c2), c2 = Math.max(selRange.c1, selRange.c2);
   return r2 > r1 && ri >= r1 && ri <= r2 && c1 === 0 && c2 >= colCount - 1;
@@ -9643,9 +9819,10 @@ function App() {
       if (e.key === "Delete" && !typing) {
         if (!e.repeat && selectedId !== null) {
           e.preventDefault();
-          const isFullRow = selRange &&
-            Math.min(selRange.c1, selRange.c2) === 0 &&
-            Math.max(selRange.c1, selRange.c2) === activeEffectiveCols(dataRef.current).length - 1;
+          const lastColIdx = activeEffectiveCols(dataRef.current).length - 1;
+          // B2530690 — EVERY range must be a full row for Delete to remove rows (ID-column select, Ctrl+click on
+          // row numbers); any cell range in the mix makes Delete clear contents instead, as in Excel.
+          const isFullRow = selRange && rangesOf(selRange).every(g => g.c1 === 0 && g.c2 === lastColIdx);
           if (isFullRow) {
             // Delete every row in the selected span (ID-column drag /
             // shift-click) — asks first if any of them have subtasks (requestDelete);
@@ -9658,14 +9835,15 @@ function App() {
           // the span — mirrors the fill path (typing into a range fills the whole range), which Delete
           // previously didn't match (it only cleared the focused cell).
           const cols = activeEffectiveCols(dataRef.current);
-          if (selRange && (Math.min(selRange.r1,selRange.r2) !== Math.max(selRange.r1,selRange.r2) || Math.min(selRange.c1,selRange.c2) !== Math.max(selRange.c1,selRange.c2))) {
-            const minR = Math.min(selRange.r1,selRange.r2), maxR = Math.max(selRange.r1,selRange.r2);
-            const minC = Math.min(selRange.c1,selRange.c2), maxC = Math.max(selRange.c1,selRange.c2);
+          if (selIsRange(selRange)) {
             const ftasks = flatTasksRef.current;
-            for (let r = minR; r <= maxR; r++) {
+            // every cell of every range, grouped by row so each task gets ONE updateTask (one undo step overall)
+            const byRow = new Map();
+            cellsOf(selRange).forEach(({r, c}) => { if (!byRow.has(r)) byRow.set(r, []); byRow.get(r).push(c); });
+            for (const [r, cs] of byRow) {
               const t = ftasks[r]; if (!t) continue;
               const patch = {};
-              for (let c = minC; c <= maxC; c++) {
+              for (const c of cs) {
                 const col = cols[c];
                 if (!col?.e || col.t === "health" || col.t === "notes") continue;
                 if (t.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost")) continue;
@@ -9723,7 +9901,7 @@ function App() {
           const cur = selRange || {r1:anchorRow, r2:anchorRow, c1:selectedColIdx, c2:selectedColIdx};
           const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, cur.r2, cur.c2, blankAt);
           if (t) {
-            setSelRange({...cur, r2:t.row, c2:t.col});
+            setSelRange(withActive(cur, {r1:cur.r1, c1:cur.c1, r2:t.row, c2:t.col}));
             // the range's moving end is not the selection, so the grid's selection-chase doesn't follow it — ask it to
             document.dispatchEvent(new CustomEvent("planar-reveal-cell", {detail: {row: t.row, col: t.col}}));
           }
@@ -9791,13 +9969,13 @@ function App() {
       // range when one is active, not just the anchor cell (see rowRangeSelIds/structuralTargets).
       if (e.altKey && e.shiftKey && e.key === "ArrowRight" && !typing) {
         e.preventDefault();
-        if (!e.repeat && selectedId !== null) indentSelectionByIds(structuralTargets(selectedId));
+        if (!e.repeat && selectedId !== null) { const ids = blockOnlyTargets(selectedId); if (ids) indentSelectionByIds(ids); }
         return;
       }
       // Alt+Shift+Left → outdent (promote one level up) — same whole-selection scope as indent.
       if (e.altKey && e.shiftKey && e.key === "ArrowLeft" && !typing) {
         e.preventDefault();
-        if (!e.repeat && selectedId !== null) outdentSelectionByIds(structuralTargets(selectedId));
+        if (!e.repeat && selectedId !== null) { const ids = blockOnlyTargets(selectedId); if (ids) outdentSelectionByIds(ids); }
         return;
       }
       // Fix #2: Tab / Shift+Tab — advance to next/previous column (Excel-style)
@@ -9825,7 +10003,7 @@ function App() {
             if (e.key === "ArrowUp")    r2 = Math.max(0, r2 - 1);
             if (e.key === "ArrowRight") c2 = stepGridCol(c2, +1);
             if (e.key === "ArrowLeft")  c2 = stepGridCol(c2, -1);
-            setSelRange({r1, r2, c1, c2});
+            setSelRange(withActive(cur, {r1, r2, c1, c2}));   // B2530690 — only the newest range extends
           }
           return;
         }
@@ -10157,12 +10335,12 @@ function App() {
   // single-task behavior.
   const fullRowSelIds = () => {
     if (!selRange) return [];
-    if (Math.min(selRange.c1, selRange.c2) !== 0 || Math.max(selRange.c1, selRange.c2) !== activeEffectiveCols(dataRef.current).length - 1) return [];
+    const lastColIdx = activeEffectiveCols(dataRef.current).length - 1;
+    // B2530690 — with several ranges, the rows of ALL of them, but only when every one is a full-width row
+    // selection (a cell range among them is a "clear contents" selection, not a "delete rows" one).
+    if (!rangesOf(selRange).every(g => g.c1 === 0 && g.c2 === lastColIdx)) return [];
     const ft = flatTasksRef.current || [];
-    const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
-    const r2 = Math.min(ft.length - 1, Math.max(selRange.r1, selRange.r2));
-    if (r2 < r1) return [];
-    return ft.slice(r1, r2 + 1).map(t => t.id);
+    return selRowsOf(selRange, ft.length - 1).map(r => ft[r].id);
   };
 
   // Ids of every task in the current row selection, regardless of which COLUMNS it spans.
@@ -10174,10 +10352,9 @@ function App() {
   const rowRangeSelIds = () => {
     if (!selRange) return [];
     const ft = flatTasksRef.current || [];
-    const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
-    const r2 = Math.min(ft.length - 1, Math.max(selRange.r1, selRange.r2));
-    if (r2 <= r1) return [];
-    return ft.slice(r1, r2 + 1).map(t => t.id);
+    const rows = selRowsOf(selRange, ft.length - 1);   // B2530690 — every range's rows (copy / cut take all of them)
+    if (rows.length <= 1) return [];
+    return rows.map(r => ft[r].id);
   };
 
   // Resolve "the ids a structural op (indent/outdent/delete) should act on" for a caller that
@@ -10187,6 +10364,13 @@ function App() {
   const structuralTargets = (anchorId) => {
     const ids = rowRangeSelIds();
     return ids.length > 1 && ids.includes(anchorId) ? ids : [anchorId];
+  };
+  // B2530690 — indent / outdent / "Move to…" / drag-reorder are built on ONE contiguous block of rows (see the
+  // header of indentSelection). With several ranges selected they refuse, out loud — never act on part of the
+  // selection or on none of it in silence. Returns null when refused.
+  const blockOnlyTargets = (anchorId) => {
+    if (isMulti(selRange)) { showToast(MULTI_SELECTION_MESSAGE, { type: "warn" }); return null; }
+    return structuralTargets(anchorId);
   };
 
   // ── Delete-with-children: ask, never silently cascade or silently promote ──────────────────
@@ -10239,10 +10423,9 @@ function App() {
     const ft = flatTasksRef.current || [];
     const cells = [];
     if (selRange && ft.length) {
-      const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2)), r2 = Math.min(ft.length - 1, Math.max(selRange.r1, selRange.r2));
       const eff = activeEffectiveCols(dataRef.current);
-      const c1 = Math.max(0, Math.min(selRange.c1, selRange.c2)), c2 = Math.min(eff.length - 1, Math.max(selRange.c1, selRange.c2));
-      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) { const ck = eff[c]?.k; if (ck) cells.push({taskId: ft[r].id, colKey: ck}); }
+      // B2530690 — every cell of every range (one format pass, one undo step)
+      for (const {r, c} of cellsOf(selRange)) { const ck = eff[c]?.k; if (ck && ft[r]) cells.push({taskId: ft[r].id, colKey: ck}); }
     } else if (taskCtx) {
       cells.push({taskId: taskCtx.task.id, colKey: activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || 'name'});
     }
@@ -10487,6 +10670,7 @@ function App() {
   const insertTask = useCallback(() => {
     const flat = flatTasksRef.current || [];
     let anchorId = selectedId;
+    if (isMulti(selRange)) { showToast(MULTI_SELECTION_MESSAGE, { type: "warn" }); return; }   // B2530690
     if (selRange && selRange.r1 !== selRange.r2) {
       const top = flat[Math.min(selRange.r1, selRange.r2)];
       if (top) anchorId = top.id;
@@ -12149,9 +12333,9 @@ function App() {
           onCopyTaskFull={() => { copyTaskById(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
           onPasteTask={() => { pasteTaskAfter(taskCtx.task.id); setTaskCtx(null); }}
           hasClipboard={!!clipboardRef.current}
-          onIndent={() => { indentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
-          onOutdent={() => { outdentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
-          onMoveTo={() => { setMoveToCtx({ ids: structuralTargets(taskCtx.task.id), projId: taskCtx.projId }); setTaskCtx(null); }}
+          onIndent={() => { const ids = blockOnlyTargets(taskCtx.task.id); if (ids) indentSelectionByIds(ids); setTaskCtx(null); }}
+          onOutdent={() => { const ids = blockOnlyTargets(taskCtx.task.id); if (ids) outdentSelectionByIds(ids); setTaskCtx(null); }}
+          onMoveTo={() => { const ids = blockOnlyTargets(taskCtx.task.id); if (ids) setMoveToCtx({ ids, projId: taskCtx.projId }); setTaskCtx(null); }}
           canOutdent={(() => {
             const targets = structuralTargets(taskCtx.task.id);
             const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
@@ -13481,7 +13665,6 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - BUF);
   const endIdx   = Math.min(totalRows, startIdx + Math.ceil(vh / ROW_H) + BUF * 2);
 
-  const dragAnchor     = useRef(null); // {ri, ci}
   const isDraggingCells = useRef(false);
   const cellDragPin = useRef(null);   // release fn of the `cell` cursor pin while a range-select drag spans 2+ cells
   const healthClickSel  = useRef(null); // captures selRange at health/status mousedown before collapse
@@ -13624,6 +13807,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 
     // ARM — the held pointer has travelled past the threshold: only now does anything pick up, paint, pin or scroll.
     const arm = () => {
+      // B2530690 — a drag of rows needs ONE contiguous block; with several ranges selected it says so (out loud)
+      // instead of moving part of the selection. A press that never travels is still a click (handled above).
+      if (isMulti(selRange)) { showToast(MULTI_SELECTION_MESSAGE, { type: "warn" }); cancel(); return; }
       state.moved = true;
       rowDragRef.current = state;
       // The cursor stays the grab hand for the WHOLE drag (pinned at the root: every cell, header and Gantt row paints its own
@@ -13728,46 +13914,147 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     return () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("pointermove", onMove, true); };
   }, []);
 
-  // Is cell (ri, ci) inside the current selRange?
-  const inRange = (ri, ci) => {
-    if (!selRange) return false;
-    const {r1,r2,c1,c2} = selRange;
-    return ri >= Math.min(r1,r2) && ri <= Math.max(r1,r2)
-        && ci >= Math.min(c1,c2) && ci <= Math.max(c1,c2);
-  };
+  // Is cell (ri, ci) inside ANY selected range? (B2530690 — the selection is a list of ranges now; the shared
+  // model in the RANGE-SELECTION block is the one place that answers it.)
+  const inRange = (ri, ci) => selContains(selRange, ri, ci);
   // Box-shadow string for selection outline on edge cells
   const selShadow = (ri, ci, selected, active) => {
     if (active) return "inset 0 0 0 2px var(--blue)";
     if (!selected || !selRange) return "none";
-    const minR=Math.min(selRange.r1,selRange.r2), maxR=Math.max(selRange.r1,selRange.r2);
-    const minC=Math.min(selRange.c1,selRange.c2), maxC=Math.max(selRange.c1,selRange.c2);
+    const ed = selEdgesAt(selRange, ri, ci);
     const s=[];
-    if(ri===minR) s.push("inset 0 2px 0 0 #2563eb");
-    if(ri===maxR) s.push("inset 0 -2px 0 0 #2563eb");
+    if(ed.top) s.push("inset 0 2px 0 0 #2563eb");
+    if(ed.bottom) s.push("inset 0 -2px 0 0 #2563eb");
     // (B2160464) no inner 1px row separator here any more: every cell now draws its OWN bottom line
     // (GRID_LINE_RANGE inside a range), so an inset one would stack a second blue line beside it.
-    if(ci===minC) s.push("inset 2px 0 0 0 #2563eb");
+    if(ed.left) s.push("inset 2px 0 0 0 #2563eb");
     // when the range reaches the LAST visible column, the right edge belongs to the row's filler strip (its far end)
-    if(ci===maxC && !(stripJoinsRange && ci===stripCi)) s.push("inset -2px 0 0 0 #2563eb");
+    if(ed.right && !(stripJoinsRange && ci===stripCi)) s.push("inset -2px 0 0 0 #2563eb");
     return s.join(",");
   };
   // The ONE press / drag-enter / right-click behaviour of a body cell. The row's right-edge FILLER strip
   // (NEW-1) calls these same three with the row's last visible column, so a press in the leftover width
   // selects the row exactly as a press on that row's own last cell does (shift-extend and drag included).
+  // B2530690 — ONE drag session for every gesture that extends a cell / row range (a cell press, a Ctrl+press that
+  // adds a range, an ID-column press). It mirrors the Spreadsheet's beginRangeDrag (B2452528): window listeners
+  // + a rAF loop, the row under the pointer found by COORDINATES (so a row that is not rendered yet is still
+  // reachable) and the grid scrolling while the pointer sits at/past an edge — even held perfectly still. The
+  // speed ramp is the shared edgeScroll.axisVelocity. Nothing extends or scrolls until the pointer has really
+  // travelled (a press near the edge is a click, not a drag — the lesson of NEW-1's row drag). `apply(ri, ci)`
+  // gets the cell the selection should reach; `onEnd(reason, moved)` is "up" | "cancel".
+  const cellSessionRef = useRef(null);
+  const skipColClickRef = useRef(false);   // a Ctrl+click that TOOK a cell out of the selection: the click that follows must not re-aim the active column at it
+  const liveGridRef = useRef({ tasks, allCols: [], gridZoom, stripCi: -1 });   // refreshed every render, right after stripCi is known (below). ⛔ never name a const declared LATER in this component here: the compiled production build keeps const block-scoping (TDZ) where the in-browser Babel page used in dev does not
+  const beginCellDrag = (startEvent, { rowMode, apply, onEnd }) => {
+    cellSessionRef.current?.stop("cancel");
+    const el = ref.current;
+    if (!el) return;
+    const pointer = { x: startEvent.clientX, y: startEvent.clientY };
+    const start = { x: startEvent.clientX, y: startEvent.clientY };
+    let raf = 0, lastT = 0, lastKey = "", moved = false, lastCi = null;
+    isDraggingCells.current = true;
+    const reach = () => {
+      const g = liveGridRef.current;
+      if (!g.tasks.length) return;
+      const rect = el.getBoundingClientRect();
+      const zoom = el.offsetHeight ? rect.height / el.offsetHeight : (g.gridZoom || 1);
+      const rf = Math.floor(rowFloatAtPointer(pointer.y, rect.top, el.scrollTop, zoom, TL_H, ROW_H));
+      const r = Math.max(0, Math.min(g.tasks.length - 1, rf));
+      let c = rowMode ? 0 : lastCi;
+      if (!rowMode) {
+        // The column under the pointer, found on the element actually painted there (so a pinned column that
+        // covers a scrolled one answers as itself); a pointer outside the grid is clamped to its nearest cell.
+        const x = Math.max(rect.left + 2, Math.min(rect.right - 3, pointer.x));
+        const y = Math.max(rect.top + (TL_H + 2) * zoom, Math.min(rect.bottom - 3, pointer.y));
+        const hit = document.elementFromPoint(x, y);
+        const cell = hit && hit.closest ? hit.closest("[data-task-row] [data-col-key]") : null;
+        if (cell) { const k = cell.getAttribute("data-col-key"); const i = g.allCols.findIndex(col => col.k === k); if (i >= 0) c = i; }
+        else if (hit && hit.closest && hit.closest("[data-grid-strip]") && g.stripCi >= 0) c = g.stripCi;
+        if (c == null) return;
+        lastCi = c;
+      }
+      const key = r + ":" + c;
+      if (key !== lastKey) { lastKey = key; apply(r, c); }
+    };
+    const tick = (now) => {
+      raf = requestAnimationFrame(tick);
+      if (!moved) return;
+      const dt = lastT ? Math.min(64, now - lastT) : 16;
+      lastT = now;
+      const g = liveGridRef.current;
+      const rect = el.getBoundingClientRect();
+      const zoom = el.offsetHeight ? rect.height / el.offsetHeight : (g.gridZoom || 1);
+      const vy = axisVelocity(pointer.y - rect.top, TL_H * zoom, rect.height);
+      if (vy) el.scrollTop += (vy * dt) / 1000;
+      if (!rowMode) {
+        const pin = pinRef.current || { lw: 0, rw: 0 };
+        const vx = axisVelocity(pointer.x - rect.left, pin.lw * zoom, rect.width - pin.rw * zoom);
+        if (vx) el.scrollLeft += (vx * dt) / 1000;
+      }
+      reach();   // re-target every frame: scrolling moves which cell sits under a still pointer
+    };
+    const onMove = (ev) => {
+      if (ev.buttons === 0) { stop("up"); return; }   // a release we never saw
+      pointer.x = ev.clientX; pointer.y = ev.clientY;
+      if (!moved) {
+        if (Math.abs(pointer.x - start.x) + Math.abs(pointer.y - start.y) < 3) return;
+        moved = true;
+        // A range-select drag that has travelled shows the `cell` cursor until the button is released
+        // (pinned, driven by the gesture — never by a ref read at render, which left it stuck after mouseup).
+        if (!cellDragPin.current) cellDragPin.current = window.pinSchedCursor("cell", { onExit: () => { isDraggingCells.current = false; cellDragPin.current = null; } });
+      }
+      reach();
+    };
+    const onUp = () => stop("up");
+    const onCancel = () => stop("cancel");
+    const stop = (reason) => {
+      if (cellSessionRef.current !== session) return;
+      cellSessionRef.current = null;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", onCancel);
+      isDraggingCells.current = false;
+      if (cellDragPin.current) { cellDragPin.current(); cellDragPin.current = null; }
+      onEnd?.(reason, moved);
+    };
+    const session = { stop };
+    cellSessionRef.current = session;
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", onCancel);
+    raf = requestAnimationFrame(tick);
+  };
+  useEffect(() => () => cellSessionRef.current?.stop("cancel"), []);
+  // The selection as it stands BEFORE a press: the range list, or — after keyboard navigation cleared it — the
+  // one active cell.
+  const currentSelection = () => {
+    if (selRange) return selRange;
+    const ri0 = selectedId != null ? tasks.findIndex(t => t.id === selectedId) : -1;
+    return ri0 >= 0 ? { r1: ri0, r2: ri0, c1: selectedColIdx ?? 0, c2: selectedColIdx ?? 0 } : null;
+  };
+  // The ONE press / right-click behaviour of a body cell. The row's right-edge FILLER strip (NEW-1) calls the same
+  // with the row's last visible column, so a press in the leftover width selects the row exactly as a press on that
+  // row's own last cell does (shift-extend, Ctrl-add and drag included).
   const cellMouseDown = (e, task, ri, c, ci) => {
     if (e.button !== 0) return;
+    skipColClickRef.current = false;
+    const additive = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;   // B2530690 — Ctrl/Cmd+press adds a range
+    const lastCol = allCols.length - 1;
     // Shift+click — Excel-style: extend selection from anchor (current selectedId/selectedColIdx)
-    // to this cell. Anchor stays put so subsequent shift-clicks/shift-arrows continue from it.
+    // to this cell. Anchor stays put so subsequent shift-clicks/shift-arrows continue from it. Only the NEWEST
+    // range extends; earlier ranges (Ctrl+click) stay as they are.
     if (e.shiftKey && selectedId !== null) {
       e.preventDefault();
       const anchorRi = tasks.findIndex(t => t.id === selectedId);
       const anchorCi = selectedColIdx ?? 0;
       if (anchorRi >= 0) {
+        const cur = selRange || null;
         // ID column shift-click extends to full rows
         if (c.k === "id") {
-          setSelRange({r1: anchorRi, r2: ri, c1: 0, c2: allCols.length-1});
+          setSelRange(withActive(cur, {r1: anchorRi, r2: ri, c1: 0, c2: lastCol}));
         } else {
-          setSelRange({r1: anchorRi, r2: ri, c1: anchorCi, c2: ci});
+          setSelRange(withActive(cur, {r1: anchorRi, r2: ri, c1: anchorCi, c2: ci}));
         }
         // Keep focus on the grid container; keyboard nav is handled at the document level.
         setTimeout(()=>ref.current?.focus({preventScroll:true}), 0);
@@ -13783,14 +14070,14 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       // range — the mouse path used to collapse here, so a multi-row health/status fill
       // silently changed only the clicked cell while the keyboard path filled every row.
       // Only collapse when the click is OUTSIDE the range (a fresh single selection).
-      const inSpan = selRange && ri >= Math.min(selRange.r1, selRange.r2) && ri <= Math.max(selRange.r1, selRange.r2);
+      const inSpan = selRange && selTouchesRow(selRange, ri);
       if (!inSpan) setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
       return;
     }
     // ID column — Excel row-header behavior: click selects the
     // whole row, and dragging up/down extends the selection
-    // across full rows. rowMode tells onMouseEnter to span all
-    // columns no matter which column the pointer crosses.
+    // across full rows (rowMode: all columns whichever column the pointer crosses). Ctrl+press adds this row
+    // as another range.
     if (c.k === "id") {
       // B2445008 (×2) — the ID cell of a row inside a multi-row selection is a pick-up handle for the
       // whole selection (the 8px grip was the only way in, and the owner drags by the ID he selected by).
@@ -13799,37 +14086,39 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         startRowDrag(e, task.id, { onClick: () => { setSelectedId(task.id); setSelectedColIdx(0); setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1}); } });
         return;
       }
-      dragAnchor.current = {ri, ci: 0, rowMode: true};
-      isDraggingCells.current = true;
+      const base = additive ? rangesOf(currentSelection()) : undefined;
       setSelectedId(task.id);
       setSelectedColIdx(0);
-      setSelRange({r1:ri, r2:ri, c1:0, c2:allCols.length-1});
+      setSelRange(makeSelection({r1:ri, r2:ri, c1:0, c2:lastCol}, base));
+      beginCellDrag(e, { rowMode: true, apply: (r) => { setSelRange(makeSelection({r1:ri, r2:r, c1:0, c2:lastCol}, base)); const t = tasks[r]; if (t) { setSelectedId(t.id); setSelectedColIdx(0); } } });
       return;
     }
     // Everywhere else: pure Excel — drag starts immediately on mousedown
-    dragAnchor.current = {ri, ci};
-    isDraggingCells.current = true;
+    if (additive) {
+      // Ctrl+click adds this cell as a NEW range (the earlier ones stay highlighted) and Ctrl+drag grows it. A
+      // Ctrl+press on an already-selected cell is a toggle, decided on release: no drag = take that cell OUT.
+      const prev = currentSelection();
+      const wasSel = selContains(prev, ri, ci);
+      const base = rangesOf(prev);
+      setSelectedId(task.id);
+      setSelectedColIdx(ci);
+      setSelRange(addRange(prev, {r1:ri, r2:ri, c1:ci, c2:ci}));
+      beginCellDrag(e, {
+        apply: (r, cc) => { setSelRange(makeSelection({r1:ri, r2:r, c1:ci, c2:cc}, base)); const t = tasks[r]; if (t) { setSelectedId(t.id); setSelectedColIdx(cc); } },
+        onEnd: (reason, moved) => {
+          if (reason !== "up" || !wasSel || moved) return;
+          const next = toggleCellOut(prev, ri, ci);
+          setSelRange(next);
+          const t = tasks[next.r1];
+          if (t) { setSelectedId(t.id); setSelectedColIdx(next.c1); skipColClickRef.current = true; }
+        },
+      });
+      return;
+    }
     setSelectedId(task.id);
     setSelectedColIdx(ci);
     setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
-  };
-  const cellMouseEnter = (task, ri, c, ci) => {
-    if (!isDraggingCells.current || !dragAnchor.current) return;
-    // A range-select drag that has reached a second cell shows the `cell` cursor until the button is released
-    // (pinned, driven by the gesture — never by a ref read at render, which left it stuck after mouseup). A plain
-    // click never gets here, so a click does not flash it.
-    if (!cellDragPin.current) cellDragPin.current = window.pinSchedCursor("cell", { onExit: () => { isDraggingCells.current = false; cellDragPin.current = null; } });
-    // Row-header drag: always span every column, regardless of
-    // which column the pointer happens to pass through.
-    if (dragAnchor.current.rowMode) {
-      setSelRange({r1:dragAnchor.current.ri, r2:ri, c1:0, c2:allCols.length-1});
-      setSelectedId(task.id);
-      setSelectedColIdx(0);
-      return;
-    }
-    setSelRange({r1:dragAnchor.current.ri, r2:ri, c1:dragAnchor.current.ci, c2:ci});
-    setSelectedId(task.id);
-    setSelectedColIdx(ci);
+    beginCellDrag(e, { apply: (r, cc) => { setSelRange({r1:ri, r2:r, c1:ci, c2:cc}); const t = tasks[r]; if (t) { setSelectedId(t.id); setSelectedColIdx(cc); } } });
   };
   const cellContextMenu = (e, task, ri, c, ci) => {
     e.preventDefault(); e.stopPropagation();
@@ -13845,7 +14134,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // (NEW-2) the old "rows × columns" size pill that used to paint in the header's leftover width is GONE — it
   // was a readout only (nothing read it back) and nobody could tell what "14 × 18" meant. `hasRange` is still the
   // one "a multi-cell selection exists" test the range paint below keys off.
-  const hasRange = !!selRange && (Math.abs(selRange.r2 - selRange.r1) > 0 || Math.abs(selRange.c2 - selRange.c1) > 0);
+  const hasRange = selIsRange(selRange);
 
   const colWidthsRef = useRef(null);
   const pinRef = useRef({ lw: 0, rw: 0, l: [], r: [], w: {} });   // NEW-1 — pinned-column geometry for the reveal effect
@@ -14169,16 +14458,17 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     if (hasRange && selRange) {
       const ci = COLS.findIndex(c => c.k === col);
       const ri = tasks.findIndex(t => t.id === taskId);
-      const minR = Math.min(selRange.r1, selRange.r2);
-      const maxR = Math.max(selRange.r1, selRange.r2);
-      if (isHealthOp ? (ri >= minR && ri <= maxR) : inRange(ri, ci)) {
+      if (isHealthOp ? selTouchesRow(selRange, ri) : inRange(ri, ci)) {
         if (col === "name" || col === "notes" || col === "predecessors") {
           // These are never range-filled (filling one name across many rows is destructive), but the
           // focused cell's OWN edit must still commit — the old loop skipped every row and returned,
           // silently discarding the typed value when a row/range selection covered the edited cell.
           applyUpdate(taskId, col, val);
         } else {
-          for (let r = minR; r <= maxR; r++) {
+          // B2530690 — every range, not just the active one: a row is filled when the column's cell sits in a range
+          // (a health/status fill takes every row any range touches).
+          for (const r of selRowsOf(selRange, tasks.length - 1)) {
+            if (!isHealthOp && !inRange(r, ci)) continue;
             const t = tasks[r];
             // Don't fill a parent's rolled-up fields: dates self-correct via rollupParentDates, but
             // cost/budget/actual have no rollup-on-write, so a filled value would persist invisibly into
@@ -14300,13 +14590,14 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // columns already fill the pane.
   const stripCol = orderedCols[orderedCols.length - 1];
   const stripCi = stripCol ? allCols.indexOf(stripCol) : -1;
-  const stripJoinsRange = hasRange && stripCi >= Math.min(selRange.c1, selRange.c2) && stripCi <= Math.max(selRange.c1, selRange.c2);
+  liveGridRef.current = { tasks, allCols, gridZoom, stripCi };
+  const stripJoinsRange = hasRange && selTouchesCol(selRange, stripCi);
   const stripShadow = (ri) => {
     if (!stripJoinsRange || !inRange(ri, stripCi)) return "none";
-    const minR = Math.min(selRange.r1, selRange.r2), maxR = Math.max(selRange.r1, selRange.r2);
+    const ed = selEdgesAt(selRange, ri, stripCi);
     const sh = [];
-    if (ri === minR) sh.push("inset 0 2px 0 0 #2563eb");
-    if (ri === maxR) sh.push("inset 0 -2px 0 0 #2563eb");
+    if (ed.top) sh.push("inset 0 2px 0 0 #2563eb");
+    if (ed.bottom) sh.push("inset 0 -2px 0 0 #2563eb");
     sh.push("inset -2px 0 0 0 #2563eb");
     return sh.join(",");
   };
@@ -14569,8 +14860,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
               {task.__rvMover ? <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:10,fontWeight:600,color:"var(--amber)",background:"#fff3d6",border:"1px solid #f0c98a",padding:"0 5px",borderRadius:9,zIndex:7,pointerEvents:"none"}}>{task.__rvMover>=0?"+":""}{task.__rvMover}d</span> : null}
 
               {orderedCols.map((c) => { const ci = allCols.indexOf(c);
-                const active = isFocused && selectedColIdx === ci && !hasRange;
+                const activeInMulti = isFocused && selectedColIdx === ci && isMulti(selRange);   // B2530690 — with several ranges the active cell keeps its own outline
+                const active = isFocused && selectedColIdx === ci && (!hasRange || activeInMulti);
                 const selected = inRange(ri, ci);
+                const tinted = selected && hasRange && !activeInMulti;
                 const cfmt = task.cellFmt?.[c.k]; // per-cell format (bold/italic/fill/underline/color/size)
                 // Predecessor editor shows a live hint below the input — let it escape the clipped 24px cell.
                 const predEditing = c.k==="predecessors" && edit?.taskId===task.id && edit?.col===c.k;
@@ -14581,22 +14874,21 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     height:ROW_H,
                     position:"relative",
                     zIndex: predEditing ? 30 : (active ? 2 : "auto"),
-                    background: (selected && hasRange) ? "#dbeafe" : (cfmt?.fill || "transparent"),
+                    background: tinted ? "#dbeafe" : (cfmt?.fill || "transparent"),
                     fontWeight: cfmt?.bold ? 700 : undefined,
                     fontStyle: cfmt?.italic ? "italic" : undefined,
                     textDecoration: cfmt?.underline ? "underline" : undefined,
                     color: cfmt?.color || undefined,
-                    borderRight: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
-                    borderBottom: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
+                    borderRight: tinted ? GRID_LINE_RANGE : GRID_LINE,
+                    borderBottom: tinted ? GRID_LINE_RANGE : GRID_LINE,
                     boxShadow: [selShadow(ri, ci, selected, active), (isFocused && c === orderedCols[0]) ? "inset 2px 0 0 0 var(--blue)" : "none"].filter(x => x !== "none").join(",") || "none",
                     userSelect: isDraggingCells.current ? "none" : "auto",
                     cursor: (c.k === "id" && !review && idPressMovesRows(selRange, ri, allCols.length)) ? "grab" : "default",   // the range-select drag's own `cell` cursor is pinned by the gesture (cellDragPin), never read from a ref here; an ID cell inside a multi-row selection is a pick-up handle (B2445008 ×2)
                     // NEW-1 — a pinned cell paints its own opaque look (row colour, then any range / cell fill on top)
-                    ...(pinStyle(c.k, [rowBg, (selected && hasRange) ? "#dbeafe" : cfmt?.fill], 5) || {})
+                    ...(pinStyle(c.k, [rowBg, tinted ? "#dbeafe" : cfmt?.fill], 5) || {})
                   }}
                     onMouseDown={e => cellMouseDown(e, task, ri, c, ci)}
-                    onMouseEnter={() => cellMouseEnter(task, ri, c, ci)}
-                    onClick={() => { setSelectedColIdx(ci); }}
+                    onClick={() => { if (skipColClickRef.current) { skipColClickRef.current = false; return; } setSelectedColIdx(ci); }}
                     onContextMenu={e => cellContextMenu(e, task, ri, c, ci)}
                     onDoubleClick={() => {
                       if (review) return;
@@ -14628,7 +14920,6 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
               })}
               {stripCol && <div data-grid-strip
                 onMouseDown={e => cellMouseDown(e, task, ri, stripCol, stripCi)}
-                onMouseEnter={() => cellMouseEnter(task, ri, stripCol, stripCi)}
                 onContextMenu={e => cellContextMenu(e, task, ri, stripCol, stripCi)}
                 style={{flex:"1 1 0", minWidth:0, height:ROW_H, position:"relative", cursor:"default",
                   background: (stripJoinsRange && inRange(ri, stripCi)) ? "#dbeafe" : "transparent",

@@ -135,6 +135,10 @@ export const LAYER_TIER = {
   ga_dams: "reference",
   ga_impaired_streams: "reference",
   ga_spalding_zoning: "reference",       // county zoning — a look-up, like the DeSoto zoning row
+  ga_road_ownership: "reference",        // who permits the driveway — a look-up
+  ga_rare_species: "reference",          // generalised ~4 mi records; DNR review is the check
+  ga_mineral: "reference",               // a 2005 register of pits and quarries
+  ga_bartow_zoning: "reference",         // county zoning — a look-up, like the DeSoto and Spalding rows
   ga_opportunity_zones: "context",       // a tax-incentive wash
   ga_jtc_tiers: "context",
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
@@ -183,6 +187,30 @@ export const LAYER_TIER = {
   co_aurora_apz: "reference",
   co_weld_row: "reference",
 
+  // Florida due-diligence layers (B2452976)
+  fl_wellfield_broward: "reference", // a use restriction to confirm with the county, not a land-taking line
+  fl_wellfield_miamidade: "reference",
+  fl_erp_sfwmd: "reference",         // permitted footprints around / on the site — look-up context
+  fl_conservation_lands: "reference",
+  fl_contamination_sites: "reference", // a tracked cleanup — a pull-the-file flag (Phase I), like the Georgia HSI
+  fl_brownfield_areas: "reference",
+  fl_institutional_controls: "constraint", // a recorded use restriction on the land
+  fl_sinkhole_reports: "reference",
+  fl_sinkhole_areas: "reference",
+  fl_outstanding_florida_waters: "reference",
+  fl_panther_consultation: "reference",
+  fl_eagle_nesting: "reference",
+  fl_fll_noise: "reference",
+  fl_sfwmd_canals: "reference",
+  fl_sfwmd_row_permits: "constraint",   // a canal / levee right-of-way takes land off the site
+  fl_sfwmd_conservation_easements: "constraint", // an easement takes land off the site
+  fl_udb_miamidade: "reference",
+  fl_sis_highways: "reference",      // a state designation to confirm with FDOT
+  fl_evac_zones: "reference",        // an insurance / comp-plan flag, not the floodplain
+  fl_natural_lands_broward: "reference",
+  fl_wetlands_broward: "constraint", // a wetland takes land off the site and brings a county license
+  fl_drainage_districts_broward: "reference",
+
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
   co_enterprise_zones: "context",   // B2528688
@@ -193,6 +221,30 @@ export const LAYER_TIER = {
   ms_desoto_flu: "context",
   ms_desoto_thoroughfare: "context",
   ms_desoto_future_subd: "context",
+  /* NEW-1 (Mississippi due-diligence layers) — declared per layer, never inferred. */
+  ms_county_state: "context",
+  ms_city: "context",
+  ms_tribal: "constraint",          // federal / tribal jurisdiction — county zoning does not govern on it
+  ms_deq_gard: "constraint",        // a cleanup site can stop or reprice a deal
+  ms_deq_ust: "constraint",
+  ms_epa_brownfields: "reference",
+  ms_deq_landfills: "constraint",
+  ms_deq_mines: "reference",
+  ms_ogb_wells: "constraint",       // an orphaned or plugged well on the site is a setback / re-entry issue
+  ms_deq_og_fields: "reference",
+  ms_deq_spa: "reference",
+  ms_nrcs_easements: "constraint",  // a federal easement bars development on its area
+  ms_nrhp: "reference",
+  ms_cemeteries: "constraint",
+  ms_crit_habitat: "constraint",
+  ms_303d: "reference",
+  ms_dams: "reference",
+  ms_dam_inundation: "reference",
+  ms_desoto_drainage: "constraint", // a drainage district can review and restrict work in its channels
+  ms_desoto_levee: "constraint",
+  ms_desoto_lomr: "reference",
+  ms_desoto_loma: "reference",
+  ms_desoto_cemeteries: "constraint",
   jur_city: "context",
   jur_etj: "context",
   jur_isd: "context",
@@ -201,6 +253,9 @@ export const LAYER_TIER = {
   tn_county: "context",            // B2507065 (NEW-10)
   ms_county: "context",            // NEW-1 (Georgia)
   ga_city: "context",
+  fl_county: "context",            // NEW-1 (Florida)
+  fl_city: "context",
+  fl_wmd: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",
   nj_county: "context",            // NEW-1 (New Jersey + New York)
@@ -209,6 +264,23 @@ export const LAYER_TIER = {
   ny_city: "context",
   ny_town: "context",
   ny_village: "context",
+  // Tennessee (B2521584): the county / city lines are orientation furniture; every other Tennessee row is a look-up fact — a flag to pull a file,
+  // never louder than the plan (the computed buffer bands, when present, are the constraint)
+  tn_city: "context",
+  tn_ms4: "reference",
+  tn_wqa: "reference",
+  tn_pws: "reference",
+  tn_drycleaners: "reference",
+  tn_sna: "reference",
+  tn_scenic: "reference",
+  tn_nrhp: "reference",
+  tn_nrhp_bounds: "reference",
+  tn_thc_sites: "reference",
+  tn_landfills: "reference",
+  tn_remediation: "reference",
+  tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
+  tn_cemeteries: "reference",
+  tn_crit_habitat: "reference",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",

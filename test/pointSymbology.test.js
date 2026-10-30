@@ -177,3 +177,17 @@ describe("hitFeature — POINT features are hittable (so the canvas identify rea
     expect(hitFeature(fc, { ...at, tolDeg: 0.0001 }).properties.NAME).toBe("polygon");
   });
 });
+
+/* B2452976 — esri-leaflet's `_redraw` feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for every re-delivered feature of a layer that has one; for a polygon that is a
+ * ring, `latLng` throws, the `createLayers` batch aborts and the batch's polygons are never drawn (530 of 820 Broward wellfield polygons in view). The one construction site
+ * therefore guards `_redraw`: only a Point reaches the point-symbol factory. (The behavioural proof is the Florida live harness's completeness + no-pageerror arms.) */
+describe("B2452976 guard — a polygon never reaches pointToLayer through esri-leaflet's redraw", () => {
+  it("buildFeatureLayer overrides _redraw so only Point geometry takes the pointToLayer path", () => {
+    const layers = src("lib/layers.js");
+    const helper = layers.slice(layers.indexOf("function buildFeatureLayer"));
+    const body = helper.slice(0, helper.indexOf("\n}\n"));
+    expect(body).toContain("lyr._redraw = function");
+    expect(body).toMatch(/g\.type !== "Point"/);
+    expect(body).toContain("origRedraw.call(this, id)");
+  });
+});

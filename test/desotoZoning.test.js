@@ -48,6 +48,8 @@ describe("ordinanceRef — a link only when it is a real http(s) URL", () => {
     expect(ordinanceRef("https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR")).toEqual({ href: "https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR", text: "Zoning ordinance (Municode)" });
   });
   it("an anchor tag in the field is unwrapped to its href and text", () => {
+    expect(ordinanceRef("https://www.desotocountyms.gov/DocumentCenter/View/8541")).toEqual({ href: "https://www.desotocountyms.gov/DocumentCenter/View/8541", text: "Zoning ordinance (DeSoto County)" });
+    expect(ordinanceRef("https://example.gov/ord/12.pdf").text).toBe("Zoning ordinance"); // never the bare word "Ordinance" under an "Ordinance" label
     expect(ordinanceRef('<a href="https://example.gov/ord/12.pdf">Ordinance 12</a>')).toEqual({ href: "https://example.gov/ord/12.pdf", text: "Ordinance 12" });
   });
   it("an ordinance number typed as text stays text, never a link", () => {

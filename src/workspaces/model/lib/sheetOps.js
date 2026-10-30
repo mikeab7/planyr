@@ -12,12 +12,13 @@
  * exactly like Excel). This module is a thin, pure coordinating layer over that primitive plus
  * sheetModel's own cell addressing — it does not reimplement any reference math itself.
  *
- * An INTERNAL clipboard (not the OS one): Ctrl+C copies the selected range's raw text into a
- * small in-memory structure the workspace holds; Ctrl+V pastes it at the new active cell,
- * shifting every formula's relative references by the same delta. This reliably fixes the
- * reported defect (copy inside the sheet, paste inside the sheet) without the added surface of
- * async Clipboard-API permissions, which behave inconsistently across a real browser and a
- * headless test run — a scope call worth stating plainly rather than silently narrowing.
+ * ⛔ UPDATED 2026-10-29 (B2455075): this file used to say the clipboard was an INTERNAL ref "without the added surface of
+ * async Clipboard-API permissions". That reasoning only holds for the ASYNC API — the native copy / cut / paste EVENTS give
+ * `event.clipboardData` with no permission prompt, and the internal-only copy meant paste from Excel did nothing (or pasted a
+ * stale copy), copy never reached other apps, and the look was lost. Ctrl+C / Ctrl+X / Ctrl+V now use the real system
+ * clipboard (lib/clipboardIO.js + ModelApp.jsx's document listeners). What stays HERE is the pure stamping: `relocateText`
+ * (the relative-reference shift both paste and fill use), `fillDown` / `fillRight` and AutoSum. `copyRange` / `pasteRange`
+ * are kept for their callers and tests; the keyboard no longer goes through them.
  */
 import { rewriteFormulaForCopy, parseRefText } from "../../../shared/formula/formula.js";
 import { cellAddressText } from "./sheetEngine.js";
@@ -41,7 +42,7 @@ export function copyRange(sheet, r1, r2, c1, c2) {
 /** One raw cell's text, relocated from (fromR, fromC) to (toR, toC) — a formula's relative A1
  *  references shift by the delta; everything else (a literal value, a [Column] structured
  *  ref) is copied verbatim, because rewriteFormulaForCopy only ever touches A1-shaped tokens. */
-function relocateText(text, fromR, fromC, toR, toC) {
+export function relocateText(text, fromR, fromC, toR, toC) {
   if (!isFormulaText(text)) return text;
   if (fromR === toR && fromC === toC) return text;
   const src = cellAddressText(fromR, fromC), dst = cellAddressText(toR, toC);
@@ -102,6 +103,61 @@ export function fillDown(sheet, r1, r2, c1, c2) {
     }
   }
   return s;
+}
+
+/** Ctrl+R: fill the selection's LEFT column rightward through every column of the selection,
+ *  shifting relative references per column — the horizontal twin of fillDown. */
+export function fillRight(sheet, r1, r2, c1, c2) {
+  const rr1 = Math.min(r1, r2), rr2 = Math.max(r1, r2);
+  const cc1 = Math.min(c1, c2), cc2 = Math.max(c1, c2);
+  if (cc2 <= cc1) return sheet;
+  let s = sheet;
+  for (let r = rr1; r <= rr2; r++) {
+    const sourceText = rawAt(s, r, cc1);
+    for (let c = cc1 + 1; c <= cc2; c++) s = setRaw(s, r, c, relocateText(sourceText, r, cc1, r, c));
+  }
+  return s;
+}
+
+/** Ctrl+Enter: write one typed entry into every cell of the selection (a formula's relative
+ *  references shift per cell, exactly like a fill). */
+export function fillSelectionWith(sheet, r1, r2, c1, c2, text) {
+  const rr1 = Math.min(r1, r2), rr2 = Math.max(r1, r2);
+  const cc1 = Math.min(c1, c2), cc2 = Math.max(c1, c2);
+  let s = sheet;
+  for (let r = rr1; r <= rr2; r++) for (let c = cc1; c <= cc2; c++) s = setRaw(s, r, c, relocateText(text, rr1, cc1, r, c));
+  return s;
+}
+
+const looksNumeric = (raw) => {
+  if (raw === "" || raw == null) return false;
+  if (isFormulaText(raw)) return true;
+  return Number.isFinite(Number(String(raw).replace(/[$,%\s]/g, "")));
+};
+
+/** Alt+=: where to put SUM formulas for a selection, as `[{ r, c, text }]` (empty = nothing to sum).
+ *  One cell: sum the run of numbers directly above it, else directly to its left (Excel's guess).
+ *  A taller-than-one-row range: a total under each column; a single-row range: a total to its right. */
+export function autoSumPlan(sheet, r1, r2, c1, c2) {
+  const rr1 = Math.min(r1, r2), rr2 = Math.max(r1, r2);
+  const cc1 = Math.min(c1, c2), cc2 = Math.max(c1, c2);
+  const addr = (r, c) => cellAddressText(r, c);
+  if (rr1 === rr2 && cc1 === cc2) {
+    let top = rr1;
+    while (top - 1 >= 0 && looksNumeric(rawAt(sheet, top - 1, cc1))) top--;
+    if (top < rr1) return [{ r: rr1, c: cc1, text: `=SUM(${addr(top, cc1)}:${addr(rr1 - 1, cc1)})` }];
+    let left = cc1;
+    while (left - 1 >= 0 && looksNumeric(rawAt(sheet, rr1, left - 1))) left--;
+    if (left < cc1) return [{ r: rr1, c: cc1, text: `=SUM(${addr(rr1, left)}:${addr(rr1, cc1 - 1)})` }];
+    return [];
+  }
+  const out = [];
+  if (rr2 > rr1) {
+    for (let c = cc1; c <= cc2; c++) out.push({ r: rr2 + 1, c, text: `=SUM(${addr(rr1, c)}:${addr(rr2, c)})` });
+  } else {
+    for (let r = rr1; r <= rr2; r++) out.push({ r, c: cc2 + 1, text: `=SUM(${addr(r, cc1)}:${addr(r, cc2)})` });
+  }
+  return out;
 }
 
 /** Excel's "block jump": from (r, c), Ctrl+Arrow moves to the edge of the current run of

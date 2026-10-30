@@ -42,10 +42,16 @@ const read = (page) => sheetEl(page).evaluate((el) => {
 /** The ANCHOR (active cell) — the Name Box shows its address, which stays readable when the anchor's
  *  own row has scrolled out of the virtualised render window. */
 const anchorOf = async (page) => {
-  const v = await page.getByTestId("model-name-box").inputValue();
-  const m = /^([A-Z]+)(\d+)$/.exec(v.trim());
-  const col = [...m[1]].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
-  return { row: +m[2] - 1, col };
+  const v = (await page.getByTestId("model-name-box").inputValue()).trim();
+  const colNum = (letters) => [...letters].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+  // A whole-column / whole-row selection reads "B:H" / "3:25" (B2455074): the run's first line is the anchor
+  // when it was dragged away from it (these specs only drag right / down), the other axis is line 0.
+  let m = /^([A-Z]+):([A-Z]+)$/.exec(v);
+  if (m) return { row: 0, col: colNum(m[1]) };
+  m = /^(\d+):(\d+)$/.exec(v);
+  if (m) return { row: +m[1] - 1, col: 0 };
+  m = /^([A-Z]+)(\d+)$/.exec(v);
+  return { row: +m[2] - 1, col: colNum(m[1]) };
 };
 const box = (page) => sheetEl(page).evaluate((el) => {
   const r = el.getBoundingClientRect();

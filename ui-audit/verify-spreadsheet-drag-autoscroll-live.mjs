@@ -44,8 +44,12 @@ try {
   });
   const anchor = async () => {
     const v = (await page.getByTestId("model-name-box").inputValue()).trim();
-    const m = /^([A-Z]+)(\d+)$/.exec(v);
-    return { row: +m[2] - 1, col: [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1 };
+    const colNum = (L) => [...L].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+    // a whole-column / whole-row selection reads "B:H" / "3:25" (B2455074) — its first line is the anchor
+    let m = /^([A-Z]+):([A-Z]+)$/.exec(v); if (m) return { row: 0, col: colNum(m[1]) };
+    m = /^(\d+):(\d+)$/.exec(v); if (m) return { row: +m[1] - 1, col: 0 };
+    m = /^([A-Z]+)(\d+)$/.exec(v);
+    return { row: +m[2] - 1, col: colNum(m[1]) };
   };
   const cellBox = (r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`).boundingBox();
   const reset = async () => { await sheet.evaluate((el) => { el.scrollTop = 0; el.scrollLeft = 0; }); await hold(300); };

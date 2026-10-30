@@ -20,6 +20,10 @@
  * addition nobody told this file about.
  */
 import { KEY_CONTRACT } from "../../workspaces/site-planner/lib/keyContract.js";
+// The Spreadsheet's Excel shortcuts are DERIVED from its own key tables (pure data, no UI), so this page cannot
+// disagree with what the handler does — same discipline as the Site section above.
+import { CHORDS } from "../../workspaces/model/lib/keymap.js";
+import { allKeyTips } from "../../workspaces/model/lib/keyTips.js";
 
 /** One shortcut. `combo` is an array of tokens `formatCombo` (./platform.js) renders for the
  *  current platform ("mod" = Ctrl on Windows/Linux, ⌘ on Mac). `keysText` is a pre-composed,
@@ -299,13 +303,25 @@ const NOTES_ITEMS = [
 
 /* ── Spreadsheet (the "model" workspace) ──────────────────────────────────────────────────────── */
 
+/* Excel for Windows' chords, one row each, straight from lib/keymap.js's table. */
+const CHORD_LABELS = {
+  bold: "Bold", italic: "Italic", underline: "Underline", strikethrough: "Strikethrough",
+  "number-format-dialog": "Open the number format dialog", "currency-style": "Currency format", "percent-style": "Percent format",
+  "number-comma-style": "Number with thousands separator", "numfmt-general": "General format", "numfmt-date": "Date format",
+  "border-outline": "Outline border", "border-none": "Remove borders", "fill-right": "Fill the left column of the selection to the right",
+  "insert-date": "Enter today's date", "insert-time": "Enter the current time", "copy-above-formula": "Copy the formula from the cell above",
+  "copy-above-value": "Copy the value from the cell above", autosum: "AutoSum", "repeat-last": "Repeat the last action",
+  "insert-cells": "Insert row / column (cells prompt when a block is selected)", "delete-cells": "Delete row / column (cells prompt when a block is selected)",
+  "hide-rows": "Hide the selected rows", "unhide-rows": "Unhide rows", "hide-columns": "Hide the selected columns", "unhide-columns": "Unhide columns",
+  "sheet-add": "New sheet", "sheet-prev": "Previous sheet tab", "sheet-next": "Next sheet tab", "save-now": "Save now (no browser save dialog)",
+};
 const SPREADSHEET_ITEMS = [
   item({ id: "sheet.nav", label: "Move the active cell", combo: ["arrowup"], note: "Arrow keys; Shift extends the selection.",
     evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight"' }] }),
   item({ id: "sheet.tab", label: "Move to the next / previous cell", combo: ["tab"], note: "Shift+Tab moves back.",
     evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Tab") { e.preventDefault(); const c = stepCol' }] }),
   item({ id: "sheet.enter", label: "Move down / up a row", combo: ["enter"], note: "Enter moves down, Shift+Enter moves up.",
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Enter") { e.preventDefault(); const r = Math.max' }] }),
+    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Enter" && !e.altKey) { e.preventDefault(); const r = stepRowVis' }] }),
   item({ id: "sheet.edit", label: "Edit the active cell", combo: ["f2"],
     evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "F2") { e.preventDefault(); startEdit' }] }),
   item({ id: "sheet.clear", label: "Clear the selected range", combo: ["del"],
@@ -316,10 +332,12 @@ const SPREADSHEET_ITEMS = [
     evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "usedRangeEnd(sheet)" }] }),
   item({ id: "sheet.block-jump", label: "Jump to the edge of the current block of data", combo: ["mod", "arrowdown"], note: "Ctrl/⌘ + any arrow key.",
     evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "ctrlArrowTarget(hasContent" }] }),
-  item({ id: "sheet.copy", label: "Copy", combo: ["mod", "c"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'k === "c") { e.preventDefault(); if (isMulti(selRange)) refuseMulti(); else onCopy' }] }),
-  item({ id: "sheet.paste", label: "Paste", combo: ["mod", "v"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'k === "v") { e.preventDefault(); if (isMulti(selRange)) refuseMulti(); else onPaste' }] }),
+  item({ id: "sheet.copy", label: "Copy", combo: ["mod", "c"], note: "To the system clipboard — pastes into Excel, email and Notes with its formatting.",
+    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'document.addEventListener("copy", onCopy)' }] }),
+  item({ id: "sheet.cut", label: "Cut", combo: ["mod", "x"], note: "A dashed outline marks the cells; pasting moves them (Esc cancels).",
+    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'document.addEventListener("cut", onCut)' }] }),
+  item({ id: "sheet.paste", label: "Paste", combo: ["mod", "v"], note: "From Planyr, Excel, Google Sheets, a web table or plain text.",
+    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'document.addEventListener("paste", onPasteEvent)' }] }),
   item({ id: "sheet.filldown", label: "Fill the top row of the selection down", combo: ["mod", "d"],
     evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'k === "d") { e.preventDefault(); if (isMulti(selRange)) onFillDownRanges' }] }),
   item({ id: "sheet.zoom", label: "Zoom the sheet", keysText: "Ctrl/⌘ + scroll wheel",
@@ -338,7 +356,48 @@ const SPREADSHEET_ITEMS = [
     evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'k === "k") { e.preventDefault(); setPaletteOpen(true)' }] }),
   item({ id: "sheet.trace-clear", label: "Clear a formula trace", combo: ["esc"],
     evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'e.key === "Escape" && !e.ctrlKey && !e.metaKey' }] }),
+  ...sheetChordItems(),
+  ...sheetNavItems(),
+  ...sheetAltItems(),
 ];
+
+function sheetChordItems() {
+  return CHORDS.map(([id, combo]) => item({
+    id: `sheet.chord.${id}`, label: CHORD_LABELS[id] || id, keysText: combo.replace(/^Ctrl/, "Ctrl/⌘"),
+    evidence: [{ file: "src/workspaces/model/lib/keymap.js", pattern: `["${id}", "${combo.replace(/"/g, '\\"')}"` }],
+  }));
+}
+
+/* Selection / movement keys that need the grid's own state (lib/keymap.js `navAction`). */
+function sheetNavItems() {
+  const ev = (pattern) => [{ file: "src/workspaces/model/lib/keymap.js", pattern }];
+  return [
+    item({ id: "sheet.nav.select-all", label: "Select the current region; again for the whole sheet", keysText: "Ctrl/⌘+A", evidence: ev('type: "select-all"') }),
+    item({ id: "sheet.nav.select-row", label: "Select the whole row", keysText: "Shift+Space", evidence: ev('type: "select-row"') }),
+    item({ id: "sheet.nav.select-column", label: "Select the whole column", keysText: "Ctrl+Space", evidence: ev('type: "select-column"') }),
+    item({ id: "sheet.nav.row-start", label: "Start of the row (Shift extends)", keysText: "Home / Shift+Home", evidence: ev('type: "row-start"') }),
+    item({ id: "sheet.nav.extend-start", label: "Extend the selection to A1", keysText: "Ctrl/⌘+Shift+Home", evidence: ev('type: "extend-to-start"') }),
+    item({ id: "sheet.nav.extend-end", label: "Extend the selection to the last used cell", keysText: "Ctrl/⌘+Shift+End", evidence: ev('type: "extend-to-used-end"') }),
+    item({ id: "sheet.nav.page", label: "Move a screen down / up (Shift extends)", keysText: "PgDn / PgUp", evidence: ev('type: "page-down"') }),
+    item({ id: "sheet.nav.page-across", label: "Move a screen right / left", keysText: "Alt+PgDn / Alt+PgUp", evidence: ev('type: "page-across"') }),
+    item({ id: "sheet.edit.newline", label: "New line inside the cell being edited", keysText: "Alt+Enter",
+      evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Enter" && e.altKey && !modKey' }] }),
+    item({ id: "sheet.edit.fill-selection", label: "Fill the whole selection with what you typed", keysText: "Ctrl/⌘+Enter",
+      evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "onFillText(cells, editValueRef.current, edit.r, edit.c)" }] }),
+    item({ id: "sheet.edit.cycle-ref", label: "Cycle $A$1 / A$1 / $A1 / A1 on the reference at the caret", keysText: "F4 (while editing a formula)",
+      evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "cycleReferenceAtCaret(editValueRef.current, ss)" }] }),
+    item({ id: "sheet.header-select", label: "Select a whole column / row", keysText: "Click a column letter or row number (drag or Shift+click for a run; the corner box selects everything)",
+      evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "const headerPress = (axis, idx, e)" }] }),
+  ];
+}
+
+/* Excel's Alt key-tips: press and release Alt, then the letters — one row per path in lib/keyTips.js. */
+function sheetAltItems() {
+  return allKeyTips().map(({ path, label }) => item({
+    id: `sheet.alt.${path}`, label, keysText: ["Alt", ...path.split("")].join(", "),
+    evidence: [{ file: "src/workspaces/model/lib/keyTips.js", pattern: label }],
+  }));
+}
 
 /* ── Global (the app shell, and this page's own entry point) ─────────────────────────────────── */
 

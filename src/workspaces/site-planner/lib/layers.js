@@ -16,8 +16,11 @@ import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
+import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
+import { TN_LAYERS } from "./tennesseeLayers.js"; // B2521584 (Tennessee industrial due-diligence layers)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -1028,11 +1031,11 @@ export const AHJ_LAYERS = {
     role: "line", group: "jurisdiction", order: 1,
   },
   /* B2507065 (NEW-10) — Tennessee's county lines and DeSoto County's own outline, so a view on the Mississippi / Tennessee line names BOTH counties along it
-   * ("DeSoto Co." / "Shelby Co., TN"). Tennessee is the State's statewide layer (95 counties), offered in TN and, because the line sits at DeSoto's feet, in MS; the
+   * ("DeSoto Co." / "Shelby Co., TN"). Tennessee is the State's statewide layer (95 counties), offered in TN and, because the line sits at DeSoto's feet, in the Mississippi counties on the Tennessee line only (`stateRegions` → `ms_tn_line`); the
    * Mississippi row is the county server's own County Outline (ONE county — DeSoto — so it is limited to the DeSoto area; the rest of Mississippi has no county-line row yet). */
   tn_county: {
     kind: "vector", label: "County Boundaries (Tennessee)", mergeGroup: "counties_cities", source: "State of Tennessee (STS)",
-    url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"],
+    url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"], stateRegions: { MS: ["ms_tn_line"] }, // MS: only the counties on the Tennessee line (NEW-1 review) — Jackson / Tupelo / Pascagoula can never draw it
     minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
     note: "Tennessee county lines (State of Tennessee, all 95 counties). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
@@ -1042,6 +1045,15 @@ export const AHJ_LAYERS = {
     url: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/8", states: ["MS"], regions: ["desoto"],
     minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
     note: "DeSoto County's own outline (the county server publishes only DeSoto in this layer). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  /* NEW-1 (Mississippi) — the rest of Mississippi's county lines. The DeSoto row above is the county server's own outline of ONE county; this is MDEQ's statewide county layer
+   * (82 counties) with DeSoto left out (`where` in its VECTOR_SOURCES entry), so DeSoto's own outline is not drawn twice (the neighbours' copies of the shared border still are — two digitisations of one line). */
+  ms_county_state: {
+    kind: "vector", label: "County Boundaries (Mississippi)", mergeGroup: "counties_cities", source: "MDEQ — Office of Land and Water Resources",
+    url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/"), states: ["MS"],
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
+    note: "Mississippi county lines (MDEQ, all 82 counties; DeSoto County's own outline is the separate row). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
   ga_city: {
@@ -1208,7 +1220,7 @@ export const AHJ_LAYERS = {
     // source's own `query.minVectorZoom` (test/layerZoomGate pins the two together).
     minZoom: 12,
     opacity: 0.55,
-    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, 100 ft on a PROTECTED RIVER (average flow of 400 cfs or more — O.C.G.A. 12-2-8, Rule 391-3-16-.04, drawn from DCA's protected-river lines), and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. The wider rule governs. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
+    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, 100 ft on a PROTECTED RIVER (average flow of 400 cfs or more — O.C.G.A. 12-2-8, Rule 391-3-16-.04, drawn from DCA's protected-river lines — NOT on the Chattahoochee reach under the Metropolitan River Protection Act, where the MRPA rows govern, nor on tidal reaches under the Coastal Marshlands Protection Act, both of which the rule excludes), and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. The wider rule governs. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out — on a protected river several hundred feet wide the 100-ft band sits mostly in the water and badly understates the buffer. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
     role: "area", group: "flood", order: 3,
     floodTier: "hydrography", agency: "USGS / Georgia DNR",
   },
@@ -1308,7 +1320,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1400,8 +1412,10 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
+  ...FLORIDA_VINTAGE,
   ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
@@ -1582,25 +1596,43 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // setTimeout can't fire refresh() on a detached layer. Wrap onRemove (Leaflet calls it on
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;
-  lyr.onRemove = function (map) { clearTimeout(timer); if (origOnRemove) return origOnRemove.call(this, map); };
+  lyr.onRemove = function (map) { clearTimeout(timer); clearTimeout(resetTimer); retryPending = false; if (origOnRemove) return origOnRemove.call(this, map); };
+  /* B2521584 — a draw-budget refusal must SURVIVE the `load` that esri-leaflet fires right after it: the handler below reset the status to "loaded", or to "empty / No
+   * features in this view" when nothing was drawn, so a layer that REFUSED to draw read as "no data here" (reproduced against esri-leaflet 3.0.19: failed ×4, then empty).
+   * `refused` is raised by `overbudget` and cleared when the next request cycle starts ("loading"). */
+  let refused = false, resetTimer = null, cycleErr = false, gaveUp = false, retryPending = false;
+  lyr.on("loading", () => { refused = false; cycleErr = false; gaveUp = false; });
   lyr.on("load", () => {
-    tries = 0;
+    /* esri-leaflet fires `load` when the LAST of a cycle's parallel cell requests finishes, and for a request that failed it calls the callback (→ `load`) BEFORE firing `requesterror`
+     * in the same tick — so resetting `tries` here wiped the count every cycle and a persistently failing service retried forever (simulated: 1,801 refreshes in 12 minutes). Two
+     * orders exist: error-then-load (a fast cell failed, a slower one finished last) and load-then-error (the failing request was last). The reset is DEFERRED one tick and skipped if
+     * ANY error was seen in the cycle (`cycleErr`, cleared by the next "loading"), whichever order — no wall-clock window, so a service that hangs 30 s then 504s counts too. */
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => { if (!cycleErr) tries = 0; }, 0);
+    // a refusal, a retry-budget failure and a pending retry each OWN the row's status until the next request cycle: a slower cell finishing after a failed one must not flip it to "loaded"
+    if (refused || gaveUp || retryPending) return;
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
   // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
   lyr.on("overbudget", (e) => {
-    onStatus && onStatus(k, "failed", `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+    refused = true;
+    // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
   });
   lyr.on("requesterror", (e) => {
-    const code = e && e.error && (e.error.code ?? e.error.httpStatus);
+    cycleErr = true; clearTimeout(resetTimer);   // this cycle failed: no `load` of it may reset the count
+    // esri-leaflet 3.x fires { url, params, message, code, method }; older callers wrapped it in `error`
+    const code = e && (e.code ?? (e.error && (e.error.code ?? e.error.httpStatus)));
     const { retry, delayMs } = featureRetryDecision(code, tries, max);
     if (retry) {
       tries += 1;
       onStatus && onStatus(k, "loading", `${cfg.label}: service hiccup — retrying (${tries}/${max})…`);
       clearTimeout(timer);
-      timer = setTimeout(() => { try { lyr.refresh(); } catch (_) {} }, delayMs);
+      retryPending = true;
+      timer = setTimeout(() => { retryPending = false; gaveUp = false; refused = false; /* a re-issued request owns the status (a real refusal fires `overbudget` again); esri-leaflet fires no "loading" for a refresh that overlaps one still in flight */ try { lyr.refresh(); } catch (_) {} }, delayMs);
     } else {
+      gaveUp = true;
       onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
     }
   });
@@ -1629,30 +1661,76 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
     ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
   }));
+  /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
+   * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
+   * polygons of that batch are never drawn (measured: 530 of 820 wellfield polygons in view; the same on any dense polygon row). Only a Point may reach the point-symbol
+   * factory; every other geometry takes the path style alone. */
+  {
+    const origRedraw = lyr._redraw;
+    lyr._redraw = function (id) {
+      const layer = this._layers && this._layers[id];
+      const g = layer && layer.feature && layer.feature.geometry;
+      if (g && g.type !== "Point") {
+        if (layer.setStyle && this.options.style) this.resetFeatureStyle(layer.feature.id);
+        return undefined;
+      }
+      return origRedraw.call(this, id);
+    };
+  }
   // B2507064 (NEW-9) — the draw budget: a batch of features over the vertex budget is NOT handed to Leaflet (that is what froze the tab); the layer says so instead.
   {
     const origCreate = lyr.createLayers;
     let drawn = 0;
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
+    /* B2521584 — what is already on the map, by feature id → the vertex count of the geometry held now. esri-leaflet re-delivers a feature it already holds (every pan / grid cell that
+     * touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
+     * copy under the same id, and `setLatLngs` replaces the old one). So a held id is charged only for the vertices it GROWS by; a refused batch leaves the old geometry in place. */
+    const held = new Map();
+    /* NEW-1 review (B2521584, finding 7): esri-leaflet takes a feature OFF the map when its cell leaves the view (`removefeature`) and puts it back with `addLayers` (`addfeature`, no
+     * `createLayers`), keeping the Leaflet layer in `_layers` for the next visit. The total is judged against what is ON the map, so a feature that left the view stops counting until it
+     * returns — otherwise a long pan accumulates every cell ever visited and a layer is refused as "too detailed" in a view that is not. `offMap` is that set; a `permanent` removal forgets it. */
+    const offMap = new Set();
+    const heldSum = () => { let n = 0; for (const [id, v] of held) if (!offMap.has(id)) n += v; return n; };
+    lyr.on("removefeature", (e) => {
+      const id = e && e.feature && e.feature.id;
+      if (id == null || !held.has(id)) return;
+      if (!offMap.has(id)) { drawn = Math.max(0, drawn - held.get(id)); offMap.add(id); }
+      if (e.permanent) { held.delete(id); offMap.delete(id); }
+    });
+    lyr.on("addfeature", (e) => {
+      const id = e && e.feature && e.feature.id;
+      if (id != null && offMap.has(id)) { offMap.delete(id); drawn += held.get(id) || 0; }
+    });
     lyr.createLayers = function (features) {
-      // esri-leaflet re-delivers a feature it already holds (every pan / grid cell that touches it) and only updates it — never count that twice against the total
-      const fresh = (features || []).filter((f) => !(f && f.id != null && this._layers && this._layers[f.id]));
-      const v = countVertices(fresh, Math.max(cap, total));
-      if (v > cap || drawn + v > total) {
-        try { this.fire("overbudget", { vertices: v, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
-        return undefined;
+      let grow = 0, net = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what is on the map (judged against the layer total)
+      const mine = [];
+      const inBatch = new Set();
+      for (const f of features || []) {
+        const fv = countVertices([f], Math.max(cap, total));
+        const id = f && f.id != null ? f.id : null;
+        if (id != null && inBatch.has(id)) continue;   // the same id twice in ONE batch is one feature on the map
+        if (id != null) inBatch.add(id);
+        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - (offMap.has(id) ? 0 : held.get(id)); }
+        else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
+        else { grow += fv; net += fv; }
+        if (id != null) mine.push([id, fv]);
       }
-      drawn += v;
+      if (grow > cap || drawn + net > total) {
+        try { this.fire("overbudget", { vertices: grow, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
+        return undefined;   // refused: nothing is recorded, the old geometry stays on the map
+      }
+      drawn = Math.max(0, drawn + net);   // signed: a feature that comes back LIGHTER credits the total (a layer re-asked at several zooms must not ratchet up to a refusal)
+      for (const [id, fv] of mine) { held.set(id, fv); offMap.delete(id); }
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { drawn = 0; });
+    lyr.on("remove", () => { drawn = 0; held.clear(); offMap.clear(); });
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;
       const onZoom = () => {
         const z = lyr._map && lyr._map.getZoom();
         if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
-        fetchedAt = z; drawn = 0;
+        fetchedAt = z; drawn = heldSum();   // the total is what is still ON the map, not zero
         try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
       };
       lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });
@@ -2095,7 +2173,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : featureBaseStyle(cfg, oo))); } catch (_) {} };
+              : (oo) => { try { const sf = (f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo, f && f.properties) : featureBaseStyle(cfg, oo)); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }; // _originalStyle too: esri-leaflet's resetFeatureStyle (run for every re-delivered feature) restores THAT, so without it a re-delivered point went hollow (featureBaseStyle's fill 0) and a re-delivered feature snapped back to the opacity the layer was built with (B2452976 review pass 4)
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

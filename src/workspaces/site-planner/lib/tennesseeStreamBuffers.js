@@ -1,0 +1,58 @@
+/* Tennessee stream buffers — the PURE half (B2521584). No Leaflet, no DOM, no network.
+ *
+ * WHAT IS DRAWN. A 30 ft band on each side of every stream centreline — the natural riparian buffer zone the TDEC Construction General Permit
+ * (TNR100000) requires between a waterbody and the limits of disturbance. The permit lets a project AVERAGE the width, with no point narrower than
+ * half of it (15 ft), and averages each side of a stream on its own — so the band is the required AVERAGE, not a hard setback line.
+ *
+ * WHAT IS NOT DRAWN, and said on the layer. The permit asks 60 ft (average; no point under 30 ft) where the discharge is to Exceptional Tennessee
+ * Waters or waters with unavailable siltation / habitat parameters. TDEC publishes those reaches as its "CGP Unavailable Waters" layer, but that server
+ * (tdeconline.tn.gov) refuses the relay and cannot be read from a browser Planyr can verify — measured 2026-10-29 — so the 60 ft tier is NOT drawn and
+ * the row says so rather than draw 30 ft as if it were the whole answer. Adding it is a data source, not a rewrite: widen `TN_BUFFER_TIERS`.
+ *
+ * Only streams are buffered (the Georgia layer's NHD rule — `georgiaStreamBuffers.isBufferedStream`: ftype 460, not ephemeral; never canals, ditches or
+ * pipelines) PLUS one Tennessee addition: a NAMED artificial path (ftype 558 carrying a GNIS name). NHD draws a wide named river as a polygon with an
+ * "artificial path" centreline through it; at the Middle Fork Stones River near Christiana that centreline is the ONLY line in view, so without it the layer
+ * said "No streams in this view" beside a named river (found by the live check, 2026-10-30). An UNNAMED artificial path (the line through a pond or lake) is
+ * still not buffered. A wet-weather conveyance is not "waters of the state" and carries no buffer — NHD cannot tell one from
+ * a stream, so a small headwater channel can be drawn that a TDEC hydrologic determination (rule 0400-40-17) would call a conveyance. Local governments
+ * add their own post-construction buffers on top (an MS4 city such as Murfreesboro or Nashville) — NOT drawn: their width depends on drainage area and
+ * stream class the data does not carry.
+ *
+ * ⛔ MEASURED FROM THE CENTRELINE, NOT THE BANK. The permit measures from the top of the stream bank; NHD gives a centreline, so the band is too narrow
+ * by half the channel width on a wide stream. Said on the layer; a survey of the bank governs.
+ *
+ * Reuses `corridorRingLngLat` (the pipeline-corridor buffer: local flat-earth feet frame, no new dependency). */
+import { corridorRingLngLat } from "./pipelineCorridor.js";
+import { isBufferedStream, linePartsOf } from "./georgiaStreamBuffers.js";
+
+/* ftype 460 (not ephemeral), or a named ftype 558 artificial path — the centreline NHD draws through a wide river. Accepts either property casing. Pure. */
+export function isBufferedWaterTn(props) {
+  if (isBufferedStream(props)) return true;
+  const p = props || {};
+  const ftype = Number(p.ftype ?? p.FTYPE);
+  const name = String(p.gnis_name ?? p.GNIS_NAME ?? "").trim();
+  return ftype === 558 && name.length > 0;
+}
+
+export const TN_BUFFER_TIERS = {
+  standard: { id: "standard", eachSideFt: 30, color: "#b45309", label: "30 ft construction buffer (average)" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
+};
+
+/* THE FUNCTION: NHD flowlines → the bands to draw. returns [{ ring: [[lng,lat],…], tier }]. Pure. */
+export function streamBufferBandsTn({ nhd = null } = {}) {
+  const bands = [];
+  for (const feature of (nhd && nhd.features) || []) {
+    if (!isBufferedWaterTn(feature.properties)) continue;
+    for (const part of linePartsOf(feature)) {
+      if (!part || part.length < 2) continue;
+      const ring = corridorRingLngLat(part, TN_BUFFER_TIERS.standard.eachSideFt * 2);
+      if (ring && ring.length >= 3) bands.push({ ring, tier: TN_BUFFER_TIERS.standard });
+    }
+  }
+  return bands;
+}
+
+/* The legend/ⓘ line — the tier actually present in the bands. Pure. */
+export function bufferLegendTn(bands) {
+  return bands && bands.length ? [TN_BUFFER_TIERS.standard.label] : [];
+}

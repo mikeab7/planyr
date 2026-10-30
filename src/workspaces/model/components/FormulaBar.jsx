@@ -6,18 +6,19 @@
  * formula exactly as it would in-cell.
  */
 import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
+import { wholeSelectionLabel, parseWholeAddress } from "../lib/selection.js";
+import { colLetterName } from "../lib/sheetModel.js";
+import { hasPendingFormulaText } from "../lib/pendingEntry.js";
 
-function colLabel(colIndex) {
-  let n = colIndex + 1, s = "";
-  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
-  return s;
-}
+const colLabel = colLetterName; // one letters function for the whole module (the grid header uses it too)
 
-export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxRef, focusGrid }) {
-  const address = `${colLabel(col)}${row + 1}`;
+const FormulaBar = forwardRef(function FormulaBar({ sheet, row, col, selRange, onCommit, onGoTo, nameBoxRef, focusGrid }, ref) {
+  // A whole-column / whole-row / whole-sheet selection reads "C:C" / "5:5" / "A:Z" (NEW-2, 2026-10-29);
+  // any other selection reads its active cell, as before.
+  const address = (selRange && wholeSelectionLabel(sheet, selRange)) || `${colLabel(col)}${row + 1}`;
   const [value, setValue] = useState(() => formulaBarText(sheet, row, col));
   const [nameValue, setNameValue] = useState(address);
   const [nameFocused, setNameFocused] = useState(false);
@@ -39,11 +40,23 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
 
   const commit = () => onCommit(row, col, value);
 
+  // NEW-1 (2026-10-29) — text typed here but not yet committed is saved to its own cell when the
+  // sheet is about to change; the re-seed effect above used to silently throw it away. Must run
+  // BEFORE the active sheet changes (see SheetView's commitPending).
+  useImperativeHandle(ref, () => ({
+    commitPending: () => {
+      if (!hasPendingFormulaText(value, formulaBarText(sheet, row, col))) return false;
+      onCommit(row, col, value);
+      return true;
+    },
+  }), [value, sheet, row, col, onCommit]);
+
   // Returns whether the jump succeeded, so the Enter handler knows whether to hand focus to the
   // grid (a rejected entry stays focused here, visibly flagged, so the user can fix it in place,
   // matching Excel's own Name Box — never hand focus away from an error the user hasn't seen yet).
   const goToTyped = () => {
-    const target = parseNameBoxAddress(nameValue, sheet.rowCount, sheet.columns.length);
+    const whole = parseWholeAddress(nameValue, sheet); // "C:C", "A:C", "5:5", "2:7" -> a whole column / row run
+    const target = whole || parseNameBoxAddress(nameValue, sheet.rowCount, sheet.columns.length);
     if (target) { onGoTo(target.r1, target.c1, target.r2, target.c2); return true; }
     // An address that doesn't resolve reverts rather than navigating blindly — and now says so.
     setNameValue(address);
@@ -102,4 +115,6 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
       />
     </div>
   );
-}
+});
+
+export default FormulaBar;

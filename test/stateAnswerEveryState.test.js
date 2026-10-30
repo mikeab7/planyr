@@ -31,7 +31,7 @@ beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 /* One point well inside each state (a city, not a border town). [lat, lng]. */
 const INTERIOR = {
   AL: [33.52, -86.80], AK: [61.2181, -149.9003], AZ: [33.4484, -112.074], AR: [34.7465, -92.2896], CA: [38.5816, -121.4944],
-  CO: [39.7392, -104.9903], CT: [41.7658, -72.6734], DE: [39.1582, -75.5244], DC: [38.9072, -77.0369], FL: [28.5383, -81.3792],
+  CO: [39.7392, -104.9903], CT: [41.7658, -72.6734], DE: [39.1582, -75.5244], DC: [38.9072, -77.0369], FL: [27.9506, -82.4572], /* Tampa (was Orlando, which sits on the edge of the SFWMD service area — B2452976: a region-gated row can differ between the exact plan origin and the finder's rounded view centre only at a boundary, and an interior point should not be one) */
   GA: [33.749, -84.388], HI: [21.3069, -157.8583], ID: [43.615, -116.2023], IL: [39.7817, -89.6501], IN: [39.7684, -86.1581],
   IA: [41.5868, -93.625], KS: [39.0473, -95.6752], KY: [38.2527, -85.7585], LA: [30.4515, -91.1871], ME: [44.3106, -69.7795],
   MD: [39.2904, -76.6122], MA: [42.2626, -71.8023], MI: [42.7325, -84.5555], MN: [44.9778, -93.265], MS: [32.2988, -90.1848],
@@ -67,6 +67,16 @@ const BORDER = [
   ["Orange TX (on the Sabine)", 30.0927, -93.7366, "TX"],
   ["Denison TX (on the Red River)", 33.7557, -96.5367, "TX"],
   ["Durant OK (just over the Red River)", 33.9937, -96.3711, "OK"],
+  /* NEW-1 (B2539744 review): TN's hand-drawn outline reaches km past the Kentucky / Virginia line, and Natural Earth puts the Mississippi–Louisiana
+   * line on the wrong side of Vidalia. Each is paired with a control on the OTHER side so a fix cannot just move the error across the line. */
+  ["Fulton KY (just north of the Tennessee line)", 36.51, -88.88, "KY"],
+  ["Union City TN (control, Tennessee side)", 36.4242, -89.057, "TN"],
+  ["Bristol VA, State Street (north side)", 36.598, -82.18, "VA"],
+  ["Bristol VA, downtown", 36.605, -82.18, "VA"],
+  ["Bristol TN (control, Tennessee side)", 36.58, -82.19, "TN"],
+  ["Vidalia LA (west of the Mississippi)", 31.565, -91.44, "LA"],
+  ["Vidalia LA, city centre", 31.5653, -91.4311, "LA"],
+  ["Natchez MS (control, Mississippi side)", 31.5604, -91.4032, "MS"],
 ];
 
 /* Ground that is not a US state at all — it stays null (and so is "somewhere else", never "unknown"). */
@@ -123,6 +133,7 @@ describe("(b) a row is offered only where its source serves — in every state, 
         expect(scope.state, `${label} scope state`).toBe(st);
         for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
           if (cfg.regions && cfg.regions.length) continue; // a region row is also gated by a boundary — covered by layerLocationScope
+          if (cfg.stateRegions && cfg.stateRegions[st]) continue; // a region that binds only in this state (tn_county in MS: its border counties) — covered by mississippiLayers
           const want = (!cfg.states || cfg.states.includes(st)) && !(cfg.statesNot || []).includes(st);
           expect(layerAvailableHere(cfg, scope), `${label}: ${id} at ${st}`).toBe(want);
         }
@@ -138,6 +149,7 @@ describe("(b) a row is offered only where its source serves — in every state, 
       const planner = plannerScope(lat, lng), finder = finderScope(lat, lng);
       for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
         if (cfg.regions && cfg.regions.length) continue;
+        if (cfg.stateRegions && cfg.stateRegions[st]) continue;
         if (cfg.states && !cfg.states.includes(st)) expect(layerAvailableHere(cfg, planner), `${id} offered at ${name}`).toBe(false);
         if (cfg.statesNot && cfg.statesNot.includes(st)) expect(layerAvailableHere(cfg, planner), `${id} offered at ${name}`).toBe(false);
       }

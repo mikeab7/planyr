@@ -10,9 +10,14 @@
  * with nothing loaded): each ring is cut into RUNS and every run is simplified with a tolerance that fits what it is for —
  *   · COAST runs (both ends on a ne_10m_coastline vertex): 0.04° — a site that falls out of the polygon on a bay is caught by the
  *     seaward pad in `siteRegion.js`, so coastal detail buys nothing;
- *   · BORDERS touching one of the eight states a rule keys off (TX CO GA CA FL TN NJ NY): 0.003° (~300 m) — the line that decides
+ *   · BORDERS touching one of the nine states a rule keys off (TX CO GA CA FL TN MS NJ NY — MS since its due-diligence layers, B2539744: its river edge once ran 3-5 km into LA/AR): 0.003° (~300 m) — the line that decides
  *     whether Shreveport is Texas;
  *   · BORDERS between two other states: 0.03° — no rule keys off them, an answer that is 3 km off on OH/KY changes nothing.
+ * ONE EDGE IS NOT NATURAL EARTH'S (NEW-1, B2539744): NE puts the Mississippi–Louisiana line ~1 km on the wrong side at Vidalia (its river is the
+ * pre-channel-shift one — Vidalia's own centre reads "MS", and its river edge sits up to 3.8 km off elsewhere). The MS|LA and MS|AR run is therefore
+ * spliced from Esri's USA_States_Generalized_Boundaries (Census-derived), keeping NE's end points; both ring sides get the SAME polyline, so no
+ * sliver. Checked against 21 river-town landmarks (test/stateLineLandmarks.test.js) where NE fails Vidalia. Source cached as
+ * scripts/data/esri_ms.geojson (re-fetched by --fetch).
  * Classification is a property of an EDGE, not of a state, and a run is simplified end-to-end, so the two states that share a border
  * simplify it IDENTICALLY (no sliver between them). Alaska / Hawaii are coarse (0.3°).
  *
@@ -28,9 +33,10 @@ const SRC = join(ROOT, "scripts", "data");
 const OUT = join(ROOT, "src", "workspaces", "site-planner", "lib", "usStatesData.js");
 const NE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson";
 const FILES = ["ne_10m_admin_1_states_provinces.geojson", "ne_10m_coastline.geojson"];
+const ESRI_MS = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_States_Generalized_Boundaries/FeatureServer/0/query?where=STATE_ABBR%3D%27MS%27&outFields=STATE_ABBR&f=geojson&returnGeometry=true";
 const SCALE = 1000; // 0.001° ≈ 110 m
 const T_COAST = 0.04, T_FINE = 0.003, T_COARSE = 0.03, T_FAR = 0.3;
-const PRECISE = new Set(["TX", "CO", "GA", "CA", "FL", "TN", "NJ", "NY"]);
+const PRECISE = new Set(["TX", "CO", "GA", "CA", "FL", "TN", "MS", "NJ", "NY"]);
 const FAR = new Set(["AK", "HI"]);
 
 async function load(f) {
@@ -70,14 +76,100 @@ for (const f of coast.features) for (const l of lines(f.geometry)) for (const p 
 
 const feats = admin1.features.filter((f) => f.properties.adm0_a3 === "USA");
 const edgeKey = (a, b) => { const ka = q(a), kb = q(b); return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`; };
-/* edge → set of states that carry it */
-const edgeStates = new Map();
 const ringsOf = (f) => (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates).map((p) => p[0]);
-for (const f of feats) for (const ring of ringsOf(f)) for (let i = 1; i < ring.length; i++) {
-  const k = edgeKey(ring[i - 1], ring[i]);
-  if (!edgeStates.has(k)) edgeStates.set(k, new Set());
-  edgeStates.get(k).add(f.properties.postal);
+/* edge → set of states that carry it */
+function edgeStatesOf() {
+  const m = new Map();
+  for (const f of feats) for (const ring of ringsOf(f)) for (let i = 1; i < ring.length; i++) {
+    const k = edgeKey(ring[i - 1], ring[i]);
+    if (!m.has(k)) m.set(k, new Set());
+    m.get(k).add(f.properties.postal);
+  }
+  return m;
 }
+
+/* ── The Mississippi River edge (see the header): splice Esri's MS|LA and MS|AR run in place of Natural Earth's ───────────────────── */
+async function spliceMississippiRiver() {
+  const p = join(SRC, "esri_ms.geojson");
+  if (!existsSync(p) || process.argv.includes("--fetch")) {
+    const r = await fetch(ESRI_MS);
+    if (!r.ok) throw new Error(`Esri MS → HTTP ${r.status}`);
+    writeFileSync(p, await r.text());
+  }
+  const esriMs = JSON.parse(readFileSync(p, "utf8")).features[0];
+  const esriRing = (esriMs.geometry.type === "Polygon" ? [esriMs.geometry.coordinates] : esriMs.geometry.coordinates)
+    .map((c) => c[0]).sort((a, b) => b.length - a.length)[0].slice(0, -1);
+  const states = edgeStatesOf();
+  const featOf = (st) => feats.find((f) => f.properties.postal === st);
+  const owners = (a, b) => states.get(edgeKey(a, b));
+  const dist2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+  const nearestIdx = (pts, pt) => pts.reduce((bi, c, i) => (dist2(c, pt) < dist2(pts[bi], pt) ? i : bi), 0);
+
+  /* the MS ring's longest run of edges shared with LA or AR, as a vertex list A…B in the ring's own order */
+  const msF = featOf("MS");
+  const msRing = ringsOf(msF).sort((a, b) => b.length - a.length)[0];
+  const open = msRing.slice(0, -1), n = open.length;
+  const isRun = (i) => { const o = owners(open[i], open[(i + 1) % n]); return o.has("LA") || o.has("AR"); };
+  let start = -1;
+  for (let i = 0; i < n; i++) if (isRun(i) && !isRun((i - 1 + n) % n)) { let len = 0; while (isRun((i + len) % n) && len < n) len++; if (start < 0 || len > start.len) start = { i, len }; }
+  if (!start || start.i === undefined) throw new Error("splice: no MS|LA|AR run found in Natural Earth");
+  const run = []; for (let k = 0; k <= start.len; k++) run.push(open[(start.i + k) % n]);
+  const A = run[0], B = run[run.length - 1];
+  let T = null; // the MS|AR|LA tripoint: where the run's other-state changes
+  for (let k = 0; k < run.length - 1 && !T; k++) { const o = owners(run[k], run[k + 1]); const o2 = k + 2 < run.length ? owners(run[k + 1], run[k + 2]) : null; if (o2 && o.has("AR") !== o2.has("AR")) T = run[k + 1]; }
+  if (!T) throw new Error("splice: the MS run does not change from AR to LA");
+
+  /* Esri's arc between the vertices nearest A and B: of the two arcs round its ring, the one lying nearer the NE run */
+  const m = esriRing.length, ia = nearestIdx(esriRing, A), ib = nearestIdx(esriRing, B);
+  const arc = (from, to, step) => { const out = [esriRing[from]]; for (let i = from; i !== to; ) { i = (i + step + m) % m; out.push(esriRing[i]); } return out; };
+  const meanNear = (pts) => run.reduce((acc, r) => acc + Math.sqrt(Math.min(...pts.map((e) => dist2(e, r)))), 0) / run.length;
+  const fwd = arc(ia, ib, +1), bwd = arc(ia, ib, -1);
+  const river = meanNear(fwd) <= meanNear(bwd) ? fwd : bwd;
+  const poly = [A, ...river.slice(1, -1), B];
+  const kLng = Math.cos((A[1] * Math.PI) / 180);
+  const segKm = (pt, u, v) => {
+    const ax = (u[0] - pt[0]) * kLng, ay = u[1] - pt[1], bx = (v[0] - pt[0]) * kLng, by = v[1] - pt[1], dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+    return Math.hypot(ax + t * dx, ay + t * dy) * 111;
+  };
+  const dev = Math.max(...run.map((r) => Math.min(...poly.slice(1).map((e, i) => segKm(r, poly[i], e)))));
+  console.log(`splice: MS run ${run.length} NE pts → ${poly.length} Esri pts; max NE vertex offset from the new line ${dev.toFixed(1)} km`);
+  const it = nearestIdx(poly, T);
+  const p1 = poly.slice(0, it + 1); p1[0] = A; p1[p1.length - 1] = T; // A … T
+  const p2 = poly.slice(it); p2[0] = T;                                 // T … B
+  const isAfromAR = owners(run[0], run[1]).has("AR"); // is the run's first leg (A … T) the Arkansas one?
+  const ar = isAfromAR ? [A, T, p1] : [T, B, p2], la = isAfromAR ? [T, B, p2] : [A, T, p1];
+
+  /* write the run back into a ring: replace the consecutive edges between vertex keys `ka` … `kb` (either order) with `newPts` (ordered ka→kb) */
+  function replaceRun(ring, ka, kb, newPts) {
+    const o = ring.slice(0, -1), L = o.length;
+    const ia2 = o.findIndex((p) => q(p) === ka), ib2 = o.findIndex((p) => q(p) === kb);
+    if (ia2 < 0 || ib2 < 0) throw new Error(`splice: run end points not on the ring (${ka} ${ia2} / ${kb} ${ib2})`);
+    const edgeShared = (i) => owners(o[i], o[(i + 1) % L]).has("MS");
+    const walk = (from, to) => { let i = from, ok = true; while (i !== to) { if (!edgeShared(i)) { ok = false; break; } i = (i + 1) % L; } return ok; };
+    let from = ia2, to = ib2, pts = newPts;
+    if (!walk(from, to)) { from = ib2; to = ia2; pts = [...newPts].reverse(); if (!walk(from, to)) throw new Error("splice: no shared run between the end points"); }
+    const outRing = [];
+    for (let i = to; i !== from; i = (i + 1) % L) outRing.push(o[i]); // the untouched part, to … from
+    outRing.push(o[from]);
+    outRing.push(...pts.slice(1, -1)); // the new interior, from → to
+    outRing.push(outRing[0]); // close at `to`
+    return outRing;
+  }
+  const swap = (st, ka, kb, pts) => {
+    const f = featOf(st);
+    const rs = ringsOf(f);
+    const idx = rs.reduce((bi, r, i) => (r.length > rs[bi].length ? i : bi), 0);
+    const nr = replaceRun(rs[idx], ka, kb, pts);
+    if (f.geometry.type === "Polygon") f.geometry.coordinates[0] = nr; else f.geometry.coordinates[idx][0] = nr;
+  };
+  // MS ring (its own order): the whole run A…B
+  swap("MS", q(A), q(B), poly);
+  swap("AR", q(ar[0]), q(ar[1]), ar[2]);
+  swap("LA", q(la[0]), q(la[1]), la[2]);
+}
+await spliceMississippiRiver();
+const edgeStates = edgeStatesOf();
 
 function tolFor(st, a, b, span) {
   if (FAR.has(st)) return Math.min(T_FAR, Math.max(0.004, span / 25)); // scaled to the island, or Oahu collapses to a sliver

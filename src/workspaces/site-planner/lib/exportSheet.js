@@ -869,7 +869,9 @@ export function createExportSheet(ctx) {
         if (!gj || !gj.geometry) return;
         // B2081252 — lines, POINTS and POLYGONS, same symbology as the screen (the pure rule lives in overlayVectorSvg).
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
-        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) labels.push(...esriLineLabels(gj, cfg)); // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY)
+        // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY). The fragment writer takes labels ALREADY PLACED in sheet pixels ({x,y,text}),
+        // like the terrain contour labels below — a bare {lng,lat,text} was dropped silently, so no pipe size ever reached the sheet (V1956865 step 6, 2026-10-30).
+        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text }); }
       });
       return { features, labels };
     }

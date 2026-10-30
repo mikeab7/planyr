@@ -14,9 +14,9 @@ import { buildIndex } from "../src/workspaces/site-planner/lib/countyPolygonsCor
 
 const OUT = new URL("../src/workspaces/site-planner/lib/serviceAreaData.js", import.meta.url);
 const round = (n) => Math.round(n * 1e4) / 1e4;
-const q = async (url, params) => {
+const q = async (url, params, headers = {}) => {
   const u = new URL(url); for (const [k, v] of Object.entries({ f: "geojson", outSR: 4326, outFields: "*", ...params })) u.searchParams.set(k, v);
-  const r = await fetch(u); if (!r.ok) throw new Error(`${url} → ${r.status}`);
+  const r = await fetch(u, { headers }); if (!r.ok) throw new Error(`${url} → ${r.status}`);
   const j = await r.json(); if (j.error) throw new Error(`${url} → ${JSON.stringify(j.error)}`);
   return j;
 };
@@ -52,6 +52,33 @@ if (want("desoto")) {
   const rec = index.counties.find((c) => c.state === "MS" && /^de ?soto$/i.test(c.name.replace(/ county$/i, "")));
   if (!rec) throw new Error("DeSoto County MS not found in the county polygon asset");
   areas.desoto = { label: "DeSoto County, MS", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
+/* NEW-1 (Florida, B2452976): the county- and district-scoped Florida rows.
+ *   broward / miamidade               the county, from the SAME bundled county polygons as `harris` (no network).
+ *   sfwmd                             the South Florida Water Management District, from its own published boundary (SFWMD's hosted
+ *                                     "Water Management District Boundaries", WMDNAME='SFWMD'); the ERP permit layer, canals and rights of way are
+ *                                     SFWMD's own and carry nothing outside it. */
+for (const [key, name, label] of [["broward", "Broward", "Broward County, FL"], ["miamidade", "Miami-Dade", "Miami-Dade County, FL"]]) {
+  if (!want(key)) continue;
+  const rec = index.counties.find((c) => c.state === "FL" && c.name.replace(/ county$/i, "") === name);
+  if (!rec) throw new Error(`${label} not found in the county polygon asset`);
+  areas[key] = { label, source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
+if (want("sfwmd")) {
+  const wmd = await q("https://services1.arcgis.com/sDAPyc2rGRn7vf9B/arcgis/rest/services/BDWMD_Boundary_Area/FeatureServer/0/query", { where: "WMDNAME='SFWMD'", maxAllowableOffset: 0.004 });
+  areas.sfwmd = { label: "South Florida Water Management District", source: "SFWMD Water Management District Boundaries (services1.arcgis.com/sDAPyc2rGRn7vf9B), WMDNAME='SFWMD'", polys: polysOf(wmd) };
+}
+if (want("pantherconsult")) {
+  /* USFWS's South Florida panther consultation area (one multipart polygon), as FDEP hosts it. FDEP's server is not reachable from every build sandbox, so it is read through planyr.io's same-origin relay
+   * (a browser-style User-Agent is needed: Cloudflare refuses a bare script one). PLANYR_RELAY_BASE overrides the origin (a branch preview works before the relay is on the apex). */
+  const base = process.env.PLANYR_RELAY_BASE || "https://planyr.io";
+  /* FDEP's MapServer answers f=geojson only with a token, so read Esri JSON and take every ring as its own polygon (a hole is therefore filled — an area may only ever err toward SHOWING a layer). */
+  const u = new URL(`${base}/gis-proxy/ca.dep.state.fl.us/arcgis/rest/services/OpenData/PANTHER_CONSULT_AREA/MapServer/0/query`);
+  for (const [k, v] of Object.entries({ f: "json", where: "1=1", outSR: 4326, returnGeometry: "true", maxAllowableOffset: 0.004 })) u.searchParams.set(k, v);
+  const r = await fetch(u, { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } }); if (!r.ok) throw new Error(`${u} → ${r.status}`);
+  const j = await r.json(); if (j.error) throw new Error(`${u} → ${JSON.stringify(j.error)}`);
+  const polys = j.features.flatMap((f) => f.geometry.rings.map((ring) => [ring.map(([x, y]) => [round(x), round(y)])]));
+  areas.pantherconsult = { label: "USFWS Florida panther consultation area", source: "USFWS South Florida Ecological Services consultation area (FDEP OpenData PANTHER_CONSULT_AREA)", polys };
 }
 if (want("olivebranch")) {
   /* The city's PLANNING AREA is the ground AROUND the city (it excludes the city proper — measured: downtown Olive Branch is outside it), so it cannot stand for
@@ -90,15 +117,25 @@ if (want("co_aurora")) {
  *   mngwpd       the 15-county Metropolitan North Georgia Water Planning District (ARC's `MNGWPD_Boundary` layer 1 — the SAME outline the stream-buffer rule uses).
  *                The Chattahoochee MRPA corridor/buffers and the District's small water supply watersheds are declared for this area.
  *   spalding_ga  Spalding County GA, from the SAME bundled county polygons as `harris` (no network) — the county's own unincorporated zoning layer.
- * `--only=mngwpd,spalding_ga,ga_blue_ridge` rebuilds just these three and keeps every other area as committed. */
+ * `--only=mngwpd,spalding_ga,ga_blue_ridge,bartow_ga,mrpa_corridor` rebuilds just these five and keeps every other area as committed. */
+/* NEW-1 (B2539744 review, finding 2) — ms_tn_line: the Mississippi counties that touch Tennessee (a ring vertex at/above 34.95°N: DeSoto, Marshall, Tippah,
+ * Alcorn, Tishomingo, Benton — printed below), from the SAME bundled county polygons. The Tennessee county lines (State of Tennessee STS, TN only) are offered across
+ * the state line there, where a Mississippi view reaches Shelby / Fayette / Hardeman / McNairy / Hardin counties — and nowhere else in Mississippi (Jackson, Vicksburg,
+ * Tupelo, Pascagoula can never draw it). Used through the row's `stateRegions: { MS: ["ms_tn_line"] }`; Tennessee itself is wholly served. */
+if (want("ms_tn_line")) {
+  const recs = index.counties.filter((c) => c.state === "MS" && c.rings.some((ring) => ring.some(([, y]) => y / index.scale >= 34.95)));
+  if (recs.length < 5) throw new Error(`ms_tn_line: expected the MS counties on the Tennessee line, found ${recs.length}`);
+  console.log("ms_tn_line counties:", recs.map((c) => c.name).join(", "));
+  areas.ms_tn_line = { label: "Mississippi counties on the Tennessee line", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: recs.flatMap((rec) => rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])])) };
+}
 if (want("mngwpd")) {
   /* The District outline is NOT enough on its own: the District's own small-water-supply watersheds reach past it (the Randy Poynter reservoir's basin sits partly in
    * Walton/Newton — measured: its interior point is outside the outline). The region is the outline ∪ those watersheds ∪ the Chattahoochee MRPA corridor, so a row declared
-   * for it is never hidden over ground its own data covers. */
+   * for it is never hidden over ground its own data covers. (The Chattahoochee MRPA rows use the narrower `mrpa_corridor` below — Bartow's Adairsville is a District county, 70 miles from the river.) */
   const ARC = "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services";
   const parts = [];
-  for (const l of ["MNGWPD_Boundary/FeatureServer/1", "SWSW/FeatureServer/0", "ProtectedSWSW/FeatureServer/1", "Chattahoochee_River_Corridor_2000ft/FeatureServer/0"]) parts.push(...polysOf(await q(`${ARC}/${l}/query`, { where: "1=1", maxAllowableOffset: 0.003 })));
-  areas.mngwpd = { label: "Metropolitan North Georgia Water Planning District, its water-supply watersheds and the Chattahoochee corridor", source: "Atlanta Regional Commission MNGWPD_Boundary layer 1 ∪ SWSW ∪ ProtectedSWSW ∪ Chattahoochee_River_Corridor_2000ft", polys: parts };
+  for (const l of ["MNGWPD_Boundary/FeatureServer/1", "SWSW/FeatureServer/0", "ProtectedSWSW/FeatureServer/1"]) parts.push(...polysOf(await q(`${ARC}/${l}/query`, { where: "1=1", maxAllowableOffset: 0.003 })));
+  areas.mngwpd = { label: "Metropolitan North Georgia Water Planning District and its water-supply watersheds", source: "Atlanta Regional Commission MNGWPD_Boundary layer 1 ∪ SWSW ∪ ProtectedSWSW", polys: parts };
 }
 if (want("ga_blue_ridge")) {
   /* DCA's protected-mountain polygon (one feature, 28k pieces) is north Georgia only: the region is its published data extent (returnExtentOnly, WGS84) padded 0.05° — a rectangle,
@@ -108,6 +145,26 @@ if (want("ga_blue_ridge")) {
   const j = await (await fetch(u)).json(); if (!j.extent) throw new Error(`protected mountains → no extent ${JSON.stringify(j)}`);
   const e = j.extent, PAD = 0.05, x0 = round(e.xmin - PAD), y0 = round(e.ymin - PAD), x1 = round(e.xmax + PAD), y1 = round(e.ymax + PAD);
   areas.ga_blue_ridge = { label: "North Georgia mountains (DCA protected-mountain data extent)", source: "Georgia DCA EnvironmentalPlanning layer 3 (ProtectedMountainAreas) extent, padded 0.05°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
+}
+if (want("mrpa_corridor")) {
+  /* The Chattahoochee MRPA corridor (ARC's 2,000-ft polygon, Buford Dam → the Fulton/Douglas line) is a thin diagonal ribbon: its bounding box swallows half of metro Atlanta and the District outline swallows
+   * Bartow. The region is the cells of a 0.05° grid (~3.5 mi) the ribbon passes through, plus their eight neighbours — "on or within a few miles of the river" — as one square polygon per cell. */
+  const u = new URL("https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Chattahoochee_River_Corridor_2000ft/FeatureServer/0/query");
+  for (const [k, v] of Object.entries({ f: "geojson", where: "1=1", outSR: 4326, outFields: "*", maxAllowableOffset: 0.0005 })) u.searchParams.set(k, v);
+  const gj = await (await fetch(u)).json(); if (!gj.features || !gj.features.length) throw new Error("MRPA corridor → no features");
+  const CELL = 0.05, cells = new Set(), mark = (x, y) => { const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL); for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) cells.add(`${cx + dx},${cy + dy}`); };
+  for (const poly of polysOf(gj)) for (const ring of poly) for (let i = 0; i < ring.length; i++) {
+    mark(ring[i][0], ring[i][1]);
+    const [x1, y1] = ring[i], [x2, y2] = ring[(i + 1) % ring.length], n = Math.ceil(Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1)) / (CELL / 2));
+    for (let k = 1; k < n; k++) mark(x1 + ((x2 - x1) * k) / n, y1 + ((y2 - y1) * k) / n); // an edge longer than half a cell would otherwise skip the cells between its ends
+  }
+  const sq = (c) => { const [cx, cy] = c.split(",").map(Number), x0 = round(cx * CELL), y0 = round(cy * CELL), x1 = round((cx + 1) * CELL), y1 = round((cy + 1) * CELL); return [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]; };
+  areas.mrpa_corridor = { label: "Along the Chattahoochee MRPA corridor (within a few miles)", source: "ARC Chattahoochee_River_Corridor_2000ft, dilated to a 0.05° grid", polys: [...cells].map(sq) };
+}
+if (want("bartow_ga")) {
+  const rec = index.counties.find((c) => c.state === "GA" && /^bartow$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Bartow County GA not found in the county polygon asset");
+  areas.bartow_ga = { label: "Bartow County, GA", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
 if (want("spalding_ga")) {
   const rec = index.counties.find((c) => c.state === "GA" && /^spalding$/i.test(c.name.replace(/ county$/i, "")));
