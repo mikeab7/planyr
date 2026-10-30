@@ -192,7 +192,7 @@ describe("onRequest — response hygiene", () => {
     const res = await call(`${SGRC_PATH}?f=json`);
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(res.headers.get("x-upstream-only")).toBeNull();
-    expect(res.headers.get("content-type")).toBe("application/json");
+    expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
   });
 
   it("caches only a genuine 200 — an upstream error response is never cached", async () => {

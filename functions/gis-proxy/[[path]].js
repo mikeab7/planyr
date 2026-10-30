@@ -206,7 +206,14 @@ export function redirectTarget(res, fromUrl, method, hop = 0) {
   if (to.protocol !== "https:") return { error: `Upstream redirected to a non-https address (${to.protocol}//${to.host}).` };
   if (!ALLOWED_HOSTS.has(to.host)) return { error: `Upstream redirected to ${to.host}, which is not on the relay's allow-list.` };
   const s = res.status;
-  return { url: to.toString(), method: method === "POST" && (s === 301 || s === 302 || s === 303) ? "GET" : method };
+  const nextMethod = method === "POST" && (s === 301 || s === 302 || s === 303) ? "GET" : method;
+  // The next hop is held to the SAME rules as the first: an allow-listed host that answers a redirect to its admin or write endpoint (or replays a POST body at one) is not a licence to relay it.
+  const cleaned = cleanSegments(to.pathname.split("/").filter(Boolean));
+  if (cleaned.error) return { error: "Upstream redirected to an unreadable path." };
+  const verdict = classifyPath(cleaned.segs, nextMethod);
+  if (!verdict.ok) return { error: `Upstream redirected to a path the relay does not carry (${verdict.error})` };
+  to.search = forceJsonFormat(to.search, { isQuery: true }).text;
+  return { url: to.toString(), method: nextMethod };
 }
 
 /* ───────────────────────── WHAT THE RELAY WILL CARRY (NEW-1 security review, B2555776, 2026-10-30) ─────────────────────────
@@ -247,7 +254,7 @@ const WRITE_OR_ADMIN_SEGMENTS = new Set([
 ]);
 /* Operations that take a POST: the four read endpoints the app sends bodies to (esri-leaflet's FeatureLayer / Query / identify / dynamicMapLayer, and `wideTileRequest`). */
 const POST_OPS = new Set(["query", "identify", "export", "exportimage"]);
-const GET_ONLY_OPS = new Set(["layers", "legend", "info"]);
+const GET_ONLY_OPS = new Set(["layers", "legend"]);
 const isLayerId = (seg) => /^\d{1,5}$/.test(seg);
 
 /* Decode and vet the path segments. Returns { segs } (decoded — they are re-encoded when the URL is built) or { error: Response }.
@@ -266,11 +273,14 @@ export function cleanSegments(segs) {
 /* May this ArcGIS REST path be relayed with this method? `rest` = the decoded segments AFTER the host. Pure. Returns { ok: true } or { error: string, status }. */
 export function classifyPath(rest, method) {
   const low = rest.map((s) => s.toLowerCase());
+  // Every ArcGIS REST endpoint lives under `…/rest/services` (or is `…/rest/info`); a numeric last segment alone is not enough to be relayed (a `/wp-admin/post.php/delete/5` would be).
+  const restIdx = low.findIndex((s, i) => s === "rest" && (low[i + 1] === "services" || (low[i + 1] === "info" && i + 2 === low.length)));
+  if (restIdx < 0) return { error: "That path is not under an ArcGIS REST /rest/services endpoint, which is all the relay carries.", status: 403 };
   const blocked = low.find((s) => WRITE_OR_ADMIN_SEGMENTS.has(s));
   if (blocked) return { error: `The relay carries read-only ArcGIS queries; "${blocked}" is not one of them.`, status: 403 };
   const last = low[low.length - 1];
   const parent = low[low.length - 2];
-  const svcIdx = low.lastIndexOf("services");
+  const svcIdx = restIdx + 1 < low.length && low[restIdx + 1] === "services" ? restIdx + 1 : -1;
   const isOp = POST_OPS.has(last);
   if (method === "POST") {
     if (!isOp) return { error: "POST is only relayed to the ArcGIS query / identify / export / exportImage endpoints.", status: 403 };
@@ -284,34 +294,36 @@ export function classifyPath(rest, method) {
   }
   // GET only from here: metadata, the services directory, and map tiles.
   if (last !== undefined && (SERVICE_TYPES.has(last) || isLayerId(last) || GET_ONLY_OPS.has(last))) return { ok: true };
-  if (last === "services" || (svcIdx >= 0 && low.length - svcIdx <= 2)) return { ok: true }; // …/rest/services or …/rest/services/<Folder>
+  if (last === "info" && parent === "rest") return { ok: true };
+  if (svcIdx >= 0 && low.length - svcIdx <= 2) return { ok: true }; // …/rest/services or …/rest/services/<Folder>
   if (low.length >= 4 && low[low.length - 4] === "tile" && isLayerId(low[low.length - 3]) && isLayerId(low[low.length - 2]) && isLayerId(last)) return { ok: true };
   return { error: "That path is not an ArcGIS read endpoint the relay carries.", status: 403 };
 }
 
 /* The `f` values the app consumes. Anything else — and no `f` at all, which ArcGIS answers with an HTML directory page — becomes `json`. */
 const OK_FORMATS = new Set(["json", "pjson", "geojson", "image", "pbf"]);
-const keyOf = (pair) => { const k = pair.split("=")[0].replace(/\+/g, " "); try { return decodeURIComponent(k).toLowerCase(); } catch (_e) { return k.toLowerCase(); } };
-/* Force a safe `f` (and no JSONP `callback`) onto a query string (starting "?") or a urlencoded body (no "?"). A text that is ALREADY safe — exactly one valid `f`, no `callback` — is returned
+const SEP = /[&;]/; // ArcGIS (like several servers) may treat `;` as a pair separator too, so the scan does
+const keyOf = (pair) => { const k = pair.split("=")[0].replace(/\+/g, " "); try { return decodeURIComponent(k).trim().toLowerCase(); } catch (_e) { return k.trim().toLowerCase(); } };
+const valueOf = (q) => { const v = q.slice(q.indexOf("=") + 1); try { return decodeURIComponent(v.replace(/\+/g, " ")).trim().toLowerCase(); } catch (_e) { return ""; } };
+/* Is this pair EXACTLY `f=<a format the app consumes>`, byte for byte? Anything else (f=json%20, F=JSON, f=json%0a) is rewritten, never forwarded for the upstream to interpret. */
+const isCanonicalF = (pair) => pair.startsWith("f=") && OK_FORMATS.has(pair.slice(2));
+/* Force a safe `f` (and no JSONP `callback`) onto a query string (starting "?") or a urlencoded body (no "?"). A text that is ALREADY safe — exactly one canonical `f`, no `callback` — is returned
  * byte-for-byte, so a clean request is never reordered or re-encoded. `addMissing:false` (a POST body) leaves a body with no `f` alone, since the query string carries one. Returns { text, fmt, changed }
  * where `fmt` is the `f` the upstream will see. Pure. */
 export function forceJsonFormat(text, { isQuery = true, addMissing = true } = {}) {
   const raw = isQuery ? String(text || "").replace(/^\?/, "") : String(text || "");
-  const pairs = raw ? raw.split("&") : [];
+  const pairs = raw ? raw.split(SEP) : [];
   const fs = pairs.filter((q) => keyOf(q) === "f");
-  const valueOf = (q) => { const v = q.slice(q.indexOf("=") + 1); try { return decodeURIComponent(v.replace(/\+/g, " ")).trim().toLowerCase(); } catch (_e) { return ""; } };
   const hasJsonp = pairs.some((q) => keyOf(q) === "callback");
-  const single = fs.length === 1 && q_hasEq(fs[0]) && OK_FORMATS.has(valueOf(fs[0]));
+  const single = fs.length === 1 && isCanonicalF(fs[0]);
   const wrap = (t) => (isQuery ? (t ? "?" + t : "") : t);
-  if (!hasJsonp && (single || (!fs.length && !addMissing))) return { text: wrap(raw), fmt: single ? valueOf(fs[0]) : null, changed: false };
+  if (!hasJsonp && (single || (!fs.length && !addMissing))) return { text: wrap(raw), fmt: single ? fs[0].slice(2) : null, changed: false };
   const kept = pairs.filter((q) => { const k = keyOf(q); return k !== "f" && k !== "callback"; });
-  const fmt = fs.length === 1 && q_hasEq(fs[0]) && OK_FORMATS.has(valueOf(fs[0])) ? valueOf(fs[0]) : "json";
+  const fmt = fs.length === 1 && OK_FORMATS.has(valueOf(fs[0])) ? valueOf(fs[0]) : "json";
   if (!fs.length && !addMissing) return { text: wrap(kept.join("&")), fmt: null, changed: true };
   kept.push("f=" + fmt);
   return { text: wrap(kept.filter(Boolean).join("&")), fmt, changed: true };
 }
-const q_hasEq = (pair) => pair.includes("=");
-
 const JSON_TYPE = /^(application\/([\w.+-]+\+)?json|text\/json)$/;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/tiff"]);
 const PROTOBUF_TYPES = new Set(["application/x-protobuf", "application/protobuf"]);
@@ -319,7 +331,8 @@ const PROTOBUF_TYPES = new Set(["application/x-protobuf", "application/protobuf"
 export function classifyResponseType(contentType, asked) {
   const raw = String(contentType || "").trim();
   const media = raw.split(";")[0].trim().toLowerCase();
-  if (JSON_TYPE.test(media)) return { type: raw || "application/json", image: false };
+  // the type is rebuilt from the bare media type: an upstream value with parameters or a comma list ("application/json; x, text/html") is never echoed
+  if (JSON_TYPE.test(media)) return { type: media + "; charset=utf-8", image: false };
   if (IMAGE_TYPES.has(media)) return { type: media, image: true };
   if (PROTOBUF_TYPES.has(media)) return { type: media, image: false };
   // ArcGIS behind IIS / a proxy sometimes labels a JSON answer text/plain, or leaves the type off. Re-label it ONLY when JSON was asked for — the body is never served as HTML.

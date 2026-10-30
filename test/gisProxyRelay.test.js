@@ -182,6 +182,15 @@ describe("C2. cleanSegments — traversal, encoded slashes, control characters",
   });
 });
 
+describe("C2b. only paths under /rest/services (or /rest/info) are relayed — a numeric last segment alone is not an ArcGIS endpoint", () => {
+  it("refuses non-ArcGIS paths that merely end like one", () => {
+    for (const rest of [["wp-admin", "post.php", "delete", "5"], ["api", "users", "logout", "0"], ["x", "y", "MapServer"], ["x", "FeatureServer", "0", "addToDefinition", "0"], ["x", "FeatureServer", "0", "refresh", "0"], ["rest", "MapServer", "0"], ["arcgis", "rest", "info", "x"], ["services", "x", "MapServer", "0"]])
+      expect(classifyPath(rest, "GET").ok, rest.join("/")).toBeFalsy();
+    for (const rest of [["arcgis", "rest", "services", "X", "MapServer", "0"], ["Geocortex", "Essentials", "REST", "sites", "Adair County (MO)", "map", "mapservices", "5", "rest", "services", "x", "MapServer"], ["arcgis", "rest", "info"]])
+      expect(classifyPath(rest, "GET").ok, rest.join("/")).toBe(true);
+  });
+});
+
 describe("C3. forceJsonFormat — an ArcGIS request never asks for HTML", () => {
   it("rewrites f=html (any case), a missing f, an unknown f and a doubled f to json; drops callback", () => {
     expect(forceJsonFormat("?f=html&where=1").text).toBe("?where=1&f=json");
@@ -193,6 +202,15 @@ describe("C3. forceJsonFormat — an ArcGIS request never asks for HTML", () => 
     expect(forceJsonFormat("?f=json&f=html").text).toBe("?f=json");
     expect(forceJsonFormat("?f=json&callback=alert(1)").text).toBe("?f=json");
     expect(forceJsonFormat("?f=json&CALLBACK=x").text).toBe("?f=json");
+  });
+  it("a non-canonical f is rewritten, never forwarded for the upstream to interpret (whitespace, control chars, `;` separators)", () => {
+    expect(forceJsonFormat("?f=json%20&where=1").text).toBe("?where=1&f=json");
+    expect(forceJsonFormat("?f=%20json").text).toBe("?f=json");
+    expect(forceJsonFormat("?f=json%0a").text).toBe("?f=json");
+    expect(forceJsonFormat("?F=JSON&where=1").text).toBe("?where=1&f=json");
+    expect(forceJsonFormat("?where=1;f=html").text).toBe("?where=1&f=json");
+    expect(forceJsonFormat("?f=json;f=html").text).toBe("?f=json");
+    expect(forceJsonFormat("where=1;f=html", { isQuery: false, addMissing: false }).text).toBe("where=1&f=json");
   });
   it("leaves an already-safe request byte-for-byte (a clean request is never reordered or re-encoded)", () => {
     for (const q of ["?f=json&where=1%3D1&outFields=*", "?where=NAME+LIKE+%27A%25%27&f=pjson", "?f=image&bbox=1,2,3,4", "?f=pbf", "?f=geojson"]) expect(forceJsonFormat(q).text).toBe(q);
@@ -209,6 +227,11 @@ describe("C4. classifyResponseType — only what the app consumes, never HTML or
     for (const t of ["application/json", "application/json; charset=UTF-8", "application/geo+json", "application/vnd.geo+json", "text/json"]) expect(classifyResponseType(t, "json").refuse, t).toBeUndefined();
     for (const t of ["image/png", "image/jpeg", "image/gif", "image/webp", "image/tiff"]) expect(classifyResponseType(t, "image"), t).toEqual({ type: t, image: true });
     expect(classifyResponseType("application/x-protobuf", "pbf").refuse).toBeUndefined();
+  });
+  it("never echoes the upstream's raw value: parameters and comma lists are dropped", () => {
+    for (const t of ["application/json; charset=x, text/html", "application/json;\ttext/html", 'application/json; x="<svg>"']) expect(classifyResponseType(t, "json").type, t).toBe("application/json; charset=utf-8");
+    // a `+json` structured suffix is JSON, and is re-issued as plain application/json; json-seq / jsonp / svg+xml+json are not JSON types and are refused
+    for (const t of ["application/json-seq", "application/jsonp", "image/svg+xml+json"]) expect(classifyResponseType(t, "json").refuse, t).toBeTruthy();
   });
   it("refuses HTML, SVG, XML, JavaScript, PDF and unknown types", () => {
     for (const t of ["text/html", "text/html; charset=utf-8", "image/svg+xml", "application/xhtml+xml", "application/xml", "text/xml", "application/javascript", "text/javascript", "application/pdf", "application/zip", "text/css", "image/x-icon"])
@@ -238,6 +261,7 @@ afterEach(() => vi.unstubAllGlobals());
 const H = "https://planyr.io/gis-proxy/www.bartowgis.org";
 const Q = `${H}/arcgis/rest/services/BartowZoning/MapServer/0/query`;
 const FORM = { "content-type": "application/x-www-form-urlencoded" };
+const RQ = "/arcgis/rest/services/B/MapServer/0/query";
 
 describe("C5. the relay against the attacks in the review (each paired with the legitimate request it must not block)", () => {
   it("CONTROL: a plain layer query is relayed, as JSON, with the security headers", async () => {
@@ -360,30 +384,30 @@ describe("D. redirects are re-checked against the allow-list", () => {
     expect((await out.json()).error).toMatch(/evil\.example\.com/);
   });
   it("a redirect to plain http is refused even for an allow-listed host", async () => {
-    const { out } = await run(`${Q}?f=json`, {}, () => res(301, { location: "http://www.bartowgis.org/a" }));
+    const { out } = await run(`${Q}?f=json`, {}, () => res(301, { location: "http://www.bartowgis.org/arcgis/rest/services/B/MapServer/0/query" }));
     expect(out.status).toBe(502);
   });
   it("a redirect to another allow-listed host is followed and its answer returned (and the second hop's TYPE is vetted too)", async () => {
-    const { out, calls } = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(301, { location: "https://maps.tdec.tn.gov/b?f=json" }) : res(200, JSONCT, '{"ok":1}')));
+    const { out, calls } = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(301, { location: "https://maps.tdec.tn.gov/arcgis/rest/services/B/MapServer/0/query?f=json" }) : res(200, JSONCT, '{"ok":1}')));
     expect(out.status).toBe(200);
     expect(await out.json()).toEqual({ ok: 1 });
-    expect(calls.map((c) => c.url)).toEqual([`https://www.bartowgis.org/arcgis/rest/services/BartowZoning/MapServer/0/query?f=json`, "https://maps.tdec.tn.gov/b?f=json"]);
-    const html = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(301, { location: "https://maps.tdec.tn.gov/b" }) : res(200, { "content-type": "text/html" }, "<html>")));
+    expect(calls.map((c) => c.url)).toEqual([`https://www.bartowgis.org/arcgis/rest/services/BartowZoning/MapServer/0/query?f=json`, "https://maps.tdec.tn.gov/arcgis/rest/services/B/MapServer/0/query?f=json"]);
+    const html = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(301, { location: "https://maps.tdec.tn.gov/arcgis/rest/services/B/MapServer/0/query" }) : res(200, { "content-type": "text/html" }, "<html>")));
     expect(html.out.status).toBe(502);
   });
   it("a relative Location stays on the same host", async () => {
-    const { calls } = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(302, { location: "/b" }) : res(200, JSONCT)));
-    expect(calls[1].url).toBe("https://www.bartowgis.org/b");
+    const { calls } = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(302, { location: "/arcgis/rest/services/B/MapServer/0/query" }) : res(200, JSONCT)));
+    expect(calls[1].url).toBe("https://www.bartowgis.org/arcgis/rest/services/B/MapServer/0/query?f=json");
   });
   it("gives up after MAX_REDIRECTS hops and when Location is missing", async () => {
-    const loop = await run(`${Q}?f=json`, {}, () => res(302, { location: "https://www.bartowgis.org/a" }));
+    const loop = await run(`${Q}?f=json`, {}, () => res(302, { location: "https://www.bartowgis.org/arcgis/rest/services/B/MapServer/0/query" }));
     expect(loop.out.status).toBe(502);
     expect(loop.calls.length).toBe(MAX_REDIRECTS + 1);
     const none = await run(`${Q}?f=json`, {}, () => res(302));
     expect(none.out.status).toBe(502);
   });
   it("a POST keeps its body across 307 and becomes a GET across 302", async () => {
-    const post = (status) => run(Q, { method: "POST", body: "f=json", headers: FORM }, (n) => (n === 1 ? res(status, { location: "https://www.bartowgis.org/q2" }) : res(200, JSONCT)));
+    const post = (status) => run(Q, { method: "POST", body: "f=json", headers: FORM }, (n) => (n === 1 ? res(status, { location: "https://www.bartowgis.org/arcgis/rest/services/B/MapServer/0/query" }) : res(200, JSONCT)));
     const keep = await post(307);
     expect(keep.calls[1].init.method).toBe("POST");
     expect(keep.calls[1].init.body).toBeTruthy();
@@ -391,10 +415,22 @@ describe("D. redirects are re-checked against the allow-list", () => {
     expect(drop.calls[1].init.method).toBe("GET");
     expect(drop.calls[1].init.body).toBeUndefined();
   });
+  it("a redirect to an allow-listed host's ADMIN / WRITE path is refused, GET or POST — the next hop is held to the first hop's rules", async () => {
+    for (const loc of ["https://www.bartowgis.org/arcgis/admin/services/x/delete", "https://www.bartowgis.org/arcgis/rest/services/x/FeatureServer/0/applyEdits?edits=%5B%5D&f=json", "https://www.bartowgis.org/wp-admin/post.php/delete/5", "https://www.bartowgis.org/arcgis/rest/services/x/../../admin"]) {
+      const g = await run(`${Q}?f=json`, {}, () => res(302, { location: loc }));
+      expect(g.out.status, loc).toBe(502);
+      expect(g.calls.length, loc).toBe(1);
+    }
+    const p = await run(Q, { method: "POST", body: "adds=%5B%7B%7D%5D&f=json", headers: FORM }, () => res(307, { location: "https://www.bartowgis.org/arcgis/rest/services/x/FeatureServer/0/applyEdits" }));
+    expect(p.out.status).toBe(502);
+    expect(p.calls.length).toBe(1); // the POST body was never replayed at the write endpoint
+    const html = await run(`${Q}?f=json`, {}, (n) => (n === 1 ? res(302, { location: `https://www.bartowgis.org${RQ}?f=html&callback=x` }) : res(200, JSONCT)));
+    expect(html.calls[1].url).toBe(`https://www.bartowgis.org${RQ}?f=json`); // the redirect's own query is vetted too
+  });
   it("redirectTarget and isRedirectStatus are the pure halves", () => {
     for (const s of [301, 302, 303, 307, 308]) expect(isRedirectStatus(s)).toBe(true);
     for (const s of [200, 304, 404, 500]) expect(isRedirectStatus(s)).toBe(false);
-    expect(redirectTarget(res(302, { location: "https://tnmap.tn.gov/x" }), "https://www.bartowgis.org/a", "GET").url).toBe("https://tnmap.tn.gov/x");
-    expect(redirectTarget(res(302, { location: "https://nope.example/x" }), "https://www.bartowgis.org/a", "GET").error).toMatch(/allow-list/);
+    expect(redirectTarget(res(302, { location: "https://tnmap.tn.gov/arcgis/rest/services/B/MapServer/0/query" }), "https://www.bartowgis.org/a", "GET").url).toBe("https://tnmap.tn.gov/arcgis/rest/services/B/MapServer/0/query?f=json");
+    expect(redirectTarget(res(302, { location: "https://nope.example/arcgis/rest/services/B/MapServer/0/query" }), "https://www.bartowgis.org/a", "GET").error).toMatch(/allow-list/);
   });
 });
