@@ -48,3 +48,15 @@ where name in ('work_mem', 'shared_buffers', 'max_wal_size', 'checkpoint_timeout
 -- Per-function overrides (browse sets work_mem = 12MB for itself only):
 select proname, proconfig from pg_proc
 where pronamespace = 'public'::regnamespace and proconfig::text ilike '%work_mem%';
+
+-- 6. TRACKED vs TOTAL — run this and section 1 together, twice, and subtract (B2559168 live finding).
+-- pg_stat_statements cannot see Supabase's own monitoring sessions (supabase_admin sets
+-- pg_stat_statements.track = none), so the database-wide temp_bytes in section 1 carries a FLOOR from
+-- sessions you cannot attribute (~2.6 MB/min, ~1.9 MB files, measured 2026-10-30 after the Food fix).
+-- Judge the APP by the tracked delta; report the database-wide delta and the untracked remainder separately.
+-- my_stat_reads is this very query spilling (reading pg_stat_statements spills ~1.9 MB at work_mem 2 MB):
+-- subtract its growth from the tracked delta.
+select now() as taken_at,
+  sum(temp_blks_written) * 8192 as tracked_temp_bytes,
+  sum(temp_blks_written) filter (where query ilike '%pg_stat_statements%') * 8192 as my_stat_reads_bytes
+from pg_stat_statements;
