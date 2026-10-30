@@ -149,6 +149,22 @@ describe("the MRPA corridor governs the Chattahoochee's 75-ft District band too,
     const t = nhd("Peachtree Creek", [[-84.5, 33.6], [-84.5, 33.9]]);
     expect(tier(streamBufferBands({ nhd: fc(t), district: DISTRICT, mrpa: fc(poly(MRPA_RING)) }), "district").length).toBe(1);
   });
+  it("LIVE 2026-10-30 (Atlanta): an UNNAMED perennial flowline that tracks the river's own centreline gets no band inside the corridor; a tributary far from the river keeps its band; its mouth is trimmed", () => {
+    // NHD's Chattahoochee there is an unbuffered 'artificial path' (ftype 558); the unnamed 460 lines beside it carried the 75-ft band for kilometres.
+    const river = line("Chattahoochee River", [[-84.5, 33.6], [-84.5, 33.7], [-84.5, 33.8], [-84.5, 33.9]]);
+    const braid = nhd(null, [[-84.5002, 33.62], [-84.5002, 33.7], [-84.5002, 33.85]]);
+    const trib = nhd("Peachtree Creek", [[-84.6, 33.8], [-84.55, 33.8], [-84.5, 33.8]]);
+    const bands = tier(streamBufferBands({ nhd: fc(braid, trib), rivers: fc(river), district: DISTRICT, mrpa: fc(poly(MRPA_RING)) }), "district");
+    expect(bands.some((b) => b.ring.every((p) => Math.abs(p[0] + 84.5002) < 0.0008)), "no band along the unnamed braid").toBe(false);
+    const tribBand = bands.find((b) => b.ring.every((p) => p[0] < -84.499));
+    expect(tribBand, "the tributary keeps a band").toBeTruthy();
+    expect(Math.max(...tribBand.ring.map((p) => p[0])), "…trimmed before it reaches the river").toBeLessThan(-84.5005);
+    expect(Math.max(...tribBand.ring.map((p) => p[0])), "…but only by about 65 m").toBeGreaterThan(-84.503);
+  });
+  it("without the DCA river lines the unnamed braid cannot be recognised (only the named cut applies)", () => {
+    const braid = nhd(null, [[-84.5002, 33.62], [-84.5002, 33.7]]);
+    expect(tier(streamBufferBands({ nhd: fc(braid), rivers: null, district: DISTRICT, mrpa: fc(poly(MRPA_RING)) }), "district").length).toBe(1);
+  });
   it("without the corridor polygon (it failed to load) nothing is cut", () => {
     const r = nhd("Chattahoochee River", [[-84.5, 33.6], [-84.5, 33.9]]);
     expect(tier(streamBufferBands({ nhd: fc(r), district: DISTRICT, mrpa: null }), "district").length).toBe(1);

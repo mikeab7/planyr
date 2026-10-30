@@ -74,14 +74,17 @@ async function infoText(panel, id) {
   await sleep(300);
   return menu.locator('[data-testid="layer-info-text"]').allInnerTexts().then((a) => a.join("\n"));
 }
-async function clickCentreForCard(re, tries = 6) {
+/* Click OFF the centre: the test account's own site pin can sit at the real-site coordinate, and a click on it opens the plan instead of the layer's card. */
+async function clickOffsetForCard(re, offsets = [[250, 150], [-100, 220], [300, -120]], tries = 3) {
   for (let i = 0; i < tries; i++) {
-    await sleep(3500);
-    const box = await page.evaluate(() => { const r = window.__mapFinderMap.getContainer().getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-    await page.mouse.click(box.x, box.y);
-    await sleep(900);
-    const t = await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => "");
-    if (re.test(t)) return t;
+    await sleep(6000);
+    for (const [dx, dy] of offsets) {
+      const c = await page.evaluate(() => { const r = window.__mapFinderMap.getContainer().getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      await page.mouse.click(c.x + dx, c.y + dy);
+      await sleep(2500);
+      const t = await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => "");
+      if (re.test(t)) return t;
+    }
   }
   return await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => "");
 }
@@ -97,10 +100,10 @@ try {
   // ── A · Oklahoma tribal cards ──
   const BAD = /NOT legal boundar|not a legal boundary|just statistical/i;
   const NO_CLAIM = /\b(is|are) (in|within|under|subject to) (the )?(tribal|Indian country)/i;
-  await goTo(36.9, -95.85, 10);
+  await goTo(36.9, -95.85, 12);
   let panel = await openFinderPanel();
   check("A · KNOWN-GOOD: the Tribal Areas row is offered at the Oklahoma site", await turnOn(panel, "ok_tribal"));
-  let card = await clickCentreForCard(/Courts/);
+  let card = await clickOffsetForCard(/Courts/);
   console.log("--- Oklahoma site card ---\n" + card + "\n---");
   check("A · a card opened with Name / Type / Courts", /Name/.test(card) && /Type/.test(card) && /Courts/.test(card));
   check("A · it says the OTSA is the Census representation drawn with the tribe", /Tribal Statistical Area \(OTSA\)[^\n]*Census representation/.test(card));
@@ -108,7 +111,7 @@ try {
   check("A · it carries the counsel sentence and no site-level claim", /unsettled and fact-specific/.test(card) && /does not say whether a site is or is not under tribal jurisdiction/.test(card) && !NO_CLAIM.test(card));
   check("A · the old blanket 'statistical, not a legal boundary' wording is gone", !BAD.test(card));
   await goTo(36.667, -96.337, 11);
-  card = await clickCentreForCard(/Osage Reservation/);
+  card = await clickOffsetForCard(/Osage Reservation/);
   console.log("--- Pawhuska card ---\n" + card + "\n---");
   check("A · Pawhuska: the Osage Reservation card opened", /Osage Reservation/.test(card));
   check("A · it is a legal area in Census's classification, not 'statistical'", /legal area in Census's classification/.test(card) && !/statistical/i.test(card));
@@ -157,27 +160,28 @@ try {
   await goTo(34.1613, -84.0733, 14);
   panel = await openFinderPanel();
   check("C · KNOWN-GOOD: the Protected Rivers row is offered at Buford Dam", await turnOn(panel, "ga_protected_rivers"));
-  const below = verts.filter(([x, y]) => y > 34.14 && y < 34.165 && x > -84.1 && x < -84.07).sort((a, b) => b[1] - a[1])[0];
+  const near = verts.filter(([x, y]) => y > 34.14 && y < 34.165 && x > -84.1 && x < -84.07).sort((a, b) => b[1] - a[1]);
+  const projected = (pts) => page.evaluate((ps) => { const m = window.__mapFinderMap, bx = m.getContainer().getBoundingClientRect(); return ps.map(([x, y]) => { const q = m.latLngToContainerPoint([y, x]); return [bx.left + q.x, bx.top + q.y]; }).filter(([x, y]) => x > bx.left + 40 && x < bx.right - 40 && y > bx.top + 40 && y < bx.bottom - 40); }, pts);
   let cardC = "";
-  if (below) {
-    await goTo(below[1], below[0], 16);
-    for (let t = 0; t < 8 && !/Metropolitan River Protection Act/.test(cardC); t++) {
-      await sleep(4000);
-      const pts = await page.evaluate(() => {
-        const m = window.__mapFinderMap, bx = m.getContainer().getBoundingClientRect(), out = [];
-        m.eachLayer((l) => {
-          if (!(l && l.options && String(l.options.color || "").toLowerCase() === "#0369a1" && l._latlngs)) return;
-          const ring = Array.isArray(l._latlngs[0]) ? l._latlngs[0] : l._latlngs;
-          for (let i = 0; i + 1 < ring.length; i++) { const a = m.latLngToContainerPoint(ring[i]), b = m.latLngToContainerPoint(ring[i + 1]); for (let f = 0; f <= 1; f += 0.05) { const x = bx.left + a.x + (b.x - a.x) * f, y = bx.top + a.y + (b.y - a.y) * f; if (x > bx.left + 60 && x < bx.right - 60 && y > bx.top + 60 && y < bx.bottom - 60) out.push([x, y]); } }
-        });
-        return out.filter((_, i) => i % 4 === 0).slice(0, 30);
-      });
-      for (const [x, y] of pts) { await page.mouse.click(x, y); await sleep(500); cardC = await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => ""); if (/Metropolitan River Protection Act/.test(cardC)) break; }
+  if (near.length) {
+    await goTo(near[0][1], near[0][0], 17);
+    for (let t = 0; t < 6 && !/Metropolitan River Protection Act/.test(cardC); t++) {
+      await sleep(5000);
+      for (const [x, y] of await projected(near.slice(0, 12))) { await page.mouse.click(x, y); await sleep(600); cardC = await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => ""); if (/Metropolitan River Protection Act/.test(cardC)) break; }
     }
   }
   console.log("--- Buford Dam card ---\n" + cardC + "\n---");
   check("C · the line just below the dam opens the MRPA card", /Metropolitan River Protection Act/.test(cardC));
   check("C · it prints no '100-ft river corridor' rule", !/100-ft river corridor/.test(cardC));
+  // the lake side of the dam, inside the OLD bounding box but not on the reach: no line is there, so a click must not open an MRPA card
+  await page.keyboard.press("Escape");
+  await goTo(34.169, -84.079, 17);
+  await sleep(4000);
+  const lake = await page.evaluate(() => { const r = window.__mapFinderMap.getContainer().getBoundingClientRect(); return [r.left + r.width / 2 + 200, r.top + r.height / 2 + 120]; });
+  await page.mouse.click(lake[0], lake[1]);
+  await sleep(2500);
+  const lakeCard = await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => "");
+  check("C · the lake side of Buford Dam (inside the old box) opens no MRPA card", !/Metropolitan River Protection Act/.test(lakeCard));
 
   // ── D · Florida citations ──
   await freshFinder();
