@@ -160,7 +160,7 @@ try {
     for (const [key, st] of Object.entries(sh.styles)) { const [r, c] = at(key); if (!cells.some((x) => x.r === r && x.c === c)) cells.push({ r, c, v: null, ht: ALIGN_HT[st.align], indent: st.indent || 0 }); }
     await page.evaluate(([cs, widths, colW]) => {
       const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet();
-      ws.getRange(0, 0, 60, 14).clear();
+      ws.getRange(0, 0, 60, 14).clear(); ws.showRows(0, 60); ws.showColumns(0, 14); ws.setFrozenRows(0); ws.setFrozenColumns(0);   // the checks before this one leave a hidden row / freeze behind (undo-redo-all) — a hidden row has no pixels to measure
       widths.forEach((w, i) => ws.setColumnWidth(i, w || colW));
       for (const x of cs) { const s = {}; if (x.ht) s.ht = x.ht; if (x.indent) s.pd = { l: 2 + 14 * x.indent }; ws.getRange(x.r, x.c).setValue(x.v == null ? { s } : { v: x.v, s }); }
       ws.scrollToCell(0, 0); ws.getRange(0, 0).activate();
