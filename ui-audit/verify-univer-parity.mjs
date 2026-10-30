@@ -41,7 +41,8 @@ function seedWorkbook() {
 // ── harness plumbing ────────────────────────────────────────────────────────────────────────────────────────────────────
 let server, browser, page;
 const results = [];
-const record = (id, label, status, detail = "") => { results.push({ id, label, status, detail }); console.log(`${status.padEnd(10)} ${id.padEnd(22)} ${label}${detail ? "  ::  " + detail : ""}`); };
+export const results_ = results;
+export const record = (id, label, status, detail = "") => { results.push({ id, label, status, detail }); console.log(`${status.padEnd(10)} ${id.padEnd(22)} ${label}${detail ? "  ::  " + detail : ""}`); };
 
 async function startSandbox() {
   const res = await fetch(`${BASE}/ui-audit/univer-sandbox/index.html`).catch(() => null);
@@ -56,7 +57,12 @@ const ev = (fn, arg) => page.evaluate(fn, arg);
 const inSheet = (body, arg) => page.evaluate(`((arg) => { const api = window.__planyrUniverRead.api(); const ws = api.getActiveWorkbook().getActiveSheet(); return (${body.toString()})(api, ws, arg); })(${JSON.stringify(arg ?? null)})`);
 const wait = (ms) => page.waitForTimeout(ms);
 
+/** Where the checklist runs: the sandbox host by default; verify-univer-live.mjs binds the real signed-in app instead. */
+export function bind({ page: p, reset: r, savedLast: sl, flushSave: fs } = {}) { if (p) page = p; if (r) resetImpl = r; if (sl) savedLastImpl = sl; if (fs) flushSaveImpl = fs; }
+let resetImpl = null, savedLastImpl = null, flushSaveImpl = null;
+export { seedWorkbook, checks };
 async function reset(workbook = seedWorkbook()) {
+  if (resetImpl) return resetImpl(workbook);
   await wait(450);                                              // let any debounced save from the previous check land first
   await ev(([wb]) => { window.__saved.length = 0; window.__notices = []; window.__sandboxLoad(wb, {}); }, [workbook]);
   await wait(500);
@@ -85,8 +91,8 @@ const val1 = async (r, c) => { const x = await inSheet((api, ws, [rr, cc]) => { 
 const type = async (text, { enter = true } = {}) => { await page.keyboard.type(text, { delay: 8 }); if (enter) await page.keyboard.press("Enter"); await wait(150); };
 const press = async (k) => { await page.keyboard.press(k); await wait(180); };
 const heldClick = async (r, c, key) => { const p = await pt(r, c); await page.keyboard.down(key); await page.mouse.click(p.x, p.y); await page.keyboard.up(key); };
-const savedLast = () => ev(() => window.__saved[window.__saved.length - 1] || null);
-const flushSave = async () => { await ev(() => window.__planyrUniverRead.flush()); await wait(200); };
+const savedLast = () => (savedLastImpl ? savedLastImpl() : ev(() => window.__saved[window.__saved.length - 1] || null));
+const flushSave = async () => { if (flushSaveImpl) return flushSaveImpl(); await ev(() => window.__planyrUniverRead.flush()); await wait(200); };
 
 const checks = [];
 const check = (id, label, fn) => checks.push({ id, label, fn });
@@ -495,4 +501,6 @@ async function main() {
   if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ at: new Date().toISOString(), tally, results }, null, 2));
   process.exit(tally.FAIL ? 1 : 0);
 }
-main().catch((e) => { console.error(e); if (server) server.kill(); process.exit(1); });
+if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  main().catch((e) => { console.error(e); if (server) server.kill(); process.exit(1); });
+}
