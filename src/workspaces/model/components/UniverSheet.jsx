@@ -37,6 +37,7 @@ import {
   workbookToUniver, univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
 } from "../lib/univerBridge.js";
 import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
+import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 
 const SAVE_DEBOUNCE_MS = 300;
 const STRUCTURE_OPS = {
@@ -84,6 +85,8 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       });
       L.univer = univer; L.univerAPI = univerAPI;
       L.injector = univer.__getInjector();
+      // The Excel keys the free Univer build lacks (Ctrl+1, Ctrl+Shift+$%!~#, Shift/Ctrl+Space, Ctrl+9/0, Ctrl+Plus/Minus, Ctrl+;, Alt key-tips…)
+      L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
 
       const load = (wb) => {
         const migrated = migrateWorkbook(wb);
@@ -179,6 +182,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         api: () => (e2e() ? univerAPI : null),
         sidecar: () => (e2e() ? L.sidecar : null),
         flush: () => { if (e2e()) flush(); return e2e(); },
+        excelKeys: () => (e2e() ? { registered: L.excelKeys && L.excelKeys.registered, tips: L.excelKeys && L.excelKeys.keyTips.state, run: (id) => L.excelKeys.runAction(id) } : null),
       };
     } catch (err) {
       setError(err);
@@ -194,6 +198,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       try { L.mo && L.mo.disconnect(); } catch (_) {}
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
+      try { L.excelKeys && L.excelKeys.dispose(); } catch (_) {}
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
       try { L.univer && L.univer.dispose(); } catch (_) {}
       L.univer = null; L.univerAPI = null; L.unitId = null;

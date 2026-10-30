@@ -7,7 +7,7 @@
 **Univer can carry the Spreadsheet, and it fixes the exact kind of bug that cost you the afternoon — but it is not Excel either, and moving over would be a real project (roughly 12–16 sessions), not a switch flip.**
 
 - **What it fixes, with real keystrokes in a real browser:** Ctrl+Z while typing, a bare letter just typing (no fullscreen), row numbers and column letters that can't be edited, clicking a header to select the whole row or column (plus drag, Shift+click and the corner box), Ctrl+click for a second range, drag-selecting past the edge (it scrolls in all four directions), clearing a cell without the neighbour's text jumping, copy / paste / cut with formulas following, Excel's own clipboard, the fill handle, F2, F4, Alt+Enter, Ctrl+Enter, Ctrl+D / Ctrl+R, Ctrl+A twice, undo / redo across all of it.
-- **What it does not give you, because the free build doesn't have it:** indent (the cell has no indent at all), Ctrl+1, the Ctrl+Shift number-format keys, Shift+Space / Ctrl+Space, Ctrl+9 / Ctrl+0, Ctrl+Plus / Ctrl+Minus, Ctrl+; and Ctrl+5, and the Alt key-tips. Univer can be extended, so these are buildable, but they are work — they are the same keys you just fought to get right in the old grid.
+- **What the free build did not give you, and what has happened since:** indent (the cell has no indent at all) is still open. Ctrl+1, the Ctrl+Shift number-format keys, Shift+Space / Ctrl+Space, Ctrl+9 / Ctrl+0, Ctrl+Plus / Ctrl+Minus, Ctrl+; and Ctrl+5, and the Alt key-tips were all missing in the spike run and have since been built as ONE Planyr plugin on Univer's own command and shortcut services (`src/workspaces/model/lib/univerExcelKeys/`, cutover step 2) — see the Alt paths below.
 - **One place it is *different* from Excel on purpose:** dragging an already-selected row or column header **moves** it (Excel only does that with Shift held).
 - **What it costs:** the first time you flip the switch your browser downloads about 1.8 MB of compressed code (more only if needed); the sheet takes a couple of seconds to appear instead of under one; Planyr's own formula engine is 3–4× faster than Univer's (both are well under a second at 5,000 formulas); the project's build now needs a lot more memory.
 - **What stays safe:** with the switch off the old grid is **byte-for-byte identical** (screenshots compared against the build before this work). Saving goes through exactly the same path as today. Nothing of yours was touched — every test used throwaway data on the test account.
@@ -26,7 +26,7 @@
 
 ## Excel-parity checklist
 
-Run with real keystrokes and mouse (never fake key events) against the real component; the grid is a canvas, so state is read back through Univer's own programming interface (its "facade"). Result tally: 29 work · 14 are not in the free build · 1 differs from Excel. Items driven through that interface rather than the toolbar (merge, freeze, filter, sort, formats, wrap, sizes, hide) test that the *engine* does it, not that each toolbar button is wired — I looked at the toolbar and right-click menus (Start / Formulas / Data / View; Copy, Paste Special, Clear, Insert, Delete, Hide, Width, Fit-for-data, Freeze, Sort are all there) but did not click every button.
+Run with real keystrokes and mouse (never fake key events) against the real component; the grid is a canvas, so state is read back through Univer's own programming interface (its "facade"). Result tally (after the Excel-keys plugin, 2026-10-30): 42 work · 1 is not in the free build (indent — cutover step 3) · 1 differs from Excel (header drag — step 1). Before the plugin it was 29 · 14 · 1. Items driven through that interface rather than the toolbar (merge, freeze, filter, sort, formats, wrap, sizes, hide) test that the *engine* does it, not that each toolbar button is wired — I looked at the toolbar and right-click menus (Start / Formulas / Data / View; Copy, Paste Special, Clear, Insert, Delete, Hide, Width, Fit-for-data, Freeze, Sort are all there) but did not click every button.
 
 | Checklist item | Result | What the run saw |
 |---|---|---|
@@ -42,26 +42,26 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 | Ctrl+B bold | **Works** | toggles on and off |
 | Ctrl+I italic | **Works** | italic on |
 | Ctrl+U underline | **Works** | underline on |
-| Ctrl+5 strikethrough | **Not in the free build** | no effect (style stays "none"): Ctrl+5 is not bound |
-| Ctrl+1 Format Cells dialog | **Not in the free build** | no Format Cells dialog (Univer formats from the toolbar and the number-format menu) |
-| Ctrl+Shift+$ currency | **Not in the free build** | no binding: number format stayed "" |
-| Ctrl+Shift+% percent | **Not in the free build** | no binding: number format stayed "" |
-| Ctrl+Shift+! number | **Not in the free build** | no binding: number format stayed "" |
-| Ctrl+Shift+~ general | **Not in the free build** | no binding: number format stayed "" |
-| Ctrl+Shift+# date | **Not in the free build** | no binding: number format stayed "" |
-| Ctrl+Shift+& outline border, Ctrl+Shift+_ remove border | **Not in the free build** | no binding for border shortcuts |
+| Ctrl+5 strikethrough | **Works** | added by the Planyr Excel-keys plugin (NEW-1): line-through on, one Ctrl+Z removes it, a second Ctrl+5 toggles it off; also fires inside the cell editor like Ctrl+B/I/U |
+| Ctrl+1 Format Cells dialog | **Works** | opens Univer's number-format panel (Format types, Confirm / Cancel) — the plugin binds the key to Univer's own panel; Alt H N does the same |
+| Ctrl+Shift+$ currency | **Works** | `$#,##0.00` on every cell of the selection (A1 shows $1.00); one Ctrl+Z restores the sheet exactly |
+| Ctrl+Shift+% percent | **Works** | `0%` (Excel's own); one undo step |
+| Ctrl+Shift+! number | **Works** | `#,##0.00`; one undo step |
+| Ctrl+Shift+~ general | **Works** | back to General (A1 shows 1); one undo step |
+| Ctrl+Shift+# date | **Works** | `d-mmm-yy`; one undo step |
+| Ctrl+Shift+& outline border, Ctrl+Shift+_ remove border | **Works** | outline of A1:B2 puts top+left on A1 and bottom+right on B2 only, nothing inside; Ctrl+Shift+_ clears it; each one undo step |
 | Ctrl+A twice (data region, then everything) | **Works** | first press A1:C5, second press everything |
-| Shift+Space (row) and Ctrl+Space (column) | **Not in the free build** | neither chord changes the selection (Shift+Space and Ctrl+Space are not bound; use the header click) |
+| Shift+Space (row) and Ctrl+Space (column) | **Works** | one cell → the whole row / whole column; a 2×2 block → both rows / both columns whole |
 | Ctrl+Shift+Arrow | **Works** | selected A1:A5 |
-| Ctrl+Plus / Ctrl+Minus (insert / delete) | **Not in the free build** | Ctrl+Plus / Ctrl+Minus are not bound (insert and delete are in the right-click menu) |
-| Ctrl+9 / Ctrl+0 (hide row / column) | **Not in the free build** | no Ctrl+9 / Ctrl+0 binding (hide is in the header right-click menu) |
+| Ctrl+Plus / Ctrl+Minus (insert / delete) | **Works** | a whole row or column inserts / deletes at once; on cells Excel's shift prompt appears (Shift cells right / down / Entire row / Entire column; letter accelerators; Enter = default, Esc = nothing changes); the numpad keys too; two separate ranges are refused in Excel's words; each one undo step |
+| Ctrl+9 / Ctrl+0 (hide row / column), Ctrl+Shift+9 / Ctrl+Shift+0 (unhide) | **Works** | row 3 and column C hid; the unhide chords un-hid them across a selection spanning them; each hide one undo step |
 | F2 | **Works** | F2 kept the text and appended ("alphaX") |
 | F4 | **Works** | =A1 → =$A$1 |
 | Alt+Enter | **Works** | "a⏎b" in one cell (Univer stores the break as a carriage return; the bridge saves it as a newline) |
 | Ctrl+Enter | **Works** | A7:A9 all 7 |
 | Ctrl+D and Ctrl+R | **Works** | A2:A4 = 1 and C1:E1 = alpha |
-| Ctrl+; (today's date) | **Not in the free build** | Ctrl+; is not bound |
-| Alt key-tips (Alt H O I …) — expected missing | **Not in the free build** | pressing Alt on its own shows no key-tip badges; Alt H O I does nothing |
+| Ctrl+; (today's date), Ctrl+Shift+; (the time) | **Works** | a real date value (Excel serial, `m/d/yyyy`) and a real time-of-day (`h:mm AM/PM`), not text; a cell already formatted keeps its format; one undo step |
+| Alt key-tips (Alt H O I …) | **Works** | Alt alone shows the key-tip strip and badges on the toolbar buttons; Esc backs out one level; the Alt keyup is cancelled so Windows browsers don't focus their menu bar; Alt+Enter stays a chord. Every path in the shared table runs (see below) |
 | Copy / paste inside the sheet with formatting; one value pasted into a whole range | **Works** | "alpha" pasted with its bold; one value pasted into D6:D9 |
 | Paste from Excel (a real Excel HTML clipboard) with formatting | **Works** | 13 cells pasted from an Excel HTML clipboard (first row ["Item","Cost","Share",null]); the header arrived bold on a rgb(255,255,0) fill |
 | Cut moves the cell and the formulas pointing at it follow | **Works** | A1 moved to G1 and B3 now reads =G1+A2 |
@@ -74,6 +74,8 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 | (extra) Site.* / Plan.* / Comp.* project names resolve and recompute | **Works** | dotted names evaluate ([25,100001,"#N/A","#NAME?"]), recompute on change ([40,100001]), and are never saved as the workbook's own names |
 | (extra) No request to any Univer host | **Works** | 0 requests to any Univer host during the whole run |
 
+
+**The Alt paths that now run on the Univer grid** (the table is the SAME one the old grid and the Keyboard Shortcuts page use — `lib/keyTips.js` — so there is one list, true for both): H O I / H O A autofit column / row · H O W / H O H width / height (a number prompt) · H B A / N / O / T borders · H H fill colour and H F C font colour (open the toolbar\'s own palette) · H A L / C / R and T / M / B alignment · H W wrap · H M M / C / U merge, merge & centre, unmerge · H I R / C and H D R / C insert / delete row / column · H E A / F / C clear all / formats / contents · H S S / O / F sort A→Z, Z→A, filter · W F F / R / C freeze · H 0 / H 9 decimals · H K comma · H P percent · H 1 / 2 / 3 bold / italic / underline · H N number-format panel. **Two honest limits:** H 5 / H 6 (indent) say "Indent isn\'t available in the new grid yet" until cutover step 3 registers `planyr.excel.indent-decrease` / `-increase` (the plugin runs a Univer command of that name if one exists); and Univer\'s colour palette opens and is then driven with the arrow keys and Enter — Excel\'s gallery, not a typed letter. **Keys of the old grid with no Univer equivalent yet, named and not silent** (`UNIVER_UNSUPPORTED_CHORDS` in `bindings.js`, unit-tested): Alt+= AutoSum, F4 repeat-last outside the editor, Shift+F11, Ctrl+PgUp / PgDn (the host\'s tab switching), Ctrl+S (the host save path). Browser-level effects — Ctrl+0 / Ctrl+Plus / Ctrl+Minus not zooming the page — are a `preventDefault` a headless browser cannot show; the live check records what it can and says so.
 
 "Not in the free build" means the key demonstrably did nothing in the run (or the control does not exist). A harness that can only see "nothing happened" cannot tell *unbound* from *bound but broken*, so read these as "does not work today".
 
@@ -158,7 +160,7 @@ These are against localhost, so the real internet adds the download. The live ru
 Estimated **12–16 sessions**, in this order — gaps first, because they are what you will notice, and retirement last:
 
 1. **Harden the save path** (1–1.5): flush edits before export, tab switch and unmount; live-verify file mode and org workbooks; confirm the Planyr undo stack and Univer's undo agree.
-2. **Fill the Excel-key gaps as one Planyr plugin on Univer** (2): Ctrl+1 and number-format dialog, the Ctrl+Shift format keys, Shift+Space / Ctrl+Space, Ctrl+9 / 0, Ctrl+Plus / Minus, Ctrl+;, Ctrl+5, copy-above, Alt key-tips.
+2. **Fill the Excel-key gaps as one Planyr plugin on Univer** (2) — **DONE 2026-10-30 (B2573632):** Ctrl+1 and number-format dialog, the Ctrl+Shift format keys, Shift+Space / Ctrl+Space, Ctrl+9 / 0, Ctrl+Plus / Minus, Ctrl+;, Ctrl+5, copy-above, Alt key-tips. 32 strict checks in `ui-audit/lib/univerExcelKeysChecks.mjs`, every one red on the build before the plugin.
 3. **Decide indent** (1): draw it as paragraph indent in the cell, or drop the feature.
 4. **Fix the header-drag-moves difference** (0.5) and the load time — prune the unused language files, try the background worker (1).
 5. **Look** (1–3): keep Univer's toolbar with the Planyr theme (cheap) or drive a Planyr-styled toolbar from Univer's interface (the flat strip you approved).

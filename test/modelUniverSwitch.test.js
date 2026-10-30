@@ -69,7 +69,12 @@ describe("what the Univer code may import", () => {
   });
   it("only UniverSheet.jsx imports @univerjs/*; everything else reaches it through the lazy boundary", () => {
     const importers = walk("src").filter((f) => /from\s+["']@univerjs\/|import\s+["']@univerjs\/|import\(["']@univerjs\//.test(read(f)));
-    expect(importers).toEqual(["src/workspaces/model/components/UniverSheet.jsx"]);
+    // The Excel-keys plugin (NEW-1) is part of the same lazy chunk: UniverSheet.jsx is its only importer (asserted below).
+    expect(importers).toEqual([
+      "src/workspaces/model/components/UniverSheet.jsx",
+      "src/workspaces/model/lib/univerExcelKeys/actions.js",
+      "src/workspaces/model/lib/univerExcelKeys/index.js",
+    ]);
   });
   it("ModelApp loads UniverSheet with React.lazy and never statically (so it can only ride its own chunk)", () => {
     const app = read("src/workspaces/model/ModelApp.jsx");

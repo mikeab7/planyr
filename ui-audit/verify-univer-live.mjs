@@ -100,7 +100,10 @@ try {
     await page.evaluate(() => { window.__ev = []; const api = window.__planyrUniverRead.api(); (window.__evOff || []).forEach((f) => f.dispose && f.dispose()); window.__evOff = ["SheetEditStarted", "SheetEditEnded"].map((k) => api.addEvent(api.Event[k], () => window.__ev.push(k))); });
   };
   bind({ page, reset: liveReset });
-  const LIVE_IDS = ["undo-typing", "bare-letter", "headers-fixed", "header-select", "ctrl-click", "key-bold", "key-italic", "key-underline", "key-select-all", "key-f2", "key-f4", "key-alt-enter", "key-ctrl-enter", "key-fill", "clip-internal", "clip-cut", "fill-handle", "undo-redo-all"];
+  const LIVE_IDS = ["undo-typing", "bare-letter", "headers-fixed", "header-select", "ctrl-click", "key-bold", "key-italic", "key-underline", "key-select-all", "key-f2", "key-f4", "key-alt-enter", "key-ctrl-enter", "key-fill", "clip-internal", "clip-cut", "fill-handle", "undo-redo-all",
+    // the Excel keys the Planyr plugin adds (NEW-1, B2573632) — the same strict checks as the sandbox run
+    "key-strike", "key-format-cells", "key-currency", "key-percent", "key-number", "key-date", "key-general", "key-border", "key-row-col", "key-insert-delete", "key-hide", "key-today", "key-copy-above",
+    "excel-keys-editor-guard", "excel-keys-namebox-guard", "alt-keytips", "alt-h-o-i", "alt-h-o-a", "alt-h-o-w", "alt-h-o-h", "alt-h-b-a-n-o-t", "alt-h-h-h-f-c", "alt-h-a-l-c-r-t-m-b", "alt-h-w", "alt-h-m-m-u-c", "alt-h-i-r-c-h-d-r-c", "alt-h-e-a-f-c", "alt-h-s-s-o-f", "alt-w-f-f-r-c", "alt-h-0-h-9-h-k-h-p-h-1-3-h-n"];
   // KNOWN-GOOD ARM for coordinates on the real page
   await liveReset();
   const pt = await page.evaluate(() => { const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet(); const r = ws.getRange(2, 2).getCellRect(); const o = typeof r === "string" ? JSON.parse(r) : r; const cv = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: cv.left + o.x + o.width / 2, y: cv.top + o.y + o.height / 2 }; });
