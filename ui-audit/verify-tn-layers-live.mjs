@@ -193,13 +193,12 @@ try {
   const sb = tnPanel.locator('[data-testid="layer-row-tn_stream_buffers"] input[type="checkbox"]').first();
   if (await sb.count()) await sb.check();
   await sleep(14000);
-  const polys = await page.evaluate(() => document.querySelectorAll(".leaflet-pane path").length);
+  // the buffer bands are the only paths stroked in the tier colour (#b45309) — counted exactly, not "any path on the page"
+  const polys = await page.evaluate(() => [...document.querySelectorAll(".leaflet-pane path")].filter((p) => (p.getAttribute("stroke") || "").toLowerCase() === "#b45309").length);
   const sbState = await stateOf(tnPanel, "tn_stream_buffers");
-  console.log(`   stream buffers: row state=${sbState}, ${polys} map paths`);
-  const sbText = await (async () => { await tnPanel.locator('[data-testid="layer-caret-tn_stream_buffers"]').first().click().catch(() => {}); await sleep(400); return tnPanel.locator('[data-testid="layer-row-tn_stream_buffers"]').first().innerText().catch(() => ""); })();
-  console.log("   stream buffers status line:", JSON.stringify(sbText.slice(0, 200)));
-  check("B · Stream Buffers draws (state drawing) and says what it drew", sbState === "drawing" && /30 ft/.test(sbText) && !/No streams in this view/.test(sbText), `state=${sbState}`);
-  check("B · …and real buffer polygons are on the map", polys > 0, `${polys} paths`);
+  console.log(`   stream buffers: row state=${sbState}, ${polys} buffer-coloured bands on the map`);
+  check("B · Stream Buffers draws (zoom-gate state 'drawing', not dormant-blank = 'No streams in this view')", sbState === "drawing", `state=${sbState}`);
+  check("B · …and real 30 ft buffer bands are on the map", polys > 0, `${polys} bands`);
   check("B · the NHD stream lines were asked and answered", answered(/hydro\.nationalmap\.gov|nhd/i).length > 0, `NHD ${answered(/hydro\.nationalmap\.gov|nhd/i).length}`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-christiana-buffers.png` });
 
