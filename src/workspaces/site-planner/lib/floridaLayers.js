@@ -21,11 +21,18 @@ export const relayUrl = (url) => String(url).replace(/^https:\/\//, `${FLORIDA_R
 
 const FL = { states: ["FL"] };
 /* The agencies publish ALL-CAPS names and addresses; a card prints them in words (a value with any lowercase letter is left exactly as written). */
-const KEEP_CAPS = new Set(["LLC", "INC", "LP", "LLP", "II", "III", "IV", "NW", "NE", "SW", "SE", "FPL", "FDOT", "USA", "FL", "MD", "SR", "US", "CR", "PGA", "DBA", "DEP", "AT&T", "SFWMD", "SWFWMD", "SJRWMD", "SRWMD", "NWFWMD", "WMD", "WCD", "FWC"]);
+const KEEP_CAPS = new Set(["LLC", "INC", "LP", "LLP", "II", "III", "IV", "NW", "NE", "SW", "SE", "FPL", "FDOT", "USA", "FL", "MD", "SR", "US", "CR", "PGA", "DBA", "DEP", "AT&T", "SFWMD", "SWFWMD", "SJRWMD", "SRWMD", "NWFWMD", "WMD", "WCD", "FWC", "USACE", "FEC", "DD", "BCB"]);
+/* Street / road abbreviations that have no vowels but are words, not acronyms ("Ft", "St", "Hwy"). */
+const WORD_ABBR = new Set(["ST", "FT", "MT", "DR", "RD", "HWY", "BLVD", "PKWY", "PKY", "CT", "LN", "PL", "CIR", "TRL", "STE", "JR", "TPKE", "CNL", "CNLS", "BRK", "CRK"]);
+/* A token stays upper-case when it is a known acronym, when it is a canal / road id mixing letters and digits ("C-24D", "L-35"), or when it is a vowel-less run of letters — the shape every district and
+ * canal-authority acronym has ("NSLRWCD", "LWDD", "FPFWCD") and no ordinary name has. Everything else is title-cased. */
+const upperToken = (w) => KEEP_CAPS.has(w.toUpperCase())
+  || (/\d/.test(w) && /[a-z]/.test(w) && !/^\d+(st|nd|rd|th)$/.test(w))
+  || (/^[a-z]{2,}$/.test(w) && !/[aeiouy]/.test(w) && !WORD_ABBR.has(w.toUpperCase()));
 export function niceCase(v) {
-  const t = String(v == null ? "" : v).trim();
+  const t = String(v == null ? "" : v).replace(/\s+/g, " ").trim();
   if (!t || /[a-z]/.test(t)) return t;
-  return t.toLowerCase().replace(/[a-z0-9&']+/g, (w) => (KEEP_CAPS.has(w.toUpperCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).replace(/(\d)(St|Nd|Rd|Th)\b/g, (_m, d, suf) => d + suf.toLowerCase());
+  return t.toLowerCase().replace(/[a-z0-9&']+/g, (w) => (upperToken(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).replace(/(\d)(St|Nd|Rd|Th)\b/g, (_m, d, suf) => d + suf.toLowerCase());
 }
 
 const first = (v) => String(v == null ? "" : v).split(/[\r\n]+/)[0].trim();
@@ -182,7 +189,7 @@ export const FLORIDA_LAYERS = {
     minZoom: 13, color: "#0284c7", weight: 1.6, opacity: 0.55,
     styleFn: (_p, opacity) => ({ color: "#0284c7", weight: 1.6, opacity, fill: false }),
     ...hoverCommon, hoverTitle: "Canal or stream", hoverSource: "SFWMD",
-    hoverFields: [{ names: ["NAME", "ALIAS", "NHD_GNIS_NAME"], label: "Name" }, { names: ["OWNER"], label: "Owner", format: (p) => niceCase(p.OWNER) }, { names: ["OPER_MAINT"], label: "Operated by", format: (p) => niceCase(p.OPER_MAINT) }],
+    hoverFields: [{ names: ["NAME", "ALIAS", "NHD_GNIS_NAME"], label: "Name", format: (p) => niceCase(p.NAME || p.ALIAS || p.NHD_GNIS_NAME) }, { names: ["OWNER"], label: "Owner", format: (p) => niceCase(p.OWNER) }, { names: ["OPER_MAINT"], label: "Operated by", format: (p) => niceCase(p.OPER_MAINT) }],
     note: "SFWMD's map of the canal and stream network in its 16 counties (the NHD, edited on the District's aerials). A canal beside the site is a possible discharge outlet and a right-of-way / setback question — see Canal & Levee Rights-of-Way. Owner and operator are filled in for only part of the network (a drainage district, the District, a county), so a blank is not 'privately owned'.",
     infoCaveat: "A hydrography map, not a survey of the canal bank or its right-of-way, and not proof the canal can take your discharge. Confirm the owner and any permit with SFWMD and the local drainage district.",
     role: "line", group: "flood", order: 6,
@@ -356,7 +363,7 @@ export const FLORIDA_LAYERS = {
     minZoom: 8, color: "#0369a1", weight: 2, opacity: 0.55,
     styleFn: (props, opacity) => ({ color: "#0369a1", weight: 2, opacity, fill: false, dashArray: /future/i.test(String(props && props.SISTYPE_DE || "")) ? "8 5" : null }), // planned ("Future") corridors are dashed
     ...hoverCommon, hoverTitle: "SIS highway", hoverSource: "FDOT",
-    hoverFields: [{ names: ["FACILITY"], label: "Facility" }, { names: ["SISTYPE_DE"], label: "Type" }, { names: ["COUNTY"], label: "County" }],
+    hoverFields: [{ names: ["FACILITY"], label: "Facility", format: (p) => niceCase(p.FACILITY) }, { names: ["SISTYPE_DE"], label: "Type" }, { names: ["COUNTY"], label: "County" }],
     note: "The highways on FDOT's Strategic Intermodal System — the state's designated high-priority freight and passenger corridors (interstates, the Turnpike, major connectors). Freight-oriented industrial sites cluster on them; a driveway or median opening onto a state road needs an FDOT connection permit, and FDOT's access-management rules apply on state roads.",
     infoCaveat: "SIS is a state planning designation, not a measure of truck volume or a guarantee of access. Confirm the access class and connection rules with the FDOT district office.",
     role: "line", group: "access", order: 6,
@@ -370,7 +377,7 @@ export const FLORIDA_LAYERS = {
     styleFn: browardWellfieldStyle, simplifyFactor: 0.5, fetchAll: true,
     legend: [{ label: "Zone 1 — innermost", color: BROWARD_WELLFIELD_RAMP[1] }, { label: "Zone 2", color: BROWARD_WELLFIELD_RAMP[2] }, { label: "Zone 3 — outermost", color: BROWARD_WELLFIELD_RAMP[3] }],
     ...hoverCommon, hoverTitle: "Wellfield protection zone", hoverSource: "Broward County",
-    hoverFields: [{ names: ["ZONE"], label: "Zone" }, { names: ["LABEL"], label: "Wellfield" }],
+    hoverFields: [{ names: ["ZONE"], label: "Zone" }, { names: ["LABEL"], label: "Wellfield", format: (p) => niceCase(p.LABEL) }],
     note: "Broward County's regulatory zones around public water-supply wells. For a well on the county's 2001 map the zones are the mapped ones; for a later well, Zone 1 is 250 ft, Zone 2 out to 500 ft and Zone 3 out to 1,320 ft (the county's own layer description of its wellfield ordinance). The ordinance restricts how regulated substances are stored, handled, used and disposed of inside the zones — generally tightest nearest the well — which matters for tenant uses (chemicals, fuel, hazardous-materials storage).",
     infoCaveat: "Screening only: Broward County's Environmental Permitting Division determines the zone and any use restriction for a parcel. Zone edges are drawn from the county's model, not surveyed.",
     role: "area", group: "environmental", order: 20,
@@ -382,8 +389,8 @@ export const FLORIDA_LAYERS = {
     styleFn: mdcWellfieldStyle, simplifyFactor: 0.5, where: "TRAVELTIME IN ('010','030','100','210')",
     legend: [{ label: "10-day travel time", color: MDC_TRAVEL_RAMP["010"] }, { label: "30-day", color: MDC_TRAVEL_RAMP["030"] }, { label: "100-day", color: MDC_TRAVEL_RAMP["100"] }, { label: "210-day", color: MDC_TRAVEL_RAMP["210"] }],
     ...hoverCommon, hoverTitle: "Wellfield protection area", hoverSource: "Miami-Dade County",
-    hoverFields: [{ names: ["TRAVELTIME"], label: "Travel time" }, { names: ["NAME"], label: "Wellfield" }],
-    identifyCard: (props) => ({ title: "Wellfield protection area", rows: [{ label: "Travel time to the well", text: mdcTravelDays(props.TRAVELTIME) ? `${mdcTravelDays(props.TRAVELTIME)} days` : "" }, { label: "Wellfield", text: props.NAME }] }),
+    hoverFields: [{ names: ["TRAVELTIME"], label: "Travel time" }, { names: ["NAME"], label: "Wellfield", format: (p) => niceCase(p.NAME) }],
+    identifyCard: (props) => ({ title: "Wellfield protection area", rows: [{ label: "Travel time to the well", text: mdcTravelDays(props.TRAVELTIME) ? `${mdcTravelDays(props.TRAVELTIME)} days` : "" }, { label: "Wellfield", text: niceCase(props.NAME) }] }),
     note: "Miami-Dade County's wellfield protection areas, drawn as groundwater travel-time contours to a public supply well (10, 30, 100 and 210 days). Chapter 24 of the Code of Miami-Dade County restricts land uses that could pollute the aquifer inside them, tightest nearest the well. Matters for industrial tenants that store fuel, solvents or other regulated substances.",
     infoCaveat: "Screening only: Miami-Dade County applies the restriction to a parcel. Travel-time contours are modelled and are revised by ordinance.",
     role: "area", group: "environmental", order: 21,

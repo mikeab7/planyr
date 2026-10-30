@@ -329,3 +329,24 @@ describe("review pass 4 stays fixed", () => {
     expect(layers).toMatch(/const sf = \(f\) => \(isPointFeature\(f\) \? pointSymbolOptions\(cfg, oo\) : featureBaseStyle\(cfg, oo\)\); lyr\._originalStyle = sf; lyr\.setStyle\(sf\);/);
   });
 });
+
+describe("review pass 5 stays fixed — one acronym-aware formatter for every shouted name", () => {
+  it("keeps district / canal-authority acronyms, canal ids and state-road numbers, and still words ordinary names", () => {
+    const cases = {
+      "NLWCD CANAL": "NLWCD Canal", "NSLRWCD C-24D": "NSLRWCD C-24D", "LWDD L-35": "LWDD L-35", "CBRWCD S-12": "CBRWCD S-12", "FPFWCD": "FPFWCD",
+      "USACE": "USACE", "USACE/SFWMD": "USACE/SFWMD", "715 FARMS DD": "715 Farms DD", "BCB": "BCB", "US 27/SR 25": "US 27/SR 25", "SR 826": "SR 826",
+      "NW 44TH ST LLC": "NW 44th St LLC", "FT L  PROSPECT": "Ft L Prospect", "WESTSIDE": "Westside", "HIATUS RD": "Hiatus Rd", "NORTH NEW RIVER CANAL": "North New River Canal",
+      "ACME IMPROVEMENT DISTRICT": "Acme Improvement District", "CITY OF SUNRISE-SPRINGTREE GOLF COURSE": "City Of Sunrise-Springtree Golf Course",
+    };
+    for (const [raw, want] of Object.entries(cases)) expect(niceCase(raw), raw).toBe(want);
+    expect(niceCase("Already Mixed Case")).toBe("Already Mixed Case");
+  });
+  it("the canal name, SIS facility and wellfield cards run through it", async () => {
+    const { hoverRows } = await import("../src/workspaces/site-planner/lib/featureHover.js");
+    const text = (id, props, label) => (hoverRows(ALL_LAYERS[id], props).find((r) => r.label === label) || {}).text;
+    expect(text("fl_sfwmd_canals", { NAME: "NLWCD CANAL" }, "Name")).toBe("NLWCD Canal");
+    expect(text("fl_sis_highways", { FACILITY: "US 27/SR 25" }, "Facility")).toBe("US 27/SR 25");
+    expect(text("fl_wellfield_broward", { LABEL: "FT L  PROSPECT" }, "Wellfield")).toBe("Ft L Prospect");
+    expect(text("fl_wellfield_miamidade", { NAME: "WESTSIDE" }, "Wellfield")).toBe("Westside");
+  });
+});
