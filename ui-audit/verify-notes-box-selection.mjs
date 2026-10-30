@@ -539,14 +539,21 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   const c13 = await centreOf(page, 0);
   await page.mouse.click(c13.x, c13.y);
   await pacedWait(page, 300);
-  const selectedWash = await page.evaluate(() =>
-    parseFloat(getComputedStyle(document.querySelector('[data-testid="note-anchor"]')).backgroundColor.match(/[\d.]+\)$/)?.[0] || "0"));
+  const paint = () => page.evaluate(() => {
+    const cs = getComputedStyle(document.querySelector('[data-testid="note-anchor"]'));
+    return { bg: cs.backgroundColor, border: parseFloat(cs.borderTopWidth) };
+  });
+  const selectedPaint = await paint();
   await page.mouse.click(c13.x, c13.y);
   await pacedWait(page, 300);
-  const editingWash = await page.evaluate(() =>
-    parseFloat(getComputedStyle(document.querySelector('[data-testid="note-anchor"]')).backgroundColor.match(/[\d.]+\)$/)?.[0] || "0"));
-  ok(`${label} · ⛔ SELECTED (stage 1) AND EDITING (stage 2) PAINT DIFFERENTLY`,
-    editingWash > selectedWash, `selected wash ${selectedWash} → editing wash ${editingWash}`);
+  const editingPaint = await paint();
+  /* NEW-3 (owner 2026-10-30): a clicked box shows ONLY its border and handles — no fill. The two stages
+     are therefore told apart by the heavier editing border alone (they used to differ by wash too). */
+  const clear = (c) => c === "rgba(0, 0, 0, 0)" || c === "transparent";
+  ok(`${label} · ⛔ NO FILL on a selected or an editing box — border and handles only`,
+    clear(selectedPaint.bg) && clear(editingPaint.bg), `selected ${selectedPaint.bg} · editing ${editingPaint.bg}`);
+  ok(`${label} · ⛔ SELECTED (stage 1) AND EDITING (stage 2) STILL PAINT DIFFERENTLY — by border weight`,
+    editingPaint.border > selectedPaint.border, `selected border ${selectedPaint.border}px → editing border ${editingPaint.border}px`);
 
   await ctx.close();
 }

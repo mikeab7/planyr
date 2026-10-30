@@ -504,6 +504,8 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     default height while every word kept its size — a formatting bug wearing a spacing bug's
     clothes. Harness: **audit-notes-enter-inherit** (38 checks, real keys, judged on the stored
     document, both tiers printed side by side); decision unit-tested in `test/notesEnterInherit.js`.
+- **LINE-SPACING POPOVER (NEW-1/NEW-2, B2556416/B2556417, 2026-10-30):** the toolbar's spacing button opens a panel whose choices are `SPACING_LINE_OPTIONS` in `lib/notesSpacing.js` — **0.8 / 0.9 / 1.0 / 1.15 / 1.50 / 2.0**, a 3 × 2 grid — with Before and After steppers on their own lines (side by side they overran the 216 px content box and the After "+" hung outside the panel). Every toolbar dropdown must stay inside itself and on screen from 390 to 1500 px wide; guard: the **verify-notes-spacing-popover-selection** harness under `ui-audit/`.
+  **A SELECTED OR EDITING BOX PAINTS NO FILL (NEW-3, B2556418)** — border and handles only; editing is the heavier border. Guard: the repo-root `test/` suite **notesSelectionNoFill**.
 - `lib/notesSpacing.js` — **HOW FAR APART THE LINES ARE (B391076).** A BLOCK property on paragraph
   and heading, never a text style: half a line cannot be one-and-a-half spaced. Written into the
   markup by one attribute (three that each wrote `style` would overwrite one another), so it saves,

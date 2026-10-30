@@ -406,11 +406,13 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    the same spot landed inside the first attempt's leftover and appeared to do nothing at all.
    It is outlined whenever it is empty, and while the caret is in it, it says what to do. The
    words are content, not a node — nothing here reaches the document, the Markdown or the PDF. */
-/* ⛔ SELECTED IS OBVIOUS AT A GLANCE (B421494) — a solid accent ring and a faint wash, so a set
-   of nine reads as one thing. It is a BORDER COLOUR on the existing border rather than an outline
+/* ⛔ SELECTED IS A BORDER AND HANDLES, NEVER A FILL (NEW-3, owner 2026-10-30: clicking a box tinted
+   the whole thing pink; he wants only the border and the handles). B421494 had added a faint wash
+   so a set of nine read as one thing; the solid ring alone does that, and a wash also tinted the
+   text under the selection highlight. It is a BORDER COLOUR on the existing border rather than an outline
    or a box-shadow: both of those paint outside the element's box, which would put chrome over the
    neighbouring box's controls and re-create the press-swallowing defect this module keeps hitting. */
-.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; background: color-mix(in srgb, var(--accent-notes) 8%, transparent); }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; }
 /* ⛔ SELECTED AND EDITING MUST NOT LOOK IDENTICAL (B1555152 part 1, owner report 2026-09-11:
    "sometimes it takes a double click, sometimes it takes a click, it's actually kinda odd").
    Measured: before this rule, selected-alone and selected-plus-editing painted the exact same
@@ -418,10 +420,10 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    mouse cursor glyph (grab vs text), which needs the pointer hovering the box to see and says
    nothing once the mouse has moved on. A box picked up (stage 1, Delete removes it) and a box you
    are actively typing in (stage 2) are two different things to be IN, and a glance has to be able
-   to tell them apart without touching anything. Editing gets a visibly heavier wash and border —
-   never outline/box-shadow (see the note above: both paint outside the box and would swallow a
+   to tell them apart without touching anything. Since NEW-3 (no fill on a selected box) editing is
+   told apart by its heavier border alone — never a fill, never outline/box-shadow (see the note above: both paint outside the box and would swallow a
    neighbour's controls). */
-.planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { border-width: 2px; background: color-mix(in srgb, var(--accent-notes) 16%, transparent); }
+.planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { border-width: 2px; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"] { border-color: var(--border-default); border-style: dashed; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within { border-color: var(--accent-notes); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within .planyr-anchor-content::after { content: "Type here"; position: absolute; left: 16px; top: 3px; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
