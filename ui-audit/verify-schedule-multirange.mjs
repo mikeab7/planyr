@@ -57,7 +57,10 @@ if (base) {
 } else {
   const { ensureVendored, rewriteCdn, serveVendored } = await import("./lib/vendorCdn.mjs");
   await ensureVendored();
-  const ROOT = new URL("../public/", import.meta.url).pathname;
+  // SEQ_ROOT=dist serves the COMPILED production page (npm run build first). ⛔ That is the build users get: it keeps `const`
+  // block-scoping, so a render-time read of a const declared LATER (a TDZ error — "Cannot access 'x' before initialization")
+  // only shows there; the in-browser-Babel page in public/ hides it. Run both.
+  const ROOT = new URL(process.env.SEQ_ROOT === "dist" ? "../dist/" : "../public/", import.meta.url).pathname;
   const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
   server = createServer(async (req, res) => {
     try {
@@ -90,6 +93,7 @@ await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json",
 await pacedWait(page, 700); await page.locator('[data-testid="history-panel"] button:has-text("Close")').click(); await pacedWait(page, 1500);
 await page.locator('.hdr-view button:has-text("Grid")').click(); await pacedWait(page, 800);
 
+await page.waitForSelector(GRID, { timeout: 30000 }).catch(async (e) => { await page.screenshot({ path: "/tmp/sched-live-fail.png" }); console.log("grid never appeared; url", page.url()); throw e; });
 // ── instruments ───────────────────────────────────────────────────────────────────────────────────────────
 const build = o => (o.build.commit || o.build.sha || JSON.stringify(o.build)).toString().slice(0, 9);
 const observe = () => page.evaluate(async () => {
