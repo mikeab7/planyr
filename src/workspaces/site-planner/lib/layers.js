@@ -1029,11 +1029,11 @@ export const AHJ_LAYERS = {
     role: "line", group: "jurisdiction", order: 1,
   },
   /* B2507065 (NEW-10) — Tennessee's county lines and DeSoto County's own outline, so a view on the Mississippi / Tennessee line names BOTH counties along it
-   * ("DeSoto Co." / "Shelby Co., TN"). Tennessee is the State's statewide layer (95 counties), offered in TN and, because the line sits at DeSoto's feet, in MS; the
+   * ("DeSoto Co." / "Shelby Co., TN"). Tennessee is the State's statewide layer (95 counties), offered in TN and, because the line sits at DeSoto's feet, in the Mississippi counties on the Tennessee line only (`stateRegions` → `ms_tn_line`); the
    * Mississippi row is the county server's own County Outline (ONE county — DeSoto — so it is limited to the DeSoto area; the rest of Mississippi has no county-line row yet). */
   tn_county: {
     kind: "vector", label: "County Boundaries (Tennessee)", mergeGroup: "counties_cities", source: "State of Tennessee (STS)",
-    url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"],
+    url: GIS_SOURCES.countyTn.serviceUrl, states: ["TN", "MS"], stateRegions: { MS: ["ms_tn_line"] }, // MS: only the counties on the Tennessee line (NEW-1 review) — Jackson / Tupelo / Pascagoula can never draw it
     minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
     note: "Tennessee county lines (State of Tennessee, all 95 counties). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
@@ -1218,7 +1218,7 @@ export const AHJ_LAYERS = {
     // source's own `query.minVectorZoom` (test/layerZoomGate pins the two together).
     minZoom: 12,
     opacity: 0.55,
-    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, 100 ft on a PROTECTED RIVER (average flow of 400 cfs or more — O.C.G.A. 12-2-8, Rule 391-3-16-.04, drawn from DCA's protected-river lines), and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. The wider rule governs. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
+    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, 100 ft on a PROTECTED RIVER (average flow of 400 cfs or more — O.C.G.A. 12-2-8, Rule 391-3-16-.04, drawn from DCA's protected-river lines — NOT on the Chattahoochee reach under the Metropolitan River Protection Act, where the MRPA rows govern, nor on tidal reaches under the Coastal Marshlands Protection Act, both of which the rule excludes), and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. The wider rule governs. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out — on a protected river several hundred feet wide the 100-ft band sits mostly in the water and badly understates the buffer. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
     role: "area", group: "flood", order: 3,
     floodTier: "hydrography", agency: "USGS / Georgia DNR",
   },
@@ -1683,7 +1683,21 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
      * touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
      * copy under the same id, and `setLatLngs` replaces the old one). So a held id is charged only for the vertices it GROWS by; a refused batch leaves the old geometry in place. */
     const held = new Map();
-    const heldSum = () => { let n = 0; for (const v of held.values()) n += v; return n; };
+    /* NEW-1 review (B2521584, finding 7): esri-leaflet takes a feature OFF the map when its cell leaves the view (`removefeature`) and puts it back with `addLayers` (`addfeature`, no
+     * `createLayers`), keeping the Leaflet layer in `_layers` for the next visit. The total is judged against what is ON the map, so a feature that left the view stops counting until it
+     * returns — otherwise a long pan accumulates every cell ever visited and a layer is refused as "too detailed" in a view that is not. `offMap` is that set; a `permanent` removal forgets it. */
+    const offMap = new Set();
+    const heldSum = () => { let n = 0; for (const [id, v] of held) if (!offMap.has(id)) n += v; return n; };
+    lyr.on("removefeature", (e) => {
+      const id = e && e.feature && e.feature.id;
+      if (id == null || !held.has(id)) return;
+      if (!offMap.has(id)) { drawn = Math.max(0, drawn - held.get(id)); offMap.add(id); }
+      if (e.permanent) { held.delete(id); offMap.delete(id); }
+    });
+    lyr.on("addfeature", (e) => {
+      const id = e && e.feature && e.feature.id;
+      if (id != null && offMap.has(id)) { offMap.delete(id); drawn += held.get(id) || 0; }
+    });
     lyr.createLayers = function (features) {
       let grow = 0, net = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what is on the map (judged against the layer total)
       const mine = [];
@@ -1693,7 +1707,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
         const id = f && f.id != null ? f.id : null;
         if (id != null && inBatch.has(id)) continue;   // the same id twice in ONE batch is one feature on the map
         if (id != null) inBatch.add(id);
-        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - held.get(id); }
+        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - (offMap.has(id) ? 0 : held.get(id)); }
         else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
         else { grow += fv; net += fv; }
         if (id != null) mine.push([id, fv]);
@@ -1703,10 +1717,10 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
         return undefined;   // refused: nothing is recorded, the old geometry stays on the map
       }
       drawn = Math.max(0, drawn + net);   // signed: a feature that comes back LIGHTER credits the total (a layer re-asked at several zooms must not ratchet up to a refusal)
-      for (const [id, fv] of mine) held.set(id, fv);
+      for (const [id, fv] of mine) { held.set(id, fv); offMap.delete(id); }
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { drawn = 0; held.clear(); });
+    lyr.on("remove", () => { drawn = 0; held.clear(); offMap.clear(); });
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;

@@ -368,4 +368,38 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     lyr.createLayers([{ id: 5, ...poly(100000) }]);                                                   // 550k > 500k — only if the total survived the re-ask
     expect(refused).toHaveLength(1);
   });
+  /* NEW-1 review of B2521584, finding 7: esri-leaflet takes a feature off the map when its cell leaves the view and puts it back with addLayers; the budget must follow what is ON the map */
+  it("budget: panning out and back — a cell that left the view stops counting, and counts again when it returns", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Pan", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    const leave = (ids, permanent = false) => ids.forEach((id) => lyr.fire("removefeature", { feature: { id }, permanent }));
+    const enter = (ids) => ids.forEach((id) => lyr.fire("addfeature", { feature: { id } }));
+    for (const id of [1, 2, 3, 4]) lyr.createLayers([{ id, ...poly(100000) }]);        // view A: 400k on the map (total 500k)
+    leave([1, 2, 3, 4]);                                                                  // pan to B
+    for (const id of [5, 6, 7, 8]) lyr.createLayers([{ id, ...poly(100000) }]);        // view B: 400k — 800k "ever seen" would be refused
+    expect(refused).toHaveLength(0);
+    leave([5, 6, 7, 8]); enter([1, 2, 3, 4]);                                             // pan back to A
+    lyr.createLayers([{ id: 9, ...poly(90000) }]);                                       // 490k on the map ≤ 500k
+    expect(refused).toHaveLength(0);
+    lyr.createLayers([{ id: 10, ...poly(20000) }]);                                      // 510k > 500k — A really is back on the map
+    expect(refused).toHaveLength(1);
+  });
+  it("budget: a re-delivery of a feature that is off the map is charged when it comes back, and a permanent removal forgets it", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Pan2", color: "#000", vertexBudget: 250000 }, 1, "pane");
+    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
+    for (const id of [1, 2, 3, 4]) lyr.createLayers([{ id, ...poly(100000) }]);        // 400k
+    lyr.fire("removefeature", { feature: { id: 1 }, permanent: false });                 // off the map: 300k
+    lyr.createLayers([{ id: 1, ...poly(100000) }]);                                      // delivered again → back on the map: 400k, not 500k+
+    lyr.createLayers([{ id: 11, ...poly(100000) }]);                                     // 500k, still within the total
+    expect(refused).toHaveLength(0);
+    lyr.createLayers([{ id: 12, ...poly(1000) }]);                                       // 501k → refused: the credit was not double-counted
+    expect(refused).toHaveLength(1);
+    lyr.fire("removefeature", { feature: { id: 2 }, permanent: true });                  // gone for good
+    lyr.createLayers([{ id: 12, ...poly(1000) }]);                                       // 401k + 1k: fits again
+    expect(refused).toHaveLength(1);
+  });
 });

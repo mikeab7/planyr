@@ -101,6 +101,10 @@ export function layerAvailableHere(cfg, scope = {}) {
     const answers = cfg.regions.map((r) => inRegion(r, loc));
     if (answers.every((a) => a === false)) return false;
   }
+  /* `stateRegions: { MS: ["ms_tn_line"] }` — a region scope that binds only in the listed state(s); every other state in `states` is wholly served. For a row whose source
+   * serves ALL of one state and only a border band of another (the Tennessee county lines: Tennessee, plus the Mississippi counties on its line). */
+  const sr = state && cfg.stateRegions && cfg.stateRegions[state];
+  if (Array.isArray(sr) && sr.length && loc && sr.map((r) => inRegion(r, loc)).every((a) => a === false)) return false;
   return true;
 }
 

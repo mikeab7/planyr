@@ -21,6 +21,7 @@
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { approvalDate } from "./desotoZoning.js";
 import { ROAD_AUTHORITY_COLORS } from "./jurisdiction.js";
+import { riverExclusionAt } from "./georgiaRiverExclusions.js";
 
 /* ⛔ NO ROW SETS `fields` (the outFields limiter). esri-leaflet keys every feature by its OBJECT ID, and a request that leaves the id field out of `outFields` gets features
  * with no id — they all collapse into ONE feature, so a layer returning 50 river segments drew exactly one (caught on the real map by verify-georgia-due-diligence, not by
@@ -219,11 +220,19 @@ export const GEORGIA_LAYERS = {
   ga_protected_rivers: row("gaProtectedRiver", {
     label: "Protected Rivers", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "line", order: 22, minZoom: 8, simplifyFactor: 1, color: "#0369a1", weight: 2.4, opacity: 0.55, legend: [{ label: "Protected river", color: "#0369a1" }],
     hoverTitle: "Protected river", hoverSource: "Georgia DCA", hoverFields: [{ names: ["FENAME"] }],
-    identifyCard: (props) => card(sentence(props && props.FENAME) || "Protected river",
-      [[{ label: "Rule", text: "A protected river (average flow of 400 cfs or more): local governments must keep a 100-ft natural vegetative buffer each side, measured from the banks (O.C.G.A. 12-2-8, Rule 391-3-16-.04). Turn on 'Stream Buffers' to see the band." }]],
-      "DCA's planning map — the local river-corridor ordinance governs."),
-    note: "Georgia's PROTECTED RIVERS — perennial streams averaging 400 cfs or more (O.C.G.A. 12-2-8; Rule 391-3-16-.04), compiled by DCA. Local governments adopt a river-corridor plan with a 100-ft natural vegetative buffer each side, measured from the banks. The 'Stream Buffers' layer draws that 100 ft; the county's ordinance governs the exceptions (road and utility crossings, existing uses).",
-    infoCaveat: "DCA's compiled lines (2003) — a planning map, not a survey; the buffer is measured from the bank, not this line.",
+    /* The rule's own exclusions come first: a segment covered by the Metropolitan River Protection Act or the Coastal Marshlands Protection Act is NOT a protected river for Rule 391-3-16-.04, so no
+     * 100-ft rule is printed there — the card says which Act governs (NEW-1 review of B2535200). */
+    identifyCard: (props, at) => {
+      const title = sentence(props && props.FENAME) || "Protected river";
+      const excl = riverExclusionAt(props && props.FENAME, at);
+      if (excl === "mrpa") return card(title, [[{ label: "Rule", text: "This reach of the Chattahoochee is under the Metropolitan River Protection Act, not the protected-river rule (Rule 391-3-16-.04 excludes it): the 2,000-ft corridor plan sets a 50-ft undisturbed buffer and a 150-ft impervious setback. Turn on the Chattahoochee MRPA rows to see them." }]], "DCA's planning map — the Act's corridor plan and the local ordinance govern.");
+      if (excl === "tidal") return card(title, [[{ label: "Rule", text: "This is a tidal reach: the Coastal Marshlands Protection Act (O.C.G.A. 12-5-280) governs the marsh and tidal waters, not the 100-ft protected-river buffer (Rule 391-3-16-.04 excludes it). Permits come from the Coastal Resources Division. Tidal reach is a screening estimate from the National Wetlands Inventory, good to about a kilometre." }]], "DCA's planning map — the Act's reach and the Coastal Resources Division govern.");
+      return card(title,
+        [[{ label: "Rule", text: "A protected river (average flow of 400 cfs or more): local governments must keep a 100-ft natural vegetative buffer each side, measured from the banks (O.C.G.A. 12-2-8, Rule 391-3-16-.04). Turn on 'Stream Buffers' to see the band — it is drawn from the centreline, so on a wide river it understates the buffer." }]],
+        "DCA's planning map — the local river-corridor ordinance governs.");
+    },
+    note: "Georgia's PROTECTED RIVERS — perennial streams averaging 400 cfs or more (O.C.G.A. 12-2-8; Rule 391-3-16-.04), compiled by DCA. Local governments adopt a river-corridor plan with a 100-ft natural vegetative buffer each side, measured from the banks. The 'Stream Buffers' layer draws that 100 ft from the centreline, so on a wide river it understates the buffer; the county's ordinance governs the exceptions (road and utility crossings, existing uses). The rule does NOT cover a segment under the Metropolitan River Protection Act (the Chattahoochee, Buford Dam to the Fulton/Douglas line) or the Coastal Marshlands Protection Act (the tidal reaches): DCA's lines run through both, but no 100-ft band is drawn on them.",
+    infoCaveat: "DCA's compiled lines (2003) — a planning map, not a survey; the buffer is measured from the bank, not this line. Tidal reach is a screening estimate from the National Wetlands Inventory.",
   }),
   ga_protected_mountains: row("gaProtectedMountain", {
     label: "Protected Mountains", source: "Georgia DCA — Environmental Planning (O.C.G.A. 12-2-8)", ...ENV, role: "area", order: 23, minZoom: 9, simplifyFactor: 2, cellSize: 16384, vertexBudget: 1500000, regions: ["ga_blue_ridge"], color: "#166534", styleFn: washStyle("#166534", 0.4, 0.5), legend: [{ label: "Protected mountain", color: "#166534" }],
