@@ -376,6 +376,7 @@ import { regionPathD, polylinesPathD } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
 import { followDrives } from "./lib/driveFollow.js";
+import { RAMP_DEFAULTS, RAMP_MAX_GRADE_PCT, RAMP_LAYOUTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampWidthFt, rampGradePct, rampLayout, rampDir, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, gradeText, rampGeometry, fitAlongTheWall } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import { roundaboutDiameterFor, roundaboutBandFor, normalizeRoundaboutD, ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D } from "./lib/roundabout.js";
@@ -561,7 +562,7 @@ import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/u
 import { BORDER_1, PondSection, ROWB6, SURF_RAISED } from "./lib/plannerShared.js";
 import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, POND_ADD_FILL_DEFAULT, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
 import { NumInput } from "./components/NumInput.jsx";
-import { ElNode, dimSlideFor, dockDoorRun, resolveElNeighbors } from "./components/elementRender.jsx";
+import { ElNode, dimSlideFor, dockDoorRun, rampSpansOnSide, resolveElNeighbors } from "./components/elementRender.jsx";
 import { CostDisclosure, DesignChangeSummaryCard, DrainagePanel, ProvenanceLegend, YieldPanel } from "./components/YieldDrainagePanels.jsx";
 
 /* NEW-1 — render-loop probe identities. Module-scope constants so naming a run costs no allocation
@@ -1414,10 +1415,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *   · a way OUT — whole-canvas replacements (undo / redo, a remote row, a plan load, a version restore, a seed adoption) call `setElsRaw`, because those
    *     RESTORE exact geometry and must never be re-interpreted. Because the road's follow is written into the same state as the field's move, ONE undo frame
    *     (pushHistory before the gesture) reverses both and redo replays both. */
+  // NEW-1 (2026-10-30) — a drive-in ramp's box is a cache derived from its host (lib/driveInRamp.js); the plan's dock height (the ramp's default
+  // rise) is read through this ref so the seam below never closes over `settings`, which is declared further down.
+  const rampDockInRef = useRef(48);
   const setEls = (u) => {
     const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
     const gestureBase = d && d.followBase ? d.followBase : null;
-    setElsRaw((prev) => followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad }));
+    setElsRaw((prev) => refitRamps(followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad }), (h) => dockSidesFor(h).dockSides, rampDockInRef.current));
   };
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
@@ -11564,7 +11568,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const out = outwardUnit(b, name);
     // Side-parking rows are excluded: relayoutWallKids re-derives their distance out from the wall
     // against the just-added strip, so hand-shifting them here would push them out twice (NEW-3).
-    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.sideParkSide && (!isWallStrip(x) || isFlushWallLayer(x)) && sideOfKid(b, x) === name).map((x) => x.id));
+    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.sideParkSide && (!isWallStrip(x) || isFlushWallLayer(x)) && sideOfKid(b, x) === name).map((x) => x.id));
     if (history) pushHistory();
     setEls((a) => relayoutWallKids([...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw], b));
     setSel({ kind: "el", id: b.id });
@@ -11773,7 +11777,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the court (and its trailer parking): the buffer / walk / road outside it stay, close in against the wall, and the
   // innermost of them heads the chain — a stack member stamped with this `stackSide` whose inboard neighbour is gone.
   // (Trailer parking can never head one: it opens off a court. A non-dock wall's layers carry no `noFit`.)
-  const findHeadIn = (arr, b, side) => findCourtIn(arr, b, side) || arr.find((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.noFit
+  const findHeadIn = (arr, b, side) => findCourtIn(arr, b, side) || arr.find((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && x.noFit
     && x.stackSide === side && !x.truckCourt && !x.forCourt && x.type !== "trailer"
     && !arr.some((y) => y.id === x.prevZone || y.id === x.forTrailer));
   // The full dock-zone chain on a side (head → outward), within `arr`.
@@ -11883,7 +11887,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const [nx, ny] = SIDE_N[side]; const isH = ny !== 0, s = isH ? ny : nx;
     let maxOut = (isH ? b.h : b.w) / 2;                       // the wall face itself
     const u = outwardUnit(b, side);
-    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && sideOfKid(b, x) === side).forEach((x) => {
+    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && sideOfKid(b, x) === side).forEach((x) => {
       const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
       const c = s * (isH ? l.y : l.x);                       // signed perp distance of the element centre
       const ax = rot2(x.w / 2, 0, x.rot || 0), ay = rot2(0, x.h / 2, x.rot || 0);
@@ -11897,7 +11901,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wallOutermostExtent = (arr, b, side) => {
     const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
     let best = null, bestOut = -Infinity;
-    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side
+    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side
       && (isWallStrip(x) || x.type === "road" || isWallTrailer(x) || x.sideParkSide || SIDE_PARK_PAD_TYPES.has(x.type))).forEach((x) => {
       const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot), out = sg * (isH ? l.y : l.x);
       if (out > bestOut) { bestOut = out; best = x; }
@@ -12206,7 +12210,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { cross, dimBX, dimBY } = hostAxisExtents(b, sw);
     const isVert = side === "left" || side === "right";
     const depth = isVert ? dimBX : dimBY;                // thickness: perpendicular to the wall
-    const box = wallStripBoxFor(b, side, bumpsOfHost(arr, b), depth, sw, isFlushWallLayer(sw) ? inboardReach(b, side, arr.filter((k) => k !== sw && k.attachedTo === b.id && !k.dogEar && !k.noFit && !isFlushWallLayer(k) && (isWallStrip(k) || isSideParkPad(k, b)) && sideOfKid(b, k) === side)) : 0);
+    const box = wallStripBoxFor(b, side, bumpsOfHost(arr, b), depth, sw, isFlushWallLayer(sw) ? inboardReach(b, side, arr.filter((k) => k !== sw && k.attachedTo === b.id && !k.dogEar && k.type !== "driveInRamp" && !k.noFit && !isFlushWallLayer(k) && (isWallStrip(k) || isSideParkPad(k, b)) && sideOfKid(b, k) === side)) : 0);
     const off = rot2(box.lx, box.ly, b.rot);
     return { ...sw, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
   };
@@ -12356,6 +12360,47 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
     placeDogEars(b, corners);
   };
+  /* ---- Drive-in ramps (NEW-1 / NEW-2, 2026-10-30 — lib/driveInRamp.js owns every rule) -------------------------------------------------------
+   * One building-attached `driveInRamp` element per ramp. The "+" beside a dock wall's buttons drops one on the nearest free door module to the wall's
+   * middle; the one beside a corner "+" drops it at the end of the belt by that corner; both then open its Properties. A wall that is not a dock wall
+   * takes a door MARKER instead (no ramp: the floor is at grade there). The door run it reads is `dockDoorRun` WITHOUT ramps — the module grid is the
+   * building's, not the ramps'. */
+  const rampsOnHost = (arr, b) => arr.filter((x) => x.type === "driveInRamp" && x.attachedTo === b.id);
+  const rampDoorRun = (b, side) => {
+    const grd = resolveGridSettings(b, settings);
+    const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
+    return dockDoorRun(b, side, els.filter((x) => x.attachedTo === b.id && x.dogEar), gg.lengthLines.map((l) => l.at), grd);
+  };
+  const planRampAt = (b, side, where) => {
+    const isDock = dockSidesOf(b).dockSides.includes(side);
+    const f = wallFrame(b, side);
+    const W = isDock ? RAMP_DEFAULTS.widthFt : DOOR_SIZES[RAMP_DEFAULTS.door].w;
+    const taken = rampsOnHost(els, b).filter((r) => r.ramp.side === side).map((r) => rampSpan(r.ramp, { marker: !isDock, dockHeightIn: rampDockIn }));
+    const run = isDock ? rampDoorRun(b, side) : null;
+    const lo = run ? run.startF : 0, hi = run ? run.endF : f.L;
+    const clear = (at) => at - W / 2 >= lo - 0.01 && at + W / 2 <= hi + 0.01 && taken.every((t) => at + W / 2 <= t.u0 + 0.01 || at - W / 2 >= t.u1 - 0.01);
+    const want = where === "start" ? lo + W / 2 : where === "end" ? hi - W / 2 : (lo + hi) / 2;
+    const stops = run ? moduleStops(run.doors) : [];
+    const grid = [];
+    for (let k = 0; k <= Math.ceil(f.L / 6); k++) { grid.push(want + k * 6); if (k) grid.push(want - k * 6); }
+    const cands = [...stops.slice().sort((a, c) => Math.abs(a - want) - Math.abs(c - want)), ...(stops.length ? [] : grid)];
+    return cands.find(clear) ?? null;
+  };
+  const addRamp = (b, side, where = null) => {
+    if (!b || b.type !== "building" || b.points || b.footEdit || !SIDE_N[side]) return;
+    const at = planRampAt(b, side, where);
+    if (at == null) { flashWarn("There is no free door module on that wall for a drive-in ramp.", 4000); return; }
+    const isDock = dockSidesOf(b).dockSides.includes(side);
+    const ramp = newRampRecord(side, at);
+    const ne = { id: uid(), type: "driveInRamp", attachedTo: b.id, noLabel: true, ramp, ...rampBox(b, ramp, { marker: !isDock, dockHeightIn: rampDockIn }) };
+    pushHistory();
+    setEls((a) => [...a, ne]);
+    setSel({ kind: "el", id: ne.id });
+    openInspector();
+    if (!isDock) flashWarn("That wall is not a dock wall (the floor is at grade), so this is a drive-in door marker only — there is no ramp.", 5000);
+  };
+  // Properties edits go through the host's own geometry: the patch lands on the `ramp` record and the write seam re-derives the box.
+  const setRampPatch = (id, patch) => { pushHistory(); setEls((a) => a.map((x) => (x.id === id ? { ...x, ramp: { ...x.ramp, ...patch } } : x))); };
   // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
   // from the kid's position (so legacy / untagged strips are still recognised).
   const sideOfKid = (b, kid) => {
@@ -12494,6 +12539,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
+    if (el.type === "driveInRamp") { setSel({ kind: "el", id }); return; } // a ramp's place is derived from its wall (set in Properties), so a drag has nothing to move
     if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
     /* NEW-2 — pushHistory() USED TO FIRE HERE, on pointer DOWN, before a single pixel of movement.
@@ -14259,6 +14305,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const gsFieldT = Number.isFinite(gsSettings.fieldT) ? Math.max(0, Math.min(1, gsSettings.fieldT)) : 0;
   const gsShrinkPct = Number.isFinite(gsSettings.shrinkPct) ? gsSettings.shrinkPct : null;
   const gsDockDrop = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
+  // NEW-1 (2026-10-30) — the plan's dock height (in) is a drive-in ramp's default rise. Keep the seam's ref current and re-fit the ramps' cached boxes when
+  // it changes (a derived cache, not an edit: no undo frame; identity-stable when nothing moved).
+  const rampDockIn = dockHeightInOf(settings);
+  rampDockInRef.current = rampDockIn;
+  useEffect(() => { setElsRaw((prev) => refitRamps(prev, (h) => dockSidesFor(h).dockSides, rampDockIn)); }, [rampDockIn]);
   const gsMedianGrade = fmElev.existGradeFt;
   // Owner-only grading layer: the gate, then the small always-loaded glue (settings, the setback polygon, a
   // ground sampler that does not need a drainage check to have run). All inert for every other account.
@@ -14272,7 +14323,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ROUND 4 (B2349120) — the rings that join the GRADING LIMIT without being graded planes: drive aisles / roads inside
   // the site and the walks / landscape strips hosted by a building. The graded planes themselves (FM_FILL_TYPES) join
   // through gsEls. Fresh array per render; useGradingBase memoises it on its value signature.
-  const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape" || e.type === "driveInRamp")) : null;
   const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
     if (e.type === "road") {
       try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), undefined) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
@@ -14292,9 +14343,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => { if (!grOn && grLimitEdit) setGrLimitEdit(null); }, [grOn, grLimitEdit]);
   const gsExistAt = fmGradeAt || (grOn && grBase.existAt) || (gsMedianGrade != null ? () => gsMedianGrade : null);
   const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : (grOn && grBase.existAt) ? grBase.existKey : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
-  const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type)).map((e) => {
+  const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type) || (grOn && e.type === "driveInRamp")).map((e) => {
     const r = ringOf(e);
     if (!r || r.length < 3) return null;
+    // NEW-3 (2026-10-30) — a drive-in ramp joins the grading ONLY while grading is on (grOn), as a pad member of its host building whose surface is the plane
+    // apron → FFE (lib/driveInRamp.js `rampGeometry`; the host's finish elevation is added inside the engine). A door-marker (non-dock wall) has no ramp.
+    if (e.type === "driveInRamp") {
+      const rh = els.find((h) => h.id === e.attachedTo && h.type === "building" && !h.points);
+      const rg = rh && e.ramp && dockSidesFor(rh).dockSides.includes(e.ramp.side) ? rampGeometry(rh, e.ramp, { dockHeightIn: rampDockIn }) : null;
+      return rg ? { id: e.id, type: "driveInRamp", ring: r, dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, ramp: rg, hostId: grHosts.get(e.id) ?? rh.id } : null;
+    }
     // Dock-stack members (court + its trailer strip) grade as ONE dockApron plane
     // anchored at the dock face of their HOST building (the effectivePadElev grouping).
     const host = (e.truckCourt || e.forCourt) && e.attachedTo ? els.find((x) => x.id === e.attachedTo) : null;
@@ -14348,7 +14406,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fmEffectivePadFt ?? "", gsDockDrop, gsFieldT, gsExistKey,
     gsApronRatio, gsDaylightAsap ? 1 : 0, gsEasementRings.map((r) => ringHash(r)).join(","),
     gsTarget ? `${Math.round(gsTarget.x)},${Math.round(gsTarget.y)}` : "",
-    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}`).join("|"),
+    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}${e.ramp ? `:r${e.ramp.riseFt.toFixed(2)}/${e.ramp.lengthFt.toFixed(1)}` : ""}`).join("|"),
     gsPondRings.map((r) => ringHash(r)).join(","), gsParcelRings.map((r) => ringHash(r)).join(","),
     ...(grOn ? [`gr:${grBase.sig}`, gsEls.map((e) => e.hostId ?? "").join(",")] : []),
   ].join("~");
@@ -18640,6 +18698,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      may fill, so a laptop does not have to give up half its canvas to reach the controls. Still
      site-size independent — nothing here reads the plan. */
   const featEditOpacity = featureEditOpacity(rppf, size.w);
+  /* NEW-2 (2026-10-30) — the small "drive-in ramp" button that sits beside the dock-wall "+ / −" pair and beside each purple corner "+": a wedge with an
+     arrow, smaller than they are, slate (not purple / amber) so it reads as its own thing. Same press discipline as every on-building control
+     (`data-el-action`, stop the press, swallow the double-click — CHROME-NEVER-EATS-A-PRESS). It is offset ALONG the wall from its neighbours so the
+     two never overlap; the grading spot tags move out of the way of these buttons, never the reverse. */
+  const RAMP_BTN_R = FEAT_CTRL_R * 0.78;
+  const rampGlyph = (key, cx, cy, title, onClick) => {
+    const r = RAMP_BTN_R;
+    return (
+      <g key={key} data-el-action="1" data-ramp-add="1" style={{ cursor: "pointer" }}
+        onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}
+        onDoubleClick={(e) => e.stopPropagation()}>
+        <title>{title}</title>
+        <circle cx={cx} cy={cy} r={r} fill="#475569" stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+        <path d={`M ${cx - r * 0.55} ${cy + r * 0.45} L ${cx + r * 0.55} ${cy + r * 0.45} L ${cx + r * 0.55} ${cy - r * 0.05} Z`} fill="#ffffff" />
+        <path d={`M ${cx - r * 0.5} ${cy - r * 0.2} L ${cx + r * 0.3} ${cy - r * 0.55} M ${cx + r * 0.05} ${cy - r * 0.6} L ${cx + r * 0.3} ${cy - r * 0.55} L ${cx + r * 0.28} ${cy - r * 0.28}`} fill="none" stroke="#ffffff" strokeWidth={Math.max(1, FEAT_CTRL_STROKE * 0.7)} strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    );
+  };
   const sideAddNodes = (() => {
     if (tool !== "select" || editingCorners || !featActiveId || !featEditOpacity) return null; // NEW-1 (B1264944): the mode's own crosshair, not a "+" button
     const el = els.find((x) => x.id === featActiveId);
@@ -18672,23 +18748,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
             const n = stackCountIn(els, el, name);
             const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
-            return featPair(`dock${name}`, pos, tan, {
-              canAdd: n < MAX_DOCK_ZONES, addColor: "#b45309",
-              addTitle: nextLabel ? `Extend out — add ${Math.round(depths[n])}′ ${nextLabel}` : "All dock zones added",
-              onAdd: () => addZoneOnSide(el, name),
-              canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
-              onRemove: () => removeOuterZoneOnSide(el, name),
-            });
+            const rOff = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;     // clear of the "+ / −" pair's outer edge, along the wall
+            return (
+              <g key={`dockw${name}`}>
+                {featPair(`dock${name}`, pos, tan, {
+                  canAdd: n < MAX_DOCK_ZONES, addColor: "#b45309",
+                  addTitle: nextLabel ? `Extend out — add ${Math.round(depths[n])}′ ${nextLabel}` : "All dock zones added",
+                  onAdd: () => addZoneOnSide(el, name),
+                  canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
+                  onRemove: () => removeOuterZoneOnSide(el, name),
+                })}
+                {!el.footEdit && rampGlyph(`rampw${name}`, pos.x + tan.x * rOff, pos.y + tan.y * rOff, "Add drive-in ramp", () => addRamp(el, name, null))}
+              </g>
+            );
           }
           // non-dock side (a short end, or the long side opposite single-load docks) → the
           // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses.
           const sw = empSideSidewalk(el, name), park = empSidePark(el, name);
-          return featPair(`end${name}`, pos, tan, {
-            canAdd: true, addColor: "#16a34a", addTitle: empSideAddTitle(el, name),
-            onAdd: () => growEmployeeSide(el, name, 1),
-            canRemove: !!(sw || park), removeTitle: park ? "Remove a parking row" : "Remove the sidewalk",
-            onRemove: () => growEmployeeSide(el, name, -1),
-          });
+          const rOffE = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;
+          return (
+            <g key={`endw${name}`}>
+              {featPair(`end${name}`, pos, tan, {
+                canAdd: true, addColor: "#16a34a", addTitle: empSideAddTitle(el, name),
+                onAdd: () => growEmployeeSide(el, name, 1),
+                canRemove: !!(sw || park), removeTitle: park ? "Remove a parking row" : "Remove the sidewalk",
+                onRemove: () => growEmployeeSide(el, name, -1),
+              })}
+              {!el.footEdit && rampGlyph(`rampe${name}`, pos.x + tan.x * rOffE, pos.y + tan.y * rOffE, "Add drive-in door (this wall is at grade — a door marker, no ramp)", () => addRamp(el, name, null))}
+            </g>
+          );
         })}
         {/* dog-ear bump-outs at each corner of every dock side — a single toggle (you only add
             one thing there, per the owner); needs room on BOTH axes (B225) */}
@@ -18702,7 +18790,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
             const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
             const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
-            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null);
+            // the ramp "+" for this corner sits beside the purple one, a little toward the wall's middle (never over the bump-out's own button)
+            const mo = rot2(nx * el.w / 2, ny * el.h / 2, el.rot), midS = f2p({ x: el.cx + mo.x, y: el.cy + mo.y });
+            let mx = midS.x - pos.x, my = midS.y - pos.y; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
+            const cOff = FEAT_CTRL_R + 4 + RAMP_BTN_R;
+            return (
+              <g key={`dogc${name}${sign}`}>
+                {featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null)}
+                {!el.footEdit && rampGlyph(`rampc${name}${sign}`, pos.x + mx * cOff, pos.y + my * cOff, "Add drive-in ramp", () => addRamp(el, name, sign < 0 ? "start" : "end"))}
+              </g>
+            );
           });
         })}
       </g>
@@ -18885,6 +18982,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
+    if (el.type === "driveInRamp") return null;       // a ramp's size and place come from its numbers in Properties (its grips would be undone by the wall fit)
     const cpx0 = f2p({ x: el.cx, y: el.cy });
     // A CENTERLINE road (B596/B597): a draggable handle at each clicked vertex. Drag to reshape
     // the alignment (Shift = 45° lock); click a handle to SELECT that vertex, then flip it
@@ -20767,7 +20865,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (one answer for a strip, road, trailer and a parking field alike).
     const wallSpan = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
     const extentOf = (x) => { const a = layerAlignOf(wallKidAlong(b, side, x), wallSpan); return { len: Math.round(a.len), max: Math.round(a.max), full: a.full, start: a.start, end: a.end, centre: a.centre }; };
-    els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
+    els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
       const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : isWallTrailer(x) ? "trailer" : null;
       if (!kind) return;
       const depth = kind === "road" ? (x.travelW ?? Math.max(1, depthOfKid(x) - 2 * (+x.curb || CURB))) : depthOfKid(x);
@@ -20787,7 +20885,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Returns the SAME array when nothing moves (no dirty churn).
   const repackFlushBeyond = (arr, b, side) => {
     const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
-    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
+    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
     const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
     const perp = (x) => { const l = local(x); return sg * (isH ? l.y : l.x); };
     const depth = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
@@ -21054,8 +21152,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const grd = resolveGridSettings(b, settings);
     const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
     const lenOffsets = gg.lengthLines.map((l) => l.at);
-    const doors = dockSidesFor(b).dockSides.reduce((sum, s) => sum + dockDoorRun(b, s, bumps, lenOffsets, grd).doors.length, 0);
-    return { ...area, bumpN: bumps.length, doors, grd, gg };
+    const rampsH = rampsOnHost(els, b), sidesB = dockSidesFor(b).dockSides;
+    const doors = sidesB.reduce((sum, s) => sum + dockDoorRun(b, s, bumps, lenOffsets, grd, rampSpansOnSide(rampsH, s, sidesB, settings)).doors.length, 0);
+    return { ...area, bumpN: bumps.length, doors, rampN: rampsH.length, grd, gg };
   };
   // NEW-7 — does this building carry any per-building column-grid override? (The panel no longer
   // edits them, but a plan saved with one must not hide it.) `resetBuildingGridOverrides` clears them.
@@ -28003,7 +28102,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               (renderElAppearance is the ONE body; the two call sites differ only by `roadPanel`).
               Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6), so the standalone section is suppressed for them.
               Car parking renders its own "Appearance" group inside the spec sheet (B1790016 NEW-1), so it is suppressed here too. */}
+          {!multiStyleable && selEl && selEl.type === "driveInRamp" && (() => {
+            // NEW-3 (2026-10-30) — the drive-in ramp's own panel. Everything it quotes is read from lib/driveInRamp.js off the HOST, so the panel, the
+            // canvas, the door belt and the grading plane cannot disagree; every edit is one history frame and the write seam re-derives the box.
+            const host = els.find((x) => x.id === selEl.attachedTo && x.type === "building" && !x.points) || null;
+            const rec = selEl.ramp || null;
+            if (!host || !rec) return <Section title={null}><div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>This ramp is no longer attached to a building.</div><button type="button" style={chip} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete</button></Section>;
+            const dockSides = dockSidesFor(host).dockSides, marker = !dockSides.includes(rec.side);
+            const court = els.find((x) => x.attachedTo === host.id && x.truckCourt && x.truckCourt.side === rec.side && !x.points);
+            const courtDepth = court ? (rec.side === "top" || rec.side === "bottom" ? hostAxisExtents(host, court).dimBY : hostAxisExtents(host, court).dimBX) : null;
+            const stackIds = new Set(els.filter((x) => x.attachedTo === host.id && (x.truckCourt || x.forCourt || x.forTrailer || x.prevZone || x.stackSide)).map((x) => x.id));
+            const flagRing = (x) => { try { return isCenterlineRoad(x) ? roadStripRing(x, settings, sharpFor(x), undefined) : ringOf(x); } catch (_) { return null; } };
+            const others = els.filter((x) => x.id !== selEl.id && x.id !== host.id && !stackIds.has(x.id))
+              .map((x) => ({ id: x.id, name: x.dogEar ? "the corner bump-out" : `the ${(TYPE[x.type]?.label || "another element").split(" / ")[0].toLowerCase()}`, ring: flagRing(x) }));
+            const allowedRings = parcels.filter((pc) => pc.active !== false && pc.points && pc.points.length >= 3).map((pc) => { const sb = parcelSetbacks(pc); return (sb.some((v) => v > 0) ? offsetPolygon(pc.points, sb) : null) || pc.points; });
+            const flags = rampFlags(host, rec, { dockSides, dockHeightIn: rampDockIn, courtDepthFt: courtDepth, others, allowedRings });
+            const sp = rampSpan(rec, { marker, dockHeightIn: rampDockIn });
+            const doorsNow = rampDoorRun(host, rec.side).doors, leaf = resolveGridSettings(host, settings).doorWidth;
+            const doorsTaken = marker ? 0 : doorsNow.filter((c) => Math.min(c + leaf / 2, sp.u1) - Math.max(c - leaf / 2, sp.u0) > 1).length;
+            return (
+              <Section title={null}>
+                <DriveInRampPanel ramp={rec} marker={marker} lengthFt={rampLengthFt(rec, rampDockIn)} riseIn={rampRiseFt(rec, rampDockIn) * 12} dockHeightIn={rampDockIn}
+                  doorsTaken={doorsTaken} flags={flags}
+                  onPatch={(patch) => {
+                    // turning it ALONG the wall, or flipping which way it runs, keeps the footprint on the wall (a door position that would overrun it slides in)
+                    const turning = patch.layout === "along" || (rampLayout(rec) === "along" && patch.dir != null);
+                    const fit = turning ? fitAlongTheWall({ ...rec, ...patch }, { L: wallFrame(host, rec.side).L, stops: moduleStops(doorsNow), dockHeightIn: rampDockIn, keepDir: patch.dir != null ? patch.dir : null }) : null;
+                    setRampPatch(selEl.id, fit ? { ...patch, ...fit } : patch);
+                  }}
+                  onAt={(n) => { const stops = moduleStops(doorsNow); const want = Number.isFinite(n) ? n : rec.at; setRampPatch(selEl.id, { at: Math.round((stops.length ? stops.reduce((b, v) => (Math.abs(v - want) < Math.abs(b - want) ? v : b), stops[0]) : want) * 100) / 100 }); }}
+                  onRise={(n) => setRampPatch(selEl.id, { riseIn: Number.isFinite(n) ? n : null })}
+                  onDelete={() => deleteSel(null, { entry: "panel:element" })} />
+              </Section>
+            );
+          })()}
           {!roadPanel && elAppearanceOn && renderElAppearance()}
+          {/* NEW-3 (2026-10-30) — a drive-in ramp has its own panel (above); the generic element card below is for everything else. */}
+          {selEl && selEl.type === "driveInRamp" ? null : (<>
           {!multiStyleable && selEl && (
             <Section title={null}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
@@ -28520,7 +28655,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <LoadingWallPicker b={b} bumps={bumpSpecs} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} onCorner={(side, sign) => toggleBumpCorner(b, side, sign)} />
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div data-testid="loading-type" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 600, color: txtPrimary }}>{loadingTypeLabel(b)}</div>
-                            <div data-testid="loading-doors" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{noDock ? "No dock doors" : `${f0(hm.doors)} dock ${hm.doors === 1 ? "door" : "doors"}`}</div>
+                            <div data-testid="loading-doors" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{noDock ? "No dock doors" : `${f0(hm.doors)} dock ${hm.doors === 1 ? "door" : "doors"}`}{hm.rampN ? ` · ${hm.rampN} drive-in` : ""}</div>
                             <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. Click a dashed corner to add a bump-out.</div>
                           </div>
                         </div>
@@ -28727,11 +28862,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const gg = computeBuildingGrid({ length: footprintLength(selEl), depth: footprintDepth(selEl), dock, grid: grd });
                       const lenOffsets = gg.lengthLines.map((l) => l.at);
                       const dogEars = els.filter((x) => x.attachedTo === selEl.id && x.dogEar);
-                      const total = dockSidesFor(selEl).dockSides.reduce((sum, s) => sum + dockDoorRun(selEl, s, dogEars, lenOffsets, grd).doors.length, 0);
+                      const rampsH = rampsOnHost(els, selEl), sidesB = dockSidesFor(selEl).dockSides;
+                      const total = sidesB.reduce((sum, s) => sum + dockDoorRun(selEl, s, dogEars, lenOffsets, grd, rampSpansOnSide(rampsH, s, sidesB, settings)).doors.length, 0);
                       return (
                         <>
                           {settings.showGrid && gg.summary && <>Column grid: <b style={{ color: PAL.ink }}>{gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′</b> typ{gg.summary.speedBay ? <> · speed bay {gg.summary.speedBay}′</> : ""} · {gg.summary.lengthCount} × {gg.summary.depthCount} bays<br /></>}
-                          Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ {grd.doorOC}′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}
+                          Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ {grd.doorOC}′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}{rampsH.length ? <span data-testid="drive-in-count"> · {rampsH.length} drive-in</span> : null}
                         </>
                       );
                     })()}
@@ -30321,6 +30457,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
             </Section>
           )}
+          </>)}
 
           {roadPanel && elAppearanceOn && renderElAppearance()}
 
@@ -31650,6 +31787,69 @@ function AutoPill({ on, onClick, label }) {
         border: `1px solid ${on ? "var(--accent-site)" : "var(--border-strong)"}`, background: on ? "var(--accent-site)" : "transparent", color: on ? "var(--on-accent-site)" : "var(--text-secondary)" }}>
       <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 5.2 4 7.6 8.5 2.6" /></svg>Auto
     </button>
+  );
+}
+/* Drive-in ramp Properties (NEW-3, 2026-10-30) — layout "A": a Ramp section (the choices), a Size & position section (what follows from them) and the
+ * shared Appearance section the generic inspector renders beside it. Presentational: every rule and number is lib/driveInRamp.js, passed in. */
+function DriveInRampPanel({ ramp, marker, lengthFt, riseIn, dockHeightIn, doorsTaken, flags, atMax, onPatch, onAt, onRise, onDelete }) {
+  const lay = rampLayout(ramp), horizWall = ramp.side === "top" || ramp.side === "bottom";
+  const note = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
+  const check = (key, label, on, tid) => (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm, fontSize: FONT_SIZE.control, color: "var(--text-primary)", cursor: "pointer" }}>
+      <input type="checkbox" data-testid={tid} checked={on} onChange={(e) => onPatch({ [key]: e.target.checked })} /> {label}
+    </label>
+  );
+  return (
+    <div data-testid="ramp-panel">
+      <StdSubLabel section="appearance">{marker ? "Door" : "Ramp"}</StdSubLabel>
+      {!marker && (
+        <Field label="Layout">
+          <SegmentedControl aria-label="Ramp layout" data-testid="ramp-layout" value={lay} onChange={(k) => onPatch({ layout: k })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
+            options={[{ key: "straight", label: "Straight-in", testid: "ramp-layout-straight", title: "Perpendicular to the wall, out into the court" }, { key: "along", label: "Along the wall", testid: "ramp-layout-along", title: "Runs parallel to the dock face and turns into the door at the top" }]} />
+        </Field>
+      )}
+      {!marker && lay === "along" && (
+        <Field label="Runs">
+          <SegmentedControl aria-label="Ramp direction" data-testid="ramp-dir" value={rampDir(ramp) > 0 ? "end" : "start"} onChange={(k) => onPatch({ dir: k === "end" ? 1 : -1 })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
+            options={[{ key: "start", label: horizWall ? "Left" : "Up", testid: "ramp-dir-start" }, { key: "end", label: horizWall ? "Right" : "Down", testid: "ramp-dir-end" }]} />
+        </Field>
+      )}
+      <Field label="Position" title="Feet from the start of the wall to the centre of the drive-in door; it snaps to the door spacing">
+        <NumInput boxed unit="ft" testid="ramp-at" ariaLabel="Ramp position along the wall" value={Math.round((ramp.at ?? 0) * 100) / 100} min={0} step={6} coarse={12} onCommit={onAt} />
+      </Field>
+      {!marker && (
+        <>
+          <Field label="Width"><NumInput boxed unit="ft" testid="ramp-width" ariaLabel="Ramp width" value={rampWidthFt(ramp)} min={14} max={40} step={2} coarse={4} onCommit={(n) => onPatch({ width: Math.max(14, Math.min(40, n)) })} /></Field>
+          <Field label="Grade"><NumInput boxed unit="%" testid="ramp-grade" ariaLabel="Ramp grade" value={rampGradePct(ramp)} min={2} max={20} step={0.5} coarse={1} onCommit={(n) => onPatch({ gradePct: Math.max(2, Math.min(20, n)) })} /></Field>
+          <Field label="Rise" title={`Defaults to the plan's dock height (${Math.round(dockHeightIn)} in)`}>
+            <span style={ROW6}>
+              <NumInput boxed unit="in" testid="ramp-rise" ariaLabel="Ramp rise in inches" value={Math.round(riseIn * 10) / 10} min={6} max={120} step={2} coarse={6} onCommit={onRise} />
+              {ramp.riseIn != null && <button type="button" data-testid="ramp-rise-auto" onClick={() => onRise(null)} style={{ ...note, padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>dock height</button>}
+            </span>
+          </Field>
+        </>
+      )}
+      <Field label="Door">
+        <SegmentedControl aria-label="Door size" data-testid="ramp-door" value={ramp.door === "14x16" ? "14x16" : "12x14"} onChange={(k) => onPatch({ door: k })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
+          options={[{ key: "12x14", label: "12×14", testid: "ramp-door-12x14" }, { key: "14x16", label: "14×16", testid: "ramp-door-14x16" }]} />
+      </Field>
+      {!marker && <Field label="Details"><span style={{ display: "inline-flex", gap: SPACE.xl, flexWrap: "wrap" }}>{check("wings", "Wing walls", ramp.wings !== false, "ramp-wings")}{check("bollards", "Bollards", ramp.bollards !== false, "ramp-bollards")}</span></Field>}
+      {!marker && (
+        <>
+          <StdSubLabel section="size">Size & position</StdSubLabel>
+          <Field label="Length"><span data-testid="ramp-length" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", fontVariantNumeric: TABULAR_NUMS }}>{f0(lengthFt)} ft</span></Field>
+          <Field label="Takes"><span data-testid="ramp-takes" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{doorsTaken === 0 ? "no dock doors" : `${doorsTaken} dock ${doorsTaken === 1 ? "door" : "doors"}`}</span></Field>
+        </>
+      )}
+      {flags.map((f) => (
+        <div key={f.code} data-testid={`ramp-flag-${f.code}`} role="status" style={{ display: "flex", alignItems: "flex-start", gap: SPACE.sm, margin: `${SPACE.xs}px 0 ${SPACE.md}px`, fontSize: FONT_SIZE.label, color: "var(--warn-text)", lineHeight: 1.4 }}>
+          <span aria-hidden="true" style={{ flex: "none" }}>⚠</span><span>{f.text}</span>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: SPACE.md, marginTop: SPACE.md }}>
+        <button type="button" data-testid="ramp-delete" onClick={onDelete} style={{ height: CONTROL_H.md, padding: "0 12px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, border: "1px solid var(--danger-text)", background: "transparent", color: "var(--danger-text)" }}>{marker ? "Delete door" : "Delete ramp"}</button>
+      </div>
+    </div>
   );
 }
 function DockLayerPanel({ kind, size, grade, style, pinned, onPin, removal, onRemove, removeNoun }) {

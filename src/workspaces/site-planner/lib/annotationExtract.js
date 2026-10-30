@@ -215,7 +215,7 @@ export function elementSubject(el) {
   if (!el) return "Site element";
   if (el.type === "building") return "Building";
   if (el.type === "paving") return el.truckCourt ? "Truck court" : "Paving";
-  const W = { pond: "Detention pond", road: "Road", parking: "Car parking", trailer: "Trailer parking", sidewalk: "Sidewalk", landscape: "Landscape" };
+  const W = { pond: "Detention pond", road: "Road", parking: "Car parking", trailer: "Trailer parking", sidewalk: "Sidewalk", landscape: "Landscape", driveInRamp: "Drive-in ramp" };
   return W[el.type] || String(el.type || "Site element").replace(/^./, (c) => c.toUpperCase());
 }
 /** Plain words for a site-data markup kind (easements, utility routes — they live in `markups` but are drawn site data). */

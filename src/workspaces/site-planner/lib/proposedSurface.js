@@ -171,6 +171,7 @@ export function wedgeDz(zEdge, g0, od, ratio, shoulder = 0) {
 export function classifyGradeElement(el) {
   if (!el) return null;
   if (el.type === "building") return "buildingPad";
+  if (el.type === "driveInRamp") return "driveInRamp"; // NEW-1 (2026-10-30): a drive-in ramp — its own plane, apron → FFE (lib/driveInRamp.js)
   if (el.dockStack) return "dockApron";
   if (el.type === "trailer") return "trailerParking";
   if (el.type === "parking") return el.accessible ? "carParkingAccessible" : "carParkingGeneral";
@@ -218,6 +219,22 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     if (!el || !Array.isArray(el.ring) || el.ring.length < 3) continue;
     const classId = classifyGradeElement(el);
     if (!classId) continue;
+    // A DRIVE-IN RAMP is a pad member of its host building whose surface climbs from apron grade (host FFE − rise) at the low end to the FFE at the door.
+    // Its geometry (`el.ramp`: lowPt / axis / lengthFt / riseFt) is prepared by the planner off lib/driveInRamp.js; only the host's FINISH elevation — typed or
+    // suggested, known here and nowhere else — is added. Not an ordinary paved plane: it has no wall, no slope rule and is exempt from seam bending.
+    if (classId === "driveInRamp") {
+      const R = el.ramp, gH = el.hostId != null && byIdEl ? byIdEl.get(el.hostId) : null;
+      const hostFfe = gH && gH.padElevFt != null && isFinite(gH.padElevFt) ? gH.padElevFt : ffeFt;
+      if (!R || !(R.lengthFt > 0) || hostFfe == null || !isFinite(hostFfe)) { skipped.push(el.id); continue; }
+      const base = hostFfe - R.riseFt, rise = R.riseFt, L = R.lengthFt, lx = R.lowPt.x, ly = R.lowPt.y, ux = R.axis.x, uy = R.axis.y;
+      planes.set(el.id, {
+        elId: el.id, classId, label: "Drive-in ramp", baseElevFt: base, anchor: R.lowPt, dir: R.axis, slopePct: (rise / L) * 100, floating: false,
+        hostId: el.hostId ?? null, graded: true, ramp: true,
+        check: { ok: null, violation: null, bound: null, limitPct: null, unknown: true },
+        zAt: (pt) => base + rise * Math.min(1, Math.max(0, ((pt.x - lx) * ux + (pt.y - ly) * uy) / L)),
+      });
+      continue;
+    }
     const baseRule = GRADING_RULES[classId] || null;
     const hasOverride = el.slopeOverridePct != null && isFinite(el.slopeOverridePct);
     // An override pins the plane's slope (min = max); provenance stays the base rule's.
@@ -303,7 +320,7 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
   const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   const maxCells = opts.maxCells || 3000;
   const minCellFt = opts.minCellFt || 2;
-  const prec = (el) => (el.type === "building" ? 0 : el.dockStack ? 1 : 2);
+  const prec = (el) => (el.type === "building" ? 0 : el.type === "driveInRamp" ? 0.5 : el.dockStack ? 1 : 2); // a ramp lies INSIDE its court: it wins that overlap
   const graded = els
     .filter((e) => e && planes.has(e.id) && Array.isArray(e.ring) && e.ring.length >= 3)
     .map((e) => ({ el: e, plane: planes.get(e.id), bbox: ringBBox(e.ring) }))
@@ -651,7 +668,8 @@ function regionIndexOf(pt, regions) {
 export function buildSeams(graded, { maxPavementSlopePct = 5 } = {}) {
   const seams = new Map();
   const steps = [];
-  const paved = graded.filter((g) => g.plane.classId !== "buildingPad");
+  // A drive-in ramp is held by its wing walls: its sides meet the court with a step by design (like the dock wall), so it never bends or bends others.
+  const paved = graded.filter((g) => g.plane.classId !== "buildingPad" && g.plane.classId !== "driveInRamp");
   for (const E of paved) {
     const samples = sampleRing(E.el.ring, SEAM_SAMPLE_FT);
     const c = ringCentroid(E.el.ring);

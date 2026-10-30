@@ -319,6 +319,10 @@ function normalizeBondedRotations(list, onHeal) {
     const host = byId.get(e.attachedTo);
     if (!host || host.points ||
         typeof host.rot !== "number" || typeof host.cx !== "number" || typeof host.cy !== "number") return e;
+    // A drive-in ramp (NEW-1, 2026-10-30) keeps its box in step with its host at the planner's one element-write seam (lib/driveInRamp.js
+    // `refitRamps`); its angle is already host.rot, so there is nothing for this quarter-turn repair to add — and it must not rotate the ramp about
+    // the host on its own terms.
+    if (e.type === "driveInRamp") return e;
     // Corner bump-out (dog-ear): re-flush its WHOLE box to the host's CURRENT edge + angle
     // (NEW-6). Guard the side (a malformed `side` would throw in dogEarGeom's SIDE_N destructure
     // and blank the planner) and require finite host/child w·h (dogEarGeom reads them; a NaN box

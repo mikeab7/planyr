@@ -32,6 +32,8 @@ export const TYPE = {
   sidewalk: { fill: "#f7f6f2", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
   landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
   road: { fill: "#9eabb7", stroke: "#66737f", label: "Road", weight: 1.25 },
+  // NEW-1 (2026-10-30) — a drive-in ramp is poured concrete: a plain concrete grey, lighter than paving so the wing walls (drawn in ink) read on it.
+  driveInRamp: { fill: "#c8c9c6", stroke: "#6c7075", label: "Drive-in Ramp", weight: 1 },
 };
 
 /* Building panel v3 (NEW-4) — the "Docks & walls" strip. A piece is filled with its layer's PLAN colour (read from
