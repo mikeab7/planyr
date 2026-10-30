@@ -17,6 +17,7 @@ export const BUMP_BTN_INSET = 20;   // the corner "+" sits this far in from the 
 export const SIDE_BTN_INSET = 24;   // the wall "+ / −" pair sits this far in from the wall's middle
 export const SIDE_PAIR_GAP = FEAT_CTRL_R + 3; // …its two discs this far either side of that point, along the wall
 export const CORNER_TAG_PILL_H = 17;
+export const RAMP_BTN_R = FEAT_CTRL_R * 0.78; // the small slate drive-in ramp button (B2566544–B2566547)
 const CLEAR_PX = 1;                 // air kept between a tag's box and a button disc (outer edge, keyline included)
 const STEP_PX = 2;
 const TAG_INSET_PX = 4;             // the tag's centre rides this far inside the wall line
@@ -39,6 +40,18 @@ export function sideButtonAnchor(mid, centre) {
   return { pos: { x: mid.x - u.x * SIDE_BTN_INSET, y: mid.y - u.y * SIDE_BTN_INSET }, tan: { x: -u.y, y: u.x } };
 }
 
+/** The ramp "+" beside the wall pair: along the wall, clear of the pair's outer edge. `pos`/`tan` are `sideButtonAnchor`'s. */
+export function rampWallAnchor(pos, tan) {
+  const off = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;
+  return { x: pos.x + tan.x * off, y: pos.y + tan.y * off };
+}
+
+/** The ramp "+" beside a corner's purple "+": a little toward the middle of the dock wall the corner belongs to. */
+export function rampCornerAnchor(bumpPos, wallMid) {
+  const u = unit(wallMid.x - bumpPos.x, wallMid.y - bumpPos.y), off = FEAT_CTRL_R + 4 + RAMP_BTN_R;
+  return { x: bumpPos.x + u.x * off, y: bumpPos.y + u.y * off };
+}
+
 /** Every disc a selected building's buttons can occupy (the worst case: both halves of every pair, all four corners). */
 export function buttonDiscs(quad) {
   const c = { x: quad.reduce((s, p) => s + p.x, 0) / quad.length, y: quad.reduce((s, p) => s + p.y, 0) / quad.length };
@@ -50,6 +63,12 @@ export function buttonDiscs(quad) {
     const { pos, tan } = sideButtonAnchor({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, c);
     out.push({ x: pos.x - tan.x * SIDE_PAIR_GAP, y: pos.y - tan.y * SIDE_PAIR_GAP, r, kind: "side", wall: i });
     out.push({ x: pos.x + tan.x * SIDE_PAIR_GAP, y: pos.y + tan.y * SIDE_PAIR_GAP, r, kind: "side", wall: i });
+    // the ramp buttons (worst case: every wall carries one; each corner one toward EACH of its two walls' middles)
+    out.push({ ...rampWallAnchor(pos, tan), r: RAMP_BTN_R + FEAT_CTRL_STROKE / 2, kind: "ramp-wall", wall: i });
+    const bump = bumpButtonAnchor(p, c);
+    for (const [a, b] of [[quad[(i + quad.length - 1) % quad.length], p], [p, q]]) {
+      out.push({ ...rampCornerAnchor(bump, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }), r: RAMP_BTN_R + FEAT_CTRL_STROKE / 2, kind: "ramp-corner", corner: i });
+    }
   });
   return out;
 }

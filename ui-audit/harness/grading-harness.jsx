@@ -7,7 +7,7 @@ import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import GradingController from "../../src/workspaces/site-planner/components/GradingController.jsx";
 import { GradingPanel, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
-import { bumpButtonAnchor, sideButtonAnchor, SIDE_PAIR_GAP } from "../../src/workspaces/site-planner/lib/padCornerTag.js";
+import { bumpButtonAnchor, sideButtonAnchor, rampWallAnchor, rampCornerAnchor, RAMP_BTN_R, SIDE_PAIR_GAP } from "../../src/workspaces/site-planner/lib/padCornerTag.js";
 import { FEAT_CTRL_R, FEAT_CTRL_STROKE } from "../../src/workspaces/site-planner/lib/featureEditZoom.js";
 import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
@@ -238,10 +238,17 @@ function Harness({ data }) {
               {plus && <line x1={pos.x} y1={pos.y - R * 0.5} x2={pos.x} y2={pos.y + R * 0.5} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />}
             </g>);
           const out = [];
-          [2, 3].forEach((i) => out.push(glyph(`bump${i}`, bumpButtonAnchor(q[i], c), "#7c3aed", true)));
+          const ramp = (k, pos) => <g key={k} data-harness-button={k}><circle cx={pos.x} cy={pos.y} r={RAMP_BTN_R} fill="#475569" stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} /></g>;
+          [2, 3].forEach((i) => {
+            const bp = bumpButtonAnchor(q[i], c);
+            out.push(glyph(`bump${i}`, bp, "#7c3aed", true));
+            const mid = { x: (q[2].x + q[3].x) / 2, y: (q[2].y + q[3].y) / 2 };  // the dock (south) wall's middle
+            out.push(ramp(`rampc${i}`, rampCornerAnchor(bp, mid)));
+          });
           q.forEach((p, i) => {
             const n = q[(i + 1) % 4], { pos, tan } = sideButtonAnchor({ x: (p.x + n.x) / 2, y: (p.y + n.y) / 2 }, c);
             out.push(glyph(`side${i}p`, { x: pos.x - tan.x * SIDE_PAIR_GAP, y: pos.y - tan.y * SIDE_PAIR_GAP }, i === 2 ? "#b45309" : "#16a34a", true));
+            out.push(ramp(`rampw${i}`, rampWallAnchor(pos, tan)));
             if (i === 2) out.push(glyph(`side${i}m`, { x: pos.x + tan.x * SIDE_PAIR_GAP, y: pos.y + tan.y * SIDE_PAIR_GAP }, "#b91c1c", false));
           });
           return <g data-harness-buttons="1">{out}</g>;

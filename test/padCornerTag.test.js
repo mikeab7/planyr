@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  placeCornerTag, buttonDiscs, boxHitsDisc, bumpButtonAnchor, sideButtonAnchor, pillWidth, BUMP_BTN_INSET, SIDE_BTN_INSET,
+  placeCornerTag, buttonDiscs, boxHitsDisc, bumpButtonAnchor, sideButtonAnchor, rampWallAnchor, rampCornerAnchor, pillWidth, BUMP_BTN_INSET, SIDE_BTN_INSET, RAMP_BTN_R,
 } from "../src/workspaces/site-planner/lib/padCornerTag.js";
 import { padCornerSpots } from "../src/workspaces/site-planner/lib/buildingGrade.js";
 import { FEAT_CTRL_R, featureEditOpacity } from "../src/workspaces/site-planner/lib/featureEditZoom.js";
@@ -111,6 +111,16 @@ describe("the buttons never move: the canvas places them through the same anchor
     expect(src).not.toMatch(/ms\.x - ux \* 24/);
     expect(src).not.toMatch(/cs\.x - dx \* 20/);
   });
+  it("the drive-in ramp buttons (B2566544) are placed through the shared anchors too, and the tags avoid them (the ramp PR merged first, so its discs were NOT known to the placer until this follow-up)", () => {
+    const src = code(read("../src/workspaces/site-planner/SitePlanner.jsx"));
+    expect(src).toMatch(/rampWallAnchor\(pos, tan\)/);
+    expect(src).toMatch(/rampCornerAnchor\(pos, midS\)/);
+    expect(src).not.toMatch(/const RAMP_BTN_R =/);          // one definition, in the lib
+    const wall = rampWallAnchor({ x: 100, y: 100 }, { x: 0, y: 1 });
+    expect(wall.x).toBeCloseTo(100, 9); expect(wall.y).toBeCloseTo(100 + FEAT_CTRL_R * 2 + 7 + RAMP_BTN_R, 9);
+    const corner = rampCornerAnchor({ x: 0, y: 0 }, { x: 50, y: 0 });
+    expect(corner.x).toBeCloseTo(FEAT_CTRL_R + 4 + RAMP_BTN_R, 9); expect(corner.y).toBeCloseTo(0, 9);
+  });
 });
 
 describe("tags are non-interactive", () => {
@@ -134,7 +144,9 @@ describe("the corner spots carry their corner index (the placer needs it when a 
   });
   it("FEAT_CTRL_R is what the disc radius is built from", () => {
     const d = buttonDiscs(quadOf(400, 250, 0, 1));
-    expect(d.every((x) => x.r > FEAT_CTRL_R)).toBe(true);
-    expect(d).toHaveLength(12);
+    expect(d.filter((x) => !x.kind.startsWith("ramp")).every((x) => x.r > FEAT_CTRL_R)).toBe(true);
+    expect(d.filter((x) => x.kind.startsWith("ramp")).every((x) => x.r > RAMP_BTN_R)).toBe(true);
+    expect(d).toHaveLength(24);                                    // per wall/corner: bump + 2 pair discs + wall ramp + 2 corner ramps
+    expect(d.filter((x) => x.kind.startsWith("ramp"))).toHaveLength(12);
   });
 });
