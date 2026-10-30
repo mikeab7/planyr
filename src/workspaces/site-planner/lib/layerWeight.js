@@ -133,6 +133,10 @@ export const LAYER_TIER = {
   ga_dams: "reference",
   ga_impaired_streams: "reference",
   ga_spalding_zoning: "reference",       // county zoning — a look-up, like the DeSoto zoning row
+  ga_road_ownership: "reference",        // who permits the driveway — a look-up
+  ga_rare_species: "reference",          // generalised ~4 mi records; DNR review is the check
+  ga_mineral: "reference",               // a 2005 register of pits and quarries
+  ga_bartow_zoning: "reference",         // county zoning — a look-up, like the DeSoto and Spalding rows
   ga_opportunity_zones: "context",       // a tax-incentive wash
   ga_jtc_tiers: "context",
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
@@ -207,6 +211,23 @@ export const LAYER_TIER = {
   ny_city: "context",
   ny_town: "context",
   ny_village: "context",
+  // Tennessee (B2521584): the county / city lines are orientation furniture; every other Tennessee row is a look-up fact — a flag to pull a file,
+  // never louder than the plan (the computed buffer bands, when present, are the constraint)
+  tn_city: "context",
+  tn_ms4: "reference",
+  tn_wqa: "reference",
+  tn_pws: "reference",
+  tn_drycleaners: "reference",
+  tn_sna: "reference",
+  tn_scenic: "reference",
+  tn_nrhp: "reference",
+  tn_nrhp_bounds: "reference",
+  tn_thc_sites: "reference",
+  tn_landfills: "reference",
+  tn_remediation: "reference",
+  tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
+  tn_cemeteries: "reference",
+  tn_crit_habitat: "reference",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",

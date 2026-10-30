@@ -27,3 +27,5 @@ file…"). ONE source of truth: the Library file's stored bytes ARE the document
      The doc-pointer-audit check fails CI on a stale reference. -->
 
 - **Undo while typing (B2535792):** `lib/undoKeyScope.js` decides who owns Ctrl+Z/Y (a text control or an open cell editor owns it; the sheet stack only fires otherwise) and `lib/cellEditHistory.js` is the cell editor's own undo (nothing left → abandon back to the original value). ModelApp's window listener must keep asking `undoKeyOwner` before it calls `undo()`/`redo()`. Guards: repo-root `test/` **modelCellEditorUndo**; e2e **model-cell-editor-undo**.
+
+- **Leaving a sheet commits what is half-typed (B2540736):** `SheetView` and `FormulaBar` expose `commitPending()`; `ModelApp.commitPendingEntry()` runs it BEFORE every handler that changes the showing sheet (select / add / duplicate / delete tab, trace navigation) — never add a sheet-changing path that skips it, and keep add/duplicate/delete as functional `commit((wb) => …)`. Rule for the formula bar's draft: `lib/pendingEntry.js`. Guards: repo-root `test/` **modelTabSwitchCommit**; e2e **model-tab-switch-commits**.

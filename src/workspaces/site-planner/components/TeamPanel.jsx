@@ -25,7 +25,7 @@ import { loadUserPrefs, saveUserPrefs } from "../lib/userPrefs.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
-import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs } from "../lib/teamRoster.js";
+import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs, createRosterLoader } from "../lib/teamRoster.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", background: "var(--surface-default)" };
@@ -140,12 +140,23 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
   useEffect(() => { if (onTitle) onTitle(currentName); return () => { if (onTitle) onTitle(null); }; }, [onTitle, currentName]);
   const isAdmin = current && current.role === "admin";
 
-  const loadRoster = useCallback(async (teamId) => {
-    if (!teamId) { setMembers([]); setInvites([]); return; }
-    setMembers(await listMembers(teamId));
-    setInvites(await listInvites(teamId));
-  }, []);
-  useEffect(() => { loadRoster(sel); setConfirmLeave(false); setConfirmDelete(false); setMenuOpen(false); setRenaming(false); setPersonMenu(null); setShowInvite(false); }, [sel, loadRoster]);
+  // NEW-4 — see createRosterLoader: a roster result is applied only while its team is still selected
+  // and it is the newest request, so a slow answer for team A can never sit under team B.
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  const rosterLoader = useMemo(() => createRosterLoader({
+    fetchMembers: listMembers, fetchInvites: listInvites,
+    getSelected: () => selRef.current,
+    onApply: (_teamId, m, i) => { setMembers(m); setInvites(i); },
+    onError: () => say("err", "Couldn't load this team's members — check your connection."),
+  }), [say]);
+  const loadRoster = useCallback((teamId) => rosterLoader.load(teamId), [rosterLoader]);
+  useEffect(() => {
+    // Switching team empties the list at once (never the previous team's people under the new name).
+    setMembers([]); setInvites([]);
+    loadRoster(sel); setConfirmLeave(false); setConfirmDelete(false); setMenuOpen(false); setRenaming(false); setPersonMenu(null); setShowInvite(false);
+    return () => rosterLoader.cancel();
+  }, [sel, loadRoster, rosterLoader]);
 
   // How many of my projects are shared with the selected team (local cache; secondary nicety).
   const sharedCount = useMemo(() => {
