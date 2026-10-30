@@ -242,7 +242,7 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
   it("tribal cards name the court ruling only for the nations a ruling covers, and say which way it went", () => {
     const courts = (nm) => (t.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Courts") || {}).text || "";
     const t = ALL_LAYERS.ok_tribal;
-    expect(courts("Creek OTSA")).toMatch(/McGirt v\. Oklahoma \(U\.S\. Supreme Court, 2020\) held that Congress never disestablished/);
+    expect(courts("Creek OTSA")).toMatch(/McGirt v\. Oklahoma \(U\.S\. Supreme Court, 2020\), a criminal-jurisdiction case, held that Congress never disestablished/);
     for (const n of ["Cherokee", "Chickasaw", "Choctaw", "Seminole", "Quapaw"]) expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": in (a )?criminal cases? the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished"));
     expect(courts("Kickapoo OTSA")).toMatch(/criminal case.*held in 2023 that the reservation was disestablished/);
     expect(courts("Creek OTSA")).toMatch(/a criminal-jurisdiction case/);
