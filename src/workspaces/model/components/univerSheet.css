@@ -10,7 +10,18 @@
 .planyr-univer [class*="univer-formula-box"],
 .planyr-univer [class*="univer-footer"],
 .planyr-univer [class*="univer-sheet-bar"] { border-radius: 0 !important; box-shadow: none !important; }
-/* The Start / Formulas / Data / View strip is one flat full-width band: no pill, no rounded tab, no shadow (NEW-2). */
-.planyr-univer [data-u-comp="ribbon-header-menu"],
-.planyr-univer [data-u-comp="ribbon-header-menu"] * { border-radius: 0 !important; box-shadow: none !important; }
-.planyr-univer [data-u-comp="ribbon-header-menu"] { background: var(--surface-raised) !important; border-bottom: 1px solid var(--chrome-divider); }
+/* ONE header strip (NEW-1, B2574352): the ribbon runs as Univer's "collapsed" type (UniverSheet.jsx), so the Start / Formulas / Data /
+ * View tab row is folded into a dropdown at the strip's left edge and the tab's tools sit left-packed beside it. Everything in
+ * the strip is flat and square — no pill, rounded button or hover chip, no shadow. Popups the strip opens (the tab menu, the
+ * font / colour pickers) float over the grid on their own and are not part of the strip. */
+.planyr-univer [data-u-comp="headerbar"],
+.planyr-univer [data-u-comp="headerbar"] * { border-radius: 0 !important; box-shadow: none !important; }
+.planyr-univer [data-u-comp="headerbar"] { background: var(--surface-raised) !important; }
+/* the tab band the collapsed ribbon leaves behind is an empty 1px line — drop it so the strip has the one hairline below it */
+.planyr-univer [data-u-comp="ribbon-header-menu"] { border: 0 !important; background: transparent !important; }
+/* the tab dropdown: the app's own text, a chevron, and a hairline between it and the tools — never Univer's dark pill */
+.planyr-univer [data-u-comp="headerbar"] a[data-state] {
+  background: transparent !important; color: var(--text-primary) !important; font-weight: 600;
+  margin-right: 8px; padding: 0 10px 0 4px; height: 24px; border-right: 1px solid var(--chrome-divider);
+}
+.planyr-univer [data-u-comp="headerbar"] a[data-state] svg { color: var(--text-primary) !important; }

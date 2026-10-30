@@ -39,6 +39,7 @@ import "@univerjs/preset-sheets-sort/lib/index.css";
 import "@univerjs/preset-sheets-filter/lib/index.css";
 import "@univerjs/preset-sheets-find-replace/lib/index.css";
 import "./univerSheet.css";
+import { CURVED_ICONS } from "./univerIcons.jsx";
 import { migrateWorkbook, canonicalJson } from "../lib/sheetModel.js";
 import {
   workbookToUniver, univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
@@ -49,6 +50,10 @@ import { installUniverIndent } from "../lib/univerIndent.js";
 import { createSaveController } from "../lib/univerSave.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
+// ONE header strip, everything left-aligned (NEW-1, B2574352): Univer's "collapsed" ribbon folds the Start / Formulas / Data / View
+// tab strip into a dropdown at the strip's left edge and packs that tab's tools right beside it. (The default, "classic", is a
+// centred tab row ABOVE the tool row = two headers.) Configuration only — the package is not forked; see univerSheet.css.
+const RIBBON_TYPE = "collapsed";
 const STRUCTURE_OPS = {
   "sheet.mutation.insert-row": "insert-row", "sheet.mutation.remove-row": "remove-row",
   "sheet.mutation.insert-col": "insert-col", "sheet.mutation.remove-col": "remove-col",
@@ -89,7 +94,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         locales: { [LocaleType.EN_US]: mergeLocales(coreEnUS, sortEnUS, filterEnUS, findEnUS) },
         theme, darkMode: dark0,
         presets: [
-          UniverSheetsCorePreset({ container: hostRef.current, formula: { initialFormulaComputing: CalculationMode.WHEN_EMPTY } }),
+          UniverSheetsCorePreset({ container: hostRef.current, ribbonType: RIBBON_TYPE, formula: { initialFormulaComputing: CalculationMode.WHEN_EMPTY } }),
           UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsFindReplacePreset(),
         ],
       });
@@ -97,6 +102,10 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       L.injector = univer.__getInjector();
       // The Excel keys the free Univer build lacks (Ctrl+1, Ctrl+Shift+$%!~#, Shift/Ctrl+Space, Ctrl+9/0, Ctrl+Plus/Minus, Ctrl+;, Alt key-tips…)
       L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
+      // Curved undo / redo (NEW-2, B2574353): toolbar glyphs resolve by name through Univer's IconManager (not the facade's
+      // registerComponent, which is a different registry). Replace the built-in ones; the toolbar draws them on its next render.
+      const icons = L.injector.get(IconManager);
+      for (const [name, icon] of Object.entries(CURVED_ICONS)) { icons.delete(name); icons.register(name, icon); }
 
       const load = (wb) => {
         const migrated = migrateWorkbook(wb);
