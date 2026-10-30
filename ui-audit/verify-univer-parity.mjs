@@ -18,6 +18,7 @@ import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { registerExcelKeyChecks } from "./lib/univerExcelKeysChecks.mjs";
 import { createWorkbook, setRaw, setCellStyle } from "../src/workspaces/model/lib/sheetModel.js";
 
 const args = process.argv.slice(2);
@@ -399,25 +400,6 @@ const shortcut = (id, label, keys, run) => check(id, label, async () => { await 
 shortcut("key-bold", "Ctrl+B bold", "Control+b", async (k) => { await press(k); const on = (await cell(1, 2)).bold; await press(k); const off = (await cell(1, 2)).bold; return on === "bold" && off !== "bold" ? PASS("toggles on and off") : FAIL(`on=${on} off=${off}`); });
 shortcut("key-italic", "Ctrl+I italic", "Control+i", async (k) => { await press(k); const on = (await cell(1, 2)).italic; return on === "italic" ? PASS("italic on") : FAIL(`got ${on}`); });
 shortcut("key-underline", "Ctrl+U underline", "Control+u", async (k) => { await press(k); const on = (await cell(1, 2)).line; return /underline/.test(on) ? PASS("underline on") : FAIL(`got ${on}`); });
-shortcut("key-strike", "Ctrl+5 strikethrough", "Control+5", async (k) => { await press(k); const on = (await cell(1, 2)).line; return /line-through|strike/.test(on) ? PASS("strikethrough on") : NOT_IN_OSS(`no effect (style stays "${on}"): Ctrl+5 is not bound`); });
-shortcut("key-format-cells", "Ctrl+1 Format Cells dialog", "Control+1", async (k) => { await press(k); await wait(300); const dlg = await ev(() => !!document.querySelector('[role="dialog"], .univer-dialog')); return dlg ? PASS("a dialog opened") : NOT_IN_OSS("no Format Cells dialog (Univer formats from the toolbar and the number-format menu)"); });
-for (const [id, label, k, test] of [
-  ["key-currency", "Ctrl+Shift+$ currency", "Control+Shift+$", (nf) => /\$/.test(nf || "")],
-  ["key-percent", "Ctrl+Shift+% percent", "Control+Shift+%", (nf) => /%/.test(nf || "")],
-  ["key-number", "Ctrl+Shift+! number", "Control+Shift+!", (nf) => /#,##0\.00|0\.00/.test(nf || "")],
-  ["key-general", "Ctrl+Shift+~ general", "Control+Shift+~", (nf) => !nf || /general/i.test(nf)],
-  ["key-date", "Ctrl+Shift+# date", "Control+Shift+#", (nf) => /d|y/i.test(nf || "") && !/#,/.test(nf || "")],
-]) {
-  shortcut(id, label, k, async (kk) => {
-    await click(0, 0); const before = (await cell(0, 0)).nf; await press(kk); const nf = (await cell(0, 0)).nf;
-    return nf !== before && test(nf) ? PASS(`number format is now ${nf}`) : NOT_IN_OSS(`no binding: number format stayed ${JSON.stringify(nf)}`);
-  });
-}
-shortcut("key-border", "Ctrl+Shift+& outline border / Ctrl+Shift+_ remove border", "Control+Shift+&", async (k) => {
-  await click(0, 0); await press(k);
-  const b = await inSheet((api, ws) => { const s = api.getActiveWorkbook().save(); const sid = ws.getSheetId(); const c = s.sheets[sid].cellData[0] && s.sheets[sid].cellData[0][0]; const st = c && c.s && (typeof c.s === "string" ? s.styles[c.s] : c.s); return st && st.bd ? Object.keys(st.bd) : []; });
-  return b.length ? PASS(`border edges ${b.join(",")}`) : NOT_IN_OSS("no binding for border shortcuts");
-});
 check("key-select-all", "Ctrl+A twice (region, then everything)", async () => {
   await reset(); await click(1, 1);
   await press("Control+a"); const first = (await sel())[0];
@@ -427,27 +409,9 @@ check("key-select-all", "Ctrl+A twice (region, then everything)", async () => {
   const secondAll = second && second.r2 === rows - 1;
   return firstIsRegion && secondAll ? PASS(`first press ${first.a1}, second press everything`) : FAIL(`first=${first && first.a1} second=${second && second.a1}`);
 });
-check("key-row-col", "Shift+Space selects the row; Ctrl+Space selects the column", async () => {
-  await reset(); await click(2, 2); await press("Shift+Space"); const row = (await sel())[0]; await click(2, 2); await press("Control+Space"); const col = (await sel())[0];
-  const cols = await ev(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getMaxColumns());
-  const rows = await ev(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getMaxRows());
-  const rOk = row && row.r1 === 2 && row.r2 === 2 && row.c2 === cols - 1, cOk = col && col.c1 === 2 && col.c2 === 2 && col.r2 === rows - 1;
-  return rOk && cOk ? PASS("whole row 3 and whole column C") : (row && row.a1 === "C3" && col && col.a1 === "C3" ? NOT_IN_OSS("neither chord changes the selection (Shift+Space and Ctrl+Space are not bound; use the header click)") : FAIL(`row=${row && row.a1} col=${col && col.a1}`));
-});
 check("key-ctrl-shift-arrow", "Ctrl+Shift+Arrow extends to the end of the data", async () => {
   await reset(); await click(0, 0); await press("Control+Shift+ArrowDown"); const s = (await sel())[0];
   return s && s.r2 === 4 ? PASS(`selected ${s.a1}`) : FAIL(`selected ${s && s.a1}`);
-});
-check("key-insert-delete", "Ctrl+Plus inserts, Ctrl+Minus deletes (cells / rows / columns)", async () => {
-  await reset(); await click(2, 0); await press("Shift+Space"); await press("Control+Shift+="); await wait(300);
-  const rowsAfterInsert = await val1(3, 0);
-  const dlg = await ev(() => !!document.querySelector('[role="dialog"]'));
-  if (rowsAfterInsert === 3 || dlg) { await press("Control+-"); await wait(300); return PASS(`row inserted via Ctrl+Plus (old row 3 moved to row 4${dlg ? ", a dialog asked first" : ""})`); }
-  return NOT_IN_OSS("Ctrl+Plus / Ctrl+Minus are not bound (insert and delete are in the right-click menu)");
-});
-check("key-hide", "Ctrl+9 hides rows, Ctrl+0 hides columns", async () => {
-  await reset(); await click(2, 2); await press("Control+9"); const r = (await hiddenState()).rows.includes(2); await press("Control+0"); const c = (await hiddenState()).cols.includes(2);
-  return r && c ? PASS("row 3 and column C hidden") : (r || c ? FAIL(`row hidden=${r}, column hidden=${c}`) : NOT_IN_OSS("no Ctrl+9 / Ctrl+0 binding (hide is in the header right-click menu)"));
 });
 check("key-f2", "F2 edits the cell in place with its content", async () => {
   await reset(); await click(0, 1); await press("F2"); await page.keyboard.type("X"); await press("Enter"); await wait(400);
@@ -478,16 +442,10 @@ check("key-fill", "Ctrl+D fills down, Ctrl+R fills right", async () => {
   const right = [await val1(0, 2), await val1(0, 3), await val1(0, 4)];
   return eq(down, [1, 1, 1]) && right.every((v) => v === "alpha") ? PASS("A2:A4 = 1 and C1:E1 = alpha") : FAIL(`down ${JSON.stringify(down)} right ${JSON.stringify(right)} (no binding?)`);
 });
-check("key-today", "Ctrl+; inserts today's date", async () => {
-  await reset(); await click(6, 0); await press("Control+;"); await press("Escape"); await wait(100);
-  const v = await val1(6, 0);
-  return v ? PASS(`cell holds ${JSON.stringify(v)}`) : NOT_IN_OSS("Ctrl+; is not bound");
-});
-check("alt-keytips", "Alt key-tips (Alt H O I …) — expected missing", async () => {
-  await reset(); await click(0, 0);
-  await page.keyboard.down("Alt"); await page.keyboard.up("Alt"); await wait(300);
-  const tips = await ev(() => document.querySelectorAll('[class*="keytip" i], [data-keytip]').length);
-  return tips === 0 ? NOT_IN_OSS("pressing Alt on its own shows no key-tip badges; Alt H O I does nothing") : PASS(`${tips} key tips shown`);
+// The Excel keys the free Univer build lacks, added by the Planyr plugin (NEW-1): strict checks in ui-audit/lib/univerExcelKeysChecks.mjs.
+registerExcelKeyChecks({
+  check, PASS, FAIL, reset, click, press, sel, cell, val1, inSheet, ev, wait, hiddenState, heldClick, eq, page: () => page,
+  model: { createWorkbook, setRaw },
 });
 
 // ── 5. clipboard ────────────────────────────────────────────────────────────────────────────────────────────────────────

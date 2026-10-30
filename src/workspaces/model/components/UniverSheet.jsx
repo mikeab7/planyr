@@ -45,6 +45,7 @@ import {
   workbookToUniver, univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
 } from "../lib/univerBridge.js";
 import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
+import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
 import { createSaveController } from "../lib/univerSave.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
@@ -99,6 +100,8 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       });
       L.univer = univer; L.univerAPI = univerAPI;
       L.injector = univer.__getInjector();
+      // The Excel keys the free Univer build lacks (Ctrl+1, Ctrl+Shift+$%!~#, Shift/Ctrl+Space, Ctrl+9/0, Ctrl+Plus/Minus, Ctrl+;, Alt key-tips…)
+      L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
       // Curved undo / redo (NEW-2, B2574353): toolbar glyphs resolve by name through Univer's IconManager (not the facade's
       // registerComponent, which is a different registry). Replace the built-in ones; the toolbar draws them on its next render.
       const icons = L.injector.get(IconManager);
@@ -293,6 +296,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         api: () => (e2e() ? univerAPI : null),
         sidecar: () => (e2e() ? L.sidecar : null),
         flush: () => { if (e2e()) flush(); return e2e(); },
+        excelKeys: () => (e2e() ? { registered: L.excelKeys && L.excelKeys.registered, tips: L.excelKeys && L.excelKeys.keyTips.state, run: (id) => L.excelKeys.runAction(id) } : null),
         // harness-only: the header-drag gate's state and the controller's view of what is pending
         gate: () => (e2e() ? L.gate : null),
         gateInstalls: () => (e2e() ? { n: L.gateInstalls || 0, error: L.gateError || null } : null),
@@ -313,6 +317,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       try { L.mo && L.mo.disconnect(); } catch (_) {}
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
+      try { L.excelKeys && L.excelKeys.dispose(); } catch (_) {}
       try { L.indent && L.indent.dispose(); } catch (_) {}
       try { clearTimeout(L.gateTimer); L.detachGate && L.detachGate(); } catch (_) {}
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
