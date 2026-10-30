@@ -107,7 +107,7 @@ const ALL_NOTES_FILES = [
   "lib/notesFormatPalette.js",
   // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
   "lib/notesTableToText.js",
-  "lib/notesTablePaste.js",
+  "lib/notesTablePaste.js", "lib/notesOfficeLists.js", "lib/notesFakeBullets.js",
   "lib/notesTableClipboard.js", "lib/notesTableFill.js", "lib/notesTableMultiSelect.js",
   // NEW-1/NEW-2 (B1554272/B1554273) — widening a table column must not squeeze its neighbours,
   // and a column may never be squeezed below a readable floor. Pure decision + the editor command.
