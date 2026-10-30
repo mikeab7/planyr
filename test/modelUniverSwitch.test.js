@@ -121,4 +121,43 @@ describe("the theme is built from Planyr's tokens", () => {
     expect(base.primary[500], "the base theme must not be mutated").toBe("#000000");
     expect(buildUniverTheme(base, { accent: "garbage" }).primary[500]).toBe("#000000");
   });
+
+  // NEW-2: Univer's scale keeps its direction in dark mode (0 lightest … 900 darkest; its dark classes pick the other end), so
+  // writing the dark surface into gray.0 and the light text into gray.900 made every dark label dark-on-dark.
+  const dark = { accent: "#3D6FD1", border: "#262A33", surface: "#1D2027", text: "#E8EBF0" };
+  const light = { accent: "#3D6FD1", border: "#D7DDE5", surface: "#FFFFFF", text: "#1B1E26" };
+  const base = { primary: { 500: "#000" }, gray: { 0: "#FFFFFF", 50: "#F9FAFB", 200: "#E5E7EB", 600: "#4B5563", 700: "#374151", 800: "#1F2124", 900: "#111827" } };
+  it("light theme: surface in gray.0, text in gray.900, the hairline in gray.200", () => {
+    const t = buildUniverTheme(base, light);
+    expect([t.gray[0], t.gray[900], t.gray[200]]).toEqual(["#FFFFFF", "#1B1E26", "#D7DDE5"]);
+  });
+  it("dark theme: LIGHT text in gray.0 (what dark labels and icons use), the dark surface in gray.800 / 900, never the other way round", () => {
+    const t = buildUniverTheme(base, dark, { dark: true });
+    expect(t.gray[0]).toBe("#E8EBF0");
+    expect(t.gray[800]).toBe("#1D2027");
+    expect(t.gray[900]).toBe("#1D2027");
+    const lightness = (h) => parseInt(h.slice(1, 3), 16);
+    expect(lightness(t.gray[0]), "gray.0 is text in dark: must be light").toBeGreaterThan(200);
+    expect(lightness(t.gray[800]), "gray.800 is the surface in dark: must be dark").toBeLessThan(60);
+    expect(lightness(t.gray[700]) > lightness(t.gray[800]) && lightness(t.gray[600]) > lightness(t.gray[700]), "hover steps climb away from the surface").toBe(true);
+  });
+  it("dark theme: the hairline and header tint are written PRE-INVERTED so Univer's canvas inversion lands them on the token", () => {
+    // Univer paints the canvas through out_i = in_i − 0.667·(r+g+b) + 1 (normalised) in dark mode; apply it to what we wrote.
+    const univerInvert = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); const s = c[0] + c[1] + c[2]; return c.map((v) => Math.round(Math.min(1, Math.max(0, v - 0.667 * s + 1)) * 255)); };
+    const t = buildUniverTheme(base, dark, { dark: true });
+    const got = univerInvert(t.gray[200]);
+    const want = [0x26, 0x2A, 0x33];
+    got.forEach((v, i) => expect(Math.abs(v - want[i]), `channel ${i}`).toBeLessThanOrEqual(2));
+  });
+  it("a bad token in dark leaves the base theme's step alone (never a blank colour)", () => {
+    const t = buildUniverTheme(base, { ...dark, surface: "nope", text: "" }, { dark: true });
+    expect(t.gray[0]).toBe("#FFFFFF");
+    expect(t.gray[800]).toBe("#1F2124");
+  });
+  it("UniverSheet rebuilds the theme from the live tokens on every light/dark flip (a theme built once at mount goes stale)", () => {
+    const src = read("src/workspaces/model/components/UniverSheet.jsx");
+    expect(src).toMatch(/univerAPI\.setTheme\(buildUniverTheme\(defaultTheme, readTokens\(\), \{ dark \}\)\)/);
+    expect(src).toMatch(/new MutationObserver\(applyTheme\)/);
+    expect(src).toMatch(/addEventListener\("change", applyTheme\)/);
+  });
 });

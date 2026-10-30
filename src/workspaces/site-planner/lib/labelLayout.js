@@ -369,10 +369,13 @@ export const suppressedDimIds = (dimItems, labelBoxes, pad = 2) => {
 // number still folds the bump-out area in (the caller passes it); only the wording was removed,
 // and it is not moved elsewhere on the canvas. `bumpCount` is accepted and ignored so callers
 // need no change.
-export const buildingLabelLines = ({ name, sqft, dims }) => {
+// NEW-1 (2026-10-30): a graded plan adds "FFE 790.3" UNDER the dimensions (`ffe` is the finished line, null = none). It is the
+// lowest-priority line, so on zoom-out it drops before the dimensions do.
+export const buildingLabelLines = ({ name, sqft, dims, ffe }) => {
   const out = [name];
   if (sqft) out.push(sqft); // B121: omitted when the "Show areas" toggle is off (sqft passed null)
   if (dims) out.push(dims);
+  if (ffe) out.push(ffe);
   return out;
 };
 

@@ -53,7 +53,7 @@ import {
   latticeCover, latticeTileAt, LATTICE_MAX_BAND, LATTICE_MIN_BAND,
 } from "./demGrid.js";
 import {
-  composeContourPaint, contourLabelText, buildContourIndex, hitContour, clipContourLinesOutside, labelInsideClip,
+  composeContourPaint, contourLabelText, hoverMarkerPaneOptions, buildContourIndex, hitContour, clipContourLinesOutside, labelInsideClip,
   hoverLabelPlacement, hoverLabelSize,
   contourLineKey, contourLabelKey, diffKeyedPaint,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
@@ -353,6 +353,7 @@ const CONTOUR_COL = "#7C3F12";        // topo brown, readable on green imagery
 const CONTOUR_INDEX_COL = "#5B2E0D";
 const ARROW_COL = "#0369A1";          // drainage blue (not the status palette)
 export const CONTOUR_HOVER_CLASS = "planyr-contour-hover"; // marks the ONE transient hover label
+
 
 /* `offset` (NEW-1) shifts the tag off the anchor by an exact number of SCREEN pixels, with
  * the span's TOP-LEFT at the offset instead of its centre on the anchor — that is what
@@ -768,6 +769,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       // index labels — a ghost or a stacked pair is otherwise invisible to a DOM check
       icon: labelIcon(text, CONTOUR_HOVER_CLASS, place),
       interactive: false, keyboard: false,
+      ...hoverMarkerPaneOptions(labelPane),
     }).addTo(hoverGroup);
     return hit;
   };
