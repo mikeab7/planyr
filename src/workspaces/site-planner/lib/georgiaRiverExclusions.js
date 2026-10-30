@@ -24,8 +24,8 @@ export const inTidalReach = (lng, lat) => tidalCells().has(Math.floor(lng / GA_T
 /* The Metropolitan River Protection Act corridor, as a bounding box, for the places that have no polygon to hand (a click card): ARC's 2,000-ft Chattahoochee corridor runs Buford
  * Dam → the downstream limit of Fulton/Douglas counties, (-84.85..-84.07, 33.51..34.17) (sources.js gaMrpaCorridor). Only the Chattahoochee itself runs through it. */
 export const MRPA_REACH_BOX = Object.freeze({ lngMin: -84.85, lngMax: -84.07, latMin: 33.51, latMax: 34.17 });
-export function inMrpaReachBox(lng, lat) {
-  return lng >= MRPA_REACH_BOX.lngMin && lng <= MRPA_REACH_BOX.lngMax && lat >= MRPA_REACH_BOX.latMin && lat <= MRPA_REACH_BOX.latMax;
+export function inMrpaReachBox(lng, lat, pad = 0) {
+  return lng >= MRPA_REACH_BOX.lngMin - pad && lng <= MRPA_REACH_BOX.lngMax + pad && lat >= MRPA_REACH_BOX.latMin - pad && lat <= MRPA_REACH_BOX.latMax + pad;
 }
 
 /* Which excluded segment (if any) a clicked protected-river point is on — for the Protected Rivers card, which has only the feature's name and the click: "mrpa" | "tidal" | null. */

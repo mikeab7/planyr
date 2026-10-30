@@ -1973,7 +1973,7 @@ export const SOURCE_DOCS = {
   },
   gaProtectedRiver: {
   notes:
-    "DCA's compiled protected-river lines (perennial streams averaging 400 cfs or more per USGS; O.C.G.A. 12-2-8, Rule 391-3-16-.04). The rule asks local governments for a river-corridor plan with a 100-ft natural vegetative buffer each side measured from the banks; the local ordinance governs. DCA's lines are a planning map, not a survey.",
+    "DCA's compiled protected-river lines (perennial streams averaging 400 cfs or more per USGS; O.C.G.A. 12-2-8, Rule 391-3-16-.04). The rule asks local governments for a river-corridor plan with a 100-ft natural vegetative buffer each side measured from the banks; the local ordinance governs. DCA's lines are a planning map, not a survey, and run through two reaches the rule EXCLUDES (the Chattahoochee under the Metropolitan River Protection Act; the tidal reaches under the Coastal Marshlands Protection Act). The Stream Buffers band is drawn from the centreline, so it understates the bank-measured buffer on a wide river.",
   },
   gaProtectedMountain: {
   notes:

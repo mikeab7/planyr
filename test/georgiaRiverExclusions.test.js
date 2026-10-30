@@ -47,6 +47,13 @@ describe("the bands: the river tier is cut out of the two excluded segments", ()
     expect(mid.length).toBeGreaterThan(0);
     for (const lat of mid) expect(lat, "only the upstream part (north of the corridor) carries the band").toBeGreaterThan(34.1);
   });
+  it("DCA's centreline a hair outside ARC's corridor edge is still the MRPA reach (live: 81 vertices sat 2-120 m outside), but a river 400 m beyond it is not", () => {
+    const edgeLng = -84.2; // the ring's east side
+    const near = line("Chattahoochee River", [[edgeLng + 0.0008, 34.0], [edgeLng + 0.0008, 34.01]]);   // ~75 m outside
+    const far = line("Chattahoochee River", [[edgeLng + 0.004, 34.0], [edgeLng + 0.004, 34.01]]);      // ~370 m outside
+    expect(riverBands(streamBufferBands({ rivers: fc(near), mrpa: fc(poly(MRPA_RING)) })).length).toBe(0);
+    expect(riverBands(streamBufferBands({ rivers: fc(far), mrpa: fc(poly(MRPA_RING)) })).length).toBe(1);
+  });
   it("a non-MRPA protected river is untouched by the corridor", () => {
     const coosa = line("Coosa River", [[-85.2, 34.3], [-85.15, 34.27], [-85.1, 34.24]]);
     expect(riverBands(streamBufferBands({ rivers: fc(coosa), mrpa: fc(poly(MRPA_RING)) })).length).toBe(1);

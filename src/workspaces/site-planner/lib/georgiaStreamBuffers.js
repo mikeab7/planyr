@@ -27,7 +27,8 @@
  * Reuses `corridorRingLngLat` (the pipeline-corridor buffer: local flat-earth feet frame, no new dependency).
  */
 import { corridorRingLngLat } from "./pipelineCorridor.js";
-import { inTidalReach } from "./georgiaRiverExclusions.js";
+import { inTidalReach, inMrpaReachBox } from "./georgiaRiverExclusions.js";
+const MRPA_EDGE_DEG = 0.0015, MRPA_BOX_PAD_DEG = 0.01;
 export { inTidalReach, riverExclusionAt, inMrpaReachBox, MRPA_REACH_BOX } from "./georgiaRiverExclusions.js";
 
 export const GA_BUFFER_TIERS = {
@@ -135,7 +136,15 @@ export function streamBufferBands({ nhd = null, trout = null, district = null, r
   // DCA's protected rivers: 100 ft each side (the widest tier — no narrower rule can govern a protected river) — EXCEPT on the segments the rule excludes: the MRPA reach of the Chattahoochee
   // (cut out by ARC's corridor polygon; `mrpa` null = the polygon could not be loaded, and the caller must say the band may cover that reach) and the tidal reaches (Coastal Marshlands Protection Act).
   const mrpaRings = districtRings(mrpa);
-  const dropVertex = ([lng, lat]) => inTidalReach(lng, lat) || (mrpaRings.length > 0 && inAnyRing(lng, lat, mrpaRings));
+  /* DCA's centreline and ARC's corridor are two digitisations of one river: measured live 2026-10-30, 81 of 1,761 Chattahoochee vertices inside the corridor's box sit 2-120 m OUTSIDE its
+   * polygon (the downstream end, 33.51-33.57 N), where the card already says the MRPA governs. A vertex within MRPA_EDGE_DEG (~150 m) of the polygon counts as inside it — nine probes
+   * (the point and its eight neighbours at that distance), tried only inside the corridor's padded box. */
+  const nearMrpa = (lng, lat) => {
+    if (!mrpaRings.length || !inMrpaReachBox(lng, lat, MRPA_BOX_PAD_DEG)) return false;
+    for (const dx of [0, -MRPA_EDGE_DEG, MRPA_EDGE_DEG]) for (const dy of [0, -MRPA_EDGE_DEG, MRPA_EDGE_DEG]) if (inAnyRing(lng + dx, lat + dy, mrpaRings)) return true;
+    return false;
+  };
+  const dropVertex = ([lng, lat]) => inTidalReach(lng, lat) || nearMrpa(lng, lat);
   for (const feature of (rivers && rivers.features) || []) {
     for (const part of linePartsOf(feature)) {
       if (!part || part.length < 2) continue;
