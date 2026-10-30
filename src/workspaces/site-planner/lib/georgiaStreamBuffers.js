@@ -10,6 +10,9 @@
  *                    Chattahoochee, Buford Dam → the Fulton/Douglas line — cut out with ARC's own 2,000-ft corridor polygon, where the MRPA row governs) or by the
  *                    Coastal Marshlands Protection Act (the tidal reaches — `inTidalReach`, a screening proxy from the National Wetlands Inventory, see gaTidalReaches.js).
  *                    DCA's layer includes BOTH (live 2026-10-30: the Chattahoochee reach, and the Altamaha / Ogeechee / Savannah / Satilla / St Marys to the sea).
+ *                    The same MRPA cut applies to the Chattahoochee's 75 / 50 / 25-ft bands (NHD / trout lines named Chattahoochee): inside the corridor the MRPA plan governs, so the District's
+ *                    model buffer is not drawn along the river there either. Tributaries keep their bands. Every cut is GEOMETRIC (`clipOutside`): the line is split where it crosses the
+ *                    corridor edge, never at the nearest vertex, so a long segment does not lose its whole length to one vertex.
  *   district 75 ft   inside the Metropolitan North Georgia Water Planning District — the District's MODEL stream-buffer
  *                    ordinance: 50 ft undisturbed + 25 ft impervious setback. A MODEL: each member county adopts and may
  *                    amend its own, so this is labelled "typical local requirement — confirm with the county", never law.
@@ -27,9 +30,9 @@
  * Reuses `corridorRingLngLat` (the pipeline-corridor buffer: local flat-earth feet frame, no new dependency).
  */
 import { corridorRingLngLat } from "./pipelineCorridor.js";
-import { inTidalReach, inMrpaReachBox } from "./georgiaRiverExclusions.js";
-const MRPA_EDGE_DEG = 0.0015, MRPA_BOX_PAD_DEG = 0.01;
-export { inTidalReach, riverExclusionAt, inMrpaReachBox, MRPA_REACH_BOX } from "./georgiaRiverExclusions.js";
+import { inTidalReach, inMrpaReachBox, makeRingIndex, nearRingIndexes, MRPA_EDGE_DEG } from "./georgiaRiverExclusions.js";
+const MRPA_BOX_PAD_DEG = 0.01, CLIP_STEP_DEG = 0.0005;
+export { inTidalReach, riverExclusionAt, inMrpaReachBox, inMrpaReach, MRPA_REACH_BOX } from "./georgiaRiverExclusions.js";
 
 export const GA_BUFFER_TIERS = {
   state: { id: "state", eachSideFt: 25, color: "#b45309", label: "25 ft state-waters buffer" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
@@ -103,6 +106,37 @@ export function keepRuns(path, drop) {
   return runs;
 }
 
+/* Clip a path to the parts for which `drop(point)` is false, GEOMETRICALLY: each segment is sampled every CLIP_STEP_DEG (so a long segment that dips through a small excluded area is still seen),
+ * and where the answer flips the crossing is found by bisection — the run ends AT the edge, not at the last vertex before it. Runs under two points vanish. Only original vertices and crossings
+ * are kept (the samples are for testing). Pure. */
+export function clipOutside(path, drop, step = CLIP_STEP_DEG) {
+  const runs = []; let cur = [];
+  const flush = () => { if (cur.length > 1) runs.push(cur); cur = []; };
+  const cross = (a, aDrop, b) => { // a and b answer differently: the kept-side point nearest the edge
+    let lo = a, hi = b;
+    for (let i = 0; i < 12; i++) { const m = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]; if (drop(m) === aDrop) lo = m; else hi = m; }
+    return aDrop ? hi : lo;
+  };
+  let prev = path[0], prevDrop = drop(prev);
+  if (!prevDrop) cur.push(prev);
+  for (let i = 1; i < path.length; i++) {
+    const b = path[i], n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - prev[0]), Math.abs(b[1] - prev[1])) / step));
+    let a = prev, aDrop = prevDrop;
+    for (let k = 1; k <= n; k++) {
+      const pt = k === n ? b : [prev[0] + ((b[0] - prev[0]) * k) / n, prev[1] + ((b[1] - prev[1]) * k) / n];
+      const d = drop(pt);
+      if (d !== aDrop) { const edge = cross(a, aDrop, pt); if (aDrop) cur = [edge]; else { cur.push(edge); flush(); } }
+      a = pt; aDrop = d;
+    }
+    if (!aDrop) cur.push(b); else flush();
+    prev = b; prevDrop = aDrop;
+  }
+  flush();
+  return runs;
+}
+
+const nameOf = (p) => String((p && (p.gnis_name ?? p.GNIS_NAME ?? p.FENAME ?? p.name ?? p.NAME)) || "");
+
 const midpoint = (path) => path[Math.floor(path.length / 2)];
 
 /* THE FUNCTION: NHD flowlines + DNR trout lines + the District outline → the bands to draw.
@@ -111,6 +145,14 @@ const midpoint = (path) => path[Math.floor(path.length / 2)];
  * midpoint (an NHD reach is ~1 km; a reach straddling the District line takes its middle's answer).
  * `districtOk` is FALSE when the District outline could not be loaded: then NO part is promoted to 75 and the caller
  * must say so — a missing outline must never silently draw the narrower band as if it were the answer. Pure. */
+const _mrpaCache = new WeakMap();
+function mrpaIndexes(mrpa) {
+  if (!mrpa) return [];
+  let v = _mrpaCache.get(mrpa);
+  if (!v) { v = districtRings(mrpa).map(makeRingIndex); _mrpaCache.set(mrpa, v); }
+  return v;
+}
+
 export function streamBufferBands({ nhd = null, trout = null, district = null, rivers = null, mrpa = null } = {}) {
   const rings = districtRings(district);
   const bands = [];
@@ -118,37 +160,40 @@ export function streamBufferBands({ nhd = null, trout = null, district = null, r
     const ring = corridorRingLngLat(path, tier.eachSideFt * 2);
     if (ring && ring.length >= 3) bands.push({ ring, tier, from });
   };
+  /* The MRPA corridor (ARC's polygon) as an indexed ring set, and the "is this point on the MRPA reach?" test the cuts share. `mrpa` null = the polygon could not be loaded: nothing is cut. */
+  const mrpaIdx = mrpaIndexes(mrpa);
+  const nearMrpa = (lng, lat) => mrpaIdx.length > 0 && inMrpaReachBox(lng, lat, MRPA_BOX_PAD_DEG) && nearRingIndexes(mrpaIdx, lng, lat, MRPA_EDGE_DEG);
+  const dropMrpa = ([lng, lat]) => nearMrpa(lng, lat);
+  /* The Chattahoochee's own 75 / 50 / 25-ft bands stop at the corridor edge too (the MRPA plan governs inside it); a tributary is not the river and keeps its band. */
+  const partsFor = (feature, part) => (mrpaIdx.length && /^chattahoochee/i.test(nameOf(feature.properties)) ? clipOutside(part, dropMrpa) : [part]);
   for (const feature of (nhd && nhd.features) || []) {
     if (!isBufferedStream(feature.properties)) continue;
-    for (const part of linePartsOf(feature)) {
-      if (!part || part.length < 2) continue;
-      const m = midpoint(part);
-      push(part, tierFor({ inDistrict: inAnyRing(m[0], m[1], rings) }), "nhd");
+    for (const whole of linePartsOf(feature)) {
+      if (!whole || whole.length < 2) continue;
+      for (const part of partsFor(feature, whole)) {
+        const m = midpoint(part);
+        push(part, tierFor({ inDistrict: inAnyRing(m[0], m[1], rings) }), "nhd");
+      }
     }
   }
   for (const feature of (trout && trout.features) || []) {
-    for (const part of linePartsOf(feature)) {
-      if (!part || part.length < 2) continue;
-      const m = midpoint(part);
-      push(part, tierFor({ inDistrict: inAnyRing(m[0], m[1], rings), trout: true }), "trout");
+    for (const whole of linePartsOf(feature)) {
+      if (!whole || whole.length < 2) continue;
+      for (const part of partsFor(feature, whole)) {
+        const m = midpoint(part);
+        push(part, tierFor({ inDistrict: inAnyRing(m[0], m[1], rings), trout: true }), "trout");
+      }
     }
   }
   // DCA's protected rivers: 100 ft each side (the widest tier — no narrower rule can govern a protected river) — EXCEPT on the segments the rule excludes: the MRPA reach of the Chattahoochee
   // (cut out by ARC's corridor polygon; `mrpa` null = the polygon could not be loaded, and the caller must say the band may cover that reach) and the tidal reaches (Coastal Marshlands Protection Act).
-  const mrpaRings = districtRings(mrpa);
-  /* DCA's centreline and ARC's corridor are two digitisations of one river: measured live 2026-10-30, 81 of 1,761 Chattahoochee vertices inside the corridor's box sit 2-120 m OUTSIDE its
-   * polygon (the downstream end, 33.51-33.57 N), where the card already says the MRPA governs. A vertex within MRPA_EDGE_DEG (~150 m) of the polygon counts as inside it — nine probes
-   * (the point and its eight neighbours at that distance), tried only inside the corridor's padded box. */
-  const nearMrpa = (lng, lat) => {
-    if (!mrpaRings.length || !inMrpaReachBox(lng, lat, MRPA_BOX_PAD_DEG)) return false;
-    for (const dx of [0, -MRPA_EDGE_DEG, MRPA_EDGE_DEG]) for (const dy of [0, -MRPA_EDGE_DEG, MRPA_EDGE_DEG]) if (inAnyRing(lng + dx, lat + dy, mrpaRings)) return true;
-    return false;
-  };
-  const dropVertex = ([lng, lat]) => inTidalReach(lng, lat) || nearMrpa(lng, lat);
+  // The tidal cells are a vertex-derived proxy (gaTidalReaches.js marks the cell under each tidal VERTEX of DCA's lines), so they cut at vertices; the MRPA corridor is a real polygon and cuts geometrically.
   for (const feature of (rivers && rivers.features) || []) {
     for (const part of linePartsOf(feature)) {
       if (!part || part.length < 2) continue;
-      for (const run of keepRuns(part, dropVertex)) push(run, GA_BUFFER_TIERS.river, "river");
+      for (const fresh of keepRuns(part, ([lng, lat]) => inTidalReach(lng, lat))) {
+        for (const run of mrpaIdx.length ? clipOutside(fresh, dropMrpa) : [fresh]) push(run, GA_BUFFER_TIERS.river, "river");
+      }
     }
   }
   return bands;

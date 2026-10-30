@@ -220,13 +220,42 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
       expect(text, id).not.toMatch(/\b\d+[- ]?(ft|feet|foot|mile|miles)\b/i);
     }
   });
-  it("tribal wording never asserts a legal conclusion: statistical areas are said to be statistical", () => {
+  it("tribal wording (NEW-1 second review): per area type, never 'just statistical', never a site IS / IS NOT under tribal jurisdiction", () => {
     const t = ALL_LAYERS.ok_tribal;
-    expect(t.note).toMatch(/statistical/i);
-    expect(t.note).toMatch(/NOT legal boundaries/i);
-    expect(t.infoCaveat).toMatch(/legal question/i);
-    expect(t.identifyCard({ NAME: "Cherokee OTSA" }).note).toMatch(/not legal boundaries/i);
-    expect(ALL_LAYERS.ok_tribal.legend.find((e) => /statistical/i.test(e.label))).toBeTruthy();
+    const all = (nm) => { const c = t.identifyCard({ NAME: nm }); return [c.title, ...c.rows.map((r) => r.label + " " + r.text), c.note].join(" "); };
+    for (const nm of ["Creek OTSA", "Cherokee OTSA", "Kiowa-Comanche-Apache-Fort Sill Apache OTSA", "Caddo-Wichita-Delaware OTSA", "Osage Reservation", "Shawnee Trust Land"]) {
+      const x = all(nm);
+      expect(x, nm).not.toMatch(/\bNOT legal boundar|just statistical|not a legal boundary/i);
+      expect(x, nm).toMatch(/unsettled and fact-specific/);
+      expect(x, nm).toMatch(/Ask counsel and the Nation/);
+      expect(x, nm).toMatch(/does not say whether a site is or is not under tribal jurisdiction/);
+      expect(x, nm).not.toMatch(/\b(is|are) (in|within|under|subject to) (the )?(tribal|Indian country)/i);
+    }
+    expect(t.note).toMatch(/McGirt v\. Oklahoma, 2020/);
+    expect(t.note).toMatch(/Oklahoma Court of Criminal Appeals, 2021/);
+    expect(t.note).toMatch(/Osage Nation disputes/);
+    expect(t.note).not.toMatch(/NOT legal boundaries/i);
+    expect(t.infoCaveat).toMatch(/does not say whether a site is under tribal jurisdiction/);
+    expect(t.legend.some((e) => /not a legal boundary/i.test(e.label))).toBe(false);
+  });
+  it("tribal cards name the court ruling only for the nations a ruling covers, and say which way it went", () => {
+    const courts = (nm) => (t.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Courts") || {}).text || "";
+    const t = ALL_LAYERS.ok_tribal;
+    expect(courts("Creek OTSA")).toMatch(/McGirt v\. Oklahoma \(U\.S\. Supreme Court, 2020\) held that Congress never disestablished/);
+    for (const n of ["Cherokee", "Chickasaw", "Choctaw", "Seminole", "Quapaw"]) expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished"));
+    expect(courts("Creek/Seminole joint-use OTSA")).toMatch(/Muscogee \(Creek\).*Seminole:/);
+    expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).toMatch(/was disestablished/);
+    expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).not.toMatch(/not disestablished/);
+    expect(courts("Caddo-Wichita-Delaware OTSA")).toBe("No court ruling on this area is cited here.");
+    expect(courts("Osage Reservation")).toMatch(/Osage Nation v\. Irby \(2010\).*disestablished.*Osage Nation disputes/);
+  });
+  it("per area type: OTSAs are Census tribal areas, the Osage Reservation and Shawnee trust land are legal areas in Census's classification", () => {
+    const type = (nm) => ALL_LAYERS.ok_tribal.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Type").text;
+    expect(type("Cherokee OTSA")).toMatch(/Tribal Statistical Area \(OTSA\)/);
+    expect(type("Osage Reservation")).toMatch(/legal area in Census's classification/);
+    expect(type("Osage Reservation")).not.toMatch(/statistical/i);
+    expect(type("Shawnee Trust Land")).toMatch(/trust land/i);
+    expect(type("Shawnee Trust Land")).not.toMatch(/statistical/i);
   });
 });
 
@@ -315,7 +344,7 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
   it("the tribal key lists the Shawnee trust land the map draws, and the dashed OTSA swatch is dashed", () => {
     const k = ALL_LAYERS.ok_tribal.legend;
     expect(k.find((e) => /Trust land/i.test(e.label))).toBeTruthy();
-    expect(k.find((e) => /statistical/i.test(e.label)).dash).toBe(true);
+    expect(k.find((e) => /OTSA/.test(e.label)).dash).toBe(true);
     expect(ALL_LAYERS.ok_tribal.styleFn({ NAME: "Shawnee Trust Land" }, 1).color).toBe(k.find((e) => /Trust land/i.test(e.label)).color);
   });
   it("a well card never prints a raw well-type code, and a well with no class carries no Status row", () => {
@@ -340,7 +369,9 @@ describe("adversarial-review findings, pinned (each was a confirmed defect)", ()
       const c = ALL_LAYERS[id];
       const text = [c.note, c.infoCaveat, c.identifyNote].join(" ");
       expect(text, id).not.toMatch(/has no ETJ|zoning and permitting authority|review pending/i);
-      expect(text, id).not.toMatch(/McGirt|Osage Wind|\bBIA\b|sign-off/i);
+      // McGirt is allowed ONLY on the tribal row: round 4 removed case citations typed from memory; the second review (2026-10-30) asked for the McGirt / Oklahoma Court of Criminal Appeals rulings by name,
+      // each checked against reporting of the decision, and pinned in the tribal tests above.
+      expect(text, id).not.toMatch(id === "ok_tribal" ? /Osage Wind|\bBIA\b|sign-off/i : /McGirt|Osage Wind|\bBIA\b|sign-off/i);
       expect(text, id).not.toMatch(/runs with the land|strictest protection|can exclude them|endangered-species review|Land use inside is limited|none is published|is not public|tighter limits|hard constraint|extra protection|older wells can be approximate/i); // statements no source in the registry supports // legal conclusions about reservations / mineral estates are never typed from memory
     }
     expect(OK_SOURCES.okCity.fullPurposeOnly).toBe(true);

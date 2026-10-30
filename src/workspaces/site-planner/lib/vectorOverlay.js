@@ -778,7 +778,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
     if (lost.length) {
       // a lost corridor makes the Chattahoochee band WIDER than the rule (the MRPA governs there), every other loss makes a band NARROWER
       const narrower = failed.trout || failed.district || failed.rivers;
-      const effect = [narrower && "the bands shown may be narrower than the rule", failed.mrpa && "a 100-ft river band may be drawn on the Chattahoochee reach, where the Metropolitan River Protection Act's buffers govern instead"].filter(Boolean).join("; ");
+      const effect = [narrower && "the bands shown may be narrower than the rule", failed.mrpa && "river or District bands may be drawn along the Chattahoochee reach, where the Metropolitan River Protection Act's buffers govern instead"].filter(Boolean).join("; ");
       report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — ${effect}. NOT the full answer (screening only).`);
     } else if (!list.length) {
       report("empty", "No state-waters streams in this view.");
