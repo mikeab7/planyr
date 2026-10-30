@@ -9,8 +9,11 @@
  * (tdeconline.tn.gov) refuses the relay and cannot be read from a browser Planyr can verify — measured 2026-10-29 — so the 60 ft tier is NOT drawn and
  * the row says so rather than draw 30 ft as if it were the whole answer. Adding it is a data source, not a rewrite: widen `TN_BUFFER_TIERS`.
  *
- * Only streams are buffered (the same NHD rule the Georgia layer uses — `georgiaStreamBuffers.isBufferedStream`: ftype 460, not ephemeral; never
- * canals, ditches, artificial paths or pipelines). A wet-weather conveyance is not "waters of the state" and carries no buffer — NHD cannot tell one from
+ * Only streams are buffered (the Georgia layer's NHD rule — `georgiaStreamBuffers.isBufferedStream`: ftype 460, not ephemeral; never canals, ditches or
+ * pipelines) PLUS one Tennessee addition: a NAMED artificial path (ftype 558 carrying a GNIS name). NHD draws a wide named river as a polygon with an
+ * "artificial path" centreline through it; at the Middle Fork Stones River near Christiana that centreline is the ONLY line in view, so without it the layer
+ * said "No streams in this view" beside a named river (found by the live check, 2026-10-30). An UNNAMED artificial path (the line through a pond or lake) is
+ * still not buffered. A wet-weather conveyance is not "waters of the state" and carries no buffer — NHD cannot tell one from
  * a stream, so a small headwater channel can be drawn that a TDEC hydrologic determination (rule 0400-40-17) would call a conveyance. Local governments
  * add their own post-construction buffers on top (an MS4 city such as Murfreesboro or Nashville) — NOT drawn: their width depends on drainage area and
  * stream class the data does not carry.
@@ -22,6 +25,15 @@
 import { corridorRingLngLat } from "./pipelineCorridor.js";
 import { isBufferedStream, linePartsOf } from "./georgiaStreamBuffers.js";
 
+/* ftype 460 (not ephemeral), or a named ftype 558 artificial path — the centreline NHD draws through a wide river. Accepts either property casing. Pure. */
+export function isBufferedWaterTn(props) {
+  if (isBufferedStream(props)) return true;
+  const p = props || {};
+  const ftype = Number(p.ftype ?? p.FTYPE);
+  const name = String(p.gnis_name ?? p.GNIS_NAME ?? "").trim();
+  return ftype === 558 && name.length > 0;
+}
+
 export const TN_BUFFER_TIERS = {
   standard: { id: "standard", eachSideFt: 30, color: "#b45309", label: "30 ft construction buffer (average)" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
 };
@@ -30,7 +42,7 @@ export const TN_BUFFER_TIERS = {
 export function streamBufferBandsTn({ nhd = null } = {}) {
   const bands = [];
   for (const feature of (nhd && nhd.features) || []) {
-    if (!isBufferedStream(feature.properties)) continue;
+    if (!isBufferedWaterTn(feature.properties)) continue;
     for (const part of linePartsOf(feature)) {
       if (!part || part.length < 2) continue;
       const ring = corridorRingLngLat(part, TN_BUFFER_TIERS.standard.eachSideFt * 2);

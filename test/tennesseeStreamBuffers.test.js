@@ -30,8 +30,8 @@ describe("streamBufferBandsTn — widths measured in feet", () => {
   it("an intermittent stream is buffered too", () => {
     expect(streamBufferBandsTn({ nhd: fc(ew(INTERMITTENT)) })).toHaveLength(1);
   });
-  it("only streams are buffered: ephemeral channels, canals, artificial paths and ditches are not", () => {
-    expect(streamBufferBandsTn({ nhd: fc(ew(EPHEMERAL), ew(CANAL, 500), ew({ ftype: 558 }, 900), ew({ ftype: 428 }, 1300)) })).toEqual([]);
+  it("only streams are buffered: ephemeral channels, canals, UNNAMED artificial paths and ditches are not", () => {
+    expect(streamBufferBandsTn({ nhd: fc(ew(EPHEMERAL), ew(CANAL, 500), ew({ ftype: 558 }, 900), ew({ ftype: 558, gnis_name: "   " }, 1100), ew({ ftype: 428 }, 1300)) })).toEqual([]);
   });
   it("an empty view returns nothing, and nothing throws on null input", () => {
     expect(streamBufferBandsTn({})).toEqual([]);
@@ -52,5 +52,9 @@ describe("legend", () => {
     expect(bufferLegendTn([])).toEqual([]);
     expect(bufferLegendTn(null)).toEqual([]);
     expect(bufferLegendTn(streamBufferBandsTn({ nhd: fc(ew(STREAM)) }))).toEqual([TN_BUFFER_TIERS.standard.label]);
+  });
+  it("a NAMED artificial path (the centreline NHD draws through a wide river — Middle Fork Stones River near Christiana) IS buffered, in either property casing", () => {
+    expect(streamBufferBandsTn({ nhd: fc(ew({ ftype: 558, fcode: 55800, gnis_name: "Middle Fork Stones River" }, 700)) })).toHaveLength(1);
+    expect(streamBufferBandsTn({ nhd: fc(ew({ FTYPE: 558, GNIS_NAME: "Stones River" }, 700)) })).toHaveLength(1);
   });
 });
