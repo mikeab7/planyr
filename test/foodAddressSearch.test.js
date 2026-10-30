@@ -57,10 +57,18 @@ describe("address search (B2051665)", () => {
     const i = sql.indexOf("create or replace function public.food_places_search_by_address(");
     expect(i).toBeGreaterThan(-1);
     const fn = sql.slice(i, sql.indexOf("grant execute on function public.food_places_search_by_address", i));
-    expect(fn).toMatch(/language sql stable/);
+    expect(fn).toMatch(/language plpgsql stable/);
     expect(fn).toContain("[^a-z0-9]+");      // words are letters/digits only: no LIKE wildcard can come from the query
-    expect(fn).not.toMatch(/\bexecute\b\s+['"(]|format\(/i); // no dynamic SQL
-    expect(fn).toMatch(/limit least\(greatest\(1, p_cap\), 100\)/);
+    // B2559168: the words must be inlined as literals for the trigram index to serve them, so the SQL
+    // is built dynamically — injection-proof BY CONSTRUCTION: only the sanitised words go in, each
+    // quoted with %L; the centre and cap travel as USING parameters; the raw query never appears in
+    // the statement text.
+    expect(fn).toMatch(/format\('lower\(fp\.address\) like %L', '%' \|\| w \|\| '%'\)/);
+    expect(fn).toMatch(/using p_center_lat, p_center_lon, p_cap/);
+    const execAt = fn.indexOf("return query execute");
+    expect(execAt).toBeGreaterThan(-1);
+    expect(fn.slice(execAt)).not.toContain("p_query"); // nothing typed reaches the dynamic statement except via v_words
+    expect(fn).toMatch(/limit least\(greatest\(1, \$3\), 100\)/); // $3 = p_cap, passed via USING
     expect(sql).toMatch(/grant execute on function public\.food_places_search_by_address\(text, integer, double precision, double precision\) to anon, authenticated/);
     expect(sql).toContain("food_places_address_trgm_idx");
   });

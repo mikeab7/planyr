@@ -541,8 +541,9 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
 
   it("the RPC partitions the bbox into a grid AND weights each cell's cap by its own true count — never a flat 1/N share", () => {
     const sql = src("db/food.sql");
-    expect(sql).toContain("width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy");
-    expect(sql).toContain("width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx");
+    // B2559168: the bucket is cast to int2 so the ranking rows stay narrow (see foodBrowseDiskIo.test.js)
+    expect(sql).toContain("width_bucket(lat, p_south, p_north, greatest(p_grid, 1))::int2 as gy");
+    expect(sql).toContain("width_bucket(lon, p_west, p_east, greatest(p_grid, 1))::int2 as gx");
     expect(sql).toContain("partition by gy, gx");
     expect(sql).toContain("count(*) over () as total_matched");
     // The proportional weighting — this is the line that fixed the >13x disparity. A flat
