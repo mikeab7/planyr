@@ -142,7 +142,11 @@ These are against localhost, so the real internet adds the download. The live ru
 
 ## Live check on planyr.io (V2008256)
 
-{{LIVE}}
+**Not run yet — it can only run against a deployed build.** There is no per-branch preview for this repo, so the signed-in check on planyr.io runs right after this merges and deploys (the served build id is read in the same call as every assertion). Until V2008256 records a dated pass, **everything above was measured in the sandbox: the real component, the real Univer, a real Chromium — but not on the real site, and not as the real owner account.**
+
+What it will prove, on a throwaway project on the *test* account (deleted afterwards and re-read as gone): the switch is **absent** for a non-admin (the real `is_admin()` answer is checked first and must be `false`) and a stored "on" does nothing; with `is_admin` answered `true` by a network intercept for that one browser (the client-side gate is a visibility switch, not a security boundary — data access is still the test account's own), the switch appears and the grid mounts; a keyboard subset of the checklist passes on the real page; a value typed in Univer reaches the same cloud row and shows in the regular grid; and `=Site.Acres` / `=Plan.Building1.SF` show the same numbers in both grids. It also prints the real click-to-ready time and the bytes the switch downloads.
+
+The one thing no session can do is sign in *as you*: the real owner switch (your account) is yours to try once it is live. Nothing is needed from you for the check itself.
 
 ## Cutover plan (if you decide to go)
 
