@@ -38,11 +38,14 @@ await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentload
 await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 30000 });
 await page.waitForTimeout(3500);
 const before = await page.locator('[data-testid^="notes-row-"]').count();
-await page.locator('[data-testid="notes-new-page"]').click();
-await page.waitForSelector('[data-testid="note-title"]', { timeout: 20000 });
-await page.locator('[data-testid="note-title"]').fill(TITLE);
-await page.locator('[data-testid="note-title"]').press("Tab").catch(() => {});
-await page.waitForTimeout(800);
+/* one fresh throwaway page PER CASE: a big paste pans the workspace, so the title (which an earlier draft clicked to leave the box) can sit outside the viewport */
+const newPage = async (n) => {
+  await page.locator('[data-testid="notes-new-page"]').first().click();
+  await page.waitForSelector('[data-testid="note-title"]', { timeout: 20000 });
+  await page.locator('[data-testid="note-title"]').fill(`${TITLE} ${n}`);
+  await page.locator('[data-testid="note-title"]').press("Tab").catch(() => {});
+  await page.waitForTimeout(800);
+};
 
 async function arm(fx, fy) {
   const at = await page.evaluate(([a, b]) => { const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect(); return { x: r.left + r.width * a, y: r.top + r.height * b }; }, [fx, fy]);
@@ -91,25 +94,27 @@ try {
   let idx = 0;
   for (const [name, want] of cases) {
     console.log(`\n[${idx + 1}] ${name} on blank paper`);
-    ok("a double-click on blank paper armed a caret", await arm(0.08, 0.12 + 0.28 * idx));
+    await newPage(idx + 1);
+    ok("a double-click on blank paper armed a caret", await arm(0.08, 0.12));
     await paste(load(name));
-    const got = await rendered(idx);
+    const got = await rendered(0);   // one box per throwaway page
     ok("it renders as the outline it was (real nested lists, table under its bullet)", JSON.stringify(got) === JSON.stringify(want), `\n      want ${JSON.stringify(want)}\n      got  ${JSON.stringify(got)}`);
     ok("no bullet glyph is left in the text", !(got || []).some((l) => GLYPH.test(l) || /^\s*[•\d.]+\s+o\s/.test(l)), JSON.stringify(got));
     await page.screenshot({ path: `${SHOT}-${idx + 1}-${name}.png` });
-    await clickOut();
     idx += 1;
   }
 } finally {
   console.log("\n[cleanup] deleting the throwaway page");
   try {
-    const row = page.locator(`[data-testid^="notes-row-"]`, { hasText: TITLE }).first();
-    await row.click({ button: "right" });
-    await page.waitForTimeout(300);
-    await page.locator('[data-testid^="notes-menu-"]', { hasText: /^Delete/ }).first().click();
-    await page.waitForTimeout(800);
-    const yes = page.locator('button[aria-label*="Confirm" i], button:has-text("✓")').first();
-    if (await yes.count()) { await yes.click(); await page.waitForTimeout(1200); }
+    for (let g = 0; g < 8 && (await page.locator(`[data-testid^="notes-row-"]`, { hasText: TITLE }).count()); g++) {
+      const row = page.locator(`[data-testid^="notes-row-"]`, { hasText: TITLE }).first();
+      await row.click({ button: "right" });
+      await page.waitForTimeout(300);
+      await page.locator('[data-testid^="notes-menu-"]', { hasText: /^Delete/ }).first().click();
+      await page.waitForTimeout(800);
+      const yes = page.locator('button[aria-label*="Confirm" i], button:has-text("✓")').first();
+      if (await yes.count()) { await yes.click(); await page.waitForTimeout(1200); }
+    }
   } catch (e) { console.log("  cleanup step error:", String(e).slice(0, 200)); }
   const left = await page.locator(`[data-testid^="notes-row-"]`, { hasText: TITLE }).count();
   ok("the throwaway page is gone from the list", left === 0);
