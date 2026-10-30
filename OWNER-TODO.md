@@ -5,7 +5,11 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-29._
+_Last updated: 2026-10-30._
+
+## 🖱 A ten-second look: does the Layers panel still tremble when you slide the pointer down its left list? (B2559953 / V2010721)
+- [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
+
 
 ## 📱 Two-minute check on your iPhone: does a pasted-table picture show straight away? (B2515969 / V1960400)
 - [ ] **In Notes on your iPhone, paste a few rows from a spreadsheet, tap the little "(Ctrl) ▾" tab, then the last picture icon.** The table should turn into a picture of itself within about a second. In the phone test I can run here, the picture sometimes shows only as a small "Pasted table" label until you tap the page once — that test uses a stand-in for Safari, so I can't tell whether your phone does it. If yours shows the label, tell me; if it just shows the picture, say so and I'll close it. (The tab itself is now thumb-sized — that was fixed.)
