@@ -29,6 +29,7 @@
 import { Extension } from "@tiptap/core";
 import { CellSelection, TableMap, isInTable, selectedRect } from "@tiptap/pm/tables";
 import { TABLE_FILLS } from "./notesFormatPalette.js";
+import { isMultiCell, multiCellPositions, refuseMultiCell } from "./notesTableMultiSelect.js";
 
 /* The palette itself lives with the module's other CONTENT colours (notesFormatPalette.js). */
 export { TABLE_FILLS };
@@ -95,7 +96,7 @@ function cellsInRows(map, top, bottom) {
 export function tableTarget(state) {
   if (!state || !isInTable(state)) return null;
   const rect = selectedRect(state);
-  return { rect, map: rect.map, table: rect.table, tableStart: rect.tableStart, isCells: state.selection instanceof CellSelection };
+  return { rect, map: rect.map, table: rect.table, tableStart: rect.tableStart, isCells: state.selection instanceof CellSelection, multi: multiCellPositions(state) };
 }
 
 const rowIsAllHeader = (table, map, r) => {
@@ -165,6 +166,8 @@ export function toggleHeaderRows(state, dispatch) {
  *  caret cell's whole ROW (the brief: "the caret cell's whole ROW when nothing is selected"). */
 function fillTargets(t) {
   const { map, rect, isCells } = t;
+  // B2530690 — several ranges (Ctrl+click): every selected cell, not just the newest rectangle
+  if (t.multi) return t.multi.positions;
   return isCells ? map.cellsInRect(rect) : cellsInRows(map, rect.top, rect.bottom);
 }
 
@@ -256,7 +259,7 @@ export const NoteTableFill = Extension.create({
   },
   addCommands() {
     return {
-      toggleHeaderRows: () => ({ state, dispatch }) => toggleHeaderRows(state, dispatch),
+      toggleHeaderRows: () => ({ state, dispatch, editor }) => (isMultiCell(state) ? refuseMultiCell(editor) : toggleHeaderRows(state, dispatch)),
       setCellFill: (choice) => ({ state, dispatch }) => setCellFill(choice)(state, dispatch),
     };
   },
