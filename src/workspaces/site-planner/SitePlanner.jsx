@@ -390,6 +390,8 @@ import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
 import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, showAreaOn, normDeg } from "./lib/easementLabelPull.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
+import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
+import { sideButtonAnchor, bumpButtonAnchor } from "./lib/padCornerTag.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -18126,6 +18128,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         }
       }
     } else {
+      // NEW-1 (2026-10-30) — a GRADED plan's building label carries its FFE (typed or suggested, read live from the one grading
+      // model; null with grading off, for a bump-out and before the suggestion lands). lib/buildingFfeLabel.js.
+      const ffeText = ffeLineText(buildingFfeFt(el, { grOn, autoFfe: grModel && grModel.autoFfe }));
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
       const name = bn ? `Building ${bn}` : (TYPE[el.type]?.label || "Element").split(" / ")[0];
       if (el.type === "building" && !poly && !el.dogEar) {
@@ -18135,7 +18140,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // "(incl. N bump-outs)" wording from the label (it is not shown anywhere on the canvas).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, dims: `${f0(el.w)}′ × ${f0(el.h)}′`, ffe: ffeText });
       } else if (el.type === "trailer") {
         // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
         // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
@@ -18153,6 +18158,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // (an AREA line — dropped with areas off, leaving just the name).
         if (!poly) lines.push(`${f0(el.w)}′ × ${f0(el.h)}′`);
         else if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} AC`);
+        if (ffeText) lines.push(ffeText); // NEW-1 (2026-10-30): an irregular building's FFE rides under its size line, same as a rectangle's
       }
     }
     // Shape's on-screen bounding half-extents (rotation-aware for rects). halfH drives the
@@ -18665,9 +18671,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
-          let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-          const pos = { x: ms.x - ux * 24, y: ms.y - uy * 24 }; // just inside the wall, on the building
-          const tan = { x: -uy, y: ux };                        // along the wall (side-by-side +/−)
+          const { pos, tan } = sideButtonAnchor(ms, cpx);       // just inside the wall, on the building; `tan` runs along the wall (side-by-side +/−) — lib/padCornerTag.js, which the grading corner tags avoid (NEW-2 2026-10-30)
           if (dockSides.includes(name)) {
             // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
             const n = stackCountIn(els, el, name);
@@ -18699,8 +18703,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const cl = alongIsX ? { x: sign * el.w / 2, y: ny * el.h / 2 } : { x: nx * el.w / 2, y: sign * el.h / 2 };
             const co = rot2(cl.x, cl.y, el.rot);
             const cs = f2p({ x: el.cx + co.x, y: el.cy + co.y });
-            let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-            const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
+            const pos = bumpButtonAnchor(cs, cpx); // just inside the corner (in the footprint) — lib/padCornerTag.js
             const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
             return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null);
           });
