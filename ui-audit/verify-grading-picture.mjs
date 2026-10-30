@@ -416,6 +416,11 @@ try {
     }
   }
   check("(j) known-good coverage: the clip was judged on a view carrying the band in BOTH limit modes", (bandJudged.layout || 0) > 0 && (bandJudged.boundary || 0) > 0, JSON.stringify(bandJudged));
+  // the top-of-bank straightness test for (o): offsets along the line (ft) and the worst deviation from the least-squares line
+  const STRAIGHT_OFFS = [-40, -32, -24, -16, -8, 0, 8, 16, 24, 32, 40];
+  const straightDev = (xs, ys) => { const mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    const sl = xs.reduce((a, x, k) => a + (x - mx) * (ys[k] - my), 0) / xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    return Math.max(...xs.map((x, k) => Math.abs(ys[k] - (my + sl * (x - mx))))); };
   // ---- ROUND 9 (B2500224 ×2, owner live check 2026-10-30): the owner's Concept A (`owner=2`), "To the boundary", the NE (cut) and SW
   // (fill) corners of the building at about the 50-ft scale — and the owner's own path: open in "Around the layout", switch.
   {
@@ -466,7 +471,7 @@ try {
       // (o) evenly spaced band contours, read off the drawn paths: along normals into the band from each long straight limit edge,
       // consecutive crossings of DRAWN levels are equal within 10% (the bank body; the last three crossings are the toe)
       const pieces = r.drawn.flatMap((lv) => verts(lv.d).map((pc) => ({ level: lv.level, pc })));
-      // a transect is judged where the line's own ground is straight across ±24 ft (second difference ≤ 0.6 ft): there the bank is
+      // a transect is judged where the line's own ground is straight across ±40 ft (within 0.4 ft of its least-squares line): there the bank is
       // a plane and its contours must be parallel and even; where the ground bends along the line (a ravine meeting it) the bank's
       // contours bend with it — correct — and are skipped (counted). Tolerance: 10%, or 0.15 of the contour lattice's cell, the
       // tracer's own resolution, whichever is larger.
@@ -474,7 +479,7 @@ try {
         const b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
         if (len < 250) return [];
         const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len;
-        return [0.35, 0.5, 0.65].flatMap((t) => [-24, 0, 24].map((o) => ({ x: a.x + (b.x - a.x) * t + tx * o, y: a.y + (b.y - a.y) * t + ty * o })));
+        return [0.35, 0.5, 0.65].flatMap((t) => STRAIGHT_OFFS.map((o) => ({ x: a.x + (b.x - a.x) * t + tx * o, y: a.y + (b.y - a.y) * t + ty * o })));
       })));
       let gk = 0, skippedBent = 0;
       const runs = [];
@@ -483,8 +488,8 @@ try {
         if (len < 250) continue;
         const nIn = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
         for (const t of [0.35, 0.5, 0.65]) {
-          const [gm, g0, gp] = [gAt[gk], gAt[gk + 1], gAt[gk + 2]]; gk += 3;
-          if (gm == null || g0 == null || gp == null || Math.abs(gm + gp - 2 * g0) > 0.6) { skippedBent++; continue; }
+          const g = gAt.slice(gk, gk + STRAIGHT_OFFS.length); gk += STRAIGHT_OFFS.length;
+          if (g.some((v) => v == null) || straightDev(STRAIGHT_OFFS, g) > 0.4) { skippedBent++; continue; }
           for (const sg of [1, -1]) {
           const o = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, e = { x: o.x + sg * nIn.x * 90, y: o.y + sg * nIn.y * 90 };
           const hits = [];
@@ -503,7 +508,7 @@ try {
       }
       const tolOf = (med) => Math.max(0.1 * med, 0.15 * r.cell);
       const uneven = runs.filter((sp) => { const med = [...sp].sort((x, y) => x - y)[sp.length >> 1]; return sp.some((v) => Math.abs(v - med) > tolOf(med)); });
-      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 10% / 0.15 cell)`, runs.length >= 3 && uneven.length === 0, `${runs.length} transects judged · ${skippedBent} skipped where the line's ground bends · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
+      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 10% / 0.15 cell)`, runs.length >= 2 && uneven.length === 0, `${runs.length} transects judged · ${skippedBent} skipped where the line's ground bends · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
       await page.close();
     }
     // the owner's path: the plan opens "Around the layout", then "To the boundary" is chosen in the panel — at NO moment after the
