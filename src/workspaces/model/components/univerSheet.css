@@ -1,0 +1,12 @@
+/* Univer grid (owner-only spike) — FLAT, edge-to-edge chrome to match the approved Spreadsheet look
+ * (src/workspaces/model/CLAUDE.md "Chrome is FLAT"): no card, no outer border, single hairlines, no rounded
+ * corners or shadow on the strips. Scoped under .planyr-univer so nothing here can reach another module.
+ * Univer draws the grid on a canvas, so its cell/header colours come from the THEME (lib/univerTheme.js), not here. */
+.planyr-univer { background: var(--surface-raised); color: var(--text-primary); }
+.planyr-univer .univer-workbench-container,
+.planyr-univer .univer-app-layout,
+.planyr-univer [class*="univer-app-container"] { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; margin: 0 !important; }
+.planyr-univer [class*="univer-toolbar"],
+.planyr-univer [class*="univer-formula-box"],
+.planyr-univer [class*="univer-footer"],
+.planyr-univer [class*="univer-sheet-bar"] { border-radius: 0 !important; box-shadow: none !important; }

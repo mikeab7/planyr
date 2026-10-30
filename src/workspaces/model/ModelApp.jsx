@@ -38,7 +38,7 @@
  * merge, but it can no longer clobber another device's saved work in total silence.
  */
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
@@ -97,6 +97,10 @@ import {
 } from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
+// Univer spike (owner-only; docs/SPREADSHEET-UNIVER-SPIKE.md) — the switch is the ONLY touch to the existing grid. The grid
+// itself is a lazy chunk, so none of @univerjs/* is in any bundle a non-owner (or an owner with the switch off) downloads.
+import { useUniverSwitch } from "./lib/univerSwitch.js";
+const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 // NEW-1 (open an uploaded Excel in Spreadsheet) — a Library file opened as an editable workbook.
@@ -199,6 +203,11 @@ export default function ModelApp({
   const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
   const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
   const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
+  // Univer spike — `univer.active` is true only for a CONFIRMED is_admin() user who turned "Try the new grid" on (this device).
+  // While it is, Univer owns the keyboard and the clipboard, so the grid-level window listeners below stand down (`gridKeysOn`).
+  const univer = useUniverSwitch(userId);
+  const univerOn = univer.active;
+  const gridKeysOn = isActive && !univerOn;
   // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
   // undo-tracked `workbook` value, the same way zoom/painter/filterOn already are below: a plain
   // tab click is navigation, not a content edit, and must never mint (or be reverted by) an undo
@@ -789,7 +798,7 @@ export default function ModelApp({
   // `isActive` the same way Notes gates its own window shortcut: workspaces stay
   // mounted-but-hidden, so an ungated listener fires from a tab nobody is looking at.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     const onKey = (e) => {
       // STAGE 3 (NEW-1) — Esc clears an active trace, the "way to clear" the build brief asks
       // for, alongside the ribbon's own Remove Arrows button. A no-op when no trace is active.
@@ -829,7 +838,7 @@ export default function ModelApp({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActive, undo, redo, onOpenFind, onOpenReplace, clearClipMark]);
+  }, [gridKeysOn, undo, redo, onOpenFind, onOpenReplace, clearClipMark]);
 
   // STAGE 3 (NEW-1) — evaluated across the WHOLE WORKBOOK, always, regardless of which sheet is
   // currently visible: a cross-sheet formula on one sheet needs every OTHER sheet's cells (its
@@ -1646,7 +1655,7 @@ export default function ModelApp({
   // (1) Excel's Ctrl / F-key / Alt+= chords -> registry commands (lib/keymap.js). Inside the in-cell editor only the four
   // font-style chords fire; any other text control (formula bar, name box, find bar, a dialog) keeps every key.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     const onKey = (e) => {
       if (keyTipRef.current.active) return; // an Alt sequence owns the keyboard (handled in the capture listener below)
       const t = e.target instanceof Element ? e.target : null;
@@ -1659,14 +1668,14 @@ export default function ModelApp({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActive, runCommand]);
+  }, [gridKeysOn, runCommand]);
 
   // (2) The Alt key-tip sequence. Press and release Alt ALONE -> the sequence opens; letters follow Excel's Home / View paths
   // (lib/keyTips.js); Esc backs out a level; an unmatched key, a second Alt or any click cancels. Capture phase, so while a
   // sequence is open NOTHING else (the grid's type-to-edit, a ribbon button) sees the letters. Alt+Enter / Alt+click / Alt+= are
   // chords, not "Alt alone": any other key or a mouse press between Alt down and up cancels the arming.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     let armed = false;
     const setTip = (st) => { keyTipRef.current = st; setKeyTip(st); };
     const scopeOk = (e) => {
@@ -1709,12 +1718,12 @@ export default function ModelApp({
       window.removeEventListener("blur", cancel);
       keyTipRef.current = KEYTIP_START;
     };
-  }, [isActive, runCommand, showNotice]);
+  }, [gridKeysOn, runCommand, showNotice]);
 
   // (3) The real clipboard: native copy / cut / paste EVENTS (no permission prompt) — see lib/clipboardIO.js. The functions are
   // reached through `clipFnsRef` (re-pointed every render) so a listener armed once never writes into a stale sheet / tab.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     const onCopyEvent = (e, cut) => {
       const F = clipFnsRef.current;
       if (!F || !F.clipboardScopeOk(e)) return;
@@ -1734,7 +1743,7 @@ export default function ModelApp({
     document.addEventListener("cut", onCut);
     document.addEventListener("paste", onPasteEvent);
     return () => { document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPasteEvent); };
-  }, [isActive]);
+  }, [gridKeysOn]);
 
   const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
@@ -1801,9 +1810,14 @@ export default function ModelApp({
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
               onOpenFile={onOpenFileFromComputer}
+              univerSwitch={univer.available ? { on: univer.on, setOn: univer.setOn } : null}
             />
-            <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
-            <AuditGroup ctx={ctx} />
+            {!univerOn && (
+              <>
+                <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
+                <AuditGroup ctx={ctx} />
+              </>
+            )}
           </>
         ) : undefined}
       />
@@ -1843,6 +1857,20 @@ export default function ModelApp({
               onUseCloud={onUseCloudCopy}
             />
           )}
+          {univerOn ? (
+            // Univer spike (owner-only, switch on) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
+            // pieces below. Edits come back as a whole Planyr workbook through the SAME `commit` (and so the same write-through,
+            // cloud push, file-mode save and undo frame) as every other edit — persistence is not touched.
+            <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the new grid…</div>}>
+              <UniverSheet
+                workbook={workbook}
+                projectNames={projectNames}
+                onChange={(next) => { commit(() => next); if (next.activeSheetId) setActiveSheetId(next.activeSheetId); }}
+                onNotice={showNotice}
+              />
+            </Suspense>
+          ) : (
+          <>
           {/* NEW-1 (2026-10-29, owner-approved mockup) — the toolbar and formula bar are FLAT, full-width strips
               directly under the module tabs. They replace the Round 3/4 (B1087904) floating card — rounded
               corners, drop shadow, an 8px margin on every side over the page-grey band — which the owner read as
@@ -1943,6 +1971,8 @@ export default function ModelApp({
             onDelete={onDeleteSheetTab}
             onReorder={onReorderSheetTab}
           />
+          </>
+          )}
           <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
           <KeyTipOverlay state={keyTip} />
           {dialog && <ShortcutDialog spec={dialog} onClose={() => { setDialog(null); focusGrid(); }} />}

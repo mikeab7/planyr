@@ -213,3 +213,4 @@ ui-audit/discover-county-parcels-results.json
 # durable record; landed untracked at the repo root on every ci-parity run this session, worth
 # closing at the root now that it's been seen twice.
 /critical-results.json
+dist-univer-sandbox
