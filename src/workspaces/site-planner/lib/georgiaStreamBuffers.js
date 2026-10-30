@@ -137,6 +137,36 @@ export function clipOutside(path, drop, step = CLIP_STEP_DEG) {
 
 const nameOf = (p) => String((p && (p.gnis_name ?? p.GNIS_NAME ?? p.FENAME ?? p.name ?? p.NAME)) || "");
 
+/* A grid index over the Chattahoochee centreline segments (DCA's protected-river lines), so "is this point on the river?" visits a few segments, not hundreds. NHD often has NO name on the stretch that
+ * runs along the river (live 2026-10-30 in Atlanta: the Chattahoochee itself is an unbuffered 'artificial path', while unnamed perennial 460 flowlines track it for kilometres), so the MRPA cut also
+ * takes any stream within RIVER_NEAR_DEG (about 65 m) of the river's own centreline. Lines are in degrees scaled by cos(lat) so the tolerance is round. Pure. */
+const RIVER_NEAR_DEG = 0.0006, RIVER_CELL_DEG = 0.002, RIVER_KX = 0.83;
+function makeRiverIndex(rivers) {
+  const cells = new Map(); let any = false;
+  const add = (a, b) => {
+    const x1 = a[0] * RIVER_KX, y1 = a[1], x2 = b[0] * RIVER_KX, y2 = b[1];
+    const c0 = Math.floor((Math.min(x1, x2) - RIVER_NEAR_DEG) / RIVER_CELL_DEG), c1 = Math.floor((Math.max(x1, x2) + RIVER_NEAR_DEG) / RIVER_CELL_DEG);
+    const r0 = Math.floor((Math.min(y1, y2) - RIVER_NEAR_DEG) / RIVER_CELL_DEG), r1 = Math.floor((Math.max(y1, y2) + RIVER_NEAR_DEG) / RIVER_CELL_DEG);
+    for (let cx = c0; cx <= c1; cx++) for (let cy = r0; cy <= r1; cy++) { const k = cx + "," + cy; (cells.get(k) || cells.set(k, []).get(k)).push([x1, y1, x2, y2]); }
+    any = true;
+  };
+  for (const f of (rivers && rivers.features) || []) {
+    if (!/^chattahoochee/i.test(nameOf(f.properties))) continue;
+    for (const part of linePartsOf(f)) for (let i = 0; i + 1 < (part || []).length; i++) add(part[i], part[i + 1]);
+  }
+  if (!any) return null;
+  return (lng, lat) => {
+    const x = lng * RIVER_KX, y = lat, segs = cells.get(Math.floor(x / RIVER_CELL_DEG) + "," + Math.floor(y / RIVER_CELL_DEG));
+    if (!segs) return false;
+    for (const [x1, y1, x2, y2] of segs) {
+      const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+      const t = L ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / L)) : 0;
+      if (Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)) <= RIVER_NEAR_DEG) return true;
+    }
+    return false;
+  };
+}
+
 const midpoint = (path) => path[Math.floor(path.length / 2)];
 
 /* THE FUNCTION: NHD flowlines + DNR trout lines + the District outline → the bands to draw.
@@ -164,8 +194,15 @@ export function streamBufferBands({ nhd = null, trout = null, district = null, r
   const mrpaIdx = mrpaIndexes(mrpa);
   const nearMrpa = (lng, lat) => mrpaIdx.length > 0 && inMrpaReachBox(lng, lat, MRPA_BOX_PAD_DEG) && nearRingIndexes(mrpaIdx, lng, lat, MRPA_EDGE_DEG);
   const dropMrpa = ([lng, lat]) => nearMrpa(lng, lat);
-  /* The Chattahoochee's own 75 / 50 / 25-ft bands stop at the corridor edge too (the MRPA plan governs inside it); a tributary is not the river and keeps its band. */
-  const partsFor = (feature, part) => (mrpaIdx.length && /^chattahoochee/i.test(nameOf(feature.properties)) ? clipOutside(part, dropMrpa) : [part]);
+  /* The Chattahoochee's own 75 / 50 / 25-ft bands stop at the corridor edge too (the MRPA plan governs inside it): a feature NAMED Chattahoochee, and any stream that runs within ~65 m of DCA's
+   * Chattahoochee centreline while inside the corridor (the river's unnamed flowlines and a tributary's mouth). A tributary away from the river keeps its band. */
+  const onRiver = makeRiverIndex(rivers);
+  const dropMrpaRiver = ([lng, lat]) => nearMrpa(lng, lat) && !!onRiver && onRiver(lng, lat);
+  const partsFor = (feature, part) => {
+    if (!mrpaIdx.length) return [part];
+    if (/^chattahoochee/i.test(nameOf(feature.properties))) return clipOutside(part, dropMrpa);
+    return onRiver ? clipOutside(part, dropMrpaRiver) : [part];
+  };
   for (const feature of (nhd && nhd.features) || []) {
     if (!isBufferedStream(feature.properties)) continue;
     for (const whole of linePartsOf(feature)) {
