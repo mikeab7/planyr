@@ -481,7 +481,8 @@ try {
             if (d1 * d2 < 0 && d3 * d4 < 0) { const tt = d3 / (d3 - d4); hits.push(Math.hypot((e.x - o.x) * tt, (e.y - o.y) * tt)); }
           }
           hits.sort((x, y) => x - y);
-          const sp = hits.slice(1).map((h, k) => h - hits[k]).slice(0, -3);
+          // the bank's body: the first crossing is where a line weaves along the limit itself (the daylight), the last three the toe
+          const sp = hits.slice(1).map((h, k) => h - hits[k]).slice(1, -3);
           if (sp.length >= 3) runs.push(sp);
         }
       }

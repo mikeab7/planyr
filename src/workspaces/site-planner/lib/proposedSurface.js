@@ -1350,6 +1350,32 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
       values[k] = z;
     }
   }
+  // ROUND 9 (B2500224 ×2): boundary mode — the bank meets existing ground ON the limit line at a real break (2:1 inside, the
+  // ground outside), and a lattice cell straddling the line interpolated across that kink, so a proposed contour reached the
+  // line up to a foot from where the ground is its level. Every sample just OUTSIDE the line (within 1.5 cells) instead takes
+  // the proposed surface continued across it (mirrored through its nearest point q on the line: 2·z(q) − z(mirror), z(q) the
+  // ground there); the worker clips at the line, so nothing outside is ever drawn, and each contour ends where the surface —
+  // which IS the ground on the line — is its level.
+  if (boundary && grid.limit && Array.isArray(grid.limit.limitRegions) && typeof existAt === "function") {
+    const ringsAll = grid.limit.limitRegions.flatMap((rg) => [rg.outer, ...rg.holes]);
+    const reach = 1.5 * cellFt;
+    for (let i = 0; i < nx; i++) {
+      yield;
+      const x = x0 + (i + 0.5) * cellFt;
+      for (let j = 0; j < ny; j++) {
+        const k = j * nx + i;
+        if (inside[k] > 0) continue;
+        const pt = { x, y: y0 + (j + 0.5) * cellFt };
+        let best = null, bd = reach;
+        for (const ring of ringsAll) { const q = nearestOnRing(pt, ring); if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < bd) { bd = d; best = q; } } }
+        if (!best) continue;
+        const gq = existAt(best);
+        const mr = grid.probe({ x: 2 * best.x - pt.x, y: 2 * best.y - pt.y });
+        if (gq == null || !Number.isFinite(gq) || !mr || mr.status !== "value" || !Number.isFinite(mr.ft)) continue;
+        values[k] = 2 * gq - mr.ft;
+      }
+    }
+  }
   if (!(hi > lo)) return null;
   // the existing Contour-lines rule: 1 ft, coarser only when the PROPOSED range would drown the picture
   let interval = 1;
