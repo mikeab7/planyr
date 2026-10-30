@@ -238,6 +238,109 @@ export const SOURCE_FIXTURES = {
     { label: "Epps Mill Rd, Rutherford", point: [-86.3194, 35.7299], expectMinCount: 1 }, // live: 10+ within 800 m (I-24 State Highway Agency)
   ],
   },
+  /* NEW-1 (Tennessee industrial due-diligence layers, B2521584) · every count is the number of features inside the ±0.01° box the
+   * verifier queries, measured live 2026-10-29 against the service itself. Spread Memphis ↔ Nashville/Murfreesboro ↔ Knoxville/Chattanooga
+   * (≥200 km) so a county- or metro-clipped copy fails. */
+  drycleanersTn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 3
+    { label: "Nashville (Davidson)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 1
+    { label: "Chattanooga (Hamilton)", point: [-85.3097, 35.0456], expectMinCount: 1 }, // live: 1
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  ms4Tn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 2
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 1
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  wqaTn: {
+  fixtures: [
+    { label: "Memphis area streams", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 1
+    { label: "Christiana (Rutherford) — Stones River basin", point: [-86.3436, 35.7425], expectMinCount: 1 }, // live: 3
+    { label: "Knoxville streams", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  pwsTn: {
+  fixtures: [
+    { label: "Memphis — Memphis Light, Gas & Water", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 1
+    { label: "Christiana — Consolidated Utility District of Rutherford County", point: [-86.3436, 35.7425], expectMinCount: 1 }, // live: 1 (TN0000791)
+    { label: "Nashville — Metro Water Services", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 1 (TN0000494)
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  snaTn: {
+  fixtures: [
+    { label: "Auntney Hollow SNA (Lewis/Maury)", point: [-87.4393, 35.5137], expectMinCount: 1 }, // live: 1
+    { label: "Pogue Creek Canyon SNA (Fentress/Pickett)", point: [-84.8578, 36.5239], expectMinCount: 1 }, // live: 1
+    { label: "Hampton Creek Cove SNA (Carter/Johnson)", point: [-82.0447, 36.1424], expectMinCount: 1 }, // live: 1
+    { label: "Rutherford cedar glades (Christiana area)", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 4 }, // live: 11 in the wider box
+  ],
+  },
+  scenicTn: {
+  fixtures: [
+    { label: "Collins Scenic River (Grundy/Warren)", point: [-85.604, 35.4307], expectMinCount: 1 }, // live: 1
+    { label: "French Broad Scenic River (Sevier/Jefferson)", point: [-83.0506, 35.9491], expectMinCount: 1 }, // live: 1
+    { label: "Harpeth Scenic River (Davidson/Williamson)", bbox: [-87.0, 35.9, -86.6, 36.3], expectMinCount: 1 }, // live: 2 near Nashville
+  ],
+  },
+  nrhpTn: {
+  fixtures: [
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 37
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 41
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 32
+  ],
+  },
+  critHabitatTn: {
+  fixtures: [
+    { label: "Hardin / Wayne counties — Tennessee River mussels, west TN (wide box)", bbox: [-88.3, 35.0, -87.5, 35.6], expectMinCount: 1 }, // live: 3
+    { label: "Hancock / Hawkins — Clinch & Holston, east TN (wide box, kept south of the Virginia line)", bbox: [-83.6, 36.3, -83.0, 36.5], expectMinCount: 1 }, // live: 11
+    { label: "Christiana / Murfreesboro (Stones River mussels) — wide box", bbox: [-86.64, 35.44, -86.04, 36.04], expectMinCount: 1 }, // live: 4
+    { label: "Knoxville / Clinch-Holston mussels — wide box", bbox: [-84.22, 35.66, -83.62, 36.26], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  cemeteriesTn: {
+  fixtures: [
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 4
+    { label: "Murfreesboro (Rutherford)", point: [-86.3903, 35.8456], expectMinCount: 1 }, // live: 2
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  dorSitesTn: {
+  fixtures: [
+    // measured 2026-10-29 straight from TDEC's ArcGIS Online org: 825 OPEN sites statewide.
+    { label: "Memphis (Shelby)", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 3
+    { label: "Nashville (Davidson)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 19
+    { label: "Knoxville (Knox)", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 7
+  ],
+  },
+  landfillsTn: {
+  fixtures: [
+    // measured THROUGH planyr.io's relay 2026-10-29 (maps.tdec.tn.gov is unreachable from the build environment): 111 facilities; each point is a real facility.
+    { label: "Milan Army Ammunition Plant landfill (Gibson, west TN)", point: [-88.713215, 35.896768], expectMinCount: 1 }, // live: 1
+    { label: "Mueller Company landfill (Hamilton)", point: [-85.254573, 35.086244], expectMinCount: 1 }, // live: 1
+    { label: "Volunteer Regional Landfill (Scott)", point: [-84.488425, 36.545536], expectMinCount: 1 }, // live: 1
+    { label: "Carter County / Elizabethton landfill (east TN)", point: [-82.194389, 36.371859], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  thcSitesTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 186,319 survey points; the inventory is partial (0 at Christiana), so the fixtures sit in surveyed towns.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 777
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 495
+    { label: "Johnson City (Washington)", point: [-82.3535, 36.3134], expectMinCount: 1 }, // live: 1534
+  ],
+  },
+  nrhpBoundsTn: {
+  fixtures: [
+    // measured through the relay 2026-10-29: 2,047 boundary polygons.
+    { label: "Memphis", point: [-90.049, 35.1495], expectMinCount: 1 }, // live: 55
+    { label: "Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live: 44
+    { label: "Knoxville", point: [-83.9207, 35.9606], expectMinCount: 1 }, // live: 37
+  ],
+  },
   /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
    * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
    * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
@@ -426,6 +529,34 @@ export const SOURCE_FIXTURES = {
     { label: "Spalding County \u2014 Pomona/AR1", point: [-84.28, 33.265], expectMinCount: 1 }, // live 2026-10-29: 1
     { label: "Spalding County \u2014 south", point: [-84.2, 33.18], expectMinCount: 1 }, // live 2026-10-29: 1
     { label: "Spalding County \u2014 east", point: [-84.14, 33.3], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  gaRoadOwnership: {
+  fixtures: [
+    { label: "Atlanta", bbox: [-84.4, 33.74, -84.38, 33.76], expectMinCount: 1 }, // live 2026-10-29: 141
+    { label: "Savannah", bbox: [-81.11, 32.07, -81.09, 32.09], expectMinCount: 1 }, // live 2026-10-29: 181
+    { label: "Albany", bbox: [-84.17, 31.57, -84.15, 31.59], expectMinCount: 1 }, // live 2026-10-29: 73
+  ],
+  },
+  gaRareSpecies: {
+  fixtures: [
+    { label: "Savannah (Chatham)", bbox: [-81.105, 32.075, -81.095, 32.085], expectMinCount: 1 }, // live 2026-10-29: 7
+    { label: "Albany (Dougherty)", bbox: [-84.165, 31.575, -84.155, 31.585], expectMinCount: 1 }, // live 2026-10-29: 12
+    { label: "Rome (Floyd)", bbox: [-85.165, 34.255, -85.155, 34.265], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  gaMineral: {
+  fixtures: [
+    { label: "Cartersville (Bartow)", bbox: [-84.9, 34.07, -84.7, 34.27], expectMinCount: 1 }, // live 2026-10-29: 328
+    { label: "Rome (Floyd)", bbox: [-85.26, 34.16, -85.06, 34.36], expectMinCount: 1 }, // live 2026-10-29: 26
+    { label: "Augusta (Richmond)", bbox: [-82.07, 33.37, -81.87, 33.57], expectMinCount: 1 }, // live 2026-10-29: 17
+  ],
+  },
+  gaBartowZoning: {
+  fixtures: [
+    { label: "Adairsville (incorporated, 'Incorporated' polygons)", bbox: [-84.94, 34.36, -84.92, 34.38], expectMinCount: 1 }, // live 2026-10-29: 902
+    { label: "rural Bartow \u2014 south", bbox: [-84.71, 34.19, -84.69, 34.21], expectMinCount: 1 }, // live 2026-10-29: 28
+    { label: "rural Bartow \u2014 west", bbox: [-84.91, 34.24, -84.89, 34.26], expectMinCount: 1 }, // live 2026-10-29: 79
   ],
   },
   countyCa: {
@@ -969,6 +1100,188 @@ export const SOURCE_FIXTURES = {
     { label: "Aurora / east Denver metro (MHFD)", point: [-104.7781, 39.7587], expectMinCount: 1 }, // B209505 · live 2026-08-06: 88
   ],
   },
+  /* NEW-1 (B2528688, 2026-10-29) — the Colorado due-diligence family. Every count below was measured live 2026-10-29 (ECMC and Aurora through the planyr.io
+   * /gis-proxy relay, everything else straight from ArcGIS Online); `expectMinCount` is deliberately a floor well under the measured count so a normal edit never
+   * trips it, while a county-clipped or wrong service does. The ECMC floors are the ANTI-CLIP guard: Adams County's COGCC copy holds 711 wells in all of Weld,
+   * the Greeley box alone holds 768 here. */
+  ecmcWells: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 500 }, // live 2026-10-29: 768 wells (a county clip fails this)
+    { label: "Windsor (Weld/Larimer)", bbox: [-104.95, 40.45, -104.85, 40.52], expectMinCount: 300 }, // live 2026-10-29: 638
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 25
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  ecmcFlowlines: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 300 }, // live 2026-10-29: 692 segments
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 200 }, // live 2026-10-29: 596
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 300 }, // live 2026-10-29: 722
+  ],
+  },
+  ecmcLocations: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 200 }, // live 2026-10-29: 382 footprints
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 100 }, // live 2026-10-29: 205
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 5 }, // live 2026-10-29: 26
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  ecmcFacilities: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 40 }, // live 2026-10-29: 80 facilities (flowline points left off; 200 with them)
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 13 }, // live 2026-10-29: 26 (110 with flowline points)
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1 (2 with flowline points)
+  ],
+  },
+  cdpheRcraCa: {
+  fixtures: [
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 6 }, // live 2026-10-29: 12
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  cdpheInstControls: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 10 }, // live 2026-10-29: 26
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 2
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  cdpheClosedLandfills: {
+  fixtures: [
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Fort Collins (Larimer)", bbox: [-105.12, 40.55, -105.02, 40.62], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  cdpheSolidWaste: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 20 }, // live 2026-10-29: 44
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 8 }, // live 2026-10-29: 15
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  drmsUndermined: {
+  fixtures: [
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 6 }, // live 2026-10-29: 13 undermined-area polygons (Boulder–Weld coal field)
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 6 }, // live 2026-10-29: 13
+    { label: "Colorado Springs", bbox: [-104.88, 38.78, -104.78, 38.88], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  cpwPrairieDog: {
+  fixtures: [
+    { label: "Fort Collins (Larimer)", bbox: [-105.12, 40.55, -105.02, 40.62], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Pueblo", bbox: [-104.65, 38.22, -104.55, 38.30], expectMinCount: 1 }, // live 2026-10-29: 2
+  ],
+  },
+  cpwEagleNests: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 3 }, // live 2026-10-29: 6
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 2 }, // live 2026-10-29: 4
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  nrhpCo: {
+  fixtures: [
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 100 }, // live 2026-10-29: 232
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 3 }, // live 2026-10-29: 7
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 3 }, // live 2026-10-29: 7
+  ],
+  },
+  critHabitatCo: {
+  fixtures: [
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 3 (Colorado River fish designations)
+    { label: "Colorado Springs", bbox: [-104.88, 38.78, -104.78, 38.88], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  enterpriseZonesCo: {
+  fixtures: [
+    { label: "Denver", bbox: [-105.05, 39.70, -104.95, 39.78], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Grand Junction (Mesa)", bbox: [-108.62, 39.04, -108.5, 39.12], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Durango (La Plata)", bbox: [-107.92, 37.22, -107.82, 37.30], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldZoning: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 50 }, // live 2026-10-29: 101 districts
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 15 }, // live 2026-10-29: 36
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 5 }, // live 2026-10-29: 10
+  ],
+  },
+  weldGrowthBoundary: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldIga: {
+  fixtures: [
+    { label: "Windsor (Weld/Larimer)", bbox: [-104.95, 40.45, -104.85, 40.52], expectMinCount: 2 }, // live 2026-10-29: 4
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 1 }, // live 2026-10-29: 3
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldAirportOverlay: {
+  fixtures: [
+    { label: "Greeley-Weld airport overlay (south)", bbox: [-104.66, 40.32, -104.62, 40.36], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Greeley-Weld airport overlay (north)", bbox: [-104.66, 40.44, -104.62, 40.48], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  weldOilGasAssessment: {
+  fixtures: [
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 3 }, // live 2026-10-29: 7 county permit records
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 1 }, // live 2026-10-29: 3
+  ],
+  },
+  weldRoadRow: {
+  fixtures: [
+    { label: "Greeley (Weld)", bbox: [-104.78, 40.38, -104.65, 40.46], expectMinCount: 150 }, // live 2026-10-29: 357 right-of-way polygons
+    { label: "Windsor (Weld/Larimer)", bbox: [-104.95, 40.45, -104.85, 40.52], expectMinCount: 80 }, // live 2026-10-29: 207
+    { label: "Erie (Weld/Boulder)", bbox: [-105.07, 40.02, -105.0, 40.08], expectMinCount: 30 }, // live 2026-10-29: 85
+  ],
+  },
+  adamsZoning: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 150 }, // live 2026-10-29: 336
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 20 }, // live 2026-10-29: 60
+    { label: "Aurora", bbox: [-104.78, 39.66, -104.68, 39.76], expectMinCount: 3 }, // live 2026-10-29: 10
+  ],
+  },
+  adamsAviation: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Aurora", bbox: [-104.78, 39.66, -104.68, 39.76], expectMinCount: 1 }, // live 2026-10-29: 1
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  adamsLandfills: {
+  fixtures: [
+    { label: "Commerce City", bbox: [-104.98, 39.78, -104.85, 39.88], expectMinCount: 40 }, // live 2026-10-29: 101 landfill / fill polygons
+    { label: "Brighton (Adams/Weld)", bbox: [-104.85, 39.95, -104.75, 40.03], expectMinCount: 1 }, // live 2026-10-29: 4
+  ],
+  },
+  auroraAirportNoise: {
+  fixtures: [
+    { label: "Aurora — Buckley / DEN contours", bbox: [-104.78, 39.70, -104.70, 39.74], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Aurora — south (Centennial / Air and Space Port influence)", bbox: [-104.80, 39.58, -104.70, 39.64], expectMinCount: 1 }, // live 2026-10-29: 4
+  ],
+  },
+  auroraBuckleyApz: {
+  fixtures: [
+    { label: "Aurora — Buckley runway ends", bbox: [-104.78, 39.70, -104.70, 39.74], expectMinCount: 2 }, // live 2026-10-29: 5
+    { label: "Aurora — central (clear zone south end)", bbox: [-104.85, 39.68, -104.78, 39.73], expectMinCount: 1 }, // live 2026-10-29: 1
+  ],
+  },
+  auroraZoning: {
+  fixtures: [
+    { label: "Aurora — north", bbox: [-104.85, 39.76, -104.75, 39.82], expectMinCount: 50 }, // live 2026-10-29: 182
+    { label: "Aurora — south", bbox: [-104.80, 39.58, -104.70, 39.64], expectMinCount: 50 }, // live 2026-10-29: 225
+  ],
+  },
 };
 
 /* The fixtures for one registry key (both kinds), or an empty record. Pure. */
@@ -1279,6 +1592,75 @@ export const SOURCE_DOCS = {
     "The Tennessee counterpart of `road`. TDOT's Road Segment inventory (updated monthly): GOVT_CTRL says who owns/maintains each " +
     "segment (State / County / Municipal Highway Agency …). Local-road coverage is TDOT's — an honest 'Unknown' beats a wrong guess.",
   },
+  drycleanersTn: {
+  notes:
+    "TDEC Division of Remediation's Drycleaner Environmental Response Program (DCERP): every drycleaner registered since 1996 (pick-up-only " +
+    "shops are not on it), edited 2026-02-26. COMMENTS says whether TDEC has worked a release there (\"DCERP Response Site\") or only holds the " +
+    "registration. A Phase I ESA flag — solvent (PCE) releases are the classic drycleaner contamination — never a finding about a neighbour.",
+  },
+  ms4Tn: {
+  notes:
+    "TDEC DWR's MS4 NPDES permit areas (88): the cities and counties whose own stormwater, post-construction and stream-buffer rules apply " +
+    "ON TOP of the state's Construction General Permit. Inside an area, ask the permittee for its design manual; outside, the state CGP governs alone.",
+  },
+  wqaTn: {
+  notes:
+    "TDEC DWR 2026 Water Quality Assessment, stream assessment units (edited 2026-08-13). The spatial companion of the EPA-approved Tennessee " +
+    "2026 List of Impaired and Threatened Streams; the cause of an impairment is in TDEC's Potential Sources table, not on the line.",
+  },
+  pwsTn: {
+  notes:
+    "TDEC DWR public water system service areas (447; edited 2024-10-01): the permitted system whose declared territory holds the point (PWSID, " +
+    "owner type, population served, link to its Drinking Water Watch page). A territory, NOT proof of a main at the property line.",
+  },
+  snaTn: {
+  notes:
+    "TDEC Division of Natural Areas — State Natural Areas designated under the Natural Areas Preservation Act of 1971 (93; edited 2026-10-13). " +
+    "A designated area is a hard constraint on the land itself; the cedar-glade areas around Christiana/Murfreesboro host federally listed plants.",
+  },
+  scenicTn: {
+  notes:
+    "TDEC Division of Natural Areas — State Scenic Rivers (Tennessee Scenic Rivers Act of 1968; 25 corridor polygons, edited 2023-09-13) with the " +
+    "Act's river class. The corridor is a planning designation; the Act's management plan for the river governs what is allowed inside it.",
+  },
+  nrhpTn: {
+  notes:
+    "The Tennessee reading of the NPS National Register (Esri Federal Data copy; one point per listing — a district is one point, not its boundary). " +
+    "The Tennessee Historical Commission's own inventory of recorded-but-unlisted sites is not public GIS, so an empty map is never proof of none.",
+  },
+  critHabitatTn: {
+  notes:
+    "USFWS final critical habitat read at Tennessee sites (mussels and fish in the Stones, Clinch, Holston and Duck systems; plants on the cedar glades). " +
+    "It binds FEDERAL actions, not private land directly — but a Corps wetlands/stream permit is a federal action. USFWS IPaC is the authoritative species list.",
+  },
+  cemeteriesTn: {
+  notes:
+    "USGS GNIS recorded cemeteries read at Tennessee sites — INCOMPLETE by construction: an unrecorded family burial ground is not on it, so an empty " +
+    "map is never proof of none. Tennessee law protects every known burial site; have the property surveyed and ask the county.",
+  },
+  dorSitesTn: {
+  notes:
+    "TDEC Division of Remediation's register of sites in a remediation program (825 OPEN sites): voluntary cleanup, State Superfund (state-funded or liable-party-funded), " +
+    "EPA NPL and non-NPL, Department of Defense, pre-remedial evaluation and the drycleaner program. The register was last edited 2024-06-25, so a site opened since is " +
+    "not on it. A flag for a Phase I ESA — pull TDEC's file — never a finding about a neighbour, and a missing site is not proof of none.",
+  },
+  landfillsTn: {
+  notes:
+    "TDEC's permitted Tennessee landfills (111 operating facilities, Class I–IV by the kind of waste accepted) with the TDEC site id, county and status. " +
+    "A landfill beside the site is a flag (gas, leachate, truck traffic, a closed-cell buffer) — ask TDEC's Division of Solid & Hazardous Waste Management. " +
+    "Closed and unpermitted dumps are NOT on it, so an empty map is never proof of none.",
+  },
+  thcSitesTn: {
+  notes:
+    "The Tennessee Historical Commission's recorded historic-sites survey (186,319 points): buildings and sites surveyed over decades, most of them NOT on the " +
+    "National Register. The service says the paper-to-digital conversion is in progress, so the inventory is partial statewide — an empty map is never proof of " +
+    "none. A flag to check with the Commission (Section 106 review applies where a federal permit is involved).",
+  },
+  nrhpBoundsTn: {
+  notes:
+    "National Register of Historic Places boundaries for Tennessee from the State Historic Preservation Office (2,047 polygons): the footprint of a listed " +
+    "property or district, where the NPS point layer gives one point. Fixed-width padded text from the source is trimmed in the card.",
+  },
   hsiGa: {
   notes:
     "Georgia EPD Hazardous Site Inventory (HSI) — sites with a release of a regulated substance above the reportable " +
@@ -1401,6 +1783,22 @@ export const SOURCE_DOCS = {
   gaSpaldingZoning: {
   notes:
     "Spalding County's own zoning polygons: the unincorporated county and the town of Orchard Hill (the City of Griffin zones itself and is not in the layer; confirm any other city with the county). The county's description field disagrees with itself for several codes, so Planyr shows the zone CODE only; the Spalding County zoning ordinance defines each district. Edited 2025-08-11.",
+  },
+  gaRoadOwnership: {
+  notes:
+    "GDOT's own road-ownership layer (as of August 2022), published on the Georgia GIS Data Clearinghouse: State / County / City / Other owned. Ownership is who maintains and permits access to the road; a private or unlisted road reads 'Other'. Updated yearly by GDOT — a road built or transferred since is not in it. Entity codes are not shown (unreadable numbers).",
+  },
+  gaRareSpecies: {
+  notes:
+    "DNR Natural Heritage rare-species RECORDS, generalised to a quarter-quad cell (about 4 miles): the layer shows records with a federal status (Endangered / Threatened / Candidate) or state protection (Endangered / Threatened). A cell means 'recorded somewhere in this ~4-mile cell', never 'on the site', and an empty map is NOT an all-clear: unrecorded habitat is not on it. DNR's Natural Heritage review is the real check.",
+  },
+  gaMineral: {
+  notes:
+    "USGS MRDS / MAS-MILS mineral-resource records for Georgia (2005 digest): producers, past producers, plants, prospects and occurrences. A point per record with commodities; no boundary and no reclamation status. A past quarry or pit nearby is a voids / fill / blasting flag.",
+  },
+  gaBartowZoning: {
+  notes:
+    "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. REZONING is the county's case reference; ZONINGTEXT is its free-text note (mostly ordinance ids). Both are shown as published.",
   },
   countyCa: {
   notes:
@@ -1526,6 +1924,110 @@ export const SOURCE_DOCS = {
   notes:
     "Existing storm outfall structures — the nearest one is where a site's release would " +
     "realistically tie in. The Colorado counterpart of the BKDD outfall row. Screening only.",
+  },
+  ecmcWells: {
+  notes:
+    "ECMC's own statewide well register (API spots) \u2014 NOT a county clip. Status is ECMC's two-letter code (PR producing, SI shut-in, TA temporarily abandoned, PA plugged and abandoned\u2026). A well record is a surface point, not the extent of its pad or flowlines.",
+  },
+  ecmcFlowlines: {
+  notes:
+    "Operator-submitted flowline registrations (Forms 12 / 44) \u2014 off-location flowlines, produced-water and crude transfer lines. Not every pipe is here (on-location lines and FERC/PHMSA gathering lines are not), so an empty map is never proof of none.",
+  },
+  ecmcLocations: {
+  notes:
+    "The surveyed footprint of each permitted oil-and-gas location (the pad, Form 2A), with ECMC's status. The footprint is what ECMC's setback rules are measured from.",
+  },
+  ecmcFacilities: {
+  notes:
+    "Tank batteries, compressor stations, gas plants, injection and disposal facilities, land-application sites registered with ECMC.",
+  },
+  cdpheRcraCa: {
+  notes:
+    "CDPHE's own tracking of RCRA corrective-action facilities: groundwater impact, off-site impact and plume length where known. A Phase I ESA pre-screen, not a clearance.",
+  },
+  cdpheInstControls: {
+  notes:
+    "Completed institutional controls (environmental covenants / notices of environmental use restrictions) filed with the county clerk \u2014 land-use restrictions that run with the land.",
+  },
+  cdpheClosedLandfills: {
+  notes:
+    "CDPHE's inventory of closed landfills; a flagged 'known or suspect release' is CDPHE's, not Planyr's.",
+  },
+  cdpheSolidWaste: {
+  notes:
+    "CDPHE Solid Waste Information System facilities: landfills, transfer stations, compost, recycling, asbestos, medical waste, impoundments.",
+  },
+  drmsUndermined: {
+  notes:
+    "DRMS Mine Subsidence Protection Program undermined areas with a 100 ft buffer (2023 statewide update). Hazard RATINGS exist only for parts of the Boulder\u2013Weld and Colorado Springs districts and are not on this row.",
+  },
+  cpwPrairieDog: {
+  notes:
+    "CPW's modelled probability (H / M / L) that black-tailed prairie dog colonies occur \u2014 a habitat screen, not a colony survey. Colonies drive burrowing-owl and black-footed-ferret survey requirements.",
+  },
+  cpwEagleNests: {
+  notes:
+    "CPW nest-site areas (active, inactive, destroyed, unknown). Bald and golden eagles are federally protected (Bald and Golden Eagle Protection Act); CPW and USFWS set the buffers and seasonal limits, not Planyr.",
+  },
+  nrhpCo: {
+  notes:
+    "The NPS National Register point layer (the same service as the Georgia row), shown in Colorado. A listing is one point; a district is one point, not its boundary.",
+  },
+  critHabitatCo: {
+  notes:
+    "USFWS final critical habitat (the same service as the Georgia row), shown in Colorado. Sparse in Colorado by nature.",
+  },
+  enterpriseZonesCo: {
+  notes:
+    "OEDIT's 19 Colorado Enterprise Zones for 2026-2035; a zone qualifies investment for state income-tax credits under C.R.S. 39-30-101 et seq. Eligibility is the program's, not the map's.",
+  },
+  weldZoning: {
+  notes:
+    "Weld County's zoning for unincorporated ground; municipalities zone their own ground.",
+  },
+  weldGrowthBoundary: {
+  notes:
+    "Weld County's urban growth boundaries for Brighton, Erie, Greeley, Lochbuie and Pierce.",
+  },
+  weldIga: {
+  notes:
+    "Municipal intergovernmental-agreement areas around 21 Weld towns, with the county's 'buffered' flag.",
+  },
+  weldAirportOverlay: {
+  notes:
+    "The county's Greeley-Weld airport overlay district.",
+  },
+  weldOilGasAssessment: {
+  notes:
+    "Weld County's own oil-and-gas location assessment permits (WOGLA) \u2014 a LOCAL land-use permit, separate from ECMC's well and location registers.",
+  },
+  weldRoadRow: {
+  notes:
+    "Weld County road right-of-way polygons with the status of how each was acquired and a width where recorded.",
+  },
+  adamsZoning: {
+  notes:
+    "Adams County's zoning districts; ground inside a city is labelled with the city's name, not a district.",
+  },
+  adamsAviation: {
+  notes:
+    "The county's aviation overlays: airport height, DIA 60 DNL noise, Front Range 60 DNL noise, airport influence zone.",
+  },
+  adamsLandfills: {
+  notes:
+    "The county's landfill and fill-site polygons: solid waste, inert fill, construction debris, sludge.",
+  },
+  auroraAirportNoise: {
+  notes:
+    "The city's published day-night-level contours and influence areas for Buckley SFB, Denver International, Centennial and Colorado Air and Space Port.",
+  },
+  auroraBuckleyApz: {
+  notes:
+    "Buckley Space Force Base clear zones and accident potential zones (APZ I / APZ II), north and south runway ends, as published by the city.",
+  },
+  auroraZoning: {
+  notes:
+    "Aurora's zoning districts as the city publishes them.",
   },
 };
 

@@ -36,6 +36,7 @@ import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { streamBufferBands, bufferLegend } from "./georgiaStreamBuffers.js";
+import { streamBufferBandsTn, bufferLegendTn } from "./tennesseeStreamBuffers.js";   // B2521584 (Tennessee)
 import { ftypeLabel } from "./nhdFlowline.js";
 import { pointSymbolOptions } from "./layerRequest.js";
 import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
@@ -638,6 +639,8 @@ export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts
   // Georgia stream buffers are a corridor of a different kind: per-feature widths from three sources, not one
   // assumed width off one source — a sibling builder, same pane / status / export contract.
   if (cfg.bufferRule === "ga_streams") return cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts);
+  // Tennessee's construction-permit stream buffers: NHD streams + TDEC's own list of restricted waters — the same shape, a different rule (B2521584).
+  if (cfg.bufferRule === "tn_streams") return cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts);
   const source = VECTOR_SOURCES[cfg.pipelineSource || "txrrc_pipe"];
   if (!source) return null;
   const { cache = gisCache } = opts;
@@ -827,6 +830,93 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
     m.off("moveend", refresh);
     L.LayerGroup.prototype.onRemove.call(this, m);
     map = null; data.nhd = data.trout = data.district = data.rivers = null;
+  };
+  group.setOpacity = (o) => { opacity = o; paint(); };
+  group.getExportMode = () => "vector";
+  return group;
+}
+
+/* Tennessee STREAM BUFFER bands (B2521584) — the sibling of the Georgia builder above, with the same pane / status / export contract (the export
+ * gatherer reads the polygons exactly as it reads a pipeline corridor — PDF-PARITY). The rule is `tennesseeStreamBuffers.streamBufferBandsTn`, pure
+ * and unit-tested: USGS NHD streams at 30 ft each side (the Construction General Permit's average natural riparian buffer). The NHD pull comes
+ * through `fetchCached`, the same SWR cache entry the drawn "Streams" layer uses, so turning the buffer on beside it costs no second pull.
+ *
+ * LOUD, never partial-and-silent: the status line always carries what is NOT drawn (the 60 ft tier on TDEC-listed waters), and a failed NHD pull
+ * clears the bands and says so. Vector-only: below the NHD source's vector gate there are no centrelines, so it says "zoom in". */
+export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
+  const nhd = VECTOR_SOURCES.nhd_flowlines;
+  if (!nhd) return null;
+  const { cache = gisCache } = opts;
+  const NOT_DRAWN = "The 60 ft tier on TDEC-listed waters is not drawn.";
+
+  let map = null, opacity = initialOpacity, seq = 0, data = null;
+  const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
+  const group = L.layerGroup([], { pane });
+  const bands = L.layerGroup([]);
+  group.addLayer(bands);
+
+  const paint = () => {
+    bands.clearLayers();
+    if (!data) return;
+    const list = streamBufferBandsTn({ nhd: data });
+    for (const { ring, tier } of list) {
+      bands.addLayer(L.polygon(ring.map(([lng, lat]) => [lat, lng]), {
+        pane: CORRIDOR_PANE,
+        stroke: true, color: tier.color, weight: 0.5, opacity: Math.min(1, opacity + 0.15),
+        fill: true, fillColor: tier.color, fillOpacity: 0.18 * opacity,
+        interactive: false,
+      }));
+    }
+    if (!list.length) report("empty", "No streams in this view.");
+    else if (data.truncated) report("loaded", `Partial — too many streams in this view to buffer them all; zoom in. ${bufferLegendTn(list).join(" · ")}. ${NOT_DRAWN}`);
+    else report("loaded", `${bufferLegendTn(list).join(" · ")}. ${NOT_DRAWN}`);
+  };
+
+  const refresh = async () => {
+    if (!map) return;
+    const zoom = map.getZoom();
+    const b = map.getBounds();
+    const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
+    const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
+    if (decideVectorOrImage(nhd, { zoom, bboxAreaDeg: areaDeg }) === "image") {
+      seq++; bands.clearLayers(); data = null;
+      report("empty", "Zoom in to about street level to see the stream buffers.");
+      return;
+    }
+    const mySeq = ++seq;
+    try {
+      const r = await fetchCached(nhd, bbox, {
+        cache, zoom,
+        onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data = fr.data; paint(); } },
+      });
+      if (mySeq !== seq || !map) return;
+      data = r.data;
+      paint();
+    } catch (e) {
+      if (mySeq !== seq || !map) return;
+      bands.clearLayers();
+      reportClientEvent("tn-stream-buffer-source-failed", String((e && e.message) || e), { source: "nhd" });
+      report("failed", `${cfg.label}: couldn't load the USGS stream lines here — no buffers are shown (screening only).`);
+    }
+  };
+
+  group.onAdd = function (m) {
+    map = m;
+    if (!m.getPane(CORRIDOR_PANE)) {
+      const p = m.createPane(CORRIDOR_PANE);
+      p.style.zIndex = 349; // just below the GIS overlay pane (350) → bands sit under the stream lines
+    }
+    L.LayerGroup.prototype.onAdd.call(this, m);
+    m.on("moveend", refresh);
+    report("loading");
+    refresh();
+    return this;
+  };
+  group.onRemove = function (m) {
+    seq++;
+    m.off("moveend", refresh);
+    L.LayerGroup.prototype.onRemove.call(this, m);
+    map = null; data = null;
   };
   group.setOpacity = (o) => { opacity = o; paint(); };
   group.getExportMode = () => "vector";

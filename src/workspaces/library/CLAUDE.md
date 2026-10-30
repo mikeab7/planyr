@@ -47,3 +47,4 @@ tree logic in `/src/shared/folders/`, and the server-side Drive mirror at `/func
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
+- **Drive sync status belongs to ITS project (B2540739):** `FolderTree` stays mounted across a project switch, so a mirror run goes through `lib/driveSyncRun.js` `runDriveSync` — tagged with its project, its progress / verdict reach the screen only while that project is shown (`shownProjectRef`), and a project change clears the pending sync timer. Never write `setDrive` from a sync callback directly. Guard: repo-root `test/` **libraryDriveSyncSwitch**.

@@ -57,7 +57,7 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     // exactly as the MUD/CCN rows are in Texas. It is a fifth MEMBER of the one consolidated row,
     // not a second row — which is the whole point of the merge group.
     // B2507057 — the DeSoto County MS / Olive Branch utilities joined the one row (Mississippi has no CCN; the city's and the regional authority's own mains are the provider data there).
-    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud", "ms_dcrua_easements", "ms_dcrua_main", "ms_dcrua_service_area", "ms_dcrua_structures", "ms_ob_lift_stations", "ms_ob_manholes", "ms_ob_sewer_force", "ms_ob_sewer_gravity", "ms_ob_water_main", "ms_ob_wwtp", "ms_psc_sewer", "ms_psc_water"].sort());
+    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud", "ms_dcrua_easements", "ms_dcrua_main", "ms_dcrua_service_area", "ms_dcrua_structures", "ms_ob_lift_stations", "ms_ob_manholes", "ms_ob_sewer_force", "ms_ob_sewer_gravity", "ms_ob_water_main", "ms_ob_wwtp", "ms_psc_sewer", "ms_psc_water", "tn_pws"].sort());
   });
   it("every member keeps group 'utilities' and its own fetch (url/kind) untouched", () => {
     for (const [, cfg] of membersOf("water_sewer")) {
@@ -84,7 +84,7 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     const slots = buildGroupSlots(utilEntries);
     const waterSlot = slots.find((s) => s.kind === "merge" && s.mergeGroup === "water_sewer");
     expect(waterSlot).toBeTruthy();
-    expect(waterSlot.members.length).toBe(17); // NEW-2 — co_water_districts joined the group; B2507057 — the 12 DeSoto / Olive Branch / PSC / DCRUA members (see the member list above)
+    expect(waterSlot.members.length).toBe(18); // B2521584 — tn_pws (Tennessee TDEC water service areas) joined; NEW-2 — co_water_districts joined the group; B2507057 — the 12 DeSoto / Olive Branch / PSC / DCRUA members (see the member list above)
     // and only ONE such slot — never split across two rows
     expect(slots.filter((s) => s.kind === "merge" && s.mergeGroup === "water_sewer").length).toBe(1);
   });

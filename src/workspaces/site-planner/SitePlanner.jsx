@@ -67,7 +67,7 @@ import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsR
 import { ftPerPointForScale, chooseOverlayScale } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, liveRefOpacities, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
 import { buildingFloodExposure } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
@@ -5951,6 +5951,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       live: Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k] && overlayRefs.current[k] !== "pending"),
       // What each live layer is really drawn at (NEW-2: "set 60% on an off layer" is asserted on the map's own layer, not the saved number).
       opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])),
+      // B2528688 — features each live vector layer has painted (null for a raster): the harness's "it drew real features" observable.
+      features: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefFeatureCount(overlayRefs.current[k])])),
       identityEpoch: epoch,
       /* B2472945 — what a live vector layer has PAINTED at a point (its own `identifyAt`, the same hit-test the canvas click uses over the
        * same GeoJSON the map draws). The drawn ETJ layer's "is anything shaded here?" has no other observable: the DOM holds Leaflet

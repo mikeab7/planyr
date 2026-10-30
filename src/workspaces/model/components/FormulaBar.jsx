@@ -6,15 +6,16 @@
  * formula exactly as it would in-cell.
  */
 import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
 import { wholeSelectionLabel, parseWholeAddress } from "../lib/selection.js";
 import { colLetterName } from "../lib/sheetModel.js";
+import { hasPendingFormulaText } from "../lib/pendingEntry.js";
 
 const colLabel = colLetterName; // one letters function for the whole module (the grid header uses it too)
 
-export default function FormulaBar({ sheet, row, col, selRange, onCommit, onGoTo, nameBoxRef, focusGrid }) {
+const FormulaBar = forwardRef(function FormulaBar({ sheet, row, col, selRange, onCommit, onGoTo, nameBoxRef, focusGrid }, ref) {
   // A whole-column / whole-row / whole-sheet selection reads "C:C" / "5:5" / "A:Z" (NEW-2, 2026-10-29);
   // any other selection reads its active cell, as before.
   const address = (selRange && wholeSelectionLabel(sheet, selRange)) || `${colLabel(col)}${row + 1}`;
@@ -38,6 +39,17 @@ export default function FormulaBar({ sheet, row, col, selRange, onCommit, onGoTo
   useEffect(() => { if (!nameFocused) setNameValue(address); }, [address, nameFocused]);
 
   const commit = () => onCommit(row, col, value);
+
+  // NEW-1 (2026-10-29) — text typed here but not yet committed is saved to its own cell when the
+  // sheet is about to change; the re-seed effect above used to silently throw it away. Must run
+  // BEFORE the active sheet changes (see SheetView's commitPending).
+  useImperativeHandle(ref, () => ({
+    commitPending: () => {
+      if (!hasPendingFormulaText(value, formulaBarText(sheet, row, col))) return false;
+      onCommit(row, col, value);
+      return true;
+    },
+  }), [value, sheet, row, col, onCommit]);
 
   // Returns whether the jump succeeded, so the Enter handler knows whether to hand focus to the
   // grid (a rejected entry stays focused here, visibly flagged, so the user can fix it in place,
@@ -103,4 +115,6 @@ export default function FormulaBar({ sheet, row, col, selRange, onCommit, onGoTo
       />
     </div>
   );
-}
+});
+
+export default FormulaBar;
