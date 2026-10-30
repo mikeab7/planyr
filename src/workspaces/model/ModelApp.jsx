@@ -655,14 +655,27 @@ export default function ModelApp({
     if (o.telemetry) import("../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent(o.telemetry.kind, o.telemetry.message, o.telemetry.extra)).catch(() => {});
     return o;
   }, []);
-  const onOrgCreate = useCallback(() => {
-    const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const name = "Untitled workbook";
-    const wb = createWorkbook();
-    writeLocalSheet(userId, id, wb);
-    setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
-    setOrgWorkbookId(id);
-    if (userId) saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }).then((r) => applyOrgOutcome("create", r, id));
+  // B2584320 — the workbook OPENS only once its first cloud row exists (or the create has said why not). It used to open at
+  // once and race the insert: the open-time load ran first, found no row, and left the version unknown — so the first edit's
+  // push was an INSERT too and the database refused it as a duplicate (409), and no edit to a new organization workbook ever
+  // reached the cloud until the page was reloaded. Opening on the create's answer makes that load find version 1.
+  const orgCreatingRef = useRef(false);
+  const onOrgCreate = useCallback(async () => {
+    if (orgCreatingRef.current) return;
+    orgCreatingRef.current = true;
+    try {
+      const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const name = "Untitled workbook";
+      const wb = createWorkbook();
+      writeLocalSheet(userId, id, wb);
+      setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
+      if (userId) {
+        let r;
+        try { r = await saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }); } catch (e) { r = { ok: false, reason: "error", error: String((e && e.message) || e) }; }
+        applyOrgOutcome("create", r, id); // a refusal is still said out loud; the workbook opens on this device either way
+      }
+      setOrgWorkbookId(id);
+    } finally { orgCreatingRef.current = false; }
   }, [userId, applyOrgOutcome]);
   const onOrgOpen = useCallback((id) => setOrgWorkbookId(id), []);
   const onOrgRename = useCallback((id, name) => {
