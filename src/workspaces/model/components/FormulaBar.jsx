@@ -6,9 +6,10 @@
  * formula exactly as it would in-cell.
  */
 import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
+import { hasPendingFormulaText } from "../lib/pendingEntry.js";
 
 function colLabel(colIndex) {
   let n = colIndex + 1, s = "";
@@ -16,7 +17,7 @@ function colLabel(colIndex) {
   return s;
 }
 
-export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxRef, focusGrid }) {
+const FormulaBar = forwardRef(function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxRef, focusGrid }, ref) {
   const address = `${colLabel(col)}${row + 1}`;
   const [value, setValue] = useState(() => formulaBarText(sheet, row, col));
   const [nameValue, setNameValue] = useState(address);
@@ -38,6 +39,17 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
   useEffect(() => { if (!nameFocused) setNameValue(address); }, [address, nameFocused]);
 
   const commit = () => onCommit(row, col, value);
+
+  // NEW-1 (2026-10-29) — text typed here but not yet committed is saved to its own cell when the
+  // sheet is about to change; the re-seed effect above used to silently throw it away. Must run
+  // BEFORE the active sheet changes (see SheetView's commitPending).
+  useImperativeHandle(ref, () => ({
+    commitPending: () => {
+      if (!hasPendingFormulaText(value, formulaBarText(sheet, row, col))) return false;
+      onCommit(row, col, value);
+      return true;
+    },
+  }), [value, sheet, row, col, onCommit]);
 
   // Returns whether the jump succeeded, so the Enter handler knows whether to hand focus to the
   // grid (a rejected entry stays focused here, visibly flagged, so the user can fix it in place,
@@ -102,4 +114,6 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
       />
     </div>
   );
-}
+});
+
+export default FormulaBar;
