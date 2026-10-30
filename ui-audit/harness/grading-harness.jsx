@@ -7,7 +7,7 @@ import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import GradingController from "../../src/workspaces/site-planner/components/GradingController.jsx";
 import { GradingPanel, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
-import { bumpButtonAnchor, sideButtonAnchor, SIDE_PAIR_GAP } from "../../src/workspaces/site-planner/lib/padCornerTag.js";
+import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R } from "../../src/workspaces/site-planner/lib/buildingButtons.js";
 import { FEAT_CTRL_R, FEAT_CTRL_STROKE } from "../../src/workspaces/site-planner/lib/featureEditZoom.js";
 import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
@@ -15,7 +15,7 @@ import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
 import { offsetPolygon } from "../../src/workspaces/site-planner/lib/parcelOffset.js";
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
-import { CHEHAW_CROSS_DOCK_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
+import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
 // ROUND 5 (NEW-4) — the picture arms: the EXISTING contours the app's Leaflet layer would draw (traced here off the same
 // DEM with the same tracer, cut OUTSIDE the graded area by the same clipper), the paper background, and a framing
 import { buildContours } from "../../src/workspaces/site-planner/lib/contourTrace.js";
@@ -42,11 +42,14 @@ function Harness({ data }) {
   const [els, setEls] = useState(() => {
     const bx = +(new URLSearchParams(location.search).get("bx") ?? -560), by = +(new URLSearchParams(location.search).get("by") ?? -1326);
     // ?owner=1 — the owner's real 636,916 SF cross-dock (problem report 6cea9895), moved from his plan's origin into this frame
-    if (new URLSearchParams(location.search).get("owner") === "1") {
+    // ?owner=2 — the owner's Concept A as of 2026-10-30 (1429 × 650 at 259°; B2500224 ×2)
+    const ownerQ = new URLSearchParams(location.search).get("owner");
+    if (ownerQ === "1" || ownerQ === "2") {
+      const ROWS = ownerQ === "2" ? CHEHAW_CONCEPT_A_ROWS : CHEHAW_CROSS_DOCK_ROWS;
       const o = lngLatToFeet(OWNER_ORIGIN.lon, OWNER_ORIGIN.lat, data.origin.lon, data.origin.lat);
-      const host = CHEHAW_CROSS_DOCK_ROWS[0];
+      const host = ROWS[0];
       const hc = { x: host.cx + o.x, y: host.cy + o.y };
-      return CHEHAW_CROSS_DOCK_ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
+      return ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
         id: e.id, type: e.type, attachedTo: e.attachedTo, truckCourt: !!e.truckCourt, ring: rowRing(e).map((p) => ({ x: p.x + o.x, y: p.y + o.y })),
         ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
       }));
@@ -83,7 +86,7 @@ function Harness({ data }) {
   const [limitEdit, setLimitEdit] = useState(null);
   const [model, setModel] = useState(null);
   const [headEl, setHeadEl] = useState(null);
-  const [sel, setSel] = useState(new URLSearchParams(location.search).get("sel") === "none" ? null : new URLSearchParams(location.search).get("owner") === "1" ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");   // ?sel=none — nothing selected (NEW-2: the corner tags go home)
+  const [sel, setSel] = useState(new URLSearchParams(location.search).get("sel") === "none" ? null : new URLSearchParams(location.search).get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");   // ?sel=none — nothing selected (NEW-2: the corner tags go home)
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
   const planOn = cfg.enabled;
@@ -150,8 +153,20 @@ function Harness({ data }) {
     const b = els.length ? els[0].ring : ring;
     const bx = b.map((p) => p.x), by = b.map((p) => p.y);
     if (zoom === "bldg") return fitBox(Math.min(...bx), Math.min(...by), Math.max(...bx), Math.max(...by), 220);
+    // ROUND 9 (B2500224 ×2): the owner's views of 2026-10-30 — the building's NE / SW CORNER (the footprint vertex furthest
+    // north-east / south-west, so a rotated building is framed on its real corner) out past the limit, at about the 50-ft
+    // scale bar: the cut corner (ne50) and the fill corner (sw50)
+    if (zoom === "ne50" || zoom === "sw50") {
+      const sg = zoom === "ne50" ? 1 : -1;
+      let c = b[0]; for (const p of b) if (sg * (p.x - p.y) > sg * (c.x - c.y)) c = p;
+      // about 1 px per foot (the owner's 50-ft scale bar on his screen), the corner near the opposite edge of the canvas
+      return sg > 0 ? fitBox(c.x - 500, c.y - 600, c.x + 850, c.y + 360, 0) : fitBox(c.x - 850, c.y - 360, c.x + 500, c.y + 600, 0);
+    }
     // NEW-2 (2026-10-30): `south` — the building's south end at working zoom, both south corners in view (the owner's picture)
     if (zoom === "south") { const x0 = Math.min(...bx), x1 = Math.max(...bx), y1 = Math.max(...by); return fitBox(x0, y1 - 150, x1, y1 + 60, 70); }
+    // NEW-5 (2026-10-30): `sw250` / `sw50` — a 250-ft / 50-ft wide window on the building's south-west corner (the owner's two review scales), a little of
+    // the building inside it and the court outside it, so both sides of the wall — tags in, buttons out — are in the picture
+    if (zoom === "sw250" || zoom === "sw50") { const half = zoom === "sw250" ? 125 : 25, cx = Math.min(...bx), cy = Math.max(...by); return fitBox(cx - half * 0.7, cy - half * 1.1, cx + half * 1.3, cy + half * 0.7, 0); }
     if (zoom === "ne") { const cx = Math.max(...bx), cy = Math.min(...by); return fitBox(cx - 180, cy - 180, cx + 180, cy + 180, 0); }
     // ROUND 8 (NEW-3): the owner's view — the NW corner of the whole layout (the north car lot's west end) out to the limit
     if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
@@ -225,25 +240,30 @@ function Harness({ data }) {
         )}
         {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
-        {/* NEW-2: the selected building's edit buttons, drawn the way SitePlanner's sideAddNodes draws them — through the SAME anchors
-            (lib/padCornerTag.js), on top of the grading layer — so the picture shows exactly what the tags have to clear */}
-        {qs.get("buttons") === "1" && sel && (() => {
+        {/* NEW-2 / NEW-5: the selected building's edit buttons, drawn the way SitePlanner's sideAddNodes draws them — through the SAME layout
+            (lib/buildingButtons.js: every button OUTSIDE its wall, in one row; the grading corner tags are INSIDE the footprint) — on top of the
+            grading layer, so the picture shows exactly what the tags have to clear. Both dock walls here are the long ones (top / bottom). */}
+        {(qs.get("buttons") === "1" || qs.get("buttons") === "inside") && sel && (() => {
           const e = els.find((x) => x.id === sel); if (!e) return null;
           const q = e.ring.slice(0, 4).map((p) => f2p(p));
-          const c = { x: q.reduce((a, p) => a + p.x, 0) / 4, y: q.reduce((a, p) => a + p.y, 0) / 4 };
-          const R = FEAT_CTRL_R, glyph = (k, pos, color, plus) => (
+          // `?buttons=inside` is the KNOWN-BAD arm: the pre-fix shape, every button pushed to the INSIDE of its wall, where the corner tags are
+          const flip = qs.get("buttons") === "inside";
+          const layout = layoutBuildingButtons(wallsFromQuad(q, ["top", "bottom"]).map((w) => (flip ? { ...w, out: { x: -w.out.x, y: -w.out.y } } : w)));
+          const R = FEAT_CTRL_R, glyph = (k, pos, color, plus, r = R) => (
             <g key={k} data-harness-button={k}>
-              <circle cx={pos.x} cy={pos.y} r={R} fill={color} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
-              <line x1={pos.x - R * 0.5} y1={pos.y} x2={pos.x + R * 0.5} y2={pos.y} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
-              {plus && <line x1={pos.x} y1={pos.y - R * 0.5} x2={pos.x} y2={pos.y + R * 0.5} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />}
+              <circle cx={pos.x} cy={pos.y} r={r} fill={color} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
+              <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
+              {plus && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />}
             </g>);
           const out = [];
-          [2, 3].forEach((i) => out.push(glyph(`bump${i}`, bumpButtonAnchor(q[i], c), "#7c3aed", true)));
-          q.forEach((p, i) => {
-            const n = q[(i + 1) % 4], { pos, tan } = sideButtonAnchor({ x: (p.x + n.x) / 2, y: (p.y + n.y) / 2 }, c);
-            out.push(glyph(`side${i}p`, { x: pos.x - tan.x * SIDE_PAIR_GAP, y: pos.y - tan.y * SIDE_PAIR_GAP }, i === 2 ? "#b45309" : "#16a34a", true));
-            if (i === 2) out.push(glyph(`side${i}m`, { x: pos.x + tan.x * SIDE_PAIR_GAP, y: pos.y + tan.y * SIDE_PAIR_GAP }, "#b91c1c", false));
-          });
+          for (const [id, en] of layout) {
+            if (en.discs) {
+              const dock = id === "pair:top" || id === "pair:bottom";
+              out.push(glyph(`${id}:add`, en.discs[0], dock ? "#b45309" : "#16a34a", true));
+              if (dock) out.push(glyph(`${id}:rem`, en.discs[1], "#b91c1c", false));
+            } else if (id.startsWith("corner:")) out.push(glyph(id, en, "#7c3aed", true));
+            else out.push(glyph(id, en, "#475569", true, RAMP_BTN_R));
+          }
           return <g data-harness-buttons="1">{out}</g>;
         })()}
         {limitEdit && Array.isArray(settings.grading.limitRing) && <polygon data-grading-limit-edit="1" points={settings.grading.limitRing.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#1d4ed8" strokeWidth="1.5" strokeDasharray="6 4" />}
