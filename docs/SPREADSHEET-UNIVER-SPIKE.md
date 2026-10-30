@@ -88,7 +88,7 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 - **Filters** — Univer's filter works, but Planyr does not store filter state in the workbook (it didn't before either), so a filter is gone on reload.
 - **Vertical merges** made in Univer, formulas written with `[Column]` names, a typed date such as `1/15/2027` (Univer treats it as text until you give it a date format), and formatting *inside* a cell (mixed bold in one cell) — reported on screen when a save would lose them.
 - **Export while typing** — the Excel / CSV export in the header reads the saved workbook; an edit made in the last third of a second before you click it would be missed.
-- **Dark theme** — wired to follow the app theme but only the light theme was looked at.
+- **Dark theme** — the first cut was wired to follow the app theme but only the light theme had been looked at, and it was unreadable in dark (B2566048, owner report 2026-10-30). Fixed and now guarded: Univer's gray scale never flips direction (its dark mode picks the other end of it) and its canvas is painted through a colour inversion, so `lib/univerTheme.js` builds a per-mode theme and writes the canvas-facing steps as the pre-image of that inversion; `UniverSheet.jsx` rebuilds it on every light/dark flip. `ui-audit/verify-univer-theme-contrast.mjs` (sandbox) and `verify-univer-theme-live.mjs` (signed in) measure the pixels in both themes, mounted and flipped while open.
 - **Phone / touch** — not tried.
 
 **Planyr's 93 commands (the registry the old grid's keys, palette, ribbon and menus all run):**
