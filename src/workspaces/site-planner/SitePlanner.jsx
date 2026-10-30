@@ -392,7 +392,7 @@ import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, sh
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
-import { sideButtonAnchor, bumpButtonAnchor } from "./lib/padCornerTag.js";
+import { sideButtonAnchor, bumpButtonAnchor, rampWallAnchor, rampCornerAnchor, RAMP_BTN_R } from "./lib/padCornerTag.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -18708,7 +18708,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      arrow, smaller than they are, slate (not purple / amber) so it reads as its own thing. Same press discipline as every on-building control
      (`data-el-action`, stop the press, swallow the double-click — CHROME-NEVER-EATS-A-PRESS). It is offset ALONG the wall from its neighbours so the
      two never overlap; the grading spot tags move out of the way of these buttons, never the reverse. */
-  const RAMP_BTN_R = FEAT_CTRL_R * 0.78;
   const rampGlyph = (key, cx, cy, title, onClick) => {
     const r = RAMP_BTN_R;
     return (
@@ -18752,7 +18751,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
             const n = stackCountIn(els, el, name);
             const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
-            const rOff = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;     // clear of the "+ / −" pair's outer edge, along the wall
+            const rp = rampWallAnchor(pos, tan);                    // clear of the "+ / −" pair's outer edge, along the wall (lib/padCornerTag.js — the grading tags avoid it)
             return (
               <g key={`dockw${name}`}>
                 {featPair(`dock${name}`, pos, tan, {
@@ -18762,14 +18761,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
                   onRemove: () => removeOuterZoneOnSide(el, name),
                 })}
-                {!el.footEdit && rampGlyph(`rampw${name}`, pos.x + tan.x * rOff, pos.y + tan.y * rOff, "Add drive-in ramp", () => addRamp(el, name, null))}
+                {!el.footEdit && rampGlyph(`rampw${name}`, rp.x, rp.y, "Add drive-in ramp", () => addRamp(el, name, null))}
               </g>
             );
           }
           // non-dock side (a short end, or the long side opposite single-load docks) → the
           // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses.
           const sw = empSideSidewalk(el, name), park = empSidePark(el, name);
-          const rOffE = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;
+          const rpE = rampWallAnchor(pos, tan);
           return (
             <g key={`endw${name}`}>
               {featPair(`end${name}`, pos, tan, {
@@ -18778,7 +18777,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 canRemove: !!(sw || park), removeTitle: park ? "Remove a parking row" : "Remove the sidewalk",
                 onRemove: () => growEmployeeSide(el, name, -1),
               })}
-              {!el.footEdit && rampGlyph(`rampe${name}`, pos.x + tan.x * rOffE, pos.y + tan.y * rOffE, "Add drive-in door (this wall is at grade — a door marker, no ramp)", () => addRamp(el, name, null))}
+              {!el.footEdit && rampGlyph(`rampe${name}`, rpE.x, rpE.y, "Add drive-in door (this wall is at grade — a door marker, no ramp)", () => addRamp(el, name, null))}
             </g>
           );
         })}
@@ -18795,12 +18794,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
             // the ramp "+" for this corner sits beside the purple one, a little toward the wall's middle (never over the bump-out's own button)
             const mo = rot2(nx * el.w / 2, ny * el.h / 2, el.rot), midS = f2p({ x: el.cx + mo.x, y: el.cy + mo.y });
-            let mx = midS.x - pos.x, my = midS.y - pos.y; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
-            const cOff = FEAT_CTRL_R + 4 + RAMP_BTN_R;
+            const rc = rampCornerAnchor(pos, midS);
             return (
               <g key={`dogc${name}${sign}`}>
                 {featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null)}
-                {!el.footEdit && rampGlyph(`rampc${name}${sign}`, pos.x + mx * cOff, pos.y + my * cOff, "Add drive-in ramp", () => addRamp(el, name, sign < 0 ? "start" : "end"))}
+                {!el.footEdit && rampGlyph(`rampc${name}${sign}`, rc.x, rc.y, "Add drive-in ramp", () => addRamp(el, name, sign < 0 ? "start" : "end"))}
               </g>
             );
           });
