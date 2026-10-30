@@ -227,6 +227,7 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
       const x = all(nm);
       expect(x, nm).not.toMatch(/\bNOT legal boundar|just statistical|not a legal boundary/i);
       expect(x, nm).toMatch(/unsettled and fact-specific/);
+      expect(x, nm).toMatch(/criminal-jurisdiction decisions; they do not by themselves settle civil, regulatory or tax questions/);
       expect(x, nm).toMatch(/Ask counsel and the Nation/);
       expect(x, nm).toMatch(/does not say whether a site is or is not under tribal jurisdiction/);
       expect(x, nm).not.toMatch(/\b(is|are) (in|within|under|subject to) (the )?(tribal|Indian country)/i);
@@ -242,12 +243,14 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
     const courts = (nm) => (t.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Courts") || {}).text || "";
     const t = ALL_LAYERS.ok_tribal;
     expect(courts("Creek OTSA")).toMatch(/McGirt v\. Oklahoma \(U\.S\. Supreme Court, 2020\) held that Congress never disestablished/);
-    for (const n of ["Cherokee", "Chickasaw", "Choctaw", "Seminole", "Quapaw"]) expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished"));
+    for (const n of ["Cherokee", "Chickasaw", "Choctaw", "Seminole", "Quapaw"]) expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": in (a )?criminal cases? the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished"));
+    expect(courts("Kickapoo OTSA")).toMatch(/criminal case.*held in 2023 that the reservation was disestablished/);
+    expect(courts("Creek OTSA")).toMatch(/a criminal-jurisdiction case/);
     expect(courts("Creek/Seminole joint-use OTSA")).toMatch(/Muscogee \(Creek\).*Seminole:/);
     expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).toMatch(/was disestablished/);
     expect(courts("Kiowa-Comanche-Apache-Fort Sill Apache OTSA")).not.toMatch(/not disestablished/);
-    expect(courts("Caddo-Wichita-Delaware OTSA")).toBe("No court ruling on this area is cited here.");
-    expect(courts("Osage Reservation")).toMatch(/Osage Nation v\. Irby \(2010\).*disestablished.*Osage Nation disputes/);
+    expect(courts("Caddo-Wichita-Delaware OTSA")).toBe("No court ruling is cited here for this area; that does not mean none exists.");
+    expect(courts("Osage Reservation")).toMatch(/Osage Nation v\. Irby \(2010\).*disestablished.*in 2024.*criminal case.*Osage Nation disputes/);
   });
   it("per area type: OTSAs are Census tribal areas, the Osage Reservation and Shawnee trust land are legal areas in Census's classification", () => {
     const type = (nm) => ALL_LAYERS.ok_tribal.identifyCard({ NAME: nm }).rows.find((r) => r.label === "Type").text;

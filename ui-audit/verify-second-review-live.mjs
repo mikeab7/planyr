@@ -104,7 +104,7 @@ try {
   console.log("--- Oklahoma site card ---\n" + card + "\n---");
   check("A · a card opened with Name / Type / Courts", /Name/.test(card) && /Type/.test(card) && /Courts/.test(card));
   check("A · it says the OTSA is the Census representation drawn with the tribe", /Tribal Statistical Area \(OTSA\)[^\n]*Census representation/.test(card));
-  check("A · it names a ruling only for a nation one covers, or says none is cited", /McGirt|Court of Criminal Appeals|No court ruling on this area is cited here/.test(card));
+  check("A · it names a ruling only for a nation one covers, or says none is cited", /McGirt|Court of Criminal Appeals|No court ruling is cited here for this area/.test(card));
   check("A · it carries the counsel sentence and no site-level claim", /unsettled and fact-specific/.test(card) && /does not say whether a site is or is not under tribal jurisdiction/.test(card) && !NO_CLAIM.test(card));
   check("A · the old blanket 'statistical, not a legal boundary' wording is gone", !BAD.test(card));
   await goTo(36.667, -96.337, 11);

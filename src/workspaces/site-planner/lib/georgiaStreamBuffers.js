@@ -106,7 +106,7 @@ export function keepRuns(path, drop) {
   return runs;
 }
 
-/* Clip a path to the parts for which `drop(point)` is false, GEOMETRICALLY: each segment is sampled every CLIP_STEP_DEG (so a long segment that dips through a small excluded area is still seen),
+/* Clip a path to the parts for which `drop(point)` is false, GEOMETRICALLY (a run ends where `drop` flips — for the MRPA cut that is the corridor edge plus its ~150 m digitisation tolerance, so a run ends that far OUTSIDE the polygon): each segment is sampled every CLIP_STEP_DEG (so a long segment that dips through a small excluded area is still seen),
  * and where the answer flips the crossing is found by bisection — the run ends AT the edge, not at the last vertex before it. Runs under two points vanish. Only original vertices and crossings
  * are kept (the samples are for testing). Pure. */
 export function clipOutside(path, drop, step = CLIP_STEP_DEG) {

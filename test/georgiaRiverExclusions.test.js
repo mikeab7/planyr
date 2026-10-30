@@ -180,7 +180,7 @@ describe("the MRPA corridor governs the Chattahoochee's 75-ft District band too,
       expect(riverExclusionAt("Chattahoochee River", { lat, lng })).toBe(null);
     }
   });
-  it("the reach test is fast enough for a click or a whole view (13,000-vertex corridor, strip-indexed)", () => {
+  it("the reach test (the baked outline, strip-indexed) is fast enough for a click or a whole view", () => {
     const t0 = performance.now();
     for (let i = 0; i < 2000; i++) inMrpaReach(-84.3 + (i % 50) * 0.001, 33.99 + Math.floor(i / 50) * 0.001);
     expect(performance.now() - t0).toBeLessThan(1500);

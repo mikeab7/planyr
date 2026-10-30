@@ -125,23 +125,24 @@ const TRIBAL = {
  * McGirt v. Oklahoma (U.S. 2020) · Oklahoma Court of Criminal Appeals 2021 for the Cherokee, Chickasaw, Choctaw, Seminole and the Quapaw · the OCCA's Kiowa-Comanche-Apache ruling · Osage Nation v. Irby,
  * 597 F.3d 1117 (10th Cir. 2010), cert. denied 2011, which the Osage Nation now asks courts to revisit after McGirt. */
 export const TRIBAL_COURTS = [
-  [/\bcreek\b/i, "Muscogee (Creek): McGirt v. Oklahoma (U.S. Supreme Court, 2020) held that Congress never disestablished the reservation."],
-  [/\bcherokee\b/i, "Cherokee: the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bchickasaw\b/i, "Chickasaw: the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bchoctaw\b/i, "Choctaw: the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bseminole\b/i, "Seminole: the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bquapaw\b/i, "Quapaw: the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bkiowa\b/i, "Kiowa, Comanche and Apache: the Oklahoma Court of Criminal Appeals held that the reservation was disestablished."],
+  [/\bcreek\b/i, "Muscogee (Creek): McGirt v. Oklahoma (U.S. Supreme Court, 2020), a criminal-jurisdiction case, held that Congress never disestablished the reservation."],
+  [/\bcherokee\b/i, "Cherokee: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bchickasaw\b/i, "Chickasaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bchoctaw\b/i, "Choctaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bseminole\b/i, "Seminole: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bquapaw\b/i, "Quapaw: in a criminal case the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
+  [/\bkiowa\b/i, "Kiowa, Comanche and Apache: in a criminal case the Oklahoma Court of Criminal Appeals held that the reservation was disestablished."],
+  [/\bkickapoo\b/i, "Kickapoo: in a criminal case the Oklahoma Court of Criminal Appeals held in 2023 that the reservation was disestablished."],
 ];
-export const OSAGE_COURTS = "The Tenth Circuit held in Osage Nation v. Irby (2010) that Congress disestablished the reservation; the Osage Nation disputes that after McGirt v. Oklahoma (2020).";
-const COUNSEL = "What a ruling, or an area on this map, means for a site's jurisdiction — civil, regulatory or tax — is unsettled and fact-specific. Ask counsel and the Nation; this map does not say whether a site is or is not under tribal jurisdiction.";
+export const OSAGE_COURTS = "The Tenth Circuit held in Osage Nation v. Irby (2010) that Congress disestablished the reservation, and in 2024 the Oklahoma Court of Criminal Appeals followed it in a criminal case; the Osage Nation disputes that after McGirt v. Oklahoma (2020).";
+const COUNSEL = "The rulings cited are criminal-jurisdiction decisions; they do not by themselves settle civil, regulatory or tax questions. What a ruling, or an area on this map, means for a site's jurisdiction — civil, regulatory or tax — is unsettled and fact-specific. Ask counsel and the Nation; this map does not say whether a site is or is not under tribal jurisdiction.";
 const courtLinesFor = (name) => TRIBAL_COURTS.filter(([re]) => re.test(String(name || ""))).map(([, t]) => t);
 const tribalCard = (props) => {
   const p = props || {}, name = clean(p.NAME), kind = tribalCensusKind(name);
   if (kind === "osage") return { title: "Tribal area", rows: [rowOf("Name", name, { raw: true }), rowOf("Type", "Reservation, as shown by Census (a legal area in Census's classification)", { raw: true }), rowOf("Courts", OSAGE_COURTS, { raw: true })].filter(Boolean), note: COUNSEL + " The Osage Nation's mineral estate is a separate question for the Nation." };
   if (kind === "trust") return { title: "Tribal area", rows: [rowOf("Name", name, { raw: true }), rowOf("Type", "Off-reservation trust land, as shown by Census (a legal area in Census's classification)", { raw: true })].filter(Boolean), note: COUNSEL };
   const lines = courtLinesFor(name);
-  return { title: "Tribal area", rows: [rowOf("Name", name.replace(/\s+OTSA$/i, " (Census tribal area)"), { raw: true }), rowOf("Type", "Oklahoma Tribal Statistical Area (OTSA) — the Census representation of the area, drawn with the tribe", { raw: true }), rowOf("Courts", lines.length ? lines.join(" ") : "No court ruling on this area is cited here.", { raw: true })].filter(Boolean), note: COUNSEL };
+  return { title: "Tribal area", rows: [rowOf("Name", name.replace(/\s+OTSA$/i, " (Census tribal area)"), { raw: true }), rowOf("Type", "Oklahoma Tribal Statistical Area (OTSA) — the Census representation of the area, drawn with the tribe", { raw: true }), rowOf("Courts", lines.length ? lines.join(" ") : "No court ruling is cited here for this area; that does not mean none exists.", { raw: true })].filter(Boolean), note: COUNSEL };
 };
 const tribalCensusKind = (name) => /^osage reservation$/i.test(String(name || "")) ? "osage" : /trust land/i.test(String(name || "")) ? "trust" : "otsa";
 const tribalStyle = (props, opacity) => {
@@ -269,7 +270,7 @@ export const OK_LAYERS = {
     minZoom: 7, color: TRIBAL.otsa.color, weight: 1.2, styleFn: tribalStyle, legend: TRIBAL_LEGEND,
     hoverTitle: "Tribal area", hoverSource: "U.S. Census Bureau",
     identifyCard: tribalCard,
-    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — areas Census draws with each tribe, in several cases following a historic reservation), the Osage Reservation and the Shawnee trust land. Courts have held that the Muscogee (Creek) reservation (McGirt v. Oklahoma, 2020) and the Cherokee, Chickasaw, Choctaw, Seminole and Quapaw reservations (Oklahoma Court of Criminal Appeals, 2021) were not disestablished, and that the Kiowa, Comanche and Apache reservation was — as was the Osage Reservation, a ruling the Osage Nation disputes; click an area for its own line.",
+    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — areas Census draws with each tribe, in several cases following a historic reservation), the Osage Reservation and the Shawnee trust land. In criminal-jurisdiction cases, courts have held that the Muscogee (Creek) reservation (McGirt v. Oklahoma, 2020) and the Cherokee, Chickasaw, Choctaw, Seminole and Quapaw reservations (Oklahoma Court of Criminal Appeals, 2021) were not disestablished, and that the Kiowa, Comanche and Apache and the Kickapoo reservations were — as was the Osage Reservation, a ruling the Osage Nation disputes; other areas have their own cases. Click an area for its own line.",
     infoCaveat: "A tribal boundary on a map does not say whether a site is under tribal jurisdiction. That is a legal question that turns on the facts — civil, regulatory and tax questions can differ. Ask counsel and the Nation early.",
     group: "jurisdiction", order: 21,
   }),
