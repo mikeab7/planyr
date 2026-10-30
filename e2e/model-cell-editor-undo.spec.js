@@ -92,16 +92,11 @@ test.describe("Spreadsheet — undo while typing in a cell", () => {
     await committedIntact(page);
   });
 
-  test("the formula bar and column-rename box keep undo for their own text", async ({ page }) => {
+  test("the formula bar keeps undo for its own text (the column-rename box no longer exists — headers are fixed labels, B2455073)", async ({ page }) => {
     await seed(page, "e2e-model-edundo-5");
     await cell(page, 2, 0).click();
     const fb = page.getByTestId("model-formula-bar");
     await fb.click(); await page.keyboard.type("hello");
-    await page.keyboard.press("Control+z");
-    await committedIntact(page);
-    await page.keyboard.press("Escape");
-    await page.getByTestId("model-col-header-1").dblclick();
-    await page.keyboard.press("Control+A"); await page.keyboard.type("Revenue");
     await page.keyboard.press("Control+z");
     await committedIntact(page);
   });

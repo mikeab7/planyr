@@ -35,13 +35,6 @@ async function seedProject(page, id) {
   }, [id, site]);
 }
 
-async function renameCol(page, idx, name) {
-  await page.getByTestId(`model-col-header-${idx}`).dblclick();
-  await page.keyboard.press("Control+A");
-  await page.keyboard.type(name);
-  await page.keyboard.press("Enter");
-}
-
 async function typeAndEnter(page, text) {
   await page.keyboard.type(text);
   await page.keyboard.press("Enter");
@@ -88,12 +81,18 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     await expect(cell(page, 0, 0)).toHaveText("1000000");
   });
 
-  test("column rename applies, and survives typing a multi-character name", async ({ page }) => {
-    // Regression guard for the header-rename-vs-global-keydown bug.
+  // NEW-1 (2026-10-29, B2455073) — Excel parity: a column letter is a LABEL. This used to be a rename test; the rename route is
+  // retired (owner: "Row numbers and column letters can be edited" was the bug). The header keeps its letter however it is
+  // double-clicked or typed at; the Sheet TAB is still renamable (tests further down).
+  test("a column header is a fixed label — double-click and typing do not rename it", async ({ page }) => {
     await seedProject(page, "e2e-model-rename");
     await page.goto("/#/project/e2e-model-rename/model");
-    await renameCol(page, 0, "Revenue");
-    await expect(page.getByTestId("model-col-header-0")).toContainText("Revenue");
+    await expect(sheetEl(page)).toBeVisible();
+    await page.getByTestId("model-col-header-0").dblclick();
+    await page.keyboard.type("Revenue");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("model-col-header-0")).toHaveText("A");
+    await expect(page.locator('[data-testid="model-col-header-0"] input')).toHaveCount(0);
   });
 
   // ⛔ THE CORE FIX, MEASURED: a formula in ONE cell must never touch a neighbour in its column.
