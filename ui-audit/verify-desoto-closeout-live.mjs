@@ -161,10 +161,15 @@ if (PART === "b" || PART === "all") {
     console.log("  unincorporated chip:", JSON.stringify(unChip));
     check('867·1 · the chip at 34.90, −89.78 reads "Unincorporated DeSoto County"', /Unincorporated DeSoto County/i.test(unChip) && !/ETJ/i.test(unChip), unChip);
     // Site Analysis: the panel was redesigned to trusted verdicts only (B2117136) and carries no free-text zoning line any more — the DeSoto answer lives in WHO GOVERNS THIS SITE
-    await page.getByText("Analysis", { exact: true }).first().click().catch(() => {});
-    await sleep(8000);
-    const body = await page.evaluate(() => document.body.innerText);
-    const gov = (body.match(/WHO GOVERNS THIS SITE[\s\S]{0,260}/) || [""])[0].replace(/\s+/g, " ");
+    let gov = "";
+    for (let i = 0; i < 6 && !gov; i++) {
+      await page.getByText("Analysis", { exact: true }).first().click({ timeout: 5000 }).catch(() => {});
+      for (let j = 0; j < 8 && !gov; j++) {
+        await sleep(1500);
+        const body = await page.evaluate(() => document.body.innerText);
+        gov = (body.match(/WHO GOVERNS THIS SITE[\s\S]{0,260}/) || [""])[0].replace(/\s+/g, " ");
+      }
+    }
     console.log("  Site Analysis:", JSON.stringify(gov));
     check("867·1 · Site Analysis names the DeSoto answer: County DeSoto County, City Unincorporated DeSoto County, MS — and no ETJ", /County DeSoto County/.test(gov) && /Unincorporated DeSoto County, MS/.test(gov) && !/ETJ/i.test(gov), gov.slice(0, 160));
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-unincorporated.png` });
