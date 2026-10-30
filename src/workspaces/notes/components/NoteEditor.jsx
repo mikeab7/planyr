@@ -2402,6 +2402,16 @@ const NoteEditor = forwardRef(function NoteEditor({
     return () => { window.removeEventListener("copy", onClip, { capture: true }); window.removeEventListener("cut", onClip, { capture: true }); };
   }, [editor, onPrintNotice]);
 
+  /* B2530690 — the table's multi-cell selection says "this won't work on multiple selections" through a DOM event on
+   * the editor (it has no prop to call); show it where every other editor notice shows. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const dom = editor.view.dom;
+    const onNote = (e) => { if (e.detail && e.detail.message) onPrintNotice?.(e.detail.message); };
+    dom.addEventListener("planyr-notes-notice", onNote);
+    return () => dom.removeEventListener("planyr-notes-notice", onNote);
+  }, [editor, onPrintNotice]);
+
   /* ⛔ THE FIRST KEYSTROKE, CAUGHT BEFORE THE EDITOR SEES IT. Bound on `window` in CAPTURE, for
    * the same reason the rest of this module's global bindings are: the editor's DOM holds focus
    * while a placement is armed, so a keydown bound on the editor would arrive only after

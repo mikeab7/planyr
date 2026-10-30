@@ -37,6 +37,7 @@ import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
 import { NoteTableFill } from "./notesTableFill.js";
+import { NoteTableMultiSelect } from "./notesTableMultiSelect.js";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
@@ -242,6 +243,7 @@ export const NOTE_EXTENSIONS = [
   TableCell, TableHeader, TableRow,
   // Header row on ANY row + cell fill (NEW-1/NEW-2, 2026-10-28) — see lib/notesTableFill.js.
   NoteTableFill,
+  NoteTableMultiSelect,   // B2530690 — Ctrl+click adds table cells to the selection
 
   // "Convert table to text" (NEW-2) — a right-click command that pulls a table's rows out as
   // plain lines, keeping every cell's marks. See lib/notesTableToText.js for the whole rule,

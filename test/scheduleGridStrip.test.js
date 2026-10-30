@@ -30,13 +30,15 @@ describe("Schedule grid — the right-edge strip reads as the row continuing (NE
     expect(grid).toMatch(/boxShadow: stripShadow\(ri\)/);
   });
   it("the outline's right edge moves from the last cell to the strip's far end when the range reaches the last column", () => {
-    expect(grid).toMatch(/if\(ci===maxC && !\(stripJoinsRange && ci===stripCi\)\) s\.push\("inset -2px 0 0 0 #2563eb"\)/);
+    expect(grid).toMatch(/if\(ed\.right && !\(stripJoinsRange && ci===stripCi\)\) s\.push\("inset -2px 0 0 0 #2563eb"\)/);
     expect(grid).toMatch(/sh\.push\("inset -2px 0 0 0 #2563eb"\)/);
   });
   it("a press / drag-enter / right-click in the strip run the SAME functions as the last cell — one implementation", () => {
     expect(grid).toMatch(/onMouseDown=\{e => cellMouseDown\(e, task, ri, c, ci\)\}/);
     expect(grid).toMatch(/onMouseDown=\{e => cellMouseDown\(e, task, ri, stripCol, stripCi\)\}/);
-    expect(grid).toMatch(/onMouseEnter=\{\(\) => cellMouseEnter\(task, ri, stripCol, stripCi\)\}/);
+    // (B2530690) the drag no longer rides per-cell onMouseEnter: one coordinate-driven session (beginCellDrag)
+    // extends the range for cells and the strip alike, so there is no enter handler left to keep in step.
+    expect(grid).not.toMatch(/onMouseEnter=\{\(\) => cellMouseEnter/);
     expect(grid).toMatch(/onContextMenu=\{e => cellContextMenu\(e, task, ri, stripCol, stripCi\)\}/);
     // …and the cells hold no second inline copy of the press logic
     expect(grid.match(/e\.shiftKey && selectedId !== null/g)?.length).toBe(1);
@@ -54,7 +56,7 @@ describe("Schedule grid — no size readout (NEW-2)", () => {
     expect(grid).not.toMatch(/\{hasRange && \(\s*<div style=\{\{position:"absolute",right:12/);
   });
   it("`hasRange` (the paint test the range fill keys off) survives", () => {
-    expect(grid).toMatch(/const hasRange = !!selRange &&/);
+    expect(grid).toMatch(/const hasRange = selIsRange\(selRange\);/);
   });
 });
 
