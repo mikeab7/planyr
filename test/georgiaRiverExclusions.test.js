@@ -88,11 +88,11 @@ describe("the Protected Rivers click card", () => {
     expect(MRPA_REACH_BOX.latMax).toBeGreaterThan(34.1);
     const t = text(card("Chattahoochee River", { lat: 33.9982, lng: -84.3348 }));
     expect(t).toMatch(/Metropolitan River Protection Act/);
-    expect(t).not.toMatch(/100-ft natural vegetative buffer/);
+    expect(t).not.toMatch(/100-ft river corridor/);
   });
   it("a non-MRPA protected river keeps the 100-ft rule, and says the band is drawn from the centreline", () => {
     const t = text(card("Etowah River", { lat: 34.15, lng: -84.8 }));
-    expect(t).toMatch(/100-ft natural vegetative buffer/);
+    expect(t).toMatch(/100-ft river corridor/);
     expect(t).toMatch(/centreline/);
   });
   it("NEW-1: the card cites the RULE (not an ordinance), says the corridor is measured from the top of the bank, and says in one plain line that the drawn band understates it", () => {
@@ -104,7 +104,7 @@ describe("the Protected Rivers click card", () => {
     expect(t).toMatch(/The true corridor starts at the top of the river bank, so the band drawn here \(from DCA's centreline\) understates it\./);
     expect(t).toMatch(/excluded/);
     expect(JSON.stringify(c)).not.toMatch(/ordinance/i);
-    for (const at of [{ lat: 33.9982, lng: -84.3348 }, { lat: 31.9539, lng: -81.2885 }]) expect(JSON.stringify(card("Ogeechee River", at))).not.toMatch(/ordinance/i);
+    for (const [nm, at] of [["Chattahoochee River", { lat: 33.9982, lng: -84.3348 }], ["Ogeechee River", { lat: 31.9539, lng: -81.2885 }]]) { const x = card(nm, at); expect(x.rows.length).toBeGreaterThan(0); expect(JSON.stringify(x)).not.toMatch(/ordinance/i); }
   });
   it("NEW-1: the Protected Rivers legend line says the true corridor starts at the top of the bank and the drawn band understates it", () => {
     const lg = ALL_LAYERS.ga_protected_rivers.legend;
@@ -120,7 +120,7 @@ describe("the Protected Rivers click card", () => {
     expect(riverExclusionAt("Ogeechee River", { lat: 31.9539, lng: -81.2885 })).toBe("tidal");
     const t = text(card("Ogeechee River", { lat: 31.9539, lng: -81.2885 }));
     expect(t).toMatch(/Coastal Marshlands Protection Act/);
-    expect(t).not.toMatch(/100-ft natural vegetative buffer/);
+    expect(t).not.toMatch(/100-ft river corridor/);
   });
   it("the layer's note names both exclusions", () => {
     expect(ALL_LAYERS.ga_protected_rivers.note).toMatch(/Metropolitan River Protection Act/);
