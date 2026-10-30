@@ -8,7 +8,7 @@
 
 - **What it fixes, with real keystrokes in a real browser:** Ctrl+Z while typing, a bare letter just typing (no fullscreen), row numbers and column letters that can't be edited, clicking a header to select the whole row or column (plus drag, Shift+click and the corner box), Ctrl+click for a second range, drag-selecting past the edge (it scrolls in all four directions), clearing a cell without the neighbour's text jumping, copy / paste / cut with formulas following, Excel's own clipboard, the fill handle, F2, F4, Alt+Enter, Ctrl+Enter, Ctrl+D / Ctrl+R, Ctrl+A twice, undo / redo across all of it.
 - **What it does not give you, because the free build doesn't have it:** Ctrl+1, the Ctrl+Shift number-format keys, Shift+Space / Ctrl+Space, Ctrl+9 / Ctrl+0, Ctrl+Plus / Ctrl+Minus, Ctrl+; and Ctrl+5, and the Alt key-tips. Univer can be extended, so these are buildable, but they are work — they are the same keys you just fought to get right in the old grid.
-- **One place it is *different* from Excel on purpose:** dragging an already-selected row or column header **moves** it (Excel only does that with Shift held).
+- **Header drag now matches Excel (fixed 2026-10-30, B2577680):** a plain drag on a row or column header — selected or not — extends the selection; only **Shift+drag** moves the row or column. It was the one place Univer differed from Excel on purpose.
 - **What it costs:** the first time you flip the switch your browser downloads about 1.8 MB of compressed code (more only if needed); the sheet takes a couple of seconds to appear instead of under one; Planyr's own formula engine is 3–4× faster than Univer's (both are well under a second at 5,000 formulas); the project's build now needs a lot more memory.
 - **What stays safe:** with the switch off the old grid is **byte-for-byte identical** (screenshots compared against the build before this work). Saving goes through exactly the same path as today. Nothing of yours was touched — every test used throwaway data on the test account.
 
@@ -34,7 +34,7 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 | A bare letter with a cell selected starts typing (never triggers the app's F fullscreen or any one-letter shortcut) | **Works** | typed "foo" into the cell; document.fullscreenElement stayed null |
 | Row numbers and column letters cannot be edited by any route | **Works** | double-clicking a column letter or a row number opens no editor (0 edit events); the labels are painted by the grid and have no stored text |
 | Click a header selects the whole row/column; drag and Shift+click extend; the corner box selects all | **Works** | column click, drag C→E, Shift+click G, row click and the corner box all select the right ranges |
-| (extra) Dragging an already-selected header | **Differs from Excel** | column C was MOVED by dragging its selected header (C1 was "cherry", now "null") — Excel only moves it with Shift held |
+| (extra) Dragging an already-selected header | **Works** (was: Differs from Excel) | fixed 2026-10-30 (B2577680): a plain drag extends the selection (C → C:E, C1 stays "cherry"); **Shift+drag** moves the column or row, as in Excel; the border still resizes and a double-click still autofits. Gate in `lib/univerHeaderMove.js` in front of Univer's own header-move permission check — no package patched. Checks `header-drag-moves`, `-rows`, `header-shift-drag-moves`, `header-resize-autofit` in `ui-audit/verify-univer-parity.mjs` |
 | Ctrl+click adds a second, separate range | **Works** | A1 and C3 selected together |
 | Drag-select past the visible edge autoscrolls in all four directions | **Works** | right to col 25, down to row 47, left to col 0, up to row 13 |
 | Text spills over empty neighbours; clearing a cell never moves the text beside it | **Works** | label spills (271 px of ink in the empty neighbour); clearing A5 left B5's pixels identical |
@@ -83,11 +83,11 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 
 **Does not carry or needs work — said plainly:**
 - **Indent** — now drawn (B2572784, see the table row above). The sidecar no longer carries it: the number lives on the Univer cell style so it follows its cell through every structural edit.
-- **File mode, org workbooks** — wired through the same save routine, but **not exercised** in this spike (the live run used an ordinary project workbook). Treat as untested.
+- **File mode, org workbooks** — wired through the same save routine; the spike's live run used an ordinary project workbook. Exercised by `ui-audit/verify-univer-save-live.mjs` (B2577681, V2033376): see *Save path* below for the dated result.
 - **Formula-consistency flags and the Inconsistencies panel, trace precedents / dependents, "General" fit, the sheet zoom, the command palette, the Alt key-tips, the old Find bar and Name Manager** — all of these live in the old grid's own code and read its selection; with Univer on they are hidden. Univer has its own zoom slider, find panel and name box; it has no equivalent of the consistency flags or the trace arrows that I could see.
 - **Filters** — Univer's filter works, but Planyr does not store filter state in the workbook (it didn't before either), so a filter is gone on reload.
 - **Vertical merges** made in Univer, formulas written with `[Column]` names, a typed date such as `1/15/2027` (Univer treats it as text until you give it a date format), and formatting *inside* a cell (mixed bold in one cell) — reported on screen when a save would lose them.
-- **Export while typing** — the Excel / CSV export in the header reads the saved workbook; an edit made in the last third of a second before you click it would be missed.
+- **Export while typing** — **RESOLVED 2026-10-30 (B2577681).** Export, the grid toggle, hiding the module tab, closing a file, changing project / workbook / file, reloading and closing the page now all flush the grid first (`lib/univerSave.js`; see *Save path* below). Export reads the up-to-date workbook straight from the flush instead of the saved copy a render behind it.
 - **Dark theme** — the first cut was wired to follow the app theme but only the light theme had been looked at, and it was unreadable in dark (B2566048, owner report 2026-10-30). Fixed and now guarded: Univer's gray scale never flips direction (its dark mode picks the other end of it) and its canvas is painted through a colour inversion, so `lib/univerTheme.js` builds a per-mode theme and writes the canvas-facing steps as the pre-image of that inversion; `UniverSheet.jsx` rebuilds it on every light/dark flip. `ui-audit/verify-univer-theme-contrast.mjs` (sandbox) and `verify-univer-theme-live.mjs` (signed in) measure the pixels in both themes, mounted and flipped while open.
 - **Phone / touch** — not tried.
 
@@ -157,15 +157,27 @@ These are against localhost, so the real internet adds the download. The live ru
 
 Estimated **12–16 sessions**, in this order — gaps first, because they are what you will notice, and retirement last:
 
-1. **Harden the save path** (1–1.5): flush edits before export, tab switch and unmount; live-verify file mode and org workbooks; confirm the Planyr undo stack and Univer's undo agree.
+1. ~~**Harden the save path** (1–1.5)~~ **DONE 2026-10-30 (B2577681)** — see *Save path* below.
 2. **Fill the Excel-key gaps as one Planyr plugin on Univer** (2): Ctrl+1 and number-format dialog, the Ctrl+Shift format keys, Shift+Space / Ctrl+Space, Ctrl+9 / 0, Ctrl+Plus / Minus, Ctrl+;, Ctrl+5, copy-above, Alt key-tips.
 3. **Decide indent** (1): ✅ DONE (owner: keep and draw it) — B2572784; stored as the cell's own padding, drawn by a render interceptor, buttons + command ids on the Start tab.
-4. **Fix the header-drag-moves difference** (0.5) and the load time — prune the unused language files, try the background worker (1).
+4. ~~**Fix the header-drag-moves difference** (0.5)~~ **DONE 2026-10-30 (B2577680).** The load time — prune the unused language files, try the background worker (1) — is still open.
 5. **Look** (1–3): keep Univer's toolbar with the Planyr theme (cheap) or drive a Planyr-styled toolbar from Univer's interface (the flat strip you approved).
 6. **Port the Planyr-only features** (2–3): consistency flags and panel, trace arrows, command palette, name manager — on Univer's interface.
 7. **One formula engine** (1–2): today Planyr's engine feeds Excel export, the audit tools and the numbers elsewhere; with Univer on screen the two could disagree on edge cases. Pick one and test the Excel export against it.
 8. **Rewrite the tests that read cells off the page** (~2): the canvas has no cells to query; they move to Univer's interface (the parity checklist is the pattern).
 9. **Dogfood, then default on, then delete the old grid** (1–2): `SheetView.jsx`, `sheetModel.js`'s grid parts and the old engine only once nothing reads them.
+
+## Save path (cutover step 1 — B2577681, 2026-10-30)
+
+How an edit travels: Univer edit → `lib/univerSave.js` (debounce 300 ms, the echo guard, and a synchronous **flush**) → `UniverSheet`'s `onChange` → `ModelApp.onUniverChange` → the ONE `commit` (write-through, cloud push, file mode, org workbooks as today).
+
+- **The gap that was open:** an edit sat inside Univer for up to 300 ms before it was a Planyr workbook. Export, a grid toggle, a hidden tab, closing a file, a project change and the page closing could all miss it — and the unmount path flushed *after* marking itself disposed, which made its own flush a no-op.
+- **Now every way out flushes first** — `flushUniver()` in `ModelApp` is synchronous and idempotent and returns the workbook as it is now: **Export** (xlsx and csv read that, a failed flush stops the export with a message — never a stale file) · **the grid toggle** (also commits text still typed in an open cell editor) · **hiding the module tab** · **Close file** · **project / org workbook / file change** (a layout-effect cleanup, which runs before the load that replaces the workbook and before the file hook's "upload what I'm leaving" step) · **unmount** · **`beforeunload`, `pagehide`, tab hidden**.
+- **An urgent flush persists synchronously** (React does not render before a closing page dies): the local copy and the dirty mark are written in the same call — the same safety net the regular grid's write-through gives — so the next open pushes it (`decideLoadSync` "push-local"), and the red "different copy" bar is not raised. A grid that is going away because the project changed saves into the project it was *showing*, never into the one being opened, and starts that project's upload at once (best effort — the regular push effect for it is cancelled by the change).
+- **A save that fails is loud:** the controller reports it (status badge → error, a message, a telemetry row `model-univer-save-failed`), keeps the edit pending, and the next flush retries it.
+- **Echo guard with two saves in flight:** a queue of what was emitted but has not yet come back down as the `workbook` prop, so the grid is never rebuilt to the *older* of two quick saves.
+- **Undo:** the regular grid's Ctrl+Z after switching back from Univer takes **one step per committed Univer edit** (each flush is one `commit`; a burst inside one debounce window is one step; flushing again with nothing new adds none). Univer's own history lives only as long as the Univer grid is mounted — switching away discards it, while Planyr's stack keeps going — so Ctrl+Z in Univer never reaches back past the switch. Univer's own undo/redo are mutations like any edit, so they flow out as new commits and the two stacks stay in agreement about *content* (neither tries to replay the other's frames).
+- **Guards:** `test/modelUniverSave.test.js` (controller red-proofs incl. the old unmount order reproduced, wiring); `ui-audit/verify-univer-save-path.mjs` (real Chromium, real keys, leaving INSIDE the debounce window — export, idempotent, unmount, a real navigation and a real reload, two quick saves, mid-typing, a failing snapshot); `ui-audit/verify-univer-save-live.mjs` (signed in on planyr.io, debounce frozen so only the flush can save: toggle, Export re-read with ExcelJS, module tab, project change, reload, Ctrl+Z, a Library `.xlsx` in file mode, an org workbook).
 
 ## What argues against cutover
 
@@ -174,7 +186,7 @@ Estimated **12–16 sessions**, in this order — gaps first, because they are w
 - **A canvas grid is invisible to screen readers and to the page-reading tests** the repo relies on.
 - **Two formula engines** until step 7, and a different function set (it is richer, but `[Column]` references and Planyr-only functions are not understood).
 - **A young, fast-moving dependency** (1.x, many presets and Pro-only extras). Charts, pivots, printing, history and live collaboration are paid; none are needed today, but you asked not to pay, so they are off the table.
-- **It moves columns when you drag a selected header** — a small thing, and exactly the sort of surprise that started this.
+- ~~**It moves columns when you drag a selected header**~~ — fixed (B2577680): a plain drag extends, Shift+drag moves, as in Excel.
 - **The saved format stays Planyr's**, which is the safe choice, but it means every Univer-only feature (rich text in a cell, vertical merges, data validation) has nowhere to live without changing the model.
 
 ## Turning it off for good

@@ -170,12 +170,66 @@ check("header-select", "Header click selects the whole line; drag and Shift+clic
   const bad = [!wholeCol && "column click", !dragOk && "header drag", !shiftOk && "Shift+click", !wholeRow && "row click", !allOk && "corner box"].filter(Boolean);
   return bad.length ? FAIL(`not met: ${bad.join(", ")} — got ${JSON.stringify({ colSel, drag, shift, rowSel, all })}`) : PASS("column click, drag C→E, Shift+click G, row click and the corner box all select the right ranges");
 });
-check("header-drag-moves", "Dragging an already-selected header does not move the row/column (Excel needs Shift)", async () => {
+const dragFrom = async (a, z, { shift = false } = {}) => {
+  await page.mouse.move(a.x, a.y); await wait(250);   // a person hovers before pressing; Univer arms its move cursor on hover
+  if (shift) await page.keyboard.down("Shift");
+  await page.mouse.down(); await page.mouse.move(z.x, z.y, { steps: 8 }); await page.mouse.up();
+  if (shift) await page.keyboard.up("Shift");
+  await wait(350);
+};
+const rowOf = (r, n = 6) => Promise.all(Array.from({ length: n }, (_, c) => val1(r, c)));
+const colOf = (c, n = 6) => Promise.all(Array.from({ length: n }, (_, r) => val1(r, c)));
+/* NEW-1 (2026-10-30): a plain drag on a header — selected or not — extends the header selection; only Shift+drag MOVES it (Excel).
+ * Univer's own header-move controller moves on ANY drag from a selected header; lib/univerHeaderMove.js gates it. */
+check("header-drag-moves", "Dragging an already-selected header does not move the row/column; it extends the selection (Excel needs Shift to move)", async () => {
   await reset(); const h = await headerPt(2); await page.mouse.click(h.x, h.y); await wait(150);
-  const before = await val1(0, 2);
-  const z = await headerPt(4); await page.mouse.move(h.x, h.y); await page.mouse.down(); await page.mouse.move(z.x, z.y, { steps: 6 }); await page.mouse.up(); await wait(300);
-  const stayed = (await val1(0, 2)) === before;
-  return stayed ? PASS("the column stayed where it was; the drag only re-selected") : FAIL(`column C was MOVED by dragging its selected header (C1 was "${before}", now "${await val1(0, 2)}") — Excel only moves it with Shift held`);
+  const before = await rowOf(0);
+  const z = await headerPt(4); await dragFrom(h, z);
+  const after = await rowOf(0), s = (await sel())[0];
+  if (!eq(before, after)) return FAIL(`column C was MOVED by dragging its selected header (row 1 was ${JSON.stringify(before)}, now ${JSON.stringify(after)}) — Excel only moves it with Shift held`);
+  return s && s.c1 === 2 && s.c2 === 4 ? PASS(`the column stayed where it was and the selection became ${s.a1}`) : FAIL(`nothing moved, but the selection is ${s && s.a1} (a plain drag should extend it to C:E)`);
+});
+check("header-drag-moves-rows", "Same for a row header: a plain drag extends, nothing moves", async () => {
+  await reset(); const h = await rowHeaderPt(1); await page.mouse.click(h.x, h.y); await wait(150);
+  const before = await colOf(0);
+  const z = await rowHeaderPt(3); await dragFrom(h, z);
+  const after = await colOf(0), s = (await sel())[0];
+  if (!eq(before, after)) return FAIL(`row 2 was MOVED by dragging its selected header (column A was ${JSON.stringify(before)}, now ${JSON.stringify(after)})`);
+  return s && s.r1 === 1 && s.r2 === 3 ? PASS(`the row stayed where it was and the selection became ${s.a1}`) : FAIL(`nothing moved, but the selection is ${s && s.a1} (should be 2:4)`);
+});
+check("header-shift-drag-moves", "Shift+drag on a selected column / row header MOVES it (Excel)", async () => {
+  await reset(); const h = await headerPt(2); await page.mouse.click(h.x, h.y); await wait(150);
+  const before = await rowOf(0);                                         // [1, alpha, cherry, null, null, null]
+  const z = await headerPt(4); await dragFrom(h, z, { shift: true });
+  const after = await rowOf(0);
+  const colMoved = !eq(before, after) && after[2] !== "cherry" && after.includes("cherry");
+  await reset(); const rh = await rowHeaderPt(1); await page.mouse.click(rh.x, rh.y); await wait(150);
+  const rb = await colOf(0);
+  const rz = await rowHeaderPt(3); await dragFrom(rh, rz, { shift: true });
+  const ra = await colOf(0);
+  const rowMoved = !eq(rb, ra);
+  return colMoved && rowMoved ? PASS(`column C moved (row 1 ${JSON.stringify(before)} → ${JSON.stringify(after)}); row 2 moved (column A ${JSON.stringify(rb)} → ${JSON.stringify(ra)})`) : FAIL(`column moved=${colMoved}, row moved=${rowMoved}`);
+});
+check("header-press-keeps-others", "Ctrl+click on an already-selected header still adds a range (the gate never collapses a multi-selection)", async () => {
+  await reset(); await click(0, 0);
+  const a = await headerPt(2); await page.mouse.click(a.x, a.y); await wait(120);
+  const b = await headerPt(4); await page.keyboard.down("Control"); await page.mouse.click(b.x, b.y); await page.keyboard.up("Control"); await wait(150);
+  const two = (await sel()).map((x) => x.a1);
+  return two.length === 2 && two[0] === "C:C" && two[1] === "E:E" ? PASS("C:C and E:E selected together") : FAIL(`selection list is ${JSON.stringify(two)}`);
+});
+check("header-resize-autofit", "The column border still resizes by drag (with the column selected) and double-click still autofits", async () => {
+  await reset(); const h = await headerPt(2); await page.mouse.click(h.x, h.y); await wait(150);
+  const p = await pt(0, 2); const cv = await canvasBox();
+  const edge = { x: p.right - 1, y: cv.top + 10 };
+  const w0 = await inSheet((api, ws) => ws.getColumnWidth(2));
+  await page.mouse.move(edge.x, edge.y); await wait(120);
+  await page.mouse.down(); await page.mouse.move(edge.x + 70, edge.y, { steps: 6 }); await page.mouse.up(); await wait(350);
+  const w1 = await inSheet((api, ws) => ws.getColumnWidth(2));
+  const p2 = await pt(0, 2); const edge2 = { x: p2.right - 1, y: cv.top + 10 };
+  await page.mouse.move(edge2.x, edge2.y); await wait(120); await page.mouse.dblclick(edge2.x, edge2.y); await wait(450);
+  const w2 = await inSheet((api, ws) => ws.getColumnWidth(2));
+  const resized = w1 > w0 + 30;
+  return resized && w2 !== w1 ? PASS(`drag: ${w0} → ${w1}; double-click autofit: ${w1} → ${w2}`) : FAIL(`drag ${w0} → ${w1} (resized=${resized}); double-click ${w1} → ${w2}`);
 });
 check("ctrl-click", "Ctrl+click adds a second, separate range", async () => {
   await reset(); await click(0, 0); await heldClick(2, 2, "Control"); await wait(150);

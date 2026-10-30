@@ -38,7 +38,7 @@
  * merge, but it can no longer clobber another device's saved work in total silence.
  */
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
@@ -532,11 +532,83 @@ export default function ModelApp({
   });
   // Declared AFTER `fw` and `fileMode` (a `const` read earlier is a TDZ crash — it took the Spreadsheet down on the live build).
   const shownStatus = fileMode ? fw.status : shownModelStatus(status, diverged);
+  // NEW-2 (Univer save path) — the Univer grid hands its edits over after a short debounce, so EVERY way out of it asks the
+  // grid to flush first: Export, the grid toggle, hiding the module tab, closing a file, a project / workbook / file change,
+  // the page closing. `flushUniver()` is synchronous and idempotent and returns the workbook AS IT IS NOW (the edit included).
+  // An URGENT save is also persisted right here, synchronously: React would not render before a closing page dies, and the
+  // write-through effect only runs after a render. Same safety net the regular grid has — the stored copy is never staler
+  // than the screen — and the same dirty mark, so the next load pushes it (decideLoadSync "push-local"), never a "different copy" bar.
+  const univerHandleRef = useRef(null);
+  const readyRef = useRef(false); readyRef.current = ready;
+  const fwRef = useRef(fw); fwRef.current = fw;
+  const univerScope = fileMode ? `file:${fw.loadGen}` : (storageKey ? `${orgMode ? "org" : "project"}:${storageKey}` : "none");
+  const scopeRef = useRef(univerScope); scopeRef.current = univerScope;
+  const persistUniverNow = useCallback((scope, wb) => {
+    if (scope.fileMode) { fwRef.current.noteWorkbookNow(wb, scope.fileId); return true; }
+    if (!readyRef.current || !scope.key) return true;
+    if (!writeLocalSheet(scope.userId, scope.key, wb)) { setStatus("error"); return false; }
+    writeSyncMeta(scope.userId, scope.key, { baseVersion: baseVersionRef.current, dirty: true });
+    if (scopeRef.current === scope.id) dirtyRef.current = true;
+    return true;
+  }, []);
+  /** The grid is going away because the project / workbook CHANGED: the regular push effect for the one being left is cancelled by
+   *  the change, so start its upload here (best effort — the dirty local copy written above is the net, and the next open of
+   *  that workbook pushes it). A failure raises nothing on the badge: the badge now describes the workbook being OPENED. */
+  const uploadLeavingUniver = useCallback((scope, wb) => {
+    if (!scope.cloud) return;
+    const expected = cloudVersionRef.current;
+    const p = scope.cloud.projectId
+      ? saveCloudSheet({ uid: scope.userId, projectId: scope.cloud.projectId, sheet: wb, expected })
+      : saveOrgWorkbookCloud({ uid: scope.userId, id: scope.cloud.orgId, name: scope.cloud.name, sheet: wb, expected });
+    Promise.resolve(p).then((r) => {
+      if (!r || !r.ok) return;
+      const stored = readLocalSheet(scope.userId, scope.key);
+      if (stored && sheetsDiverge(stored, wb)) return;   // edited again since — that copy stays dirty and uploads on its own
+      writeSyncMeta(scope.userId, scope.key, { baseVersion: r.version, dirty: false });
+    }).catch(() => {});
+  }, []);
+  const reportUniverSaveError = useCallback((err, stage) => {
+    setStatus("error");
+    setFileNotice({ kind: "error", text: "Your last edit in the new grid could not be saved yet. It will be retried — keep this tab open." });
+    import("../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("model-univer-save-failed", String((err && err.message) || err), { stage })).catch(() => {});
+  }, []);
+  /** Save a workbook the Univer grid just emitted. `scope` is the workbook that grid was SHOWING — a grid that is going away
+   *  because the project / file changed must save into the OLD one and never into whatever replaced it. */
+  const onUniverChange = (next, _notes, meta) => {
+    const scope = {
+      id: univerScope, key: storageKey, userId, fileMode, fileId: activeFileId,
+      cloud: !fileMode && userId && cloudSettled && !divergedRef.current && statusRef.current !== "not-provisioned"
+        ? (openProject ? { projectId } : { orgId: orgWorkbookId, name: orgWorkbookName }) : null,
+    };
+    if (meta && meta.urgent) {
+      if (!persistUniverNow(scope, next)) return;
+      if (scopeRef.current !== scope.id) uploadLeavingUniver(scope, next);
+    }
+    if (scopeRef.current === scope.id) { commit(() => next); if (next.activeSheetId) setActiveSheetId(next.activeSheetId); }
+  };
+  const flushUniver = useCallback(() => {
+    const h = univerHandleRef.current;
+    return h ? h.flush({ urgent: true }) : null;   // { workbook, changed, ok } | null (the regular grid is showing)
+  }, []);
+  // Leaving the workbook the grid is showing (project, org workbook, file) or hiding the tab: flush BEFORE the swap. A layout
+  // effect's cleanup runs ahead of every passive effect, including the load effect that replaces the workbook and the file
+  // hook's "start uploading what I'm leaving" step — both then see the newest edit.
+  useLayoutEffect(() => () => { flushUniver(); }, [univerScope, activeFileId, flushUniver]);
+  useEffect(() => { if (!isActive) flushUniver(); }, [isActive, flushUniver]);
+  const setUniverOn = useCallback(async (on) => {
+    const h = univerHandleRef.current;
+    if (h) {
+      await Promise.race([h.commitEditing ? h.commitEditing() : null, new Promise((r) => setTimeout(r, 400))]);
+      flushUniver();
+    } else { sheetViewRef.current?.commitPending?.(); formulaBarRef.current?.commitPending?.(); }
+    univer.setOn(on);
+  }, [flushUniver, univer]);
   const closeFile = useCallback(async () => {
+    flushUniver();
     const ok = await fw.flush();
     if (!ok) return; // the bar already shows why it couldn't save; never close over unsaved edits
     setActiveFile(fileScopeRef.current, null);
-  }, [fw]);
+  }, [fw, flushUniver]);
   // Leaving Organization (switching tabs elsewhere, or picking a project) always drops back to
   // the workbook list — never carry a stale workbook selection into a context that no longer
   // names it.
@@ -977,25 +1049,41 @@ export default function ModelApp({
     return sanitizeFilename(name);
   }, [projectId, openOrgWorkbook, orgWorkbookName, fileMode, fw.name]);
 
+  /** NEW-2 — what Export writes is the workbook as it is NOW: with the Univer grid showing, an edit still inside its save
+   *  debounce is flushed first and read straight from the grid (the React state is a render behind it). null = the flush FAILED
+   *  (already reported) — the export must not go ahead with a stale copy. */
+  const workbookForExport = useCallback(() => {
+    const r = flushUniver();
+    if (!r) return workbook;
+    if (!r.ok || !r.workbook) { setFileNotice({ kind: "error", text: "Export stopped: the latest edit in the new grid could not be saved first. Try again in a moment." }); return null; }
+    return r.workbook;
+  }, [flushUniver, workbook]);
+
   const onExportXlsx = useCallback(async () => {
     setFileBusy(true);
     try {
-      const blob = await exportWorkbookInWorker(workbook, { projectNames });
+      const wbNow = workbookForExport();
+      if (!wbNow) return;
+      const blob = await exportWorkbookInWorker(wbNow, { projectNames });
       downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
     } finally { setFileBusy(false); }
-  }, [workbook, currentFileBaseName, projectNames]);
+  }, [workbookForExport, currentFileBaseName, projectNames]);
 
   const onExportCsv = useCallback(() => {
     try {
-      const csv = sheetToCsv(sheet, evalResult);
+      const wbNow = workbookForExport();
+      if (!wbNow) return;
+      // Straight from the flushed workbook when the Univer grid is showing; otherwise exactly what is on screen, as before.
+      const entry = wbNow === workbook ? activeEntry : (wbNow.sheets.find((e) => e.id === activeSheetId) || activeSheetEntry(wbNow));
+      const csv = wbNow === workbook ? sheetToCsv(sheet, evalResult) : sheetToCsv(entry.sheet, evaluateWorkbook(wbNow, { projectNames }).get(entry.id));
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      downloadBlob(blob, `${sanitizeFilename(sheetName)}.csv`);
+      downloadBlob(blob, `${sanitizeFilename(entry.name)}.csv`);
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to CSV failed: ${e?.message || e}` });
     }
-  }, [sheet, evalResult, sheetName]);
+  }, [workbookForExport, workbook, activeEntry, activeSheetId, sheet, evalResult, projectNames]);
 
   const runXlsxImport = useCallback(async (file) => {
     setFileBusy(true);
@@ -1810,7 +1898,7 @@ export default function ModelApp({
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
               onOpenFile={onOpenFileFromComputer}
-              univerSwitch={univer.available ? { on: univer.on, setOn: univer.setOn } : null}
+              univerSwitch={univer.available ? { on: univer.on, setOn: setUniverOn } : null}
             />
             {!univerOn && (
               <>
@@ -1863,10 +1951,13 @@ export default function ModelApp({
             // cloud push, file-mode save and undo frame) as every other edit — persistence is not touched.
             <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the new grid…</div>}>
               <UniverSheet
+                key={univerScope}
                 workbook={workbook}
                 projectNames={projectNames}
-                onChange={(next) => { commit(() => next); if (next.activeSheetId) setActiveSheetId(next.activeSheetId); }}
+                onChange={onUniverChange}
                 onNotice={showNotice}
+                onError={reportUniverSaveError}
+                onReady={(h) => { univerHandleRef.current = h; }}
               />
             </Suspense>
           ) : (
