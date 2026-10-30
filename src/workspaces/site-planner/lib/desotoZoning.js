@@ -67,7 +67,9 @@ export function ordinanceRef(raw) {
     let host = "";
     try { host = new URL(url).hostname; } catch (_) { return { href: null, text: s }; }
     const municode = /municode\.com$/i.test(host);
-    return { href: url, text: municode ? "Zoning ordinance (Municode)" : (m && m[2] ? m[2].trim() : "Ordinance") };
+    const county = /desotocountyms\.gov$/i.test(host);
+    // a card row labelled "Ordinance" must not read "Ordinance: Ordinance": name WHICH ordinance the link opens
+    return { href: url, text: municode ? "Zoning ordinance (Municode)" : (m && m[2] && m[2].trim()) || (county ? "Zoning ordinance (DeSoto County)" : "Zoning ordinance") };
   }
   return { href: null, text: s };
 }
