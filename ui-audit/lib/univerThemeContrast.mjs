@@ -34,15 +34,16 @@ async function regions(page) {
     const q = (s) => document.querySelector(s);
     const root = q(".planyr-univer");
     const canvas = q("canvas[id^='univer-sheet-main-canvas']"); const cr = canvas.getBoundingClientRect();
-    const tab = (t) => [...root.querySelectorAll('[data-u-comp="ribbon-header-menu"] button, [data-u-comp="ribbon-header-menu"] span')].find((e) => e.textContent.trim() === t);
+    // NEW-1 (B2574352): the Start / Formulas / Data / View row is ONE dropdown at the left of the single header strip.
+    const dd = [...root.querySelectorAll('[data-u-comp="headerbar"] a[data-state]')].find((e) => e.getBoundingClientRect().width > 0);
     const icons = [...root.querySelectorAll('[data-u-comp="ribbon-toolbar"] button:not([disabled]) svg')].filter((e) => e.getBoundingClientRect().width >= 12).map(box);
     const fb = q('.planyr-univer [data-u-comp="formula-bar"]');
     const dn = q('.planyr-univer [data-u-comp="defined-name"]'), fe = q('.planyr-univer [data-u-comp="formula-editor"]');
-    const strip = q('.planyr-univer [data-u-comp="ribbon-header-menu"]');
+    const strip = q('.planyr-univer [data-u-comp="headerbar"]');
     const radii = [strip, ...strip.querySelectorAll("*")].map((e) => getComputedStyle(e)).filter((s) => parseFloat(s.borderTopLeftRadius) > 0 || (s.boxShadow && s.boxShadow !== "none"));
     return {
       stripBox: box(strip), rootBox: box(root), flatViolations: radii.length,
-      tabs: Object.fromEntries(["Start", "Formulas", "Data", "View"].map((t) => [t, tab(t) ? box(tab(t)) : null])),
+      tabs: { "Start ▾ dropdown": dd ? box(dd) : null },
       icons, definedName: dn ? box(dn) : null, formulaEditor: fe ? box(fe) : null, formulaBar: fb ? box(fb) : null,
       toolbar: box(q('.planyr-univer [data-u-comp="ribbon-toolbar"]')),
       colHeader: { x: cr.x + 46 + 4, y: cr.y + 1, w: 112, h: 18 },         // column "A" label
@@ -66,7 +67,7 @@ async function colours(page) {
     const root = document.querySelector(".planyr-univer"); const cs = (e) => (e ? getComputedStyle(e) : null);
     const eff = (e) => { for (let n = e; n; n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent") return c; } return "rgb(255, 255, 255)"; };
     const tb = root.querySelector('[data-u-comp="ribbon-toolbar"] button:not([disabled]) svg');
-    const st = root.querySelector('[data-u-comp="ribbon-header-menu"]');
+    const st = [...root.querySelectorAll('[data-u-comp="headerbar"] a[data-state]')].find((e) => e.getBoundingClientRect().width > 0) || root.querySelector('[data-u-comp="headerbar"]');
     return { theme: document.documentElement.dataset.theme, univerDark: document.documentElement.classList.contains("univer-dark"),
       toolbarIconColor: tb ? cs(tb).color : null, toolbarBg: tb ? eff(tb) : null, stripBg: eff(st), appSurface: cs(root).backgroundColor };
   });
@@ -95,7 +96,7 @@ export async function scenario(page, name, steps) {
 
   const icons = R.icons.map((r) => I(r)); const worst = icons.reduce((a, b) => (b.ratio < a.ratio ? b : a), { ratio: 99 });
   rec("toolbar-icons", `every enabled toolbar icon reads (≥ ${ICON}:1)`, icons.length > 5 && icons.every((m) => m.ratio >= ICON), `${icons.length} icons, worst ${fmt(worst)}`);
-  for (const [t, r] of Object.entries(R.tabs)) { if (!r) { rec(`tab-${t}`, `${t} tab present`, false, "not found"); continue; } const m = I(r); rec(`tab-${t}`, `"${t}" tab label reads (≥ ${TEXT}:1)`, m.ratio >= TEXT, fmt(m)); }
+  for (const [t, r] of Object.entries(R.tabs)) { if (!r) { rec(`tab-${t}`, `${t} present`, false, "not found"); continue; } const m = I(r); rec(`tab-${t}`, `"${t}" label reads (≥ ${TEXT}:1)`, m.ratio >= TEXT, fmt(m)); }
   const ch = I(R.colHeader); rec("col-letter", `column letter reads (≥ ${TEXT}:1)`, ch.ratio >= TEXT, fmt(ch));
   const rh = I(R.rowHeader); rec("row-number", `row number reads (≥ ${TEXT}:1)`, rh.ratio >= TEXT, fmt(rh));
   if (R.definedName) { const m = I({ x: R.definedName.x + 2, y: R.definedName.y + 2, w: 44, h: R.definedName.h - 4 }); rec("name-box", `name box text reads (≥ ${TEXT}:1)`, m.ratio >= TEXT, fmt(m)); } else rec("name-box", "name box present", false, "not found");
@@ -106,12 +107,13 @@ export async function scenario(page, name, steps) {
   // grid line: visible but not glaring
   const ln = I({ x: R.lineAt.x - 2, y: R.lineAt.y, w: 5, h: 4 });
   rec("grid-lines", `grid lines are visible and quiet (${LINE_MIN}–${LINE_MAX}:1)`, ln.ratio >= LINE_MIN && ln.ratio <= LINE_MAX, fmt(ln));
-  // tab strip: flat, full width, and the same family as the toolbar under it (no bright pill on a dark header)
-  const stripBg = inkContrast(img3, { x: 8, y: R.stripBox.y + 2, w: 300, h: R.stripBox.h - 4 }).bg;
+  // the header strip: flat, full width, and the tab dropdown on the same surface as the tools beside it (no bright pill on a dark header)
+  const ddBox = R.tabs["Start ▾ dropdown"];
+  const stripBg = ddBox ? inkContrast(img3, { x: ddBox.x, y: ddBox.y, w: ddBox.w, h: ddBox.h }).bg : null;
   const toolBg = inkContrast(img3, { x: 8, y: R.toolbar.y, w: 300, h: R.toolbar.h }).bg;
-  rec("strip-flat", "tab strip has no rounded corners or shadow", R.flatViolations === 0, `${R.flatViolations} rounded/shadowed parts`);
-  rec("strip-full-width", "tab strip spans the whole width", Math.abs(R.stripBox.w - R.rootBox.w) <= 1, `${Math.round(R.stripBox.w)} of ${Math.round(R.rootBox.w)}`);
-  rec("strip-matches-toolbar", "tab strip is the same surface as the toolbar (no pill)", stripBg && toolBg && ratio(stripBg, toolBg) <= 1.25, `${stripBg ? css(stripBg) : "?"} vs ${toolBg ? css(toolBg) : "?"}`);
+  rec("strip-flat", "header strip has no rounded corners or shadow", R.flatViolations === 0, `${R.flatViolations} rounded/shadowed parts`);
+  rec("strip-full-width", "header strip spans the whole width", Math.abs(R.stripBox.w - R.rootBox.w) <= 1, `${Math.round(R.stripBox.w)} of ${Math.round(R.rootBox.w)}`);
+  rec("strip-matches-toolbar", "tab dropdown is the same surface as the toolbar (no pill)", stripBg && toolBg && ratio(stripBg, toolBg) <= 1.25, `${stripBg ? css(stripBg) : "?"} vs ${toolBg ? css(toolBg) : "?"}`);
   return { name, results, colours: await colours(page) };
 }
 
