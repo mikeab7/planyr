@@ -316,7 +316,7 @@ export function GradedAreaLine({ limit, actions }) {
   const src = limit.mode === "boundary" ? limitBasisPhrase(limit.basis) : limit.source === "edited" ? "limit edited" : "limit auto";
   const layout = limit.mode !== "boundary";
   return (
-    <div data-graded-area="1" data-limit-mode={limit.mode} data-limit-source={limit.source} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0 0 8px" }}>
+    <div data-graded-area="1" data-limit-mode={limit.mode} data-limit-source={limit.source} data-limit-sig={limit.sig || ""} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0 0 8px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <span data-graded-area-line="1" style={{ fontVariantNumeric: "tabular-nums" }}>Graded area · {ac} · {src}</span>
         <SegmentedControl options={LIMIT_MODE_OPTIONS} value={limit.mode} onChange={(m) => actions.setLimitMode && actions.setLimitMode(m)} aria-label="Grading limit mode" data-testid="grading-limit-mode" />
@@ -437,7 +437,7 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
         </g>
       )}
       {cutfill && cutfill.dataUrl && (
-        <g data-layer="cutfill" data-band-ready={cutfill.bandReady ? "1" : "0"} data-band-source={cutfill.bandSource || ""}>
+        <g data-layer="cutfill" data-band-ready={cutfill.bandReady ? "1" : "0"} data-band-source={cutfill.bandSource || ""} data-band-limit={cutfill.bandLimitSig || ""}>
           {cutfill.outlineD ? (
             <>
               {/* legacy (no grading limit): the per-cell picture and its cell outline */}
@@ -465,7 +465,7 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
       )}
       {/* ROUND 4 (B2349122) — the proposed contours: bold brown lines, index lines heavier and labelled, clipped to daylight */}
       {contours && contours.levels && contours.levels.length > 0 && (
-        <g data-layer="contours" data-contour-interval={contours.interval} data-contour-index-only={drawPlan.indexOnly ? "1" : "0"} data-contour-levels-drawn={drawPlan.levels.length}>
+        <g data-layer="contours" data-contour-limit={contours.limitSig || ""} data-contour-interval={contours.interval} data-contour-index-only={drawPlan.indexOnly ? "1" : "0"} data-contour-levels-drawn={drawPlan.levels.length}>
           {drawPlan.levels.map((lv) => (
             <g key={lv.level} data-contour-level={lv.level} data-contour-index={lv.isIndex ? "1" : "0"}
               transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>

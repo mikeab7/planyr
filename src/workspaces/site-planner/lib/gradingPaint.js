@@ -370,13 +370,19 @@ export function contourMultiple(spacingFt, rppf, { minPitchPx = CONTOUR_DRAW.min
   }
   return m;
 }
+export const BAND_SNAP = Object.freeze([0.6, 1.6]);   // ROUND 9: a piece spaced within this factor of interval × ratio is band
 export function planContourDraw(contours, rppf, opts = {}) {
   if (!contours || !contours.levels || !contours.levels.length || !(rppf > 0)) return { levels: [], labels: [], indexOnly: false, weights: { inter: CONTOUR_DRAW.hairPx, index: CONTOUR_DRAW.indexPx } };
   const interval = contours.interval > 0 ? contours.interval : 1;
   const indexOnly = rppf < (opts.indexOnlyBelowPpf ?? CONTOUR_DRAW.indexOnlyBelowPpf);
   const weights = indexOnly ? { inter: CONTOUR_DRAW.thinPx, index: CONTOUR_DRAW.thinPx } : { inter: CONTOUR_DRAW.hairPx, index: CONTOUR_DRAW.indexPx };
   const step = (level) => Math.round(level / interval);
-  const shows = (level, spacingFt) => step(level) % contourMultiple(spacingFt, rppf, opts) === 0;
+  // ROUND 9 (B2500224 ×2, NEW-2): the slope band is a plane at the ratio (proposedSurface.js), so every piece of it is spaced
+  // interval × ratio — a measured spacing within reach of that is the band's, and the WHOLE band is thinned with one multiple
+  // (never a mixture of every-level and every-other-level pieces side by side, the owner's "unevenly spaced")
+  const bandFt = contours.bandSpacingFt > 0 ? contours.bandSpacingFt : null;
+  const snap = (sp) => (bandFt && sp >= bandFt * BAND_SNAP[0] && sp <= bandFt * BAND_SNAP[1] ? bandFt : sp);
+  const shows = (level, spacingFt) => step(level) % contourMultiple(snap(spacingFt), rppf, opts) === 0;
   const levels = [];
   for (const lv of contours.levels) {
     const pieces = lv.pieces || [{ d: lv.d, spacingFt: Infinity }];
