@@ -100,3 +100,21 @@ describe("esriZoneLabels — the printed twin runs the same layout in sheet pixe
     expect(esriZoneLabels([feat(1, poly(rect(0, 0, 100, 60)), "")], cfg, (ll) => project(ll, 1), { w: 1000, h: 1000 })).toEqual([]);
   });
 });
+
+describe("the printed sheet keeps a code whole (contain)", () => {
+  const spot = labelSpotOf(poly(rect(0, 0, 200, 100)));
+  const item = (x, y) => ({ key: "a", text: "C-2", x, y, spot, pxPerM: 1 });
+  it("a code whose box would be cut by the frame edge is not printed; on screen the same label (centre in view) stays", () => {
+    const view = { x0: 0, y0: 0, x1: 100, y1: 100 };
+    expect(layoutZoneLabels([item(98, 50)], { view })).toHaveLength(1);
+    expect(layoutZoneLabels([item(98, 50)], { view, contain: true })).toEqual([]);
+    expect(layoutZoneLabels([item(50, 50)], { view, contain: true })).toHaveLength(1);
+  });
+  it("esriZoneLabels takes the printed frame as a rect", () => {
+    const cfg = { lineLabel: { field: "ZONE", polygon: true, format: (v) => String(v || "").trim() || null } };
+    const proj = (ll) => { const p = project(ll, 1); return { x: p.x + 100, y: p.y + 200 }; };
+    const g = [feat(1, poly(rect(0, 0, 100, 60)), "M-1")];
+    expect(esriZoneLabels(g, cfg, proj, { x0: 0, y0: 0, x1: 1000, y1: 1000 })).toHaveLength(1);
+    expect(esriZoneLabels(g, cfg, proj, { x0: 400, y0: 0, x1: 1000, y1: 1000 })).toEqual([]);
+  });
+});

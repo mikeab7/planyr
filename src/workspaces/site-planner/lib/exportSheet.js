@@ -876,7 +876,12 @@ export function createExportSheet(ctx) {
           else for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text }); }
         }
       });
-      if (zoneGj.length) labels.push(...esriZoneLabels(zoneGj, cfg, ([lng, lat]) => projLLtoPx([lng, lat]), { w: size.w, h: size.h }));
+      if (zoneGj.length) {
+        // the codes are placed against the PRINTED FRAME (not the live canvas), so a polygon label never lands half off the page
+        const ext = exportFeetExtent(printFrame), a = ext && f2p({ x: ext.minX, y: ext.minY }), b = ext && f2p({ x: ext.maxX, y: ext.maxY });
+        const frame = a && b ? { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) } : { w: size.w, h: size.h };
+        labels.push(...esriZoneLabels(zoneGj, cfg, ([lng, lat]) => projLLtoPx([lng, lat]), frame));
+      }
       return { features, labels };
     }
     if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)

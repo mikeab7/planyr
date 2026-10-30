@@ -212,7 +212,7 @@ export function esriLineLabels(gj, cfg) {
 }
 
 /* B2573312 (NEW-3) — the printed twin of the on-screen zone codes (`cfg.lineLabel.polygon`, DeSoto zoning): the SAME pure layout as the screen (`zoneLabels.js` — one label per polygon at its pole of
- * inaccessibility, hidden when the polygon is too small to hold the text on the SHEET, never overlapping), run in sheet pixels. `project([lng, lat])` → {x, y}; `view` = { w, h } the sheet. Returns [{x, y, text}]. PDF-PARITY. Pure. */
+ * inaccessibility, hidden when the polygon is too small to hold the text on the SHEET, never overlapping), run in sheet pixels. `project([lng, lat])` → {x, y}; `view` = the printed frame in the same pixels — { x0, y0, x1, y1 } (or { w, h } from the origin); a code whose whole box is not inside it is not printed, so none is cut by the page edge. Returns [{x, y, text}]. PDF-PARITY. Pure. */
 export function esriZoneLabels(featuresGj, cfg, project, view) {
   const items = [];
   for (const gj of featuresGj || []) {
@@ -225,7 +225,8 @@ export function esriZoneLabels(featuresGj, cfg, project, view) {
     if (!(pxPerM > 0)) continue;
     items.push({ key: String(gj.id != null ? gj.id : `${spot.lat},${spot.lng}`), text, x: p.x, y: p.y, spot, pxPerM });
   }
-  return layoutZoneLabels(items, { view: { x0: 0, y0: 0, x1: view.w, y1: view.h } }).map((l) => ({ x: l.x, y: l.y, text: l.text }));
+  const frame = view && view.x1 != null ? view : { x0: 0, y0: 0, x1: view.w, y1: view.h };
+  return layoutZoneLabels(items, { view: frame, contain: true }).map((l) => ({ x: l.x, y: l.y, text: l.text }));
 }
 
 // terrain worker artifact coords are [lat,lng]; GeoJSON/our features are [lon,lat].

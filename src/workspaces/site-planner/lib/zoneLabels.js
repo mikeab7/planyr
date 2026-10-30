@@ -108,13 +108,16 @@ export function labelFits(spot, box, pxPerM) {
 }
 
 /* Place the labels. `items` = [{ key, text, x, y, spot, pxPerM }] (x / y: the spot in the caller's pixel space). `view` = { x0, y0, x1, y1 } keeps a label
- * whose centre is inside it. Returns [{ key, text, x, y, w, h }] — biggest polygon first, a label that touches a placed one dropped. Pure. */
-export function layoutZoneLabels(items, { view, fontPx = 11, gap = 2 } = {}) {
+ * whose centre is inside it (the whole box with `contain`). Returns [{ key, text, x, y, w, h }] — biggest polygon first, a label that touches a placed one dropped. Pure. */
+export function layoutZoneLabels(items, { view, fontPx = 11, gap = 2, contain = false } = {}) {
   const order = (items || []).filter((it) => it && it.text && it.spot && Number.isFinite(it.x) && Number.isFinite(it.y)).sort((a, b) => b.spot.areaM2 - a.spot.areaM2 || String(a.key).localeCompare(String(b.key)));
   const placed = [];
   for (const it of order) {
-    if (view && (it.x < view.x0 || it.x > view.x1 || it.y < view.y0 || it.y > view.y1)) continue;
     const box = textBox(it.text, fontPx);
+    // on screen a label whose centre is in view stays (the map edge may clip it, as every map label is); on the SHEET (`contain`) the whole text box must be inside the printed frame — a half-cut code on the page edge reads as an error
+    if (view && (contain
+      ? (it.x - box.w / 2 < view.x0 || it.x + box.w / 2 > view.x1 || it.y - box.h / 2 < view.y0 || it.y + box.h / 2 > view.y1)
+      : (it.x < view.x0 || it.x > view.x1 || it.y < view.y0 || it.y > view.y1))) continue;
     if (!labelFits(it.spot, box, it.pxPerM)) continue;
     const x0 = it.x - box.w / 2 - gap, x1 = it.x + box.w / 2 + gap, y0 = it.y - box.h / 2 - gap, y1 = it.y + box.h / 2 + gap;
     let clash = false;

@@ -19,6 +19,7 @@ mkdirSync(SHOTS, { recursive: true });
 let failed = 0, voided = 0;
 const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${name}${detail ? "  — " + detail : ""}`); if (!ok) failed++; };
 const voidRun = (why) => { console.log(`VOID: ${why}`); voided++; };
+const SUFFIX = /\((Olive Branch|Unincorporated|Hernando|Southaven|Horn Lake|Walls)/;   // a jurisdiction suffix — NOT a parenthesis inside an ordinance's own district name ("Residential Single-Family (Low Density)")
 const want = (p) => PART === "all" || PART === p;
 
 const s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
@@ -88,7 +89,7 @@ async function legendCase(tag, lat, lng, { wantHeads, shot, narrow = false }) {
   console.log(`  ${tag}: headings ${JSON.stringify(lg && lg.heads)}; rows ${lg ? lg.rows.length : "none"}`);
   if (!lg || !lg.rows.length) { voidRun(`${tag}: the legend never filled — nothing to judge`); return null; }
   check(`${tag} · headings are exactly ${JSON.stringify(wantHeads)}`, JSON.stringify(lg.heads) === JSON.stringify(wantHeads), JSON.stringify(lg.heads));
-  check(`${tag} · no row carries a parenthetical jurisdiction suffix`, lg.rows.every((r) => !/\(/.test(r.text)), lg.rows.filter((r) => /\(/.test(r.text)).map((r) => r.text).join(" | "));
+  check(`${tag} · no row carries a parenthetical jurisdiction suffix`, lg.rows.every((r) => !SUFFIX.test(r.text)), lg.rows.filter((r) => SUFFIX.test(r.text)).map((r) => r.text).join(" | "));
   const tops = lg.rows.map((r) => r.top);
   check(`${tag} · every entry is on its own row (no two rows share a line)`, new Set(tops).size === tops.length && lg.rows.every((r, i) => i === 0 || r.top > lg.rows[i - 1].top), tops.join(","));
   check(`${tag} · every row reads "CODE" or "CODE · Name" and none holds two entries`, lg.rows.every((r) => /^[A-Z0-9][A-Za-z0-9 \-]*( · [^·]+)?$/.test(r.text)), lg.rows.map((r) => r.text).join(" | "));
@@ -119,7 +120,7 @@ try {
     const setView = async (lat, lng, z) => { await page.evaluate(([a, b, z]) => window.__mapFinderMap.setView([a, b], z, { animate: false }), [lat, lng, z]); };
     await setView(34.93, -89.80, 14); await sleep(1200);
     check("Map view · Zoning is offered and turned on", await zoningOn(fp));
-    const msgOf = () => page.evaluate(() => { const row = document.querySelector('[data-surface="finder"] [data-testid="layer-row-ms_desoto_zoning"]'); const t = row && row.parentElement ? row.parentElement.innerText : ""; const m = t.match(/too detailed[^\n]*|Zoom in to see[^\n]*/); return { msg: m ? m[0] : null, polys: document.querySelectorAll(".leaflet-overlay-pane path").length }; });
+    const msgOf = () => page.evaluate(() => { const row = document.querySelector('[data-surface="finder"] [data-testid="layer-row-ms_desoto_zoning"]'); const t = row && row.parentElement ? row.parentElement.innerText : ""; const m = t.match(/too detailed[^\n]*|Zoom in to see[^\n]*/); return { msg: m ? m[0] : null, polys: document.querySelectorAll(".leaflet-pane path").length }; });
     if (want("legend")) {
       let lg = null;
       for (let i = 0; i < 14 && !(lg && lg.heads.length >= 2); i++) { await sleep(1500); lg = await readLegend(fp.locator("xpath=.")); }
@@ -127,7 +128,9 @@ try {
       if (!lg) voidRun("Map view legend never filled");
       else {
         check("both · two headings, Olive Branch first", lg.heads.length >= 2 && lg.heads[0] === "Olive Branch" && lg.heads.includes("Unincorporated DeSoto County"), JSON.stringify(lg.heads));
-        check("both · no suffix on any row; one entry per row", lg.rows.every((r) => !/\(/.test(r.text)) && new Set(lg.rows.map((r) => r.top)).size === lg.rows.length);
+        const dupTops = lg.rows.filter((r, i) => lg.rows.findIndex((q) => q.top === r.top) !== i).map((r) => `${r.text}@${r.top}`);
+        check("both · no suffix on any row", lg.rows.every((r) => !SUFFIX.test(r.text)), lg.rows.filter((r) => SUFFIX.test(r.text)).map((r) => r.text).join(" | "));
+        check("both · one entry per row (no two rows share a line)", dupTops.length === 0, dupTops.join(" | "));
         const codes = lg.rows.map((r) => r.text.split(" · ")[0]);
         console.log("  codes listed under more than one heading:", [...new Set(codes.filter((c, i) => codes.indexOf(c) !== i))].join(", ") || "none");
       }
@@ -148,7 +151,7 @@ try {
   if (want("labels") || want("pdf")) {
     console.log("── LABELS + PDF (planner, the owner's view)");
     const plan = mk("labels", 34.95, -89.83);
-    plan.parcels[0].points = [{ x: -300, y: -300 }, { x: 300, y: -300 }, { x: 300, y: 300 }, { x: -300, y: 300 }]; plan.els[0] = { ...plan.els[0], w: 200, h: 120 };
+    plan.parcels[0].points = [{ x: -900, y: -900 }, { x: 900, y: -900 }, { x: 900, y: 900 }, { x: -900, y: 900 }]; plan.els[0] = { ...plan.els[0], w: 1600, h: 60 }; // a ~75-acre lot with a long thin building: the exported frame (fitted to the building) is ~1,600 ft wide, so it shows several zoning polygons above and below the strip
     await insert(plan);
     await page.addInitScript(() => { window.__svgBlobs = []; const o = URL.createObjectURL.bind(URL); URL.createObjectURL = (b) => { try { if (b && /svg/.test(b.type || "")) window.__svgBlobs.push(b); } catch (_) { /* capture only */ } return o(b); }; });
     await openPlan(plan);

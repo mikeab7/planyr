@@ -27,7 +27,7 @@ describe("the Zoning legend as the Layers panel draws it", () => {
     expect(rows.every((r) => !/ · .* · /.test(r) || r.split(" · ").length === 2)).toBe(true);   // no row holds two entries
   });
   it("no row carries a jurisdiction suffix, and the bare PB inside Olive Branch is not given the county's name", () => {
-    for (const r of rows) expect(r).not.toMatch(/\(/);
+    for (const r of rows) expect(r).not.toMatch(/\((Olive Branch|Unincorporated)/);
     expect(rows).not.toContain("PB · Planned Business");
   });
   it("the layout is a column that lets a long name wrap under itself (never a wrapping row of inline chips)", () => {
