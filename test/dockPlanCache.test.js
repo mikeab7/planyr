@@ -100,7 +100,7 @@ const resolveBlock = SP.slice(resolveStart, SP.indexOf("\n/* element renderer wo
 describe("the wiring — a re-introduced per-frame solve is invisible to every other kind of test", () => {
   it("resolveDockPlan exists and is called from the per-model-change resolver", () => {
     expect(SP).toContain("function resolveDockPlan(");
-    expect(resolveBlock).toContain("resolveDockPlan(el, settings, dogEars)");
+    expect(resolveBlock).toContain("resolveDockPlan(el, settings, dogEars, ramps)"); // NEW-1 (2026-10-30): the resolver also hands the building's drive-in ramps to the door solve
   });
 
   it("the neighbour memo is keyed on BOTH els and settings", () => {

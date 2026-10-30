@@ -435,11 +435,15 @@ export default function GradingController({ input, onModel }) {
       out.push({
         id, centre: F.centre, minSideFt, spots,
         corners: padCornerSpots(b.ring, ffe, gsInputs.existAt),
+        // NEW-2 (2026-10-30): the pad's four corners + whether this building is the SELECTED one (its edit buttons are on screen), so the
+        // canvas can slide a corner tag clear of them (lib/padCornerTag.js)
+        quad: cs, selected: selBuildingId === id,
         flagDot: F.flag ? { pt: F.flag.centroid, text: `${F.flag.over} ft past the setback` } : null,
       });
     }
     return out;
-  }, [gradeSurface, grid, buildings, facts, labelIds.join(","), autoVer, typedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // selBuildingId is a dep on purpose: the corner tags' `selected` flag — a one-building plan keeps the same labelIds across select / deselect
+  }, [gradeSurface, grid, buildings, facts, labelIds.join(","), selBuildingId, autoVer, typedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- Level-pad limit: the pad mask at the building's FFE (else the best finish) ---------------- */
   const [maskRes, setMaskRes] = useState(null);

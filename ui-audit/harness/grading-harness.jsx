@@ -7,6 +7,8 @@ import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import GradingController from "../../src/workspaces/site-planner/components/GradingController.jsx";
 import { GradingPanel, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { bumpButtonAnchor, sideButtonAnchor, SIDE_PAIR_GAP } from "../../src/workspaces/site-planner/lib/padCornerTag.js";
+import { FEAT_CTRL_R, FEAT_CTRL_STROKE } from "../../src/workspaces/site-planner/lib/featureEditZoom.js";
 import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
@@ -84,7 +86,7 @@ function Harness({ data }) {
   const [limitEdit, setLimitEdit] = useState(null);
   const [model, setModel] = useState(null);
   const [headEl, setHeadEl] = useState(null);
-  const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
+  const [sel, setSel] = useState(new URLSearchParams(location.search).get("sel") === "none" ? null : new URLSearchParams(location.search).get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");   // ?sel=none — nothing selected (NEW-2: the corner tags go home)
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
   const planOn = cfg.enabled;
@@ -160,6 +162,8 @@ function Harness({ data }) {
       // about 1 px per foot (the owner's 50-ft scale bar on his screen), the corner near the opposite edge of the canvas
       return sg > 0 ? fitBox(c.x - 500, c.y - 600, c.x + 850, c.y + 360, 0) : fitBox(c.x - 850, c.y - 360, c.x + 500, c.y + 600, 0);
     }
+    // NEW-2 (2026-10-30): `south` — the building's south end at working zoom, both south corners in view (the owner's picture)
+    if (zoom === "south") { const x0 = Math.min(...bx), x1 = Math.max(...bx), y1 = Math.max(...by); return fitBox(x0, y1 - 150, x1, y1 + 60, 70); }
     if (zoom === "ne") { const cx = Math.max(...bx), cy = Math.min(...by); return fitBox(cx - 180, cy - 180, cx + 180, cy + 180, 0); }
     // ROUND 8 (NEW-3): the owner's view — the NW corner of the whole layout (the north car lot's west end) out to the limit
     if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
@@ -233,6 +237,27 @@ function Harness({ data }) {
         )}
         {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
+        {/* NEW-2: the selected building's edit buttons, drawn the way SitePlanner's sideAddNodes draws them — through the SAME anchors
+            (lib/padCornerTag.js), on top of the grading layer — so the picture shows exactly what the tags have to clear */}
+        {qs.get("buttons") === "1" && sel && (() => {
+          const e = els.find((x) => x.id === sel); if (!e) return null;
+          const q = e.ring.slice(0, 4).map((p) => f2p(p));
+          const c = { x: q.reduce((a, p) => a + p.x, 0) / 4, y: q.reduce((a, p) => a + p.y, 0) / 4 };
+          const R = FEAT_CTRL_R, glyph = (k, pos, color, plus) => (
+            <g key={k} data-harness-button={k}>
+              <circle cx={pos.x} cy={pos.y} r={R} fill={color} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
+              <line x1={pos.x - R * 0.5} y1={pos.y} x2={pos.x + R * 0.5} y2={pos.y} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
+              {plus && <line x1={pos.x} y1={pos.y - R * 0.5} x2={pos.x} y2={pos.y + R * 0.5} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />}
+            </g>);
+          const out = [];
+          [2, 3].forEach((i) => out.push(glyph(`bump${i}`, bumpButtonAnchor(q[i], c), "#7c3aed", true)));
+          q.forEach((p, i) => {
+            const n = q[(i + 1) % 4], { pos, tan } = sideButtonAnchor({ x: (p.x + n.x) / 2, y: (p.y + n.y) / 2 }, c);
+            out.push(glyph(`side${i}p`, { x: pos.x - tan.x * SIDE_PAIR_GAP, y: pos.y - tan.y * SIDE_PAIR_GAP }, i === 2 ? "#b45309" : "#16a34a", true));
+            if (i === 2) out.push(glyph(`side${i}m`, { x: pos.x + tan.x * SIDE_PAIR_GAP, y: pos.y + tan.y * SIDE_PAIR_GAP }, "#b91c1c", false));
+          });
+          return <g data-harness-buttons="1">{out}</g>;
+        })()}
         {limitEdit && Array.isArray(settings.grading.limitRing) && <polygon data-grading-limit-edit="1" points={settings.grading.limitRing.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#1d4ed8" strokeWidth="1.5" strokeDasharray="6 4" />}
         <polygon points={ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#0a0" strokeWidth="1.5" />
       </svg>

@@ -25,6 +25,7 @@ import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { LIMIT_MODES, LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
 import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels, planContourDraw } from "../lib/gradingPaint.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
+import { placeCornerTag, pillWidth, CORNER_TAG_PILL_H } from "../lib/padCornerTag.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
 import { gradingPanelView, limitBasisPhrase } from "../lib/gradingPanelModel.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
@@ -393,9 +394,9 @@ export function GradingPanel({ planOn = true, showOnMap = false, showContours = 
 
 /* ---------------------------------------------------------------- canvas */
 export const LABELS_MIN_PX = 90;        // labels draw only when the building's shorter side is at least this many screen px
-const PILL_H = 17;
+const PILL_H = CORNER_TAG_PILL_H;
 function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
-  const w = Math.max(22, text.length * (size * 0.6) + 10);
+  const w = pillWidth(text, size);
   return (
     <g data-grade-pill="1">
       <rect x={x - w / 2} y={y - PILL_H / 2} width={w} height={PILL_H} rx={4} fill={fill || PAL.panelBg} stroke={stroke || PAL.panelLine} strokeWidth={1} />
@@ -522,10 +523,27 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
               );
             })}
             {L.corners.map((k, i) => {
+              // NEW-2 (2026-10-30): the tag is placed by lib/padCornerTag — in its usual spot, or (building selected) slid along the
+              // wall clear of the purple bump-out / dock buttons with a leader to the exact corner. Non-interactive either way.
+              const quad = L.quad ? L.quad.map((q) => f2p(q)) : null;
+              const t = quad ? placeCornerTag(quad, k.idx, k.text, !!L.selected) : null;
               const p = f2p(k.pt);
-              const dx = c0.x - p.x, dy = c0.y - p.y, d = Math.hypot(dx, dy) || 1;
-              const inset = Math.min(26, d * 0.3);
-              return <g key={i} data-pad-corner={k.kind}><Pill2 x={p.x + (dx / d) * inset} y={p.y + (dy / d) * inset} text={k.text} PAL={PAL} /></g>;
+              let x, y;
+              if (t) { x = t.x; y = t.y; } else {
+                const dx = c0.x - p.x, dy = c0.y - p.y, d = Math.hypot(dx, dy) || 1, inset = Math.min(26, d * 0.3);
+                x = p.x + (dx / d) * inset; y = p.y + (dy / d) * inset;
+              }
+              return (
+                <g key={i} data-pad-corner={k.kind} data-pad-corner-idx={k.idx} data-pad-corner-moved={t && t.leader ? "1" : "0"} pointerEvents="none">
+                  {t && t.leader && (
+                    <g data-pad-corner-leader="1">
+                      <line x1={t.leader.x1} y1={t.leader.y1} x2={t.leader.x2} y2={t.leader.y2} stroke={PAL.ink} strokeWidth={1} />
+                      <circle cx={t.leader.x1} cy={t.leader.y1} r={2.2} fill={PAL.ink} />
+                    </g>
+                  )}
+                  <Pill2 x={x} y={y} text={k.text} PAL={PAL} />
+                </g>
+              );
             })}
           </g>
         );

@@ -90,6 +90,7 @@ export function netLabel(netCy) {
 function roleOfPlane(plane, dockN, el) {
   if (plane.classId === "buildingPad") return "building";
   if (plane.classId === "dockApron") return el && el.type === "trailer" ? "trailer" : "court";
+  if (plane.classId === "driveInRamp") return "ramp";
   if (!dockN || !plane.wall) return "lot";
   const dot = plane.wall.n.x * dockN.x + plane.wall.n.y * dockN.y;
   if (dot > 0.9) return "lot-dock-side";
@@ -99,7 +100,7 @@ function roleOfPlane(plane, dockN, el) {
 const ROLE_PHRASE = {
   building: "the building", court: "the truck court", trailer: "the trailer parking",
   "lot-dock-side": "the dock-side parking", "lot-opposite": "the parking opposite the docks",
-  "lot-end": "the end-wall parking", lot: "the parking",
+  "lot-end": "the end-wall parking", lot: "the parking", ramp: "the drive-in ramp",
 };
 export const rolePhrase = (r) => ROLE_PHRASE[r] || "the building";
 
@@ -327,18 +328,18 @@ export function padCorners(ring) {
 }
 
 /* "cut 9.1" / "fill 6.8" at each pad corner: existing ground against the finished floor. `existAt(pt)` → ft | null.
- * A corner over a DEM void has no spot (never a guessed number). Returns [{ pt, existFt, kind, depthFt, text }]. */
+ * A corner over a DEM void has no spot (never a guessed number). Returns [{ pt, idx, existFt, kind, depthFt, text }]. */
 export function padCornerSpots(ring, ffe, existAt) {
   const cs = padCorners(ring);
   if (!cs || !Number.isFinite(ffe) || typeof existAt !== "function") return [];
   const out = [];
-  for (const pt of cs) {
+  cs.forEach((pt, idx) => {   // `idx` = which of the four corners (padCorners order) — a corner over a void is skipped, the rest keep theirs
     const g = existAt(pt);
-    if (g == null || !Number.isFinite(g)) continue;
+    if (g == null || !Number.isFinite(g)) return;
     const d = ffe - g;
-    if (Math.abs(d) < 0.05) out.push({ pt, existFt: g, kind: "grade", depthFt: 0, text: "grade" });
-    else out.push({ pt, existFt: g, kind: d < 0 ? "cut" : "fill", depthFt: Math.abs(d), text: `${d < 0 ? "cut" : "fill"} ${f1(Math.abs(d))}` });
-  }
+    if (Math.abs(d) < 0.05) out.push({ pt, idx, existFt: g, kind: "grade", depthFt: 0, text: "grade" });
+    else out.push({ pt, idx, existFt: g, kind: d < 0 ? "cut" : "fill", depthFt: Math.abs(d), text: `${d < 0 ? "cut" : "fill"} ${f1(Math.abs(d))}` });
+  });
   return out;
 }
 
