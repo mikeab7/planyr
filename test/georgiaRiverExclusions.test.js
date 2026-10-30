@@ -11,7 +11,7 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({
 }));
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
-import { streamBufferBands, keepRuns, clipOutside } from "../src/workspaces/site-planner/lib/georgiaStreamBuffers.js";
+import { streamBufferBands, keepRuns, clipOutside, streamBufferLossNote } from "../src/workspaces/site-planner/lib/georgiaStreamBuffers.js";
 import { inTidalReach, riverExclusionAt, inMrpaReachBox, inMrpaReach, MRPA_REACH_BOX } from "../src/workspaces/site-planner/lib/georgiaRiverExclusions.js";
 import { GA_TIDAL_CELLS, GA_TIDAL_CELL_DEG } from "../src/workspaces/site-planner/lib/gaTidalReaches.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
@@ -200,5 +200,46 @@ describe("the MRPA corridor governs the Chattahoochee's 75-ft District band too,
     const t0 = performance.now();
     for (let i = 0; i < 2000; i++) inMrpaReach(-84.3 + (i % 50) * 0.001, 33.99 + Math.floor(i / 50) * 0.001);
     expect(performance.now() - t0).toBeLessThan(1500);
+  });
+});
+
+/* NEW-1 (third adversarial review of main 3ba5c0c3, 2026-10-30, finding 3) — when DCA's protected-river lines fail to load, `makeRiverIndex` is null, so the river's UNNAMED flowlines are not cut and the
+ * District's 75-ft band is drawn along the Chattahoochee INSIDE the MRPA corridor (proved above: "without the DCA river lines the unnamed braid cannot be recognised"). The failure line only said "narrower". */
+describe("the failure line names the MRPA-corridor consequence whenever the corridor OR the river lines are lost", () => {
+  const WIDER = /river or District bands may be drawn along the Chattahoochee reach, inside the corridor where the Metropolitan River Protection Act's buffers govern instead/;
+  it("rivers lost → says narrower AND that bands may be drawn inside the corridor (the finding)", () => {
+    const m = streamBufferLossNote("Stream Buffers", { rivers: true });
+    expect(m).toMatch(/couldn't load the protected-river lines/);
+    expect(m).toMatch(/may be narrower than the rule/);
+    expect(m).toMatch(WIDER);
+  });
+  it("mrpa lost → the corridor sentence, and NOT 'narrower' (nothing else is missing)", () => {
+    const m = streamBufferLossNote("Stream Buffers", { mrpa: true });
+    expect(m).toMatch(/couldn't load the Chattahoochee MRPA corridor/);
+    expect(m).toMatch(WIDER);
+    expect(m).not.toMatch(/narrower/);
+  });
+  it("trout or District lost → narrower only, no corridor sentence", () => {
+    for (const f of [{ trout: true }, { district: true }]) {
+      const m = streamBufferLossNote("Stream Buffers", f);
+      expect(m).toMatch(/narrower/);
+      expect(m).not.toMatch(/Metropolitan River Protection Act/);
+    }
+  });
+  it("several lost → every source named; nothing lost → empty (no message)", () => {
+    const m = streamBufferLossNote("Stream Buffers", { trout: true, rivers: true, mrpa: true });
+    expect(m).toMatch(/trout streams and the protected-river lines and the Chattahoochee MRPA corridor/);
+    expect(m).toMatch(/NOT the full answer/);
+    expect(streamBufferLossNote("Stream Buffers", {})).toBe("");
+    expect(streamBufferLossNote("Stream Buffers")).toBe("");
+  });
+  it("the claim is TRUE: with the river lines lost the unnamed braid keeps its District band inside the corridor; with them loaded it does not", () => {
+    const ring = [[-84.9, 33.5], [-84.2, 33.5], [-84.2, 34.1], [-84.9, 34.1], [-84.9, 33.5]];
+    const district = fc(poly([[-85.5, 33.0], [-83.5, 33.0], [-83.5, 34.6], [-85.5, 34.6], [-85.5, 33.0]]));
+    const braid = { type: "Feature", properties: { ftype: 460, fcode: 46006 }, geometry: { type: "LineString", coordinates: [[-84.5002, 33.62], [-84.5002, 33.7]] } };
+    const river = line("Chattahoochee River", [[-84.5, 33.6], [-84.5, 33.7], [-84.5, 33.8]]);
+    const d = (rivers) => streamBufferBands({ nhd: fc(braid), rivers, district, mrpa: fc(poly(ring)) }).filter((b) => b.tier.id === "district").length;
+    expect(d(null)).toBe(1);
+    expect(d(fc(river))).toBe(0);
   });
 });
