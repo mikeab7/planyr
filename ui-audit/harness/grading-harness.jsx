@@ -13,7 +13,7 @@ import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
 import { offsetPolygon } from "../../src/workspaces/site-planner/lib/parcelOffset.js";
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
-import { CHEHAW_CROSS_DOCK_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
+import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
 // ROUND 5 (NEW-4) — the picture arms: the EXISTING contours the app's Leaflet layer would draw (traced here off the same
 // DEM with the same tracer, cut OUTSIDE the graded area by the same clipper), the paper background, and a framing
 import { buildContours } from "../../src/workspaces/site-planner/lib/contourTrace.js";
@@ -40,11 +40,14 @@ function Harness({ data }) {
   const [els, setEls] = useState(() => {
     const bx = +(new URLSearchParams(location.search).get("bx") ?? -560), by = +(new URLSearchParams(location.search).get("by") ?? -1326);
     // ?owner=1 — the owner's real 636,916 SF cross-dock (problem report 6cea9895), moved from his plan's origin into this frame
-    if (new URLSearchParams(location.search).get("owner") === "1") {
+    // ?owner=2 — the owner's Concept A as of 2026-10-30 (1429 × 650 at 259°; B2500224 ×2)
+    const ownerQ = new URLSearchParams(location.search).get("owner");
+    if (ownerQ === "1" || ownerQ === "2") {
+      const ROWS = ownerQ === "2" ? CHEHAW_CONCEPT_A_ROWS : CHEHAW_CROSS_DOCK_ROWS;
       const o = lngLatToFeet(OWNER_ORIGIN.lon, OWNER_ORIGIN.lat, data.origin.lon, data.origin.lat);
-      const host = CHEHAW_CROSS_DOCK_ROWS[0];
+      const host = ROWS[0];
       const hc = { x: host.cx + o.x, y: host.cy + o.y };
-      return CHEHAW_CROSS_DOCK_ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
+      return ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
         id: e.id, type: e.type, attachedTo: e.attachedTo, truckCourt: !!e.truckCourt, ring: rowRing(e).map((p) => ({ x: p.x + o.x, y: p.y + o.y })),
         ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
       }));
@@ -81,7 +84,7 @@ function Harness({ data }) {
   const [limitEdit, setLimitEdit] = useState(null);
   const [model, setModel] = useState(null);
   const [headEl, setHeadEl] = useState(null);
-  const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") === "1" ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
+  const [sel, setSel] = useState(new URLSearchParams(location.search).get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
   const planOn = cfg.enabled;
@@ -148,6 +151,15 @@ function Harness({ data }) {
     const b = els.length ? els[0].ring : ring;
     const bx = b.map((p) => p.x), by = b.map((p) => p.y);
     if (zoom === "bldg") return fitBox(Math.min(...bx), Math.min(...by), Math.max(...bx), Math.max(...by), 220);
+    // ROUND 9 (B2500224 ×2): the owner's views of 2026-10-30 — the building's NE / SW CORNER (the footprint vertex furthest
+    // north-east / south-west, so a rotated building is framed on its real corner) out past the limit, at about the 50-ft
+    // scale bar: the cut corner (ne50) and the fill corner (sw50)
+    if (zoom === "ne50" || zoom === "sw50") {
+      const sg = zoom === "ne50" ? 1 : -1;
+      let c = b[0]; for (const p of b) if (sg * (p.x - p.y) > sg * (c.x - c.y)) c = p;
+      // about 1 px per foot (the owner's 50-ft scale bar on his screen), the corner near the opposite edge of the canvas
+      return sg > 0 ? fitBox(c.x - 500, c.y - 600, c.x + 850, c.y + 360, 0) : fitBox(c.x - 850, c.y - 360, c.x + 500, c.y + 600, 0);
+    }
     if (zoom === "ne") { const cx = Math.max(...bx), cy = Math.min(...by); return fitBox(cx - 180, cy - 180, cx + 180, cy + 180, 0); }
     // ROUND 8 (NEW-3): the owner's view — the NW corner of the whole layout (the north car lot's west end) out to the limit
     if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
