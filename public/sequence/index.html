@@ -13944,7 +13944,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // gets the cell the selection should reach; `onEnd(reason, moved)` is "up" | "cancel".
   const cellSessionRef = useRef(null);
   const skipColClickRef = useRef(false);   // a Ctrl+click that TOOK a cell out of the selection: the click that follows must not re-aim the active column at it
-  const liveGridRef = useRef({ tasks, allCols, gridZoom, stripCi: -1 });   // refreshed every render, right after stripCi is known (below)
+  const liveGridRef = useRef({ tasks, allCols: [], gridZoom, stripCi: -1 });   // refreshed every render, right after stripCi is known (below). ⛔ never name a const declared LATER in this component here: the compiled production build keeps const block-scoping (TDZ) where the in-browser Babel page used in dev does not
   const beginCellDrag = (startEvent, { rowMode, apply, onEnd }) => {
     cellSessionRef.current?.stop("cancel");
     const el = ref.current;
