@@ -54,6 +54,11 @@ export const ALLOWED_HOSTS = new Set([
    * is Cass County's only readable source (a labelled COPY — the county's own CAMAvision viewer is a format Planyr cannot read yet). MEASURED through this relay on the PR preview.
    * The ~35 hosts read only to look for sources (assessor portals, county sites, the CAMAvision / Breeze / GIS Cloud vendors) were pruned: nothing wired uses them. */
   "gis2.marc2.org", // Mid-America Regional Council — Cass County
+  /* NEW-1 (Oklahoma screening, 2026-10-29) — the three Oklahoma AGENCY servers the Oklahoma layer rows read. The build sandbox's egress blocks all three (403 on CONNECT), so their field
+   * lists, record counts and CORS could not be read from here; each is relayed server-side and MEASURED through this relay on the PR preview before a row was wired to it. */
+  "gis.occ.ok.gov", // Oklahoma Corporation Commission — RBDMS wells, orphan wells, PST tanks
+  "gis.deq.ok.gov", // Oklahoma Department of Environmental Quality — LandWeb cleanup programs, WaterWeb (wellhead protection, impaired waters, special-protection waters)
+  "owrb.csa.ou.edu", // Oklahoma Water Resources Board — water-system service areas, NFIP participation
   /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
    * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
    * county is wired to it. */

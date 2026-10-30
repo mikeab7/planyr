@@ -181,8 +181,8 @@ export function rampGradient(cfg) {
 /* Which key entry a member of a merged row contributes ("Counties & Cities": heavier county line,
  * thin city line, dashed ETJ). Members without a role contribute nothing. */
 const KEY_ROLE = {
-  jur_county: "County", ga_county: "County", ca_county: "County", nj_county: "County", ny_county: "County", tn_county: "County", ms_county: "County", ms_county_state: "County", fl_county: "County",
-  jur_city: "City Limits", ms_city: "City Limits", ms_desoto_city: "City Limits", ga_city: "City Limits", fl_city: "City Limits", ca_city: "City Limits", co_city: "City Limits", ny_city: "City Limits", tn_city: "City Limits",
+  jur_county: "County", ga_county: "County", ca_county: "County", nj_county: "County", ny_county: "County", tn_county: "County", ms_county: "County", ms_county_state: "County", fl_county: "County", ok_county: "County",
+  jur_city: "City Limits", ms_city: "City Limits", ms_desoto_city: "City Limits", ga_city: "City Limits", fl_city: "City Limits", ca_city: "City Limits", co_city: "City Limits", ny_city: "City Limits", tn_city: "City Limits", ok_city: "City Limits",
   nj_city: "Municipal Limits", ny_town: "Town Limits", ny_village: "Village Limits", // NEW-1 (NJ + NY): NJ's one municipal layer; NY's nested town / village tiers
   jur_etj: "ETJ",
 };

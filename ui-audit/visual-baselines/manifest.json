@@ -7,13 +7,13 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedCommit": "efa12b85c",
+        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
       },
       "dark": {
         "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedCommit": "efa12b85c",
+        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
       },
       "light--phone": {
         "approvedAt": "2026-10-29",

@@ -93,6 +93,7 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/layers.js",
   "src/workspaces/site-planner/lib/desotoLayers.js", // B2507057 — registry rows of the same kind as layers.js: map ink for drawn utility lines
   "src/workspaces/site-planner/lib/floridaLayers.js", // B2452976 — registry rows of the same kind as layers.js: map ink for drawn hazard / jurisdiction layers
+  "src/workspaces/site-planner/lib/oklahomaLayers.js", // NEW-1 (Oklahoma screening) — registry rows of the same kind as layers.js: map ink for drawn wells, cleanup sites, dams, tribal areas and protected waters
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
   "src/workspaces/site-planner/lib/mississippiLayers.js", // B2539744 — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn points, lines and washes (the legend colours), not chrome
   "src/workspaces/site-planner/lib/tennesseeLayers.js", // B2521584 — registry rows of the same kind as layers.js: map ink for drawn Tennessee layers
