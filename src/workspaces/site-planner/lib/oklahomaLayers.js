@@ -125,18 +125,19 @@ const TRIBAL = {
  * holding of the Oklahoma Court of Criminal Appeals (OCCA) unless it says otherwise. Each cite was matched against at least two independent reports of the decision on 2026-10-30 (the opinion text itself was
  * not reachable from the build environment — read the opinion on OSCN before relying on a holding):
  *   · McGirt v. Oklahoma, 591 U.S. 894 (2020) — Muscogee (Creek)          · Hogner v. State, 2021 OK CR 4 (Mar. 11, 2021) — Cherokee
- *   · Bosse v. State, No. PCD-2019-124 (Mar. 11, 2021) — Chickasaw          · Sizemore v. State, 2021 OK CR 6 (Apr. 1, 2021) — Choctaw
+ *   · Bosse v. State, 2021 OK CR 30, 499 P.3d 771 (Oct. 7, 2021) — Chickasaw · Sizemore v. State, 2021 OK CR 6 (Apr. 1, 2021) — Choctaw
  *   · Grayson v. State, 2021 OK CR 8 (Apr. 1, 2021) — Seminole            · State v. Lawhorn, 2021 OK CR 37 (Oct. 21, 2021) — Quapaw
- *     (Bosse is cited by DOCKET: the March opinion, 2021 OK CR 3, was withdrawn on other grounds and the reservation holding reissued — per the parties' briefs, as 2021 OK CR 23 and 30 — and the
- *      successor opinions were not read, so no OK CR number is printed for it.)
+ *     (Bosse: the March 11, 2021 opinion, 2021 OK CR 3, 484 P.3d 286, was withdrawn on other grounds by 2021 OK CR 23, 495 P.3d 669, and the reservation ruling reaffirmed in 2021 OK CR 30 — the one the card
+ *      cites. Checked 2026-10-30 (NEW-1) against the docket/date index and the Oklahoma Supreme Court's own later citation (In re S.J.W., 2023); the opinion text itself was NOT read — OSCN is unreachable from the build sandbox.)
  *   · Martinez v. State, No. PCD-2020-612 (Okla. Crim. App. Dec. 30, 2021), 2021 WL 6202796 — Kiowa-Comanche-Apache (disestablished; its OK CR number was not found)
- *   · Buck v. State, 2023 OK CR 2, 525 P.3d 39 (Jan. 19, 2023) — Kickapoo (disestablished)
+ *   · Buck v. State, 2023 OK CR 2 (Jan. 19, 2023) — Kickapoo (disestablished; the P.3d cite 525 P.3d 39 could not be confirmed, so the card does not print it)
  *   · Osage Nation v. Irby, 597 F.3d 1117 (10th Cir. 2010), cert. denied 2011, followed by McCauley v. State, 2024 OK CR 8, 548 P.3d 461 (Apr. 4, 2024) — Osage (disestablished; the Osage Nation disputes Irby after McGirt).
+ * Martinez (docket, date, WL cite, holding), Buck (holding) and McCauley (OK CR 8, 548 P.3d 461, Apr. 4 2024, holding) were re-checked 2026-10-30 against court-docket indexes and news reports of the opinions, not the opinion text.
  * A nation with no row here (Ottawa, Peoria, Miami… — State v. Brester, 2023 OK CR 10 is the OCCA's ruling on several of them) is given NO court sentence rather than one typed from memory. */
 export const TRIBAL_COURTS = [
   [/\bcreek\b/i, "Muscogee (Creek): McGirt v. Oklahoma (U.S. Supreme Court, 2020), a criminal-jurisdiction case, held that Congress never disestablished the reservation."],
   [/\bcherokee\b/i, "Cherokee: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Hogner v. State, 2021 OK CR 4)."],
-  [/\bchickasaw\b/i, "Chickasaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Bosse v. State, No. PCD-2019-124)."],
+  [/\bchickasaw\b/i, "Chickasaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Bosse v. State, 2021 OK CR 30)."],
   [/\bchoctaw\b/i, "Choctaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Sizemore v. State, 2021 OK CR 6)."],
   [/\bseminole\b/i, "Seminole: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Grayson v. State, 2021 OK CR 8)."],
   [/\bquapaw\b/i, "Quapaw: in a criminal case the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (State v. Lawhorn, 2021 OK CR 37)."],
