@@ -523,10 +523,10 @@ export function GradingCanvas({ model, f2p, rppf, PAL }) {
               );
             })}
             {L.corners.map((k, i) => {
-              // NEW-2 (2026-10-30): the tag is placed by lib/padCornerTag — in its usual spot, or (building selected) slid along the
-              // wall clear of the purple bump-out / dock buttons with a leader to the exact corner. Non-interactive either way.
+              // NEW-2 / NEW-5 (2026-10-30): the tag is placed by lib/padCornerTag — ALWAYS wholly inside the footprint, with a leader to the exact
+              // corner when it sits away from it; every edit button lies outside the walls (lib/buildingButtons), so the two cannot meet. Non-interactive.
               const quad = L.quad ? L.quad.map((q) => f2p(q)) : null;
-              const t = quad ? placeCornerTag(quad, k.idx, k.text, !!L.selected) : null;
+              const t = quad ? placeCornerTag(quad, k.idx, k.text) : null;
               const p = f2p(k.pt);
               let x, y;
               if (t) { x = t.x; y = t.y; } else {

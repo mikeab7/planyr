@@ -121,10 +121,14 @@ try {
 
   // ---- 1 · the buttons ---------------------------------------------------------------------------------------------------------------
   const btns = await page.evaluate(() => [...document.querySelectorAll('[data-ramp-add="1"]')].map((g) => { const r = g.querySelector("circle").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, title: (g.querySelector("title") || {}).textContent || "" }; }));
-  ok("ramp '+' buttons are on the building (wall + corner)", btns.length >= 2 && btns.every((b) => /drive-in/i.test(b.title)), btns.map((b) => b.title).join(" | "));
+  const dockWalls = bl.dock === "cross" ? 2 : bl.dock === "none" ? 0 : 1;
+  ok(`exactly ${3 * dockWalls} ramp '+' buttons: one per dock wall (${dockWalls}) and one beside each of its two purple corner '+' (${2 * dockWalls}) — none on any other wall`, btns.length === 3 * dockWalls && btns.every((b) => b.title === "Add drive-in ramp"), `${btns.length} · dock "${bl.dock}" · ` + btns.map((b) => b.title).join(" | "));
   const discs = await page.evaluate(() => [...document.querySelectorAll('[data-testid="feature-edit-nodes"] g[data-el-action="1"]')].map((g) => { const r = g.querySelector("circle").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, r: r.width / 2 }; }));
   let overlap = 0;
   for (let i = 0; i < discs.length; i++) for (let j = i + 1; j < discs.length; j++) if (Math.hypot(discs[i].x - discs[j].x, discs[i].y - discs[j].y) < discs[i].r + discs[j].r - 0.5) overlap++;
+  const foot = await page.evaluate((id) => { const r = document.querySelector(`[data-el-id="${id}"]`).getBoundingClientRect(); return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height }; }, bl.id);
+  const touching = discs.filter((d) => d.x + d.r > foot.x0 && d.x - d.r < foot.x1 && d.y + d.r > foot.y0 && d.y - d.r < foot.y1).length;
+  ok("every edit button sits OUTSIDE the building's footprint (the grading tags are inside it)", touching === 0, `${touching} of ${discs.length} touch it`);
   ok("no two buttons on the building overlap", overlap === 0, `${overlap} overlapping pair(s) of ${discs.length}`);
   await shot("1-buttons");
 
