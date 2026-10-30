@@ -56,7 +56,8 @@ describe("browse RPC error handling", () => {
 
   it("FoodApp wires the error to the map and the logger", () => {
     const app = read("src/workspaces/food/FoodApp.jsx");
-    expect(app).toMatch(/if \(error\) \{\s*reportBrowseError\(error\)/);
+    // B2559168: a failed answer first forgets the "last covered area" so the next move re-queries
+    expect(app).toMatch(/if \(error\) \{\s*(lastBrowseRef\.current = null;\s*)?reportBrowseError\(error\)/);
     expect(app).toContain("placesError={placesError}");
     expect(app).toContain("onRetryPlaces=");
   });
