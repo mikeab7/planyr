@@ -82,7 +82,7 @@ const click = async (r, c, opts = {}) => { const p = await pt(r, c); await page.
 const sel = () => inSheet((api, ws) => ws.getSelection().getActiveRangeList().map((x) => { const g = x.getRange(); return { a1: x.getA1Notation(), r1: g.startRow, r2: g.endRow, c1: g.startColumn, c2: g.endColumn, type: g.rangeType }; }));
 const cell = (r, c) => inSheet((api, ws, [rr, cc]) => {
   const x = ws.getRange(rr, cc); const cs = x.getCellStyle(); const st = (cs && cs._style) || {};
-  return { v: x.getValue(), f: x.getFormula(), bold: st.bl === 1 ? "bold" : "normal", italic: st.it === 1 ? "italic" : "normal", line: st.ul && st.ul.s === 1 ? "underline" : st.st && st.st.s === 1 ? "line-through" : "none", nf: x.getNumberFormat(), wrap: x.getWrap() };
+  return { v: x.getValue(), f: x.getFormula(), bold: st.bl === 1 ? "bold" : "normal", italic: st.it === 1 ? "italic" : "normal", line: st.ul && st.ul.s === 1 ? "underline" : st.st && st.st.s === 1 ? "line-through" : "none", nf: x.getNumberFormat(), wrap: x.getWrap(), bg: st.bg && st.bg.rgb || null, color: st.cl && st.cl.rgb || null };
 }, [r, c]);
 /** hidden rows / columns live only in the saved snapshot (the facade has hide, not is-hidden) */
 const hiddenState = () => inSheet((api, ws) => { const sd = api.getActiveWorkbook().save().sheets[ws.getSheetId()]; return { rows: Object.keys(sd.rowData || {}).filter((r) => sd.rowData[r].hd === 1).map(Number), cols: Object.keys(sd.columnData || {}).filter((c) => sd.columnData[c].hd === 1).map(Number) }; });
@@ -365,10 +365,11 @@ check("clip-excel", "Paste from Excel (HTML) keeps values and formatting", async
   await click(9, 0); await press("Control+v"); await wait(500);
   const got = await inSheet((api, ws) => { const out = []; for (let r = 9; r < 14; r++) { const row = []; for (let c = 0; c < 4; c++) row.push(ws.getRange(r, c).getValue()); out.push(row); } return out; });
   const any = got.flat().filter((v) => v !== null && v !== "").length;
-  return any >= 3 ? PASS(`${any} cells pasted from an Excel HTML clipboard: ${JSON.stringify(got[0])}`) : FAIL(`pasted ${any} cells`);
+  // the fixture's header row is bold on a yellow fill; a row further down is a currency / percent / italic-red-centred mix
+  const head = await cell(9, 0);
+  const looks = head.bold === "bold" && !!head.bg;
+  return any >= 3 && looks ? PASS(`${any} cells pasted from an Excel HTML clipboard (first row ${JSON.stringify(got[0])}); the header arrived bold on a ${head.bg} fill`) : FAIL(`pasted ${any} cells; header bold=${head.bold} fill=${head.bg}`);
 });
-
-// ── 6. features ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 check("fill-handle", "Fill handle: drag and double-click", async () => {
   await reset(); await click(0, 0); await page.keyboard.down("Shift"); await click(1, 0); await page.keyboard.up("Shift");
   const p = await pt(1, 0);

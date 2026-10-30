@@ -72,6 +72,7 @@ try {
   const before = requested.length;
 
   // ── C. mount ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  const resBefore = await page.evaluate(() => performance.getEntriesByType("resource").length);
   const t0 = Date.now();
   await page.click('[data-testid="model-univer-switch"]');
   await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
@@ -79,6 +80,8 @@ try {
   const mountMs = Date.now() - t0;
   ok("C1 the switch turns the Univer grid on", true, `click → grid ready in ${mountMs} ms (network included)`);
   ok("C2 Univer's own files were requested only after the switch", requested.length > before, `${requested.length - before} file request(s), first: ${(requested[before] || "").split("/").pop()}`);
+  const dl = await page.evaluate((n) => { const es = performance.getEntriesByType("resource").slice(n); return { files: es.length, bytes: es.reduce((a, e) => a + (e.transferSize || 0), 0), decoded: es.reduce((a, e) => a + (e.decodedBodySize || 0), 0) }; }, resBefore);
+  ok("C2b what the switch downloads on first use (network, compressed)", dl.files > 0, `${dl.files} files, ${(dl.bytes / 1048576).toFixed(2)} MB transferred (${(dl.decoded / 1048576).toFixed(1)} MB once unpacked)`);
   ok("C3 the choice is remembered on this device", (await page.evaluate((k) => localStorage.getItem(k), SWITCH_KEY)) === "1");
   ok("C4 the old grid is gone while Univer is on", (await page.locator('[data-testid="model-sheet"]').count()) === 0);
   await page.waitForTimeout(1500);
