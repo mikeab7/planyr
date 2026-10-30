@@ -571,6 +571,7 @@ export const OPEN_GROUND_MIN_FALL_PCT = 0.5;   // ROUND 8: the fall a pit-filled
 const DRAIN_MAX_NODES = 60000;                 // ROUND 8: the drain lattice's density (≈ the contour lattice's)
 const DRAIN_MIN_CELL_FT = 3;
 const BAND_DEPTH_EPS_FT = 0.02;
+const BAND_BLEND_FT = 0.5;                       // ROUND 9: the depth over which the exact band blends into the open-ground lattice
 const BAND_BUCKET_FT = 40;                // a point whose band clamp is below this is open ground, not the slope band
 const LIMIT_SAMPLE_FT = 10;     // the limit ring is sampled this often for the slope reach + the daylight line
 const REACH_MAX_FT = 400;
@@ -927,6 +928,10 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     }
   }
   const pitFill = { nodes: 0, maxFt: 0, maxAt: null, unreached: 0, cellFt: dh };
+  // ROUND 9 (B2500224 ×2, NEW-2): a node the flood raised only because it sits ON the limit's outer line — raised to the ground
+  // at the line, so water leaving across it has the right outlet height — is an OUTLET, not ground. The flood keeps its raised
+  // value (dZ); every READER takes its bare value, so the outermost node row is never a lump the contours bunch against.
+  const seedRaised = new Uint8Array(DN), readRaise = new Float64Array(DN);
   const distToGradedNode = (pt) => { let D = Infinity; for (const g of graded) { const q = nearestOnRing(pt, g.el.ring); if (q) D = Math.min(D, Math.hypot(pt.x - q.x, pt.y - q.y)); } return D; };
   {
     // the filled swale keeps the 0.5% minimum fall (measured: a steeper fill, half the open-ground slope, lifted a few cells of
@@ -957,8 +962,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
         if (o.q && o.d < 1.5 * dh && !(nearest(pt, holeRings).d < o.d) && !(distToGradedNode(pt) < o.d)) {
           const g = existAt(o.q);
           if (g != null && Number.isFinite(g) && g > dZ[c]) {
-            dZ[c] = g; pitFill.nodes++;
-            if (g - dZb[c] > pitFill.maxFt) { pitFill.maxFt = g - dZb[c]; pitFill.maxAt = pt; }
+            dZ[c] = g; seedRaised[c] = 1;   // an outlet height, not a fill: never counted, never read (ROUND 9)
           }
         }
       }
@@ -985,6 +989,21 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       }
     }
     for (let c = 0; c < DN; c++) if (dK[c] >= 0 && !done[c]) pitFill.unreached++;
+    // ROUND 9: what a reader takes at an outlet node — its bare value, raised only as far as the ground behind it was really
+    // filled (a bowl that spills across the line keeps its water level to the line; a bank that merely meets the line keeps
+    // its exact slope)
+    for (let c = 0; c < DN; c++) {
+      if (!seedRaised[c]) continue;
+      const i = c % dnx, j = (c - i) / dnx;
+      let nr = 0;
+      for (const [ox, oy] of N8) {
+        const ii = i + ox, jj = j + oy;
+        if (ii < 0 || jj < 0 || ii >= dnx || jj >= dny) continue;
+        const n = jj * dnx + ii;
+        if (dK[n] >= 0 && !seedRaised[n] && dZ[n] - dZb[n] > nr) nr = dZ[n] - dZb[n];
+      }
+      readRaise[c] = Math.min(dZ[c] - dZb[c], nr);
+    }
   }
   yield;
   // the open-ground surface at a point (inside the limit, off every element): { ft, zb, zo, depth } — `depth` the band's
@@ -1009,8 +1028,36 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const b0 = bareAt(pt);
     return b0 ? { ft: b0.zb, zb: b0.zb, zo: b0.zo, depth: Math.abs(b0.zb - b0.zo) } : null;
   };
+  // ROUND 9 (B2500224 ×2, NEW-2) — INSIDE THE SLOPE BAND THE SURFACE IS THE EXACT PLANE AT THE RATIO, never the lattice. The band
+  // is the open ground clamped by the slope thrown from the limit (`bandZ`: z(b) ∓ d / ratio off the limit's own ground); read
+  // bilinearly off the ~7 ft drain lattice it became a few stepped cells across a 40 ft bank, and the contours drawn off it
+  // bunched and gapped instead of running every interval × ratio. Wherever the clamp binds (a corner node of the lattice cell
+  // carries band depth), the band is read analytically (plus any real pit-fill raise), blended into the lattice over the first
+  // `BAND_BLEND_FT` of depth so the toe meets the open ground without a seam.
+  const bandNear = (pt) => {
+    const fx = (pt.x - dbx0) / dh, fy = (pt.y - dby0) / dh;
+    const i0 = Math.max(0, Math.min(dnx - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(dny - 2, Math.floor(fy)));
+    for (const c of [j0 * dnx + i0, j0 * dnx + i0 + 1, (j0 + 1) * dnx + i0, (j0 + 1) * dnx + i0 + 1]) {
+      if (dK[c] < 0 || seedRaised[c] || Math.abs(dZb[c] - dZo[c]) > BAND_DEPTH_EPS_FT) return true;
+    }
+    return false;
+  };
   const filledSurface = (pt) => {
     const lat = latticeSurface(pt);
+    if (boundary && bandNear(pt)) {
+      const b0 = bareAt(pt);
+      const depth = b0 ? Math.abs(b0.zb - b0.zo) : 0;
+      if (b0 && depth > BAND_DEPTH_EPS_FT) {
+        // where the flood really filled (a bowl spilling across the line), the water level stands to the line: never below
+        // the lattice there; elsewhere the exact bank
+        const rz = raiseAt(pt);
+        const exact = { ft: rz > 1e-9 && lat ? Math.max(b0.zb + rz, lat.ft) : b0.zb, zb: b0.zb, zo: b0.zo, depth };
+        if (!lat || depth >= BAND_BLEND_FT) return exact;
+        let t = depth / BAND_BLEND_FT; t = t * t * (3 - 2 * t);
+        const mix = (a, b) => a * (1 - t) + b * t;
+        return { ft: mix(lat.ft, exact.ft), zb: mix(lat.zb, exact.zb), zo: mix(lat.zo, exact.zo), depth: mix(lat.depth, exact.depth) };
+      }
+    }
     // (not near the LIMIT: there the lattice IS the drainage answer — an exact reading of the band between two nodes can raise
     // a thin ridge between a dish and its outlet on the limit, measured on the default harness layout, and it did not tighten
     // the tie to existing ground either)
@@ -1030,7 +1077,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const fx = (pt.x - dbx0) / dh, fy = (pt.y - dby0) / dh;
     const i0 = Math.max(0, Math.min(dnx - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(dny - 2, Math.floor(fy)));
     const tx = Math.max(0, Math.min(1, fx - i0)), ty = Math.max(0, Math.min(1, fy - j0));
-    const R = (c) => (dK[c] >= 0 ? dZ[c] - dZb[c] : 0);
+    const R = (c) => (dK[c] < 0 ? 0 : seedRaised[c] ? readRaise[c] : dZ[c] - dZb[c]);
     return (R(j0 * dnx + i0) * (1 - tx) + R(j0 * dnx + i0 + 1) * tx) * (1 - ty) + (R((j0 + 1) * dnx + i0) * (1 - tx) + R((j0 + 1) * dnx + i0 + 1) * tx) * ty;
   };
   const latticeSurface = (pt) => {
@@ -1042,7 +1089,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     for (let q = 0; q < 4; q++) {
       const w = W[q]; if (!(w > 0)) continue;
       const c = C[q];
-      if (dK[c] >= 0) { ft += w * dZ[c]; zbS += w * dZb[c]; zoS += w * dZo[c]; } else wOff += w;
+      if (dK[c] >= 0) { ft += w * (seedRaised[c] ? dZb[c] + readRaise[c] : dZ[c]); zbS += w * dZb[c]; zoS += w * dZo[c]; } else wOff += w;
     }
     if (wOff > 0) {
       const b0 = bareAt(pt);
@@ -1243,7 +1290,9 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     cells, owners: graded, pondRings, apronsOn, zOf, shoulderFt: 0,
     grading: { slopeRatio: apronRatio, shoulderFt: spec.shoulderFt ?? G.shoulderFt, ramp: false },
     limit: {
-      mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / SQFT_PER_ACRE,
+      // ROUND 9 (B2500224 ×2): `sig` is THE limit's identity (its definition — gradingLimit.resolveGradingLimit `defSig`) — every picture traced off this surface (band, contours, the
+      // existing-contour cut) carries the sig it was traced against and is painted only while it matches (gradingPicture.js)
+      sig: limit.defSig, mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / SQFT_PER_ACRE,
       grewIds: limit.grewIds, plateaus, reachFt: reach, basis: spec.basis || null, pitFill,
       drain: { nx: dnx, ny: dny, cellFt: dh, x0: dbx0, y0: dby0, filled: dZ, bare: dZb, region: dK }, shoulderFt: limit.shoulderFt, cornerRadiusFt: limit.cornerRadiusFt,
       regions_stats: regionStats.map((r) => ({ cutCy: r.cutCf / CF_PER_CY, fillCy: r.fillCf / CF_PER_CY, areaSf: r.areaSf, slopeSf: r.slopeSf })),
@@ -1317,6 +1366,32 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
       } else if (r && r.reason === "pond") z = NaN;
       else if (typeof existAt === "function") { const g = existAt(pt); z = g != null && Number.isFinite(g) ? g : NaN; }
       values[k] = z;
+    }
+  }
+  // ROUND 9 (B2500224 ×2): boundary mode — the bank meets existing ground ON the limit line at a real break (2:1 inside, the
+  // ground outside), and a lattice cell straddling the line interpolated across that kink, so a proposed contour reached the
+  // line up to a foot from where the ground is its level. Every sample just OUTSIDE the line (within 1.5 cells) instead takes
+  // the proposed surface continued across it (mirrored through its nearest point q on the line: 2·z(q) − z(mirror), z(q) the
+  // ground there); the worker clips at the line, so nothing outside is ever drawn, and each contour ends where the surface —
+  // which IS the ground on the line — is its level.
+  if (boundary && grid.limit && Array.isArray(grid.limit.limitRegions) && typeof existAt === "function") {
+    const ringsAll = grid.limit.limitRegions.flatMap((rg) => [rg.outer, ...rg.holes]);
+    const reach = 1.5 * cellFt;
+    for (let i = 0; i < nx; i++) {
+      yield;
+      const x = x0 + (i + 0.5) * cellFt;
+      for (let j = 0; j < ny; j++) {
+        const k = j * nx + i;
+        if (inside[k] > 0) continue;
+        const pt = { x, y: y0 + (j + 0.5) * cellFt };
+        let best = null, bd = reach;
+        for (const ring of ringsAll) { const q = nearestOnRing(pt, ring); if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < bd) { bd = d; best = q; } } }
+        if (!best) continue;
+        const gq = existAt(best);
+        const mr = grid.probe({ x: 2 * best.x - pt.x, y: 2 * best.y - pt.y });
+        if (gq == null || !Number.isFinite(gq) || !mr || mr.status !== "value" || !Number.isFinite(mr.ft)) continue;
+        values[k] = 2 * gq - mr.ft;
+      }
     }
   }
   if (!(hi > lo)) return null;
