@@ -392,7 +392,7 @@ import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, sh
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
-import { sideButtonAnchor, bumpButtonAnchor } from "./lib/padCornerTag.js";
+import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -9355,7 +9355,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const x of els) {
           if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) continue;
           if (elHidden(hiddenGroups, x)) continue; // NEW-1 — a hidden building is not hoverable, so its +/− cluster never pops over empty ground
-          const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
+          // NEW-5 (2026-10-30): the edit buttons sit OUTSIDE the walls, so the building already under the cursor stays hovered out to them
+          const reach = x.type === "building" && x.id === hoverElId && view.ppf > 0 ? HOVER_BUTTON_REACH_PX / view.ppf : 0;
+          const hw = Math.abs(x.w) / 2 + reach, hh = Math.abs(x.h) / 2 + reach; // unrotated footprint bbox (generous on rotation — fine for hover)
           if (!(fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh)) continue;
           if (!hovered || byZ(x, hovered) >= 0) hovered = x;
         }
@@ -18708,7 +18710,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      arrow, smaller than they are, slate (not purple / amber) so it reads as its own thing. Same press discipline as every on-building control
      (`data-el-action`, stop the press, swallow the double-click — CHROME-NEVER-EATS-A-PRESS). It is offset ALONG the wall from its neighbours so the
      two never overlap; the grading spot tags move out of the way of these buttons, never the reverse. */
-  const RAMP_BTN_R = FEAT_CTRL_R * 0.78;
   const rampGlyph = (key, cx, cy, title, onClick) => {
     const r = RAMP_BTN_R;
     return (
@@ -18732,27 +18733,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const wpx = Math.abs(el.w) * rppf, hpx = Math.abs(el.h) * rppf; // rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
-    const cpx = f2p({ x: el.cx, y: el.cy });
-    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     const depths = zoneDepthDefaults(settings);
+    /* NEW-5 (2026-10-30) — EVERY button sits OUTSIDE the footprint, in one row along its wall, offset into the court; the grading corner tags sit INSIDE
+       it (lib/padCornerTag), so the two can never meet at any zoom. `layoutBuildingButtons` (lib/buildingButtons.js) decides every position — the pair on
+       each wall's middle, the purple "+" at each end of a dock wall, ONE grey ramp "+" per dock wall and one beside each purple "+", none on a short end
+       wall — and drops (never moves) a button that would touch one already placed. This function only draws what it is handed. */
+    const corner = (lx, ly) => { const o = rot2(lx, ly, el.rot); return f2p({ x: el.cx + o.x, y: el.cy + o.y }); };
+    const quad = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
+    const roomy = Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX;   // the purple corner "+" needs room on BOTH axes (B225)
+    const walls = wallsFromQuad(quad, dockSides).filter((w) => ((w.name === "top" || w.name === "bottom") ? hpx : wpx) >= FEAT_BTN_MIN_PX)
+      .map((w) => ({ ...w, dock: w.dock && !el.footEdit, corners: w.dock && roomy ? w.corners : [] }));
+    const layout = layoutBuildingButtons(walls);
     return (
       /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
          clickable the whole time they are on screen, because a half-faded control that ignored a
          press would be its own bug. */
       <g opacity={featEditOpacity} data-testid="feature-edit-nodes">
-        {sides.map(([name, nx, ny]) => {
-          // B225: an inset control needs its wall's PERPENDICULAR on-screen size to clear the
-          // cluster; below that it piles onto the opposite wall. A long/narrow footprint keeps
-          // its long-side controls and drops only the cramped short ends.
-          if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
-          const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
-          const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
-          const { pos, tan } = sideButtonAnchor(ms, cpx);       // just inside the wall, on the building; `tan` runs along the wall (side-by-side +/−) — lib/padCornerTag.js, which the grading corner tags avoid (NEW-2 2026-10-30)
+        {walls.map((w) => {
+          const name = w.name, pl = layout.get(`pair:${name}`);
+          if (!pl) return null;
+          const { pos, tan } = pl;                                  // outside the wall, in the court; `tan` runs along it (side-by-side +/−)
           if (dockSides.includes(name)) {
             // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
             const n = stackCountIn(els, el, name);
             const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
-            const rOff = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;     // clear of the "+ / −" pair's outer edge, along the wall
+            const rp = layout.get(`ramp:${name}`);
             return (
               <g key={`dockw${name}`}>
                 {featPair(`dock${name}`, pos, tan, {
@@ -18762,49 +18767,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
                   onRemove: () => removeOuterZoneOnSide(el, name),
                 })}
-                {!el.footEdit && rampGlyph(`rampw${name}`, pos.x + tan.x * rOff, pos.y + tan.y * rOff, "Add drive-in ramp", () => addRamp(el, name, null))}
+                {rp && rampGlyph(`rampw${name}`, rp.x, rp.y, "Add drive-in ramp", () => addRamp(el, name, null))}
               </g>
             );
           }
           // non-dock side (a short end, or the long side opposite single-load docks) → the
-          // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses.
+          // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses. No ramp button: a ramp is a dock-wall feature.
           const sw = empSideSidewalk(el, name), park = empSidePark(el, name);
-          const rOffE = FEAT_CTRL_R * 2 + 3 + 4 + RAMP_BTN_R;
-          return (
-            <g key={`endw${name}`}>
-              {featPair(`end${name}`, pos, tan, {
-                canAdd: true, addColor: "#16a34a", addTitle: empSideAddTitle(el, name),
-                onAdd: () => growEmployeeSide(el, name, 1),
-                canRemove: !!(sw || park), removeTitle: park ? "Remove a parking row" : "Remove the sidewalk",
-                onRemove: () => growEmployeeSide(el, name, -1),
-              })}
-              {!el.footEdit && rampGlyph(`rampe${name}`, pos.x + tan.x * rOffE, pos.y + tan.y * rOffE, "Add drive-in door (this wall is at grade — a door marker, no ramp)", () => addRamp(el, name, null))}
-            </g>
-          );
+          return featPair(`end${name}`, pos, tan, {
+            canAdd: true, addColor: "#16a34a", addTitle: empSideAddTitle(el, name),
+            onAdd: () => growEmployeeSide(el, name, 1),
+            canRemove: !!(sw || park), removeTitle: park ? "Remove a parking row" : "Remove the sidewalk",
+            onRemove: () => growEmployeeSide(el, name, -1),
+          });
         })}
         {/* dog-ear bump-outs at each corner of every dock side — a single toggle (you only add
             one thing there, per the owner); needs room on BOTH axes (B225) */}
-        {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
-          const [nx, ny] = SIDE_N[name];
-          const alongIsX = ny !== 0;
-          return [1, -1].map((sign) => {
-            const cl = alongIsX ? { x: sign * el.w / 2, y: ny * el.h / 2 } : { x: nx * el.w / 2, y: sign * el.h / 2 };
-            const co = rot2(cl.x, cl.y, el.rot);
-            const cs = f2p({ x: el.cx + co.x, y: el.cy + co.y });
-            const pos = bumpButtonAnchor(cs, cpx); // just inside the corner (in the footprint) — lib/padCornerTag.js
-            const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
-            // the ramp "+" for this corner sits beside the purple one, a little toward the wall's middle (never over the bump-out's own button)
-            const mo = rot2(nx * el.w / 2, ny * el.h / 2, el.rot), midS = f2p({ x: el.cx + mo.x, y: el.cy + mo.y });
-            let mx = midS.x - pos.x, my = midS.y - pos.y; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
-            const cOff = FEAT_CTRL_R + 4 + RAMP_BTN_R;
-            return (
-              <g key={`dogc${name}${sign}`}>
-                {featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null)}
-                {!el.footEdit && rampGlyph(`rampc${name}${sign}`, pos.x + mx * cOff, pos.y + my * cOff, "Add drive-in ramp", () => addRamp(el, name, sign < 0 ? "start" : "end"))}
-              </g>
-            );
-          });
-        })}
+        {walls.flatMap((w) => w.corners.map((c) => {
+          const name = w.name, sign = c.sign, cb = layout.get(`corner:${name}:${sign}`);
+          if (!cb) return null;
+          const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
+          const rc = layout.get(`ramp:${name}:${sign}`);   // the ramp "+" for this corner: beside the purple one, toward the wall's middle
+          return (
+            <g key={`dogc${name}${sign}`}>
+              {featNode(`dog${name}${sign}`, cb, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null)}
+              {rc && rampGlyph(`rampc${name}${sign}`, rc.x, rc.y, "Add drive-in ramp", () => addRamp(el, name, sign < 0 ? "start" : "end"))}
+            </g>
+          );
+        }))}
       </g>
     );
   })();
@@ -19040,7 +19030,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cpx = f2p({ x: el.cx, y: el.cy });
     let ux = topMid.x - cpx.x, uy = topMid.y - cpx.y;
     const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-    const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
+    // a building's edit buttons ride just outside its top wall (lib/buildingButtons.js), so its rotate grip rides out past them
+    const rotOff = el.type === "building" && !el.dogEar ? ROTATE_GRIP_OFFSET_PX : 26;
+    const rotPos = { x: topMid.x + ux * rotOff, y: topMid.y + uy * rotOff };
     return (
       <g data-export="skip">
         {/* B619 — the thin blue bounding outline is drawn by elSelOutline (one place, so it also
