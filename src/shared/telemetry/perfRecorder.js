@@ -47,7 +47,7 @@ import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
-import { createTrigger, feedFrame, feedBootTask, feedFreeze, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
+import { createTrigger, feedFrame, feedBootTask, feedFreeze, feedSlowRun, inSlowRun, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
 import { buildCapture, encodeCapture, encodeSupplements, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
@@ -151,6 +151,8 @@ function onFrame(t) {
   pushFrame(_frames, t, dt);
   /* B2319137 ×2 — a frame that took a second or more to come while the page stayed visible is a FREEZE, which `feedFrame`
    * would drop as "not a frame". `_hiddenAt` is a number, so this stays allocation-free; the fire branch is the rare one. */
+  /* B2319137 ×4 — a RUN of slow frames (1 fps for seconds) is a freeze too, though no single frame reaches `freezeMs` */
+  if (!(_hiddenAt >= prev) && feedSlowRun(_trig, t, dt)) return true;
   if (dt >= _trig.cfg.freezeMs && !(_hiddenAt >= prev)) return feedFreeze(_trig, t, dt, "frame");
   return feedFrame(_trig, t, dt);
 }
@@ -162,6 +164,8 @@ function loop() {
   let fire = false;
   try { fire = onFrame(t); } catch (_) { /* a recorder fault must never break the frame */ }
   if (fire) { try { capture("auto"); } catch (_) { /* ignore */ } }
+  // B2319137 ×4 — keep watching through a slow run (a struggling page is the one that must not go unrecorded), capped
+  if (inSlowRun(_trig)) _activeUntil = Math.max(_activeUntil, t + _cfg.idleStopMs);
   if (t < _activeUntil) schedule();
   else { _running = false; _prevFrameT = 0; }
 }
@@ -486,7 +490,7 @@ export function capture(reason) {
      * just now") the one most able to vanish without trace, and it would have taken a week of his
      * normal use producing nothing before anyone noticed. The record now carries what actually
      * happened, and `perfCaptureDelivery()` hands the promise to the UI so the ✓ means DELIVERED. */
-    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null };
+    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null, freezeVia: cap.freezeVia || null, freezeMs: cap.freezeMs ?? null };
     _captures.push(rec);
     if (_captures.length > 10) _captures.shift();
 
