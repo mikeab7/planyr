@@ -123,7 +123,7 @@ export function hoverDetails(cfg = {}, props = {}) {
     if (f.clean && HOVER_CLEANERS[f.clean]) text = HOVER_CLEANERS[f.clean](props) || "";
     else if (f.date) text = fmtDate(pickAttr(props, f.names || [])) || ""; // NEW-1 (DeSoto zoning): an Esri date field arrives as epoch ms
     else if (typeof f.format === "function") text = String(f.format(props) || "").trim(); // B2528688 (Colorado): a coded field decoded to words (ECMC well status), computed from the row's own table
-    else text = titleCaseAgency(cleanAttr(pickAttr(props, f.names || [])));
+    else text = (typeof cfg.nameCase === "function" ? cfg.nameCase : titleCaseAgency)(cleanAttr(pickAttr(props, f.names || []))); // cfg.nameCase: a row that words its shouted agency text with its own acronym-aware formatter (Florida, B2452976)
     if (!text) continue;
     if (f.unit && /^[\d.,]+$/.test(text)) text = `${text} ${f.unit}`;
     out.push(f.label ? `${f.label} ${text}` : text);
@@ -140,7 +140,7 @@ export function hoverRows(cfg = {}, props = {}) {
     if (f.clean && HOVER_CLEANERS[f.clean]) text = HOVER_CLEANERS[f.clean](props) || "";
     else if (f.date) text = fmtDate(pickAttr(props, f.names || [])) || "";
     else if (typeof f.format === "function") text = String(f.format(props) || "").trim(); // B2528688 (Colorado): a coded field decoded to words, computed from the row's own table
-    else text = titleCaseAgency(cleanAttr(pickAttr(props, f.names || [])));
+    else text = (typeof cfg.nameCase === "function" ? cfg.nameCase : titleCaseAgency)(cleanAttr(pickAttr(props, f.names || []))); // cfg.nameCase: a row that words its shouted agency text with its own acronym-aware formatter (Florida, B2452976)
     if (!text) continue;
     if (f.unit && /^[\d.,]+$/.test(text)) text = `${text} ${f.unit}`;
     out.push({ label: f.label || (f.names && f.names[0]) || "", text });

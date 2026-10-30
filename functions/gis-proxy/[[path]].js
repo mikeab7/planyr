@@ -242,6 +242,13 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
+  /* NEW-1 (Florida, B2452976, 2026-10-29) — the Florida state / district agency hosts the due-diligence layers sit on (FDEP OpenData contamination / karst / ERP; SFWMD canals and rights of way;
+   * FWC eagle nests; Broward's FLL noise contours). The build sandbox cannot reach any of them (CONNECT 403), so their CORS could not be read: relayed and MEASURED through planyr.io after this deploys, before any layer
+   * is wired to them. An entry no wired layer ends up using is deleted in the wiring PR. */
+  "ca.dep.state.fl.us", // Florida DEP — OpenData MapServers (CLEANUP_SP, DWM_STCM, FGS_*, ERP, OFW, BROWNFIELD_AREAS …)
+  "geoweb.sfwmd.gov", // South Florida Water Management District — canals (AHED), rights of way, conservation easements
+  "gis.myfwc.com", // Florida Fish & Wildlife Conservation Commission — habitat / species models
+  "bcgishub.broward.org", // Broward County — Aviation Department (FLL) noise contours; the county GIS hub
   /* NEW-1 (Tennessee industrial due-diligence layers, 2026-10-29) — the State of Tennessee's own ArcGIS Servers, relayed so the layers they publish can be MEASURED through planyr.io (the build
    * sandbox cannot reach any *.tn.gov host) before a row is wired to them. TDEC (Dept. of Environment & Conservation) publishes Division of Remediation sites, oil & gas wells and the Division of
    * Water Resources public layers on tdeconline.tn.gov; maps.tdec.tn.gov is its hosting server. Delete an entry whose host ends up unused. */

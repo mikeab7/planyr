@@ -15,6 +15,7 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
@@ -1317,7 +1318,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1412,6 +1413,7 @@ export const LAYER_VINTAGE = {
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
+  ...FLORIDA_VINTAGE,
 };
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
@@ -1656,6 +1658,22 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
     ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
   }));
+  /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
+   * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
+   * polygons of that batch are never drawn (measured: 530 of 820 wellfield polygons in view; the same on any dense polygon row). Only a Point may reach the point-symbol
+   * factory; every other geometry takes the path style alone. */
+  {
+    const origRedraw = lyr._redraw;
+    lyr._redraw = function (id) {
+      const layer = this._layers && this._layers[id];
+      const g = layer && layer.feature && layer.feature.geometry;
+      if (g && g.type !== "Point") {
+        if (layer.setStyle && this.options.style) this.resetFeatureStyle(layer.feature.id);
+        return undefined;
+      }
+      return origRedraw.call(this, id);
+    };
+  }
   // B2507064 (NEW-9) — the draw budget: a batch of features over the vertex budget is NOT handed to Leaflet (that is what froze the tab); the layer says so instead.
   {
     const origCreate = lyr.createLayers;
@@ -2138,7 +2156,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo, f && f.properties) : featureBaseStyle(cfg, oo))); } catch (_) {} };
+              : (oo) => { try { const sf = (f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo, f && f.properties) : featureBaseStyle(cfg, oo)); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }; // _originalStyle too: esri-leaflet's resetFeatureStyle (run for every re-delivered feature) restores THAT, so without it a re-delivered point went hollow (featureBaseStyle's fill 0) and a re-delivered feature snapped back to the opacity the layer was built with (B2452976 review pass 4)
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

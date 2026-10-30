@@ -80,6 +80,14 @@ describe("the layer registry's state coverage", () => {
   });
 });
 
+/* NEW-1 (Florida, B2452976): the Florida rows are declared by name (test/floridaLayers.test.js holds the full list) and scoped to FL alone — none leaks to Texas, Georgia or any other state. */
+describe("Florida layers are Florida-only", () => {
+  it("every row whose states include FL is states:['FL'] exactly, and the national list did not grow", () => {
+    for (const [id, c] of Object.entries(ALL_LAYERS)) if ((c.states || []).includes("FL")) expect(c.states, id).toEqual(["FL"]);
+    expect(idsWhere((c) => !c.states && !c.statesNot).sort()).toEqual(NATIONAL);
+  });
+});
+
 describe("every Georgia layer row is complete (a row an inline comment swallowed once rendered as a blank checkbox)", () => {
   it("each carries a label, a source, a note, a role, a group and an order", () => {
     for (const id of GEORGIA) {

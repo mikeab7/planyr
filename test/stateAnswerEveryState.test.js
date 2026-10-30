@@ -31,7 +31,7 @@ beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 /* One point well inside each state (a city, not a border town). [lat, lng]. */
 const INTERIOR = {
   AL: [33.52, -86.80], AK: [61.2181, -149.9003], AZ: [33.4484, -112.074], AR: [34.7465, -92.2896], CA: [38.5816, -121.4944],
-  CO: [39.7392, -104.9903], CT: [41.7658, -72.6734], DE: [39.1582, -75.5244], DC: [38.9072, -77.0369], FL: [28.5383, -81.3792],
+  CO: [39.7392, -104.9903], CT: [41.7658, -72.6734], DE: [39.1582, -75.5244], DC: [38.9072, -77.0369], FL: [27.9506, -82.4572], /* Tampa (was Orlando, which sits on the edge of the SFWMD service area — B2452976: a region-gated row can differ between the exact plan origin and the finder's rounded view centre only at a boundary, and an interior point should not be one) */
   GA: [33.749, -84.388], HI: [21.3069, -157.8583], ID: [43.615, -116.2023], IL: [39.7817, -89.6501], IN: [39.7684, -86.1581],
   IA: [41.5868, -93.625], KS: [39.0473, -95.6752], KY: [38.2527, -85.7585], LA: [30.4515, -91.1871], ME: [44.3106, -69.7795],
   MD: [39.2904, -76.6122], MA: [42.2626, -71.8023], MI: [42.7325, -84.5555], MN: [44.9778, -93.265], MS: [32.2988, -90.1848],

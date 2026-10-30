@@ -185,6 +185,30 @@ export const LAYER_TIER = {
   co_aurora_apz: "reference",
   co_weld_row: "reference",
 
+  // Florida due-diligence layers (B2452976)
+  fl_wellfield_broward: "reference", // a use restriction to confirm with the county, not a land-taking line
+  fl_wellfield_miamidade: "reference",
+  fl_erp_sfwmd: "reference",         // permitted footprints around / on the site — look-up context
+  fl_conservation_lands: "reference",
+  fl_contamination_sites: "reference", // a tracked cleanup — a pull-the-file flag (Phase I), like the Georgia HSI
+  fl_brownfield_areas: "reference",
+  fl_institutional_controls: "constraint", // a recorded use restriction on the land
+  fl_sinkhole_reports: "reference",
+  fl_sinkhole_areas: "reference",
+  fl_outstanding_florida_waters: "reference",
+  fl_panther_consultation: "reference",
+  fl_eagle_nesting: "reference",
+  fl_fll_noise: "reference",
+  fl_sfwmd_canals: "reference",
+  fl_sfwmd_row_permits: "constraint",   // a canal / levee right-of-way takes land off the site
+  fl_sfwmd_conservation_easements: "constraint", // an easement takes land off the site
+  fl_udb_miamidade: "reference",
+  fl_sis_highways: "reference",      // a state designation to confirm with FDOT
+  fl_evac_zones: "reference",        // an insurance / comp-plan flag, not the floodplain
+  fl_natural_lands_broward: "reference",
+  fl_wetlands_broward: "constraint", // a wetland takes land off the site and brings a county license
+  fl_drainage_districts_broward: "reference",
+
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
   co_enterprise_zones: "context",   // B2528688
@@ -227,6 +251,9 @@ export const LAYER_TIER = {
   tn_county: "context",            // B2507065 (NEW-10)
   ms_county: "context",            // NEW-1 (Georgia)
   ga_city: "context",
+  fl_county: "context",            // NEW-1 (Florida)
+  fl_city: "context",
+  fl_wmd: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",
   nj_county: "context",            // NEW-1 (New Jersey + New York)

@@ -15,7 +15,7 @@ export const PILL_DEFS = Object.freeze([
   { id: "power", label: "Power lines", layers: ["hifld_tx"] },
   { id: "rail", label: "Rail", layers: ["bts_rail"] },
   { id: "traffic", label: "Traffic counts", byRegion: { TX: ["txdot_aadt"], CO: ["co_aadt"] } },
-  { id: "contamination", label: "Contamination sites", byRegion: { TX: ["env_lpst", "env_cleanups"], CO: ["co_env_cleanups", "co_superfund", "co_rcra_ca", "co_inst_controls", "co_closed_landfills"], TN: ["env_cleanups", "tn_remediation", "tn_drycleaners", "tn_landfills"] }, fallback: ["env_cleanups"] }, // B2521584: Tennessee adds TDEC remediation sites, drycleaners and permitted landfills (its UST layer sits on a server that refuses the relay)
+  { id: "contamination", label: "Contamination sites", byRegion: { TX: ["env_lpst", "env_cleanups"], CO: ["co_env_cleanups", "co_superfund", "co_rcra_ca", "co_inst_controls", "co_closed_landfills"], TN: ["env_cleanups", "tn_remediation", "tn_drycleaners", "tn_landfills"], FL: ["fl_contamination_sites", "env_cleanups"] }, fallback: ["env_cleanups"] }, // B2521584: Tennessee adds TDEC remediation sites, drycleaners and permitted landfills (its UST layer sits on a server that refuses the relay)
   { id: "faults", label: "Faults", byRegion: { TX: ["faults"] } },
 ]);
 

@@ -21,7 +21,10 @@
  *   fixtures[]       — { label, point|bbox, expectMinCount, layer? }  (a /query count)
  *   sampleFixtures[] — { label, point, expectValueRange|expectNoData, serviceUrl? }  (a raster probe)
  */
+import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
+
 export const SOURCE_FIXTURES = {
+  ...FLORIDA_FIXTURES,
   flood: {
   fixtures: [
     // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
@@ -1457,6 +1460,7 @@ export function fixturesFor(key) {
  * `monitored-exception` row with no reason still fails the audit. The words just no longer
  * travel to the browser to prove it. */
 export const SOURCE_DOCS = {
+  ...FLORIDA_DOCS,
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",
   },
