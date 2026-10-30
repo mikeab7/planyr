@@ -5,10 +5,13 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 import UniverSheet from "../../src/workspaces/model/components/UniverSheet.jsx";
-import { createWorkbook } from "../../src/workspaces/model/lib/sheetModel.js";
+import { createWorkbook, migrateWorkbook } from "../../src/workspaces/model/lib/sheetModel.js";
+import { evaluateWorkbook } from "../../src/workspaces/model/lib/sheetEngine.js";
 
 window.__PLANYR_E2E = true;
 window.__saved = [];
+// Planyr's OWN formula engine, in the same page, so the measurement script times both engines in one Chromium.
+window.__oldEngine = { evaluateWorkbook, migrateWorkbook };
 
 function Host() {
   const [wb, setWb] = useState(() => (window.__sandboxInitial ? window.__sandboxInitial : createWorkbook()));
