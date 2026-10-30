@@ -852,7 +852,7 @@ export const VECTOR_SOURCES = {
     note: "Georgia DNR trout streams — compute-only source for the stream-buffer layer.",
   },
   /* NEW-1 (Georgia due-diligence gaps) — DCA's PROTECTED RIVERS (257 segments statewide), the fourth compute-only source of the stream-buffer layer: a
-   * protected river carries a 100-ft natural vegetative buffer each side (O.C.G.A. 12-2-8, Rule 391-3-16-.04). The drawn "Protected Rivers" row is a plain
+   * protected river carries a 100-ft river corridor each side, measured from the top of the bank (O.C.G.A. 12-2-8, Rule 391-3-16-.04). The drawn "Protected Rivers" row is a plain
    * `esriFeature` line layer (georgiaLayers.js) over the same GIS_SOURCES row. */
   ga_protected_rivers: {
     id: "ga_protected_rivers",
