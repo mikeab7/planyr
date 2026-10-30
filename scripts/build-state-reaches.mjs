@@ -47,8 +47,8 @@ const SOURCES = {
 };
 const CHATTAHOOCHEE = { box: [31.0, -85.3, 32.95, -84.85], tol: 0.0003, grow: 0.003 };
 const PERDIDO = { box: [30.2, -87.53, 30.56, -87.36], grow: 0.0005, tol: 0.0002,
-  /* the Gulf lobe [lng, lat…]: west edge on the Alabama Point line, top edge just south of the beach */
-  lobe: [[-87.52, 30.2], [-87.4, 30.2], [-87.4, 30.298], [-87.52, 30.281]] };
+  /* the Gulf lobe [lng, lat…]: west edge on the Alabama Point line (-87.5186 — where the Escambia / Baldwin county line meets the Gulf; it was -87.52, 150 m into Alabama's water, per the independent USGS cross-check), top edge just south of the beach */
+  lobe: [[-87.5186, 30.2], [-87.4, 30.2], [-87.4, 30.298], [-87.5186, 30.281]] };
 
 async function fetchAll() {
   mkdirSync(SRC, { recursive: true });
@@ -128,7 +128,10 @@ async function main() {
 
   const fl = unionAll(toPaths(loadPolys("reach_fl.json"))), al = unionAll(toPaths(loadPolys("reach_al.json")));
   const flGrown = run(ClipperLib.ClipType.ctIntersection, grow(fl, PERDIDO.grow), boxPath(PERDIDO.box));
-  const keyAndLobe = unionAll([...flGrown, ...run(ClipperLib.ClipType.ctIntersection, ringPath(PERDIDO.lobe), boxPath(PERDIDO.box))]);
+  /* NON-ZERO fill, not `unionAll`'s even-odd: the lobe and the grown Key OVERLAP along the beach, and an even-odd union cancels an overlap into a HOLE — which left a ~100 m strip of Escambia
+   * County FL land on Perdido Key's Gulf shore (30.281–30.285 N) outside the reach, reading Alabama (found by the independent cross-check, scripts/verify-state-reaches-independent.mjs).
+   * Clipper's own outputs are orientation-consistent (outer CCW, holes CW) and the lobe is CCW, so non-zero keeps real holes and merges overlaps. */
+  const keyAndLobe = run(ClipperLib.ClipType.ctUnion, flGrown, run(ClipperLib.ClipType.ctIntersection, ringPath(PERDIDO.lobe), boxPath(PERDIDO.box)), ClipperLib.PolyFillType.pftNonZero);
   const pdKey = run(ClipperLib.ClipType.ctDifference, keyAndLobe, al);
 
   const neFL = grow(unionAll(neOf("FL", PERDIDO.box)), CHATTAHOOCHEE.grow);

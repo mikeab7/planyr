@@ -267,8 +267,9 @@ function reachOverrule(real, la, lo) {
  * ⛔ ONE ANSWER FROM REAL BOUNDARIES, NOT BOXES (B2479568 amendment, owner 2026-10-29: "you need to check every state"). The old
  * answer was eight states, three of them boxes — Shreveport read "TX", North Augusta SC read "GA" — and every other state read null.
  * Order now:
- *   1. the real state polygon holding the point (the 50 + DC set, `usStatesData.js`) — except inside a `TUNED_REACHES` stretch (today the
- *      Chattahoochee, both ways, and Perdido Key FL), where the tuned state's own county land overrules it. NEW-1 (state lines):
+ *   1. the real state polygon holding the point (the 50 + DC set, `usStatesData.js`) — except inside a `TUNED_REACHES` stretch (today four:
+ *      the Chattahoochee both ways — GA over AL and AL over GA — and the Perdido stretch both ways — perdido-key, FL over AL, and perdido-al, AL over FL along the
+ *      Perdido River), where the tuned state's own county land overrules it. NEW-1 (state lines):
  *      this used to be a default for every tuned outline, which let the FL / GA / TN / TX outlines claim Alabama, Oklahoma, Arkansas,
  *      Louisiana and New Mexico ground; the real boundary is now authoritative everywhere that is not a documented reach;
  *   2. a point the polygons put in NJ or NY: the existing NJ/NY border settlement (`njnyStateAt`, the Hudson / Arthur Kill overlap) —

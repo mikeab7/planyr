@@ -57,6 +57,11 @@ describe("landmarks the review measured", () => {
     ["Perdido Bay north shore AL", 30.346, -87.525, "AL"], ["Perdido Bay AL shore", 30.35, -87.5, "AL"], ["Perdido Bay water, AL side", 30.34, -87.47, "AL"],
     ["Perdido Key FL, west end (NE says AL)", 30.292, -87.4785, "FL"], ["Perdido Key FL, at the Flora-Bama line", 30.2835, -87.515, "FL"],
     ["Perdido Key FL, east of Ono", 30.2995, -87.4465, "FL"],
+    // fourth review, item 2 — cells the independent USGS cross-check (scripts/verify-state-reaches-independent.mjs) found reading Alabama on Escambia County FL's Gulf-shore strip: the
+    // reach's Key ring and its Gulf lobe overlapped, and an even-odd union turned the overlap into a hole. USGS and Esri both put each of these in Florida.
+    ["Perdido Key FL, Gulf-shore strip (was a hole)", 30.2845, -87.4935, "FL"], ["Perdido Key FL, Gulf-shore strip, west", 30.282, -87.51, "FL"],
+    ["Perdido Key FL, Gulf-shore strip, mid", 30.2835, -87.502, "FL"], ["Perdido Key FL, Gulf-shore strip, east", 30.285, -87.491, "FL"],
+    ["Alabama Point, Gulf side of the line (USGS: Alabama; the lobe edge was 150 m west of the line)", 30.28, -87.52, "AL"],
     // the Chattahoochee, where the old Georgia outline overruled up to 2.9 km: Alabama towns beside the river read Alabama
     ["Phenix City AL", 32.4709, -85.0008, "AL"], ["Valley AL", 32.8057, -85.1713, "AL"], ["Lanett AL", 32.8668, -85.1913, "AL"],
     ["West Point GA", 32.877, -85.18, "GA"], ["Fort Benning GA", 32.35, -84.95, "GA"],
