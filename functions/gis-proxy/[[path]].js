@@ -15,8 +15,9 @@
  * var. Route: /gis-proxy/<host>/<rest of path>?<query>.
  */
 
-// Exact hostnames only — never a pattern. Extend here as a new CORS-blocked regional/county host
-// is wired (see docs/STATEWIDE-PARCELS.md's "GIS pass-through" section).
+// Exact hostnames only — never a pattern. A host is listed ONLY while a registry row reads it through this relay, and test/gisProxyRelay.test.js fails the build in both directions: a listed host no
+// row reads (delete it) and a row that reads a host that is not listed (it would be refused at runtime). To measure a NEW host before wiring it, add it in the PR that wires its first row
+// (docs/STATEWIDE-PARCELS.md "GIS pass-through"); every entry is attack surface, and a host nothing reads is attack surface for nothing (NEW-1 security review, B2555776, 2026-10-30).
 export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (South Carolina, 2026-10-19) — the three county hosts a South Carolina county is wired to (each MEASURED through this relay on the PR preview). The statewide base layer is on
    * *.arcgis.com and needs no relay. */
@@ -24,12 +25,7 @@ export const ALLOWED_HOSTS = new Set([
   "gis.sumter-sc.com", // City / County of Sumter
   "maps.spartanburgcounty.org", // Spartanburg County
   "www.sgrcmaps.com", // Southern Georgia Regional Commission — Tift + 10 sibling GA counties
-  "mgrcmaps.org", // Middle Georgia Regional Commission
-  "maps.crc.ga.gov", // Coastal Regional Commission (not yet wired to a county)
-  /* NEW-1 (Memphis 100-mile radius) — hosts this build sandbox's egress blocks, so their CORS could not be
-   * read from here; relayed server-side so the app never depends on their ACAO header. */
-  "maps.memphistn.gov", // City of Memphis GIS — hosts the Shelby County Assessor parcel basemap
-  "gis.shelbycountytn.gov", // Shelby County TN government GIS (Assessor_Parcel)
+  /* NEW-1 (Memphis 100-mile radius) — Tennessee hosts this build sandbox's egress blocks; relayed server-side so the app never depends on their ACAO header. */
   "scgis.shelbycountytn.gov", // Shelby County TN GIS server — the Assessor of Property's CERTParcel service (NEW-1, Memphis radius ×2)
   "gis.capturecama.com", // CaptureCAMA (TN Comptroller's assessment system) — Chester County TN Assessor's parcel MapServer (NEW-1, Memphis radius ×3)
   /* NEW-1 (Tennessee pass 2, B2408834, 2026-10-22) — Hamilton County TN's own ArcGIS Server (Live_Parcels, the Assessor's tax-map parcels), MEASURED through this relay before tn_hamilton was wired. The two other
@@ -59,75 +55,35 @@ export const ALLOWED_HOSTS = new Set([
   "gis.occ.ok.gov", // Oklahoma Corporation Commission — RBDMS wells, orphan wells, PST tanks
   "gis.deq.ok.gov", // Oklahoma Department of Environmental Quality — LandWeb cleanup programs, WaterWeb (wellhead protection, impaired waters, special-protection waters)
   "owrb.csa.ou.edu", // Oklahoma Water Resources Board — water-system service areas, NFIP participation
-  /* NEW-1 (Idaho, 2026-10-19) — county / multi-county hosts the Idaho candidates sit on (found in the State Tax Commission's "County Parcel Maps"
-   * links page and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
-   * county is wired to it. */
-  "maps.idahoparcels.us", // Idaho State Tax Commission's GeoMoose/MapServer parcel host (Bear Lake, Gem, Gooding, Lemhi, Owyhee, Payette, Washington viewers)
-  "maps.terragis.net", // Terra GIS public viewers (Clark, Custer, Fremont)
+  /* NEW-1 (Idaho, 2026-10-19) — the county hosts the wired Idaho counties sit on (idParcels.js), each MEASURED through this relay before its county was wired. */
   "gis.latah.id.us", // Latah County
-  "cloudgisapps.bonnercountyid.gov", // Bonner County
-  "gis.kcgov.us", // Kootenai County
   "maps.canyonco.org", // Canyon County
   "gisportal.co.jefferson.id.us", // Jefferson County
   "madison.rexburg.org", // Madison County / City of Rexburg
   "web.binghamid.gov", // Bingham County
-  "server.boundarycountyid.org", // Boundary County
-  "maps.blainecountyid.gov", "maps.co.blaine.id.us", // Blaine County
-  "maps.bannockcounty.us", // Bannock County
-  "gis.co.nezperce.id.us", // Nez Perce County
-  "insideidaho.org", // INSIDE Idaho (University of Idaho / Idaho Geospatial Office)
-  "gis.idaho.gov", // State of Idaho GIS portal
-  "giscenter.rdc.isu.edu", "gisu.rdc.isu.edu", // Idaho State University GIS Training & Research Center
-  "portal.kcgov.us", "map.kcgov.us", // Kootenai County ArcGIS portal + map server (KC_Parcel_Polygon)
-  /* NEW-1 (New Mexico, 2026-10-19) — the state / county hosts the New Mexico candidates sit on (named by the state's "Parcels - NM - <County>" ArcGIS
-   * Online catalog and each county's own viewer config). The build sandbox reaches none of them, so each is relayed and MEASURED through here before a
-   * county is wired to it. */
-  "gis.ose.state.nm.us", "gis.ose.nm.gov", // NM Office of the State Engineer — County_Parcels_2021 (one layer per county) and MRGCD parcels
-  "rgis.unm.edu", "gstore.unm.edu", // UNM Earth Data Analysis Center — RGIS (NM's state GIS clearinghouse)
-  "maps.currycounty.org", // Curry County
-  "arcgisce2.co.valencia.nm.us", // Valencia County
-  "sfcomaps.santafecountynm.gov", // Santa Fe County
-  "gis.donaanacounty.org", // Doña Ana County
-  "webmaps.sjcounty.net", // San Juan County
-  "gis.losalamosnm.us", // Los Alamos County
-  /* NEW-1 (Alabama, 2026-10-16) — county/vendor hosts the Alabama candidates sit on. The sandbox cannot reach any of
-   * them, so each is relayed (CORS unread) and MEASURED through this relay before a county is wired to it. */
-  "web1.kcsgis.com", "web2.kcsgis.com", "web3.kcsgis.com", "web4.kcsgis.com", "web5.kcsgis.com", "web6.kcsgis.com", // KCS GIS — Revenue Commissioner viewers (Etowah, Talladega, Cullman, Colbert, Baldwin…)
+  "maps.blainecountyid.gov",
+  "map.kcgov.us",
+  /* NEW-1 (New Mexico, 2026-10-19) — the Office of the State Engineer's County_Parcels layers (nmParcels.js), MEASURED through this relay before the counties were wired. */
+  "gis.ose.nm.gov",
+  /* NEW-1 (Alabama, 2026-10-16) — the county / vendor hosts the wired Alabama counties sit on (alabamaParcels.js); the sandbox cannot reach them, so each was relayed and MEASURED through this relay before its county was wired. */
+  "web3.kcsgis.com", "web4.kcsgis.com", "web5.kcsgis.com", "web6.kcsgis.com",
   "al52portal.kcsgis.com", // KCS GIS — Morgan County
   "maps.capturecama.com", // CaptureCAMA — Cleburne, Coosa, Russell, Monroe, Bullock, Henry, Hale, Wilcox, Sumter…
   "map.stclairco.com", // St. Clair County
   "maps.shelbyal.com", // Shelby County AL (Property Tax Office)
-  "jccgis.jccal.org", "gis.jccal.org", // Jefferson County AL
+  "jccgis.jccal.org",
   "gis.limestonecounty-al.gov", // Limestone County
   "maps.madisonal.gov", // City of Madison (Madison County layer)
   "gis.calhouncounty.org", // Calhoun County
   "explore.opelika-al.gov", // City of Opelika (Lee County layer)
-  "autaugagis.autauga.com", // Autauga County
-  "arcweb.houstoncountyal.gov", // Houston County AL — the county's own parcel viewer server (NEW-1, Alabama round 2)
-  "www.alabamagis.com", // Flagship GIS public viewers (~21 AL counties) — probed for an open REST/OGC endpoint (NEW-1, Alabama round 2)
-  "isv.kcsgis.com", // KCS GIS ISV3 viewer host (e.g. isv.kcsgis.com/al.colbert_revenue) — read to find the ArcGIS service behind a county viewer (B2312352)
   "al20portal.kcsgis.com", // KCS GIS — Colbert County (named in the county viewer's own public config.js: al20server/…/Internal/Colbert_Public_ISV, B2312352)
-  /* NEW-1 (B2302785) — Flagship GIS's Autodesk MapGuide servers behind the www.alabamagis.com county viewers. Exact hostnames, one per
-   * server number the viewers name (cloudURL in each county's page); read-only anonymous queries only — never a key the viewer injects. */
-  /* NEW-1 (Georgia due-diligence gaps, 2026-10-29) — the three Georgia hosts the layer sweep found but this build sandbox cannot reach (each answers 403 at its egress), so they are
-   * relayed and MEASURED through here, from planyr.io, before anything is wired to them: GDOT's eGIS (traffic counts / dams / functional class are named on its ArcGIS Online items),
-   * the UGA ITOS host that serves GDOT's functional-class map service, and Bartow County's own GIS server (BartowZoning, the county's published zoning). Nothing reads them yet — GDOT's egis.dot.ga.gov was pruned 2026-10-30 (NEW-1 review: no row reads it; re-add it in the PR that wires one). */
+  /* NEW-1 (Georgia due-diligence gaps, 2026-10-29) — the two Georgia hosts the Georgia due-diligence rows read (the build sandbox cannot reach either, 403 at its egress; each was MEASURED through planyr.io): the UGA ITOS
+   * host that serves GDOT's functional-class / DNR / USGS map services, and Bartow County's own GIS server (BartowZoning). GDOT's egis.dot.ga.gov was pruned 2026-10-30: no row reads it. */
   "maps.itos.uga.edu", // UGA ITOS — GDOT functional class / routes / bridges map services
-  "www.bartowgis.org", // Bartow County GIS — AGOServices/BartowZoning (the row reads the www form; the bare host was never used and is not allowed)
-  /* NEW-1 (Georgia, 2026-10-19) — county / regional hosts named by the Georgia parcel sweep; each is MEASURED through this relay before any county is wired to it. */
+  "www.bartowgis.org", // Bartow County GIS — AGOServices/BartowZoning (the row reads the www form; the bare host is not allowed)
+  /* NEW-1 (Georgia, 2026-10-19) — county / regional hosts the wired Georgia counties read through this relay (gaParcels.js, counties.js), each MEASURED before its county was wired. */
   "maps.douglascountyga.gov", // Douglas County GA
-  "arcgis5.roktech.net", // ROK Technologies — Habersham, Paulding (wired by other route) and other GA county viewers
   "www.thomascountymaps.org", // Thomas County GA
-  "www.mgrcmaps.org", // Middle Georgia Regional Commission (www form)
-  "www.valorgis.com", // VALOR — Lowndes and sibling South Georgia counties
-  /* NEW-1 (Georgia re-measure, 2026-10-19) — the county hosts the 2026-09 Georgia passes wired from Michael's browser only. Added so they can be
-   * re-measured from a sandbox through this relay (B2316720); the app still reads them directly (they send CORS headers). */
-  "www.bartowgis.org", "bryangis.bryan-county.org", "gis.cherokeecountyga.gov", "weba.co.clayton.ga.us:5443", "gis.cobbcounty.gov",
-  "coweta-gis-web.coweta.ga.us", "geo.forsythco.com", "gis-web.glynncounty-ga.gov", "hallgis.hallcounty.org", "arcgis.co.henry.ga.us",
-  "gismap.augustaga.gov", "gis.whitfieldcountyga.com",
-  "gis11.cama.io", // CAMA.io — Walton County GA's MapServer (a 2017 copy) was found here; MEASURED before any county is wired to it
-  "fgis-map-100.flagshipcloud.com", "fgis-map-101.flagshipcloud.com", "fgis-map-102.flagshipcloud.com", "fgis-map-104.flagshipcloud.com",
-  "fgis-map-105.flagshipcloud.com", "fgis-map-106.flagshipcloud.com", "fgis-map-107.flagshipcloud.com", "fgis-map-110.flagshipcloud.com",
   /* NEW-1 (Michigan, 2026-10-20) — the six county-hosted services a wired Michigan county rides (each MEASURED through this relay on the PR preview before it was wired);
    * the other 46 Michigan rows read *.arcgis.com directly. */
   "gis.kentcountymi.gov", "gis.miottawa.org", "gis.mijackson.org", "gis.gtcountymi.gov", "maps.stclaircounty.org", "gis.mocogeo.org",
@@ -159,44 +115,19 @@ export const ALLOWED_HOSTS = new Set([
   "gispub.co.washington.or.us", // Washington County
   "public.co.wasco.or.us", // Wasco County
   "gis.wrd.state.or.us", // Oregon Water Resources Department public tax-lot query (Curry, Jefferson, Lincoln)
-  /* NEW-1 (Oklahoma, 2026-10-19) — county / regional hosts named by the Oklahoma parcel sweep; each is MEASURED through this relay before any county is wired to it. */
-  "gis.okco14.org", "gis.clevelandcountyassessor.us", // Cleveland County assessor
-  "map8.incog.org", "map9.incog.org", // INCOG (Tulsa regional council of governments) — Tulsa / Rogers / Wagoner parcel services
-  "asps0305.tulsacounty.org", // Tulsa County Assessor
-  "okmaps.onenet.net", // OneNet-hosted state GIS server
-  "mapview-online.com", "www.mapview-online.com", "mapview-adair.com", // MapView Online — assessor viewers for several Oklahoma counties (B2350113: inspect, not yet wired)
-  "property.spatialest.com", // Spatialest — Oklahoma county property portals (B2350113)
-  /* NEW-1 (Oklahoma second pass, B2497472, 2026-10-29) — hosts the second search of the 61 "none" counties named, added so each can be MEASURED through this relay before any county is wired to it:
-   * INCOG's newer ArcGIS Server (map11 carries Parcels_OsageCo / _CreekCo / _RogersCo / _TulsaCo / _WagonerCo — map8 / map9 above refuse the relay), the DataCrossPoint platform behind
-   * MapView Online (app.datacrosspoint.com/browse/oklahoma, "Oklahoma County Assessor Data"), and the City of Ada's ArcGIS Server (Pontotoc County). Nothing here is wired yet. */
+  /* NEW-1 (Oklahoma second pass, B2497472, 2026-10-29) — INCOG's newer ArcGIS Server, which carries the Osage / Creek / Rogers / Tulsa / Wagoner parcel services okParcels.js reads (map8 / map9 refuse the relay and were pruned). */
   "map11.incog.org",
-  "app.datacrosspoint.com", "datacrosspoint.com", "www.datacrosspoint.com", "gis.datacrosspoint.com", "maps.datacrosspoint.com", "api.datacrosspoint.com",
-  "maps.adaok.com", "maps.adaok.com:6443", "maps.adaok.com:6080",
-  /* okmaps.org — the GeoServer behind ArcGIS Online's "Parcels - OK - Statewide" item (the Property Records Preservation statewide mosaic, published as WMS at okmaps.org/geoserver/wms). The first pass tried
-   * okmaps.onenet.net only; GeoServer normally also serves WFS (queryable features), which is what is being measured here. */
-  "okmaps.org", "www.okmaps.org",
   /* NEW-1 (Arizona, 2026-10-19) — Mohave County's own GIS server (Mohave is the one Arizona county neither the ADWR compile nor an ArcGIS Online layer covers).
    * The build sandbox cannot reach it, so it is relayed and MEASURED through here (on the PR preview) before the county is wired to it. */
   "mcgis.mohave.gov", // Mohave County GIS — PARCELS MapServer
-  /* NEW-1 (South Dakota, 2026-10-19) — county / regional hosts the South Dakota sweep names (state GIS, Lincoln, the planning districts that host many counties' viewers,
-   * Rapid City, vendor viewers). The sandbox reaches none of them; each is MEASURED through this relay before a county is wired to it. */
-  "gis.lincolncountysd.gov", "maps.lincolncountysd.org", // Lincoln County SD
-  "gis.minnehahacounty.gov", "gis2.siouxfalls.org", // Minnehaha County / Sioux Falls
-  "arcgis.sd.gov", "sdgis.sd.gov", // State of South Dakota GIS (BIT)
-  "gis.districtiii.org", "www.districtiii.org", "districtiii.org", // Planning & Development District III — Faulk, Day … county viewers
-  "1stdistrict.org", "www.1stdistrict.org", "mapnet.1stdistrict.org", "gis.1stdistrict.org", // First District Association of Local Governments — MapNet county viewers
-  "gis.rcgov.org", // Rapid City
-  "davisonreports.com", "www.davisonreports.com", // Davison County parcel viewer
-  "sidbox.sidwellco.com", // Sidwell — Dakotas county parcel viewers
-  "brookingscountysd.gov", "www.brookingscountysd.gov", "codington.sdcounty.gov", "brown.sd.us", // county sites whose GIS pages name the viewer
+  /* NEW-1 (South Dakota, 2026-10-19) — the planning-district hosts that carry the wired South Dakota counties' parcel layers (sdParcels.js), each MEASURED through this relay before its counties were wired. */
+  "gis.districtiii.org",
+  "www.1stdistrict.org",
   /* NEW-1 (Iowa, 2026-10-19) — hosts behind the wired Iowa counties; each was MEASURED through this relay before its counties were wired. */
   "wfs.schneidercorp.com", // Schneider Geospatial's public county map servers (the feed behind the Beacon viewers) — 23 Iowa counties
   "gis.pottcounty-ia.gov", // Pottawattamie County (Council Bluffs) GIS
   "gis.dallascountyiowa.gov", // Dallas County (Adel) GIS
   "magic-gis.com", // MAGIC — Muscatine Area GIS consortium (Muscatine County parcels)
-  /* NEW-1 (South Dakota round 2, 2026-10-19) — hosts named by the State's county-parcel index (an AGOL org that lists one service per county): the Fall River / Lawrence
-   * vendor server, the Rapid City staff web adapter that republishes Meade + Pennington, the Sioux Falls / Minnehaha .org spellings, and District III's IMS + MapNet hosts. */
-  "arcgis.mobile311.com", "gisstaffweb.rcgov.org", "gis.siouxfalls.gov", "gis.minnehahacounty.org", "ims.districtiii.org", "www.1stdistrictmapnet.com", "1stdistrictmapnet.com", "association.1stdistrict.org", "dakotaathome.sd.gov",
   /* NEW-1 (Illinois, 2026-10-20, B2372624) — exactly the county / university hosts the 62 wired Illinois rows use (ilParcels.js), each MEASURED through this relay before its row existed.
    * The probe hosts that could not be used were pruned: the ISGS statewide service answers Token Required; the Bhamaps hosts (ags/services2.bhamaps.com) and Lee/Tazewell's older hosts answer
    * Cloudflare 526/522 from a Worker (B2379936 re-measures them from a browser). */
@@ -212,23 +143,12 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (New York, 2026-10-20) — county / city parcel hosts this build sandbox's egress blocks (CONNECT 403), so their layers could only be
    * measured through this relay on the PR preview; relayed server-side so the app never depends on their ACAO header. */
   "maps2.cattco.org", // Cattaraugus County GIS (ArcGIS Enterprise web adaptor)
-  "spatial.vhb.com", // VHB spatial viewers — Delaware County COMIT, Schoharie, Schenectady (consultant-run, county-owned)
   "spatialags.vhb.com", // VHB ArcGIS Server behind those viewers
   "maps.dancgis.org", // Development Authority of the North Country — Franklin County parcel model
-  "gis.niagaracounty.com", // Niagara County GIS (retired host: its parcel service is "not started" as of 2026-10-28 — kept, harmless)
   "gis.niagaracounty.gov", // Niagara County GIS — the county's CURRENT server (its 2026 viewer's web map points parcels here, /server/…/PublicViewer/Public_Viewer layer 4)
-  "gisservices.its.ny.gov", // NYS ITS ShareGIS — measured for the ORPTS Tax Parcel Centroid Points (statewide, points) when a county's own server is down
   "gisportal.yatescounty.org", // Yates County GIS portal
   "maps.monroecounty.gov", // Monroe County DES GIS (current parcel roll)
-  "maps.watertown-ny.gov", // City of Watertown (Jefferson County) parcels
   "gis.washingtoncountyny.gov", // Washington County GIS
-  "dg.fultoncountyny.gov", // Fulton County GIS
-  "gis2.erie.gov", // Erie County GIS — also hosts a Niagara County viewer
-  /* NEW-1 (Kentucky, 2026-10-19) — the Kentucky Division of Geographic Information publishes one PVA parcel service per county
-   * (WGS84WM_Services/Ky_PVA_<County>_Parcels_WGS84WM); LOJIC is Jefferson County's own server. The sandbox cannot reach either, so each is
-   * relayed and MEASURED through this relay before a county is wired to it. */
-  "kygisserver.ky.gov", // Kentucky DGI — county PVA parcel MapServers
-  "kygeonet.ky.gov", // Kentucky DGI — county PVA viewers (read to find a county's real service)
   /* NEW-1 (Kentucky, 2026-10-19) — county hosts the Kentucky parcel sources sit on. The sandbox cannot reach any of them, so each is
    * relayed and was MEASURED through this relay before a county was wired to it (docs/STATEWIDE-PARCELS.md "Kentucky counties"). */
   "gis.lojic.org", // LOJIC — Jefferson County (Louisville) PVA parcels
@@ -240,22 +160,19 @@ export const ALLOWED_HOSTS = new Set([
    * Hopkins was wired. (Retest hosts that stayed unreachable — maps2.bgadd.org 523, gis.ccgisonline.com:6443 522, gis.daviesskypva.org 1016 — and the
    * token-gated kygisportalservices.ky.gov are NOT listed: an allow-list entry for a host nothing uses is attack surface.) */
   "www.hopkinscountygis.com:6443", // Hopkins County KY GIS — Parcel MapServer
-  /* Second pass (Georgia, 2026-10-29) — hosts a "none" county's parcel layer was FOUND on by web-map layer URLs but that the sandbox cannot reach, relayed ONLY so the layer can be measured through
-   * this relay before anything is wired to it (docs/STATEWIDE-PARCELS.md "Georgia counties"). Delete an entry whose county stays unwired. */
+  /* Second pass (Georgia, 2026-10-29) — the Coastal Regional Commission's newer server, which carries Long County's parcel layer (gaParcels.js; docs/STATEWIDE-PARCELS.md "Georgia counties"). */
   "portal.segrass.org", // Coastal Regional Commission's newer server — Long County Property_Data / Long_Parcels (crcarcgis)
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
-  /* NEW-1 (Florida, B2452976, 2026-10-29) — the Florida state / district agency hosts the due-diligence layers sit on (FDEP OpenData contamination / karst / ERP; SFWMD canals and rights of way;
-   * FWC eagle nests; Broward's FLL noise contours). The build sandbox cannot reach any of them (CONNECT 403), so their CORS could not be read: relayed and MEASURED through planyr.io after this deploys, before any layer
-   * is wired to them. An entry no wired layer ends up using is deleted in the wiring PR. */
+  /* NEW-1 (Florida, B2452976, 2026-10-29) — the Florida state / district agency hosts the due-diligence layers read (FDEP OpenData contamination / karst / ERP; SFWMD canals and rights of way; FWC eagle nests;
+   * Broward's FLL noise contours). The build sandbox cannot reach any of them (CONNECT 403): each was MEASURED through planyr.io before its layer was wired. */
   "ca.dep.state.fl.us", // Florida DEP — OpenData MapServers (CLEANUP_SP, DWM_STCM, FGS_*, ERP, OFW, BROWNFIELD_AREAS …)
   "geoweb.sfwmd.gov", // South Florida Water Management District — canals (AHED), rights of way, conservation easements
   "gis.myfwc.com", // Florida Fish & Wildlife Conservation Commission — habitat / species models
   "bcgishub.broward.org", // Broward County — Aviation Department (FLL) noise contours; the county GIS hub
-  /* NEW-1 (Tennessee industrial due-diligence layers, 2026-10-29) — the State of Tennessee's own ArcGIS Servers, relayed so the layers they publish can be MEASURED through planyr.io (the build
-   * sandbox cannot reach any *.tn.gov host) before a row is wired to them. TDEC (Dept. of Environment & Conservation) publishes Division of Remediation sites, oil & gas wells and the Division of
-   * Water Resources public layers on tdeconline.tn.gov; maps.tdec.tn.gov is its hosting server. Delete an entry whose host ends up unused (tdeconline.tn.gov was, 2026-10-30: it answers 403 and no row reads it). */
+  /* NEW-1 (Tennessee industrial due-diligence layers, 2026-10-29) — the State of Tennessee's own ArcGIS Servers the Tennessee rows read (the build sandbox cannot reach any *.tn.gov host; each was MEASURED through planyr.io):
+   * TDEC's hosting server and the state's TNMap clearinghouse. (tdeconline.tn.gov was pruned 2026-10-30: it answers 403 and no row reads it.) */
   "maps.tdec.tn.gov", // TDEC — hosting server (Permitted_Tennessee_Landfills)
   "tnmap.tn.gov", // State of Tennessee Office of Information Resources — TNMap (state GIS clearinghouse)
   /* NEW-1 (Colorado due-diligence layers, B2528688, 2026-10-29) — the two hosts the wired Colorado rows read through this relay. The build sandbox's egress refuses every state.co.us / colorado.gov / city host
@@ -292,23 +209,137 @@ export function redirectTarget(res, fromUrl, method, hop = 0) {
   return { url: to.toString(), method: method === "POST" && (s === 301 || s === 302 || s === 303) ? "GET" : method };
 }
 
+/* ───────────────────────── WHAT THE RELAY WILL CARRY (NEW-1 security review, B2555776, 2026-10-30) ─────────────────────────
+ * The relay serves upstream bytes from the planyr.io ORIGIN, where a signed-in Supabase session lives. Before this section it copied any Content-Type through and relayed any
+ * path with GET or POST, which meant (measured on production, 2026-10-30): `/gis-proxy/<host>/arcgis/rest/services` came back `200 text/html` (an ArcGIS directory page — script
+ * served as planyr.io), `?callback=x` came back `application/javascript`, and `/arcgis/admin` and `…/0/applyEdits` were forwarded to the upstream. Four independent limits now close that;
+ * each is pure, exported and unit-tested, and none of them is a licence for the next:
+ *   1. PATHS — `classifyPath`: only the ArcGIS REST read shapes the app uses (query / identify / export / exportImage / tile, plus metadata GETs); no write or admin operation anywhere in the path;
+ *      POST only on query / identify / export / exportImage. Dot segments (also %-encoded), encoded slashes and control characters are refused before a URL is built.
+ *   2. FORMAT — `forceJsonFormat`: an ArcGIS `f` that is not one the app consumes (html, jsapi, kmz, pdf …, or no `f` at all, which ArcGIS answers with an HTML page) is rewritten to `json`; `callback`
+ *      (JSONP → JavaScript) is dropped. Applied to the query string and to a urlencoded POST body.
+ *   3. RESPONSE TYPE — `classifyResponseType`: JSON / geojson / protobuf / png / jpeg / gif / webp / tiff only. text/plain and a missing type are re-labelled `application/json` ONLY when JSON was asked for;
+ *      text/html, svg, xml, javascript and everything else are refused with a JSON error.
+ *      MEASURED 2026-10-30 through the production relay, one layer per allow-listed host (140): 135 answered, 132 `application/json`, 3 `text/plain` carrying valid JSON (greenecountyassessor.org,
+ *      maps.clintoncountypa.gov, opcgis.deq.state.ms.us) — which is why text/plain is re-labelled rather than refused. The other 5 were upstream outages (526 / 502), passed through with their status.
+ *   4. HEADERS — every response (errors too) carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`; a non-image body is `Content-Disposition: attachment`.
+ *      (`public/_headers` does not apply to Pages Function responses, so they are set here.) */
+
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "content-security-policy": "default-src 'none'; sandbox",
+};
+
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...SECURITY_HEADERS },
   });
 }
 
-/* Validate + build the upstream URL from the catch-all path segments (first segment is the
- * target host) and the incoming query string. Returns { url, host } or { error: Response }.
- * Pure — no network, no globals — so it unit-tests standalone. */
-export function resolveUpstream(segs, search) {
-  const [host, ...rest] = segs;
+const SERVICE_TYPES = new Set(["mapserver", "featureserver", "imageserver"]);
+/* Operation / admin names that may never appear ANYWHERE in a relayed path — the ArcGIS write verbs, the admin and token surfaces. (Only unambiguous names: a service folder called "Edit" or "Start"
+ * is legitimate, and those are caught anyway because the path must END in a read shape.) */
+const WRITE_OR_ADMIN_SEGMENTS = new Set([
+  "applyedits", "addfeatures", "updatefeatures", "deletefeatures", "calculate", "addattachment", "updateattachment", "deleteattachments", "uploads", "upload",
+  "admin", "manager", "generatetoken", "tokens", "sharing", "createreplica", "synchronizereplica", "unregisterreplica", "append", "truncate",
+  "adddefinition", "updatedefinition", "deletefromdefinition", "overwrite",
+]);
+/* Operations that take a POST: the four read endpoints the app sends bodies to (esri-leaflet's FeatureLayer / Query / identify / dynamicMapLayer, and `wideTileRequest`). */
+const POST_OPS = new Set(["query", "identify", "export", "exportimage"]);
+const GET_ONLY_OPS = new Set(["layers", "legend", "info"]);
+const isLayerId = (seg) => /^\d{1,5}$/.test(seg);
+
+/* Decode and vet the path segments. Returns { segs } (decoded — they are re-encoded when the URL is built) or { error: Response }.
+ * `new URL` normalises `%2e%2e` to a dot segment, so a literal ".." test on the raw segment is not enough. */
+export function cleanSegments(segs) {
+  const out = [];
+  for (const raw of segs) {
+    let seg;
+    try { seg = decodeURIComponent(raw); } catch (_e) { return { error: jsonResponse({ error: "invalid path" }, 400) }; }
+    if (seg === "." || seg === ".." || seg.includes("..") || /[\\/\u0000-\u001f\u007f%;]/.test(seg)) return { error: jsonResponse({ error: "invalid path" }, 400) };
+    out.push(seg);
+  }
+  return { segs: out };
+}
+
+/* May this ArcGIS REST path be relayed with this method? `rest` = the decoded segments AFTER the host. Pure. Returns { ok: true } or { error: string, status }. */
+export function classifyPath(rest, method) {
+  const low = rest.map((s) => s.toLowerCase());
+  const blocked = low.find((s) => WRITE_OR_ADMIN_SEGMENTS.has(s));
+  if (blocked) return { error: `The relay carries read-only ArcGIS queries; "${blocked}" is not one of them.`, status: 403 };
+  const last = low[low.length - 1];
+  const parent = low[low.length - 2];
+  const svcIdx = low.lastIndexOf("services");
+  const isOp = POST_OPS.has(last);
+  if (method === "POST") {
+    if (!isOp) return { error: "POST is only relayed to the ArcGIS query / identify / export / exportImage endpoints.", status: 403 };
+  }
+  if (isOp) {
+    const ok = last === "query" ? isLayerId(parent) || SERVICE_TYPES.has(parent)
+      : last === "identify" ? parent === "mapserver" || parent === "imageserver"
+      : last === "export" ? parent === "mapserver"
+      : parent === "imageserver";
+    return ok ? { ok: true } : { error: `"${last}" is not an ArcGIS read endpoint at this path.`, status: 403 };
+  }
+  // GET only from here: metadata, the services directory, and map tiles.
+  if (last !== undefined && (SERVICE_TYPES.has(last) || isLayerId(last) || GET_ONLY_OPS.has(last))) return { ok: true };
+  if (last === "services" || (svcIdx >= 0 && low.length - svcIdx <= 2)) return { ok: true }; // …/rest/services or …/rest/services/<Folder>
+  if (low.length >= 4 && low[low.length - 4] === "tile" && isLayerId(low[low.length - 3]) && isLayerId(low[low.length - 2]) && isLayerId(last)) return { ok: true };
+  return { error: "That path is not an ArcGIS read endpoint the relay carries.", status: 403 };
+}
+
+/* The `f` values the app consumes. Anything else — and no `f` at all, which ArcGIS answers with an HTML directory page — becomes `json`. */
+const OK_FORMATS = new Set(["json", "pjson", "geojson", "image", "pbf"]);
+const keyOf = (pair) => { const k = pair.split("=")[0].replace(/\+/g, " "); try { return decodeURIComponent(k).toLowerCase(); } catch (_e) { return k.toLowerCase(); } };
+/* Force a safe `f` (and no JSONP `callback`) onto a query string (starting "?") or a urlencoded body (no "?"). A text that is ALREADY safe — exactly one valid `f`, no `callback` — is returned
+ * byte-for-byte, so a clean request is never reordered or re-encoded. `addMissing:false` (a POST body) leaves a body with no `f` alone, since the query string carries one. Returns { text, fmt, changed }
+ * where `fmt` is the `f` the upstream will see. Pure. */
+export function forceJsonFormat(text, { isQuery = true, addMissing = true } = {}) {
+  const raw = isQuery ? String(text || "").replace(/^\?/, "") : String(text || "");
+  const pairs = raw ? raw.split("&") : [];
+  const fs = pairs.filter((q) => keyOf(q) === "f");
+  const valueOf = (q) => { const v = q.slice(q.indexOf("=") + 1); try { return decodeURIComponent(v.replace(/\+/g, " ")).trim().toLowerCase(); } catch (_e) { return ""; } };
+  const hasJsonp = pairs.some((q) => keyOf(q) === "callback");
+  const single = fs.length === 1 && q_hasEq(fs[0]) && OK_FORMATS.has(valueOf(fs[0]));
+  const wrap = (t) => (isQuery ? (t ? "?" + t : "") : t);
+  if (!hasJsonp && (single || (!fs.length && !addMissing))) return { text: wrap(raw), fmt: single ? valueOf(fs[0]) : null, changed: false };
+  const kept = pairs.filter((q) => { const k = keyOf(q); return k !== "f" && k !== "callback"; });
+  const fmt = fs.length === 1 && q_hasEq(fs[0]) && OK_FORMATS.has(valueOf(fs[0])) ? valueOf(fs[0]) : "json";
+  if (!fs.length && !addMissing) return { text: wrap(kept.join("&")), fmt: null, changed: true };
+  kept.push("f=" + fmt);
+  return { text: wrap(kept.filter(Boolean).join("&")), fmt, changed: true };
+}
+const q_hasEq = (pair) => pair.includes("=");
+
+const JSON_TYPE = /^(application\/([\w.+-]+\+)?json|text\/json)$/;
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/tiff"]);
+const PROTOBUF_TYPES = new Set(["application/x-protobuf", "application/protobuf"]);
+/* What to do with an upstream Content-Type. `asked` = the `f` the request carried. Returns { type, image } to serve, or { refuse: media type }. Pure. */
+export function classifyResponseType(contentType, asked) {
+  const raw = String(contentType || "").trim();
+  const media = raw.split(";")[0].trim().toLowerCase();
+  if (JSON_TYPE.test(media)) return { type: raw || "application/json", image: false };
+  if (IMAGE_TYPES.has(media)) return { type: media, image: true };
+  if (PROTOBUF_TYPES.has(media)) return { type: media, image: false };
+  // ArcGIS behind IIS / a proxy sometimes labels a JSON answer text/plain, or leaves the type off. Re-label it ONLY when JSON was asked for — the body is never served as HTML.
+  if ((media === "" || media === "text/plain" || media === "application/octet-stream") && (asked === "json" || asked === "pjson" || asked === "geojson")) return { type: "application/json; charset=utf-8", image: false };
+  return { refuse: media || "(none)" };
+}
+
+/* Validate + build the upstream URL from the catch-all path segments (first segment is the target host), the incoming query string and the method.
+ * Returns { url, host, fmt, rest } or { error: Response }. Pure — no network, no globals — so it unit-tests standalone. */
+export function resolveUpstream(segs, search, method = "GET") {
+  const [host, ...rawRest] = segs;
   if (!host || !ALLOWED_HOSTS.has(host)) return { error: jsonResponse({ error: "host not allowed" }, 403) };
-  if (rest.some((s) => s === ".." || s.includes(".."))) return { error: jsonResponse({ error: "invalid path" }, 400) };
-  const qs = search && search !== "?" ? search : "";
-  const url = `https://${host}${rest.length ? "/" + rest.join("/") : ""}${qs}`;
-  return { url, host };
+  const cleaned = cleanSegments(rawRest);
+  if (cleaned.error) return cleaned;
+  const rest = cleaned.segs;
+  const verdict = classifyPath(rest, method);
+  if (!verdict.ok) return { error: jsonResponse({ error: verdict.error, host }, verdict.status) };
+  const { text: qs, fmt } = forceJsonFormat(search && search !== "?" ? search : "", { isQuery: true });
+  const url = `https://${host}${rest.length ? "/" + rest.map(encodeURIComponent).join("/") : ""}${qs}`;
+  return { url, host, fmt, rest };
 }
 
 export async function onRequest(context) {
@@ -319,16 +350,23 @@ export async function onRequest(context) {
   const reqUrl = new URL(request.url);
   const p = context.params && context.params.path;
   const segs = (Array.isArray(p) ? p : String(p || "").split("/")).filter(Boolean);
-  const resolved = resolveUpstream(segs, reqUrl.search);
+  const resolved = resolveUpstream(segs, reqUrl.search, method);
   if (resolved.error) return resolved.error;
 
   const headers = { "user-agent": USER_AGENT };
   // Never forward the client's own cookies or Authorization — this relays a PUBLIC GIS endpoint,
   // not an authenticated one, and neither header belongs to the upstream host anyway.
   let body;
+  let asked = resolved.fmt;
   if (method === "POST") {
-    body = await request.arrayBuffer();
-    headers["content-type"] = request.headers.get("content-type") || "application/x-www-form-urlencoded";
+    const ctype = request.headers.get("content-type") || "application/x-www-form-urlencoded";
+    // The body is parsed so its `f` can be vetted like the query string's; the only POST the app sends is urlencoded (esri-leaflet, `serializeEsriParams`).
+    if (!/^application\/x-www-form-urlencoded\b/i.test(ctype)) return jsonResponse({ error: "POST bodies must be application/x-www-form-urlencoded.", host: resolved.host }, 415);
+    const forced = forceJsonFormat(await request.text(), { isQuery: false, addMissing: false });
+    body = forced.text;
+    headers["content-type"] = "application/x-www-form-urlencoded";
+    // a body `f` outranks the query string's (ArcGIS reads either); both are now safe, the body's is the one the answer follows.
+    if (forced.fmt) asked = forced.fmt;
   }
 
   /* ONE retry on a transient upstream failure (B2507056, 2026-10-29). Measured through planyr.io: gis.desotocountyms.gov (itself fronted by Cloudflare) answers
@@ -367,12 +405,15 @@ export async function onRequest(context) {
     return jsonResponse({ error: `Upstream GIS request to ${resolved.host} failed or timed out.`, host: resolved.host }, 502);
   }
 
-  // Pass through the body + Content-Type; deliberately copy NOTHING else from the upstream
-  // response headers — that is what strips Set-Cookie (never present) and any other upstream
-  // header this relay has no reason to forward. Cache only a genuine 200; an error is never cached.
-  const outHeaders = new Headers();
-  const ct = res.headers.get("content-type");
-  if (ct) outHeaders.set("content-type", ct);
+  /* Pass the body through under a vetted Content-Type and nothing else from upstream (no Set-Cookie, no Location, no Content-Disposition of its own). Cache only a genuine 200. */
+  const ok = classifyResponseType(res.headers.get("content-type"), asked);
+  if (ok.refuse) {
+    try { await res.body?.cancel(); } catch (_e) { /* discarding the refused body */ }
+    return jsonResponse({ error: `The relay does not serve ${ok.refuse} responses.`, host: resolved.host, upstreamStatus: res.status }, res.status >= 400 ? res.status : 502);
+  }
+  const outHeaders = new Headers({ ...SECURITY_HEADERS });
+  outHeaders.set("content-type", ok.type);
+  if (!ok.image) outHeaders.set("content-disposition", "attachment");
   outHeaders.set("cache-control", res.status === 200 ? "public, max-age=300" : "no-store");
   return new Response(res.body, { status: res.status, headers: outHeaders });
 }
