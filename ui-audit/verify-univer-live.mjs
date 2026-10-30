@@ -143,8 +143,11 @@ try {
   const uni = await page.evaluate(() => { const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet(); return { acres: ws.getRange(11, 0).getValue(), sf: ws.getRange(12, 0).getValue(), f1: ws.getRange(11, 0).getFormula(), f2: ws.getRange(12, 0).getFormula() }; });
   const num = (t) => parseFloat(String(t).replace(/,/g, ""));
   ok("F1 the formulas arrived in Univer exactly as typed", uni.f1 === "=Site.Acres" && uni.f2 === "=Plan.Building1.SF", `${uni.f1} / ${uni.f2}`);
-  ok("F2 =Site.Acres shows the same number in Univer as in the regular grid", typeof uni.acres === "number" && Math.abs(uni.acres - num(oldAcres)) < 0.01, `Univer ${uni.acres} vs regular "${oldAcres}"`);
-  ok("F3 =Plan.Building1.SF shows the same number in Univer as in the regular grid", typeof uni.sf === "number" && Math.abs(uni.sf - num(oldSf)) < 1, `Univer ${uni.sf} vs regular "${oldSf}"`);
+  // "The same result in both grids": two numbers agree, or two ERRORS read the same. The throwaway plan has no origin / element rows, so the
+  // regular grid itself answers #REF! / #NAME? here — Univer must say exactly what the regular grid says, never a naked number or a blank.
+  const sameResult = (u, oldText, tol) => (typeof u === "number" && Number.isFinite(num(oldText)) ? Math.abs(u - num(oldText)) < tol : String(u).trim() === String(oldText).trim());
+  ok("F2 =Site.Acres shows the same result in Univer as in the regular grid", sameResult(uni.acres, oldAcres, 0.01), `Univer ${JSON.stringify(uni.acres)} vs regular "${oldAcres}"`);
+  ok("F3 =Plan.Building1.SF shows the same result in Univer as in the regular grid", sameResult(uni.sf, oldSf, 1), `Univer ${JSON.stringify(uni.sf)} vs regular "${oldSf}"`);
   await page.evaluate((k) => localStorage.removeItem(k), SWITCH_KEY);
 } catch (e) {
   console.log("ABORT:", String(e.message).split("\n")[0]);
