@@ -27,9 +27,9 @@ describe("resolveUpstream — pure URL building + guards", () => {
     expect(r.host).toBe("www.sgrcmaps.com");
   });
 
-  it("no query string → no trailing '?'", () => {
-    const r = resolveUpstream(["www.sgrcmaps.com", "x"], "");
-    expect(r.url).toBe("https://www.sgrcmaps.com/x");
+  it("no query string → no stray '?', and the relay asks for JSON (an ArcGIS request with no f answers an HTML page)", () => {
+    const r = resolveUpstream(["www.sgrcmaps.com", "alma", "rest", "services"], "");
+    expect(r.url).toBe("https://www.sgrcmaps.com/alma/rest/services?f=json");
   });
 
   it("a host not on the allow-list is refused (403, JSON, named 'host not allowed')", async () => {
@@ -46,10 +46,10 @@ describe("resolveUpstream — pure URL building + guards", () => {
     expect(await r.error.json()).toEqual({ error: "invalid path" });
   });
 
-  it("every host the dispatch named is allow-listed", () => {
+  it("the host a wired county reads is allow-listed; hosts no row reads are not (NEW-1 review: mgrcmaps.org / maps.crc.ga.gov were listed with no reader and are gone)", () => {
     expect(ALLOWED_HOSTS.has("www.sgrcmaps.com")).toBe(true);
-    expect(ALLOWED_HOSTS.has("mgrcmaps.org")).toBe(true);
-    expect(ALLOWED_HOSTS.has("maps.crc.ga.gov")).toBe(true);
+    expect(ALLOWED_HOSTS.has("mgrcmaps.org")).toBe(false);
+    expect(ALLOWED_HOSTS.has("maps.crc.ga.gov")).toBe(false);
   });
 });
 
@@ -97,10 +97,10 @@ describe("onRequest — GET", () => {
 describe("onRequest — POST", () => {
   it("forwards the POST body and its Content-Type to the upstream host", async () => {
     const fetchMock = vi.fn(async (url, opts) => {
-      expect(url).toBe(`https://${SGRC_PATH}/query`);
+      expect(url).toBe(`https://${SGRC_PATH}/query?f=json`);
       expect(opts.method).toBe("POST");
       expect(opts.headers["content-type"]).toBe("application/x-www-form-urlencoded");
-      expect(new TextDecoder().decode(opts.body)).toBe("where=1%3D1&f=json");
+      expect(String(opts.body)).toBe("where=1%3D1&f=json");
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -175,9 +175,9 @@ describe("onRequest — one retry on a transient upstream status (B2507056)", ()
   });
   it("a POST retries with its body intact", async () => {
     const bodies = [];
-    const fetchMock = vi.fn(async (_u, opts) => { bodies.push(new TextDecoder().decode(opts.body)); return bodies.length === 1 ? new Response("x", { status: 503 }) : new Response("{}", { status: 200 }); });
+    const fetchMock = vi.fn(async (_u, opts) => { bodies.push(String(opts.body)); return bodies.length === 1 ? new Response("x", { status: 503 }) : new Response("{}", { status: 200 }); });
     vi.stubGlobal("fetch", fetchMock);
-    const res = await onRequest({ request: new Request(`https://planyr.io/gis-proxy/${SGRC_PATH}`, { method: "POST", body: "where=1%3D1&f=json", headers: { "content-type": "application/x-www-form-urlencoded" } }), params: { path: segsFor(SGRC_PATH) } });
+    const res = await onRequest({ request: new Request(`https://planyr.io/gis-proxy/${SGRC_PATH}/query`, { method: "POST", body: "where=1%3D1&f=json", headers: { "content-type": "application/x-www-form-urlencoded" } }), params: { path: segsFor(`${SGRC_PATH}/query`) } });
     expect(res.status).toBe(200);
     expect(bodies).toEqual(["where=1%3D1&f=json", "where=1%3D1&f=json"]);
   });
@@ -192,7 +192,7 @@ describe("onRequest — response hygiene", () => {
     const res = await call(`${SGRC_PATH}?f=json`);
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(res.headers.get("x-upstream-only")).toBeNull();
-    expect(res.headers.get("content-type")).toBe("application/json");
+    expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
   });
 
   it("caches only a genuine 200 — an upstream error response is never cached", async () => {

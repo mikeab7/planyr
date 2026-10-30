@@ -862,14 +862,23 @@ esri-leaflet, pointed straight at the same relative path) never needs to know a 
 
 **To add a new host:** add its exact hostname to `ALLOWED_HOSTS` in
 `functions/gis-proxy/[[path]].js` (a hard-coded set — never a wildcard/pattern, so this can never
-become an open relay to an arbitrary host), then wire the county's `layerUrl` as
+become an open relay to an arbitrary host) **in the same PR that wires the first row to it**, then wire the county's `layerUrl` as
 `/gis-proxy/<that host>/<the county's own REST path>`, exactly as if you were building the normal
-`https://` URL but swapping the scheme+host for the proxy's own path. GET and POST both work (the
-function forwards a POST body + its Content-Type, so the `fetchArcgisJson` GET→POST fallback for
-an over-long query still works through it); nothing is cached beyond a short response-lifetime
-`Cache-Control` on a genuine 200 — this is a pass-through, not a copy, unlike the separate B445
-`/api/gis-cache/` proxy (a Drive-backed cache for raster **imagery**; see that module's own header
-— the two proxies solve different problems and are not the same mechanism).
+`https://` URL but swapping the scheme+host for the proxy's own path. `test/gisProxyRelay.test.js` fails in both directions —
+a listed host no row reads, and a row that reads an unlisted host — so a host cannot be added "to measure it later" (there is no
+`KNOWN_UNUSED` baseline any more); measure an unwired host from a PR preview that adds it, and delete it if the county stays unwired.
+
+**What the relay will carry (NEW-1 security review, B2555776, 2026-10-30).** It serves upstream bytes from the planyr.io origin, so it is
+deliberately narrow: **paths** — only ArcGIS REST read shapes (`…/<Svc>/MapServer|FeatureServer|ImageServer[/<layer>]`, `query`, `identify`,
+`export`, `exportImage`, `layers`, `legend`, `info`, `tile/z/y/x`, the services directory); POST only to `query` / `identify` / `export` /
+`exportImage`; any write or admin segment (`applyEdits`, `addFeatures`, `deleteFeatures`, `calculate`, `admin`, `sharing`, `generateToken` …) is refused,
+as are dot segments (also `%2e%2e`), encoded slashes and control characters. **Format** — an `f=` that is not `json` / `pjson` / `geojson` / `image` / `pbf`
+(including `f=html` and no `f` at all, which ArcGIS answers with an HTML page) is rewritten to `json`, and a JSONP `callback` is dropped. **Response type** — JSON,
+geojson, protobuf and png / jpeg / gif / webp / tiff only; HTML, SVG, XML and JavaScript are refused with a JSON error (a server that labels JSON `text/plain` —
+measured 2026-10-30: Greene County MO, Clinton County PA, MDEQ Mississippi — is re-labelled JSON, but only when JSON was asked for). **Headers** — every response
+carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`, and a non-image body `Content-Disposition: attachment`
+(`public/_headers` does not apply to Pages Function responses). A wired county whose server genuinely needs another shape says so in the PR that adds it —
+widen `classifyPath` / `classifyResponseType` there, with a test, never by loosening a filter for everyone.
 
 **SGRC's one host already covers eleven more Georgia counties**, all reachable the identical way
 once wired: Atkinson, Ben Hill, Berrien, Brooks, Coffee, Cook, Echols, Irwin, Lanier, Pierce and
