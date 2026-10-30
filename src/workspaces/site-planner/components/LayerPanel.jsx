@@ -63,6 +63,7 @@ import { useServiceAreas } from "../lib/useServiceAreas.js";
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
 import { useViewLegends } from "../lib/viewLegendStore.js";
+import { StackedLegend } from "./ViewLegend.jsx";
 
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const TEXT = FONT_SIZE.control;
@@ -147,6 +148,7 @@ function Select({ label, value, onChange, options, testId }) {
 
 function Legend({ items }) {
   if (!items || !items.length) return null;
+  if (items.some((lg) => lg.stacked)) return <StackedLegend items={items} />;
   return (
     <div data-part="legend" style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
       {items.map((lg) => (
@@ -533,7 +535,7 @@ export default function LayerPanel({
     const lift = showAbove && members.some(([, c]) => configCanLift(c));
     const ramp = id === "elevation" ? rampGradient(cfg0) : null;
     const viewLegendRow = !ramp && members.some(([, c]) => typeof c.viewLegend === "function");
-    const legend = ramp ? [] : (viewLegendRow ? (viewLegends[id] || []) : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
+    const legend = ramp ? [] : (viewLegendRow ? (viewLegends[id] || []).map((e) => ({ ...e, stacked: true })) : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
     const zoomGated = vis.state === "dormant-zoom";
     const plan = dropdownPlan({ on: anyOn, zoomGated, canLift: lift, hasStatus: !!status, settings, hasLegend: legend.length > 0, hasRamp: !!ramp, hasInfo: info.some((s) => s && s.text) });
     const corr = overlays.txrrc_pipe_easement || {};

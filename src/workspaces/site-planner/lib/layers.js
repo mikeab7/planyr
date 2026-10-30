@@ -1618,7 +1618,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   lyr.on("overbudget", (e) => {
     refused = true;
     // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
-    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `Zoom in to see ${String(cfg && cfg.label || "this layer").toLowerCase()} here.`);   // B2573312: plain words — no point counts, no units (owner 2026-10-30)
   });
   lyr.on("requesterror", (e) => {
     cycleErr = true; clearTimeout(resetTimer);   // this cycle failed: no `load` of it may reset the count
@@ -1636,6 +1636,19 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
       onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
     }
   });
+}
+
+/* A feature's bounding box [west, south, east, north] from its GeoJSON geometry (null when it has none) — the draw budget judges the view, so it must know where a held feature is. */
+function bboxOf(f) {
+  const g = f && f.geometry;
+  if (!g) return null;
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  const walk = (c) => {
+    if (typeof c[0] === "number") { if (c[0] < w) w = c[0]; if (c[0] > e) e = c[0]; if (c[1] < s) s = c[1]; if (c[1] > n) n = c[1]; return; }
+    for (const x of c) walk(x);
+  };
+  try { if (g.type === "GeometryCollection") (g.geometries || []).forEach((x) => x && x.coordinates && walk(x.coordinates)); else if (g.coordinates) walk(g.coordinates); } catch (_) { return null; }
+  return Number.isFinite(w) ? [w, s, e, n] : null;
 }
 
 /* THE ONE PLACE an esri featureLayer is constructed (NEW-1). Both call sites below go through
@@ -1659,7 +1672,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
     interactive: interactive && canHover,
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
-    ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
+    ...(cfg.lineLabel && !cfg.lineLabel.polygon ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
   }));
   /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
    * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
@@ -1680,57 +1693,73 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   // B2507064 (NEW-9) — the draw budget: a batch of features over the vertex budget is NOT handed to Leaflet (that is what froze the tab); the layer says so instead.
   {
     const origCreate = lyr.createLayers;
-    let drawn = 0;
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
-    /* B2521584 — what is already on the map, by feature id → the vertex count of the geometry held now. esri-leaflet re-delivers a feature it already holds (every pan / grid cell that
-     * touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
+    /* What is already on the map, by feature id → { v: the vertex count of the geometry held now, count: what it costs the budget (0 for a feature esri-leaflet already held before this wrapper saw it), bb: its bounding box [w, s, e, n] }. esri-leaflet re-delivers a feature it already holds (every pan / grid
+     * cell that touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
      * copy under the same id, and `setLatLngs` replaces the old one). So a held id is charged only for the vertices it GROWS by; a refused batch leaves the old geometry in place. */
     const held = new Map();
     /* NEW-1 review (B2521584, finding 7): esri-leaflet takes a feature OFF the map when its cell leaves the view (`removefeature`) and puts it back with `addLayers` (`addfeature`, no
-     * `createLayers`), keeping the Leaflet layer in `_layers` for the next visit. The total is judged against what is ON the map, so a feature that left the view stops counting until it
-     * returns — otherwise a long pan accumulates every cell ever visited and a layer is refused as "too detailed" in a view that is not. `offMap` is that set; a `permanent` removal forgets it. */
+     * `createLayers`), keeping the Leaflet layer in `_layers` for the next visit. A feature that left the view stops counting until it returns; a `permanent` removal forgets it. */
     const offMap = new Set();
-    const heldSum = () => { let n = 0; for (const [id, v] of held) if (!offMap.has(id)) n += v; return n; };
+    /* B2573312 (NEW-4) — THE TOTAL IS JUDGED AGAINST THE VIEW, NOT AGAINST EVERYTHING EVER LOADED. The layer total used to be a running sum of every feature fetched and still held, so a layer panned
+     * across a county (or zoomed out once and back in) carried hundreds of thousands of vertices from places no longer on screen and refused the next small batch — "too detailed to draw (62k points)"
+     * over polygons that were visibly drawn. What freezes a tab is what the view has to draw, so only held features whose box touches the (padded) view count. A feature with no id can never be
+     * recognised again, so it is counted every time it arrives and never forgotten (the safe direction). */
+    let anon = 0;
+    const viewSum = () => {
+      const map = lyr._map, b = map && typeof map.getBounds === "function" ? map.getBounds().pad(0.25) : null;
+      let n = anon;
+      for (const [id, h] of held) {
+        if (offMap.has(id)) continue;
+        if (b && h.bb && (h.bb[2] < b.getWest() || h.bb[0] > b.getEast() || h.bb[3] < b.getSouth() || h.bb[1] > b.getNorth())) continue;
+        n += h.count;
+      }
+      return n;
+    };
     lyr.on("removefeature", (e) => {
       const id = e && e.feature && e.feature.id;
       if (id == null || !held.has(id)) return;
-      if (!offMap.has(id)) { drawn = Math.max(0, drawn - held.get(id)); offMap.add(id); }
-      if (e.permanent) { held.delete(id); offMap.delete(id); }
+      if (e.permanent) { held.delete(id); offMap.delete(id); } else offMap.add(id);
     });
     lyr.on("addfeature", (e) => {
       const id = e && e.feature && e.feature.id;
-      if (id != null && offMap.has(id)) { offMap.delete(id); drawn += held.get(id) || 0; }
+      if (id != null) offMap.delete(id);
     });
     lyr.createLayers = function (features) {
-      let grow = 0, net = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what is on the map (judged against the layer total)
+      let grow = 0, net = 0, anonNet = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what the view holds (judged against the layer total)
       const mine = [];
       const inBatch = new Set();
+      const preHeld = new Set();   // ids esri-leaflet already held before this wrapper saw them: free repeats, never charged (as before)
       for (const f of features || []) {
         const fv = countVertices([f], Math.max(cap, total));
         const id = f && f.id != null ? f.id : null;
         if (id != null && inBatch.has(id)) continue;   // the same id twice in ONE batch is one feature on the map
         if (id != null) inBatch.add(id);
-        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - (offMap.has(id) ? 0 : held.get(id)); }
-        else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
-        else { grow += fv; net += fv; }
-        if (id != null) mine.push([id, fv]);
+        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id).v); net += fv - (offMap.has(id) ? 0 : held.get(id).v); }
+        else if (id != null && this._layers && this._layers[id]) { preHeld.add(id); /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
+        else { grow += fv; net += fv; if (id == null) anonNet += fv; }
+        if (id != null) mine.push([id, fv, f]);
       }
-      if (grow > cap || drawn + net > total) {
+      if (grow > cap || viewSum() + net > total) {
         try { this.fire("overbudget", { vertices: grow, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
         return undefined;   // refused: nothing is recorded, the old geometry stays on the map
       }
-      drawn = Math.max(0, drawn + net);   // signed: a feature that comes back LIGHTER credits the total (a layer re-asked at several zooms must not ratchet up to a refusal)
-      for (const [id, fv] of mine) { held.set(id, fv); offMap.delete(id); }
+      anon += anonNet;
+      for (const [id, fv, f] of mine) {
+        const prev = held.get(id);
+        held.set(id, { v: fv, count: prev ? Math.max(0, prev.count + fv - prev.v) : (preHeld.has(id) ? 0 : fv), bb: bboxOf(f) });
+        offMap.delete(id);
+      }
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { drawn = 0; held.clear(); offMap.clear(); });
+    lyr.on("remove", () => { anon = 0; held.clear(); offMap.clear(); });
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;
       const onZoom = () => {
         const z = lyr._map && lyr._map.getZoom();
         if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
-        fetchedAt = z; drawn = heldSum();   // the total is what is still ON the map, not zero
+        fetchedAt = z;
         try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
       };
       lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });
@@ -1761,7 +1790,11 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     lyr.on("remove", () => { try { lyr._map && lyr._map.off("moveend", publish); } catch (_) { /* map already gone */ } clearViewLegend(id); });
     lyr.on("remove", () => { if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already gone */ } unsub = null; } });
   }
-  if (cfg.lineLabel) {
+  /* B2573312 (NEW-3) — an AREA row that prints its code on each polygon (`lineLabel.polygon`: DeSoto zoning) is laid out by the pure `zoneLabels.js` — one label per polygon at its
+   * pole of inaccessibility, hidden when the polygon is too small to hold it, never overlapping — and drawn by the lazy `zoneLabelLayer.js`. The per-feature tooltip path below is for lines. */
+  if (cfg.lineLabel && cfg.lineLabel.polygon) {
+    import("./zoneLabelLayer.js").then((m) => m.attachZoneLabels(lyr, cfg, { labelPane }), () => { /* the layer still paints; only its codes are unavailable */ });
+  } else if (cfg.lineLabel) {
     const syncLabels = () => {
       const want = wantLabels(lyr);
       if (want === labelsOn) return;

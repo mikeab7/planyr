@@ -84,15 +84,34 @@ describe("the ordinance lists, exactly as the dispatching chat read them (2026-1
   });
 });
 
-describe("zoningLegend", () => {
-  it("lists each code once per jurisdiction, grouped and sorted, with sourced names", () => {
-    const items = [
-      { code: "M-1", jurisdiction: "Olive Branch", color: "#7c3aed" }, { code: "M-1", jurisdiction: "Olive Branch", color: "#7c3aed" },
-      { code: "C-2", jurisdiction: "Olive Branch", color: "#ea580c" }, { code: "C-2", jurisdiction: "Unincorporated DeSoto County", color: "#ea580c" },
-      { code: "R-10", jurisdiction: "Olive Branch", color: "#ca8a04" }, { code: "R-2", jurisdiction: "Olive Branch", color: "#ca8a04" },
-    ];
+describe("zoningLegend (B2573312 NEW-1: grouped by jurisdiction, never a per-row suffix)", () => {
+  const items = [
+    { code: "M-1", jurisdiction: "Olive Branch", color: "#7c3aed" }, { code: "M-1", jurisdiction: "Olive Branch", color: "#7c3aed" },
+    { code: "C-2", jurisdiction: "Olive Branch", color: "#ea580c" }, { code: "C-2", jurisdiction: "Unincorporated DeSoto County", color: "#ea580c" },
+    { code: "R-10", jurisdiction: "Olive Branch", color: "#ca8a04" }, { code: "R-2", jurisdiction: "Olive Branch", color: "#ca8a04" },
+  ];
+  it("lists each code once per jurisdiction, each under its own group, sorted, with sourced names — and NO parenthetical on any row", () => {
     const out = zoningLegend(items, T);
-    expect(out.map((e) => e.label)).toEqual(["C-2 · Highway Commercial (Olive Branch)", "M-1 · Light Industrial", "R-2", "R-10", "C-2 · General Commercial (Unincorporated DeSoto County)"]);
+    expect(out.map((e) => [e.group, e.label])).toEqual([
+      ["Olive Branch", "C-2 · Highway Commercial"], ["Olive Branch", "M-1 · Light Industrial"], ["Olive Branch", "R-2"], ["Olive Branch", "R-10"],
+      ["Unincorporated DeSoto County", "C-2 · General Commercial"],
+    ]);
+    for (const e of out) expect(e.label).not.toMatch(/\(/);
+  });
+  it("the same code in two governments is two entries under two headings (never merged), with each government's own name", () => {
+    const out = zoningLegend(items, T).filter((e) => e.label.startsWith("C-2"));
+    expect(out).toHaveLength(2);
+    expect(new Set(out.map((e) => e.group)).size).toBe(2);
+  });
+  it("one jurisdiction in view → one group; cities come before the unincorporated county; codes whose jurisdiction is unknown come last with no heading", () => {
+    expect(new Set(zoningLegend(items.filter((i) => i.jurisdiction === "Olive Branch"), T).map((e) => e.group))).toEqual(new Set(["Olive Branch"]));
+    const out = zoningLegend([{ code: "A", jurisdiction: "Unincorporated DeSoto County" }, { code: "PB", jurisdiction: null }, { code: "A-R", jurisdiction: "Olive Branch" }], T);
+    expect(out.map((e) => e.group)).toEqual(["Olive Branch", "Unincorporated DeSoto County", null]);
+  });
+  it("PB inside Olive Branch has no Olive Branch name: it keeps the bare code (never the county's 'Planned Business') but is its own entry", () => {
+    const out = zoningLegend([{ code: "PB", jurisdiction: "Olive Branch" }, { code: "PB", jurisdiction: "Unincorporated DeSoto County" }], T);
+    expect(out.map((e) => e.label)).toContain("PB");
+    expect(out.find((e) => e.group === "Olive Branch").label).toBe("PB");
   });
   it("a code from a jurisdiction not known yet is listed by its code alone; an empty / junk input gives an empty legend", () => {
     expect(zoningLegend([{ code: "M-1", jurisdiction: null, color: "#000" }], T).map((e) => e.label)).toEqual(["M-1"]);
