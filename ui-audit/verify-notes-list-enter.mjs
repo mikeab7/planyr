@@ -227,6 +227,29 @@ console.log("\n=== B · a note pasted BEFORE the fix: Enter works there too, and
   ok("and the reloaded editor renders nested lists (not paragraphs)", stillLists >= 1, `nested ul count ${stillLists}`);
 }
 
+/* ── C · TYPED TEXT THAT ONLY LOOKS LIKE A MARKER IS NEVER TOUCHED (follow-up NEW-1, 2026-10-30) ─────────────────────────────────────────
+ * "Mr.  Jones will review." used to come out of the old-note cleanup as a numbered item "Jones will review." — the word deleted. The
+ * strings are the report's own. Opened with Enter pressed at the end of the LAST line (a real edit, so the page is saved), every line
+ * must still be a plain paragraph with its exact words, in the stored page after a reload as well. */
+if (!only || only.includes("typed")) {
+  console.log("\n=== C · typed lines that look like markers keep every word ===");
+  const LINES = ["Mr.  Jones will review.", "Dr.  Smith to call", "No.  3 is the corner lot", "Re.  Utility easement", "A.  Ryan to send", "1.  Entitlements", "I.  Introduction", "Done.  Next steps follow.", "• typed bullet", "- typed dash", "o   hello world", "Total  $85K", "400K SF - $85K"];
+  await seed([box("b1", LINES.map((l) => para(l))), para("")]);
+  const untouched = JSON.stringify(await stored());
+  ok("opening the note does not rewrite it", !untouched.includes("orderedList") && !untouched.includes("bulletList"), untouched.slice(0, 160));
+  const shown = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror .planyr-anchor-content > p")].map((e) => e.textContent.replace(/\u00a0/g, " ")));
+  ok("every typed line is on screen as a plain paragraph with its exact words", LINES.every((l, i) => shown[i] === l) && !(await page.evaluate(() => document.querySelectorAll(".ProseMirror ol, .ProseMirror ul").length)), JSON.stringify(shown));
+  await enterBox("400K SF - $85K"); await key("End"); await key("Enter"); await type("tail");
+  const after = outline(await stored());
+  const words = ["Mr.", "Dr.", "No.", "Re.", "A.", "1.", "I.", "Done.", "• typed", "- typed", "o   hello", "Total", "400K"];
+  ok("after an edit and a save every typed word is still in the stored page, no list was made", words.every((w) => after.some((l) => l.includes(w))) && !after.some((l) => /^\s*(•|\d+\.) (Jones|Smith|3 is|Utility|Ryan|Entitlements|Introduction)/.test(l)), JSON.stringify(after));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+  await pacedWait(page, 900);
+  const reloaded = outline(JSON.parse(await page.evaluate((k) => localStorage.getItem(k), PAGE_KEY)));
+  ok("and after a reload", JSON.stringify(reloaded) === JSON.stringify(after), JSON.stringify(reloaded));
+}
+
 ok("no page errors", errs.length === 0, errs.join(" | "));
 console.log(`\n${passN} passed, ${failN} failed`);
 await browser.close();
