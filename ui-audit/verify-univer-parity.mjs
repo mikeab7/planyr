@@ -60,7 +60,7 @@ const wait = (ms) => page.waitForTimeout(ms);
 /** Where the checklist runs: the sandbox host by default; verify-univer-live.mjs binds the real signed-in app instead. */
 export function bind({ page: p, reset: r, savedLast: sl, flushSave: fs } = {}) { if (p) page = p; if (r) resetImpl = r; if (sl) savedLastImpl = sl; if (fs) flushSaveImpl = fs; }
 let resetImpl = null, savedLastImpl = null, flushSaveImpl = null;
-export { seedWorkbook, checks };
+export { seedWorkbook, checks, ink, edges, click, clickToolbar, press, flushSave, savedLast, INDENT_INC };
 async function reset(workbook = seedWorkbook()) {
   if (resetImpl) return resetImpl(workbook);
   await wait(450);                                              // let any debounced save from the previous check land first
@@ -170,12 +170,66 @@ check("header-select", "Header click selects the whole line; drag and Shift+clic
   const bad = [!wholeCol && "column click", !dragOk && "header drag", !shiftOk && "Shift+click", !wholeRow && "row click", !allOk && "corner box"].filter(Boolean);
   return bad.length ? FAIL(`not met: ${bad.join(", ")} — got ${JSON.stringify({ colSel, drag, shift, rowSel, all })}`) : PASS("column click, drag C→E, Shift+click G, row click and the corner box all select the right ranges");
 });
-check("header-drag-moves", "Dragging an already-selected header does not move the row/column (Excel needs Shift)", async () => {
+const dragFrom = async (a, z, { shift = false } = {}) => {
+  await page.mouse.move(a.x, a.y); await wait(250);   // a person hovers before pressing; Univer arms its move cursor on hover
+  if (shift) await page.keyboard.down("Shift");
+  await page.mouse.down(); await page.mouse.move(z.x, z.y, { steps: 8 }); await page.mouse.up();
+  if (shift) await page.keyboard.up("Shift");
+  await wait(350);
+};
+const rowOf = (r, n = 6) => Promise.all(Array.from({ length: n }, (_, c) => val1(r, c)));
+const colOf = (c, n = 6) => Promise.all(Array.from({ length: n }, (_, r) => val1(r, c)));
+/* NEW-1 (2026-10-30): a plain drag on a header — selected or not — extends the header selection; only Shift+drag MOVES it (Excel).
+ * Univer's own header-move controller moves on ANY drag from a selected header; lib/univerHeaderMove.js gates it. */
+check("header-drag-moves", "Dragging an already-selected header does not move the row/column; it extends the selection (Excel needs Shift to move)", async () => {
   await reset(); const h = await headerPt(2); await page.mouse.click(h.x, h.y); await wait(150);
-  const before = await val1(0, 2);
-  const z = await headerPt(4); await page.mouse.move(h.x, h.y); await page.mouse.down(); await page.mouse.move(z.x, z.y, { steps: 6 }); await page.mouse.up(); await wait(300);
-  const stayed = (await val1(0, 2)) === before;
-  return stayed ? PASS("the column stayed where it was; the drag only re-selected") : FAIL(`column C was MOVED by dragging its selected header (C1 was "${before}", now "${await val1(0, 2)}") — Excel only moves it with Shift held`);
+  const before = await rowOf(0);
+  const z = await headerPt(4); await dragFrom(h, z);
+  const after = await rowOf(0), s = (await sel())[0];
+  if (!eq(before, after)) return FAIL(`column C was MOVED by dragging its selected header (row 1 was ${JSON.stringify(before)}, now ${JSON.stringify(after)}) — Excel only moves it with Shift held`);
+  return s && s.c1 === 2 && s.c2 === 4 ? PASS(`the column stayed where it was and the selection became ${s.a1}`) : FAIL(`nothing moved, but the selection is ${s && s.a1} (a plain drag should extend it to C:E)`);
+});
+check("header-drag-moves-rows", "Same for a row header: a plain drag extends, nothing moves", async () => {
+  await reset(); const h = await rowHeaderPt(1); await page.mouse.click(h.x, h.y); await wait(150);
+  const before = await colOf(0);
+  const z = await rowHeaderPt(3); await dragFrom(h, z);
+  const after = await colOf(0), s = (await sel())[0];
+  if (!eq(before, after)) return FAIL(`row 2 was MOVED by dragging its selected header (column A was ${JSON.stringify(before)}, now ${JSON.stringify(after)})`);
+  return s && s.r1 === 1 && s.r2 === 3 ? PASS(`the row stayed where it was and the selection became ${s.a1}`) : FAIL(`nothing moved, but the selection is ${s && s.a1} (should be 2:4)`);
+});
+check("header-shift-drag-moves", "Shift+drag on a selected column / row header MOVES it (Excel)", async () => {
+  await reset(); const h = await headerPt(2); await page.mouse.click(h.x, h.y); await wait(150);
+  const before = await rowOf(0);                                         // [1, alpha, cherry, null, null, null]
+  const z = await headerPt(4); await dragFrom(h, z, { shift: true });
+  const after = await rowOf(0);
+  const colMoved = !eq(before, after) && after[2] !== "cherry" && after.includes("cherry");
+  await reset(); const rh = await rowHeaderPt(1); await page.mouse.click(rh.x, rh.y); await wait(150);
+  const rb = await colOf(0);
+  const rz = await rowHeaderPt(3); await dragFrom(rh, rz, { shift: true });
+  const ra = await colOf(0);
+  const rowMoved = !eq(rb, ra);
+  return colMoved && rowMoved ? PASS(`column C moved (row 1 ${JSON.stringify(before)} → ${JSON.stringify(after)}); row 2 moved (column A ${JSON.stringify(rb)} → ${JSON.stringify(ra)})`) : FAIL(`column moved=${colMoved}, row moved=${rowMoved}`);
+});
+check("header-press-keeps-others", "Ctrl+click on an already-selected header still adds a range (the gate never collapses a multi-selection)", async () => {
+  await reset(); await click(0, 0);
+  const a = await headerPt(2); await page.mouse.click(a.x, a.y); await wait(120);
+  const b = await headerPt(4); await page.keyboard.down("Control"); await page.mouse.click(b.x, b.y); await page.keyboard.up("Control"); await wait(150);
+  const two = (await sel()).map((x) => x.a1);
+  return two.length === 2 && two[0] === "C:C" && two[1] === "E:E" ? PASS("C:C and E:E selected together") : FAIL(`selection list is ${JSON.stringify(two)}`);
+});
+check("header-resize-autofit", "The column border still resizes by drag (with the column selected) and double-click still autofits", async () => {
+  await reset(); const h = await headerPt(2); await page.mouse.click(h.x, h.y); await wait(150);
+  const p = await pt(0, 2); const cv = await canvasBox();
+  const edge = { x: p.right - 1, y: cv.top + 10 };
+  const w0 = await inSheet((api, ws) => ws.getColumnWidth(2));
+  await page.mouse.move(edge.x, edge.y); await wait(120);
+  await page.mouse.down(); await page.mouse.move(edge.x + 70, edge.y, { steps: 6 }); await page.mouse.up(); await wait(350);
+  const w1 = await inSheet((api, ws) => ws.getColumnWidth(2));
+  const p2 = await pt(0, 2); const edge2 = { x: p2.right - 1, y: cv.top + 10 };
+  await page.mouse.move(edge2.x, edge2.y); await wait(120); await page.mouse.dblclick(edge2.x, edge2.y); await wait(450);
+  const w2 = await inSheet((api, ws) => ws.getColumnWidth(2));
+  const resized = w1 > w0 + 30;
+  return resized && w2 !== w1 ? PASS(`drag: ${w0} → ${w1}; double-click autofit: ${w1} → ${w2}`) : FAIL(`drag ${w0} → ${w1} (resized=${resized}); double-click ${w1} → ${w2}`);
 });
 check("ctrl-click", "Ctrl+click adds a second, separate range", async () => {
   await reset(); await click(0, 0); await heldClick(2, 2, "Control"); await wait(150);
@@ -241,11 +295,103 @@ check("spill-and-clear", "Text spills over empty neighbours; clearing a cell nev
   if (spill < 8) return FAIL(`the long label did not spill into the empty cell beside it (${spill} dark pixels)`);
   return same ? PASS(`label spills (${spill} px of ink in the empty neighbour); clearing A5 left B5's pixels identical`) : FAIL("clearing the neighbour changed the pixels of B5");
 });
-check("indent", "Increase / decrease indent works on any cell", async () => {
-  await reset();
-  const found = await ev(() => { const t = [...document.querySelectorAll("[title],[aria-label],[data-u-command]")].map((e) => (e.title || "") + (e.getAttribute("aria-label") || "") + (e.getAttribute("data-u-command") || "")).join("|"); return /indent/i.test(t); });
-  const ids = await ev(() => { try { const api = window.__planyrUniverRead.api(); const svc = api.getShortcut ? "has-shortcut-api" : "none"; return svc; } catch (e) { return String(e); } });
-  return found ? PASS("an indent control exists") : NOT_IN_OSS(`no indent control in the toolbar or menus and no indent command in @univerjs/sheets-ui 1.3.1 (the cell model has no indent field); Planyr's indent values are carried in the bridge sidecar but not drawn. (${ids})`);
+/** x-extent of the dark ink in a cell screenshot (the text), relative to the clip's left edge */
+const edges = (buf) => page.evaluate(async (b64) => {
+  const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+  const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height).data; let left = -1, right = -1, dark = 0;
+  for (let x = 0; x < c.width; x++) for (let y = 0; y < c.height; y++) { const i = (y * c.width + x) * 4; if (d[i] < 110 && d[i + 1] < 110 && d[i + 2] < 110) { dark++; if (left < 0) left = x; right = x; } }
+  return { left, right, dark };
+}, buf.toString("base64"));
+const INDENT_INC = "planyr.sheet.command.increase-indent", INDENT_DEC = "planyr.sheet.command.decrease-indent";
+const clickToolbar = async (cmd) => {
+  const box = await page.locator(`[data-u-command="${cmd}"]`).evaluateAll((els) => { for (const e of els) { const r = e.getBoundingClientRect(); if (r.width > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; } return null; });
+  if (!box) throw new Error(`no visible toolbar button for ${cmd}`);
+  await page.mouse.click(box.x, box.y); await wait(250);
+};
+check("indent", "Increase / Decrease Indent: drawn on the reading side only, inside the column, one undo step per click, saved as Planyr's number", async () => {
+  const wb = createWorkbook(); let sh = wb.sheets[0].sheet;
+  sh = setRaw(sh, 2, 0, "Traffic Study");
+  sh = setRaw(sh, 3, 0, "Right"); sh = setCellStyle(sh, 3, 3, 0, 0, { align: "right" });
+  sh = setRaw(sh, 4, 0, "Centred"); sh = setCellStyle(sh, 4, 4, 0, 0, { align: "center" });
+  sh = setRaw(sh, 5, 0, "A long label that is wider than its own column for sure");
+  sh = setRaw(sh, 6, 1, "Narrow"); sh = setRaw(sh, 6, 2, "x"); sh = setCellStyle(sh, 6, 6, 1, 1, { indent: 15 });
+  sh = { ...sh, columns: sh.columns.map((c, i) => (i === 1 ? { ...c, width: 40 } : c)) };
+  await reset({ ...wb, sheets: [{ ...wb.sheets[0], sheet: sh }] });
+  const park = () => click(15, 8);
+  const edgeOf = async (r, c) => { await park(); return edges(await ink(r, c)); };
+  const near = (got, want) => Math.abs(got - want) <= 1.5;
+  const fails = [];
+  // 1. a left-aligned label moves RIGHT by one step per click, stays a whole number of steps, and undoes one click at a time
+  const L0 = await edgeOf(2, 0);
+  await click(2, 0); await clickToolbar(INDENT_INC);
+  const L1 = await edgeOf(2, 0);
+  await click(2, 0); await clickToolbar(INDENT_INC);
+  const L2 = await edgeOf(2, 0);
+  if (!near(L1.left - L0.left, 14) || !near(L2.left - L0.left, 28)) fails.push(`left edge moved ${L1.left - L0.left} then ${L2.left - L0.left} px (want 14 then 28)`);
+  if (L1.dark < L0.dark * 0.9) fails.push("the indented text lost ink (clipped)");
+  await flushSave();
+  const saved = await savedLast();
+  const key = saved && Object.keys(saved.wb.sheets[0].sheet.cells).find((k) => saved.wb.sheets[0].sheet.cells[k] === "Traffic Study");
+  const savedIndent = key && saved.wb.sheets[0].sheet.styles[key] && saved.wb.sheets[0].sheet.styles[key].indent;
+  if (savedIndent !== 2) fails.push(`saved workbook indent is ${JSON.stringify(savedIndent)}, not 2`);
+  await click(2, 0); await clickToolbar(INDENT_DEC);
+  const L3 = await edgeOf(2, 0);
+  if (!near(L3.left - L0.left, 14)) fails.push(`Decrease left the text ${L3.left - L0.left} px in (want 14)`);
+  await click(2, 0); await press("Control+z");
+  const L4 = await edgeOf(2, 0);
+  if (!near(L4.left - L0.left, 28)) fails.push(`one Ctrl+Z after Decrease put the text ${L4.left - L0.left} px in (want 28: one undo step per click)`);
+  // 2. the bindable command ids work from outside the toolbar (the Excel-keys plugin binds Alt H 6 / Alt H 5 to these)
+  await click(2, 0);
+  await ev((id) => window.__planyrUniverRead.api().executeCommand(id), INDENT_DEC); await wait(250); await ev((id) => window.__planyrUniverRead.api().executeCommand(id), INDENT_DEC); await wait(250);
+  await ev((id) => window.__planyrUniverRead.api().executeCommand(id), INDENT_DEC); await wait(250);   // already 0: stays 0, never negative
+  const L5 = await edgeOf(2, 0);
+  if (!near(L5.left, L0.left)) fails.push(`three Decrease commands from 2 left the text at ${L5.left - L0.left} px (want back at 0)`);
+  // 3. right-aligned: the RIGHT edge moves left; centred: nothing moves
+  const R0 = await edgeOf(3, 0); const C0 = await ink(4, 0);
+  await click(3, 0); await clickToolbar(INDENT_INC); await clickToolbar(INDENT_INC);
+  await click(4, 0); await clickToolbar(INDENT_INC); await clickToolbar(INDENT_INC);
+  const R1 = await edgeOf(3, 0); await park(); const C1 = await ink(4, 0);
+  if (!near(R0.right - R1.right, 28)) fails.push(`right-aligned text moved ${R0.right - R1.right} px from the right edge (want 28)`);
+  if (!near(R1.left - R0.left, R1.right - R0.right)) fails.push("right-aligned text changed width instead of moving");
+  if (!C0.equals(C1)) fails.push("centred text moved when it was indented (Excel: no visible change)");
+  // 4. a left label still spills over its empty neighbour when indented, and starts where the indent says
+  const S0 = await edgeOf(5, 0); const spill0 = await darkPixels(await ink(5, 1));
+  await click(5, 0); await clickToolbar(INDENT_INC);
+  const S1 = await edgeOf(5, 0); const spill1 = await darkPixels(await ink(5, 1));
+  if (!near(S1.left - S0.left, 14)) fails.push(`the long label moved ${S1.left - S0.left} px (want 14)`);
+  if (spill1 < 8 || spill0 < 8) fails.push(`an indented long label no longer spills into the empty cell beside it (${spill0} -> ${spill1} px of ink)`);
+  // 5. never outside the column: B7 (narrow, indent 15) beside a filled C7 must not paint a pixel into C7
+  const N1 = await ink(6, 2);
+  await click(6, 1); await press("Delete"); await wait(250); await park();      // empty B7 = what C7 looks like with no neighbour text
+  const NEmpty = await ink(6, 2);
+  if (!N1.equals(NEmpty)) fails.push("a deep indent in a narrow column painted text into the next column");
+  // 6. an indent follows its cell through a column insert (the style travels with the cell)
+  await click(2, 0); await clickToolbar(INDENT_INC);
+  await inSheet((api, ws) => { ws.insertColumnBefore(0); }); await wait(500);
+  await flushSave();
+  const saved2 = await savedLast();
+  const sh2 = saved2 && saved2.wb.sheets[0].sheet;
+  const key2 = sh2 && Object.keys(sh2.cells).find((k) => sh2.cells[k] === "Traffic Study");
+  if (!key2 || !sh2.styles[key2] || sh2.styles[key2].indent !== 1) fails.push(`after inserting a column the label's saved indent is ${JSON.stringify(key2 && sh2.styles[key2] && sh2.styles[key2].indent)}, not 1`);
+  const L6 = await edgeOf(2, 1);
+  if (!near(L6.left - L0.left, 14)) fails.push(`after inserting a column the label sits ${L6.left - L0.left} px in (want 14)`);
+  // 7. editing an indented cell's text (Univer turns an edit into a rich-text cell) keeps it indented
+  await click(2, 1); await park();
+  await click(2, 1); await press("F2"); await page.keyboard.type(" more", { delay: 8 }); await press("Enter"); await park();
+  const E1 = await edgeOf(2, 1);
+  if (!near(E1.left - L0.left, 14)) fails.push(`after editing its text the label sits ${E1.left - L0.left} px in (want 14)`);
+  // 8. copy / paste carries the indent (real keys): B3 -> E9, and the centred + right-aligned cells keep their number too
+  await click(2, 1); await press("Control+c"); await click(8, 4); await press("Control+v"); await wait(300);
+  await click(3, 1); await press("Control+c"); await click(9, 4); await press("Control+v"); await wait(300);
+  await click(4, 1); await press("Control+c"); await click(10, 4); await press("Control+v"); await wait(300);
+  await flushSave();
+  const saved3 = await savedLast();
+  const sh3 = saved3 && saved3.wb.sheets[0].sheet;
+  const indentAt = (r, ci) => { const col = sh3.columns[ci]; const st = col && sh3.styles[`${col.id}:${r}`]; return st ? st.indent : undefined; };
+  const pasted = [indentAt(8, 4), indentAt(9, 4), indentAt(10, 4)];
+  if (!eq(pasted, [1, 2, 2])) fails.push(`pasted cells carry indents ${JSON.stringify(pasted)}, want [1,2,2] (left, right-aligned, centred)`);
+  return fails.length ? FAIL(fails.join("; ")) : PASS(`left edge +14/+28 per click and back (saved indent 2), one Ctrl+Z per click, right-aligned inset on the right (−28), centred unchanged, long label still spills, narrow column never overflows, indent follows its cell through a column insert, survives editing its text and copy / paste`);
 });
 
 // ── 4. keyboard shortcuts ──────────────────────────────────────────────────────────────────────────────────────────────

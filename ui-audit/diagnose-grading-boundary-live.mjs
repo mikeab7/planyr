@@ -25,7 +25,11 @@ const SITE = {
   settings: { setback: 25, showSetback: true, truckCourtD: 135, trailerParkD: 50, grading: { enabled: true, limitMode: mode, layers: { buildable: false, cutfill: true, contours: true, paper: true } } },
   underlay: null, updatedAt: Date.now(), status: "active",
 };
-const s = await openSignedIn({ base, viewport: { width: 1600, height: 1000 } });
+const DSF = +arg("--dsf", "1");
+const VW = arg("--viewport", "1600x1000").split("x").map(Number);
+// rAF gap monitor (B2319137 ×4): every frame's gap since the last, kept in the page; read after each action
+const initGaps = () => { window.__gaps = []; let last = performance.now(); const tick = (t) => { window.__gaps.push(t - last); last = t; requestAnimationFrame(tick); }; requestAnimationFrame(tick); };
+const s = await openSignedIn({ base, viewport: { width: VW[0], height: VW[1] }, contextOptions: { deviceScaleFactor: DSF }, initScripts: [[initGaps, null]] });
 if (arg("--cpu", null)) { const c = await s.context.newCDPSession(s.page); await c.send("Emulation.setCPUThrottlingRate", { rate: +arg("--cpu", "1") }); }
 const { page, context } = s;
 try {
@@ -75,6 +79,32 @@ try {
     await page.screenshot({ path: `${OUT}${tag0}-${tag}.png` });
     for (let k = 0; k < 7; k++) { await page.mouse.wheel(0, 120); await page.waitForTimeout(150); }
     await page.waitForTimeout(1500);
+  }
+  // ---- B2319137 ×4: frame gaps after zoom clicks and after the mode switch (the owner's measurement)
+  if (process.argv.includes("--gaps")) {
+    // main-thread busy time per second (a CPU profile over the window: total sampled time minus idle/program), so a page that
+    // keeps working flat-out in small slices is visible even where headless frames stay fast; and the top self-time functions
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 1000 });
+    const readGaps = async (label, ms) => {
+      await page.evaluate(() => { window.__gaps = []; });
+      await cdp.send("Profiler.start");
+      const t0 = Date.now(); await page.waitForTimeout(ms);
+      const { profile } = await cdp.send("Profiler.stop");
+      const g = await page.evaluate(() => window.__gaps.slice());
+      const big = g.filter((x) => x > 250);
+      const byId = new Map(profile.nodes.map((n) => [n.id, n])); const self = new Map(); let busy = 0, tot = 0;
+      profile.samples.forEach((id, i) => { const d = (profile.timeDeltas[i + 1] || 0) / 1000; tot += d; const n = byId.get(id); const fn = n.callFrame.functionName || "(anon)";
+        if (fn === "(idle)" || fn === "(program)") return; busy += d; const k = `${fn} @${(n.callFrame.url || "").split("/").pop()}:${n.callFrame.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + d); });
+      const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${Math.round(v)}ms ${k}`).join(" | ");
+      console.log(`${label}: ${g.length} frames in ${Date.now() - t0} ms · gaps>250ms ${big.length} · max ${Math.round(Math.max(0, ...g))} ms · main thread busy ${Math.round(busy)} of ${Math.round(tot)} ms\n    top: ${top}`);
+    };
+    const zin = page.locator('button[title*="Zoom in" i], [aria-label*="Zoom in" i]').first();
+    for (let k = 1; k <= 3; k++) { await zin.click().catch(() => page.mouse.wheel(0, -240)); await readGaps(`zoom +${k}`, 12000); }
+    await page.locator('[data-testid="grading-limit-mode"]').getByText("Around the layout").click().catch(() => {});
+    await readGaps("switch → layout", 12000);
+    await page.locator('[data-testid="grading-limit-mode"]').getByText("To the boundary").click().catch(() => {});
+    await readGaps("switch → boundary", 15000);
   }
   console.log("saved under", OUT);
 } finally {

@@ -42,9 +42,12 @@ CLASSES.forEach((set, i) => set.forEach((g) => { if (!GLYPH_CLASS.has(g)) GLYPH_
 // "q" in Wingdings is the level-4 square, but a bare "q"/"o" is also a letter — both need the widest gap (see below)
 const WEAK = new Set(["o", "q"]);
 
-const ROMAN = new Set(["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"]);
+/* a REAL Roman numeral, 1-39 (the range a document outline uses): "iv", "xxxix" yes; "mix", "dim", "civil", "xl" no */
+const isRoman = (w) => /^(?:x{0,3})(?:ix|iv|v?i{0,3})$/i.test(w) && w.length > 0;
+/* a marker with no glyph needs the WIDE gap Word writes (its tab is six or seven non-breaking spaces); a typed double space is two */
+const ORDERED_MIN_GAP = 3;
 
-const markerRe = new RegExp(`^(${WS}*)([^\\s\\u00a0]{1,4}?)(${WS}{2,}|\\t${WS}*)(?=\\S)`);
+const markerRe = new RegExp(`^(${WS}*)([^\\s\\u00a0]{1,8}?)(${WS}{2,}|\\t${WS}*)(?=\\S)`);
 
 /** The marker a paragraph's text starts with, or null. `text` is the paragraph's leading text, `gap` the characters consumed
  *  in total (marker + gap + any leading blanks) so the caller can cut exactly that much. */
@@ -57,13 +60,17 @@ export function readMarker(text) {
     if (WEAK.has(mark) && gap < 4) return null;                        // a bare "o" / "q" needs a really wide gap: it is also a word
     return { kind: "bullet", cls: GLYPH_CLASS.get(mark), start: null, consumed: m[0].length, text: mark };
   }
+  /* from here on the marker has no glyph: it is a number or a letter, and typed text looks exactly like that ("Mr.  Jones", "A.  Ryan",
+   * "1.  Entitlements"), so it needs the wide gap AND (checked by the caller) a neighbour — a lone one is never converted */
+  if (gap < ORDERED_MIN_GAP) return null;
   const num = /^\(?(\d{1,3})[.)]$/.exec(mark);
   if (num) return { kind: "ordered", cls: 0, start: parseInt(num[1], 10), consumed: m[0].length, text: mark };
-  const alpha = /^\(?([a-zA-Z]{1,4})[.)]$/.exec(mark);
+  const alpha = /^\(?([a-zA-Z]+)[.)]$/.exec(mark);
   if (alpha) {
     const w = alpha[1];
-    const lower = w === w.toLowerCase();
-    return { kind: "ordered", cls: ROMAN.has(w.toLowerCase()) ? 2 : (lower ? 1 : 1), start: null, consumed: m[0].length, text: mark, letter: w, roman: ROMAN.has(w.toLowerCase()) };
+    const roman = isRoman(w);
+    if (w.length > 1 && !roman) return null;                          // only ONE letter, or a real Roman numeral: "Mr." "No." "Re." are words
+    return { kind: "ordered", cls: roman ? 2 : 1, start: null, consumed: m[0].length, text: mark, letter: w, roman };
   }
   return null;
 }
@@ -115,6 +122,15 @@ function convertSequence(blocks) {
         if (k < blocks.length && marks[k]) { run[run.length - 1].blanks.push(...blocks.slice(j, k)); j = k; continue; }
       }
       break;
+    }
+    /* ⛔ A LONE NUMBERED / LETTERED PARAGRAPH IS NEVER CONVERTED (NEW-1, 2026-10-30). Without a glyph the marker is only text that looks like
+     * one — "A.  Ryan to send", "1.  Entitlements" — and a real Word list is always two or more lines. A run converts when it has two or more
+     * shaped paragraphs (a glyph bullet beside a number counts: that is the "next to a glyph neighbour" case) or when its one paragraph is a
+     * glyph bullet, which is how a single pasted bullet has always behaved. */
+    if (run.length < 2 && run[0].mark.kind !== "bullet") {
+      out.push(blocks[run[0].at]);
+      i = run[0].at + 1;
+      continue;
     }
     /* levels: the glyph's class, never more than one deeper than the line above; a numbered marker follows its own cycle */
     let prev = 0;
