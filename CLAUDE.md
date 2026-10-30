@@ -72,6 +72,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > carry-forward filed anywhere a session does not automatically read is the same mistake.
 > **When a new instrument trap or bug family turns up, it goes in that file in the SAME commit** —
 > never left in a session.
+> **Replacing the Notes box editor with BlockNote (owner decision 2026-10-30, B2562064)? READ
+> `docs/notes-editor.md` FIRST** — the decision record, the licence rule (core/react/mantine only,
+> **never `@blocknote/xl-*`, GPL**), the measured spike (React 18 needs Mantine pinned to 8; tiptap
+> 3.29 vs 3.32; native-paste gaps; bundle cost) and the staged plan. Not yet shipped — Stage 0 only.
 >
 > **⛔ Never slurp a giant tracking file to find one thing.** `BACKLOG.md`, `VERIFICATION.md`,
 > and the two `*-DONE.md` archives are large. To pick work, **Grep the item headings**
