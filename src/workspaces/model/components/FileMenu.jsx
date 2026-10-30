@@ -37,7 +37,7 @@ const chromeBtnStyle = {
 // click the SAME hidden `<input type=file>` refs the menu's own "Import Excel…"/"Import CSV…"
 // rows already click — so a palette-driven import opens the identical OS file picker through the
 // identical DOM node, never a second import trigger.
-const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile, onOpenFile }, ref) {
+const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile, onOpenFile, univerSwitch }, ref) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const xlsxInputRef = useRef(null);
@@ -123,6 +123,16 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
           <MenuItem data-testid="model-import-csv" title="Adds a new sheet — your other sheets are untouched" onClick={() => { setOpen(false); csvInputRef.current?.click(); }}>
             Import CSV (new sheet)…
           </MenuItem>
+          {univerSwitch && (
+            // Univer spike — rendered ONLY for a confirmed is_admin() user (ModelApp passes null otherwise), so every other
+            // account sees exactly the menu above. See lib/univerSwitch.js.
+            <>
+              <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
+              <MenuItem data-testid="model-univer-switch" title="Owner-only trial of a different spreadsheet grid. Your workbook is saved the same way; turn it off any time." onClick={() => { setOpen(false); univerSwitch.setOn(!univerSwitch.on); }}>
+                {univerSwitch.on ? "Use the regular grid" : "Try the new grid"}
+              </MenuItem>
+            </>
+          )}
         </div>
       </AnchoredMenu>
       <input ref={openInputRef} type="file" accept=".xlsx,.xlsm,.xls,.csv" onChange={onOpenFileChosen} style={{ display: "none" }} data-testid="model-open-file-input" />
