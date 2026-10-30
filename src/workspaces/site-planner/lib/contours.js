@@ -413,3 +413,11 @@ export function clipContourLinesOutside(lines, clip) {
   return out;
 }
 export const labelInsideClip = (lab, clip) => !!(clip && clip.rings && clip.rings.length && pointInRings(lab.ll, [...clip.rings, ...(clip.holes || [])]));
+
+/* NEW-3 (2026-10-30, owner: "the mouse will tell you what elevations you're working with, they're showing behind the white") — the
+ * transient hover label rides the SAME label band as the permanent index labels (mapStack's line-label pane, hosted ABOVE the
+ * planner's SVG). It was added with no `pane`, so Leaflet put it in the basemap's own marker pane — UNDER the planner SVG, and
+ * under the grading paper background painted in it at 92% — so on paper the readout showed faintly through the white while the
+ * permanent labels (which carry `labelPane`) were fine. (An index level — 725, 750 — is a permanent label; the "726" the owner
+ * saw is not a multiple of five, so it can only have been this readout.) Same ink as before: dark topo brown, white halo. */
+export const hoverMarkerPaneOptions = (labelPane) => (labelPane ? { pane: labelPane } : {});
