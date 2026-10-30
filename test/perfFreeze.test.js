@@ -111,3 +111,43 @@ describe("the recorder writes a capture when a synthetic 30 s stall is injected"
     expect(w.win.pfRec.captures()).toHaveLength(0);
   });
 });
+
+/* B2319137 ×4 — the owner's tab (2026-10-30, Concept A, "To the boundary"): after one zoom click the page ran at ONE frame per
+ * second — a requestAnimationFrame gap monitor read 15 consecutive gaps of ~1000 ms — and no capture was written. Two holes, both
+ * reproduced here: the recorder stopped watching `idleStopMs` after the click (two slow frames in), and no judgment fires on a
+ * RUN of slow frames (the sustain window needs 8 frames in 2 s; the freeze needs one frame of a full second). */
+describe("B2319137 ×4 — a sustained run of ~1 s frames after ONE click writes a capture", () => {
+  let w;
+  beforeEach(() => { __resetPerfRecorder(); w = fakeWin(); installPerfRecorder(w.win, { bootRunMs: 0 }); w.advance(60_000); });
+  afterEach(() => { __resetPerfRecorder(); });
+  const clickThenSlow = (gapMs, n) => {
+    w.input(); w.frame();                                       // ONE click starts the frame loop…
+    for (let i = 0; i < n; i++) { w.advance(gapMs); w.frame(); }  // …and no further input: the page just crawls
+  };
+  it("15 gaps of 990 ms after one click → one auto capture, via 'sustained', carrying the run's length", () => {
+    clickThenSlow(990, 15);
+    const caps = w.win.pfRec.captures();
+    expect(caps).toHaveLength(1);
+    expect(caps[0].freezeVia).toBe("sustained");
+    expect(caps[0].freezeMs).toBeGreaterThanOrEqual(3_000);
+  });
+  it("positive control: the same click with frames at 60 Hz writes nothing", () => {
+    clickThenSlow(16, 15);
+    expect(w.win.pfRec.captures()).toHaveLength(0);
+  });
+  it("two slow frames then fast ones is not a run (a hitch, not a crawl)", () => {
+    w.input(); w.frame(); w.advance(600); w.frame(); w.advance(600); w.frame();
+    for (let i = 0; i < 10; i++) { w.advance(16); w.input(); w.frame(); }
+    expect(w.win.pfRec.captures()).toHaveLength(0);
+  });
+  it("the pure judgment: 'sustained' is in the capture vocabulary and the run resets on a fast frame", async () => {
+    const { feedSlowRun } = await import("../src/shared/telemetry/perfTrigger.js");
+    const s = createTrigger();
+    expect(feedSlowRun(s, 1000, 990)).toBe(false); expect(feedSlowRun(s, 2000, 990)).toBe(false);
+    expect(feedSlowRun(s, 2016, 16)).toBe(false); expect(s.slowRunN).toBe(0);
+    feedSlowRun(s, 3000, 990); feedSlowRun(s, 4000, 990);
+    expect(feedSlowRun(s, 5000, 1100)).toBe(true);
+    expect(FREEZE_VIA_VOCAB).toContain(s.lastVerdict.via);
+    expect(s.lastVerdict.via).toBe("sustained");
+  });
+});
