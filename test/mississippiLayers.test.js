@@ -310,6 +310,19 @@ describe("where each row is offered", () => {
       for (const k of ["jackson", "gulfport", "tupelo"]) expect(layerAvailableHere(ALL_LAYERS[id], scopeOf(MS_POINTS[k])), `${id} at ${k}`).toBe(false);
     }
   });
+  /* NEW-1 (B2539744 review, finding 2): the Tennessee county lines are offered across the line in the Mississippi counties that touch Tennessee, and in no other */
+  it("the Tennessee county lines (tn_county) are offered on the Tennessee line, not across the rest of Mississippi", () => {
+    const tn = ALL_LAYERS.tn_county;
+    expect(tn.stateRegions).toEqual({ MS: ["ms_tn_line"] });
+    const at = (lat, lng) => layerAvailableHere(tn, scopeOf({ lat, lng }));
+    expect(at(OLIVE_BRANCH.lat, OLIVE_BRANCH.lng), "Olive Branch (DeSoto)").toBe(true);
+    expect(at(34.8, -89.1), "Marshall County").toBe(true);
+    expect(at(34.9, -88.5), "Alcorn / Tippah").toBe(true);
+    expect(at(36.16, -86.78), "Nashville is Tennessee itself — wholly served").toBe(true);
+    for (const [name, lat, lng] of [["Jackson", 32.2988, -90.1848], ["Vicksburg", 32.3526, -90.8779], ["Tupelo", 34.2576, -88.7034], ["Pascagoula", 30.3658, -88.5561], ["Gulfport", 30.3674, -89.0928]]) {
+      expect(at(lat, lng), name).toBe(false);
+    }
+  });
   it.each(Object.entries(ELSEWHERE))("%s: not one Mississippi row is offered", (_k, p) => {
     for (const id of [...IDS, "ms_county_state"]) expect(layerAvailableHere(ALL_LAYERS[id], scopeOf(p)), id).toBe(false);
   });

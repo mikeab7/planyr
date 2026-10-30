@@ -204,6 +204,13 @@ function realRingAt(lat, lng) {
   }
   return null;
 }
+/* WHICH neighbour a hand-tuned outline may overrule. The overrule is only sound against a border the outline was drawn EXACTLY to. Tennessee's
+ * outline is exact on its Georgia / Alabama / Mississippi line (Chattanooga) but was nudged a few km OUTWARD on the Kentucky, Virginia, North
+ * Carolina, Missouri and Arkansas sides (see `tennesseeJurisdiction.TN_OUTLINE`), so there it would pull Fulton KY and downtown Bristol VA
+ * into Tennessee — the real boundary (0.003° there) answers those. Every other tuned outline is drawn to all of its lines. */
+const TUNED_OVERRULES = { TN: new Set(["GA", "AL", "MS"]) };
+const tunedMayOverrule = (tuned, real) => !TUNED_OVERRULES[tuned] || TUNED_OVERRULES[tuned].has(real);
+
 /* The state a hand-tuned outline puts the point in, or null: Texas / Colorado (the hair-inside guards) and Florida / Georgia / Tennessee (the
  * outlines drawn to the state line; they share the GA–TN and GA–FL lines exactly, so order does not matter). */
 function tunedOutlineState(la, lo) {
@@ -237,7 +244,7 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
     const real = ring.st;
     if (real === "NJ" || real === "NY") return njnyStateAt(la, lo) || real; // the Hudson settlement decides between the two
     const tuned = tunedOutlineState(la, lo);
-    if (tuned && tuned !== real && edgeDistanceDeg(ring.xy, la, lo) <= NE_BAND_DEG) return tuned;
+    if (tuned && tuned !== real && tunedMayOverrule(tuned, real) && edgeDistanceDeg(ring.xy, la, lo) <= NE_BAND_DEG) return tuned;
     return real;
   }
   const tuned = tunedOutlineState(la, lo);

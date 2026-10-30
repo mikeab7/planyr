@@ -106,10 +106,9 @@ export const ALLOWED_HOSTS = new Set([
    * server number the viewers name (cloudURL in each county's page); read-only anonymous queries only — never a key the viewer injects. */
   /* NEW-1 (Georgia due-diligence gaps, 2026-10-29) — the three Georgia hosts the layer sweep found but this build sandbox cannot reach (each answers 403 at its egress), so they are
    * relayed and MEASURED through here, from planyr.io, before anything is wired to them: GDOT's eGIS (traffic counts / dams / functional class are named on its ArcGIS Online items),
-   * the UGA ITOS host that serves GDOT's functional-class map service, and Bartow County's own GIS server (BartowZoning, the county's published zoning). Nothing reads them yet. */
-  "egis.dot.ga.gov", // Georgia DOT eGIS
+   * the UGA ITOS host that serves GDOT's functional-class map service, and Bartow County's own GIS server (BartowZoning, the county's published zoning). Nothing reads them yet — GDOT's egis.dot.ga.gov was pruned 2026-10-30 (NEW-1 review: no row reads it; re-add it in the PR that wires one). */
   "maps.itos.uga.edu", // UGA ITOS — GDOT functional class / routes / bridges map services
-  "www.bartowgis.org", "bartowgis.org", // Bartow County GIS — AGOServices/BartowZoning
+  "www.bartowgis.org", // Bartow County GIS — AGOServices/BartowZoning (the row reads the www form; the bare host was never used and is not allowed)
   /* NEW-1 (Georgia, 2026-10-19) — county / regional hosts named by the Georgia parcel sweep; each is MEASURED through this relay before any county is wired to it. */
   "maps.douglascountyga.gov", // Douglas County GA
   "arcgis5.roktech.net", // ROK Technologies — Habersham, Paulding (wired by other route) and other GA county viewers
@@ -251,8 +250,7 @@ export const ALLOWED_HOSTS = new Set([
   "bcgishub.broward.org", // Broward County — Aviation Department (FLL) noise contours; the county GIS hub
   /* NEW-1 (Tennessee industrial due-diligence layers, 2026-10-29) — the State of Tennessee's own ArcGIS Servers, relayed so the layers they publish can be MEASURED through planyr.io (the build
    * sandbox cannot reach any *.tn.gov host) before a row is wired to them. TDEC (Dept. of Environment & Conservation) publishes Division of Remediation sites, oil & gas wells and the Division of
-   * Water Resources public layers on tdeconline.tn.gov; maps.tdec.tn.gov is its hosting server. Delete an entry whose host ends up unused. */
-  "tdeconline.tn.gov", // TDEC — DOR_Sites (remediation sites, drycleaners), Oil_and_Gas2, DWR_Public
+   * Water Resources public layers on tdeconline.tn.gov; maps.tdec.tn.gov is its hosting server. Delete an entry whose host ends up unused (tdeconline.tn.gov was, 2026-10-30: it answers 403 and no row reads it). */
   "maps.tdec.tn.gov", // TDEC — hosting server (Permitted_Tennessee_Landfills)
   "tnmap.tn.gov", // State of Tennessee Office of Information Resources — TNMap (state GIS clearinghouse)
   /* NEW-1 (Colorado due-diligence layers, B2528688, 2026-10-29) — the two hosts the wired Colorado rows read through this relay. The build sandbox's egress refuses every state.co.us / colorado.gov / city host
@@ -270,6 +268,24 @@ export function isTransientStatus(status) {
   return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 527);
 }
 const USER_AGENT = "planyr-gis-proxy";
+
+export const MAX_REDIRECTS = 3;
+export const isRedirectStatus = (status) => status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+/* Where an upstream redirect may be followed to. Pure — unit-tested. Returns { url, method } or { error: string }.
+ * · the target must be https and its HOST (with any port) on ALLOWED_HOSTS — an allow-listed host that redirects elsewhere is NOT a licence to relay "elsewhere";
+ * · no Location header, or one that does not parse, is refused (the caller would otherwise get a body-less 3xx it cannot use);
+ * · 301/302/303 turn a POST into a GET (the standard), 307/308 keep the method and the body. */
+export function redirectTarget(res, fromUrl, method, hop = 0) {
+  const loc = res.headers && res.headers.get && res.headers.get("location");
+  if (!loc) return { error: "Upstream redirected without a Location." };
+  if (hop >= MAX_REDIRECTS) return { error: "Upstream redirected too many times." };
+  let to;
+  try { to = new URL(loc, fromUrl); } catch (_e) { return { error: "Upstream redirected to an unreadable address." }; }
+  if (to.protocol !== "https:") return { error: `Upstream redirected to a non-https address (${to.protocol}//${to.host}).` };
+  if (!ALLOWED_HOSTS.has(to.host)) return { error: `Upstream redirected to ${to.host}, which is not on the relay's allow-list.` };
+  const s = res.status;
+  return { url: to.toString(), method: method === "POST" && (s === 301 || s === 302 || s === 303) ? "GET" : method };
+}
 
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
@@ -314,18 +330,34 @@ export async function onRequest(context) {
    * ~10% of identical, idempotent queries with a 525 ("SSL handshake failed" to ITS origin) and the very next request succeeds (4 of 40). The relay carries only
    * read-only ArcGIS queries, so asking once more is safe, and it turns a 10% outage into ~1% instead of leaving every caller to notice and retry. Only the
    * transient classes retry (502/503/504 and Cloudflare's 520-527); a 4xx, a 500 with a body, or an abort is returned as it came. */
-  const attempt = async () => {
+  /* REDIRECTS ARE NEVER FOLLOWED BLINDLY (NEW-1 review, 2026-10-30). `fetch` follows redirects by default, so an allow-listed host that answered 301/302 to somewhere else
+   * was relayed on to a host nobody had allow-listed — the allow-list only ever checked the FIRST hop. Now `redirect: "manual"`: a 3xx is resolved by `redirectTarget`
+   * (the Location must be https and its host on this same list) and followed up to MAX_REDIRECTS times; anything else is a 502 that names the refused host. */
+  const attempt = async (url, m, b) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
-    try { return await fetch(resolved.url, { method, headers, body, signal: ctrl.signal }); } finally { clearTimeout(timer); }
+    try { return await fetch(url, { method: m, headers, body: b, signal: ctrl.signal, redirect: "manual" }); } finally { clearTimeout(timer); }
+  };
+  const attemptFollowing = async () => {
+    let url = resolved.url, m = method, b = body;
+    for (let hop = 0; ; hop++) {
+      const r = await attempt(url, m, b);
+      if (!isRedirectStatus(r.status)) return { res: r };
+      try { await r.body?.cancel(); } catch (_e) { /* discarding the redirect body */ }
+      const next = redirectTarget(r, url, m, hop);
+      if (next.error) return { refused: next.error };
+      url = next.url; m = next.method; b = next.method === "GET" ? undefined : b;
+    }
   };
   let res;
   try {
-    res = await attempt();
-    if (isTransientStatus(res.status)) {
-      try { await res.body?.cancel(); } catch (_e) { /* discarding the failed body */ }
-      res = await attempt();
+    let got = await attemptFollowing();
+    if (got.res && isTransientStatus(got.res.status)) {
+      try { await got.res.body?.cancel(); } catch (_e) { /* discarding the failed body */ }
+      got = await attemptFollowing();
     }
+    if (got.refused) return jsonResponse({ error: got.refused, host: resolved.host }, 502);
+    res = got.res;
   } catch (_e) {
     return jsonResponse({ error: `Upstream GIS request to ${resolved.host} failed or timed out.`, host: resolved.host }, 502);
   }

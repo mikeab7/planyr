@@ -362,6 +362,11 @@ describe("adversarial review round 1 (B2528688) — each confirmed finding stays
   });
   it("the Rule 604 note states the 500–2,000 ft band; the Buckley note gives no industrial verdict", () => {
     expect(L.co_ecmc_wells.note).toMatch(/500 and 2,000 ft/);
+    // NEW-1 review of B2528688: the exceptions are "the usual routes, not a closed list" — consent, an approved area / drilling plan, AND Commission approval after an alternative-location analysis
+    expect(L.co_ecmc_wells.note).toMatch(/informed consent/);
+    expect(L.co_ecmc_wells.note).toMatch(/comprehensive area or drilling plan/);
+    expect(L.co_ecmc_wells.note).toMatch(/alternative-location analysis/);
+    expect(L.co_ecmc_wells.note).toMatch(/not a closed list/);
     expect(L.co_aurora_apz.note).not.toMatch(/generally allows/);
   });
   it("round 2: ECMC flowlines generalise (a z14 Weld cell was 247k vertices over a 120k budget) and start at the zoom where the service's 2,000-record cap is not hit (San Juan z14 cells held 4,244)", () => {

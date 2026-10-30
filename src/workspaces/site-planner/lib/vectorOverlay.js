@@ -748,13 +748,13 @@ export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts
  *
  * Vector-only: below the NHD source's vector gate there are no centrelines to buffer, so it reports "zoom in". */
 export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
-  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd, rivers = VECTOR_SOURCES.ga_protected_rivers;
-  if (!nhd || !trout || !district || !rivers) return null;
+  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd, rivers = VECTOR_SOURCES.ga_protected_rivers, mrpa = VECTOR_SOURCES.ga_mrpa_corridor;
+  if (!nhd || !trout || !district || !rivers || !mrpa) return null;
   const { cache = gisCache } = opts;
 
   let map = null, opacity = initialOpacity, seq = 0;
-  const data = { nhd: null, trout: null, district: null, rivers: null };
-  const failed = { nhd: false, trout: false, district: false, rivers: false };
+  const data = { nhd: null, trout: null, district: null, rivers: null, mrpa: null };
+  const failed = { nhd: false, trout: false, district: false, rivers: false, mrpa: false };
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const group = L.layerGroup([], { pane });
   const bands = L.layerGroup([]);
@@ -763,7 +763,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
   const paint = () => {
     bands.clearLayers();
     if (!data.nhd) return;
-    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district, rivers: failed.rivers ? null : data.rivers });
+    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district, rivers: failed.rivers ? null : data.rivers, mrpa: failed.mrpa ? null : data.mrpa });
     // Widest first, so a narrower tier laid over a wider one stays legible instead of being buried by it.
     list.sort((a, b) => b.tier.eachSideFt - a.tier.eachSideFt);
     for (const { ring, tier } of list) {
@@ -774,9 +774,12 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
         interactive: false,
       }));
     }
-    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline", failed.rivers && "the protected-river lines"].filter(Boolean);
+    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline", failed.rivers && "the protected-river lines", failed.mrpa && "the Chattahoochee MRPA corridor"].filter(Boolean);
     if (lost.length) {
-      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — the bands shown may be narrower than the rule, NOT the full answer (screening only).`);
+      // a lost corridor makes the Chattahoochee band WIDER than the rule (the MRPA governs there), every other loss makes a band NARROWER
+      const narrower = failed.trout || failed.district || failed.rivers;
+      const effect = [narrower && "the bands shown may be narrower than the rule", failed.mrpa && "a 100-ft river band may be drawn on the Chattahoochee reach, where the Metropolitan River Protection Act's buffers govern instead"].filter(Boolean).join("; ");
+      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — ${effect}. NOT the full answer (screening only).`);
     } else if (!list.length) {
       report("empty", "No state-waters streams in this view.");
     } else if (data.nhd.truncated) {
@@ -803,7 +806,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
       onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data[name] = fr.data; failed[name] = false; paint(); } },
     }).then((r) => { if (mySeq === seq) { data[name] = r.data; failed[name] = false; } })
       .catch((e) => { if (mySeq === seq) { failed[name] = true; reportClientEvent("ga-stream-buffer-source-failed", String((e && e.message) || e), { source: name }); } });
-    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district), pull("rivers", rivers)]);
+    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district), pull("rivers", rivers), pull("mrpa", mrpa)]);
     if (mySeq !== seq || !map) return;
     if (failed.nhd) {
       bands.clearLayers();

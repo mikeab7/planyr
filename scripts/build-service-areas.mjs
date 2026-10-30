@@ -118,6 +118,16 @@ if (want("co_aurora")) {
  *                The Chattahoochee MRPA corridor/buffers and the District's small water supply watersheds are declared for this area.
  *   spalding_ga  Spalding County GA, from the SAME bundled county polygons as `harris` (no network) — the county's own unincorporated zoning layer.
  * `--only=mngwpd,spalding_ga,ga_blue_ridge,bartow_ga,mrpa_corridor` rebuilds just these five and keeps every other area as committed. */
+/* NEW-1 (B2539744 review, finding 2) — ms_tn_line: the Mississippi counties that touch Tennessee (a ring vertex at/above 34.95°N: DeSoto, Marshall, Tippah,
+ * Alcorn, Tishomingo, Benton — printed below), from the SAME bundled county polygons. The Tennessee county lines (State of Tennessee STS, TN only) are offered across
+ * the state line there, where a Mississippi view reaches Shelby / Fayette / Hardeman / McNairy / Hardin counties — and nowhere else in Mississippi (Jackson, Vicksburg,
+ * Tupelo, Pascagoula can never draw it). Used through the row's `stateRegions: { MS: ["ms_tn_line"] }`; Tennessee itself is wholly served. */
+if (want("ms_tn_line")) {
+  const recs = index.counties.filter((c) => c.state === "MS" && c.rings.some((ring) => ring.some(([, y]) => y / index.scale >= 34.95)));
+  if (recs.length < 5) throw new Error(`ms_tn_line: expected the MS counties on the Tennessee line, found ${recs.length}`);
+  console.log("ms_tn_line counties:", recs.map((c) => c.name).join(", "));
+  areas.ms_tn_line = { label: "Mississippi counties on the Tennessee line", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: recs.flatMap((rec) => rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])])) };
+}
 if (want("mngwpd")) {
   /* The District outline is NOT enough on its own: the District's own small-water-supply watersheds reach past it (the Randy Poynter reservoir's basin sits partly in
    * Walton/Newton — measured: its interior point is outside the outline). The region is the outline ∪ those watersheds ∪ the Chattahoochee MRPA corridor, so a row declared

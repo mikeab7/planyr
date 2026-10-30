@@ -67,6 +67,16 @@ const BORDER = [
   ["Orange TX (on the Sabine)", 30.0927, -93.7366, "TX"],
   ["Denison TX (on the Red River)", 33.7557, -96.5367, "TX"],
   ["Durant OK (just over the Red River)", 33.9937, -96.3711, "OK"],
+  /* NEW-1 (B2539744 review): TN's hand-drawn outline reaches km past the Kentucky / Virginia line, and Natural Earth puts the Mississippi–Louisiana
+   * line on the wrong side of Vidalia. Each is paired with a control on the OTHER side so a fix cannot just move the error across the line. */
+  ["Fulton KY (just north of the Tennessee line)", 36.51, -88.88, "KY"],
+  ["Union City TN (control, Tennessee side)", 36.4242, -89.057, "TN"],
+  ["Bristol VA, State Street (north side)", 36.598, -82.18, "VA"],
+  ["Bristol VA, downtown", 36.605, -82.18, "VA"],
+  ["Bristol TN (control, Tennessee side)", 36.58, -82.19, "TN"],
+  ["Vidalia LA (west of the Mississippi)", 31.565, -91.44, "LA"],
+  ["Vidalia LA, city centre", 31.5653, -91.4311, "LA"],
+  ["Natchez MS (control, Mississippi side)", 31.5604, -91.4032, "MS"],
 ];
 
 /* Ground that is not a US state at all — it stays null (and so is "somewhere else", never "unknown"). */

@@ -871,6 +871,28 @@ export const VECTOR_SOURCES = {
     },
     note: "Georgia DCA protected rivers — compute-only source for the stream-buffer layer.",
   },
+  /* NEW-1 (B2535200 review) — ARC's Chattahoochee MRPA corridor polygon (the 2,000-ft river corridor, Buford Dam → the Fulton/Douglas line), the fifth compute-only source of the stream-buffer layer:
+   * a protected river does NOT include a segment covered by the Metropolitan River Protection Act (Rule 391-3-16-.04), so the 100-ft protected-river tier is cut out of it. */
+  ga_mrpa_corridor: {
+    id: "ga_mrpa_corridor",
+    label: "Chattahoochee MRPA corridor (ARC)",
+    style: "district",
+    geometryType: "polygon",
+    sourceName: GIS_SOURCES.gaMrpaCorridor.provider,
+    query: {
+      url: GIS_SOURCES.gaMrpaCorridor.serviceUrl + "/query",
+      outFields: ["*"],
+      where: "1=1",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 90 * 24 * 3600 * 1000, // the corridor changes by statute
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // one outline, answered the same way at every pan (like the District); ≈50 m generalisation — the river runs well inside a 2,000-ft corridor
+      tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 4 }],
+    },
+    note: "Chattahoochee River Corridor (Metropolitan River Protection Act) — compute-only source for the stream-buffer layer.",
+  },
   ga_mngwpd: {
     id: "ga_mngwpd",
     label: "Metro North Georgia Water Planning District",

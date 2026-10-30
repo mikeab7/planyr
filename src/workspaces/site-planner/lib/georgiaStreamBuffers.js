@@ -6,6 +6,10 @@
  *   trout    50 ft   a Georgia DNR-mapped trout stream — the trout-water buffer.
  *   river   100 ft   a PROTECTED RIVER (perennial, 400 cfs or more — DCA's compiled map): a 100-ft natural vegetative buffer each side, measured from
  *                    the banks (O.C.G.A. 12-2-8, Rule 391-3-16-.04). Drawn from DCA's own protected-river lines, NOT matched to NHD reaches by name.
+ *                    ⛔ NOT on the segments the rule EXCLUDES: a protected river does not include a segment covered by the Metropolitan River Protection Act (the
+ *                    Chattahoochee, Buford Dam → the Fulton/Douglas line — cut out with ARC's own 2,000-ft corridor polygon, where the MRPA row governs) or by the
+ *                    Coastal Marshlands Protection Act (the tidal reaches — `inTidalReach`, a screening proxy from the National Wetlands Inventory, see gaTidalReaches.js).
+ *                    DCA's layer includes BOTH (live 2026-10-30: the Chattahoochee reach, and the Altamaha / Ogeechee / Savannah / Satilla / St Marys to the sea).
  *   district 75 ft   inside the Metropolitan North Georgia Water Planning District — the District's MODEL stream-buffer
  *                    ordinance: 50 ft undisturbed + 25 ft impervious setback. A MODEL: each member county adopts and may
  *                    amend its own, so this is labelled "typical local requirement — confirm with the county", never law.
@@ -23,6 +27,8 @@
  * Reuses `corridorRingLngLat` (the pipeline-corridor buffer: local flat-earth feet frame, no new dependency).
  */
 import { corridorRingLngLat } from "./pipelineCorridor.js";
+import { inTidalReach } from "./georgiaRiverExclusions.js";
+export { inTidalReach, riverExclusionAt, inMrpaReachBox, MRPA_REACH_BOX } from "./georgiaRiverExclusions.js";
 
 export const GA_BUFFER_TIERS = {
   state: { id: "state", eachSideFt: 25, color: "#b45309", label: "25 ft state-waters buffer" }, // design-exempt: map ink for a drawn buffer tier (cartography, not UI chrome)
@@ -83,6 +89,19 @@ export function linePartsOf(feature) {
   return [];
 }
 
+
+/* ── The two segments a protected river's 100-ft rule does NOT cover: see georgiaRiverExclusions.js (a boot-safe leaf — the registry's click card reads it too) ── */
+
+/* Split a path into the runs of consecutive vertices for which `drop(vertex)` is false (runs of fewer than two vertices vanish). Pure. */
+export function keepRuns(path, drop) {
+  const runs = []; let cur = [];
+  for (const v of path) {
+    if (drop(v)) { if (cur.length > 1) runs.push(cur); cur = []; } else cur.push(v);
+  }
+  if (cur.length > 1) runs.push(cur);
+  return runs;
+}
+
 const midpoint = (path) => path[Math.floor(path.length / 2)];
 
 /* THE FUNCTION: NHD flowlines + DNR trout lines + the District outline → the bands to draw.
@@ -91,7 +110,7 @@ const midpoint = (path) => path[Math.floor(path.length / 2)];
  * midpoint (an NHD reach is ~1 km; a reach straddling the District line takes its middle's answer).
  * `districtOk` is FALSE when the District outline could not be loaded: then NO part is promoted to 75 and the caller
  * must say so — a missing outline must never silently draw the narrower band as if it were the answer. Pure. */
-export function streamBufferBands({ nhd = null, trout = null, district = null, rivers = null } = {}) {
+export function streamBufferBands({ nhd = null, trout = null, district = null, rivers = null, mrpa = null } = {}) {
   const rings = districtRings(district);
   const bands = [];
   const push = (path, tier, from) => {
@@ -113,11 +132,14 @@ export function streamBufferBands({ nhd = null, trout = null, district = null, r
       push(part, tierFor({ inDistrict: inAnyRing(m[0], m[1], rings), trout: true }), "trout");
     }
   }
-  // DCA's protected rivers: 100 ft each side wherever they run (the widest tier — no narrower rule can govern a protected river).
+  // DCA's protected rivers: 100 ft each side (the widest tier — no narrower rule can govern a protected river) — EXCEPT on the segments the rule excludes: the MRPA reach of the Chattahoochee
+  // (cut out by ARC's corridor polygon; `mrpa` null = the polygon could not be loaded, and the caller must say the band may cover that reach) and the tidal reaches (Coastal Marshlands Protection Act).
+  const mrpaRings = districtRings(mrpa);
+  const dropVertex = ([lng, lat]) => inTidalReach(lng, lat) || (mrpaRings.length > 0 && inAnyRing(lng, lat, mrpaRings));
   for (const feature of (rivers && rivers.features) || []) {
     for (const part of linePartsOf(feature)) {
       if (!part || part.length < 2) continue;
-      push(part, GA_BUFFER_TIERS.river, "river");
+      for (const run of keepRuns(part, dropVertex)) push(run, GA_BUFFER_TIERS.river, "river");
     }
   }
   return bands;
