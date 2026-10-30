@@ -75,7 +75,7 @@ try {
   await goTo(39.8083, -104.9339, 14);
   await sleep(1500);
   let panel = await openFinderPanel();
-  await pickGroup(panel, "environmental");
+  await pickGroup(panel, "env");
   const wells = await infoText(panel, "co_ecmc_wells");
   console.log("--- Oil & Gas Wells ⓘ ---\n" + wells + "\n---");
   check("A · KNOWN-GOOD: the Oil & Gas Wells row is offered at Commerce City and its ⓘ opened", wells.length > 100, `${wells.length} chars`);
@@ -99,7 +99,7 @@ try {
   await goTo(34.15, -84.8, 15);
   await sleep(1500);
   panel = await openFinderPanel();
-  await pickGroup(panel, "environmental");
+  await pickGroup(panel, "env");
   const cb = panel.locator('[data-testid="layer-row-ga_protected_rivers"] input[type="checkbox"]').first();
   check("B · KNOWN-GOOD: the Protected Rivers row is offered at the Etowah", (await cb.count()) > 0);
   if (await cb.count()) await cb.check();
@@ -113,16 +113,48 @@ try {
   const note = await infoText(panel, "ga_protected_rivers");
   check("B · the layer ⓘ cites Rule 391-3-16-.04, the top of the river bank, and never says 'ordinance'", /391-3-16-\.04/.test(note) && /uppermost part of the river bank/.test(note) && !/ordinance/i.test(note), note.slice(0, 160));
 
-  // click the river: a popup card opens. The DCA line passes through the view centre at this zoom; try the centre then a small spiral.
-  await sleep(6000);
-  const box = await page.locator("#finder-map, .leaflet-container").first().boundingBox();
-  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  // click the river: a popup card opens. Find the PAINTED river path (ink #0369a1, a real `d`) and click ON it, at several points along its length.
+  await goTo(34.17, -84.8, 15);
+  let pts = [];
+  for (let t = 0; t < 8 && !pts.length; t++) {
+    await sleep(5000);
+    // centre the view ON a real vertex of the loaded line (the longest piece, its middle vertex), so the line passes through the view
+    const v = await page.evaluate(() => {
+      let best = null;
+      window.__mapFinderMap.eachLayer((l) => {
+        if (!(l && l.options && String(l.options.color || "").toLowerCase() === "#0369a1" && l._latlngs)) return;
+        const ring = Array.isArray(l._latlngs[0]) ? l._latlngs[0] : l._latlngs;
+        if (!best || ring.length > best.length) best = ring;
+      });
+      return best ? best[Math.floor(best.length / 2)] : null;
+    });
+    if (!v) continue;
+    await goTo(v.lat, v.lng, 15);
+    await sleep(3000);
+    pts = await page.evaluate(() => {
+      const m = window.__mapFinderMap, box = m.getContainer().getBoundingClientRect(), out = [];
+      m.eachLayer((l) => {
+        if (!(l && l.options && String(l.options.color || "").toLowerCase() === "#0369a1" && l._latlngs)) return;
+        const ring = Array.isArray(l._latlngs[0]) ? l._latlngs[0] : l._latlngs;
+        for (let i = 0; i + 1 < ring.length; i++) {   // sample ALONG each segment: any point ON the line inside the view
+          const a = m.latLngToContainerPoint(ring[i]), b = m.latLngToContainerPoint(ring[i + 1]);
+          for (let f = 0; f <= 1; f += 0.02) {
+            const x = box.left + a.x + (b.x - a.x) * f, y = box.top + a.y + (b.y - a.y) * f;
+            if (x > box.left + 60 && x < box.right - 60 && y > box.top + 60 && y < box.bottom - 60) out.push([x, y]);
+          }
+        }
+      });
+      return out.filter((_, i) => i % 5 === 0).slice(0, 40);
+    });
+  }
+  console.log("row checked:", await cb.isChecked().catch(() => "?"), "| river layers on the map:", await page.evaluate(() => { let n = 0; window.__mapFinderMap.eachLayer((l) => { if (l && l.options && String(l.options.color || "").toLowerCase() === "#0369a1") n++; }); return n; }));
+  console.log(`painted river path points to try: ${pts.length}`);
   let card = "";
-  outer: for (const r of [0, 6, 12, 20, 30]) for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r], [r, -r], [-r, r]]) {
-    await page.mouse.click(cx + dx, cy + dy);
-    await sleep(500);
+  for (const [x, y] of pts) {
+    await page.mouse.click(x, y);
+    await sleep(600);
     const t = await page.locator(".leaflet-popup-content").allInnerTexts().then((a) => a.join("\n")).catch(() => "");
-    if (/391-3-16-\.04/.test(t)) { card = t; break outer; }
+    if (/391-3-16-\.04/.test(t)) { card = t; break; }
   }
   console.log("--- Protected Rivers card ---\n" + card + "\n---");
   check("B · clicking the Etowah line opens the Protected Rivers card", card.length > 0);
