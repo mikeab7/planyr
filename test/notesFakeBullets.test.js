@@ -131,3 +131,58 @@ describe("inside an existing list item", () => {
     expect(shape(out.content[0])).toBe('noteAnchor{ul[("LEED" ul[("Child one") ("Child two")])]}');
   });
 });
+
+/* NEW-1 (2026-10-30 follow-up to #2726): the cleanup ATE A TYPED WORD. Measured by feeding single paragraphs to the shipped
+ * normaliser: "Mr.  Jones will review." became a numbered item "Jones will review." — the word "Mr." deleted. These are the
+ * exact strings from that report. A lettered / Roman marker is one letter or a real Roman numeral (to 39), a marker with no
+ * glyph needs the WIDE gap Word writes (>= 3, a typed double space is not one), and a lone numbered or lettered paragraph is
+ * never converted — only a run of two or more, or one that sits next to a glyph bullet. */
+describe("typed text that merely LOOKS like a marker is never touched (NEW-1, 2026-10-30)", () => {
+  const typed = (s) => doc(box(p(t(s))), p());
+  const unchanged = (s) => { const d = typed(s); expect(normalizeFakeBullets(d), JSON.stringify(s)).toBe(d); };
+
+  it("a 1-4 letter word + period + two spaces is a word, not a marker (Mr. Dr. No. Ms. Re.)", () => {
+    for (const w of ["Mr.", "Dr.", "No.", "Ms.", "Re.", "Mrs.", "Prof.", "St.", "Inc."]) unchanged(`${w}  Jones will review.`);
+  });
+  it("the report's own string: 'Mr.  Jones will review.' keeps 'Mr.'", () => unchanged("Mr.  Jones will review."));
+  it("a lone lettered paragraph is left alone: 'A.  Ryan to send'", () => unchanged("A.  Ryan to send"));
+  it("a lone numbered paragraph is left alone: '1.  Entitlements'", () => unchanged("1.  Entitlements"));
+  it("a lone Roman-numeral paragraph is left alone: 'I.  Introduction'", () => unchanged("I.  Introduction"));
+  it("a typed outline with a double space ('I.  Intro' / 'II.  Methods') is two typed lines, not a list", () => {
+    const d = doc(box(p(t("I.  Introduction")), p(t("II.  Methods")), p(t("1.  First")), p(t("2.  Second"))), p());
+    expect(normalizeFakeBullets(d)).toBe(d);
+  });
+  it("the strings the report says were already correct stay correct", () => {
+    for (const s of ["Done.  Next steps follow.", "Note.  Check the survey.", "• typed bullet", "- typed dash", "o   hello world", "Total  $85K", "400K SF - $85K"]) unchanged(s);
+  });
+  it("a real Word NUMBERED run (wide gap, two or more) still converts, exactly as before", () => {
+    const num = (m, w) => p(t(m), t(" ".repeat(6)), t(w));
+    const out = normalizeFakeBullets(doc(box(num("1.", "Entitlements"), num("2.", "Construction"))));
+    expect(out.content[0].content[0].type).toBe("orderedList");
+  });
+  it("a lone numbered paragraph NEXT TO a glyph bullet is part of that run and converts (mixed neighbours)", () => {
+    const out = normalizeFakeBullets(doc(box(fake("·", "Bullet"), p(t("1."), t(" ".repeat(6)), t("Number"))))); 
+    expect(out.content[0].content.map((n) => n.type)).toEqual(["bulletList", "orderedList"]);
+  });
+  it("lone GLYPH bullets keep converting exactly as before (the owner's OneNote note shape)", () => {
+    for (const g of ["·", "o", "§", "□", ""]) {
+      const out = normalizeFakeBullets(doc(box(fake(g, "Alone"))));
+      expect(out.content[0].content[0].type, g).toBe("bulletList");
+    }
+  });
+  it("only a real Roman numeral is Roman: 'mix.' 'dim.' 'civil.' are words", () => {
+    expect(readMarker("mix.      Words")).toBe(null);
+    expect(readMarker("dim.      Words")).toBe(null);
+    expect(readMarker("xl.       Words")).toBe(null);          // 40: past the numerals a document outline uses
+    expect(readMarker("iv.       Words")).toMatchObject({ kind: "ordered", roman: true });
+    expect(readMarker("xxxix.    Words")).toMatchObject({ kind: "ordered", roman: true });
+  });
+  it("only a SINGLE letter is a letter marker: 'ab.' is not one", () => {
+    expect(readMarker("ab.       Words")).toBe(null);
+    expect(readMarker("b.        Words")).toMatchObject({ kind: "ordered" });
+  });
+  it("a marker with no glyph needs a gap of three or more", () => {
+    expect(readMarker("1.  Words")).toBe(null);
+    expect(readMarker("1.   Words")).toMatchObject({ kind: "ordered" });
+  });
+});
