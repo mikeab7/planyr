@@ -18,6 +18,7 @@ const args = process.argv.slice(2);
 const val = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const RUNS = Number(val("--runs", 3));
 const JSON_OUT = val("--json", null);
+const SECTIONS = val("--sections", "A,B,C").split(",");
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 const fmt = (a, unit = "ms") => `${Math.round(median(a) * 10) / 10} ${unit}  (runs: ${a.map((x) => Math.round(x * 10) / 10).join(", ")})`;
 
@@ -36,11 +37,11 @@ function fanWorkbook(n) {              // inputs in A, one formula per row in B 
   for (let r = 0; r < n; r++) { sh = setRaw(sh, r, 0, String(r + 1)); sh = setRaw(sh, r, 1, `=A${r + 1}*$D$1+SUM(A${Math.max(1, r)}:A${r + 1})`); }
   return { ...wb, sheets: [{ ...wb.sheets[0], sheet: sh }] };
 }
-function rowsWorkbook(rows, cols, formulas = false) {
-  const wb = createWorkbook(); let sh = wb.sheets[0].sheet;
-  sh = { ...sh, rowCount: Math.max(sh.rowCount, rows + 5) };
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) sh = setRaw(sh, r, c, formulas && c === cols - 1 ? `=SUM(A${r + 1}:${String.fromCharCode(64 + cols - 1)}${r + 1})` : String(((r * 31 + c * 7) % 1000) + 0.5));
-  return { ...wb, sheets: [{ ...wb.sheets[0], sheet: sh }] };
+function rowsWorkbook(rows, cols, formulas = false) {   // built in ONE pass: setRaw copies the whole cell map per call, which is quadratic at 60k cells
+  const wb = createWorkbook(); const sh = wb.sheets[0].sheet;
+  const cells = {};
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells[`${sh.columns[c].id}:${r}`] = formulas && c === cols - 1 ? `=SUM(A${r + 1}:${String.fromCharCode(64 + cols - 1)}${r + 1})` : String(((r * 31 + c * 7) % 1000) + 0.5);
+  return { ...wb, sheets: [{ ...wb.sheets[0], sheet: { ...sh, rowCount: Math.max(sh.rowCount, rows + 5), cells } }] };
 }
 async function largestFixture() {
   let best = null;
@@ -78,33 +79,36 @@ async function main() {
   const tick = (page) => page.evaluate(() => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); }));
 
   // ── A. recalc ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+  if (SECTIONS.includes("A")) {
   console.log("\nA. RECALC — 5,000 dependent formulas, both engines, one Chromium");
   results.recalc = {};
-  for (const [shape, wb, lastRow] of [["chain (depth 5000)", chainWorkbook(5000), 4999], ["fan (5000 wide)", fanWorkbook(5000), 4999]]) {
+  // editCell = the input whose change ripples to the LAST formula: the head of the chain, or the shared multiplier D1 of the fan
+  for (const [shape, wb, lastRow, editCell] of [["chain (depth 5000)", chainWorkbook(5000), 4999, [0, 0]], ["fan (5000 wide)", fanWorkbook(5000), 4999, [0, 3]]]) {
     const oldFirst = [], oldEdit = [], uniFirst = [], uniEdit = [];
     for (let i = 0; i < RUNS; i++) {
       const { ctx, page } = await newPage(SANDBOX, SANDBOX_PATH);
       await page.waitForFunction(() => window.__planyrUniverRead && window.__planyrUniverRead.api() && window.__sandboxLoad);
       await assertMeasurable(page, "measure-univer-vs-old");
-      const o = await page.evaluate(([w]) => {
+      const o = await page.evaluate(([w, ec]) => {
         const { evaluateWorkbook, migrateWorkbook } = window.__oldEngine;
         const m = migrateWorkbook(w); const t0 = performance.now(); const ev = evaluateWorkbook(m, {}); const first = performance.now() - t0;
-        const col = m.sheets[0].sheet.columns[0].id; const ed = { ...m, sheets: [{ ...m.sheets[0], sheet: { ...m.sheets[0].sheet, cells: { ...m.sheets[0].sheet.cells, [`${col}:0`]: "2" } } }] };
+        const col = m.sheets[0].sheet.columns[ec[1]].id; const ed = { ...m, sheets: [{ ...m.sheets[0], sheet: { ...m.sheets[0].sheet, cells: { ...m.sheets[0].sheet.cells, [`${col}:${ec[0]}`]: "2" } } }] };
         const t1 = performance.now(); evaluateWorkbook(ed, {}); return { first, edit: performance.now() - t1 };
-      }, [wb]);
+      }, [wb, editCell]);
       oldFirst.push(o.first); oldEdit.push(o.edit);
       const col = shape.startsWith("chain") ? 0 : 1;
       const want0 = shape.startsWith("chain") ? 5000 : null;
       // Univer: hand the workbook over, time until the LAST formula cell holds a number
-      const u = await page.evaluate(async ([w, lr, c]) => {
+      const u = await page.evaluate(async ([w, lr, c, ec]) => {
         const tick = () => new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
         const t0 = performance.now(); window.__sandboxLoad(w, {});
-        let api, ws; for (;;) { api = window.__planyrUniverRead.api(); ws = api && api.getActiveWorkbook() && api.getActiveWorkbook().getActiveSheet(); if (ws && ws.getRange(lr, c).getValue() !== null && typeof ws.getRange(lr, c).getValue() === "number") break; await tick(); if (performance.now() - t0 > 120000) return { timeout: true }; }
-        const first = performance.now() - t0; const before = ws.getRange(lr, c).getValue();
-        const t1 = performance.now(); ws.getRange(0, 0).setValue(2);
-        for (;;) { const v = ws.getRange(lr, c).getValue(); if (typeof v === "number" && v !== before) break; await tick(); if (performance.now() - t1 > 120000) return { timeout: true, first }; }
+        const num = (ws, r, cc) => { try { const v = ws.getRange(r, cc).getValue(); return typeof v === "number" ? v : null; } catch (_) { return null; } };   // out-of-bounds = the previous 1000-row workbook is still showing: not ready
+        let api, ws; for (;;) { api = window.__planyrUniverRead.api(); ws = api && api.getActiveWorkbook() && api.getActiveWorkbook().getActiveSheet(); if (ws && num(ws, lr, c) !== null) break; await tick(); if (performance.now() - t0 > 120000) return { timeout: true }; }
+        const first = performance.now() - t0; const before = num(ws, lr, c);
+        const t1 = performance.now(); ws.getRange(ec[0], ec[1]).setValue(2);
+        for (;;) { const v = num(ws, lr, c); if (v !== null && v !== before) break; await tick(); if (performance.now() - t1 > 120000) return { timeout: true, first }; }
         return { first, edit: performance.now() - t1 };
-      }, [wb, lastRow, col]);
+      }, [wb, lastRow, col, editCell]);
       if (u.timeout) console.log("   Univer timed out", JSON.stringify(u)); else { uniFirst.push(u.first); uniEdit.push(u.edit); }
       await ctx.close(); void want0;
     }
@@ -112,7 +116,9 @@ async function main() {
     console.log(`   ${shape}\n     Planyr engine  first calc ${fmt(oldFirst)}\n                    one edit (full re-evaluate) ${fmt(oldEdit)}\n     Univer         load + first calc ${fmt(uniFirst)}\n                    one edit to A1, last cell updated ${fmt(uniEdit)}`);
   }
 
+  }
   // ── B. memory ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+  if (SECTIONS.includes("B")) {
   console.log("\nB. MEMORY — JS heap (after forced GC) with the workbook loaded, minus the same page with a blank workbook");
   const big = await largestFixture();
   const fixtures = [[`largest real fixture (${big ? big.name + ", " + big.cells + " cells" : "none"})`, big ? big.workbook : createWorkbook()], ["large synthetic (5,000 rows × 12 columns + a formula per row)", rowsWorkbook(5000, 12, true)]];
@@ -135,7 +141,9 @@ async function main() {
     results.memory[label] = { oldD, uniD }; console.log(`   ${label}\n     old grid  +${fmt(oldD, "MB")}\n     Univer    +${fmt(uniD, "MB")}`);
   }
 
+  }
   // ── C. first paint, 1,000 rows ─────────────────────────────────────────────────────────────────────────────────────────
+  if (SECTIONS.includes("C")) {
   console.log("\nC. FIRST PAINT — a 1,000-row × 12-column sheet, navigation → first value readable (production builds, localhost)");
   const w1000 = rowsWorkbook(1000, 12, true); const oldT = [], uniT = [], uniMount = [];
   for (let i = 0; i < RUNS; i++) {
@@ -148,12 +156,13 @@ async function main() {
     const c2 = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p2 = await c2.newPage();
     await p2.addInitScript((w) => { window.__sandboxInitial = w; }, w1000);
     const t1 = Date.now(); await p2.goto(SANDBOX + SANDBOX_PATH, { waitUntil: "commit" });
-    await p2.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); const ws = a && a.getActiveWorkbook() && a.getActiveSheet && a.getActiveWorkbook().getActiveSheet(); return !!ws && typeof ws.getRange(0, 0).getValue() === "number" && typeof ws.getRange(999, 11).getValue() === "number"; }, null, { timeout: 90000, polling: 25 });
+    await p2.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); const ws = a && a.getActiveWorkbook() && a.getActiveSheet && a.getActiveWorkbook().getActiveSheet(); try { return !!ws && typeof ws.getRange(0, 0).getValue() === "number" && typeof ws.getRange(999, 11).getValue() === "number"; } catch (_) { return false; } }, null, { timeout: 90000, polling: 25 });
     await tick(p2); uniT.push(Date.now() - t1);
     const mt = await p2.evaluate(() => performance.getEntriesByType("measure").length); void mt; await c2.close();
   }
   results.firstPaint = { oldT, uniT };
   console.log(`   old grid (whole app: shell + lazy Spreadsheet chunk + grid)  ${fmt(oldT)}\n   Univer (host page + Univer chunk + engine + first calc)        ${fmt(uniT)}`);
+  }
   await browser.close();
   for (const s of servers) s.kill();
   if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ at: new Date().toISOString(), runs: RUNS, results }, null, 2));

@@ -42,7 +42,7 @@ const VT = { top: 1, middle: 2, bottom: 3 };
 const WRAP_ON = 3;
 const BORDER = { thin: 1, double: 7 };
 const BORDER_BACK = { 1: "thin", 7: "double" };
-const T_STRING = 1, T_NUMBER = 2, T_BOOL = 3, T_FORCE_STRING = 4;
+const T_STRING = 1, T_NUMBER = 2, T_BOOL = 3;
 const BORDER_COLOR = "#000000";
 
 const MAPPED_STYLE_KEYS = new Set(["bold", "italic", "underline", "strike", "fontFamily", "fontSize", "color", "fill", "align", "valign", "wrap", "border"]);
