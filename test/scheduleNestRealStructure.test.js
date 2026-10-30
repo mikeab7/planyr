@@ -34,6 +34,7 @@ const real = new Function(`
   ${extractFn("const flatOrderWithLevel = (tasks) => {")};
   ${extractFn('const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfterId = "end") => {')};
   ${stmt("const rowFloatAtPointer =")}
+  ${src.slice(src.indexOf("/* RANGE-SELECTION:START */"), src.indexOf("/* RANGE-SELECTION:END */"))}
   ${extractFn("const idPressMovesRows = (selRange, ri, colCount) => {")};
   return { rowDropIntent, flatOrderWithLevel, moveSelectionToDestination, rowFloatAtPointer, idPressMovesRows };
 `)();
@@ -115,6 +116,9 @@ describe("idPressMovesRows — an ID cell inside a multi-row selection picks the
     expect(idPressMovesRows(full(10, 10), 10, cols)).toBe(false);
     expect(idPressMovesRows({ r1: 10, r2: 19, c1: 1, c2: 3 }, 12, cols)).toBe(false);
     expect(idPressMovesRows(null, 12, cols)).toBe(false);
+  });
+  it("B2530690 — with SEVERAL ranges selected a plain ID press never picks them up (it collapses to that row)", () => {
+    expect(idPressMovesRows({ ...full(10, 19), extra: [{ r1: 30, r2: 31, c1: 0, c2: cols - 1 }] }, 12, cols)).toBe(false);
   });
 });
 
