@@ -46,6 +46,7 @@ import {
   isTextInsertInputType,
 } from "../lib/notesBlankPaper.js";
 import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
+import { normalizeFakeBullets } from "../lib/notesFakeBullets.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -1645,9 +1646,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * `useEditor`, the migrated shape is simply what the editor STARTS with; neither is a
    * transaction, so `hasUserInputRef` below still gates the first save on a real, trusted user
    * action. */
-  const [initialDoc] = useState(() => migrateFlowBody(migrateSketchesToBoxes(
+  /* ⛔ AND "BULLETS" THAT ARE JUST TEXT BECOME REAL LISTS HERE TOO (lib/notesFakeBullets.js): a Word / OneNote outline pasted
+   * before the Office-list fix is paragraphs that begin with the glyph, so Enter has no list to continue. Same rule as the two
+   * migrations: on the way in, never a transaction, saved only once the person edits (pressing Enter is that edit). */
+  const [initialDoc] = useState(() => normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
     (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC,
-  )));
+  ))));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
   /* ⛔ NEW-5 — whether DOM focus is currently in the title `<input>`, so the toolbar knows to
    * read/write `titleStyle` instead of the document selection. A plain boolean, not derived
@@ -1980,6 +1984,24 @@ const NoteEditor = forwardRef(function NoteEditor({
        *  editor's DOM node — untrusted, so the browser performs no native edit of its own for
        *  it — which exercises ONLY the plugin's `handleDOMEvents.beforeinput`, exactly the event
        *  class his platform is documented to deliver without a usable `keydown`. */
+      /** NEW-1 (B2142464 x4) — drive the paste SAFETY NET on purpose. No clipboard we know of makes the parse drop a table, so
+       *  the net could never be seen working: this runs the pipeline's `transformPastedHTML` on `html` (filling its slot with
+       *  the tables the html held) and then `transformPasted` on a slice that holds a paragraph and NO table, and returns the
+       *  resulting slice as JSON. A healthy net hands the tables back. */
+      pasteSafetyNetProbe: (html) => {
+        if (editor.isDestroyed) return null;
+        const v = editor.view;
+        const para = v.state.schema.nodes.paragraph.create(null, v.state.schema.text("lost-table probe"));
+        const Frag = para.content.constructor;
+        const Slice = v.state.doc.slice(0, 0).constructor;
+        /* ProseMirror CHAINS every plugin's transform (the callback returns nothing, so `someProp` keeps going) — a probe that
+         * returned the first plugin's answer would stop at whichever one registered first and never reach ours. */
+        let h = html;
+        v.someProp("transformPastedHTML", (f) => { h = f(h, v); });
+        let out = new Slice(Frag.from(para), 0, 0);
+        v.someProp("transformPasted", (f) => { out = f(out, v); });
+        return out.content.toJSON();
+      },
       dispatchBeforeInput: (inputType = "deleteContentBackward") => {
         if (editor.isDestroyed) return;
         const event = new InputEvent("beforeinput", { inputType, cancelable: true, bubbles: true });

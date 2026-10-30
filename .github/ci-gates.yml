@@ -213,6 +213,26 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-paste-options.mjs
+      # Notes WORD / ONENOTE OUTLINE paste gate (NEW-1/NEW-2, B2557984 + B2142464 x4, 2026-10-30). Owner: bullets pasted from
+      # Word came in as a literal "o", "§" and a square, and a small table nested in the outline came in as loose lines.
+      # The committed Word / OneNote outline fixtures (test/fixtures/clipboard-lists - SYNTHETIC models of those products'
+      # markup) pasted into a real box on two landings and inside an existing bullet, judged on the STORED document: real
+      # nested lists, the table under its bullet, numbered lists numbered, no glyph left in the text. Known-good arms VOID
+      # the run (plain text lands; Google Docs' list lands). 19 of 38 red on pre-fix main. Reuses the preview server and Chromium.
+      - name: Notes Word/OneNote outline paste (real nested bullets, table under its bullet, no glyph characters - NEW-1/NEW-2, 2026-10-30)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-list-paste.mjs
+      # Notes ENTER-AFTER-A-PASTED-BULLET gate (follow-up NEW-1, B2557985, 2026-10-30). Owner screenshot: Enter at the end of a
+      # pasted level-2 item made a flush-left plain paragraph. Real keys on pasted Word / OneNote outlines at levels 1-4 and a
+      # numbered one (sibling at the same level and marker, Enter on the empty item steps out one level, Ctrl+Z, Tab / Shift+Tab,
+      # split, Backspace) AND on a note holding the shape the OLD paste stored (text bullets) - normalised to real lists on read,
+      # Enter works, a page nobody edits is not rewritten, the result survives a reload. Known-good arm VOIDS the run. 10 of 31
+      # red on pre-fix main. Reuses the preview server and Chromium.
+      - name: Notes Enter after a pasted bullet (continues the list at every level, old text-bullet notes too - follow-up NEW-1, 2026-10-30)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-list-enter.mjs
       # Notes header row on ANY row + cell fill gate (NEW-1/NEW-2, 2026-10-28). Owner report: a table's SECOND row was
       # all header cells (bold + grey), the B button read off, and "Header" only ever touched row 1. Real clicks/keys,
       # judged on the STORED document and computed style: Header row pressed / Bold lit in a header cell, the toggle
