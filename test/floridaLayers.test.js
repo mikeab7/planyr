@@ -326,7 +326,7 @@ describe("review pass 4 stays fixed", () => {
   it("the flat-style opacity setter also updates _originalStyle (esri-leaflet's reset restores it on every re-delivered feature)", async () => {
     const { readFileSync } = await import("node:fs");
     const layers = readFileSync(new URL("../src/workspaces/site-planner/lib/layers.js", import.meta.url), "utf8");
-    expect(layers).toMatch(/const sf = \(f\) => \(isPointFeature\(f\) \? pointSymbolOptions\(cfg, oo\) : featureBaseStyle\(cfg, oo\)\); lyr\._originalStyle = sf; lyr\.setStyle\(sf\);/);
+    expect(layers).toMatch(/const sf = \(f\) => \(isPointFeature\(f\) \? pointSymbolOptions\(cfg, oo(?:, f && f\.properties)?\) : featureBaseStyle\(cfg, oo\)\); lyr\._originalStyle = sf; lyr\.setStyle\(sf\);/);
   });
 });
 
