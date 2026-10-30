@@ -443,11 +443,14 @@ check("undo-redo-all", "Undo / redo across all of the above", async () => {
   const initial = await snap();
   await click(0, 0); await type("99"); await click(1, 0); await press("Control+b"); await inSheet((api, ws) => { ws.setFrozenRows(2); ws.getRange("A1").setNumberFormat("0.0%"); ws.hideRows(4, 1); });
   const final = await snap();
-  for (let i = 0; i < 12; i++) await page.keyboard.press("Control+z");
+  // EXACTLY as many undo steps as edits made above (typing, bold, freeze, number format, hide = 5). More would reach back into the
+  // test's own setup on a page whose setup went through Univer's undo stack (the live run seeds through the facade).
+  const STEPS = 5;
+  for (let i = 0; i < STEPS; i++) await page.keyboard.press("Control+z");
   await wait(300); const undone = await snap();
-  for (let i = 0; i < 12; i++) await page.keyboard.press("Control+y");
+  for (let i = 0; i < STEPS; i++) await page.keyboard.press("Control+y");
   await wait(300); const redone = await snap();
-  return undone === initial && redone === final && initial !== final ? PASS("12× Ctrl+Z restored the starting sheet exactly; 12× Ctrl+Y returned to the final state") : FAIL(`undo ${undone === initial ? "ok" : "differs"}, redo ${redone === final ? "ok" : "differs"}`);
+  return undone === initial && redone === final && initial !== final ? PASS(`${STEPS}× Ctrl+Z (one per edit) restored the starting sheet exactly; ${STEPS}× Ctrl+Y returned to the final state`) : FAIL(`undo ${undone === initial ? "ok" : "differs"}, redo ${redone === final ? "ok" : "differs"}`);
 });
 
 // ── 7. the app-facing claims ───────────────────────────────────────────────────────────────────────────────────────────
