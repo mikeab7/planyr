@@ -133,6 +133,7 @@ describe("(b) a row is offered only where its source serves — in every state, 
         expect(scope.state, `${label} scope state`).toBe(st);
         for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
           if (cfg.regions && cfg.regions.length) continue; // a region row is also gated by a boundary — covered by layerLocationScope
+          if (cfg.stateRegions && cfg.stateRegions[st]) continue; // a region that binds only in this state (tn_county in MS: its border counties) — covered by mississippiLayers
           const want = (!cfg.states || cfg.states.includes(st)) && !(cfg.statesNot || []).includes(st);
           expect(layerAvailableHere(cfg, scope), `${label}: ${id} at ${st}`).toBe(want);
         }
@@ -148,6 +149,7 @@ describe("(b) a row is offered only where its source serves — in every state, 
       const planner = plannerScope(lat, lng), finder = finderScope(lat, lng);
       for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
         if (cfg.regions && cfg.regions.length) continue;
+        if (cfg.stateRegions && cfg.stateRegions[st]) continue;
         if (cfg.states && !cfg.states.includes(st)) expect(layerAvailableHere(cfg, planner), `${id} offered at ${name}`).toBe(false);
         if (cfg.statesNot && cfg.statesNot.includes(st)) expect(layerAvailableHere(cfg, planner), `${id} offered at ${name}`).toBe(false);
       }
