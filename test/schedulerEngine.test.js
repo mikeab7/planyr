@@ -1760,7 +1760,7 @@ describe("anti-drift: the round-2 scheduler fixes still exist in the real source
     expect(src).toMatch(/setData\(d => \{\s*const newProjects = \{\};\s*Object\.entries\(d\.projects\)/);
   });
   it("G1: a health-dot click preserves a covering multi-row range (mouse fill works)", () => {
-    expect(src).toMatch(/const inSpan = selRange && ri >= Math\.min\(selRange\.r1, selRange\.r2\)/);
+    expect(src).toMatch(/const inSpan = selRange && selTouchesRow\(selRange, ri\)/);
     expect(src).toMatch(/if \(!inSpan\) setSelRange\(\{r1:ri, r2:ri, c1:ci, c2:ci\}\);/);
   });
   it("G2: the parent-lock guards lock the whole cost FAMILY by type (col.t), not just col.k", () => {

@@ -36,6 +36,10 @@ export const ALLOWED_HOSTS = new Set([
    * probe hosts (pwgis.chattanooga.gov, gis.mcgtn.org) were measured the same way and are NOT listed: nothing uses them. */
   "mapsdev.hamiltontn.gov", // Hamilton County TN GIS
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
+  /* NEW-1 (Mississippi due-diligence layers) — MDEQ's own two ArcGIS servers (Land & Water / Geology, and Pollution Control); the build sandbox reaches neither, so every layer on them was
+   * MEASURED through this relay on the PR preview. (MARIS, gis.mississippi.edu, is listed above.) */
+  "gis.deq.ms.gov", // MDEQ Office of Land and Water Resources + Office of Geology
+  "opcgis.deq.state.ms.us", // MDEQ Office of Pollution Control (MUSTER tanks, GARD sites, 303(d) list)
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
   /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
    * Integrity GIS runs five Geocortex pools; a county's public site lives on exactly one of them. */

@@ -359,6 +359,165 @@ export const SOURCE_FIXTURES = {
     { label: "Savannah (Chatham Co.)", bbox: [-81.15, 32.0, -81.05, 32.1], expectMinCount: 1 }, // live: 55
   ],
   },
+  msDeqUst: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8306, 34.959], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1806, 32.2987], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0903, 30.3694], expectMinCount: 1 },
+  ],
+  },
+  msDeqGard: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.7906, 34.9672], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1775, 32.3], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0897, 30.3707], expectMinCount: 1 },
+  ],
+  },
+  msDeqLandfills: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.7936, 34.9339], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1453, 32.3017], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1339, 30.3947], expectMinCount: 1 },
+  ],
+  },
+  msDeqSpa: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8306, 34.9571], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1787, 32.3117], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0886, 30.3654], expectMinCount: 1 },
+  ],
+  },
+  msDeqMines: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8738, 34.9424], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1406, 32.2939], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1539, 30.3952], expectMinCount: 1 },
+  ],
+  },
+  msDeqOgFields: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6942, 34.1269], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1424, 32.2681], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.2747, 31.2437], expectMinCount: 1 },
+  ],
+  },
+  msOgbWells: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6909, 34.1506], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1734, 32.3058], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.2657, 31.3653], expectMinCount: 1 },
+  ],
+  },
+  msNrcsEasements: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.7942, 34.8851], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.2742, 32.2371], expectMinCount: 1 },
+    { label: "Natchez (Adams Co.)", point: [-91.4898, 31.4914], expectMinCount: 1 },
+  ],
+  },
+  msDams: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8427, 34.9691], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.2027, 32.269], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1442, 30.4519], expectMinCount: 1 },
+  ],
+  },
+  msDamInundation: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8434, 34.969], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.2059, 32.2663], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.3448, 31.3018], expectMinCount: 1 },
+  ],
+  },
+  ms303d: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6351, 34.2752], expectMinCount: 1 },
+    { label: "Jackson area (Madison Co.)", point: [-90.0212, 32.5492], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.1532, 30.4583], expectMinCount: 1 },
+  ],
+  },
+  msCounty: {
+  fixtures: [
+    { label: "DeSoto Co. edge", point: [-89.7242, 34.9953], expectMinCount: 1 },
+    { label: "Hinds Co. edge", point: [-90.5538, 32.5076], expectMinCount: 1 },
+    { label: "Harrison Co. edge", point: [-88.8845, 30.6773], expectMinCount: 1 },
+  ],
+  },
+  msCity: {
+  fixtures: [
+    { label: "Tupelo (Lee Co.)", point: [-88.6848, 34.2938], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1785, 32.2902], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0837, 30.3529], expectMinCount: 1 },
+  ],
+  },
+  msBrownfields: {
+  fixtures: [
+    { label: "Olive Branch (DeSoto Co.)", point: [-89.8863, 34.8607], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1795, 32.3002], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0954, 30.3682], expectMinCount: 1 },
+  ],
+  },
+  msTribal: {
+  fixtures: [
+    { label: "Choctaw lands near Philadelphia (Neshoba Co.)", point: [-89.1806, 32.7505], expectMinCount: 1 },
+    { label: "Choctaw lands, south tract (Jackson Co. line)", point: [-89.0198, 31.7698], expectMinCount: 1 },
+  ],
+  },
+  msNrhp: {
+  fixtures: [
+    { label: "Olive Branch area (DeSoto Co.)", point: [-89.7793, 34.9245], expectMinCount: 1 },
+    { label: "Jackson (Hinds Co.)", point: [-90.1805, 32.2994], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.091, 30.3694], expectMinCount: 1 },
+  ],
+  },
+  msCemeteries: {
+  fixtures: [
+    { label: "Olive Branch area (DeSoto Co.)", point: [-89.9374, 34.889], expectMinCount: 1 },
+    { label: "Jackson area (Hinds Co.)", point: [-90.1523, 32.2037], expectMinCount: 1 },
+    { label: "Biloxi (Harrison Co.)", point: [-88.9075, 30.3976], expectMinCount: 1 },
+  ],
+  },
+  msCritHabitat: {
+  fixtures: [
+    { label: "Jackson (Hinds Co.)", point: [-90.1787, 32.2902], expectMinCount: 1 },
+    { label: "Hattiesburg (Forrest Co.)", point: [-89.2794, 31.3332], expectMinCount: 1 },
+    { label: "Gulfport (Harrison Co.)", point: [-89.0861, 30.3678], expectMinCount: 1 },
+  ],
+  },
+  msDesotoDrainage: {
+  fixtures: [
+    { label: "Olive Branch area", point: [-89.8571, 34.9405], expectMinCount: 1 },
+    { label: "Hernando", point: [-89.9894, 34.8127], expectMinCount: 1 },
+    { label: "Walls", point: [-90.1403, 34.9478], expectMinCount: 1 },
+  ],
+  },
+  msDesotoLevee: {
+  fixtures: [
+    { label: "North edge (Walls)", point: [-90.2394, 34.9999], expectMinCount: 1 },
+    { label: "South edge (Hernando area)", point: [-90.1963, 34.7208], expectMinCount: 1 },
+  ],
+  },
+  msDesotoLomr: {
+  fixtures: [
+    { label: "Olive Branch area", point: [-89.8386, 34.933], expectMinCount: 1 },
+    { label: "Hernando area", point: [-89.9678, 34.8339], expectMinCount: 1 },
+    { label: "Southaven area", point: [-89.9918, 34.9477], expectMinCount: 1 },
+  ],
+  },
+  msDesotoLoma: {
+  fixtures: [
+    { label: "Olive Branch", point: [-89.8422, 34.9635], expectMinCount: 1 },
+    { label: "Hernando", point: [-90.0185, 34.8191], expectMinCount: 1 },
+    { label: "Southaven", point: [-90.0078, 34.977], expectMinCount: 1 },
+  ],
+  },
+  msDesotoCemeteries: {
+  fixtures: [
+    { label: "Olive Branch", point: [-89.8227, 34.9552], expectMinCount: 1 },
+    { label: "Hernando", point: [-89.9917, 34.8185], expectMinCount: 1 },
+    { label: "Southaven", point: [-90.0043, 34.9926], expectMinCount: 1 },
+  ],
+  },
   troutGa: {
   fixtures: [
     { label: "Chattahoochee headwaters (White Co.)", point: [-83.8921, 34.6906], expectMinCount: 1 }, // live: 4
@@ -1672,6 +1831,98 @@ export const SOURCE_DOCS = {
     "Georgia EPD's REGISTER of underground storage tank facilities (name, address, facility type, status). It is not a " +
     "release list: leak, corrective-action and closure status are not in the layer (edited 2022-10-17), so a facility on it " +
     "is a flag to pull EPD's UST Management Program file, never a finding of contamination.",
+  },
+  msDeqUst: {
+  notes:
+    "MDEQ's own MUSTER repository of UST facilities (11,913 statewide, open + closed). RELEASE_STATUS 'Open Release' marks a tank site with an unresolved release; the register does not say how much or where on the lot.",
+  },
+  msDeqGard: {
+  notes:
+    "MDEQ's uncontrolled-sites / CERCLA list (2,280 sites): state and federal status per site, program (brownfield, voluntary evaluation), main contaminant. Status codes are MDEQ's as published.",
+  },
+  msDeqLandfills: {
+  notes:
+    "905 permitted solid-waste facilities incl. closed and inactive: municipal landfills, industrial/special-waste landfills, rubbish sites, tire sites. Point per facility, not the waste footprint.",
+  },
+  msDeqSpa: {
+  notes:
+    "Delineated protection areas around public water-supply sources (1,243). Polygons carry only the public water system ID.",
+  },
+  msDeqMines: {
+  notes:
+    "MDEQ surface-mining permit boundaries (1,106). Includes released permits; the polygons carry the permit number and acres only.",
+  },
+  msDeqOgFields: {
+  notes:
+    "Generalized outlines of Mississippi's oil and gas fields (1,175). A producing-area outline, not a surface restriction.",
+  },
+  msOgbWells: {
+  notes:
+    "25,200 Board-regulated wells with type and status descriptions (producing, injection, plugged, orphaned…). The Board's own Data Explorer is not an open service; MARIS is the state clearinghouse copy.",
+  },
+  msNrcsEasements: {
+  notes:
+    "698 NRCS easement polygons (wetland reserve and similar). Boundaries are NRCS's aggregate and approximate.",
+  },
+  msDams: {
+  notes:
+    "6,870 state-inventoried dams with hazard class (High / Significant / Low), height, condition, and links to emergency action plans and inspection reports where MDEQ posts them.",
+  },
+  msDamInundation: {
+  notes:
+    "322 modeled dam-failure inundation areas. Only dams MDEQ has studied have one; a dam with no polygon is unstudied, not safe.",
+  },
+  ms303d: {
+  notes:
+    "233 impaired stream reaches with pollutant and basin. The four impaired lakes (polygon layer) are not included.",
+  },
+  msCounty: {
+  notes:
+    "The 82 Mississippi counties.",
+  },
+  msCity: {
+  notes:
+    "300 incorporated places; each carries the year its boundary was last updated (Boundary_U), which varies by city.",
+  },
+  msBrownfields: {
+  notes:
+    "EPA's ACRES brownfield properties (683 in Mississippi; layer refreshed 2026-10-21). Federal brownfield grant / cleanup properties — the state's own program sites are on the MDEQ contaminated-sites layer.",
+  },
+  msTribal: {
+  notes:
+    "BIA land area representations (boundaries of federally recognized reservations and trust lands). A representation, not a survey; the Choctaw LAR is one multi-part feature.",
+  },
+  msNrhp: {
+  notes:
+    "NPS National Register listings (1,100 in Mississippi), one point per listing. Mississippi's own HRI (MDAH) is not an open service; recorded-but-unlisted sites are not here.",
+  },
+  msCemeteries: {
+  notes:
+    "USGS GNIS cemeteries (National Map structures). Recorded cemeteries only: an unrecorded family burial ground is not on the layer, so an empty map is never proof of none.",
+  },
+  msCritHabitat: {
+  notes:
+    "USFWS final critical habitat for listed species in Mississippi (gopher frog, pearl darter, black pinesnake, sandhill crane, mussels…).",
+  },
+  msDesotoDrainage: {
+  notes:
+    "The county's drainage districts (6).",
+  },
+  msDesotoLevee: {
+  notes:
+    "The part of the Yazoo–Mississippi Delta Levee District in DeSoto County.",
+  },
+  msDesotoLomr: {
+  notes:
+    "FEMA Letters of Map Revision the county has mapped (7), with the FEMA case number and links.",
+  },
+  msDesotoLoma: {
+  notes:
+    "FEMA Letters of Map Amendment (655): a lot FEMA has removed from the mapped floodplain.",
+  },
+  msDesotoCemeteries: {
+  notes:
+    "166 cemeteries the county has located; 'Confirmed' says whether the location was field-verified.",
   },
   troutGa: {
   notes:

@@ -19,7 +19,7 @@ describe("Schedule grid — one cell-line rule (NEW-1)", () => {
     expect(seq).toMatch(/const GRID_LINE = "1px solid var\(--bd\)";/);
   });
   it("body cells draw both their right and bottom line from it (range cells share the range colour)", () => {
-    expect(seq).toMatch(/borderRight: \(selected && hasRange\) \? GRID_LINE_RANGE : GRID_LINE,\s*borderBottom: \(selected && hasRange\) \? GRID_LINE_RANGE : GRID_LINE,/);
+    expect(seq).toMatch(/borderRight: tinted \? GRID_LINE_RANGE : GRID_LINE,\s*borderBottom: tinted \? GRID_LINE_RANGE : GRID_LINE,/);
   });
   it("the filler rows and the review-proposal rows draw the same two lines", () => {
     expect(seq).toMatch(/flexShrink:0,borderRight:GRID_LINE,borderBottom:GRID_LINE,height:ROW_H,/);

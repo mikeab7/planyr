@@ -82,6 +82,7 @@ import {
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
 import { resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
 import { nextAnchorSpot, selectionInsideAnchor } from "../lib/notesAnchorNode.js";
+import { isMultiCell, refuseMultiCell } from "../lib/notesTableMultiSelect.js";
 import { BOLD_TITLE, BOLD_TITLE_IN_HEADER, TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
@@ -1526,19 +1527,22 @@ export default function NoteToolbar({
     </span>
   ) : null;
 
+  /* B2530690 — with several cell ranges selected (Ctrl+click) a table-STRUCTURE command would only see the newest
+   * rectangle and look as if it worked: refuse it out loud instead (fill and formatting DO take every range). */
+  const structural = (run) => { if (isMultiCell(editor.state)) { refuseMultiCell(editor); return; } run(); };
   const tableGroupControls = inTable ? (
     <>
-      <TBButton title="Select the whole table (then Ctrl+C / Ctrl+X to copy or move it)" testid="nt-table-select" wide big={narrow} label="Select table" onClick={() => chain().selectWholeTable().run()} />
-      <TBButton title="Insert row above" testid="nt-row-before" wide big={narrow} label="Row ↑" onClick={() => chain().addRowBefore().run()} />
-      <TBButton title="Insert row below" testid="nt-row-after" wide big={narrow} label="Row ↓" onClick={() => chain().addRowAfter().run()} />
-      <TBButton title="Delete row" testid="nt-row-del" wide big={narrow} label="Row ✕" onClick={() => chain().deleteRow().run()} />
-      <TBButton title="Insert column left" testid="nt-col-before" wide big={narrow} label="Col ←" onClick={() => chain().addColumnBefore().run()} />
-      <TBButton title="Insert column right" testid="nt-col-after" wide big={narrow} label="Col →" onClick={() => chain().addColumnAfter().run()} />
-      <TBButton title="Delete column" testid="nt-col-del" wide big={narrow} label="Col ✕" onClick={() => chain().deleteColumn().run()} />
-      <TBButton title="Merge or split cells" testid="nt-merge" wide big={narrow} label="Merge/split" onClick={() => chain().mergeOrSplit().run()} />
-      <TBButton title="Header row" testid="nt-header-row" wide big={narrow} label="Header row" pressed={headerRowsState(editor.state) ?? "false"} onClick={() => chain().toggleHeaderRows().run()} />
+      <TBButton title="Select the whole table (then Ctrl+C / Ctrl+X to copy or move it)" testid="nt-table-select" wide big={narrow} label="Select table" onClick={() => structural(() => chain().selectWholeTable().run())} />
+      <TBButton title="Insert row above" testid="nt-row-before" wide big={narrow} label="Row ↑" onClick={() => structural(() => chain().addRowBefore().run())} />
+      <TBButton title="Insert row below" testid="nt-row-after" wide big={narrow} label="Row ↓" onClick={() => structural(() => chain().addRowAfter().run())} />
+      <TBButton title="Delete row" testid="nt-row-del" wide big={narrow} label="Row ✕" onClick={() => structural(() => chain().deleteRow().run())} />
+      <TBButton title="Insert column left" testid="nt-col-before" wide big={narrow} label="Col ←" onClick={() => structural(() => chain().addColumnBefore().run())} />
+      <TBButton title="Insert column right" testid="nt-col-after" wide big={narrow} label="Col →" onClick={() => structural(() => chain().addColumnAfter().run())} />
+      <TBButton title="Delete column" testid="nt-col-del" wide big={narrow} label="Col ✕" onClick={() => structural(() => chain().deleteColumn().run())} />
+      <TBButton title="Merge or split cells" testid="nt-merge" wide big={narrow} label="Merge/split" onClick={() => structural(() => chain().mergeOrSplit().run())} />
+      <TBButton title="Header row" testid="nt-header-row" wide big={narrow} label="Header row" pressed={headerRowsState(editor.state) ?? "false"} onClick={() => structural(() => chain().toggleHeaderRows().run())} />
       <FillPopover current={currentFill(editor.state)} big={narrow} onPick={(v) => chain().setCellFill(v).run()} />
-      <TBButton title="Delete table" testid="nt-table-del" wide big={narrow} label="Delete table" onClick={() => chain().deleteTable().run()} />
+      <TBButton title="Delete table" testid="nt-table-del" wide big={narrow} label="Delete table" onClick={() => structural(() => chain().deleteTable().run())} />
     </>
   ) : null;
 
