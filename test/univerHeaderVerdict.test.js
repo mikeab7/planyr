@@ -14,6 +14,7 @@ const GOOD = () => ({
   radiusOffenders: [], shadowOffenders: [], toolSig: "Undo|Redo", toolCount: 24, overflow: true,
   undo: icon({ marker: "undo-curved", paths: ["M4 9h9a6 6 0 0 1 0 12h-4"], hasPolyline: 1 }),
   redo: icon({ marker: "redo-curved", paths: ["M20 9h-9a6 6 0 0 0 0 12h4"], hasPolyline: 1 }),
+  registered: [{ cmd: "inc", shown: true, inHeader: true, cy: 20, hasIcon: true }, { cmd: "dec", shown: true, inHeader: true, cy: 20, hasIcon: true }], mainRow: 20,
   neighbour: icon(), bold: icon({ disabled: false, color: "rgb(27, 30, 38)" }),
 });
 const failing = (m) => judgeHeader(m).filter((r) => !r.ok).map((r) => r.id);
@@ -43,6 +44,12 @@ describe("univerHeader verdict", () => {
   it("is red when the tools are centred (first tool past the midpoint or far from the dropdown)", () => {
     const a = GOOD(); a.firstTool = { ...rect(800, 8, 24, 24), label: "Undo" }; expect(failing(a)).toContain("tools-left");
     const b = GOOD(); b.firstTool = { ...rect(400, 8, 24, 24), label: "Undo" }; expect(failing(b)).toContain("tools-left");
+  });
+  it("is red when a registered tool (indent) is drawn on a second row or outside the strip, and green when folded into the overflow", () => {
+    const a = GOOD(); a.registered = [{ cmd: "inc", shown: true, inHeader: true, cy: 60, hasIcon: true }]; expect(failing(a)).toContain("registered-tools");
+    const b = GOOD(); b.registered = [{ cmd: "inc", shown: true, inHeader: false, cy: 20, hasIcon: true }]; expect(failing(b)).toContain("registered-tools");
+    const c = GOOD(); c.registered = [{ cmd: "inc", shown: true, inHeader: true, cy: 20, hasIcon: false }]; expect(failing(c)).toContain("registered-tools");
+    const d = GOOD(); d.registered = [{ cmd: "inc", shown: false }, { cmd: "dec", shown: false }]; expect(failing(d)).toEqual([]);
   });
   it("is red on any border radius or box shadow in the strip", () => {
     const a = GOOD(); a.radiusOffenders = ["a.univer-mr-2:9999px"]; expect(failing(a)).toContain("flat");

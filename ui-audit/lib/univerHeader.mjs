@@ -28,12 +28,14 @@ export function measureHeaderInPage() {
     if (row) row.n++; else rows.push({ cy: c.cy, n: 1 });
   }
   const dd = [...header.querySelectorAll("a[data-state]")].find(visible) || null;
+  let firstTool = null;
   // A TOOL is one item of the ribbon-toolbar's groups: a button, a font box, or a menu selector (Formulas' "Common Functions ▾" is a div, not a button).
   const tools = [...header.querySelectorAll('[data-u-comp="ribbon-toolbar"] > div > span')].filter(visible).map((el) => {
     const b = box(el), inner = el.querySelector("[data-u-command], [aria-label]");
     const svg = el.querySelector("svg");
     return { label: (inner && (inner.getAttribute("aria-label") || inner.getAttribute("data-u-command"))) || (el.textContent || "").trim().slice(0, 24) || (svg && svg.getAttribute("class")) || "tool", ...b };
   }).sort((a, b) => a.left - b.left);
+  firstTool = tools.find((t) => !dd || t.left >= box(dd).right - 1) || null;
   const radiusOffenders = [], shadowOffenders = [];
   for (const el of header.querySelectorAll("*")) {
     if (!visible(el)) continue;
@@ -55,14 +57,22 @@ export function measureHeaderInPage() {
       width: sb.width, height: sb.height, color: cs.color, disabled: b.disabled === true,
     };
   };
+  // Tools OTHER sessions register (indent today) must land inside the strip's own row, or fold into the overflow — never a second row.
+  const registered = ["planyr.sheet.command.increase-indent", "planyr.sheet.command.decrease-indent"].map((cmd) => {
+    const el = [...header.querySelectorAll(`[data-u-command="${cmd}"]`)].find(visible);
+    if (!el) return { cmd, shown: false };
+    const b = box(el);
+    return { cmd, shown: true, inHeader: b.top >= hb.top - 1 && b.bottom <= hb.bottom + 1, cy: (b.top + b.bottom) / 2, hasIcon: !!el.querySelector("svg") };
+  });
+  const mainRow = firstTool ? (firstTool.top + firstTool.bottom) / 2 : null;
   return {
-    found: true,
+    found: true, registered, mainRow,
     header: hb, host: hostBox, formulaBar: box(fbarEl),
     tabBandHeight: (box(header.querySelector('[data-u-comp="ribbon-header-menu"]')) || { height: 0 }).height,
     rows: rows.length, interactiveCount: interactive.length,
     dropdown: dd ? { ...box(dd), text: (dd.textContent || "").trim() } : null,
     leftmost: interactive.length ? [...interactive].sort((a, b) => a.left - b.left)[0] : null,
-    firstTool: tools.find((t) => !dd || t.left >= box(dd).right - 1) || null,
+    firstTool,
     radiusOffenders, shadowOffenders,
     undo: iconInfo("univer.command.undo"), redo: iconInfo("univer.command.redo"),
     neighbour: iconInfo("ui.operation.activate-format-painter"),
@@ -100,6 +110,12 @@ export function judgeHeader(m) {
     const curved = !!i && i.marker === `${name}-curved` && i.paths.some((p) => ARC.test(p)) && !i.filledPath && i.stroke === "currentColor";
     add(`${key}-curved`, `${name} is the curved arrow (an arc path, drawn in the toolbar's own colour)`, curved,
       i ? `marker "${i.marker}" · ${i.paths.length} path(s), arc command ${i.paths.some((p) => ARC.test(p))} · filled default path ${i.filledPath}` : "icon not found");
+  }
+  if (m.registered) {
+    const shown = m.registered.filter((r) => r.shown);
+    add("registered-tools", "tools another session registers (indent) sit INSIDE the single row, or fold into the overflow — never a second row",
+      m.registered.every((r) => !r.shown || (r.inHeader && r.hasIcon && m.mainRow != null && Math.abs(r.cy - m.mainRow) < 8)),
+      `${shown.length} of ${m.registered.length} shown${shown.length ? ", all in the header row" : " (folded into the overflow at this width)"}`);
   }
   const n = m.neighbour;
   add("icon-size-colour", "undo / redo match the neighbouring icons' size and (disabled) colour",

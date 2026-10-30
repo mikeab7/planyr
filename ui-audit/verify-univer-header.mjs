@@ -82,6 +82,8 @@ async function scenarios(theme) {
   // 1-5 — the current state, judged by the pure rules.
   for (const r of judgeHeader(m)) ok(`[${theme}] ${r.label}`, r.ok, r.detail);
 
+  // KNOWN-GOOD ARM for the registered-tools rule: at this width the indent buttons are visible, so the rule is judged on something real.
+  ok(`[${theme}] KNOWN-GOOD ARM: the indent buttons another session registers are visible in the strip at full width`, m.registered.every((r) => r.shown), JSON.stringify(m.registered.map((r) => [r.cmd.split(".").pop(), r.shown])));
   // 5b — enabled state: one edit makes undo clickable; it must wear the same ink as the other enabled tools.
   await api((a) => { a.getActiveWorkbook().getActiveSheet().getRange(0, 0).setValue("x"); });
   await settle(500);
