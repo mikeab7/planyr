@@ -40,7 +40,9 @@ export const STATE_ENVELOPES = {
  * polygons answers from those first): they only decide a point the real polygons do not hold — a few km of water off the coast. */
 export const STATE_POLYGONS = {
   FL: [
-    [-87.6, 31.02], [-85.0, 31.02], [-84.88, 30.72], [-83.1, 30.63], [-82.23, 30.58], [-82.05, 30.36],
+    /* NEW-1 (state lines) — the north edge is the Alabama–Florida line itself (31.000°N), not the old 31.02° padding: the 2.2 km of padding
+     * made Florala AL (31.0046) and Flomaton AL (31.003) read Florida. Georgia's south-west vertex below is the same point. */
+    [-87.6, 31.0], [-85.0, 31.0], [-84.88, 30.72], [-83.1, 30.63], [-82.23, 30.58], [-82.05, 30.36],
     [-81.4, 30.72], [-81.2, 29.9], [-80.4, 28.4], [-79.95, 26.8], [-79.95, 25.8], [-80.3, 25.1],
     [-80.4, 24.85], [-81.0, 24.4], [-81.95, 24.35], [-82.1, 24.6], [-81.9, 25.3], [-82.15, 26.0],
     [-82.4, 26.9], [-82.9, 27.6], [-82.85, 28.9], [-83.45, 29.45], [-84.05, 29.85], [-84.65, 29.6],
@@ -50,9 +52,11 @@ export const STATE_POLYGONS = {
     /* NEW-1 (Tennessee) — the northern edge is the Georgia–Tennessee line itself (34.985° at the Alabama corner, 34.988° at
      * Ducktown, 35.0° at the North Carolina corner), not the old 35.02° padding. Tennessee's outline (below) starts exactly where this
      * one ends, so the two never overlap. */
-    [-85.65, 34.985], [-84.32, 34.988], [-83.1, 35.0], [-83.15, 34.5], [-82.85, 34.3], [-82.5, 33.9], [-82.15, 33.6],
+    /* NEW-1 (state lines) — the west corner is the Alabama–Georgia–Tennessee corner (-85.605°, the same vertex Tennessee's outline starts at),
+     * not -85.65: the old corner dragged the whole west edge up to 0.03° into Alabama (the point (34.0, -85.42) read Georgia). */
+    [-85.605, 34.985], [-84.32, 34.988], [-83.1, 35.0], [-83.15, 34.5], [-82.85, 34.3], [-82.5, 33.9], [-82.15, 33.6],
     [-81.9, 33.45], [-81.65, 33.2], [-81.4, 32.8], [-81.1, 32.35], [-80.85, 32.3], [-80.7, 31.98], [-81.0, 31.45], [-81.35, 30.95],
-    [-81.4, 30.7], [-82.05, 30.36], [-82.23, 30.58], [-83.1, 30.63], [-84.88, 30.72], [-85.0, 31.02],
+    [-81.4, 30.7], [-82.05, 30.36], [-82.23, 30.58], [-83.1, 30.63], [-84.88, 30.72], [-85.0, 31.0],
     [-85.05, 31.6], [-85.15, 32.3], [-85.19, 32.87],
   ],
 };
@@ -70,12 +74,17 @@ export const US_STATE_CODES = Object.freeze([
   "UT", "VA", "VT", "WA", "WI", "WV", "WY",
 ]);
 
-/* HAND-TUNED OUTLINES (B2479568 amendment). Natural Earth 1:10m is good to about a kilometre, and a river border is where that shows: it
- * puts downtown Columbus GA in Alabama. A rule-bearing state must not lose a site that is genuinely inside it, so Texas and Colorado each
- * keep a polygon drawn a hair INSIDE their borders (rivers), and Florida / Georgia / Tennessee keep the outlines drawn to their state
- * lines. Within NE's error band (NE_BAND_DEG) of the real boundary they overrule the real set; beyond it they do not.
+/* HAND-TUNED OUTLINES (B2479568 amendment; narrowed NEW-1 state lines). Natural Earth 1:10m is good to about a kilometre, and a river border is
+ * where that shows: it puts downtown Columbus GA in Alabama and the Perdido Key barrier island in Alabama. So a few rule-bearing states keep a
+ * hand-drawn outline (TX, CO, FL, GA, TN). The outlines are used for (a) ground the real polygons do not hold — a few km of water off a coast —
+ * and (b) the RRC trust gate (`siteChecks`); and they may OVERRULE the real polygon only through `TUNED_REACHES` below — an explicit,
+ * documented, tested list of river stretches — NEVER by default. The earlier default ("within NE's error band any tuned outline wins") was wrong
+ * for every outline that was not drawn to its true line: Florida's north edge sat 2 km into Alabama, Georgia's west edge up to 3 km, the Texas
+ * outline cuts the Red River's meanders in straight segments (1,895 Oklahoma and 506 Arkansas grid points read Texas), and Tennessee's southern
+ * edge claimed 1.1 km of Alabama / Mississippi.
  * TEXAS_OUTLINE is hand-simplified [lng, lat], padded seaward on the coast; it was `siteChecks`' trust gate before it was this
- * (siteChecks re-exports it: the RRC verdicts still require it). */
+ * (siteChecks re-exports it: the RRC verdicts still require it — and still require `siteState` to say Texas, so a strip of Oklahoma that the
+ * outline reaches is never trusted). */
 export const TEXAS_OUTLINE = Object.freeze([
   [-103.04, 36.49], [-100.03, 36.49], [-100.03, 34.60], [-99.60, 34.40], [-99.20, 34.19], [-98.60, 34.13],
   [-98.10, 34.04], [-97.40, 33.80], [-96.80, 33.80], [-96.00, 33.67], [-95.30, 33.87], [-94.50, 33.67],
@@ -150,6 +159,9 @@ function inRing(xy, lng, lat) {
   return inside;
 }
 
+/* The real boundary rings as plain {st, xy:[lng,lat,…]} — read-only, for the state-line scan test (`test/stateLineReaches.test.js`). */
+export function realBoundaryRings() { return usRings().map((r) => ({ st: r.st, xy: r.xy })); }
+
 /* The state whose real boundary holds the point, or null (open water, Canada, Mexico, anything outside the US). No padding. */
 export function realStateAt(lat, lng) {
   for (const r of usRings()) {
@@ -181,9 +193,8 @@ function nearestStateWithin(lat, lng, padDeg) {
  * (0.04°) and a shoreline site must never read "unknown" — which, for a located point, hides every state-scoped layer. */
 const SEAWARD_PAD_DEG = 0.06;
 
-/* NE's error band (degrees, ~1.3 km): within it of the boundary of the real polygon that holds a point, the older hand-tuned FL / GA / TN
- * outlines (drawn to the state line itself, not to a 1:10m generalisation of it) may overrule the real set. Beyond it they may not —
- * the Georgia outline once reached into Bluffton SC, and the Texas one 8 km into Oklahoma, which no 1.3 km band forgives. */
+/* NE's error band (degrees, ~1.3 km): within it of the boundary of the real polygon that holds a point, a hand-tuned outline may overrule the
+ * real set — but only inside a `TUNED_REACHES` entry (which may name its own wider band). */
 const NE_BAND_DEG = 0.012;
 function edgeDistanceDeg(xy, lat, lng) {
   const k = Math.cos((lat * Math.PI) / 180);
@@ -204,19 +215,46 @@ function realRingAt(lat, lng) {
   }
   return null;
 }
-/* WHICH neighbour a hand-tuned outline may overrule. The overrule is only sound against a border the outline was drawn EXACTLY to. Tennessee's
- * outline is exact on its Georgia / Alabama / Mississippi line (Chattanooga) but was nudged a few km OUTWARD on the Kentucky, Virginia, North
- * Carolina, Missouri and Arkansas sides (see `tennesseeJurisdiction.TN_OUTLINE`), so there it would pull Fulton KY and downtown Bristol VA
- * into Tennessee — the real boundary (0.003° there) answers those. Every other tuned outline is drawn to all of its lines. */
-const TUNED_OVERRULES = { TN: new Set(["GA", "AL", "MS"]) };
-const tunedMayOverrule = (tuned, real) => !TUNED_OVERRULES[tuned] || TUNED_OVERRULES[tuned].has(real);
 
-/* The state a hand-tuned outline puts the point in, or null: Texas / Colorado (the hair-inside guards) and Florida / Georgia / Tennessee (the
- * outlines drawn to the state line; they share the GA–TN and GA–FL lines exactly, so order does not matter). */
+/* THE ONLY PLACES A HAND-DRAWN OUTLINE MAY OVERRULE THE REAL BOUNDARY (NEW-1 state lines, 2026-10-30). Each entry is a river stretch where Natural
+ * Earth is measurably wrong AND the outline is drawn to the true line, and says so with a landmark on each side (asserted in
+ * test/stateLineReaches.test.js, which also grid-scans every reach and requires it to flip at least one point — a reach that does nothing is stale).
+ *   tuned — the state whose outline overrules      real — the state the real polygon holds the point in
+ *   box   — [south, west, north, east], the stretch (the overrule does not apply outside it, whatever the outline says)
+ *   band  — how far (degrees) from the real polygon's edge the overrule reaches (default NE_BAND_DEG)
+ * Everything else — every other state line, and every other stretch of these two — answers from the real polygon alone. */
+export const TUNED_REACHES = Object.freeze([
+  Object.freeze({
+    id: "chattahoochee", tuned: "GA", real: "AL", box: [31.0, -85.3, 32.95, -84.85],
+    why: "The Chattahoochee River, Alabama–Georgia line from the Florida corner to West Point: NE puts downtown Columbus and West Point in Alabama. North of West Point the line is a surveyed straight line and NE is right.",
+    tunedSide: ["Columbus GA", 32.461, -84.9877], realSide: ["Eufaula AL", 31.8913, -85.1455],
+  }),
+  Object.freeze({
+    id: "perdido-key", tuned: "FL", real: "AL", box: [30.2, -87.53, 30.36, -87.35], band: 0.07,
+    why: "Perdido Key, the barrier island on the Alabama–Florida line: NE's coast simplification gives the island's western 5 km to Alabama. The line runs mid-island at Alabama Point (-87.52).",
+    tunedSide: ["Perdido Key FL", 30.3, -87.45], realSide: ["Orange Beach AL", 30.2943, -87.5736],
+  }),
+]);
+const TUNED_OUTLINES = { TX: TEXAS_OUTLINE, CO: CO_SURE, FL: STATE_POLYGONS.FL, GA: STATE_POLYGONS.GA, TN: STATE_POLYGONS.TN };
+
+/* The state a hand-tuned outline puts a point in, or null — used ONLY for ground the real polygons do not hold. Texas / Colorado first, then
+ * Florida / Georgia / Tennessee (they share the GA–TN and GA–FL lines exactly, so order does not matter). */
 function tunedOutlineState(la, lo) {
   if (inPolygon(lo, la, TEXAS_OUTLINE)) return "TX";
   if (inPolygon(lo, la, CO_SURE)) return "CO";
   for (const st of ["FL", "GA", "TN"]) if (inPolygon(lo, la, STATE_POLYGONS[st])) return st;
+  return null;
+}
+
+/* The tuned state that may overrule `ring` at this point, or null — only through a TUNED_REACHES entry. */
+function reachOverrule(ring, la, lo) {
+  for (const r of TUNED_REACHES) {
+    if (r.real !== ring.st) continue;
+    const [s, w, n, e] = r.box;
+    if (la < s || la > n || lo < w || lo > e) continue;
+    if (!inPolygon(lo, la, TUNED_OUTLINES[r.tuned])) continue;
+    if (edgeDistanceDeg(ring.xy, la, lo) <= (r.band ?? NE_BAND_DEG)) return r.tuned;
+  }
   return null;
 }
 
@@ -227,9 +265,10 @@ function tunedOutlineState(la, lo) {
  * ⛔ ONE ANSWER FROM REAL BOUNDARIES, NOT BOXES (B2479568 amendment, owner 2026-10-29: "you need to check every state"). The old
  * answer was eight states, three of them boxes — Shreveport read "TX", North Augusta SC read "GA" — and every other state read null.
  * Order now:
- *   1. the real state polygon holding the point (the 50 + DC set, `usStatesData.js`) — except that inside its ~1.3 km error band the
- *      hand-tuned TX / CO / FL / GA / TN outlines overrule it, so a river border never costs a rule-bearing state a site that is
- *      genuinely inside it (Columbus GA, Chattanooga TN, the Red River);
+ *   1. the real state polygon holding the point (the 50 + DC set, `usStatesData.js`) — except inside a `TUNED_REACHES` stretch (today the
+ *      Chattahoochee at Columbus GA and Perdido Key FL), where a hand-tuned outline drawn to the true line overrules it. NEW-1 (state lines):
+ *      this used to be a default for every tuned outline, which let the FL / GA / TN / TX outlines claim Alabama, Oklahoma, Arkansas,
+ *      Louisiana and New Mexico ground; the real boundary is now authoritative everywhere that is not a documented reach;
  *   2. a point the polygons put in NJ or NY: the existing NJ/NY border settlement (`njnyStateAt`, the Hudson / Arthur Kill overlap) —
  *      kept exactly as it was;
  *   3. a point in NO polygon (a few km of water off a coast): the padded outlines above and the NJ / NY ones, so a shoreline site in
@@ -243,9 +282,7 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
   if (ring) {
     const real = ring.st;
     if (real === "NJ" || real === "NY") return njnyStateAt(la, lo) || real; // the Hudson settlement decides between the two
-    const tuned = tunedOutlineState(la, lo);
-    if (tuned && tuned !== real && tunedMayOverrule(tuned, real) && edgeDistanceDeg(ring.xy, la, lo) <= NE_BAND_DEG) return tuned;
-    return real;
+    return reachOverrule(ring, la, lo) || real;
   }
   const tuned = tunedOutlineState(la, lo);
   if (tuned) return tuned;
