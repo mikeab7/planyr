@@ -82,9 +82,10 @@ export const zoneWithName = (code, jurisdiction, table) => {
   return n ? `${c} · ${n}` : c;
 };
 
-/* The legend for the zones in view: one entry per (jurisdiction, code), grouped by jurisdiction, sorted. `items` = [{ code, jurisdiction|null, color }].
- * Entries from a jurisdiction that is not known yet (limits still loading) are listed by code alone. When more than one jurisdiction is in view the label carries
- * the jurisdiction only if the SAME code appears in both (so "C-2" in two governments is never merged into one line). Pure. */
+/* The legend for the zones in view: ONE ENTRY PER (jurisdiction, code), GROUPED UNDER A HEADING NAMING THE JURISDICTION — no per-row "(Olive Branch)" suffix (owner 2026-10-30: a suffix on some rows and not
+ * others "reads as random"). `items` = [{ code, jurisdiction|null, color }]. Returns [{ label, color, group }] in display order: cities A→Z, then "Unincorporated DeSoto County", then codes whose jurisdiction is not
+ * known yet (the municipal limits still loading — those carry no heading). Within a group, codes sort naturally (R-2 before R-10). The same code in two governments is two entries under two headings, never merged. Pure. */
+const UNINCORPORATED = "Unincorporated DeSoto County";
 export function zoningLegend(items, table = ZONING_NAMES) {
   const seen = new Map();
   for (const it of items || []) {
@@ -94,15 +95,11 @@ export function zoningLegend(items, table = ZONING_NAMES) {
     const key = `${j || ""}|${norm(code)}`;
     if (!seen.has(key)) seen.set(key, { code, jurisdiction: j, color: it.color });
   }
-  const list = [...seen.values()];
-  const jurisdictionsByCode = new Map();
-  for (const e of list) { const k = norm(e.code); const s = jurisdictionsByCode.get(k) || new Set(); s.add(e.jurisdiction || ""); jurisdictionsByCode.set(k, s); }
-  list.sort((a, b) => String(a.jurisdiction || "").localeCompare(String(b.jurisdiction || "")) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+  const rank = (j) => (j === null ? 2 : j === UNINCORPORATED ? 1 : 0);
+  const list = [...seen.values()].sort((a, b) => rank(a.jurisdiction) - rank(b.jurisdiction) || String(a.jurisdiction || "").localeCompare(String(b.jurisdiction || "")) || a.code.localeCompare(b.code, undefined, { numeric: true }));
   return list.map((e) => {
     const name = zoneName(e.code, e.jurisdiction, table);
-    const clash = (jurisdictionsByCode.get(norm(e.code)) || new Set()).size > 1;
     const shown = displayCode(e.code);
-    const base = name ? `${shown} · ${name}` : shown;
-    return { label: clash && e.jurisdiction ? `${base} (${e.jurisdiction})` : base, color: e.color };
+    return { label: name ? `${shown} · ${name}` : shown, color: e.color, group: e.jurisdiction || null };
   });
 }

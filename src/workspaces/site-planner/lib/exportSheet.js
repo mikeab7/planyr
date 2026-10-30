@@ -47,7 +47,7 @@ import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
-import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
+import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriZoneLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
 import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
@@ -863,7 +863,7 @@ export function createExportSheet(ctx) {
     const kind = cfg.kind;
     if (kind === "esriFeature") { // every esriFeature row: lines + points + polygons (B2081252)
       if (typeof ref.eachFeature !== "function") return { features: [] };
-      const features = [], labels = [];
+      const features = [], labels = [], zoneGj = [];
       ref.eachFeature((l) => {
         const gj = l && l.feature;
         if (!gj || !gj.geometry) return;
@@ -871,8 +871,12 @@ export function createExportSheet(ctx) {
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
         // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY). The fragment writer takes labels ALREADY PLACED in sheet pixels ({x,y,text}),
         // like the terrain contour labels below — a bare {lng,lat,text} was dropped silently, so no pipe size ever reached the sheet (V1956865 step 6, 2026-10-30).
-        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text }); }
+        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+          if (cfg.lineLabel.polygon) zoneGj.push(gj);   // B2573312: an area row's codes are laid out together below — one per polygon, never overlapping, none where it cannot fit
+          else for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text }); }
+        }
       });
+      if (zoneGj.length) labels.push(...esriZoneLabels(zoneGj, cfg, ([lng, lat]) => projLLtoPx([lng, lat]), { w: size.w, h: size.h }));
       return { features, labels };
     }
     if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)

@@ -20,6 +20,7 @@
  */
 import { xmlEscape } from "./kmzExport.js";
 import { pointSymbolOptions, lineLabelText } from "./layerRequest.js";
+import { labelSpotOf, layoutZoneLabels } from "./zoneLabels.js";
 
 const clampNum = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // Trim to `round` decimals without trailing-zero / exponent noise (kmzExport `num` idiom).
@@ -208,6 +209,23 @@ export function esriLineLabels(gj, cfg) {
     half -= seg;
   }
   return [];
+}
+
+/* B2573312 (NEW-3) — the printed twin of the on-screen zone codes (`cfg.lineLabel.polygon`, DeSoto zoning): the SAME pure layout as the screen (`zoneLabels.js` — one label per polygon at its pole of
+ * inaccessibility, hidden when the polygon is too small to hold the text on the SHEET, never overlapping), run in sheet pixels. `project([lng, lat])` → {x, y}; `view` = { w, h } the sheet. Returns [{x, y, text}]. PDF-PARITY. Pure. */
+export function esriZoneLabels(featuresGj, cfg, project, view) {
+  const items = [];
+  for (const gj of featuresGj || []) {
+    const text = lineLabelText(cfg, gj && gj.properties);
+    const spot = text ? labelSpotOf(gj.geometry) : null;
+    if (!spot) continue;
+    const p = project([spot.lng, spot.lat]), q = project([spot.lng, spot.lat + 0.001]);   // 0.001° of latitude = 111.2 m
+    if (!isFinitePair(p) || !isFinitePair(q)) continue;
+    const pxPerM = Math.hypot(q.x - p.x, q.y - p.y) / 111.2;
+    if (!(pxPerM > 0)) continue;
+    items.push({ key: String(gj.id != null ? gj.id : `${spot.lat},${spot.lng}`), text, x: p.x, y: p.y, spot, pxPerM });
+  }
+  return layoutZoneLabels(items, { view: { x0: 0, y0: 0, x1: view.w, y1: view.h } }).map((l) => ({ x: l.x, y: l.y, text: l.text }));
 }
 
 // terrain worker artifact coords are [lat,lng]; GeoJSON/our features are [lon,lat].
