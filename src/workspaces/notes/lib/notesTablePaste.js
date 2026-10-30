@@ -149,6 +149,14 @@ export function rowsToTableHtml(rows) {
   return `<table><tbody>${body}</tbody></table>`;
 }
 
+/** ⛔ A WORD LIST'S `text/plain` IS A TWO-COLUMN GRID ("1.<tab>Entitlements", "·<tab>Soft costs"): every line is a
+ *  list marker, a tab, then the item. As a grid it would turn a pasted numbered or bulleted list into a table of
+ *  marker + text. A grid whose FIRST COLUMN is nothing but list markers is a list. */
+export function isMarkerColumn(rows) {
+  const marker = /^(?:[^\w\s]|o|\(?(?:\d{1,4}|[a-z]|[ivxlcdm]+)[.)])$/i;
+  return rows.length > 0 && rows.every((r) => marker.test(String(r[0] ?? "").replace(/[\s\u00a0]+/g, "")));
+}
+
 /** The grid in a clipboard's tab-separated `text/plain`, else null. By default only when the clipboard has
  *  no html table (the html is then the better source). `ignoreHtml` is the FALLBACK ("tab-separated rows
  *  must always become a table, whenever the HTML route yields none" — owner, 2026-10-06): the caller has
@@ -156,7 +164,8 @@ export function rowsToTableHtml(rows) {
 export function tabularFromClipboard(dt, { ignoreHtml = false } = {}) {
   try {
     if (!ignoreHtml && clipboardHasTable(dt)) return null;
-    return parseTabular(dt?.getData?.("text/plain") || "");
+    const rows = parseTabular(dt?.getData?.("text/plain") || "");
+    return rows && !isMarkerColumn(rows) ? rows : null;
   } catch (_) { return null; }
 }
 
@@ -365,6 +374,22 @@ function realTables(root) {
     const up = t.parentElement?.closest?.("table");
     return !up || isScaffold(up);
   });
+}
+
+/** The text grid of every real table in a clipboard document, in the same order `readSourceTables` reports them:
+ *  one array of cell strings per row (a cell's paragraphs joined by a space). The SAFETY NET's copy of the data —
+ *  if the parse ever drops a table the clipboard plainly held, these rebuild it (notesPastePlain.js). Never throws. */
+export function tableGridsOf(root) {
+  if (!root?.querySelectorAll) return [];
+  const out = [];
+  for (const table of realTables(root)) {
+    try {
+      const rows = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
+      const grid = rows.map((tr) => cellsOf(tr).map((c) => (c.textContent || "").replace(/[\s\u00a0]+/g, " ").trim()));
+      if (grid.length && grid.some((r) => r.length >= 2)) out.push(grid);
+    } catch (_) { /* one unreadable table costs its rescue, never the paste */ }
+  }
+  return out;
 }
 
 /** `{ widths, fills }` per real table in a clipboard document. `widths[i]` is column i's source width in CSS pixels

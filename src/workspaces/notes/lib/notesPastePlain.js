@@ -27,10 +27,12 @@
  * The wiring lives in the extension at the bottom and in NoteEditor.jsx.
  */
 import { Extension } from "@tiptap/core";
-import { Fragment } from "@tiptap/pm/model";
+import { Fragment, Slice, DOMParser as PMDOMParser } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { pushDownInherited } from "./notesPasteInherit.js";
-import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml, repairTableFragment, readSourceTables } from "./notesTablePaste.js";
+import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml, repairTableFragment, readSourceTables, tableGridsOf } from "./notesTablePaste.js";
+import { convertOfficeLists } from "./notesOfficeLists.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 export const pastePlainKey = new PluginKey("notePastePlain");
 
@@ -178,6 +180,49 @@ export function tidyPastedFragment(fragment, schema, depth = 0) {
   return depth === 0 ? fillEmptyCells(done, schema) : done;
 }
 
+/* ⛔ THE SAFETY NET (NEW-1, "a table must never come in as loose lines"): the clipboard's HTML held N real tables
+ * (`sourceSlot.grids`, counted before the parse) and the parsed slice holds NONE — so something between the clipboard and
+ * the schema dropped them. Whatever that is, the cells' text is still in hand: rebuild each table from its grid and put
+ * them after what did arrive, and say so to telemetry with the clipboard's STRUCTURE (tag/class/style-property names and
+ * counts, never a word of the person's text) so the cause can be found. Returns the new Fragment, or null when nothing
+ * was lost. Never throws. */
+function rescueDroppedTables(fragment, schema) {
+  try {
+    const slot = sourceSlot;
+    if (!slot || Date.now() - slot.at >= RESCUE_WINDOW_MS || !slot.grids?.length) return null;
+    /* A copied CELL RANGE is a slice of rows / cells with NO `table` wrapper (prosemirror-tables pastes it cell by cell), so
+     * a row or a cell counts as "the table arrived" — rebuilding one beside it broke the cell paste. */
+    let has = false;
+    const isTablePart = (n) => ["table", "tableRow", "tableCell", "tableHeader"].includes(n.type.name);
+    if (fragment.firstChild && isTablePart(fragment.firstChild)) has = true;
+    fragment.descendants((n) => { if (isTablePart(n)) has = true; return !has; });
+    if (has) return null;
+    const holder = document.createElement("div");
+    holder.innerHTML = slot.grids.map((g) => rowsToTableHtml(g)).join("");
+    const tables = PMDOMParser.fromSchema(schema).parse(holder).content;
+    if (!tables.childCount) return null;
+    const count = slot.grids.length;
+    slot.grids = [];
+    reportClientEvent("notes-paste-table-rescued", "a pasted table was dropped by the parse and rebuilt from its cells", { tables: count, skeleton: slot.skeleton });
+    return fillEmptyCells(fragment.append(tables), schema);
+  } catch (e) {
+    console.warn("notes paste safety net failed", e);                       // LOUD-FAILURE: a net that fails silently is no net
+    return null;
+  }
+}
+
+/** The clipboard HTML's shape without its words: tag counts, the class names and the style PROPERTY names that appear. */
+function skeletonOf(body) {
+  const tags = {}; const classes = new Set(); const props = new Set();
+  for (const el of body.querySelectorAll("*")) {
+    const t = el.tagName.toLowerCase();
+    tags[t] = (tags[t] || 0) + 1;
+    for (const c of String(el.getAttribute("class") || "").split(/\s+/)) if (c && classes.size < 30) classes.add(c.replace(/\d+/g, "#"));
+    for (const d of String(el.getAttribute("style") || "").split(";")) { const k = d.split(":")[0].trim().toLowerCase(); if (k && props.size < 40) props.add(k); }
+  }
+  return JSON.stringify({ tags, classes: [...classes], props: [...props] }).slice(0, 900);
+}
+
 let tsvReentry = false;
 
 /* ⛔ THE SOURCE TABLE'S OWN LOOK, CAPTURED BEFORE THE PARSE THROWS IT AWAY (NEW-1, Office-style paste options).
@@ -188,6 +233,9 @@ let tsvReentry = false;
  * could have filled it is ignored, so a plain-text paste never inherits the last table's colours. */
 let sourceSlot = null;
 const SOURCE_SLOT_MS = 2000;
+/* the rescue reads the slot the same paste event filled microseconds ago — a much shorter window than the slot's own, so a stale
+ * slot (an earlier paste that something else claimed) can never rebuild tables into an unrelated plain-text paste */
+const RESCUE_WINDOW_MS = 500;
 function takeSourceTables() {
   const slot = sourceSlot;
   sourceSlot = null;
@@ -198,6 +246,13 @@ function takeSourceTables() {
 function enclosingTablePos($from) {
   for (let d = $from.depth; d > 0; d -= 1) if ($from.node(d).type.name === "table") return $from.before(d);
   return -1;
+}
+
+/** Does this slice hold a list anywhere? (a list is structure the html carried: the text fallback must not undo it) */
+function sliceHasList(slice) {
+  let found = false;
+  slice?.content?.descendants?.((n) => { if (/List$/.test(n.type?.name || "")) found = true; return !found; });
+  return found;
 }
 
 /** Does this slice hold a table anywhere? */
@@ -357,9 +412,21 @@ const NotePastePlain = Extension.create({
            * See lib/notesPasteInherit.js for the measured before/after. */
           transformPastedHTML(html) {
             try {
-              const doc2 = new DOMParser().parseFromString(repairTableFragment(html), "text/html");
-              normalizeTableMarkup(doc2.body);
-              try { sourceSlot = { at: Date.now(), tables: readSourceTables(doc2.body, doc2.documentElement) }; } catch (_) { sourceSlot = null; }
+              const prepare = (convert) => {
+                const d = new DOMParser().parseFromString(repairTableFragment(html), "text/html");
+                normalizeTableMarkup(d.body);
+                /* ⛔ WORD / ONENOTE OUTLINES (NEW-1/NEW-2, notesOfficeLists.js): bullets drawn as text become real nested
+                 * lists and a table lands under its bullet. BEFORE the source-table read below, so the tables it
+                 * reports are the ones the editor will hold, one for one. A conversion that throws is dropped whole and
+                 * the paste goes through exactly as it did before this existed. */
+                if (convert) convertOfficeLists(d.body);
+                return d;
+              };
+              let doc2;
+              try { doc2 = prepare(true); } catch (_) { doc2 = prepare(false); }
+              try {
+                sourceSlot = { at: Date.now(), tables: readSourceTables(doc2.body, doc2.documentElement), grids: tableGridsOf(doc2.body), skeleton: skeletonOf(doc2.body) };
+              } catch (_) { sourceSlot = null; }
               pushDownInherited(doc2.body);
               return doc2.body.innerHTML;
             } catch {
@@ -370,6 +437,8 @@ const NotePastePlain = Extension.create({
           transformPasted(slice, view) {
             try {
               const tidied = tidyPastedFragment(slice.content, view.state.schema);
+              const rescued = rescueDroppedTables(tidied, view.state.schema);
+              if (rescued) return new Slice(rescued, 0, 0);
               return new slice.constructor(tidied, slice.openStart, slice.openEnd);
             } catch (_) {
               return slice;               // a tidy that fails must never lose the paste
@@ -387,7 +456,7 @@ const NotePastePlain = Extension.create({
              * a table cell fills cells, a paste into a list lands after it, the chip appears). The
              * re-entry carries a table in its slice, which is what stops this firing twice. Shift
              * held is the person asking for plain text; Ctrl+Shift+V never reaches here at all. */
-            if (!view.input?.shiftKey && !tsvReentry && !sliceHasTable(slice)) {
+            if (!view.input?.shiftKey && !tsvReentry && !sliceHasTable(slice) && !sliceHasList(slice)) {
               /* `ignoreHtml`: the slice already shows the html produced NO table, so the text is the
                * fallback — whatever the html said (B2142464 ×2). `tsvReentry` stops the re-entrant paste
                * below from firing this again if its own slice still carries no table. */

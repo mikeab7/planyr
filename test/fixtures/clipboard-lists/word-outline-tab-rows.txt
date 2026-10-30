@@ -1,0 +1,9 @@
+·	Soft costs
+o	Design and engineering
+§	Fee by building size, per square foot
+SF	$/SF
+<100K	1
+100K - 250K	.60-.75
+500K - 750K	.50 - .40
+750K - 1M	.40 - .35
+o	Permits and impact fees
