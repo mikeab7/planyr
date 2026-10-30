@@ -95,6 +95,23 @@ describe("the Protected Rivers click card", () => {
     expect(t).toMatch(/100-ft natural vegetative buffer/);
     expect(t).toMatch(/centreline/);
   });
+  it("NEW-1: the card cites the RULE (not an ordinance), says the corridor is measured from the top of the bank, and says in one plain line that the drawn band understates it", () => {
+    const c = card("Etowah River", { lat: 34.15, lng: -84.8 });
+    const t = text(c);
+    expect(t).toMatch(/Rule 391-3-16-\.04/);
+    expect(t).toMatch(/measured horizontally from the uppermost part of the river bank/);
+    expect(t).toMatch(/400 cfs/);
+    expect(t).toMatch(/The true corridor starts at the top of the river bank, so the band drawn here \(from DCA's centreline\) understates it\./);
+    expect(t).toMatch(/excluded/);
+    expect(JSON.stringify(c)).not.toMatch(/ordinance/i);
+    for (const at of [{ lat: 33.9982, lng: -84.3348 }, { lat: 31.9539, lng: -81.2885 }]) expect(JSON.stringify(card("Ogeechee River", at))).not.toMatch(/ordinance/i);
+  });
+  it("NEW-1: the Protected Rivers legend line says the true corridor starts at the top of the bank and the drawn band understates it", () => {
+    const lg = ALL_LAYERS.ga_protected_rivers.legend;
+    expect(lg).toHaveLength(1);
+    expect(lg[0].label).toMatch(/starts at the top of the bank/);
+    expect(lg[0].label).toMatch(/understates/);
+  });
   it("the Chattahoochee ABOVE Buford Dam / below the Douglas line is an ordinary protected river", () => {
     expect(riverExclusionAt("Chattahoochee River", { lat: 34.52, lng: -83.7 })).toBe(null);
     expect(riverExclusionAt("Chattahoochee River", { lat: 32.0, lng: -85.0 })).toBe(null);

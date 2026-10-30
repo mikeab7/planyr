@@ -360,13 +360,23 @@ describe("adversarial review round 1 (B2528688) — each confirmed finding stays
   it("every well-status code stays in its class (a remapped code would recolour tens of thousands of wells)", () => {
     expect(Object.fromEntries(Object.entries(CL.WELL_STATUS).map(([c, [, k]]) => [c, k]))).toEqual({ PR: "live", AC: "live", DG: "live", WO: "live", IJ: "live", SI: "idle", TA: "idle", SO: "idle", PA: "plugged", AP: "never", EP: "never", AL: "never" });
   });
-  it("the Rule 604 note states the 500–2,000 ft band; the Buckley note gives no industrial verdict", () => {
-    expect(L.co_ecmc_wells.note).toMatch(/500 and 2,000 ft/);
-    // NEW-1 review of B2528688: the exceptions are "the usual routes, not a closed list" — consent, an approved area / drilling plan, AND Commission approval after an alternative-location analysis
-    expect(L.co_ecmc_wells.note).toMatch(/informed consent/);
-    expect(L.co_ecmc_wells.note).toMatch(/comprehensive area or drilling plan/);
-    expect(L.co_ecmc_wells.note).toMatch(/alternative-location analysis/);
-    expect(L.co_ecmc_wells.note).toMatch(/not a closed list/);
+  it("the Rule 604 note lists the rule's four exact routes and the school/child-care flat 2,000 ft, and still says NEW pads only (NEW-1, text read 2026-10-30)", () => {
+    for (const id of ["co_ecmc_wells", "co_ecmc_locations"]) {
+      const n = L[id].note;
+      expect(n, id).toMatch(/604\.b/);
+      expect(n, id).toMatch(/more than 500 ft and less than 2,000 ft/);
+      expect(n, id).toMatch(/ONLY by one of four routes/);
+      expect(n, id).toMatch(/\(1\) informed consent of all owners and tenants within 2,000 ft/);
+      expect(n, id).toMatch(/\(2\) an approved Comprehensive Area Plan with preliminary siting approval \(Rule 314\.b\.\(4\)\) or an approved Comprehensive Drilling Plan/);
+      expect(n, id).toMatch(/\(3\) all wells, tanks, separation equipment and compressors more than 2,000 ft away/);
+      expect(n, id).toMatch(/\(4\) a Commission finding, after a Rule 510 hearing, of substantially equivalent protection/);
+      expect(n, id).toMatch(/Disproportionately Impacted Community, 604\.b\.\(4\)\.B/);
+      expect(n, id).toMatch(/604\.a\.\(3\)[^.]*flat 2,000 ft[^.]*NO exceptions/);
+      expect(n, id).toMatch(/NEW oil-and-gas working pad surface/);
+      expect(n, id).toMatch(/does not stop anyone building near an existing well/);
+      // the old hedged wording is gone
+      expect(n, id).not.toMatch(/not a closed list|usual routes|alternative-location analysis/);
+    }
     expect(L.co_aurora_apz.note).not.toMatch(/generally allows/);
   });
   it("round 2: ECMC flowlines generalise (a z14 Weld cell was 247k vertices over a 120k budget) and start at the zoom where the service's 2,000-record cap is not hit (San Juan z14 cells held 4,244)", () => {
