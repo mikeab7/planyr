@@ -35,6 +35,7 @@ const VOID = (msg) => { voided = voided || msg; throw Object.assign(new Error("V
 
 const s = await openSignedIn({ base: BASE });
 const { page } = s;
+const freeze = (on) => page.evaluate((v) => { window.__freezeDebounce = v; }, on);   // outside the try: the cleanup must always be able to call it
 const madeReviews = [], driveKeys = new Set();
 let orgIdsBefore = [];
 try {
@@ -62,7 +63,6 @@ try {
     await page.waitForSelector('[data-testid="model-root"]', { timeout: 60000 });
     if (univer) await waitGrid(); else { await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 }); await page.waitForTimeout(1500); }
   };
-  const freeze = (on) => page.evaluate((v) => { window.__freezeDebounce = v; }, on);
   const pending = () => page.evaluate(() => window.__planyrUniverRead && window.__planyrUniverRead.pending());
   const uPt = (r, c) => page.evaluate(([rr, cc]) => { const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet(); const q = ws.getRange(rr, cc).getCellRect(); const o = typeof q === "string" ? JSON.parse(q) : q; const cv = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: cv.left + o.x + o.width / 2, y: cv.top + o.y + o.height / 2 }; }, [r, c]);
   const uVal = (r, c) => page.evaluate(([rr, cc]) => { const g = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(rr, cc); const v = g.getValue(); return v !== null && v !== undefined ? v : (g.getDisplayValue() || null); }, [r, c]);

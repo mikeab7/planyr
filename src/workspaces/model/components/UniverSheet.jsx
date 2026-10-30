@@ -20,10 +20,11 @@
  *
  * Open-source @univerjs/* only (no @univerjs-pro, no license key, no Univer server). xlsx / csv stay on the
  * existing ExcelJS / SheetJS path; this file never touches Univer's exchange packages. */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createUniver, LocaleType, mergeLocales, defaultTheme, ICommandService } from "@univerjs/presets";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createUniver, LocaleType, mergeLocales, defaultTheme, ICommandService, CommandType, InterceptorEffectEnum } from "@univerjs/presets";
 import {
   UniverSheetsCorePreset, CalculationMode, IDefinedNamesService, SetDefinedNameMutation, RemoveDefinedNameMutation,
+  SheetInterceptorService, INTERCEPTOR_POINT, SetRangeValuesCommand, IconManager,
   IRenderManagerService, HeaderMoveRenderController, SheetSkeletonManagerService, getCoordByOffset,
 } from "@univerjs/preset-sheets-core";
 import { UniverSheetsSortPreset } from "@univerjs/preset-sheets-sort";
@@ -43,6 +44,7 @@ import {
   workbookToUniver, univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
 } from "../lib/univerBridge.js";
 import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
+import { installUniverIndent } from "../lib/univerIndent.js";
 import { createSaveController } from "../lib/univerSave.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
@@ -227,6 +229,11 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       L.off = off;
 
       load(workbook);
+      // Indent (needs the sheets services, which exist once a workbook does): drawn + Increase/Decrease buttons and command ids (lib/univerIndent.js — Univer 1.x has no indent of its own).
+      L.indent = installUniverIndent({
+        univerAPI, injector: L.injector, SheetInterceptorService, INTERCEPTOR_POINT, InterceptorEffectEnum,
+        SetRangeValuesCommand, ICommandService, CommandType, IconManager, createElement,
+      });
       ensureHeaderGate(L.unitId);
       if (L.onReady) {
         L.onReady({
@@ -297,6 +304,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       try { L.mo && L.mo.disconnect(); } catch (_) {}
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
+      try { L.indent && L.indent.dispose(); } catch (_) {}
       try { clearTimeout(L.gateTimer); L.detachGate && L.detachGate(); } catch (_) {}
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
       try { L.univer && L.univer.dispose(); } catch (_) {}
