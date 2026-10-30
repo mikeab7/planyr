@@ -32,7 +32,7 @@ the layers that live only there are not wired — see "Not built".
 
 ## The stream-buffer rule, and where the numbers come from
 
-`lib/tennesseeStreamBuffers.js` (pure) draws a band each side of every NHD stream (ftype 460, not ephemeral — the Georgia rule) at:
+`lib/tennesseeStreamBuffers.js` (pure) draws a band each side of every NHD stream (ftype 460, not ephemeral — the Georgia rule — plus a NAMED ftype-558 "artificial path", the centreline NHD draws through a wide river such as the Middle Fork Stones River; an unnamed one, the line through a pond, is not buffered) at:
 
 - **30 ft** — the **natural riparian buffer zone** the TDEC **Construction General Permit, TNR100000**, requires between a waterbody and the
   limits of disturbance. The permit lets a project **average** the width, with **no point narrower than half of it (15 ft)**; each side of a

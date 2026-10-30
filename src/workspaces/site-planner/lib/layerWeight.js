@@ -219,6 +219,30 @@ export const LAYER_TIER = {
   ms_desoto_flu: "context",
   ms_desoto_thoroughfare: "context",
   ms_desoto_future_subd: "context",
+  /* NEW-1 (Mississippi due-diligence layers) — declared per layer, never inferred. */
+  ms_county_state: "context",
+  ms_city: "context",
+  ms_tribal: "constraint",          // federal / tribal jurisdiction — county zoning does not govern on it
+  ms_deq_gard: "constraint",        // a cleanup site can stop or reprice a deal
+  ms_deq_ust: "constraint",
+  ms_epa_brownfields: "reference",
+  ms_deq_landfills: "constraint",
+  ms_deq_mines: "reference",
+  ms_ogb_wells: "constraint",       // an orphaned or plugged well on the site is a setback / re-entry issue
+  ms_deq_og_fields: "reference",
+  ms_deq_spa: "reference",
+  ms_nrcs_easements: "constraint",  // a federal easement bars development on its area
+  ms_nrhp: "reference",
+  ms_cemeteries: "constraint",
+  ms_crit_habitat: "constraint",
+  ms_303d: "reference",
+  ms_dams: "reference",
+  ms_dam_inundation: "reference",
+  ms_desoto_drainage: "constraint", // a drainage district can review and restrict work in its channels
+  ms_desoto_levee: "constraint",
+  ms_desoto_lomr: "reference",
+  ms_desoto_loma: "reference",
+  ms_desoto_cemeteries: "constraint",
   jur_city: "context",
   jur_etj: "context",
   jur_isd: "context",

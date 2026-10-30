@@ -84,10 +84,14 @@ export function overlayExportRequest(cfg, { proxy = false } = {}) {
  * `fillOpacity` tracks `opacity` so the panel's slider dims the whole symbol together, and a
  * `radius` a registry row may override (`cfg.pointRadius`) keeps a dense national point layer
  * from turning the view into confetti. */
-export function pointSymbolOptions(cfg = {}, opacity = 1) {
-  const color = cfg.color || "#b91c1c";
+export function pointSymbolOptions(cfg = {}, opacity = 1, props = null) {
+  /* NEW-1 (Mississippi): a POINT row may colour each marker by its attributes through `pointStyleFn(props) → { color, radius? }` (an open-release tank is red, a plugged well grey). The
+   * flat `cfg.color` stays the fallback and the colour of a row that declares no function, so every existing row draws exactly as before. Screen, hover restyle, the opacity setter and
+   * the print path all pass the feature's properties here — one rule, so the legend and the map cannot disagree. */
+  const ps = props && typeof cfg.pointStyleFn === "function" ? (cfg.pointStyleFn(props) || {}) : {};
+  const color = ps.color || cfg.color || "#b91c1c";
   return {
-    radius: cfg.pointRadius || 4,
+    radius: ps.radius || cfg.pointRadius || 4,
     color,
     weight: cfg.weight || 2,
     opacity,
@@ -153,6 +157,8 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   if (cfg.simplifyFactor) o.simplifyFactor = cfg.simplifyFactor;
   // B2452976 (Florida): esri-leaflet answers a view with its service's first page only (2,000) and says nothing — a dense permit / wellfield layer then silently drops features. `fetchAll` follows the paging until the view is complete (the vertex budget still guards the draw).
   if (cfg.fetchAll) o.fetchAllFeatures = true;
+  // NEW-1 (Mississippi): a row on a pre-10.7 ArcGIS Server asks for plain JSON, not GeoJSON — that server's GeoJSON answer ignores maxAllowableOffset (a 195,577-vertex cell stays 195,577) and answers HTTP 400 for a few large polygons (MDEQ Dam Safety), while its JSON honours both.
+  if (cfg.forceJson) o.isModern = false;
   // NEW-1 (Georgia): a layer whose service answers one HUGE feature for any cell (DCA's protected mountains: one multipolygon, 536k vertices) asks for ONE big cell per view instead of six 512 px ones (each re-downloaded the whole feature, 11 MB apiece) and coarser coordinate text.
   if (cfg.cellSize) o.cellSize = cfg.cellSize;
   if (cfg.precision != null) o.precision = cfg.precision;

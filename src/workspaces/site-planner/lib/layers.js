@@ -16,6 +16,7 @@ import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
+import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
 import { TN_LAYERS } from "./tennesseeLayers.js"; // B2521584 (Tennessee industrial due-diligence layers)
@@ -1044,6 +1045,15 @@ export const AHJ_LAYERS = {
     note: "DeSoto County's own outline (the county server publishes only DeSoto in this layer). A has-jurisdiction boundary, not a service area.",
     role: "line", group: "jurisdiction", order: 1,
   },
+  /* NEW-1 (Mississippi) — the rest of Mississippi's county lines. The DeSoto row above is the county server's own outline of ONE county; this is MDEQ's statewide county layer
+   * (82 counties) with DeSoto left out (`where` in its VECTOR_SOURCES entry), so DeSoto's own outline is not drawn twice (the neighbours' copies of the shared border still are — two digitisations of one line). */
+  ms_county_state: {
+    kind: "vector", label: "County Boundaries (Mississippi)", mergeGroup: "counties_cities", source: "MDEQ — Office of Land and Water Resources",
+    url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/"), states: ["MS"],
+    minZoom: 6, color: BOUNDARY_FALLBACK_INK, weight: 1.6, opacity: 0.4,
+    note: "Mississippi county lines (MDEQ, all 82 counties; DeSoto County's own outline is the separate row). A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
   ga_city: {
     kind: "vector", label: "City Limits (Georgia)", mergeGroup: "counties_cities", source: "Georgia DCA",
     url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
@@ -1308,7 +1318,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...FLORIDA_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1400,6 +1410,7 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
   ...FLORIDA_VINTAGE,
@@ -2145,7 +2156,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { const sf = (f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : featureBaseStyle(cfg, oo)); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }; // _originalStyle too: esri-leaflet's resetFeatureStyle (run for every re-delivered feature) restores THAT, so without it a re-delivered point went hollow (featureBaseStyle's fill 0) and a re-delivered feature snapped back to the opacity the layer was built with (B2452976 review pass 4)
+              : (oo) => { try { const sf = (f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo, f && f.properties) : featureBaseStyle(cfg, oo)); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }; // _originalStyle too: esri-leaflet's resetFeatureStyle (run for every re-delivered feature) restores THAT, so without it a re-delivered point went hollow (featureBaseStyle's fill 0) and a re-delivered feature snapped back to the opacity the layer was built with (B2452976 review pass 4)
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

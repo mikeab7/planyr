@@ -78,6 +78,7 @@ async function openFinder(pt, zoom) {
   return fp;
 }
 const rowsIn = async (panel, group) => {
+  await panel.getByTestId("layer-group-nav").waitFor({ timeout: 20000 }).catch(() => {});
   const btn = panel.getByTestId(`layer-group-${group}`);
   if (await btn.count()) await btn.click(); else await panel.getByTestId("layer-group-select").selectOption(group);
   await sleep(250);
@@ -101,7 +102,13 @@ try {
   const BUDGET_ROWS = ["tn_pws", "tn_crit_habitat", "tn_wqa", "tn_ms4"];
   const HATCHIE = { lat: 35.05, lng: -88.785, label: "Hatchie Scenic River (west TN)" };      // one 143,521-vertex MultiPolygon, returned whole
   const HOLSTON = { lat: 36.463, lng: -83.318, label: "Holston mussel reaches (Hawkins / Hancock)" };   // critical habitat: the worst Tennessee cell (reviewed: 258–382k vertices at z17 unsimplified)
-  const statusText = (panel, id) => panel.locator(`[data-testid="layer-row-${id}"]`).first().innerText().catch(() => "");
+  /* the row's data-layer-state is the ZOOM-GATE state ("drawing" = on and past its gate); the load/refusal wording lives in the ▾ dropdown's status line */
+  const statusText = async (panel, id) => {
+    const row = panel.locator(`[data-testid="layer-row-${id}"]`).first();
+    if (!(await row.locator(`[data-testid="layer-row-${id}-menu"]`).count())) await panel.locator(`[data-testid="layer-caret-${id}"]`).first().click().catch(() => {});
+    await sleep(400);
+    return row.innerText().catch(() => "");
+  };
   async function oneRow(id, place, zoom) {
     log = [];
     const fp = await openFinder(place, zoom);
@@ -115,8 +122,9 @@ try {
     const st = await stateOf(fp, want), txt = await statusText(fp, want);
     const re = rowRe(id), n = re ? featuresFrom(re) : null;
     console.log(`   ${id.padEnd(18)} ${place.label.padEnd(26)} z${zoom}  state=${st}  features=${n}`);
-    check(`A · ${id} @ ${place.label} z${zoom}: loaded`, st === "loaded", `state=${st}`);
+    check(`A · ${id} @ ${place.label} z${zoom}: drawing (not dormant-blank / empty)`, st === "drawing", `state=${st}`);
     check(`A · ${id} @ ${place.label} z${zoom}: not refused as too detailed`, !/too detailed/i.test(txt));
+    check(`A · ${id} @ ${place.label} z${zoom}: status line is not a failure`, !/not responding|couldn't load|hiccup/i.test(txt), JSON.stringify(txt.slice(0, 140)));
     if (re) check(`A · ${id} @ ${place.label} z${zoom}: real features came back`, n > 0, `${n}`);
     const bad = log.filter((e) => !e.req && typeof e.status === "number" && e.status >= 400 && TN_HOSTS.test(e.url));
     check(`A · ${id} @ ${place.label}: no Tennessee-server request failed`, bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
@@ -139,7 +147,7 @@ try {
     await sleep(9000);
     const st = await stateOf(fp, "tn_crit_habitat");
     const txt19 = await statusText(fp, "tn_crit_habitat");
-    check("A · tn_crit_habitat @ Holston z19: refused as too detailed (failed), never empty", st === "failed", `state=${st}`);
+    check("A · tn_crit_habitat @ Holston z19: refused as too detailed, never 'no features here'", /too detailed/i.test(txt19) && !/no features/i.test(txt19), `state=${st}`);
     console.log("   z19 row text:", JSON.stringify(txt19.slice(0, 160)), "(the refusal wording lives in the row's status line)");
   }
 
@@ -185,10 +193,12 @@ try {
   const sb = tnPanel.locator('[data-testid="layer-row-tn_stream_buffers"] input[type="checkbox"]').first();
   if (await sb.count()) await sb.check();
   await sleep(14000);
-  const polys = await page.evaluate(() => document.querySelectorAll(".leaflet-pane path.leaflet-interactive, .leaflet-pane svg path").length);
+  const polys = await page.evaluate(() => document.querySelectorAll(".leaflet-pane path").length);
   const sbState = await stateOf(tnPanel, "tn_stream_buffers");
   console.log(`   stream buffers: row state=${sbState}, ${polys} map paths`);
-  check("B · Stream Buffers paints (loaded, not failed or empty)", sbState === "loaded", `state=${sbState}`);
+  const sbText = await (async () => { await tnPanel.locator('[data-testid="layer-caret-tn_stream_buffers"]').first().click().catch(() => {}); await sleep(400); return tnPanel.locator('[data-testid="layer-row-tn_stream_buffers"]').first().innerText().catch(() => ""); })();
+  console.log("   stream buffers status line:", JSON.stringify(sbText.slice(0, 200)));
+  check("B · Stream Buffers draws (state drawing) and says what it drew", sbState === "drawing" && /30 ft/.test(sbText) && !/No streams in this view/.test(sbText), `state=${sbState}`);
   check("B · …and real buffer polygons are on the map", polys > 0, `${polys} paths`);
   check("B · the NHD stream lines were asked and answered", answered(/hydro\.nationalmap\.gov|nhd/i).length > 0, `NHD ${answered(/hydro\.nationalmap\.gov|nhd/i).length}`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-christiana-buffers.png` });
