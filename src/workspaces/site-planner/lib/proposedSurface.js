@@ -1383,6 +1383,13 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
       for (let j = 0; j < ny; j++) {
         const k = j * nx + i;
         if (inside[k] > 0) continue;
+        // only a cell beside the graded area can straddle the line: a cheap neighbour test first (perf, B2319137 ×4)
+        let near = false;
+        for (let di = -2; di <= 2 && !near; di++) for (let dj = -2; dj <= 2; dj++) {
+          const ii = i + di, jj = j + dj;
+          if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && inside[jj * nx + ii] > 0) { near = true; break; }
+        }
+        if (!near) continue;
         const pt = { x, y: y0 + (j + 0.5) * cellFt };
         let best = null, bd = reach;
         for (const ring of ringsAll) { const q = nearestOnRing(pt, ring); if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < bd) { bd = d; best = q; } } }

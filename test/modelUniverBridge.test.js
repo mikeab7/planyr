@@ -53,7 +53,7 @@ function everythingWorkbook() {
   sh = setNumberFormat(sh, 7, 7, 1, 1, "#,##0.00;[Red](#,##0.00)");
   sh = setNumberFormat(sh, 20, 20, 3, 3, '0.00"/SF"');      // a format on an EMPTY cell
   sh = setCellStyle(sh, 0, 0, 0, 0, { bold: true, italic: true, underline: true, strike: true, fontFamily: "Arial", fontSize: 14, color: "#ff0000", fill: "#eeeeee", align: "center", valign: "middle", wrap: true });
-  sh = setCellStyle(sh, 1, 1, 0, 0, { indent: 3 });          // indent ONLY: Univer cannot draw it
+  sh = setCellStyle(sh, 1, 1, 0, 0, { indent: 3 });          // indent ONLY (lib/univerIndent.js draws it from the style's own pd.l)
   sh = setCellStyle(sh, 2, 2, 0, 0, { align: "right", indent: 2, bold: true });
   sh = applyBorder(sh, 4, 6, 3, 5, { edges: ["top", "right", "bottom", "left"], style: "thin", mode: "outline" });
   sh = applyBorder(sh, 8, 8, 2, 2, { edges: ["bottom", "left"], style: "double", mode: "all" });
@@ -159,13 +159,58 @@ describe("Univer bridge — edits made inside Univer come back", () => {
     expect(out.cells[cellKey(before[1], 0)]).toBe("250000");     // B1 is now C1 but is still the same column id
     expect(out.columns[3].width).toBe(200);                       // the 200-wide column moved with its data
   });
-  it("a deleted row drops that row's sidecar entries and shifts the rest", () => {
-    const { sidecar } = open();
+  it("an indent lives ON the Univer cell style (pd.l = 2 + 14 per step), not in the sidecar", () => {
+    const { data, sidecar } = open();
     const sid = base.sheets[0].id;
-    const id0 = base.sheets[0].sheet.columns[0].id;
-    const next = sidecarAfterStructure(sidecar, sid, { op: "remove-row", index: 1 });
-    expect(next.sheets[sid].indent[cellKey(id0, 1)]).toBe(2);       // old row 2 (indent 2) is now row 1
-    expect(next.sheets[sid].indent[cellKey(id0, 2)]).toBeUndefined();
+    const cd = data.sheets[sid].cellData;
+    expect(data.styles[cd[1][0].s].pd).toEqual({ l: 2 + 3 * 14 });      // A2: indent 3, nothing else
+    expect(data.styles[cd[2][0].s].pd).toEqual({ l: 2 + 2 * 14 });      // A3: right-aligned, indent 2, bold
+    expect(data.styles[cd[2][0].s].ht).toBe(3);
+    expect(sidecar.sheets[sid].indent).toBeUndefined();                 // one source of truth: no second copy to go stale
+  });
+  it("an indent follows its cell when Univer moves the cell (a deleted / inserted row shifts the style with it)", () => {
+    const u = open();
+    const sid = base.sheets[0].id;
+    const sh = u.data.sheets[sid];
+    // Univer removes row index 1: every row below shifts up by one, cell styles included.
+    const moved = {};
+    for (const [r, row] of Object.entries(sh.cellData)) { const n = Number(r); if (n === 1) continue; moved[n > 1 ? n - 1 : n] = row; }
+    sh.cellData = moved;
+    const sidecar = sidecarAfterStructure(u.sidecar, sid, { op: "remove-row", index: 1 });
+    const { workbook } = back({ data: u.data, sidecar });
+    const out = workbook.sheets[0].sheet;
+    const id0 = out.columns[0].id;
+    expect(out.styles[cellKey(id0, 1)].indent).toBe(2);                  // old row 2 (indent 2, right-aligned) is now row 1
+    expect(out.styles[cellKey(id0, 1)].align).toBe("right");
+    expect(out.styles[cellKey(id0, 2)]?.indent).toBeUndefined();
+  });
+  it("an indent changed inside Univer (pd.l) comes back as Planyr's number; clearing it removes the number", () => {
+    const u = open();
+    const sid = base.sheets[0].id;
+    const sh = u.data.sheets[sid];
+    u.data.styles.sInd = { pd: { l: 2 + 5 * 14 } };
+    sh.cellData[40] = { 0: { v: "label", t: 1, s: "sInd" } };
+    u.data.styles.sClear = { bl: 1, pd: null };                          // what Decrease to 0 leaves: pd cleared, other style kept
+    sh.cellData[41] = { 0: { v: "bold", t: 1, s: "sClear" } };
+    const { workbook } = back(u);
+    const out = workbook.sheets[0].sheet;
+    const id0 = out.columns[0].id;
+    expect(out.styles[cellKey(id0, 40)]).toEqual({ indent: 5 });
+    expect(out.styles[cellKey(id0, 41)]).toEqual({ bold: true });
+  });
+  it("junk padding never becomes an indent: none, ≤ the base, a string, or past the cap", () => {
+    const u = open();
+    const sid = base.sheets[0].id;
+    const sh = u.data.sheets[sid];
+    u.data.styles.sA = { pd: { l: 2 } }; u.data.styles.sB = { pd: { l: "40" } }; u.data.styles.sC = { pd: { l: 2 + 99 * 14 } }; u.data.styles.sD = { pd: { r: 30 } };
+    sh.cellData[40] = { 0: { v: "a", t: 1, s: "sA" }, 1: { v: "b", t: 1, s: "sB" }, 2: { v: "c", t: 1, s: "sC" }, 3: { v: "d", t: 1, s: "sD" } };
+    const { workbook } = back(u);
+    const out = workbook.sheets[0].sheet;
+    const k = (c) => cellKey(out.columns[c].id, 40);
+    expect(out.styles[k(0)]).toBeUndefined();
+    expect(out.styles[k(1)]).toBeUndefined();
+    expect(out.styles[k(2)]).toEqual({ indent: 15 });
+    expect(out.styles[k(3)]).toBeUndefined();
   });
   it("a vertical merge made in Univer is reported, not silently dropped", () => {
     const u = open();

@@ -416,6 +416,14 @@ export function registerExcelKeyChecks(h) {
     void before;
     return eq(on, [2, 2]) && eq(off, [0, 0]) && row[0] === 1 && col[1] === 1 ? PASS("W F F froze above/left of C3 then unfroze; W F R froze the top row; W F C the first column") : FAIL(`on ${JSON.stringify(on)} off ${JSON.stringify(off)} row ${JSON.stringify(row)} col ${JSON.stringify(col)}`);
   });
+  alt1("H 5 / H 6", "decrease / increase indent (the indent plugin's own commands)", "H6", async () => {
+    await reset(); await click(1, 2); const before = await snap();
+    await alt("H6"); const pd = (await styleOf(1, 2)).pd;
+    if (!pd) return FAIL(`H 6 left no indent on C2 (style padding ${JSON.stringify(pd)})`);
+    if (!(await undoOnce(before))) return FAIL("H 6 was not one undo step");
+    await press("Control+y"); await wait(200); await alt("H5"); const back = (await styleOf(1, 2)).pd;
+    return !back || JSON.stringify(back) !== JSON.stringify(pd) ? PASS(`H 6 indented C2 (${JSON.stringify(pd)}); one undo; H 5 stepped it back`) : FAIL(`H 5 left ${JSON.stringify(back)}`);
+  });
   alt1("H 0 / H 9 / H K / H P / H 1-3 / H N", "decimals, comma, percent, B/I/U, number-format dialog", "H0", async () => {
     await reset(); await put([[0, 0, 1.5]]); await wait(300); await click(0, 0);
     await press("Control+Shift+!"); await alt("H0"); const inc = (await cell(0, 0)).nf;

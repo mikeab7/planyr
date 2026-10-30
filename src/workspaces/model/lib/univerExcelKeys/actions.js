@@ -19,6 +19,7 @@ import {
   NUMFMT_FOR, TODAY_PATTERN, TIME_PATTERN, dateSerial, timeFraction, INSERT_CHOICES, DELETE_CHOICES, structureKind, wholeLineRanges,
 } from "./bindings.js";
 import { promptChoice, promptNumber } from "./dialogs.js";
+import { INDENT_COMMAND_IDS } from "../univerIndent.js";
 
 const UNIVER = Object.freeze({
   strike: "sheet.command.set-range-stroke",
@@ -202,11 +203,8 @@ export function createActions(env) {
     if (!trigger) { notice(`${label} isn't available in the toolbar right now.`); return; }
     trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, ctrlKey: false, pointerType: "mouse", isPrimary: true }));
   };
-  const indent = (dir) => async () => {
-    const id = `planyr.excel.indent-${dir}`;
-    if (commands().hasCommand(id)) { await run(id); return; }
-    notice("Indent isn't available in the new grid yet.");
-  };
+  // Indent is the indent plugin's own command (B2572784, lib/univerIndent.js) — Alt H 5 / H 6 run THAT, in one undo group.
+  const indent = (dir) => async () => { const s = here(); if (!s) return; await inOneUndo(s.unitId, () => run(INDENT_COMMAND_IDS[dir])); };
 
   const A = {
     // chords

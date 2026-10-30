@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive } from "./lib/liveFixtures.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
-import { bind, checks, record, results_ as parityResults } from "./verify-univer-parity.mjs";
+import { bind, checks, record, results_ as parityResults, ink, edges, click as clickCell, clickToolbar, INDENT_INC } from "./verify-univer-parity.mjs";
 
 const args = process.argv.slice(2);
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
@@ -103,7 +103,7 @@ try {
   const LIVE_IDS = ["undo-typing", "bare-letter", "headers-fixed", "header-select", "ctrl-click", "key-bold", "key-italic", "key-underline", "key-select-all", "key-f2", "key-f4", "key-alt-enter", "key-ctrl-enter", "key-fill", "clip-internal", "clip-cut", "fill-handle", "undo-redo-all",
     // the Excel keys the Planyr plugin adds (NEW-1, B2573632) — the same strict checks as the sandbox run
     "key-strike", "key-format-cells", "key-currency", "key-percent", "key-number", "key-date", "key-general", "key-border", "key-row-col", "key-insert-delete", "key-hide", "key-today", "key-copy-above",
-    "excel-keys-editor-guard", "excel-keys-namebox-guard", "alt-keytips", "alt-h-o-i", "alt-h-o-a", "alt-h-o-w", "alt-h-o-h", "alt-h-b-a-n-o-t", "alt-h-h-h-f-c", "alt-h-a-l-c-r-t-m-b", "alt-h-w", "alt-h-m-m-u-c", "alt-h-i-r-c-h-d-r-c", "alt-h-e-a-f-c", "alt-h-s-s-o-f", "alt-w-f-f-r-c", "alt-h-0-h-9-h-k-h-p-h-1-3-h-n"];
+    "excel-keys-editor-guard", "excel-keys-namebox-guard", "alt-keytips", "alt-h-o-i", "alt-h-o-a", "alt-h-o-w", "alt-h-o-h", "alt-h-b-a-n-o-t", "alt-h-h-h-f-c", "alt-h-a-l-c-r-t-m-b", "alt-h-5-h-6", "alt-h-w", "alt-h-m-m-u-c", "alt-h-i-r-c-h-d-r-c", "alt-h-e-a-f-c", "alt-h-s-s-o-f", "alt-w-f-f-r-c", "alt-h-0-h-9-h-k-h-p-h-1-3-h-n"];
   // KNOWN-GOOD ARM for coordinates on the real page
   await liveReset();
   const pt = await page.evaluate(() => { const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet(); const r = ws.getRange(2, 2).getCellRect(); const o = typeof r === "string" ? JSON.parse(r) : r; const cv = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: cv.left + o.x + o.width / 2, y: cv.top + o.y + o.height / 2 }; });
@@ -151,6 +151,53 @@ try {
   const sameResult = (u, oldText, tol) => (typeof u === "number" && Number.isFinite(num(oldText)) ? Math.abs(u - num(oldText)) < tol : String(u).trim() === String(oldText).trim());
   ok("F2 =Site.Acres shows the same result in Univer as in the regular grid", sameResult(uni.acres, oldAcres, 0.01), `Univer ${JSON.stringify(uni.acres)} vs regular "${oldAcres}"`);
   ok("F3 =Plan.Building1.SF shows the same result in Univer as in the regular grid", sameResult(uni.sf, oldSf, 1), `Univer ${JSON.stringify(uni.sf)} vs regular "${oldSf}"`);
+
+  // ── H. indent (NEW-1): drawn in Univer, saved as Planyr's number, the same in the regular grid, both directions ───────────
+  const COLW = 120, ALIGN_HT = { left: 1, center: 2, right: 3 };
+  const seedWorkbook = async (wb) => {              // a Planyr workbook → the live sheet, through the facade (never through the indent commands under test)
+    const sh = wb.sheets[0].sheet;
+    const at = (key) => { const i = key.lastIndexOf(":"); return [Number(key.slice(i + 1)), sh.columns.findIndex((c) => c.id === key.slice(0, i))]; };
+    const cells = [];
+    for (const [key, raw] of Object.entries(sh.cells)) { const [r, c] = at(key); const st = sh.styles[key] || {}; cells.push({ r, c, v: /^\d+$/.test(String(raw)) ? Number(raw) : raw, ht: ALIGN_HT[st.align], indent: st.indent || 0 });
+    }
+    for (const [key, st] of Object.entries(sh.styles)) { const [r, c] = at(key); if (!cells.some((x) => x.r === r && x.c === c)) cells.push({ r, c, v: null, ht: ALIGN_HT[st.align], indent: st.indent || 0 }); }
+    await page.evaluate(([cs, widths, colW]) => {
+      const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet();
+      ws.getRange(0, 0, 60, 14).clear(); ws.showRows(0, 60); ws.showColumns(0, 14); ws.setFrozenRows(0); ws.setFrozenColumns(0);   // the checks before this one leave a hidden row / freeze behind (undo-redo-all) — a hidden row has no pixels to measure
+      widths.forEach((w, i) => ws.setColumnWidth(i, w || colW));
+      for (const x of cs) { const s = {}; if (x.ht) s.ht = x.ht; if (x.indent) s.pd = { l: 2 + 14 * x.indent }; ws.getRange(x.r, x.c).setValue(x.v == null ? { s } : { v: x.v, s }); }
+      ws.scrollToCell(0, 0); ws.getRange(0, 0).activate();
+    }, [cells, sh.columns.map((c) => c.width), COLW]);
+    await page.waitForTimeout(600);
+  };
+  // H2 Univer → regular grid: indent a label twice in Univer, switch, and the regular grid shows it two steps in (14 px a step, like the label beside it).
+  await seedWorkbook((() => { const w = JSON.parse(JSON.stringify({ sheets: [{ sheet: { columns: Array.from({ length: 14 }, (_, i) => ({ id: `c${i + 1}`, width: COLW })), cells: { "c1:2": "Same", "c1:3": "Same", "c1:4": "Same" }, styles: {} } }] })); return w; })());
+  await clickCell(2, 0); await clickToolbar(INDENT_INC); await clickToolbar(INDENT_INC);
+  const viaUniver = await waitCloud((r) => r.data?.sheets?.[0]?.sheet?.styles?.["c1:2"]?.indent === 2);
+  ok("H2a two Increase Indent clicks in Univer reach the cloud row as indent 2 on that cell only", viaUniver?.data?.sheets?.[0]?.sheet?.styles?.["c1:2"]?.indent === 2 && viaUniver.data.sheets[0].sheet.styles["c1:3"]?.indent === undefined, JSON.stringify(viaUniver?.data?.sheets?.[0]?.sheet?.styles || {}));
+  await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
+  await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 30000 }); await page.waitForTimeout(1500);
+  const textLeft = (r, c) => page.evaluate(([rr, cc]) => { const el = document.querySelector(`[data-row="${rr}"][data-col="${cc}"]`); const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (n.nodeValue.trim()) { const rg = document.createRange(); rg.selectNodeContents(n); return rg.getBoundingClientRect().left - el.getBoundingClientRect().left; } return null; }, [r, c]);
+  const oldIn = (await textLeft(2, 0)) - (await textLeft(3, 0));
+  ok("H2b the regular grid draws that Univer-made indent 28 px in (two steps), like the label under it", Math.abs(oldIn - 28) <= 1.5, `${oldIn.toFixed(1)} px`);
+  // H3 regular grid → Univer: one Increase Indent in the regular grid's ribbon, switch, and Univer paints it one step in.
+  await oldCell(3, 0).click(); await page.click('[data-testid="ribbon-indent-inc"]'); await page.waitForTimeout(400);
+  const viaOld = await waitCloud((r) => r.data?.sheets?.[0]?.sheet?.styles?.["c1:3"]?.indent === 1);
+  ok("H3a one Increase Indent in the regular grid reaches the cloud row as indent 1", viaOld?.data?.sheets?.[0]?.sheet?.styles?.["c1:3"]?.indent === 1);
+  await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
+  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 60000 }); await page.waitForTimeout(3500);
+  await clickCell(15, 8);
+  const e0 = await edges(await ink(4, 0)), e1 = await edges(await ink(3, 0)), e2 = await edges(await ink(2, 0));
+  ok("H3b Univer paints the regular grid's indents: none, one step (+14), two steps (+28) on three identical labels", Math.abs(e1.left - e0.left - 14) <= 1.5 && Math.abs(e2.left - e0.left - 28) <= 1.5, `left edges ${e0.left} / ${e1.left} / ${e2.left}`);
+
+  // H1 last: its column-insert step re-ids the first column, which the cross-grid checks above key on.
+  bind({ page, reset: seedWorkbook, savedLast: async () => { const r = await cloudRow(); return r ? { wb: r.data } : null; }, flushSave: async () => { await page.evaluate(() => window.__planyrUniverRead.flush()); await page.waitForTimeout(3500); } });
+  const indentRun = checks.find((x) => x.id === "indent");
+  let indentRes;
+  try { indentRes = await indentRun.fn(); } catch (e) { indentRes = { status: "FAIL", detail: "threw: " + String(e.message).split("\n")[0].slice(0, 300) }; }
+  ok("H1 the indent check (toolbar buttons, painted edge, one undo per click, right / centred / spill / narrow column, column insert, edit, copy-paste) passes on the real app", indentRes.status === "PASS", indentRes.detail);
+  log.push({ phase: "H", indent: indentRes });
+
   await page.evaluate((k) => localStorage.removeItem(k), SWITCH_KEY);
 } catch (e) {
   console.log("ABORT:", String(e.message).split("\n")[0]);
