@@ -118,23 +118,32 @@ const TRIBAL = {
   cherokee: { key: "cherokee", label: "Cherokee Nation reservation (the Nation's own file)", color: "#b45309", dash: true },
   land: { key: "land", label: "Cherokee Nation tribal land tracts", color: "#92400e" },
 };
-/* WHAT A CARD MAY SAY ABOUT THE COURTS (NEW-1 second review, 2026-10-30). The Census OTSAs are drawn with each tribe and, for several, follow a historic reservation — so a blanket "statistical, not a
- * legal boundary" read as "no reservation here", which courts have said is wrong for the Muscogee (Creek), Cherokee, Chickasaw, Choctaw, Seminole and Quapaw. But the reverse blanket is wrong too: the
- * Kiowa, Comanche and Apache reservation and the Osage Reservation have been held DISESTABLISHED. So the card states only a ruling it can name, per nation, and never says a site IS or IS NOT under tribal
- * jurisdiction — that is a fact-specific question for counsel and the Nation. Sources read 2026-10-30 (court and year only; case names for the 2021 decisions were not verifiable from a primary source):
- * McGirt v. Oklahoma (U.S. 2020) · Oklahoma Court of Criminal Appeals 2021 for the Cherokee, Chickasaw, Choctaw, Seminole and the Quapaw · the OCCA's Kiowa-Comanche-Apache ruling · Osage Nation v. Irby,
- * 597 F.3d 1117 (10th Cir. 2010), cert. denied 2011, which the Osage Nation now asks courts to revisit after McGirt. */
+/* WHAT A CARD MAY SAY ABOUT THE COURTS (NEW-1 second review, 2026-10-30; every holding cited by case in the THIRD review, same day). The Census OTSAs are drawn with each tribe and, for several, follow a historic
+ * reservation — so a blanket "statistical, not a legal boundary" read as "no reservation here", which courts have said is wrong for the Muscogee (Creek), Cherokee, Chickasaw, Choctaw, Seminole and Quapaw.
+ * But the reverse blanket is wrong too: the Kiowa, Comanche and Apache reservation, the Kickapoo reservation and the Osage Reservation have been held DISESTABLISHED. So the card states only a ruling it can
+ * name — court, case, year — per nation, and never says a site IS or IS NOT under tribal jurisdiction: that is a fact-specific question for counsel and the Nation. Every line below is a CRIMINAL-jurisdiction
+ * holding of the Oklahoma Court of Criminal Appeals (OCCA) unless it says otherwise. Each cite was matched against at least two independent reports of the decision on 2026-10-30 (the opinion text itself was
+ * not reachable from the build environment — read the opinion on OSCN before relying on a holding):
+ *   · McGirt v. Oklahoma, 591 U.S. 894 (2020) — Muscogee (Creek)          · Hogner v. State, 2021 OK CR 4 (Mar. 11, 2021) — Cherokee
+ *   · Bosse v. State, No. PCD-2019-124 (Mar. 11, 2021) — Chickasaw          · Sizemore v. State, 2021 OK CR 6 (Apr. 1, 2021) — Choctaw
+ *   · Grayson v. State, 2021 OK CR 8 (Apr. 1, 2021) — Seminole            · State v. Lawhorn, 2021 OK CR 37 (Oct. 21, 2021) — Quapaw
+ *     (Bosse is cited by DOCKET: the March opinion, 2021 OK CR 3, was withdrawn on other grounds and the reservation holding reissued — per the parties' briefs, as 2021 OK CR 23 and 30 — and the
+ *      successor opinions were not read, so no OK CR number is printed for it.)
+ *   · Martinez v. State, No. PCD-2020-612 (Okla. Crim. App. Dec. 30, 2021), 2021 WL 6202796 — Kiowa-Comanche-Apache (disestablished; its OK CR number was not found)
+ *   · Buck v. State, 2023 OK CR 2, 525 P.3d 39 (Jan. 19, 2023) — Kickapoo (disestablished)
+ *   · Osage Nation v. Irby, 597 F.3d 1117 (10th Cir. 2010), cert. denied 2011, followed by McCauley v. State, 2024 OK CR 8, 548 P.3d 461 (Apr. 4, 2024) — Osage (disestablished; the Osage Nation disputes Irby after McGirt).
+ * A nation with no row here (Ottawa, Peoria, Miami… — State v. Brester, 2023 OK CR 10 is the OCCA's ruling on several of them) is given NO court sentence rather than one typed from memory. */
 export const TRIBAL_COURTS = [
   [/\bcreek\b/i, "Muscogee (Creek): McGirt v. Oklahoma (U.S. Supreme Court, 2020), a criminal-jurisdiction case, held that Congress never disestablished the reservation."],
-  [/\bcherokee\b/i, "Cherokee: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bchickasaw\b/i, "Chickasaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bchoctaw\b/i, "Choctaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bseminole\b/i, "Seminole: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bquapaw\b/i, "Quapaw: in a criminal case the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished."],
-  [/\bkiowa\b/i, "Kiowa, Comanche and Apache: in a criminal case the Oklahoma Court of Criminal Appeals held that the reservation was disestablished."],
-  [/\bkickapoo\b/i, "Kickapoo: in a criminal case the Oklahoma Court of Criminal Appeals held in 2023 that the reservation was disestablished."],
+  [/\bcherokee\b/i, "Cherokee: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Hogner v. State, 2021 OK CR 4)."],
+  [/\bchickasaw\b/i, "Chickasaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Bosse v. State, No. PCD-2019-124)."],
+  [/\bchoctaw\b/i, "Choctaw: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Sizemore v. State, 2021 OK CR 6)."],
+  [/\bseminole\b/i, "Seminole: in criminal cases the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (Grayson v. State, 2021 OK CR 8)."],
+  [/\bquapaw\b/i, "Quapaw: in a criminal case the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished (State v. Lawhorn, 2021 OK CR 37)."],
+  [/\bkiowa\b/i, "Kiowa, Comanche and Apache: in a criminal case the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was disestablished (Martinez v. State, No. PCD-2020-612)."],
+  [/\bkickapoo\b/i, "Kickapoo: in a criminal case the Oklahoma Court of Criminal Appeals held in 2023 that the reservation was disestablished (Buck v. State, 2023 OK CR 2)."],
 ];
-export const OSAGE_COURTS = "The Tenth Circuit held in Osage Nation v. Irby (2010) that Congress disestablished the reservation, and in 2024 the Oklahoma Court of Criminal Appeals followed it in a criminal case; the Osage Nation disputes that after McGirt v. Oklahoma (2020).";
+export const OSAGE_COURTS = "The Tenth Circuit held in Osage Nation v. Irby, 597 F.3d 1117 (2010), that Congress disestablished the reservation, and in 2024 the Oklahoma Court of Criminal Appeals followed it in a criminal case (McCauley v. State, 2024 OK CR 8); the Osage Nation disputes that after McGirt v. Oklahoma (2020).";
 const COUNSEL = "The rulings cited are criminal-jurisdiction decisions; they do not by themselves settle civil, regulatory or tax questions. What a ruling, or an area on this map, means for a site's jurisdiction — civil, regulatory or tax — is unsettled and fact-specific. Ask counsel and the Nation; this map does not say whether a site is or is not under tribal jurisdiction.";
 const courtLinesFor = (name) => TRIBAL_COURTS.filter(([re]) => re.test(String(name || ""))).map(([, t]) => t);
 const tribalCard = (props) => {
@@ -270,7 +279,7 @@ export const OK_LAYERS = {
     minZoom: 7, color: TRIBAL.otsa.color, weight: 1.2, styleFn: tribalStyle, legend: TRIBAL_LEGEND,
     hoverTitle: "Tribal area", hoverSource: "U.S. Census Bureau",
     identifyCard: tribalCard,
-    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — areas Census draws with each tribe, in several cases following a historic reservation), the Osage Reservation and the Shawnee trust land. In criminal-jurisdiction cases, courts have held that the Muscogee (Creek) reservation (McGirt v. Oklahoma, 2020) and the Cherokee, Chickasaw, Choctaw, Seminole and Quapaw reservations (Oklahoma Court of Criminal Appeals, 2021) were not disestablished, and that the Kiowa, Comanche and Apache and the Kickapoo reservations were — as was the Osage Reservation, a ruling the Osage Nation disputes; other areas have their own cases. Click an area for its own line.",
+    note: "Census 'American Indian / Alaska Native / Native Hawaiian' areas in Oklahoma: the 25 Oklahoma Tribal Statistical Areas plus four joint-use areas (OTSAs, dashed — areas Census draws with each tribe, in several cases following a historic reservation), the Osage Reservation and the Shawnee trust land. In criminal-jurisdiction cases, courts have held that the Muscogee (Creek) reservation (McGirt v. Oklahoma, 2020) and the Cherokee, Chickasaw, Choctaw, Seminole and Quapaw reservations (Oklahoma Court of Criminal Appeals, 2021) were not disestablished, and that the Kiowa, Comanche and Apache and the Kickapoo reservations were — as was the Osage Reservation, a ruling the Osage Nation disputes; other areas have their own cases. Click an area for its own line, with the case named.",
     infoCaveat: "A tribal boundary on a map does not say whether a site is under tribal jurisdiction. That is a legal question that turns on the facts — civil, regulatory and tax questions can differ. Ask counsel and the Nation early.",
     group: "jurisdiction", order: 21,
   }),

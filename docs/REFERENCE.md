@@ -318,6 +318,10 @@ create table public.profiles (
 -- Trigger handle_new_user() inserts the row from raw_user_meta_data on signup; + backfill.
 ```
 
+## Database disk I/O — diagnose with `scripts/db-io-report.sql` (B2559168, 2026-10-30)
+
+Supabase's "running out of daily disk I/O burst budget" email was NOT write- or read-driven: WAL was ~35 MB/day and disk reads 96 MB total, but **Postgres had spilled 61 GB of sort/hash temp files** (smallest compute: `work_mem` ~2 MB), 38.8 GB of it from one Food RPC. **Look at temp files first** (`pg_stat_database.temp_bytes`, then `pg_stat_statements.temp_blks_written`); the read-only script lists them, WAL by statement, and the per-function overrides. Counters are cumulative: subtract two readings. A function that ranks/counts a big set must do it on NARROW rows (id + keys) and join the wide columns back for the survivors; a per-function `set work_mem` (like `food_places_in_bounds_sampled`) is the sanctioned way to give one sort room without raising it for every query. Measurements + the ruled-out suspects (sites autosave WAL, Realtime poll, `site_elements` polls, `client_errors`, `planar_history`) are on the item.
+
 ## Document Review persistence (`src/workspaces/doc-review/lib/reviewStore.js`, `usePersistence.js`)
 Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +
 `auth.js`); no second client/keys. A "review" is `kind:'single'|'stitch'`; the work

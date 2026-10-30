@@ -22,6 +22,7 @@
 import { njnyStateAt, NJ_OUTLINE, NY_OUTLINE } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 import { TN_OUTLINE } from "./tennesseeJurisdiction.js"; // NEW-1 (Tennessee)
 import { US_STATES_ENCODED, US_STATES_SCALE } from "./usStatesData.js"; // NEW-1 (B2479568 amendment): the 50 states + DC
+import { REACH_RINGS } from "./stateReachData.js"; // NEW-1 (state lines, third review): the polygons the two TUNED_REACHES overrule with
 
 /* ROUTING BOXES — NOT USED BY `siteState` ANY MORE (B2479568 amendment, 2026-10-29). They are kept because the per-state jurisdiction
  * modules mirror them as their county-layer ROUTING hints (`georgiaJurisdiction.GA_ENVELOPE_BOX`, `californiaJurisdiction.CA_ENVELOPE_BOX`,
@@ -193,21 +194,6 @@ function nearestStateWithin(lat, lng, padDeg) {
  * (0.04°) and a shoreline site must never read "unknown" — which, for a located point, hides every state-scoped layer. */
 const SEAWARD_PAD_DEG = 0.06;
 
-/* NE's error band (degrees, ~1.3 km): within it of the boundary of the real polygon that holds a point, a hand-tuned outline may overrule the
- * real set — but only inside a `TUNED_REACHES` entry (which may name its own wider band). */
-const NE_BAND_DEG = 0.012;
-function edgeDistanceDeg(xy, lat, lng) {
-  const k = Math.cos((lat * Math.PI) / 180);
-  let best = Infinity;
-  for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
-    const ax = (xy[j] - lng) * k, ay = xy[j + 1] - lat, bx = (xy[i] - lng) * k, by = xy[i + 1] - lat;
-    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
-    const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
-    const d = Math.hypot(ax + t * dx, ay + t * dy);
-    if (d < best) best = d;
-  }
-  return best;
-}
 function realRingAt(lat, lng) {
   for (const r of usRings()) {
     if (lng < r.minX || lng > r.maxX || lat < r.minY || lat > r.maxY) continue;
@@ -216,27 +202,39 @@ function realRingAt(lat, lng) {
   return null;
 }
 
-/* THE ONLY PLACES A HAND-DRAWN OUTLINE MAY OVERRULE THE REAL BOUNDARY (NEW-1 state lines, 2026-10-30). Each entry is a river stretch where Natural
- * Earth is measurably wrong AND the outline is drawn to the true line, and says so with a landmark on each side (asserted in
- * test/stateLineReaches.test.js, which also grid-scans every reach and requires it to flip at least one point — a reach that does nothing is stale).
- *   tuned — the state whose outline overrules      real — the state the real polygon holds the point in
- *   box   — [south, west, north, east], the stretch (the overrule does not apply outside it, whatever the outline says)
- *   band  — how far (degrees) from the real polygon's edge the overrule reaches (default NE_BAND_DEG)
+/* THE ONLY PLACES THE REAL BOUNDARY MAY BE OVERRULED (NEW-1 state lines, 2026-10-30; polygons from the third review). Each entry is a stretch where Natural
+ * Earth is measurably wrong, and it is overruled by a POLYGON of the tuned state's own LAND taken from the county boundaries (a county line along a river IS
+ * the state line) — generated into `stateReachData.js` by scripts/build-state-reaches.mjs. It used to be a hand-drawn FL / GA outline inside a box + band, and
+ * that was wrong in the two ways the third review measured: Georgia's outline was three straight vertices (1.0–2.9 km west of the river, so Phenix City and
+ * Valley AL read GA) and Florida's west edge ran straight down the Alabama coast, so Ono Island, Bear Point and the Perdido Bay north shore read FL. Each entry
+ * says what it does with a landmark on each side (asserted in test/stateLineReaches.test.js, which also grid-scans every reach and requires it to flip at
+ * least one point — a reach that does nothing is stale) and with an Alabama landmark INSIDE the affected stretch.
+ *   tuned — the state whose land overrules      real — the state the real polygon (or, off every polygon, the nearest one) holds the point in
+ *   box   — [south, west, north, east], the stretch (the overrule does not apply outside it, whatever the polygon says)
+ *   ring  — the tuned state's land in the stretch (REACH_RINGS[id]); a point in it is the tuned state
  * Everything else — every other state line, and every other stretch of these two — answers from the real polygon alone. */
 export const TUNED_REACHES = Object.freeze([
   Object.freeze({
-    id: "chattahoochee", tuned: "GA", real: "AL", box: [31.0, -85.3, 32.95, -84.85],
-    why: "The Chattahoochee River, Alabama–Georgia line from the Florida corner to West Point: NE puts downtown Columbus and West Point in Alabama. North of West Point the line is a surveyed straight line and NE is right.",
-    tunedSide: ["Columbus GA", 32.461, -84.9877], realSide: ["Eufaula AL", 31.8913, -85.1455],
+    id: "chattahoochee", tuned: "GA", real: "AL", box: [31.0, -85.3, 32.95, -84.85], ring: REACH_RINGS.chattahoochee,
+    why: "The Chattahoochee River, Alabama–Georgia line from the Florida corner to West Point: NE puts downtown Columbus and West Point in Alabama (up to 3 km). The overruling ring is the Georgia counties' land along the river, so Georgia ground reads Georgia and Alabama ground (Phenix City, Valley, Eufaula) stays Alabama. North of West Point the line is a surveyed straight line and NE is right.",
+    tunedSide: ["Columbus GA", 32.461, -84.9877], realSide: ["Eufaula AL", 31.8913, -85.1455], realSideInBand: ["Phenix City AL", 32.4709, -85.0008],
   }),
   Object.freeze({
-    id: "perdido-key", tuned: "FL", real: "AL", box: [30.2, -87.53, 30.36, -87.35], band: 0.07,
-    why: "Perdido Key, the barrier island on the Alabama–Florida line: NE's coast simplification gives the island's western 5 km to Alabama. The line runs mid-island at Alabama Point (-87.52).",
-    tunedSide: ["Perdido Key FL", 30.3, -87.45], realSide: ["Orange Beach AL", 30.2943, -87.5736],
+    id: "chattahoochee-al", tuned: "AL", real: "GA", box: [31.0, -85.3, 32.95, -84.85], ring: REACH_RINGS["chattahoochee-al"],
+    why: "The same river from the other side: NE also calls Alabama ground Georgia — the Lake Eufaula shore, up to 1.6 km from the Georgia county line. The overruling ring is the Alabama river counties' land where NE says Georgia.",
+    tunedSide: ["Lake Eufaula shore AL", 31.942, -85.102], realSide: ["Columbus GA", 32.461, -84.9877], realSideInBand: ["Fort Moore GA", 32.3357, -85.0],
+  }),
+  Object.freeze({
+    id: "perdido-key", tuned: "FL", real: "AL", box: [30.2, -87.53, 30.56, -87.36], ring: REACH_RINGS["perdido-key"],
+    why: "Perdido Key, the barrier island on the Alabama–Florida line: NE's coast simplification gives the island's western 5 km to Alabama, and Escambia County's land beside Perdido Bay lies in no NE polygon at all. The line runs mid-island at Alabama Point (-87.52). The overruling ring is Escambia County FL's land there (grown ~55 m for the beach edge), less Baldwin County AL's land, plus the Gulf water off the Key's shore east of that line — Ono Island, Bear Point and the Perdido Bay north shore are Alabama.",
+    tunedSide: ["Perdido Key FL", 30.292, -87.4785], realSide: ["Ono Island AL", 30.2975, -87.479], realSideInBand: ["Bear Point AL", 30.329, -87.515],
+  }),
+  Object.freeze({
+    id: "perdido-al", tuned: "AL", real: "FL", box: [30.2, -87.53, 30.56, -87.36], ring: REACH_RINGS["perdido-al"],
+    why: "The same stretch from the other side: along the Perdido River (north of 30.45) NE also calls Baldwin County, Alabama land Florida. The overruling ring is Baldwin County's land where NE says Florida.",
+    tunedSide: ["Perdido River AL shore", 30.545, -87.437], realSide: ["Perdido Bay east shore FL", 30.401, -87.425], realSideInBand: ["Escambia County FL, Perdido Bay", 30.38, -87.4],
   }),
 ]);
-/* The outlines a reach may name. Only FL and GA have reaches; a reach for another state adds its outline here AND a row in the test. */
-const TUNED_OUTLINES = { FL: STATE_POLYGONS.FL, GA: STATE_POLYGONS.GA };
 
 /* The state a hand-tuned outline puts a point in, or null — used ONLY for ground the real polygons do not hold. Texas / Colorado first, then
  * Florida / Georgia / Tennessee (they share the GA–TN and GA–FL lines exactly, so order does not matter). */
@@ -247,14 +245,17 @@ function tunedOutlineState(la, lo) {
   return null;
 }
 
-/* The tuned state that may overrule `ring` at this point, or null — only through a TUNED_REACHES entry. */
-function reachOverrule(ring, la, lo) {
+/* A point is in a reach when an ODD number of its rings hold it: the generator writes what Clipper returns, and a hole in a reach (Baldwin County land enclosed by Escambia's grown edge) comes out
+ * as its own ring — an OR over the rings would have counted it as land (found by the third review's reading of the ring set). */
+const inReachRings = (rings, lo, la) => rings.reduce((n, ring) => n + (inPolygon(lo, la, ring) ? 1 : 0), 0) % 2 === 1;
+
+/* The tuned state that may overrule `real` at this point, or null — only through a TUNED_REACHES entry (box, then the entry's own land ring). */
+function reachOverrule(real, la, lo) {
   for (const r of TUNED_REACHES) {
-    if (r.real !== ring.st) continue;
+    if (r.real !== real) continue;
     const [s, w, n, e] = r.box;
     if (la < s || la > n || lo < w || lo > e) continue;
-    if (!inPolygon(lo, la, TUNED_OUTLINES[r.tuned])) continue;
-    if (edgeDistanceDeg(ring.xy, la, lo) <= (r.band ?? NE_BAND_DEG)) return r.tuned;
+    if (inReachRings(r.ring, lo, la)) return r.tuned;
   }
   return null;
 }
@@ -267,13 +268,14 @@ function reachOverrule(ring, la, lo) {
  * answer was eight states, three of them boxes — Shreveport read "TX", North Augusta SC read "GA" — and every other state read null.
  * Order now:
  *   1. the real state polygon holding the point (the 50 + DC set, `usStatesData.js`) — except inside a `TUNED_REACHES` stretch (today the
- *      Chattahoochee at Columbus GA and Perdido Key FL), where a hand-tuned outline drawn to the true line overrules it. NEW-1 (state lines):
+ *      Chattahoochee, both ways, and Perdido Key FL), where the tuned state's own county land overrules it. NEW-1 (state lines):
  *      this used to be a default for every tuned outline, which let the FL / GA / TN / TX outlines claim Alabama, Oklahoma, Arkansas,
  *      Louisiana and New Mexico ground; the real boundary is now authoritative everywhere that is not a documented reach;
  *   2. a point the polygons put in NJ or NY: the existing NJ/NY border settlement (`njnyStateAt`, the Hudson / Arthur Kill overlap) —
  *      kept exactly as it was;
- *   3. a point in NO polygon (a few km of water off a coast): the padded outlines above and the NJ / NY ones, so a shoreline site in
- *      those states answers as before; else the state whose boundary lies within SEAWARD_PAD_DEG; else null.
+ *   3. a point in NO polygon (a few km of water off a coast): the NEAREST real state within SEAWARD_PAD_DEG (a reach may overrule it, as in 1; NJ / NY
+ *      by the Hudson settlement), and only past that the padded outlines above — they used to answer first, and a coarse outline edge handed Alabama's
+ *      Perdido Bay shore to Florida; else null.
  * What changed is only the margin: the Texas box no longer holds Louisiana, New Mexico or Oklahoma ground, Georgia's no longer holds
  * the Carolinas, California's no longer holds Baja or Nevada, and the states the app had no region for now answer by name. */
 export function siteState({ lat = null, lng = null, lon = null } = {}) {
@@ -283,13 +285,17 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
   if (ring) {
     const real = ring.st;
     if (real === "NJ" || real === "NY") return njnyStateAt(la, lo) || real; // the Hudson settlement decides between the two
-    return reachOverrule(ring, la, lo) || real;
+    return reachOverrule(real, la, lo) || real;
   }
+  /* In no polygon (a few km of water, or a coast the 1:10m simplification clipped): the NEAREST real state first, and only a reach may overrule it — a
+   * hand-tuned outline used to answer here and its coarse west edge handed Alabama's Perdido Bay shore to Florida (third review). The outlines answer
+   * only ground no real boundary lies near. NJ / NY keep the Hudson settlement. */
+  const near = nearestStateWithin(la, lo, SEAWARD_PAD_DEG);
+  if (near === "NJ" || near === "NY") return njnyStateAt(la, lo) || near;
+  if (near) return reachOverrule(near, la, lo) || near;
   const tuned = tunedOutlineState(la, lo);
   if (tuned) return tuned;
-  const nn = njnyStateAt(la, lo);
-  if (nn) return nn;
-  return nearestStateWithin(la, lo, SEAWARD_PAD_DEG);
+  return njnyStateAt(la, lo);
 }
 
 export const isColorado = (pt) => siteState(pt) === "CO";

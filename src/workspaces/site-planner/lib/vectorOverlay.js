@@ -35,7 +35,7 @@ import { siteState } from "./siteRegion.js";
 import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
-import { streamBufferBands, bufferLegend } from "./georgiaStreamBuffers.js";
+import { streamBufferBands, bufferLegend, streamBufferLossNote } from "./georgiaStreamBuffers.js";
 import { streamBufferBandsTn, bufferLegendTn } from "./tennesseeStreamBuffers.js";   // B2521584 (Tennessee)
 import { ftypeLabel } from "./nhdFlowline.js";
 import { pointSymbolOptions } from "./layerRequest.js";
@@ -774,12 +774,9 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
         interactive: false,
       }));
     }
-    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline", failed.rivers && "the protected-river lines", failed.mrpa && "the Chattahoochee MRPA corridor"].filter(Boolean);
-    if (lost.length) {
-      // a lost corridor makes the Chattahoochee band WIDER than the rule (the MRPA governs there), every other loss makes a band NARROWER
-      const narrower = failed.trout || failed.district || failed.rivers;
-      const effect = [narrower && "the bands shown may be narrower than the rule", failed.mrpa && "river or District bands may be drawn along the Chattahoochee reach, where the Metropolitan River Protection Act's buffers govern instead"].filter(Boolean).join("; ");
-      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — ${effect}. NOT the full answer (screening only).`);
+    const lossNote = streamBufferLossNote(cfg.label, failed);
+    if (lossNote) {
+      report("failed", lossNote);
     } else if (!list.length) {
       report("empty", "No state-waters streams in this view.");
     } else if (data.nhd.truncated) {

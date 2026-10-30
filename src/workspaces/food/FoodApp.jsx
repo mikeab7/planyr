@@ -30,6 +30,7 @@ import {
   fetchAllLists, fetchAllListItems, createList, updateList, deleteList, addListItem, removeListItem,
 } from "./lib/foodStore.js";
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
+import { canReuseBrowse } from "./lib/browseReuse.js";
 import { searchOverpass } from "./lib/overpass.js";
 import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
 import ListChips from "./components/ListChips.jsx";
@@ -97,16 +98,23 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   }, []);
 
   // Places in the current map viewport — public read, works signed out too.
+  // B2559168 (disk I/O): a move INTO an area the last uncapped answer already covered is served from
+  // what is on the map (lib/browseReuse.js) instead of another database call; capped, failed and
+  // Retry answers always go to the database.
+  const lastBrowseRef = useRef(null);
   useEffect(() => {
     if (!bounds) return;
+    if (canReuseBrowse(lastBrowseRef.current, bounds, placesRetry)) return;
     let cancelled = false;
     fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched, error }) => {
       if (cancelled) return;
       if (error) {
+        lastBrowseRef.current = null;
         reportBrowseError(error);
         setPlacesError(BROWSE_ERROR_MESSAGE);
         return; // keep the pins already drawn; the notice says the new view didn't load
       }
+      lastBrowseRef.current = { bounds, capped, retry: placesRetry };
       setPlacesError(null);
       setPlaces(data);
       setPlacesCap({ capped, totalMatched });
