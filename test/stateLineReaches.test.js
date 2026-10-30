@@ -88,7 +88,7 @@ describe("landmarks the review measured", () => {
 /* ── the reaches ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 describe("every TUNED_REACHES entry is documented, bounded and live", () => {
   it("there are exactly the documented reaches, each with its reason and a landmark on each bank", () => {
-    expect(TUNED_REACHES.map((r) => r.id).sort()).toEqual(["chattahoochee", "perdido-key"]);
+    expect(TUNED_REACHES.map((r) => r.id).sort()).toEqual(["chattahoochee", "chattahoochee-al", "perdido-al", "perdido-key"]);
     for (const r of TUNED_REACHES) {
       expect(r.why.length).toBeGreaterThan(40);
       expect(r.box).toHaveLength(4);
@@ -105,11 +105,13 @@ describe("every TUNED_REACHES entry is documented, bounded and live", () => {
     // The scan below reads the boxes from TUNED_REACHES itself, so it cannot police them; this is the pin.
     expect(TUNED_REACHES.map((r) => [r.id, r.tuned, r.real, r.box])).toEqual([
       ["chattahoochee", "GA", "AL", [31.0, -85.3, 32.95, -84.85]],
-      ["perdido-key", "FL", "AL", [30.2, -87.53, 30.36, -87.4]],
+      ["chattahoochee-al", "AL", "GA", [31.0, -85.3, 32.95, -84.85]],
+      ["perdido-key", "FL", "AL", [30.2, -87.53, 30.56, -87.36]],
+      ["perdido-al", "AL", "FL", [30.2, -87.53, 30.56, -87.36]],
     ]);
   });
   it("no reach for Tennessee, Texas or Colorado: their outlines never overrule", () => {
-    for (const r of TUNED_REACHES) expect(["GA", "FL"]).toContain(r.tuned);
+    for (const r of TUNED_REACHES) expect(["GA", "FL", "AL"]).toContain(r.tuned);
   });
   it("Alabama beside the Chattahoochee reads Alabama: Phenix City, Valley and a landmark inside the old overrule band (the third review's item 2)", () => {
     // These three used to read GA — the Georgia outline was three straight vertices, 1.0–2.9 km west of the river (capped by a 0.012° band). Fort Mitchell's
@@ -118,31 +120,40 @@ describe("every TUNED_REACHES entry is documented, bounded and live", () => {
     for (const [la, lo] of [[32.8668, -85.1913], [31.8913, -85.1455], [31.2918, -85.1119]]) expect(st(la, lo), `${la},${lo}`).toBe("AL");
     for (const [la, lo] of [[32.461, -84.9877], [32.35, -84.95], [32.877, -85.18]]) expect(st(la, lo), `${la},${lo}`).toBe("GA");
   });
-  it("GROUND TRUTH, Chattahoochee: every sampled Georgia-county point reads GA; the reach adds NO Alabama-county point reading GA", () => {
+  it("GROUND TRUTH, Chattahoochee, BOTH WAYS: every sampled Georgia-county point reads GA and every sampled Alabama-county point reads AL", () => {
     const [ga, al] = [GROUND.chattahoochee.ga, GROUND.chattahoochee.al];
     expect(ga.length, "vacuous: no Georgia samples").toBeGreaterThan(150);
     expect(al.length, "vacuous: no Alabama samples").toBeGreaterThan(150);
     expect(ga.filter(([la, lo]) => st(la, lo) !== "GA")).toEqual([]);
-    // Natural Earth itself still calls a few hundred metres of Alabama beside the river Georgia (32.83–32.85N, the lake shore at Eufaula…). That is NE's
-    // error, not the reach's: every Alabama-county point that reads GA must be one the REAL polygon already calls GA. (Drawing the reach the other way
-    // too would fix them for ~5 KB of bundle — left as a documented limit.)
-    const wrong = al.filter(([la, lo]) => st(la, lo) !== "AL");
-    expect(wrong.filter(([la, lo]) => realStateAt(la, lo) !== "GA"), "the reach itself put Alabama ground in Georgia").toEqual([]);
-    expect(wrong.length, "NE's own residual error grew").toBeLessThanOrEqual(10);
-  });
-  it("GROUND TRUTH, Perdido: every Escambia-county (Florida) point reads FL and every Baldwin-county (Alabama) point reads AL", () => {
-    const { al, fl } = GROUND.perdido;
-    expect(al.length).toBeGreaterThan(10); expect(fl.length).toBeGreaterThan(25);
-    expect(fl.filter(([la, lo]) => st(la, lo) !== "FL")).toEqual([]);
+    // The fixture sits >= ~55 m inside its own county, so the 0.0003° (~33 m) simplification cannot be what it measures. Before the Alabama-over-Georgia
+    // half, ~1,000 Alabama cells (the Lake Eufaula shore, up to 1.6 km from the county line) read Georgia — Natural Earth's own error, which a GA-over-AL
+    // reach cannot undo.
     expect(al.filter(([la, lo]) => st(la, lo) !== "AL")).toEqual([]);
   });
-  it("every point in the Perdido window that the review named reads Alabama, and a 0.001° scan of the island finds no Alabama landmark in Florida", () => {
+  it("the Lake Eufaula shore: Alabama ground that Natural Earth calls Georgia reads Alabama, and the same river's Georgia bank still reads Georgia", () => {
+    for (const [la, lo] of [[31.942, -85.102], [31.944, -85.1], [31.81, -85.14], [32.83, -85.17]]) { expect(realStateAt(la, lo), `${la},${lo}`).toBe("GA"); expect(st(la, lo), `${la},${lo}`).toBe("AL"); }
+    expect(st(32.3357, -85.0)).toBe("GA");
+  });
+  it("GROUND TRUTH, Perdido: every Escambia-county (Florida) point reads FL and every Baldwin-county (Alabama) point reads AL — including the Escambia land north of 30.36 that lies in no Natural Earth polygon", () => {
+    const { al, fl } = GROUND.perdido;
+    expect(al.length).toBeGreaterThan(100); expect(fl.length).toBeGreaterThan(100);
+    expect(fl.filter(([la, lo]) => st(la, lo) !== "FL")).toEqual([]);
+    expect(al.filter(([la, lo]) => st(la, lo) !== "AL")).toEqual([]);
+    // the review's regression (291 Escambia cells at 30.362–30.399, -87.44…-87.406 read AL once the nearest-state rule came first): the fixture must reach there
+    expect(fl.filter(([la]) => la > 30.36).length, "the fixture does not cover the reviewer's pocket").toBeGreaterThan(5);
+    for (const [la, lo] of [[30.38, -87.42], [30.401, -87.425]]) expect(st(la, lo), `${la},${lo}`).toBe("FL"); // inside the 291-cell pocket: in no Natural Earth polygon
+    expect(fl.filter(([la]) => la > 30.45).length, "the fixture does not cover the Perdido River stretch").toBeGreaterThan(5);
+  });
+  it("the Gulf off the Key: water east of the Alabama Point line reads Florida (it did before the nearest-state rule), water west of it is not claimed", () => {
+    for (const [la, lo] of [[30.23, -87.5], [30.23, -87.45], [30.25, -87.42], [30.26, -87.48]]) expect(st(la, lo), `${la},${lo}`).toBe("FL");
+    for (const [la, lo] of [[30.2985, -87.485], [30.296, -87.465], [30.329, -87.515]]) expect(st(la, lo), `${la},${lo}`).toBe("AL");
+  });
+  it("every point in the Perdido window that the review named reads Alabama, and the Key's western end still flips to Florida", () => {
     let flipped = 0;
     for (let la = 30.2; la <= 30.36; la += 0.001) for (let lo = -87.53; lo <= -87.4; lo += 0.001) {
       if (realStateAt(la, lo) === "AL" && st(la, lo) === "FL") flipped++;
     }
     expect(flipped, "the reach must still pull the Key's western end to Florida").toBeGreaterThan(100);
-    // ...and none of those flips may be north of the Key: Ono Island / Bear Point / the north shore all sit above 30.294 at their longitudes
     for (const [la, lo] of [[30.2985, -87.485], [30.296, -87.465], [30.329, -87.515], [30.346, -87.525], [30.34, -87.47], [30.35, -87.5]]) expect(st(la, lo)).toBe("AL");
   });
   it("a point no real polygon holds answers the NEAREST real state before any tuned outline (Bear Point, the Perdido Bay north shore)", () => {
@@ -154,6 +165,8 @@ describe("every TUNED_REACHES entry is documented, bounded and live", () => {
     expect(st(32.461, -84.9877)).toBe("GA");
     expect(realStateAt(30.292, -87.4785)).toBe("AL");
     expect(st(30.292, -87.4785)).toBe("FL");
+    expect(realStateAt(31.942, -85.102)).toBe("GA");
+    expect(st(31.942, -85.102)).toBe("AL");
   });
   it("a reach's ring is a real polygon inside its own box and the committed data matches the reach definition", () => {
     for (const r of TUNED_REACHES) {
@@ -216,7 +229,7 @@ describe("siteState follows the real polygon on every state line except the docu
     expect(undocumented).toEqual([]);
     // every documented reach actually fired, and nothing but the reaches and the Hudson did
     for (const r of TUNED_REACHES) expect(flips.get(`${r.real}>${r.tuned}`) || 0, `reach ${r.id} never fired — stale`).toBeGreaterThan(0);
-    expect([...flips.keys()].sort()).toEqual(["AL>FL", "AL>GA", "NJ>NY", "NY>NJ"]);
+    expect([...flips.keys()].sort()).toEqual(["AL>FL", "AL>GA", "FL>AL", "GA>AL", "NJ>NY", "NY>NJ"]);
   });
 
   /* The 0.003° grid the review used, over the three strips it measured. */

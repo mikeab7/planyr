@@ -220,9 +220,19 @@ export const TUNED_REACHES = Object.freeze([
     tunedSide: ["Columbus GA", 32.461, -84.9877], realSide: ["Eufaula AL", 31.8913, -85.1455], realSideInBand: ["Phenix City AL", 32.4709, -85.0008],
   }),
   Object.freeze({
-    id: "perdido-key", tuned: "FL", real: "AL", box: [30.2, -87.53, 30.36, -87.4], ring: REACH_RINGS["perdido-key"],
-    why: "Perdido Key, the barrier island on the Alabama–Florida line: NE's coast simplification gives the island's western 5 km to Alabama. The line runs mid-island at Alabama Point (-87.52). The overruling ring is Escambia County FL's land there (grown ~55 m for the beach edge), less Baldwin County AL's land — Ono Island, Bear Point and the Perdido Bay north shore are Alabama.",
+    id: "chattahoochee-al", tuned: "AL", real: "GA", box: [31.0, -85.3, 32.95, -84.85], ring: REACH_RINGS["chattahoochee-al"],
+    why: "The same river from the other side: NE also calls Alabama ground Georgia — the Lake Eufaula shore, up to 1.6 km from the Georgia county line. The overruling ring is the Alabama river counties' land where NE says Georgia.",
+    tunedSide: ["Lake Eufaula shore AL", 31.942, -85.102], realSide: ["Columbus GA", 32.461, -84.9877], realSideInBand: ["Fort Moore GA", 32.3357, -85.0],
+  }),
+  Object.freeze({
+    id: "perdido-key", tuned: "FL", real: "AL", box: [30.2, -87.53, 30.56, -87.36], ring: REACH_RINGS["perdido-key"],
+    why: "Perdido Key, the barrier island on the Alabama–Florida line: NE's coast simplification gives the island's western 5 km to Alabama, and Escambia County's land beside Perdido Bay lies in no NE polygon at all. The line runs mid-island at Alabama Point (-87.52). The overruling ring is Escambia County FL's land there (grown ~55 m for the beach edge), less Baldwin County AL's land, plus the Gulf water off the Key's shore east of that line — Ono Island, Bear Point and the Perdido Bay north shore are Alabama.",
     tunedSide: ["Perdido Key FL", 30.292, -87.4785], realSide: ["Ono Island AL", 30.2975, -87.479], realSideInBand: ["Bear Point AL", 30.329, -87.515],
+  }),
+  Object.freeze({
+    id: "perdido-al", tuned: "AL", real: "FL", box: [30.2, -87.53, 30.56, -87.36], ring: REACH_RINGS["perdido-al"],
+    why: "The same stretch from the other side: along the Perdido River (north of 30.45) NE also calls Baldwin County, Alabama land Florida. The overruling ring is Baldwin County's land where NE says Florida.",
+    tunedSide: ["Perdido River AL shore", 30.545, -87.437], realSide: ["Perdido Bay east shore FL", 30.401, -87.425], realSideInBand: ["Escambia County FL, Perdido Bay", 30.38, -87.4],
   }),
 ]);
 
@@ -235,13 +245,17 @@ function tunedOutlineState(la, lo) {
   return null;
 }
 
+/* A point is in a reach when an ODD number of its rings hold it: the generator writes what Clipper returns, and a hole in a reach (Baldwin County land enclosed by Escambia's grown edge) comes out
+ * as its own ring — an OR over the rings would have counted it as land (found by the third review's reading of the ring set). */
+const inReachRings = (rings, lo, la) => rings.reduce((n, ring) => n + (inPolygon(lo, la, ring) ? 1 : 0), 0) % 2 === 1;
+
 /* The tuned state that may overrule `real` at this point, or null — only through a TUNED_REACHES entry (box, then the entry's own land ring). */
 function reachOverrule(real, la, lo) {
   for (const r of TUNED_REACHES) {
     if (r.real !== real) continue;
     const [s, w, n, e] = r.box;
     if (la < s || la > n || lo < w || lo > e) continue;
-    if (r.ring.some((ring) => inPolygon(lo, la, ring))) return r.tuned;
+    if (inReachRings(r.ring, lo, la)) return r.tuned;
   }
   return null;
 }
@@ -254,7 +268,7 @@ function reachOverrule(real, la, lo) {
  * answer was eight states, three of them boxes — Shreveport read "TX", North Augusta SC read "GA" — and every other state read null.
  * Order now:
  *   1. the real state polygon holding the point (the 50 + DC set, `usStatesData.js`) — except inside a `TUNED_REACHES` stretch (today the
- *      Chattahoochee at Columbus GA and Perdido Key FL), where the tuned state's own county land overrules it. NEW-1 (state lines):
+ *      Chattahoochee, both ways, and Perdido Key FL), where the tuned state's own county land overrules it. NEW-1 (state lines):
  *      this used to be a default for every tuned outline, which let the FL / GA / TN / TX outlines claim Alabama, Oklahoma, Arkansas,
  *      Louisiana and New Mexico ground; the real boundary is now authoritative everywhere that is not a documented reach;
  *   2. a point the polygons put in NJ or NY: the existing NJ/NY border settlement (`njnyStateAt`, the Hudson / Arthur Kill overlap) —
