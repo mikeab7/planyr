@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ALLOWED_HOSTS, onRequest, redirectTarget, isRedirectStatus, MAX_REDIRECTS, classifyPath, cleanSegments, forceJsonFormat, classifyResponseType, resolveUpstream,
+  ALLOWED_HOSTS, onRequest, redirectTarget, isRedirectStatus, MAX_REDIRECTS, classifyPath, cleanSegments, forceJsonFormat, classifyResponseType, resolveUpstream, formatPolicyFor,
 } from "../functions/gis-proxy/[[path]].js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -432,5 +432,75 @@ describe("D. redirects are re-checked against the allow-list", () => {
     for (const s of [200, 304, 404, 500]) expect(isRedirectStatus(s)).toBe(false);
     expect(redirectTarget(res(302, { location: "https://tnmap.tn.gov/arcgis/rest/services/B/MapServer/0/query" }), "https://www.bartowgis.org/a", "GET").url).toBe("https://tnmap.tn.gov/arcgis/rest/services/B/MapServer/0/query?f=json");
     expect(redirectTarget(res(302, { location: "https://nope.example/arcgis/rest/services/B/MapServer/0/query" }), "https://www.bartowgis.org/a", "GET").error).toMatch(/allow-list/);
+  });
+});
+
+/* ───────────────────────── F: the third review (main 3ba5c0c3, 2026-10-30), finding 5 ───────────────────────── */
+describe("F1. forceJsonFormat keeps the pairs it does not remove exactly as they came", () => {
+  it("a raw ';' inside a kept pair run is NOT turned into '&' (red on the old rewrite: `?where=a&b&f=json`)", () => {
+    expect(forceJsonFormat("?where=a;b&callback=x").text).toBe("?where=a;b&f=json");
+    expect(forceJsonFormat("?where=a;b;c&f=html").text).toBe("?where=a;b;c&f=json");
+    expect(forceJsonFormat("?x=1;y=2&callback=z&w=3;v=4").text).toBe("?x=1;y=2&w=3;v=4&f=json");
+  });
+  it("a removed pair between two kept ones is replaced by '&' (the one separator nobody reads two ways), and an already-clean text is still untouched", () => {
+    expect(forceJsonFormat("?a=1&callback=x;b=2").text).toBe("?a=1&b=2&f=json");
+    expect(forceJsonFormat("?a=1;callback=x&b=2").text).toBe("?a=1&b=2&f=json");
+    for (const q of ["?where=a;b&f=json", "?a=1;b=2&f=pjson&c=3"]) expect(forceJsonFormat(q).text).toBe(q);
+  });
+  it("a POST body keeps its separators too, and the security rewrites are unchanged", () => {
+    expect(forceJsonFormat("where=a;b&callback=x", { isQuery: false, addMissing: false }).text).toBe("where=a;b");
+    expect(forceJsonFormat("?f=html&where=1").text).toBe("?where=1&f=json");
+    expect(forceJsonFormat("?where=1;f=html").text).toBe("?where=1&f=json");
+    expect(forceJsonFormat("?f=json&callback=alert(1)").text).toBe("?f=json");
+  });
+});
+
+describe("F2. a tile or an export-image request is not given an f it never had", () => {
+  const TILE = ["arcgis", "rest", "services", "X", "MapServer", "tile", "5", "10", "12"];
+  it("formatPolicyFor: tile / export / exportImage do not get a missing f; query / identify / the directory still do", () => {
+    expect(formatPolicyFor(TILE).addMissing).toBe(false);
+    expect(formatPolicyFor(["arcgis", "rest", "services", "X", "MapServer", "export"]).addMissing).toBe(false);
+    expect(formatPolicyFor(["arcgis", "rest", "services", "X", "ImageServer", "exportImage"]).addMissing).toBe(false);
+    for (const rest of [["arcgis", "rest", "services", "X", "MapServer", "0", "query"], ["arcgis", "rest", "services", "X", "MapServer", "identify"], ["arcgis", "rest", "services"], ["arcgis", "rest", "services", "X", "MapServer"]])
+      expect(formatPolicyFor(rest).addMissing, rest.join("/")).toBe(true);
+  });
+  it("resolveUpstream: a bare tile path is forwarded bare (red on the old code: `…/tile/5/10/12?f=json`), and a tile with a dangerous f / callback is still cleaned", () => {
+    const url = (search, rest = TILE) => resolveUpstream(["www.bartowgis.org", ...rest], search, "GET").url;
+    expect(url("")).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/tile/5/10/12");
+    expect(url("?cacheKey=a;b")).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/tile/5/10/12?cacheKey=a;b");
+    expect(url("?callback=x")).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/tile/5/10/12");
+    expect(url("?f=html")).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/tile/5/10/12?f=json");
+    expect(url("?f=image&bbox=1,2,3,4", ["arcgis", "rest", "services", "X", "MapServer", "export"])).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/export?f=image&bbox=1,2,3,4");
+    expect(url("?bbox=1,2,3,4", ["arcgis", "rest", "services", "X", "MapServer", "export"])).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/export?bbox=1,2,3,4");
+  });
+  it("CONTROL: a query with no f still gets f=json, so the HTML directory page can never be asked for", () => {
+    expect(resolveUpstream(["www.bartowgis.org", "arcgis", "rest", "services", "X", "MapServer", "0", "query"], "?where=1", "GET").url).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/0/query?where=1&f=json");
+    expect(resolveUpstream(["www.bartowgis.org", "arcgis", "rest", "services"], "", "GET").url).toBe("https://www.bartowgis.org/arcgis/rest/services?f=json");
+  });
+  it("a redirect to a tile path is held to the same policy", () => {
+    const r = redirectTarget(res(302, { location: "https://tnmap.tn.gov/arcgis/rest/services/B/MapServer/tile/1/2/3" }), "https://www.bartowgis.org/a", "GET");
+    expect(r.url).toBe("https://tnmap.tn.gov/arcgis/rest/services/B/MapServer/tile/1/2/3");
+  });
+  it("end to end: the upstream sees the tile URL with no query at all", async () => {
+    const { out, calls } = await run(`${H}/arcgis/rest/services/X/MapServer/tile/5/10/12`, {}, () => res(200, { "content-type": "image/png" }, "PNG"));
+    expect(out.status).toBe(200);
+    expect(calls[0].url).toBe("https://www.bartowgis.org/arcgis/rest/services/X/MapServer/tile/5/10/12");
+  });
+});
+
+describe("F3. a trailing dot or space on a segment does not hide an admin / write name", () => {
+  it("`admin.` is `admin` (Windows / IIS drop the dot) — refused, with the legitimate path beside it still relayed", () => {
+    for (const rest of [["arcgis", "admin.", "rest", "services", "X", "MapServer", "0"], ["arcgis", "admin..", "services"], ["arcgis", "rest", "services", "X", "FeatureServer", "0", "applyEdits."],
+      ["arcgis", "rest", "services", "X", "FeatureServer", "0", "applyEdits "], ["arcgis", "rest", "services", "tokens.", "X", "MapServer", "0"], ["arcgis", "rest", "services", "X", "FeatureServer", "0", "ADDFEATURES."]])
+      expect(classifyPath(rest, "GET").ok, rest.join("/")).toBeFalsy();
+    expect(classifyPath(["arcgis", "rest", "services", "X", "MapServer", "0"], "GET").ok).toBe(true);
+    expect(classifyPath(["arcgis", "rest", "services", "Parcels.Of.Adair", "MapServer", "0"], "GET").ok, "an interior dot is a legitimate name").toBe(true);
+  });
+  it("through the whole relay: the upstream is never called", async () => {
+    for (const p of ["arcgis/admin./rest/services/X/MapServer/0?f=json", "arcgis/rest/services/X/FeatureServer/0/applyEdits.?f=json"]) {
+      const { out, calls } = await run(`${H}/${p}`);
+      expect(out.status, p).toBe(403);
+      expect(calls.length, p).toBe(0);
+    }
   });
 });

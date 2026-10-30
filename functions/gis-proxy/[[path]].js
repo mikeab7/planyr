@@ -212,7 +212,7 @@ export function redirectTarget(res, fromUrl, method, hop = 0) {
   if (cleaned.error) return { error: "Upstream redirected to an unreadable path." };
   const verdict = classifyPath(cleaned.segs, nextMethod);
   if (!verdict.ok) return { error: `Upstream redirected to a path the relay does not carry (${verdict.error})` };
-  to.search = forceJsonFormat(to.search, { isQuery: true }).text;
+  to.search = forceJsonFormat(to.search, { isQuery: true, ...formatPolicyFor(cleaned.segs) }).text;
   return { url: to.toString(), method: nextMethod };
 }
 
@@ -256,6 +256,9 @@ const WRITE_OR_ADMIN_SEGMENTS = new Set([
 const POST_OPS = new Set(["query", "identify", "export", "exportimage"]);
 const GET_ONLY_OPS = new Set(["layers", "legend"]);
 const isLayerId = (seg) => /^\d{1,5}$/.test(seg);
+/* A path segment as the checks read it: lower-cased with trailing dots and spaces removed — Windows / IIS (which hosts most ArcGIS Server) drops them, so `admin.` IS `admin` upstream
+ * and `/arcgis/admin./rest/…` must not slip past the admin check (NEW-1 third review). */
+const normSeg = (s) => String(s).toLowerCase().replace(/[.\s]+$/, "");
 
 /* Decode and vet the path segments. Returns { segs } (decoded — they are re-encoded when the URL is built) or { error: Response }.
  * `new URL` normalises `%2e%2e` to a dot segment, so a literal ".." test on the raw segment is not enough. */
@@ -272,7 +275,7 @@ export function cleanSegments(segs) {
 
 /* May this ArcGIS REST path be relayed with this method? `rest` = the decoded segments AFTER the host. Pure. Returns { ok: true } or { error: string, status }. */
 export function classifyPath(rest, method) {
-  const low = rest.map((s) => s.toLowerCase());
+  const low = rest.map(normSeg);
   // Every ArcGIS REST endpoint lives under `…/rest/services` (or is `…/rest/info`); a numeric last segment alone is not enough to be relayed (a `/wp-admin/post.php/delete/5` would be).
   const restIdx = low.findIndex((s, i) => s === "rest" && (low[i + 1] === "services" || (low[i + 1] === "info" && i + 2 === low.length)));
   if (restIdx < 0) return { error: "That path is not under an ArcGIS REST /rest/services endpoint, which is all the relay carries.", status: 403 };
@@ -302,7 +305,6 @@ export function classifyPath(rest, method) {
 
 /* The `f` values the app consumes. Anything else — and no `f` at all, which ArcGIS answers with an HTML directory page — becomes `json`. */
 const OK_FORMATS = new Set(["json", "pjson", "geojson", "image", "pbf"]);
-const SEP = /[&;]/; // ArcGIS (like several servers) may treat `;` as a pair separator too, so the scan does
 const keyOf = (pair) => { const k = pair.split("=")[0].replace(/\+/g, " "); try { return decodeURIComponent(k).trim().toLowerCase(); } catch (_e) { return k.trim().toLowerCase(); } };
 const valueOf = (q) => { const v = q.slice(q.indexOf("=") + 1); try { return decodeURIComponent(v.replace(/\+/g, " ")).trim().toLowerCase(); } catch (_e) { return ""; } };
 /* Is this pair EXACTLY `f=<a format the app consumes>`, byte for byte? Anything else (f=json%20, F=JSON, f=json%0a) is rewritten, never forwarded for the upstream to interpret. */
@@ -312,17 +314,39 @@ const isCanonicalF = (pair) => pair.startsWith("f=") && OK_FORMATS.has(pair.slic
  * where `fmt` is the `f` the upstream will see. Pure. */
 export function forceJsonFormat(text, { isQuery = true, addMissing = true } = {}) {
   const raw = isQuery ? String(text || "").replace(/^\?/, "") : String(text || "");
-  const pairs = raw ? raw.split(SEP) : [];
+  const items = splitPairs(raw);
+  const pairs = items.map((i) => i.pair);
   const fs = pairs.filter((q) => keyOf(q) === "f");
   const hasJsonp = pairs.some((q) => keyOf(q) === "callback");
   const single = fs.length === 1 && isCanonicalF(fs[0]);
   const wrap = (t) => (isQuery ? (t ? "?" + t : "") : t);
   if (!hasJsonp && (single || (!fs.length && !addMissing))) return { text: wrap(raw), fmt: single ? fs[0].slice(2) : null, changed: false };
-  const kept = pairs.filter((q) => { const k = keyOf(q); return k !== "f" && k !== "callback"; });
+  /* The pairs that stay are forwarded VERBATIM, joined by the separator they came with: `?where=a;b&callback=x` keeps `where=a;b` (it used to become `where=a&b`, a different request).
+   * Only where a removed pair sat between two kept ones is `&` used, the one separator no server reads two ways. */
+  const kept = items.map((it, i) => ({ ...it, glued: i > 0 && !DROP.has(keyOf(items[i - 1].pair)) })).filter((it) => !DROP.has(keyOf(it.pair)) && it.pair !== "");
+  const join = () => kept.map((it, i) => (i === 0 ? "" : it.glued && it.sep ? it.sep : "&") + it.pair).join("");
   const fmt = fs.length === 1 && OK_FORMATS.has(valueOf(fs[0])) ? valueOf(fs[0]) : "json";
-  if (!fs.length && !addMissing) return { text: wrap(kept.join("&")), fmt: null, changed: true };
-  kept.push("f=" + fmt);
-  return { text: wrap(kept.filter(Boolean).join("&")), fmt, changed: true };
+  if (!fs.length && !addMissing) return { text: wrap(join()), fmt: null, changed: true };
+  return { text: wrap(join() + (kept.length ? "&" : "") + "f=" + fmt), fmt, changed: true };
+}
+const DROP = new Set(["f", "callback"]);
+/* A query string / body as [{ pair, sep }] — `sep` is the separator (`&` or `;`) that came BEFORE the pair, "" for the first. */
+function splitPairs(raw) {
+  if (!raw) return [];
+  const out = []; let from = 0, sep = "";
+  for (let i = 0; i <= raw.length; i++) {
+    if (i === raw.length || raw[i] === "&" || raw[i] === ";") { out.push({ pair: raw.slice(from, i), sep }); sep = raw[i] || ""; from = i + 1; }
+  }
+  return out;
+}
+/* Which `f` policy a path gets (NEW-1 third review). A map TILE (`…/tile/<z>/<y>/<x>`) and the image operations `export` / `exportImage` return a picture and take no `f` of their own: a request with no `f` is
+ * forwarded without one (appending `?f=json` to a tile path is not a tile request any more). A PRESENT `f` is still vetted (f=html → json), and `callback` is still dropped. Everything else — query, identify,
+ * the directory and metadata GETs — keeps the original rule: no `f` becomes `json`, since ArcGIS answers a missing one with an HTML page. Pure. */
+export function formatPolicyFor(rest) {
+  const low = (rest || []).map(normSeg);
+  const last = low[low.length - 1];
+  const tile = low.length >= 4 && low[low.length - 4] === "tile" && isLayerId(low[low.length - 3]) && isLayerId(low[low.length - 2]) && isLayerId(last);
+  return { addMissing: !(tile || last === "export" || last === "exportimage") };
 }
 const JSON_TYPE = /^(application\/([\w.+-]+\+)?json|text\/json)$/;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/tiff"]);
@@ -350,7 +374,7 @@ export function resolveUpstream(segs, search, method = "GET") {
   const rest = cleaned.segs;
   const verdict = classifyPath(rest, method);
   if (!verdict.ok) return { error: jsonResponse({ error: verdict.error, host }, verdict.status) };
-  const { text: qs, fmt } = forceJsonFormat(search && search !== "?" ? search : "", { isQuery: true });
+  const { text: qs, fmt } = forceJsonFormat(search && search !== "?" ? search : "", { isQuery: true, ...formatPolicyFor(rest) });
   const url = `https://${host}${rest.length ? "/" + rest.map(encodeURIComponent).join("/") : ""}${qs}`;
   return { url, host, fmt, rest };
 }
