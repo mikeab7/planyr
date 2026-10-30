@@ -161,7 +161,7 @@ export function esriPrintFeatures(gj, cfg, leafStyle) {
   if (cfg.printGeometry === false) return out;
   if (g.type === "Point" || g.type === "MultiPoint") {
     // B2528688 — a point row with a per-feature `styleFn` (Colorado wells coloured by status) prints in the SAME colours the screen shows; a row without one is unchanged.
-    const base = pointSymbolOptions(cfg, 1);
+    const base = pointSymbolOptions(cfg, 1, gj.properties); // NEW-1 (Mississippi): a row's per-marker `pointStyleFn` colour prints as it draws
     const sf = typeof cfg.styleFn === "function" ? cfg.styleFn(gj.properties, 1) : null;
     const o = sf ? { ...base, ...(sf.color ? { color: sf.color } : {}), ...(sf.weight != null ? { weight: sf.weight } : {}), fillColor: sf.fillColor || sf.color || base.fillColor, fillOpacity: sf.fillOpacity ?? base.fillOpacity, radius: sf.radius || base.radius } : base;
     for (const c of (g.type === "Point" ? [g.coordinates] : g.coordinates)) {
