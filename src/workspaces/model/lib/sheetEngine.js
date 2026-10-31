@@ -291,7 +291,7 @@ const EMPTY_SHEET_EVAL = { get: () => null };
  * its comps), not sheet-scoped ones, so unlike `sheet.names` they are the SAME map on every
  * sheet — a user's own sheet-scoped name still wins on the rare case its text collides (defensive
  * only: `namedRanges.js`'s reserved-prefix check stops a NEW collision from ever being created). */
-export function evaluateWorkbook(workbook, { projectNames } = {}) {
+export function evaluateWorkbook(workbook, { projectNames, graphOnly = false } = {}) {
   const entries = workbook.sheets;
   const nameToId = new Map();
   const idToName = new Map();
@@ -392,6 +392,16 @@ export function evaluateWorkbook(workbook, { projectNames } = {}) {
         dependents.get(dk).add(key);
       }
     }
+  }
+
+  // NEW-1 (one formula engine) — `graphOnly`: the caller wants the dependency GRAPH (trace precedents / dependents, which reads formula
+  // structure only) and no values. The Univer grid's trace tool is that caller; it must not make this older evaluator calculate anything.
+  if (graphOnly) {
+    const graphOnlyResult = {
+      hopsFor: (sheetId, rowIndex, colIndex) => hopsByKey.get(`${sheetId}:${rowIndex}:${colIndex}`) ?? null,
+      dependentsOf: (sheetId, rowIndex, colIndex) => dependents.get(`${sheetId}:${rowIndex}:${colIndex}`) || new Set(),
+    };
+    return { get: () => EMPTY_SHEET_EVAL, graph: graphOnlyResult };
   }
 
   // Topological order + cycle detection — 3-color DFS, unchanged shape from evaluateSheet

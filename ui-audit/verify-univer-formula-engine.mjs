@@ -5,6 +5,7 @@
  *   typed-minus    typing  =-Site.Acres  (a minus before a name) calculates -12.5, not #NAME?, and is stored as =-(Site.Acres)
  *   typed-xirr     typing Planyr's interleaved XIRR(v,d,v,d) calculates and is stored in Excel's two-list form
  *   circular       a circular reference raises a visible notice (Univer shows 0 for it, like Excel — never silently)
+ *   worker-on      the formula Web Worker (B2587264) is running, so every check below exercises the worker path
  *   known-good     a plain =B2*2 is untouched (the guard rewrites nothing it should not) — the arm that must stay green
  * VOID (exit 2) if the known-good arm does not report its known value. Usage: node ui-audit/verify-univer-formula-engine.mjs [--json out.json] */
 import { chromium } from "@playwright/test";
@@ -58,6 +59,11 @@ check("known-good", "A plain =B2*2 calculates and is stored untouched (the guard
   await open(wb); await typeInto(1, 2, "=B2*2");
   const v = await gridValue(1, 2), f = await gridFormula(1, 2), saved = await lastSaved();
   return v === 42 && f === "=B2*2" && saved && savedCell(saved, 0, 1, 2) === "=B2*2" ? { status: "PASS", detail: "42 in the grid; stored =B2*2" } : { status: "FAIL", detail: `value=${v} formula=${f} stored=${saved && savedCell(saved, 0, 1, 2)}` };
+});
+check("worker-on", "The grid's formulas are being calculated in the formula Web Worker (this run exercises the worker path, not the page thread)", async () => {
+  await open(columnRefTable());
+  const urls = page.workers().map((w) => w.url());
+  return urls.length >= 1 ? { status: "PASS", detail: `${urls.length} worker(s): ${urls[0].slice(0, 90)}` } : { status: "FAIL", detail: "no Web Worker on the page — the formula worker did not start, so the checks below ran on the page thread" };
 });
 check("load-rewrite", "A [Column] workbook opens with a plain-words note, the right numbers, and the rewrite SAVED", async () => {
   await open(columnRefTable());

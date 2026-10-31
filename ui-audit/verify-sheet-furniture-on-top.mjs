@@ -150,7 +150,7 @@ const errors = [];
 const KINDS = ["buildings-table", "scale-bar", "north-arrow"];
 // the compose screen's Content toggles — a saved plan can have them OFF (the Goose fixture does); the owner's export had them ON
 async function ensureToggles(page) {
-  for (const label of ["Buildings table", "Stats band"]) {
+  for (const label of ["Buildings table", "Site summary strip"]) {
     const t = page.getByLabel(label);
     if ((await t.count()) && !(await t.first().isChecked())) { await t.first().click(); await pacedWait(page, 1500); }
   }

@@ -238,6 +238,23 @@ describe("the Excel export reads Univer's values and writes formulas Excel under
   });
 });
 
+describe("the trace tool asks the older code for structure only", () => {
+  it("evaluateWorkbook({ graphOnly }) returns the same dependency graph and evaluates nothing", () => {
+    const wb = acquisitionProForma();
+    const full = evaluateWorkbook(wb, { projectNames: PROJECT_NAMES });
+    const only = evaluateWorkbook(wb, { projectNames: PROJECT_NAMES, graphOnly: true });
+    const ret = wb.sheets[2];
+    expect(only.get(ret.id).get(1, 1)).toBeNull();                        // no value was computed
+    expect(full.get(ret.id).get(1, 1)).not.toBeNull();                    // (known-good arm: the full call does)
+    for (const [r, c] of [[1, 1], [8, 1], [9, 1]]) {
+      expect(only.graph.hopsFor(ret.id, r, c)).toEqual(full.graph.hopsFor(ret.id, r, c));
+      expect([...only.graph.dependentsOf(ret.id, r, c)]).toEqual([...full.graph.dependentsOf(ret.id, r, c)]);
+    }
+    expect(only.graph.hopsFor(ret.id, 8, 1).length).toBeGreaterThan(0);   // vacuity: IRR(B2:B7) really has precedents
+    expect(read("src/workspaces/model/lib/univerTools/index.js")).toMatch(/evaluateWorkbook\(wb, \{[^\n]*graphOnly: true/);
+  });
+});
+
 describe("nothing else computes a value", () => {
   it("the export, the CSV and the grid reach Univer's evaluator; xlsxIO has no evaluator of its own and ModelApp skips the old one under Univer", () => {
     const xlsx = read("src/workspaces/model/lib/xlsxIO.js");

@@ -157,7 +157,7 @@ describe("B765985 — the compose screen's title-block row: scale + prepared-by"
   });
 });
 
-describe("NEW-2 — the print menu's 'Stats band' toggle: printSheetLayout({ includeMetrics: false })", () => {
+describe("NEW-2 — the print menu's 'Site summary strip' toggle: printSheetLayout({ includeMetrics: false })", () => {
   it("defaults to including the band — byte-identical to every pre-existing caller", () => {
     const withDefault = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9 });
     const withExplicitTrue = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9, includeMetrics: true });

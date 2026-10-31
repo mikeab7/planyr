@@ -1121,7 +1121,7 @@ export function createExportSheet(ctx) {
    * `scaleLabel`/`preparedBy` are plain strings for the title block (empty → that row omits
    * whichever half is blank); the caller (SitePlanner) computes the scale text via printScale.js.
    *
-   * NEW-2 — `includeMetricsBand` is the print menu's "Stats band" toggle (default true, so an
+   * NEW-2 — `includeMetricsBand` is the print menu's "Site summary strip" toggle (default true, so an
    * existing sheet renders unchanged unless the owner turns it off). Off: `printSheetLayout`
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the

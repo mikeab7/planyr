@@ -5,6 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
+import univerPrune from "./scripts/vite-plugin-univer-prune.mjs";
 import { UNSAFE_BUILDS } from "./src/app/unsafeBuilds.js";
 
 // PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
@@ -191,6 +192,9 @@ export default defineConfig(({ command }) => ({
   // Compile-time constant for error telemetry (B279); read via a typeof guard in
   // src/shared/telemetry/clientErrors.js (falls back to "dev" under dev/test).
   define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
+  // A Web Worker is bundled WITHOUT the app's plugins, so the Univer prune has to be named here too (lib/univerFormulaWorker.js
+  // reaches the render engine through @univerjs/sheets; unpruned, the engine's lazy language files make the worker un-bundlable).
+  worker: { plugins: () => [univerPrune()] },
   build: {
     // Emit dist/.vite/manifest.json — the chunk graph (per-chunk `imports` = static deps,
     // `dynamicImports` = lazy deps, plus each chunk's file name). The performance-budget
@@ -212,6 +216,8 @@ export default defineConfig(({ command }) => ({
      * with no hooks unless PLANYR_PROBE=1 is in the environment, so a production build is byte-for-
      * byte unaffected (asserted by test/recomputeProbe.test.js). Never enabled by `npm run build`. */
     recomputeProbe(),
+    /* NEW-1 (B2587264) — drop the ~77 unused per-language hyphenation files Univer's render engine would otherwise emit. */
+    univerPrune(),
     pdfjsAssets(),
     chunkModuleStats(),
     buildStamp(),

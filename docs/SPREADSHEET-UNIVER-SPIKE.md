@@ -86,7 +86,7 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 **Does not carry or needs work — said plainly:**
 - **Indent** — now drawn (B2572784, see the table row above). The sidecar no longer carries it: the number lives on the Univer cell style so it follows its cell through every structural edit.
 - **File mode, org workbooks** — wired through the same save routine; the spike's live run used an ordinary project workbook. Exercised by `ui-audit/verify-univer-save-live.mjs` (B2577681, V2033376): see *Save path* below for the dated result.
-- **Formula-consistency flags and the Inconsistencies panel, trace precedents / dependents, "General" fit, the sheet zoom, the command palette, the Alt key-tips, the old Find bar and Name Manager** — all of these live in the old grid's own code and read its selection; with Univer on they are hidden. Univer has its own zoom slider, find panel and name box; it has no equivalent of the consistency flags or the trace arrows that I could see.
+- **Formula-consistency flags and the Inconsistencies panel, trace precedents / dependents, the command palette, the Name Manager and the input / formula colour convention** — **PORTED 2026-10-31 (B2586720, cutover step 6; live check V2035776)** as one Planyr plugin on Univer's own services (`lib/univerTools/`, `components/UniverTools.jsx`). They read cells through the bridge (the old grid's own pure rules, unchanged, run on the Planyr workbook built from Univer's live state) and write through Univer commands, one undo step each. See *Planyr-only tools on Univer* below. Still hidden / different: "General" fit, the sheet zoom, the old Find bar (Univer's own zoom slider, find panel and name box do those jobs).
 - **Filters** — Univer's filter works, but Planyr does not store filter state in the workbook (it didn't before either), so a filter is gone on reload.
 - **Vertical merges** made in Univer, formulas written with `[Column]` names, a typed date such as `1/15/2027` (Univer treats it as text until you give it a date format), and formatting *inside* a cell (mixed bold in one cell) — reported on screen when a save would lose them.
 - **Export while typing** — **RESOLVED 2026-10-30 (B2577681).** Export, the grid toggle, hiding the module tab, closing a file, changing project / workbook / file, reloading and closing the page now all flush the grid first (`lib/univerSave.js`; see *Save path* below). Export reads the up-to-date workbook straight from the flush instead of the saved copy a render behind it.
@@ -96,7 +96,7 @@ Run with real keystrokes and mouse (never fake key events) against the real comp
 **Planyr's 93 commands (the registry the old grid's keys, palette, ribbon and menus all run):**
 - *Have a Univer equivalent (toolbar, right-click menu or key):* undo / redo, format painter, clear formatting, bold / italic / underline / strike, horizontal and vertical alignment, wrap, merge, percent / currency / decimals, borders, insert / delete rows and columns, freeze, sort, filter, find, sheet add / duplicate / rename / delete, copy / cut / paste, fill right, clear, hide / unhide, column width and autofit, zoom, Autosum (Formulas tab).
 - *Need wiring to a Univer action:* Excel / CSV import and export (kept in Planyr's header and working through the saved workbook), Name Manager, number-format dialog, insert date / time, copy-above, repeat-last, previous / next sheet, cancel-cut.
-- *Not in the free build or Planyr-only (would have to be built on Univer):* the Excel key set listed above, Alt key-tips, the "blue input / black formula" colour convention toggle, formula-consistency flags, trace arrows, the command palette.
+- *Not in the free build or Planyr-only (built on Univer, all done):* the Excel key set listed above, Alt key-tips, the "blue input / black formula" colour convention toggle, formula-consistency flags, trace arrows, the command palette, the Name Manager.
 
 ## The numbers
 
@@ -162,12 +162,45 @@ Estimated **12–16 sessions**, in this order — gaps first, because they are w
 1. ~~**Harden the save path** (1–1.5)~~ **DONE 2026-10-30 (B2577681)** — see *Save path* below.
 2. **Fill the Excel-key gaps as one Planyr plugin on Univer** (2) — **DONE 2026-10-30 (B2573632):** Ctrl+1 and number-format dialog, the Ctrl+Shift format keys, Shift+Space / Ctrl+Space, Ctrl+9 / 0, Ctrl+Plus / Minus, Ctrl+;, Ctrl+5, copy-above, Alt key-tips. 33 strict checks in `ui-audit/lib/univerExcelKeysChecks.mjs`, every one red on the build before the plugin.
 3. **Decide indent** (1): ✅ DONE (owner: keep and draw it) — B2572784; stored as the cell's own padding, drawn by a render interceptor, buttons + command ids on the Start tab.
-4. ~~**Fix the header-drag-moves difference** (0.5)~~ **DONE 2026-10-30 (B2577680).** The load time — prune the unused language files, try the background worker (1) — is still open.
+4. ~~**Fix the header-drag-moves difference** (0.5)~~ **DONE 2026-10-30 (B2577680).** **Load time: BUILT 2026-10-31 (B2587920), TARGET NOT MET** — see *Load time (cutover step 4)* below.
 5. **Look** (1–3): *header done 2026-10-30 — one flat left-aligned strip with the tab dropdown, curved undo / redo (B2574352 / B2574353); Univer's own toolbar is kept, themed and flattened.* Still open: the formula bar, the sheet-tab strip and any Planyr-only toolbar items other cutover steps add.
-6. **Port the Planyr-only features** (2–3): consistency flags and panel, trace arrows, command palette, name manager — on Univer's interface.
+6. ~~**Port the Planyr-only features** (2–3)~~ **DONE 2026-10-31 (B2586720; live V2035776 pending):** consistency flags and panel, trace arrows, command palette, name manager and the colour convention — on Univer's interface.
 7. ~~**One formula engine**~~ **DONE 2026-10-31 (B2585376)** — Univer's engine, run headless (`lib/univerEval.js`), is the only evaluator for the Excel and CSV export and for everything else that reads a computed value; the older engine is deprecated and kept only as the reference the differential tests compare against. See *One formula engine* below.
 8. **Rewrite the tests that read cells off the page** (~2): the canvas has no cells to query; they move to Univer's interface (the parity checklist is the pattern).
 9. **Dogfood, then default on, then delete the old grid** (1–2): `SheetView.jsx`, `sheetModel.js`'s grid parts and the old engine only once nothing reads them.
+
+## Load time (cutover step 4 — B2587920, 2026-10-31)
+
+**The target was "within 25% of the old grid, and no language files downloaded on an English sheet". The second half is met (and was already true at run time); the first is not.** Measured with `ui-audit/measure-univer-tti.mjs` (production builds, 1,000 rows × 12 columns with a SUM per row, median of 5, a brand-new browser each run, the last formula cell must hold a number) and, on the real deploy, `ui-audit/verify-univer-load-live.mjs` (V2036976).
+
+| localhost, ms | old grid | Univer before | Univer after |
+|---|---|---|---|
+| Cold open (navigation → values) | 546 | 1997 (3.66×) | 2044 (3.78×) |
+| Tab click after the hover warm-up | 401 | 1365 (3.40×) | 1300 (3.04×) |
+| 5,000 rows, cold | 1001 | 3279 | 3293 |
+| 5,000 rows, click: page blocked while opening | 573 | 1183 | 894 |
+
+**What was built.** (1) *Prune*: `scripts/vite-plugin-univer-prune.mjs` removes Univer's 77 lazy hyphenation-language chunks (a spreadsheet never hyphenates; `en-us` stays; the build fails if a Univer upgrade changes the table). Deploy: 262 → 188 JS files, 23.6 → 21.9 MB raw JS. **Honest correction to the spike's claim:** those files were never downloaded on an English sheet (0 requested, before and after) — the saving is deploy size, not first-load time; and they are 77 files / ~1 MB compressed, not "about 200 / 3.2 MB". (2) *Formula worker*: `lib/univerFormulaWorker.js` (the sheets-core preset's own worker entry). It costs **+0.7 MB compressed** (the main thread still needs the engine for function help, so the engine ships twice) and buys back the main thread (page blocked 24% less at 5,000 rows), **not wall-clock**. (3) *Warm-up*: hovering the Spreadsheet tab, and `ModelApp` itself, start the Univer chunk (`lib/univerWarm.js`, `modulePrefetch.js`) — only on a device whose switch is on. Live, the chunk request used to start ~250 ms after ModelApp, behind the admin check.
+
+**Why it cannot reach 25% without changing the grid (measured, CPU profile + lifecycle timeline).** A warm open: ~160 ms to build, then **Univer's own fixed 300 ms wait before it paints** (inside the package) plus ~350 ms of layout and drawing, then ~270 ms for the formula pass — ≈ 1.3 s against 0.43 s. Cold adds the download and ~400 ms to run 7 MB of JavaScript. No Planyr function is a hot spot. The one remaining lever that is not a patch — showing formula values from cache — saves ~0.27 s and depends on the step-7 engine decision: B2587921.
+
+**Live baseline before this change (build 02bff42, test account):** the 1,000-row sheet cold took 2026 ms against 704 ms for the regular grid (2.88×); the same workbook empty was 1036 vs 915 (1.13×) — so on the real app the gap is data and calculation, not the download.
+
+## Planyr-only tools on Univer (cutover step 6 — B2586720, 2026-10-31)
+
+One plugin, `src/workspaces/model/lib/univerTools/` (+ `components/UniverTools.jsx`), installed by ONE call in `UniverSheet.jsx` and disposed with it. It imports nothing from `@univerjs` — Univer's services arrive by injection — so the "only UniverSheet.jsx imports Univer" rule and its unit tests still hold. **One rule set, two grids:** the old grid's pure libraries run unchanged on the Planyr workbook the bridge builds from Univer's live state (`snapshot()`), so a flag, an arrow, a colour or a name means exactly what it means on the old grid, and the saved workbook format does not change.
+
+| Tool | Drawn / shown by | Written through |
+|---|---|---|
+| **Consistency flags** | a `SheetInterceptorService` CELL_CONTENT interceptor adds Univer's own corner marker (top-left triangle; one colour per kind) to each flagged cell; the same `InconsistencyPanel` lists them, a row jumps the selection | Dismiss = a Planyr mutation (`planyr.tools.mutation.set-dismissed`) on the bridge sidecar with its inverse pushed on Univer's undo stack — one Ctrl+Z restores marker, flag and the saved key; saved as `sheet.dismissedInconsistencies["<colId>:<row>"]`, the old grid's key |
+| **Trace precedents / dependents** | toolbar buttons start / step it for the active cell (a second click = one level further); a `SheetExtension` on the sheet component draws dot + dashed range box + arrow to the dependent's edge in sheet coordinates (scrolls and zooms with the cells), labels for links that leave the sheet; a status strip names level / truncation | a view only, never stored; Escape or any edit that can change dependencies clears it |
+| **Command palette** | Ctrl+K (stays THE palette) opens the same `CommandPalette` component fed the registry's commands | every row runs through `ICommandService`: tool command → Excel-keys plugin (`planyr.excel.<id>`) → a Univer-native id → the tools' number-format command. A registry command with no route is NAMED in `PALETTE_UNAVAILABLE` with its reason (a unit test fails otherwise) |
+| **Name Manager** | the same `NameManager` component | define / retarget / delete = Univer's `SetDefinedNameCommand` / `RemoveDefinedNameCommand`, local to the sheet, with the id shape the bridge loads; rename also rewrites the formulas (the old grid's `renameName` rule) inside the same undo group — one Ctrl+Z reverts name and formulas. Saved as `sheet.names` through the bridge, as before |
+| **Input / formula colours** | the same interceptor sets the text colour: typed input blue, cross-sheet link green, ordinary formula keeps the text colour; a colour the person set always wins; ON by default (as before), toggle on the Formulas tab, same per-project preference key | nothing — a drawing choice, never written into cells |
+
+The seven buttons sit first in the Formulas tab of the one header strip (so they stay visible at 1440 px; Start's tools already overflow there). **Honest limits:** clicking a cross-sheet trace label does not navigate (canvas labels are not clickable; the old grid's were DOM); cells filled by Univer's fill handle carry a "shared formula" id and no formula text, so they colour as ordinary formulas (never green); no palette rows for Copy / Cut / Paste (the browser clipboard needs a real keypress), sheet duplicate / rename, import / export, and the top / double-bottom border rows (reasons in `PALETTE_UNAVAILABLE`).
+
+**Checks:** `test/modelUniverTools.test.js` (22: the old rules through the Univer-side keys, dismissal key byte-compatibility incl. the bridge round-trip, trace shapes, name ids vs the bridge's, palette coverage, wiring guards); parity-harness `tools-*` checks in `ui-audit/lib/univerToolsChecks.mjs` (real clicks / keys; canvas pixels for marker, arrow and text colour; facade + the saved workbook; one undo step each) — all seven **red on the build without the plugin**, green with it; the same checks run on the real app as section **T** of `verify-univer-live.mjs` (V2035776). The two existing parity checks that measure DARK ink (`spill-and-clear`, `indent`) now start with the colour convention off, because it is on by default and recolours typed text.
 
 ## Save path (cutover step 1 — B2577681, 2026-10-30)
 
@@ -185,7 +218,7 @@ How an edit travels: Univer edit → `lib/univerSave.js` (debounce 300 ms, the e
 
 ## What argues against cutover
 
-- **Weight and speed to appear:** ~1.8 MB first download and ~2 s to show a 1,000-row sheet, against under a second today.
+- **Weight and speed to appear:** ~1.8 MB first download (2.5 MB with the formula worker) and ~2 s to show a 1,000-row sheet, against under a second today — *Load time (cutover step 4)* below says what was tried and why the gap is structural.
 - **The Excel keys you just won are mostly *not* there** and would be rebuilt as plugin code — that is the same kind of work as before, just on someone else's foundation.
 - **A canvas grid is invisible to screen readers and to the page-reading tests** the repo relies on.
 - ~~Two formula engines~~ — closed by step 7 (see *One formula engine*): one evaluator, no Planyr-only function, and the Planyr-only *spellings* are rewritten with a note.
@@ -238,4 +271,4 @@ How an edit travels: Univer edit → `lib/univerSave.js` (debounce 300 ms, the e
 
 **Excel export.** Cached values are Univer's; an error code Excel cannot store (`#CYCLE!`, `#SPILL!`, `#CIRC!`) is written `#VALUE!` (Excel recalculates on open — `fullCalcOnLoad`); a formula reading a `Site.*` / `Plan.*` / `Comp.*` name is still frozen to its value with a cell note. Tested by writing the pro-forma, reading it back with ExcelJS and comparing every cached value with Univer's (60+ formulas), plus the `[Column]` table, the interleaved XIRR and the real fixtures. A real-Excel-written pro-forma was not available in the repo; the live arm V2034432 opens an exported file and compares it to the grid.
 
-**Harnesses.** `test/modelFormulaEnginesAgree.test.js` (CI); ui-audit `verify-univer-formula-engine.mjs` (real keystrokes in the real component: load note + saved rewrite, typed `=-Site.Acres`, typed interleaved XIRR, circular notice, known-good arm) — 5/5 on this branch, 1/5 on `origin/main`.
+**Harnesses.** `test/modelFormulaEnginesAgree.test.js` (CI); ui-audit `verify-univer-formula-engine.mjs` (real keystrokes in the real component: load note + saved rewrite, typed `=-Site.Acres`, typed interleaved XIRR, circular notice, known-good arm) — 6/6 on this branch (with the formula Web Worker confirmed running), 1/5 on the pre-worker `origin/main`. Circular cells in the worker-calculated grid are read from Univer's calculation-processing notification, which reaches the page thread; the trace tool asks the older code for its dependency graph only (`evaluateWorkbook({ graphOnly })`).

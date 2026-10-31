@@ -59,6 +59,7 @@ import {
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
 import { runBudgeted, drainBudgeted, PAINT_FRAME_BUDGET_MS } from "./paintSchedule.js";
+import { planAllContourLabels, CONTOUR_LABEL_ALL } from "./contourLabelPlan.js";
 
 const paintNowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
 
@@ -422,14 +423,40 @@ function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
  * ⇒ byte-for-byte the historic paint (every account that cannot see grading). */
 const CONTOUR_EXISTING_DASH = "6 5";
 const CONTOUR_EXISTING_MUTED_OPACITY = 0.8;
-function renderContours(parts, { opacity, canvas, onComposed, labelPane = null, gradingClip = null }) {
+/* ROUND 10 (NEW-2) — the existing lines' labels at working zoom: contourLabelPlan over the lines as map PIXELS (map.project at the
+ * current zoom — pan-invariant), trimmed to the view plus a margin, then back to lat/lng for the label markers. null = below the
+ * labelling zoom (the caller keeps its index labels). Horizontal markers: the box is the label's own, no rotation. */
+export const LABEL_VIEW_MARGIN = 0.25;
+export const LABEL_CLIP_CLEAR_PX = 16;
+function allLineLabels(lines, map, clip = null) {
+  if (!map || !lines || !lines.length) return null;
+  const z = map.getZoom(), c = map.getCenter();
+  const ftPerPx = (156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / Math.pow(2, z) * 3.280839895;
+  const ppf = 1 / ftPerPx;
+  if (!(ppf >= CONTOUR_LABEL_ALL.minPpf)) return null;
+  const b = map.getPixelBounds(), w = b.max.x - b.min.x, h = b.max.y - b.min.y;
+  const rect = { minX: b.min.x - w * LABEL_VIEW_MARGIN, maxX: b.max.x + w * LABEL_VIEW_MARGIN, minY: b.min.y - h * LABEL_VIEW_MARGIN, maxY: b.max.y + h * LABEL_VIEW_MARGIN };
+  const proj = lines.map((ln, i) => ({ key: contourLineKey(ln) + "#" + i, level: ln.level, isIndex: ln.isIndex, text: contourLabelText(ln.level), pts: ln.coords.map((q) => { const p = map.project(L.latLng(q[0], q[1]), z); return { x: p.x, y: p.y }; }) }));
+  // stay clear of the daylight line (the clip's rings), where the proposed family's own labels run up to it
+  const ringPx = clip && clip.rings ? [...clip.rings, ...(clip.holes || [])].map((r) => r.map((q) => { const p = map.project(L.latLng(q[0], q[1]), z); return [p.x, p.y]; })) : [];
+  const keepOut = ringPx.length ? (x, y) => { for (const r of ringPx) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1; let t = ((x - a[0]) * dx + (y - a[1]) * dy) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t; if (Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) < LABEL_CLIP_CLEAR_PX) return true; } return false; } : null;
+  return planAllContourLabels(proj, 1, { rect, opts: { minPpf: 0, keepOut } }).map((lab) => {
+    const ll = map.unproject(L.point(lab.pt.x, lab.pt.y), z);
+    return { ll: [ll.lat, ll.lng], level: lab.level, text: lab.text, key: lab.key };
+  });
+}
+function renderContours(parts, { opacity, canvas, onComposed, map = null, labelPane = null, gradingClip = null }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
   // its output into keyed Leaflet-build recipes.
   const composed = composeContourPaint(parts);
   const lines = gradingClip ? clipContourLinesOutside(composed.lines, gradingClip) : composed.lines;
-  const labels = gradingClip ? composed.labels.filter((lab) => !labelInsideClip(lab, gradingClip)) : composed.labels;
+  let labels = gradingClip ? composed.labels.filter((lab) => !labelInsideClip(lab, gradingClip)) : composed.labels;
+  // ROUND 10 (NEW-2): while the owner's grading picture is on and the zoom is working zoom, EVERY existing line in view carries its
+  // elevation (the index-only labels above are what the owner's 50-ft view had none of). Only on this branch — every other account
+  // keeps the historic labels byte for byte.
+  if (gradingClip && map) { const all = allLineLabels(lines, map, gradingClip); if (all) labels = all; }
   if (onComposed) onComposed({ lines, labels });
   const items = [];
   for (const ln of lines) {
