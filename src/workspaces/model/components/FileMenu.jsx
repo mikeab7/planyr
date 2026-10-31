@@ -124,12 +124,12 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
             Import CSV (new sheet)…
           </MenuItem>
           {univerSwitch && (
-            // Univer spike — rendered ONLY for a confirmed is_admin() user (ModelApp passes null otherwise), so every other
-            // account sees exactly the menu above. See lib/univerSwitch.js.
+            // The owner's safety hatch — rendered ONLY for a confirmed is_admin() user (ModelApp passes null otherwise); every other
+            // account sees the menu above and has no way to the regular grid. Per device. See lib/gridChoice.js.
             <>
               <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
-              <MenuItem data-testid="model-univer-switch" title="Owner-only trial of a different spreadsheet grid. Your workbook is saved the same way; turn it off any time." onClick={() => { setOpen(false); univerSwitch.setOn(!univerSwitch.on); }}>
-                {univerSwitch.on ? "Use the regular grid" : "Try the new grid"}
+              <MenuItem data-testid="model-univer-switch" title={univerSwitch.regular ? "Back to the new grid on this device. Your workbook is saved the same way." : "Owner-only fallback: show the old grid on this device. Your workbook is saved the same way."} onClick={() => { setOpen(false); univerSwitch.setRegular(!univerSwitch.regular); }}>
+                {univerSwitch.regular ? "Use the new grid" : "Use the regular grid"}
               </MenuItem>
             </>
           )}

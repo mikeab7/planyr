@@ -3,7 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { UNIVER_SWITCH_KEY, readUniverSwitch, writeUniverSwitch, univerGridActive } from "../src/workspaces/model/lib/univerSwitch.js";
+import { REGULAR_GRID_KEY, LEGACY_UNIVER_KEY, readRegularGrid, writeRegularGrid, migrateLegacyGridChoice, chooseGrid } from "../src/workspaces/model/lib/gridChoice.js";
 import { scaleFrom, buildUniverTheme } from "../src/workspaces/model/lib/univerTheme.js";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -15,42 +15,73 @@ function walk(dir, out = []) {
   }
   return out;
 }
-const fakeStorage = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+const fakeStorage = (init = {}) => { const m = new Map(Object.entries(init)); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), has: (k) => m.has(k) }; };
 
-describe("the owner-only switch", () => {
-  it("is off by default and remembers its state per device", () => {
+/* NEW-1 (2026-10-31, cutover steps 8–9a) — the Univer grid is THE grid; the regular grid is the OWNER's per-device hatch. */
+describe("the grid choice: Univer for everyone, the regular grid only as the owner's hatch", () => {
+  it("a device asks for the regular grid under its OWN key, off by default, remembered per device", () => {
     const s = fakeStorage();
-    expect(readUniverSwitch(s)).toBe(false);
-    writeUniverSwitch(true, s);
-    expect(readUniverSwitch(s)).toBe(true);
-    expect(s.getItem(UNIVER_SWITCH_KEY)).toBe("1");
-    writeUniverSwitch(false, s);
-    expect(readUniverSwitch(s)).toBe(false);
+    expect(REGULAR_GRID_KEY).not.toBe(LEGACY_UNIVER_KEY);
+    expect(readRegularGrid(s)).toBe(false);
+    writeRegularGrid(true, s);
+    expect(readRegularGrid(s)).toBe(true);
+    expect(s.getItem(REGULAR_GRID_KEY)).toBe("1");
+    writeRegularGrid(false, s);
+    expect(readRegularGrid(s)).toBe(false);
   });
   it("never throws when storage is unavailable", () => {
     const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }, removeItem() { throw new Error("blocked"); } };
-    expect(readUniverSwitch(broken)).toBe(false);
-    expect(writeUniverSwitch(true, broken)).toBe(false);
-    expect(readUniverSwitch(null)).toBe(false);
+    expect(readRegularGrid(broken)).toBe(false);
+    expect(writeRegularGrid(true, broken)).toBe(false);
+    expect(readRegularGrid(null)).toBe(false);
+    expect(migrateLegacyGridChoice(broken)).toBe(false);
+    expect(migrateLegacyGridChoice(null)).toBe(false);
   });
-  it("activates only when the admin gate is open AND the device switch is on (a stored 'on' never activates a non-admin)", () => {
-    expect(univerGridActive({ available: true, on: true })).toBe(true);
-    expect(univerGridActive({ available: true, on: false })).toBe(false);
-    expect(univerGridActive({ available: false, on: true })).toBe(false);
-    expect(univerGridActive({ available: false, on: false })).toBe(false);
-    expect(univerGridActive({})).toBe(false);
+  it("EVERYONE gets the Univer grid by default: signed out, signed in, admin or not, whatever the admin answer", () => {
+    for (const adminStatus of ["unknown", "admin", "not-admin", "error"]) {
+      for (const signedIn of [true, false]) expect(chooseGrid({ regular: false, signedIn, adminStatus }), `${adminStatus}/${signedIn}`).toBe("univer");
+    }
+  });
+  it("the regular grid shows ONLY for a CONFIRMED admin on a device that asked for it (a stored 'regular' never reaches a non-admin)", () => {
+    expect(chooseGrid({ regular: true, signedIn: true, adminStatus: "admin" })).toBe("regular");
+    expect(chooseGrid({ regular: true, signedIn: true, adminStatus: "not-admin" })).toBe("univer");
+    expect(chooseGrid({ regular: true, signedIn: true, adminStatus: "error" })).toBe("univer");   // fails closed
+    expect(chooseGrid({ regular: true, signedIn: false, adminStatus: "unknown" })).toBe("univer"); // signed out: nobody to ask
+    expect(chooseGrid({})).toBe("univer");
+  });
+  it("while the owner's device waits for the admin answer neither grid is mounted ('deciding')", () => {
+    expect(chooseGrid({ regular: true, signedIn: true, adminStatus: "unknown" })).toBe("deciding");
+  });
+  it("MIGRATION: the pre-cutover 'Try the new grid' key is dropped and NEVER read as 'use the regular grid' — on, off or absent", () => {
+    for (const v of ["1", "0", "true", "off"]) {
+      const s = fakeStorage({ [LEGACY_UNIVER_KEY]: v });
+      expect(migrateLegacyGridChoice(s)).toBe(true);
+      expect(s.has(LEGACY_UNIVER_KEY)).toBe(false);
+      expect(readRegularGrid(s), `legacy value ${v}`).toBe(false);
+      expect(chooseGrid({ regular: readRegularGrid(s), signedIn: true, adminStatus: "admin" })).toBe("univer");
+    }
+    const none = fakeStorage();
+    expect(migrateLegacyGridChoice(none)).toBe(false);
   });
   it("the gate IS is_admin() — the same hook the admin page and grading use — and nothing else", () => {
     const src = read("src/workspaces/model/lib/univerSwitch.js");
     expect(src).toMatch(/useIsAdmin\(/);
     expect(src).toMatch(/available: isAdmin/);
-    expect(src).not.toMatch(/location\.(search|hash)|URLSearchParams|import\.meta\.env|__PLANYR_E2E/);
+    const choice = read("src/workspaces/model/lib/gridChoice.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    for (const f of [src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""), choice]) expect(f).not.toMatch(/location\.(search|hash)|URLSearchParams|import\.meta\.env|__PLANYR_E2E/);
   });
-  it("ModelApp hands the File menu the switch ONLY when the gate is open, so every other account sees today's menu", () => {
+  it("ModelApp hands the File menu the hatch ONLY to a confirmed admin, so every other account sees no grid switch at all", () => {
     const app = read("src/workspaces/model/ModelApp.jsx");
-    expect(app).toMatch(/univerSwitch=\{univer\.available \? \{ on: univer\.on, setOn: setUniverOn \} : null\}/);
+    expect(app).toMatch(/univerSwitch=\{univer\.available \? \{ regular: univer\.regular, setRegular: setRegularGrid \} : null\}/);
     const menu = read("src/workspaces/model/components/FileMenu.jsx");
     expect(menu).toMatch(/\{univerSwitch && \(/);
+    expect(menu).toMatch(/"Use the regular grid"/);
+    expect(menu).toMatch(/"Use the new grid"/);
+    expect(menu).not.toMatch(/Try the new grid/);
+  });
+  it("ModelApp mounts neither grid while the owner's device is still waiting for the admin answer", () => {
+    const app = read("src/workspaces/model/ModelApp.jsx");
+    expect(app).toMatch(/univer\.deciding \?/);
   });
 });
 
@@ -90,7 +121,7 @@ describe("what the Univer code may import", () => {
     expect(staticImporters).toEqual([]);
   });
   it("makes no call to a Univer host and uses no Pro / license / server configuration", () => {
-    for (const f of ["src/workspaces/model/components/UniverSheet.jsx", "src/workspaces/model/lib/univerBridge.js", "src/workspaces/model/lib/univerTheme.js", "src/workspaces/model/lib/univerSwitch.js"]) {
+    for (const f of ["src/workspaces/model/components/UniverSheet.jsx", "src/workspaces/model/lib/univerBridge.js", "src/workspaces/model/lib/univerTheme.js", "src/workspaces/model/lib/univerSwitch.js", "src/workspaces/model/lib/gridChoice.js"]) {
       const src = read(f).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
       expect(src, f).not.toMatch(/univer\.ai|univer\.work|licenseKey|license:|univerjs-pro|fetch\(|XMLHttpRequest|collaboration/i);
     }

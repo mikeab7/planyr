@@ -99,14 +99,15 @@ import {
 } from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
-// Univer spike (owner-only; docs/SPREADSHEET-UNIVER-SPIKE.md) — the switch is the ONLY touch to the existing grid. The grid
-// itself is a lazy chunk, so none of @univerjs/* is in any bundle a non-owner (or an owner with the switch off) downloads.
+// The Univer grid is THE grid for every account (cutover steps 8–9a, docs/SPREADSHEET-UNIVER-SPIKE.md); lib/univerSwitch.js only decides
+// whether the OWNER's safety hatch (the regular grid, per device) is in force. The grid itself is a lazy chunk, loaded with the
+// Spreadsheet tab (src/app/modulePrefetch.js + the warm below), so none of @univerjs/* rides any other workspace's bundle.
 import { useUniverSwitch } from "./lib/univerSwitch.js";
 import { warmUniver } from "./lib/univerWarm.js";
 const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
-// NEW-1 (B2587264) — a device that uses the Univer grid starts fetching its chunk the moment THIS chunk runs, in parallel with the
+// NEW-1 (B2587264) — every device starts fetching the grid's chunk the moment THIS chunk runs, in parallel with the
 // admin check and the workbook load, instead of after them (measured live: the chunk request began ~250 ms after ModelApp arrived).
-// A no-op for any device whose switch is off (lib/univerWarm.js); the real mount below still decides whether the grid shows.
+// A no-op only on a device that asked for the owner's regular-grid hatch (lib/univerWarm.js); the real mount below still decides.
 warmUniver();
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
@@ -213,8 +214,10 @@ export default function ModelApp({
   const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
   const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
   const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
-  // Univer spike — `univer.active` is true only for a CONFIRMED is_admin() user who turned "Try the new grid" on (this device).
-  // While it is, Univer owns the keyboard and the clipboard, so the grid-level window listeners below stand down (`gridKeysOn`).
+  // The Univer grid is the grid for every account. `univer.active` is false ONLY for the owner's hatch: a CONFIRMED is_admin() user on
+  // a device that chose "Use the regular grid" (lib/gridChoice.js). While Univer shows it owns the keyboard and the clipboard, so
+  // the regular grid's window listeners below stand down (`gridKeysOn`). `univer.deciding` = that device's admin answer is still
+  // coming: neither grid is mounted yet (a placeholder shows).
   const univer = useUniverSwitch(userId);
   const univerOn = univer.active;
   const gridKeysOn = isActive && !univerOn;
@@ -605,13 +608,13 @@ export default function ModelApp({
   // hook's "start uploading what I'm leaving" step — both then see the newest edit.
   useLayoutEffect(() => () => { flushUniver(); }, [univerScope, activeFileId, flushUniver]);
   useEffect(() => { if (!isActive) flushUniver(); }, [isActive, flushUniver]);
-  const setUniverOn = useCallback(async (on) => {
+  const setRegularGrid = useCallback(async (regular) => {
     const h = univerHandleRef.current;
     if (h) {
       await Promise.race([h.commitEditing ? h.commitEditing() : null, new Promise((r) => setTimeout(r, 400))]);
       flushUniver();
     } else { sheetViewRef.current?.commitPending?.(); formulaBarRef.current?.commitPending?.(); }
-    univer.setOn(on);
+    univer.setRegular(regular);
   }, [flushUniver, univer]);
   const closeFile = useCallback(async () => {
     flushUniver();
@@ -1933,7 +1936,7 @@ export default function ModelApp({
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
               onOpenFile={onOpenFileFromComputer}
-              univerSwitch={univer.available ? { on: univer.on, setOn: setUniverOn } : null}
+              univerSwitch={univer.available ? { regular: univer.regular, setRegular: setRegularGrid } : null}
             />
             {!univerOn && (
               <>
@@ -1980,11 +1983,14 @@ export default function ModelApp({
               onUseCloud={onUseCloudCopy}
             />
           )}
-          {univerOn ? (
-            // Univer spike (owner-only, switch on) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
+          {univer.deciding ? (
+            // The owner's device asked for the regular grid and the admin answer is still coming — mount neither grid.
+            <div role="status" data-testid="model-grid-deciding" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
+          ) : univerOn ? (
+            // The Univer grid (every account) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
             // pieces below. Edits come back as a whole Planyr workbook through the SAME `commit` (and so the same write-through,
             // cloud push, file-mode save and undo frame) as every other edit — persistence is not touched.
-            <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the new grid…</div>}>
+            <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>}>
               <UniverSheet
                 key={univerScope}
                 workbook={workbook}
