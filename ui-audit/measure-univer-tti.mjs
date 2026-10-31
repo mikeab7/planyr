@@ -112,14 +112,14 @@ async function main() {
   for (let i = 0; i < RUNS; i++) {
     // ── COLD · old grid ──
     { const { ctx, page, pid } = await newOldPage();
-      await page.goto("about:blank"); await assertMeasurable(page, "measure-univer-tti (old cold)");
+      await page.goto("about:blank"); await assertMeasurable(page, "measure-univer-tti");
       const t0 = Date.now(); await page.goto(`${APP}/#/project/${pid}/spreadsheet`, { waitUntil: "commit" });
       await oldValues(page); R.oldCold.push(Date.now() - t0);
       const b = await blocked(page, 0); R.oldColdBlock.push(b.sum); R.oldColdWorst.push(b.worst); await ctx.close(); }
 
     // ── COLD · Univer ──
     { const { ctx, page, reqs } = await newUniPage(true);
-      await page.goto("about:blank"); await assertMeasurable(page, "measure-univer-tti (univer cold)");
+      await page.goto("about:blank"); await assertMeasurable(page, "measure-univer-tti");
       const t0 = Date.now(); await page.goto(LAZY, { waitUntil: "commit" });
       await page.waitForFunction(() => window.__hostReady === true, null, { timeout: 60000, polling: 10 });
       await page.evaluate((w) => window.__mountUniver(w), wb);
@@ -136,7 +136,7 @@ async function main() {
       await page.goto(`${APP}/#/project/${pid}`, { waitUntil: "load" });
       const tab = page.locator('[data-testid="module-tab-model"]').first(); await tab.waitFor({ timeout: 60000 });
       await page.waitForTimeout(1500);      // the Site route settles first: this arm times the TAB CLICK, not the boot
-      await assertMeasurable(page, "measure-univer-tti (old click)");
+      await assertMeasurable(page, "measure-univer-tti");
       await tab.hover(); await page.waitForTimeout(SETTLE_MS);
       const mark = await page.evaluate(() => performance.now()); const t0 = Date.now(); await tab.click();
       await oldValues(page); R.oldClick.push(Date.now() - t0);
@@ -147,7 +147,7 @@ async function main() {
       await page.goto(LAZY, { waitUntil: "load" });
       await page.waitForFunction(() => window.__hostReady === true, null, { timeout: 60000, polling: 10 });
       await page.waitForTimeout(1500);
-      await assertMeasurable(page, "measure-univer-tti (univer click)");
+      await assertMeasurable(page, "measure-univer-tti");
       await page.evaluate(() => window.__warm()); await page.waitForTimeout(SETTLE_MS);
       const mark = await page.evaluate(() => performance.now()); const t0 = Date.now();
       await page.evaluate((w) => window.__mountUniver(w), wb);
