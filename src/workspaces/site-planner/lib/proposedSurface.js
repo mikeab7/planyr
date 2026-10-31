@@ -658,6 +658,40 @@ export function regionEdgeIndex(regions, cellFt = 60) {
   };
   return { nearest };
 }
+/* PERF (NEW-2, the speed round) — the drain lattice's GEOMETRY, recorded by the first build of a geometry and read by every later
+ * build of the same one (the FFE search builds one geometry ~20 times at different elevations). Keyed by the exact outlines, the
+ * lattice and the ground source — a number's toString round-trips, so two keys are equal only when every coordinate is. A small
+ * LRU: a drag or an edit makes a new geometry, and the previous one is the likeliest to come back (undo). __drainGeometryStats
+ * is the probe the exactness guard reads (hits / misses). */
+const DRAIN_GEO_MAX = 3;
+const drainGeoCache = new Map();
+const drainGeoStats = { hits: 0, misses: 0 };
+export const __drainGeometryStats = () => ({ ...drainGeoStats, size: drainGeoCache.size });
+export const __clearDrainGeometry = () => { drainGeoCache.clear(); drainGeoStats.hits = 0; drainGeoStats.misses = 0; };
+let DRAIN_GEO_ON = true;
+export const __setDrainGeometryCache = (on) => { DRAIN_GEO_ON = !!on; if (!on) drainGeoCache.clear(); };
+const ringKey = (r) => { let s = ""; for (const p of r) s += p.x + "," + p.y + ";"; return s; };
+function drainGeometry({ graded, sRegions, pondRings, boundary, existAt, existKey, cornerRadiusFt, dbx0, dby0, dh, dnx, dny }) {
+  const DN = dnx * dny, G = graded.length;
+  if (!DRAIN_GEO_ON) return null;
+  const fresh = () => ({ ready: false, existAt, cls: new Int16Array(DN), near: new Float64Array(DN * G * 3), lim: new Float64Array(boundary ? DN * 4 : 0), seed: new Float64Array(DN), seedDone: new Uint8Array(DN) });
+  // (the rounded throw edge of ROUND 10 is the limit's regions + its corner radius, so those two carry it)
+  const key = [boundary ? 1 : 0, dbx0, dby0, dh, dnx, dny, existKey ?? "", cornerRadiusFt ?? "",
+    graded.map((g) => g.el.id + ":" + ringKey(g.el.ring)).join("|"), (pondRings || []).map(ringKey).join("|"),
+    sRegions.map((r) => [r.outer, ...r.holes].map(ringKey).join("/")).join("|")].join("#");
+  const hit = drainGeoCache.get(key);
+  if (hit && hit.existAt === existAt) {
+    drainGeoStats.hits++;
+    drainGeoCache.delete(key); drainGeoCache.set(key, hit);
+    return hit;
+  }
+  drainGeoStats.misses++;
+  const e = fresh();
+  drainGeoCache.set(key, e);
+  while (drainGeoCache.size > DRAIN_GEO_MAX) drainGeoCache.delete(drainGeoCache.keys().next().value);
+  // marked ready only when the build that fills it has visited every node (a superseded build leaves it unready → refilled)
+  return e;
+}
 function regionIndexOf(pt, regions) {
   for (let k = 0; k < regions.length; k++) if (pointInRegions(pt, [regions[k]])) return k;
   return -1;
@@ -809,12 +843,22 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const ds = sv - s0;
     return pZa[q] + m * sv + Kb * Math.sqrt(ds * ds + h * h);
   };
-  const openGroundZ = (pt) => {
+  // `pre` (PERF, NEW-2): this node's nearest point + distance on every graded outline, read from the drain-geometry cache —
+  // the same numbers nearestOnRing gave the first build of this geometry (x, y, d per element; x = NaN for an empty ring)
+  const openGroundZ = (pt, pre) => {
     let D = Infinity, L = Infinity;
-    for (const g of graded) {
-      const q = nearestOnRing(pt, g.el.ring);
-      if (!q) continue;
-      const d = Math.hypot(pt.x - q.x, pt.y - q.y);
+    for (let gi = 0; gi < graded.length; gi++) {
+      const g = graded[gi];
+      let q, d;
+      if (pre) {
+        const o = pre.o + gi * 3;
+        if (pre.a[o] !== pre.a[o]) continue;
+        q = { x: pre.a[o], y: pre.a[o + 1] }; d = pre.a[o + 2];
+      } else {
+        q = nearestOnRing(pt, g.el.ring);
+        if (!q) continue;
+        d = Math.hypot(pt.x - q.x, pt.y - q.y);
+      }
       if (d < D) D = d;
       const v = zOf(g, q) + Kb * d;
       if (v < L) L = v;
@@ -874,14 +918,21 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const limitIdx = FAST_LIMIT ? regionEdgeIndex(limit.regions) : { nearest: (pt) => nearestOnRegions(pt, limit.regions) };
   // ROUND 10: the nearest point on the ROUNDED throw edge bounds the surface exactly, like the limit's own (an arc is circular, not a polyline)
   const throwIdx = throwRounded.arcs.length ? (FAST_LIMIT ? regionEdgeIndex(throwRounded.regions) : { nearest: (pt) => nearestOnRegions(pt, throwRounded.regions) }) : null;
-  const bandZ = (pt, ze) => {
+  // `pre` (PERF, NEW-2): { d, gq, td, tgq } — the limit's (and the rounded throw edge's) nearest edge distance and the ground
+  // there, from the drain-geometry cache (a NaN ground = no usable ground, exactly the case the live read skips)
+  const bandZ = (pt, ze, pre) => {
     if (!bs) return ze;
     let L = -Infinity, U = Infinity;
-    const nl = limitIdx.nearest(pt);
-    if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
-    if (throwIdx) {
-      const nt = throwIdx.nearest(pt);
-      if (nt && nt.q) { const gq = existAt(nt.q); if (gq != null && isFinite(gq)) { const dq = nt.d / apronRatio; if (gq - dq > L) L = gq - dq; if (gq + dq < U) U = gq + dq; } }
+    if (pre) {
+      if (pre.gq === pre.gq) { const dq = pre.d / apronRatio; L = pre.gq - dq; U = pre.gq + dq; }
+      if (pre.tgq === pre.tgq) { const dq = pre.td / apronRatio; if (pre.tgq - dq > L) L = pre.tgq - dq; if (pre.tgq + dq < U) U = pre.tgq + dq; }
+    } else {
+      const nl = limitIdx.nearest(pt);
+      if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
+      if (throwIdx) {
+        const nt = throwIdx.nearest(pt);
+        if (nt && nt.q) { const gq = existAt(nt.q); if (gq != null && isFinite(gq)) { const dq = nt.d / apronRatio; if (gq - dq > L) L = gq - dq; if (gq + dq < U) U = gq + dq; } }
+      }
     }
     // a sample further than ratio × the largest possible |ze − z(b)| constrains nothing
     const R = apronRatio * Math.max(Math.abs(ze - bs.zMin), Math.abs(ze - bs.zMax)) + 1, R2 = R * R;
@@ -925,22 +976,64 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const dK = new Int16Array(DN).fill(-1);       // region index of an open-ground node inside the limit, else −1
   const dZo = new Float64Array(DN), dZb = new Float64Array(DN), dZ = new Float64Array(DN);
   const bareAt = (pt) => { const zo = openGroundZ(pt); if (zo == null) return null; return { zo, zb: boundary ? bandZ(pt, zo) : zo }; };
+  // PERF (NEW-2, the speed round): the FFE search builds this surface ~20 times for ONE geometry, and every build used to re-ask
+  // the same geometry of every drain node — which region it is in, whether a pond / element covers it, the nearest point on every
+  // graded outline, the limit's nearest edge and the ground there. Those answers depend on the outlines alone, never on an
+  // elevation, so the first build of a geometry records them (drainGeometry) and every later build reads them: the same numbers
+  // from the same calls, so the surface is bit-identical (guard: test/gradingSurfaceExact). The elevation half is still computed.
+  const NG = graded.length;
+  const geo = drainGeometry({ graded, sRegions, pondRings, boundary, existAt, existKey: opts && opts.existKey, cornerRadiusFt: limit.cornerRadiusFt, dbx0, dby0, dh, dnx, dny });
+  const fillGeo = !!geo && !geo.ready;
+  const preO = { a: geo ? geo.near : null, o: 0 }, preL = { d: 0, gq: NaN, td: NaN, tgq: NaN };
   for (let i = 0; i < dnx; i++) {
     yield;
     for (let j = 0; j < dny; j++) {
       // B2319137 ×2: a checkpoint every few dozen nodes — one bare-surface read is a cone search, and a whole column of them
       // ran past a frame (a yield is free when the slice has time left; runChunked decides whether it really pauses)
       if ((j & 15) === 15) yield;
-      const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
-      if (inAnyRing(pt, pondRings) || elementAt(pt)) continue;
-      const k = regionIndexOf(pt, sRegions);
-      if (k < 0) continue;
-      const b0 = bareAt(pt);
-      if (!b0) continue;
       const c = j * dnx + i;
-      dK[c] = k; dZo[c] = b0.zo; dZb[c] = b0.zb;
+      const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
+      if (!geo) {
+        // the cache switched off (a test's reference arm): the original per-node reads, untouched
+        if (inAnyRing(pt, pondRings) || elementAt(pt)) continue;
+        const k0 = regionIndexOf(pt, sRegions);
+        if (k0 < 0) continue;
+        const b0 = bareAt(pt);
+        if (!b0) continue;
+        dK[c] = k0; dZo[c] = b0.zo; dZb[c] = b0.zb;
+        continue;
+      }
+      let k;
+      if (fillGeo) {
+        k = inAnyRing(pt, pondRings) || elementAt(pt) ? -1 : regionIndexOf(pt, sRegions);
+        geo.cls[c] = k;
+        if (k >= 0) {
+          for (let gi = 0; gi < NG; gi++) {
+            const q = nearestOnRing(pt, graded[gi].el.ring), o = (c * NG + gi) * 3;
+            if (!q) { geo.near[o] = NaN; continue; }
+            geo.near[o] = q.x; geo.near[o + 1] = q.y; geo.near[o + 2] = Math.hypot(pt.x - q.x, pt.y - q.y);
+          }
+          if (bs) {
+            const nl = limitIdx.nearest(pt);
+            let gq = NaN;
+            if (nl && nl.q) { const g0 = existAt(nl.q); if (g0 != null && isFinite(g0)) gq = g0; }
+            geo.lim[c * 4] = nl ? nl.d : NaN; geo.lim[c * 4 + 1] = gq;
+            let td = NaN, tgq = NaN;
+            if (throwIdx) { const nt = throwIdx.nearest(pt); if (nt && nt.q) { td = nt.d; const g1 = existAt(nt.q); if (g1 != null && isFinite(g1)) tgq = g1; } }
+            geo.lim[c * 4 + 2] = td; geo.lim[c * 4 + 3] = tgq;
+          }
+        }
+      } else k = geo.cls[c];
+      if (k < 0) continue;
+      preO.o = c * NG * 3;
+      const zo = openGroundZ(pt, preO);
+      if (zo == null) continue;
+      let zb = zo;
+      if (boundary) { preL.d = geo.lim[c * 4]; preL.gq = geo.lim[c * 4 + 1]; preL.td = geo.lim[c * 4 + 2]; preL.tgq = geo.lim[c * 4 + 3]; zb = bandZ(pt, zo, preL); }
+      dK[c] = k; dZo[c] = zo; dZb[c] = zb;
     }
   }
+  if (fillGeo) geo.ready = true;
   const pitFill = { nodes: 0, maxFt: 0, maxAt: null, unreached: 0, cellFt: dh };
   // ROUND 9 (B2500224 ×2, NEW-2): a node the flood raised only because it sits ON the limit's outer line — raised to the ground
   // at the line, so water leaving across it has the right outlet height — is an OUTLET, not ground. The flood keeps its raised
@@ -971,13 +1064,21 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       if (!edge) for (let q = 0; q < 4; q++) { if (dK[(j + N8[q][1]) * dnx + (i + N8[q][0])] < 0) { edge = true; break; } }
       if (!edge) continue;
       if (boundary && typeof existAt === "function") {
-        const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
-        const o = nearest(pt, outerRings);
-        if (o.q && o.d < 1.5 * dh && !(nearest(pt, holeRings).d < o.d) && !(distToGradedNode(pt) < o.d)) {
-          const g = existAt(o.q);
-          if (g != null && Number.isFinite(g) && g > dZ[c]) {
-            dZ[c] = g; seedRaised[c] = 1;   // an outlet height, not a fill: never counted, never read (ROUND 9)
+        // PERF (NEW-2): the outlet's ground height is geometry too — recorded once per geometry (NaN = not an outlet)
+        let g;
+        if (geo && geo.seedDone[c]) g = geo.seed[c];
+        else {
+          const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
+          const o = nearest(pt, outerRings);
+          g = NaN;
+          if (o.q && o.d < 1.5 * dh && !(nearest(pt, holeRings).d < o.d) && !(distToGradedNode(pt) < o.d)) {
+            const g0 = existAt(o.q);
+            if (g0 != null && Number.isFinite(g0)) g = g0;
           }
+          if (geo) { geo.seed[c] = g; geo.seedDone[c] = 1; }
+        }
+        if (g === g && g > dZ[c]) {
+          dZ[c] = g; seedRaised[c] = 1;   // an outlet height, not a fill: never counted, never read (ROUND 9)
         }
       }
       done[c] = 1; push(dZ[c], c);

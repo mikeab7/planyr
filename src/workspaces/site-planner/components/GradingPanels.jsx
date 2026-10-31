@@ -342,7 +342,24 @@ export function GradedAreaLine({ limit, actions }) {
  * show-on-map button. It only READS `model` (published by the controller SitePlanner mounts whether or not this
  * panel is open); opening it starts no build. `headerSlot` is the panel chrome's action element (the ⓘ + gear portal there). */
 export const OFF_LINE = "Turn this on to suggest finish elevations and show cut and fill for this plan.";
-export function GradingPanel({ planOn = true, showOnMap = false, showContours = false, showPaper = true, onPlanOn = null, onShowOnMap = null, onShowContours = null, onShowPaper = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null }) {
+/* PERF (the speed round, NEW-2): the planner re-renders on every pointer move of a pan, and hands this panel fresh inline callbacks
+ * each time — so the whole panel (every card, every formatted number) re-rendered per move although nothing in it changed. The
+ * exported wrapper keeps the LATEST props in a ref and passes the body STABLE stand-ins that call the latest callback at call time
+ * (never a stale one), and the body is memoised on its data props, so a pan move costs this panel one tiny wrapper render. */
+export function GradingPanel(props) {
+  const latest = useRef(props);
+  latest.current = props;
+  const stable = useRef(null);
+  if (!stable.current) {
+    stable.current = {};
+    for (const k of GRADING_PANEL_CALLBACKS) stable.current[k] = (...a) => { const f = latest.current[k]; return typeof f === "function" ? f(...a) : undefined; };
+  }
+  const pass = { ...props };
+  for (const k of GRADING_PANEL_CALLBACKS) pass[k] = typeof props[k] === "function" ? stable.current[k] : props[k];
+  return <GradingPanelBody {...pass} />;
+}
+const GRADING_PANEL_CALLBACKS = ["onPlanOn", "onShowOnMap", "onShowContours", "onShowPaper", "onCfg", "onDockDrop", "onSelectBuilding", "onApplyFfeFix", "onApplyMoveFix", "onToggleBuildable", "onPullLimit"];
+const GradingPanelBody = React.memo(function GradingPanelBody({ planOn = true, showOnMap = false, showContours = false, showPaper = true, onPlanOn = null, onShowOnMap = null, onShowContours = null, onShowPaper = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null }) {
   const view = gradingPanelView(model);
   const toggles = (
     <div data-grading-switches="1" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 0 10px" }}>
@@ -392,7 +409,7 @@ export function GradingPanel({ planOn = true, showOnMap = false, showContours = 
       {model && <GroundSection model={model} buildableOn={buildableOn} onToggleBuildable={onToggleBuildable} />}
     </div>
   );
-}
+});
 
 /* ---------------------------------------------------------------- canvas */
 export const LABELS_MIN_PX = 90;        // labels draw only when the building's shorter side is at least this many screen px
@@ -410,7 +427,11 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
 /* The grading pictures + labels. Everything rides the planner's own feet→screen transform (`f2p`, `rppf`);
  * the cut/fill image is a single <image> and the outlines one path each in feet space with a non-scaling
  * stroke, so a pan never recomputes a thing (VIEW-INDEPENDENT-ONCE). */
-export function GradingCanvas({ model, f2p, rppf, PAL, viewRect = null }) {
+/* PERF (the speed round, NEW-2): MEMOISED. The planner re-renders on every pointer move of a pan (its view state moves), and this
+ * component re-reconciled every contour path, label and image on each of those renders although none of its inputs moved — during
+ * a pan `f2p` is stable (B1440's anchor keeps the render view), `rppf` and `model` are unchanged, `PAL` is memoised and `viewRect`
+ * is the planner's LATCHED cull rect (the same object until the view nears its edge). */
+export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rppf, PAL, viewRect = null }) {
   const { buildable, cutfill, labels, cfg, contours, limit } = model;
   const bandClipId = `grading-band-${useId().replace(/:/g, "")}`;
   // ROUND 6 (NEW-1): what is drawn at this zoom — index only with the parcel filling the map, every level with the building
@@ -570,4 +591,4 @@ export function GradingCanvas({ model, f2p, rppf, PAL, viewRect = null }) {
       })())}
     </g>
   );
-}
+});

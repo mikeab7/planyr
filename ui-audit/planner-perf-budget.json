@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "Site Planner speed budgets (the speed round, NEW-3, 2026-10-31). Read by ui-audit/verify-planner-perf.mjs.",
+    "Measured on the grading harness (the owner's Concept A on the real Chehaw ground, ?owner=2), grading ON with proposed contours +",
+    "cut/fill + paper, a PRODUCTION build, the CPU throttled 4x, at 1913x1000 / DSF 2.15 (the owner's screen). Views: the scale bar",
+    "reading 500 / 125 / 50 ft. A number here is the CEILING; a number in `knownOver` is a budget the planner does NOT meet today —",
+    "it carries the item that owns closing it and a `ratchet` (the worst value measured when it was filed, plus a little room): the",
+    "guard fails if it gets WORSE than the ratchet, and prints the gap to the budget on every run. Moving a number is a product",
+    "decision argued on the item, never a nudge to make a run pass (PERCEPTUAL-PARITY's rule, applied to time).",
+    "THE RULE BEHIND THE COUNTS: no feature may add per-pointer-move work to the planner. A pan or a drag move rebuilds nothing —",
+    "no surface, no worker job, no picture re-encode — and commits React at most once per move."
+  ],
+  "throttle": 4,
+  "timing": {
+    "panMainMsPerMove": 16,
+    "zoomWallMs": 1500,
+    "modeWallMs": 3000
+  },
+  "knownOver": {
+    "openWallMs": { "budget": 4000, "ratchet": 24000, "item": "B<open-item> — opening a plan with grading on: the FFE suggestion builds the surface ~20 times" },
+    "longestTaskMs": { "budget": 50, "ratchet": 320, "item": "B<open-item> — one React render on open builds the cut/fill picture + the paper background in one task" }
+  },
+  "counts": {
+    "zoom": { "surfaces": 0, "jobs": 0 },
+    "pan": { "surfaces": 0, "jobs": 0, "dataUrls": 0, "commitsPerMove": 1.15 },
+    "moveDuring": { "surfaces": 0, "jobs": 0, "dataUrls": 0 },
+    "mode": { "surfacesMax": 1 }
+  }
+}
