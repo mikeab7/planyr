@@ -141,6 +141,7 @@ import ViewMenu from "./components/ViewMenu.jsx";
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
 import { propsPanelTitle } from "./lib/propsPanelTitle.js";
 import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
+import { GRADING_GLYPH } from "./components/railGlyphs.js";
 import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
@@ -724,8 +725,8 @@ const RAIL_ICONS = {
   analysis: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.2 15.2 4.8 4.8" /></>,
   // Drainage
   drainage: <path d="M3 7.5c3-6 6 6 9 0s6 6 9 0M3 16.5c3-6 6 6 9 0s6 6 9 0" />,
-  // Grading (owner-only) — a hill drawn as nested contour lines on a ground line
-  grading: <><path d="M3 20h18" /><path d="M6 20c0-6 3-10 6-10s6 4 6 10" /><path d="M9.5 20c0-3 1.2-5 2.5-5s2.5 2 2.5 5" /></>,
+  // Grading (owner-only) — three nested contour lines of a knoll + a filled spot-elevation triangle (artwork: components/railGlyphs.js)
+  grading: <>{GRADING_GLYPH.contours.map((d) => <path key={d} d={d} />)}<path d={GRADING_GLYPH.spot} fill="currentColor" strokeWidth={GRADING_GLYPH.spotStrokeWidth} /></>,
   // Yield
   yield: <path d="M19 4H5l7 8-7 8h14" />,
   // Properties
