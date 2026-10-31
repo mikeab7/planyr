@@ -207,6 +207,34 @@ try {
   ok("H1 the indent check (toolbar buttons, painted edge, one undo per click, right / centred / spill / narrow column, column insert, edit, copy-paste) passes on the real app", indentRes.status === "PASS", indentRes.detail);
   log.push({ phase: "H", indent: indentRes });
 
+  // ── T. the Planyr-only tools (NEW-1, cutover step 6): the sandbox `tools-*` checks, unchanged, on the real signed-in app ─────────
+  // Each check hands `reset` a Planyr workbook; here that becomes the live sheet through the facade (cells as raw text — "=…" is a formula — plus a clean
+  // slate: no leftover defined name, hidden line or freeze), and a saved read is the cloud row. The same strict checks, so a PASS here means the same thing.
+  const toolsReset = async (wb) => {
+    const sh = wb.sheets[0].sheet;
+    const list = Object.entries(sh.cells).map(([key, raw]) => { const i = key.lastIndexOf(":"); return [Number(key.slice(i + 1)), sh.columns.findIndex((c) => c.id === key.slice(0, i)), /^-?\d+(\.\d+)?$/.test(String(raw)) ? Number(raw) : raw]; });
+    await page.waitForTimeout(450);
+    await page.evaluate((cells) => {
+      const wbk = window.__planyrUniverRead.api().getActiveWorkbook(); const ws = wbk.getActiveSheet();
+      for (const d of (wbk.getDefinedNames() || [])) { try { d.delete(); } catch (_) { /* gone */ } }
+      ws.getRange(0, 0, 60, 14).clear(); ws.showRows(0, 60); ws.showColumns(0, 14); ws.setFrozenRows(0); ws.setFrozenColumns(0);
+      for (const [r, c, v] of cells) ws.getRange(r, c).setValue(v);
+      ws.scrollToCell(0, 0); ws.getRange(0, 0).activate();
+    }, list);
+    await page.waitForTimeout(900);
+  };
+  bind({ page, reset: toolsReset, savedLast: async () => { const r = await cloudRow(); return r ? { wb: r.data } : null; }, flushSave: async () => { await page.evaluate(() => window.__planyrUniverRead.flush()); await page.waitForTimeout(3500); } });
+  const TOOL_IDS = ["tools-flags", "tools-flags-pattern", "tools-trace", "tools-palette", "tools-names", "tools-names-retarget", "tools-color"];
+  const toolRuns = [];
+  for (const c of checks.filter((x) => TOOL_IDS.includes(x.id))) {
+    let r;
+    try { r = await c.fn(); } catch (e) { r = { status: "FAIL", detail: "threw: " + String(e.message).split("\n")[0].slice(0, 300) }; }
+    toolRuns.push({ id: c.id, ...r });
+    ok(`T-${c.id} ${c.label}`, r.status === "PASS", r.detail);
+  }
+  ok("T0 every tools check ran (none silently skipped)", toolRuns.length === TOOL_IDS.length, `${toolRuns.length} of ${TOOL_IDS.length}`);
+  log.push({ phase: "T", tools: toolRuns });
+
   await page.evaluate((k) => localStorage.removeItem(k), SWITCH_KEY);
 } catch (e) {
   console.log("ABORT:", String(e.message).split("\n")[0]);
