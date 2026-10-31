@@ -9,7 +9,7 @@ import {
 } from "../src/workspaces/site-planner/lib/gradingPanelModel.js";
 import { gradingCfg, gradingSetback, gradingPack, hostIdMap, GRADING_DEFAULTS } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { propertyLimit, pointInRegions, resolveGradingLimit } from "../src/workspaces/site-planner/lib/gradingLimit.js";
-import { buildProposedSurface } from "../src/workspaces/site-planner/lib/proposedSurface.js";
+import { buildProposedSurface, sampleProposedAt } from "../src/workspaces/site-planner/lib/proposedSurface.js";
 import { cardEarthwork, assemblyIds, runSync, BALANCE_TOL_CY } from "../src/workspaces/site-planner/lib/buildingGrade.js";
 
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
@@ -165,6 +165,35 @@ describe("the three suggested floors on a synthetic RIDGE (the real surface engi
       ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "ridge-d" }, grading: gradingPack(cfg, setback) });
     const d = gridDepthStats(s.grid);
     expect(d.cut.ft).toBeGreaterThan(15); expect(d.fill.ft).toBeGreaterThan(2); expect(d.slopeSf).toBeGreaterThan(1000);
+  });
+});
+
+describe("the cursor readout's 'On grade' (undisturbed) path under the default property-line limit (B2585313 ×2 meets NEW-1)", () => {
+  const ring = rect(0, 0, 1200, 900);
+  const existAt = (p) => 100 + 0.01 * p.x;
+  const hosts0 = hostIdMap([{ id: "b1", type: "building" }]);
+  const els = [{ id: "b1", type: "building", ring: rect(300, 300, 500, 300) }];
+  const build = (g) => {
+    const cfg = gradingCfg({ enabled: true, ...g });
+    const setback = gradingSetback([{ id: "pc", points: ring, setbacks: ring.map(() => 25), active: true }], 25);
+    const s = buildProposedSurface({ els: els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: 103, ...(e.type !== "building" ? { hostId: hosts0.get(e.id) ?? null } : {}) })),
+      ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: `ro${JSON.stringify(g || {})}` }, grading: gradingPack(cfg, setback) });
+    return { cfg, grid: s.grid };
+  };
+  it("the default limit is the property line: the 10 ft margin strip INSIDE the property reads 'On grade'; the limit and the neighbour's land do not", () => {
+    const { cfg, grid } = build({});
+    expect(cfg.limitMode).toBe("boundary");
+    const margin = sampleProposedAt(grid, { x: 5, y: 450 }, existAt);       // inside the property, inside the 10 ft margin → off the limit
+    expect(margin).toMatchObject({ status: "value", undisturbed: true }); expect(margin.ft).toBeCloseTo(existAt({ x: 5, y: 450 }), 6);
+    const inLimit = sampleProposedAt(grid, { x: 100, y: 450 }, existAt);
+    expect(inLimit.status).toBe("value"); expect(inLimit.undisturbed).toBeFalsy();
+    const neighbour = sampleProposedAt(grid, { x: -15, y: 450 }, existAt);  // off the property: keeps its honest dash
+    expect(neighbour.status).toBe("none");
+  });
+  it("Limits of disturbance +20 (stored −20) puts that margin strip INSIDE the limit — it is graded, no longer 'On grade'", () => {
+    const { grid } = build({ gradingMarginFt: marginFromOffset(20) });
+    const strip = sampleProposedAt(grid, { x: 5, y: 450 }, existAt);
+    expect(strip.status).toBe("value"); expect(strip.undisturbed).toBeFalsy();
   });
 });
 
