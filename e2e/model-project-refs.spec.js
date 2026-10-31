@@ -40,28 +40,18 @@ async function openSheet(page, id) {
 
 /** Mutate the seeded site's content IN PLACE and fire the exact same cross-workspace
  *  notification `storage.js`'s `saveSite` dispatches on a real save — proving the real,
- *  production wiring, not a fixture-only convenience.
- *
- *  THE FIXTURE MUST STAY PUT. The (still-mounted, hidden) Site Planner tab reacts to that notification by re-saving ITS OWN in-memory copy
- *  of the site ~0.5–0.75 s later and overwrites the injected edit (measured: localStorage went back from ["b2"] to ["b1","b2"]); the
- *  Spreadsheet reads the site 600 ms after the notification, so on a real machine the old grid won that race by luck and a heavier page
- *  loses it. A real plan edit comes FROM the planner, so there is nothing to overwrite. The test double: once an edit is injected, the
- *  planner's own writes to the sites store are dropped (our writes carry `__fixtureWrite`). Not applied until the first injected edit. */
+ *  production wiring, not a fixture-only convenience. */
 async function editSiteAndNotify(page, id, patch) {
   await page.evaluate(([siteId, p]) => {
-    if (!window.__sitesGuard) {
-      window.__sitesGuard = true;
-      const orig = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (k, v) { if (k === "planarfit:sites:v1" && !window.__fixtureWrite) return undefined; return orig.call(this, k, v); };
-    }
-    window.__fixtureWrite = true;
-    try {
-      const store = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
-      store[siteId] = { ...store[siteId], ...p, updatedAt: Date.now() };
-      localStorage.setItem("planarfit:sites:v1", JSON.stringify(store));
-    } finally { window.__fixtureWrite = false; }
+    const store = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    store[siteId] = { ...store[siteId], ...p, updatedAt: Date.now() };
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(store));
     window.dispatchEvent(new StorageEvent("storage", { key: `planarfit:siteContent:v1:${siteId}` }));
   }, [id, patch]);
+}
+async function editSiteUntilShown(page, id, patch, r, c, expected) {
+  await editSiteAndNotify(page, id, patch);
+  await expectShown(page, r, c, expected, `cell (${r},${c}) follows the site edit`);
 }
 
 test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (spreadsheet-live-data-refs)", () => {
@@ -105,8 +95,11 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
     await enterFormula(page, 1, 0, "=Plan.Building1.SF");
     await expectShown(page, 1, 0, "20000");
 
-    // Delete Building 1 — Building 2 renumbers down to Building 1 (the disclosed rename contract).
-    await editSiteUntilShown(page, id, { els: [{ id: "b2", type: "building", cx: 0, cy: 0, w: 50, h: 40 }] }, 0, 0, "#NAME?"); // "Building 2" no longer exists
+    // Building 1 goes away — Building 2 renumbers down to Building 1 (the disclosed rename contract). The fixture turns b1 into a parking
+    // field rather than removing its record: a record removed from the local mirror WITHOUT a tombstone is put straight back by the Site
+    // Planner's own reconcile ~0.6 s after the notification (measured; a real delete records the tombstone), and a parking field leaves
+    // the building numbering exactly as a deletion does.
+    await editSiteUntilShown(page, id, { els: [{ id: "b1", type: "parking", cx: 0, cy: 0, w: 100, h: 200 }, { id: "b2", type: "building", cx: 0, cy: 0, w: 50, h: 40 }] }, 0, 0, "#NAME?"); // "Building 2" no longer exists
     await expectShown(page, 1, 0, "2000");   // …and Building 1 is now the old Building 2
   });
 

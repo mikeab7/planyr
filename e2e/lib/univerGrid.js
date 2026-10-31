@@ -342,3 +342,24 @@ export async function clickVisible(page, r, c, opts = {}) { const p = await visi
 /** Header points for the current (scrolled) view: the strip above a column / left of a row. */
 export async function visibleColumnHeader(page, c) { const p = await visiblePoint(page, 0, c); const cv = await canvasBox(page); return { x: p.x, y: cv.top + 10 }; }
 export async function visibleRowHeader(page, r) { const p = await visiblePoint(page, r, 0); const cv = await canvasBox(page); return { x: cv.left + 20, y: p.y }; }
+
+/* ---- NEW-2: node-side (ui-audit harness) helpers — no test runner needed -------------------------------------------------------- */
+/** A plain Chromium page on a throwaway LOCAL project, with the facade armed — the signed-out twin of `openSignedIn` for harnesses that
+ *  take `--local <base>` (the live variants sign in on planyr.io; this lets the same checks run against a local preview). */
+export async function launchLocalHarness(base, projectId, { viewport = { width: 1440, height: 900 } } = {}) {
+  const { chromium } = await import("@playwright/test");
+  const { existsSync } = await import("node:fs");
+  const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
+  const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
+  await armUniverE2E(page);
+  await seedProject(page, projectId);
+  await page.goto(`${base.replace(/\/$/, "")}/`, { waitUntil: "domcontentloaded" });
+  return { browser, context, page, close: () => browser.close() };
+}
+/** Navigate an already-running page to a project's Spreadsheet and wait until the Univer grid holds a workbook. */
+export async function gotoSpreadsheet(page, base, projectId, slug = "spreadsheet") {
+  await page.goto(`${base.replace(/\/$/, "")}/#/project/${projectId}/${slug}`, { waitUntil: "load" });
+  await waitForGrid(page);
+}
