@@ -162,6 +162,9 @@ try {
   ok("F3 =Plan.Building1.SF shows the same result in Univer as in the regular grid", sameResult(uni.sf, oldSf, 1), `Univer ${JSON.stringify(uni.sf)} vs regular "${oldSf}"`);
 
   // ── H. indent (NEW-1): drawn in Univer, saved as Planyr's number, the same in the regular grid, both directions ───────────
+  // The input / formula colour convention (B2586720) is ON by default and recolours typed text blue; the indent checks measure the DARK ink of a label's left
+  // edge, so they start with it off. Section T's `tools-color` check turns it back on itself and asserts the colours.
+  await page.evaluate(() => { const t = window.__planyrUniverRead.tools && window.__planyrUniverRead.tools(); if (t && t.getState().autoColor) t.run("planyr.tools.toggle-autocolor"); });
   const COLW = 120, ALIGN_HT = { left: 1, center: 2, right: 3 };
   const seedWorkbook = async (wb) => {              // a Planyr workbook → the live sheet, through the facade (never through the indent commands under test)
     const sh = wb.sheets[0].sheet;
