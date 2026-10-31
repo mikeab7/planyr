@@ -14546,7 +14546,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setGrLimitEdit({ highlight: span || null });
   };
   const grDoneEditLimit = () => setGrLimitEdit(null);
-  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null }); };
+  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null, limitMode: "boundary" }); };   // NEW-1: "Reset to auto" is the property-line limit again
   const grSetLimitMode = (m) => { if (m !== "layout") setGrLimitEdit(null); grSetCfg({ limitMode: m }); };
   const grStartLimitVertex = (e, index) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -23404,6 +23404,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
                 showContours={!!(settings.grading || {}).layers?.contours} onShowContours={(v) => grSetLayer("contours", v)}
                 showPaper={(settings.grading || {}).layers?.paper !== false} onShowPaper={(v) => grSetLayer("paper", v)}
+                showSpots={(settings.grading || {}).layers?.spots !== false} onShowSpots={(v) => grSetLayer("spots", v)} PAL={PAL}
                 onPullLimit={(id, span) => grEditLimit(span)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
