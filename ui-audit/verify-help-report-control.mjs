@@ -741,7 +741,9 @@ try {
             .filter((el) => el !== fab && !fab.contains(el) && isVisible(el)
               && !el.classList.contains("leaflet-container")
               && el.getAttribute("data-testid") !== "model-sheet"
-              && el.getAttribute("data-testid") !== "univer-grid");
+              && el.getAttribute("data-testid") !== "univer-grid"
+              // the Univer grid's drawing surface: a full-pane <canvas> (tabindex-focusable, like the old `model-sheet` host) — the FAB floats on it by design
+              && !(el.tagName === "CANVAS" && el.closest('[data-testid="univer-grid"]')));
           // getBoundingClientRect() ignores ancestor CLIPPING — a scrollable list's row scrolled
           // below its own visible scrollport (e.g. a Layers-panel legend row past the fold) still
           // reports its full, real layout rect even though nothing of it is actually painted on

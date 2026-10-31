@@ -601,7 +601,8 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     const z1 = await zoomOf(page);
     await wheelGrid(page, 0, 100);
     expect(await zoomOf(page)).toBe(z1);
-    await inSheet(page, (api, ws) => { ws.zoom(1); });
+    await inSheet(page, (api, ws) => { ws.zoom(1); ws.scrollToCell(0, 0); }); // (the plain wheel above scrolled the grid; back to the top)
+    await page.waitForTimeout(300);
     expect(await zoomOf(page)).toBe(1);
 
     // Real measured geometry at 200% is ~2x the 100% geometry — not just "a bigger number". The facade's cell rect is UNZOOMED, so the

@@ -101,7 +101,6 @@ try {
   // known-good arms: the instrument sees a change to the label itself; a cell to the LEFT of the label does not move it
   await put(3, 1, "General Contractor");
   const g3 = await geometry(3);
-  ok("known-good arm: editing the label itself changes its painted pixels", g3[1].pix !== (await (async () => { return hash((await cellInk(page, 3, 1)).buf) === g3[1].pix ? "" : "x"; })()) || true);
   await put(3, 1, "General");
   const g3b = await geometry(3);
   ok("known-good arm: a different label has different pixels (the instrument sees changes)", g3b[1].pix !== g3[1].pix);
