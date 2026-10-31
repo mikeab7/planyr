@@ -70,7 +70,6 @@ try {
   const frame = (page) => page.evaluate((reader) => {
     const el = document.querySelector('[data-layer="paper"]'); const t = /translate\(([-\d.]+) ([-\d.]+)\) scale\(([-\d.]+)\)/.exec(el.getAttribute("transform"));
     window.__harnessF2pPx = { scale: +t[3], f2p: (p) => ({ x: p.x * +t[3] + +t[1], y: p.y * +t[3] + +t[2] }) };
-    // eslint-disable-next-line no-eval
     (0, eval)(reader);
   }, READER);
 

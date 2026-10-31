@@ -37,7 +37,6 @@ function conceptA() {
 
 
 import { planAllContourLabels, pathToPieces, CONTOUR_LABEL_ALL } from "../src/workspaces/site-planner/lib/contourLabelPlan.js";
-import { buildProposedContours } from "../src/workspaces/site-planner/lib/contourTrace.js";
 import { groundReadout } from "../src/workspaces/site-planner/lib/groundReadout.js";
 
 /* ROUND 10 (NEW-2, owner 2026-10-30 7:11 PM): "I can't see any topo information from this view" — at the 50-ft scale NOT ONE existing or
