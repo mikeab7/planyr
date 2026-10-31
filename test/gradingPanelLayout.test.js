@@ -36,7 +36,25 @@ describe("Limits of disturbance — ONE signed number off the property line (neg
   });
   it("the default mode is the property-line limit; 'layout' survives only when named (the hand-edited outline)", () => {
     expect(gradingCfg({}).limitMode).toBe("boundary");
-    expect(gradingCfg({ limitMode: "layout" }).limitMode).toBe("layout");
+    // a hand-edited outline keeps the layout vehicle; a bare stored "layout" does not (V2034896 step 2, the owner's Concept A)
+    const ringPts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
+    expect(gradingCfg({ limitMode: "layout", limitRing: ringPts }).limitMode).toBe("layout");
+    expect(gradingCfg({ limitMode: "layout" }).limitMode).toBe("boundary");
+    expect(gradingCfg({ limitMode: "layout", gradingMarginFt: 25 })).toMatchObject({ limitMode: "boundary", gradingMarginFt: 25 });
+    expect(gradingCfg({ limitMode: "layout" }, { engineLayout: true }).limitMode).toBe("layout");   // engine tests / the harness only
+    expect(gradingCfg({ limitMode: "boundary" }).limitMode).toBe("boundary");
+  });
+  it("a plan SAVED on 'layout' (no outline) builds the SAME limit as one saved on the property line — the panel number and the map agree", () => {
+    const parcel = rect(0, 0, 1200, 900);
+    const setback = gradingSetback([{ id: "pc", points: parcel, setbacks: parcel.map(() => 25), active: true }], 25);
+    const limitOf = (saved) => gradingPack(gradingCfg(saved), setback).limit;
+    const a = limitOf({ limitMode: "layout" }), b = limitOf({ limitMode: "boundary" });
+    expect(a.mode).toBe("boundary"); expect(a.edited).toBeNull();
+    expect(a.mode).toBe(b.mode);
+    const specOf = (pk) => ({ mode: pk.limit.mode, setbackRings: pk.setbackRings, setbackHoles: pk.limit.setbackHoles });
+    const sigA = resolveGradingLimit({ els: [], spec: specOf(gradingPack(gradingCfg({ limitMode: "layout" }), setback)) }).sig;
+    const sigB = resolveGradingLimit({ els: [], spec: specOf(gradingPack(gradingCfg({ limitMode: "boundary" }), setback)) }).sig;
+    expect(sigA).toBe(sigB);
   });
   it("a POSITIVE offset moves the limit OUTWARD past the parcel; a negative one pulls it inside; zero is the line itself", () => {
     const parcel = rect(0, 0, 1000, 600);

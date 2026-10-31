@@ -171,8 +171,7 @@ function InputsBlock({ c, model, floorVisible }) {
   const offset = limitOffsetFt(cfg.gradingMarginFt);
   const setOffset = (v) => {
     const m = marginFromOffset(v);
-    // typing a limit IS choosing the property-line limit: a plan still on the retired "around the layout" auto mode moves over with it
-    actions.setLimit({ gradingMarginFt: m, ...(limit && limit.mode === "layout" && limit.source !== "edited" ? { limitMode: "boundary" } : {}) });
+    actions.setLimit({ gradingMarginFt: m });   // a stored "layout" with no hand-edited outline already reads as the property-line limit (gradingCfg)
   };
   return (
     <div data-section="inputs" style={{ ...blockStyle, gap: 6 }}>
