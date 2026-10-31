@@ -36,16 +36,20 @@
  * a focused control inside an `overflow:auto` region) — measured, not assumed, in
  * ui-audit/verify-print-menu-scroll-and-band.mjs; only the mouse/trackpad wheel was broken.
  */
-import { Button, ToggleChip, Section, Field } from "../../../shared/ui/controls.jsx";
-import { PAPER_SIZES } from "../lib/printSheet.js";
+import { Button, ToggleChip, SegmentedControl, Section, Field, CONTROL_RADIUS } from "../../../shared/ui/controls.jsx";
+import { PRIMARY_PAPERS, OTHER_PAPERS, CUSTOM_PAPER, CUSTOM_PAPER_LABEL, paperChoice, paperPick } from "../lib/printSheet.js";
 import { STANDARD_SCALES, scaleLabel } from "../lib/printScale.js";
 
+/* NEW-1 (2026-10-30, owner-approved mockup) — the panel uses ONE text size throughout (the owner rejects
+ * mixed sizes); hierarchy comes from grouping, order, bold and the card treatment only. Section headings are
+ * the shared `Section` primitive's own label. */
+const TEXT = 12;
 const panelWrap = { width: 380, flex: "none", display: "flex", flexDirection: "column", background: "var(--surface-raised)", borderLeft: "1px solid var(--border-default)", boxShadow: "-8px 0 24px rgba(0,0,0,0.08)" };
-const panelScroll = { flex: 1, overflowY: "auto", padding: "14px 14px 4px" };
+const panelScroll = { flex: 1, overflowY: "auto", padding: "14px 14px 4px", fontSize: TEXT };
 const panelFooter = { flex: "none", display: "flex", gap: 8, padding: 12, borderTop: "1px solid var(--border-default)" };
-const readOnlyVal = { fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", textAlign: "right" };
-const textInput = { font: "inherit", fontSize: 12.5, padding: "6px 9px", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", width: 168 };
-const checkRow = { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-primary)", padding: "5px 0", cursor: "pointer", userSelect: "none" };
+const textInput = { font: "inherit", fontSize: TEXT, padding: "6px 9px", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", width: 168 };
+const checkRow = { display: "flex", alignItems: "center", gap: 8, fontSize: TEXT, color: "var(--text-primary)", padding: "5px 0", cursor: "pointer", userSelect: "none" };
+const secondary = { color: "var(--text-secondary)" };
 
 function ContentToggle({ label, title, checked, onChange }) {
   return (
@@ -55,6 +59,36 @@ function ContentToggle({ label, title, checked, onChange }) {
     </label>
   );
 }
+
+/* A "Sheet" card: the whole card is the click target (it is one <label>), checkbox at the left, bold title,
+ * one plain description line, and a small page icon at the right showing where the piece sits on the sheet. */
+function SheetCard({ title, description, tinted, checked, onChange, icon }) {
+  return (
+    <label style={{
+      display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 8, cursor: "pointer", userSelect: "none",
+      borderRadius: CONTROL_RADIUS.control, border: `1px solid ${tinted ? "var(--accent)" : "var(--border-default)"}`,
+      background: tinted ? "color-mix(in srgb, var(--accent) 10%, var(--surface-raised))" : "var(--surface-raised)",
+    }}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ cursor: "pointer", margin: 0, flex: "none" }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", fontWeight: 700, color: "var(--text-primary)" }}>{title}</span>
+        <span style={{ display: "block", marginTop: 2, ...secondary }}>{description}</span>
+      </span>
+      {icon}
+    </label>
+  );
+}
+
+const pageIconSvg = (children) => (
+  <svg width="26" height="32" viewBox="0 0 26 32" aria-hidden="true" style={{ flex: "none" }}>
+    <rect x="1" y="1" width="24" height="30" rx="2" fill="var(--surface-raised)" stroke="var(--text-secondary)" strokeWidth="1.5" />
+    {children}
+  </svg>
+);
+// Bar along the bottom of the page.
+const StripIcon = () => pageIconSvg(<rect x="4" y="24" width="18" height="4" rx="1" fill="var(--accent)" />);
+// Small block in a corner of the page.
+const TableIcon = () => pageIconSvg(<rect x="14" y="4" width="8" height="8" rx="1" fill="var(--accent)" />);
 
 export default function PrintCompose({
   paper, onPaper, orient, onOrient,
@@ -74,6 +108,13 @@ export default function PrintCompose({
   onReposition, onCancel, onDownload,
   downloading,
 }) {
+  const choice = paperChoice(paper, fitToFramePage);
+  const pickPaper = (key) => {
+    if (!key) return;
+    const next = paperPick(key, paper, !!fitToFramePage);
+    if (next.paper !== paper) onPaper(next.paper);
+    if (next.fitToFramePage !== !!fitToFramePage) onToggleFitToFramePage(next.fitToFramePage);
+  };
   return (
     <div data-testid="print-compose" data-wheelscroll="1" style={{ position: "fixed", inset: 0, zIndex: 3000, display: "flex", background: "var(--surface-page)" }}>
       {/* Sheet preview — the whole point of a compose SCREEN over an overlay: the sheet is
@@ -107,60 +148,73 @@ export default function PrintCompose({
       <div style={panelWrap}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border-default)" }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Exhibit settings</span>
-          <Button variant="ghost" size="sm" onClick={onCancel} title="Close without printing — nothing is changed">✕</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel} title="Close without printing">✕</Button>
         </div>
         <div style={panelScroll}>
-          <Section title="Sheet" accent="var(--accent)">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
-              {PAPER_SIZES.map((p) => (
-                <ToggleChip key={p.key} active={paper === p.key} onClick={() => onPaper(p.key)} title={p.note} style={{ justifyContent: "center" }}>
-                  {p.label}
+          <Section title="Paper" accent="var(--accent)">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 8 }}>
+              {PRIMARY_PAPERS.map((p) => (
+                <ToggleChip key={p.key} active={choice.primary === p.key} onClick={() => pickPaper(p.key)} aria-pressed={choice.primary === p.key}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "9px 6px", fontSize: TEXT, borderRadius: CONTROL_RADIUS.control }}>
+                  <span style={{ fontWeight: 700 }}>{p.size}</span>
+                  <span style={{ fontWeight: 400, ...(choice.primary === p.key ? { opacity: 0.85 } : secondary) }}>{p.name}</span>
                 </ToggleChip>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 6, opacity: fitToFramePage ? 0.45 : 1 }}>
-              <ToggleChip active={orient === "landscape"} disabled={fitToFramePage} onClick={() => !fitToFramePage && onOrient("landscape")} style={{ flex: 1, justifyContent: "center" }} title={fitToFramePage ? "Orientation follows the frame while Fit to frame is on" : undefined}>Landscape</ToggleChip>
-              <ToggleChip active={orient === "portrait"} disabled={fitToFramePage} onClick={() => !fitToFramePage && onOrient("portrait")} style={{ flex: 1, justifyContent: "center" }} title={fitToFramePage ? "Orientation follows the frame while Fit to frame is on" : undefined}>Portrait</ToggleChip>
-            </div>
-            <label style={{ ...checkRow, marginTop: 8 }} title="The page itself takes the shape of the frame you dragged (long edge at the size picked above), instead of a fixed sheet shape — nothing wasted, nothing to letterbox. Turns off an explicit engineering scale, since the two can't both decide the page.">
-              <input type="checkbox" checked={!!fitToFramePage} onChange={(e) => onToggleFitToFramePage(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
-              Fit to frame — page takes the frame's shape
-            </label>
+            <select aria-label="Other size" value={choice.other} onChange={(e) => pickPaper(e.target.value)} style={{ ...textInput, width: "100%", marginBottom: 8 }}>
+              <option value="" disabled>Other size</option>
+              {OTHER_PAPERS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              <option value={CUSTOM_PAPER}>{CUSTOM_PAPER_LABEL}</option>
+            </select>
+            <SegmentedControl
+              aria-label="Orientation"
+              value={orient} onChange={(k) => !fitToFramePage && onOrient(k)}
+              style={fitToFramePage ? { opacity: 0.45 } : undefined}
+              options={[
+                { key: "landscape", label: "Landscape", disabled: !!fitToFramePage, title: fitToFramePage ? "Orientation follows the frame" : undefined },
+                { key: "portrait", label: "Portrait", disabled: !!fitToFramePage, title: fitToFramePage ? "Orientation follows the frame" : undefined },
+              ]}
+            />
           </Section>
 
           <Section title="Scale" accent="var(--accent)">
-            <select value={scaleFtPerIn || 0} onChange={(e) => onScale(Number(e.target.value) || null)}
-              style={{ ...textInput, width: "100%" }} title="An explicit engineering scale locks the frame to a stated ratio; a printed exhibit can be measured off a scale rule. Fit to frame keeps today's behavior — no stated ratio.">
-              <option value={0}>Fit to frame (no stated scale)</option>
+            <select value={scaleFtPerIn || 0} onChange={(e) => onScale(Number(e.target.value) || null)} style={{ ...textInput, width: "100%" }} aria-label="Scale">
+              <option value={0}>Scale to fit (NTS)</option>
               {STANDARD_SCALES.map((s) => <option key={s} value={s}>{scaleLabel(s)}</option>)}
             </select>
             {!fitWarning && scaleFtPerIn > 0 && (
-              <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 6 }}>The printed scale bar will agree with this ratio.</div>
+              <div style={{ marginTop: 6, ...secondary }}>The printed scale bar will agree with this ratio.</div>
             )}
           </Section>
 
+          <Section title="Sheet" accent="var(--accent)">
+            <SheetCard tinted title="Site summary strip" description="Detention required vs. provided, site totals, screening note. Runs across the bottom of the sheet."
+              checked={showMetricsBand} onChange={onToggleMetricsBand} icon={<StripIcon />} />
+            {buildingsTablePrintable && (
+              <SheetCard title="Buildings table" description="Each building's name and square feet, with a total. Sits in a corner of the plan."
+                checked={showBuildingsTable} onChange={onToggleBuildingsTable} icon={<TableIcon />} />
+            )}
+          </Section>
+
+          <Section title="On the plan" accent="var(--accent)">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12 }}>
+              <ContentToggle label="Dimensions" checked={showDims} onChange={onToggleDims} />
+              <ContentToggle label="Square feet labels" checked={showAreas} onChange={onToggleAreas} />
+              {aerialAvailable && <ContentToggle label="Aerial" checked={showAerial} onChange={onToggleAerial} />}
+              {mapLayersPrintable && <ContentToggle label="Map layers" checked={printMapLayers} onChange={onToggleMapLayers} />}
+              {overlayPrintable && <ContentToggle label="Overlay" checked={printOverlay} onChange={onTogglePrintOverlay} />}
+            </div>
+          </Section>
+
           <Section title="Title block" accent="var(--accent)">
-            <Field label="Project"><span style={readOnlyVal}>{siteLabel || "—"}</span></Field>
-            <Field label="Plan"><span style={readOnlyVal}>{planLabel || "—"}</span></Field>
-            <Field label="Date"><span style={readOnlyVal}>{dateStr}</span></Field>
-            <Field label="North"><span style={readOnlyVal} title="A north arrow is always drawn on the plan itself">Included</span></Field>
+            <div style={{ marginBottom: 8, ...secondary }}>{[siteLabel || "—", planLabel || "—", dateStr].join(" · ")}</div>
             <Field label="Prepared by">
-              <input type="text" value={preparedBy} onChange={(e) => onPreparedBy(e.target.value)} placeholder="Name or firm" style={textInput} />
+              <input type="text" autoComplete="off" value={preparedBy} onChange={(e) => onPreparedBy(e.target.value)} placeholder="Name or firm" style={textInput} />
             </Field>
           </Section>
 
-          <Section title="Content" accent="var(--accent)">
-            <ContentToggle label="Dimensions" title="The red footprint dimension callouts" checked={showDims} onChange={onToggleDims} />
-            <ContentToggle label="Element area / SF labels" title="The square-footage / acreage line on element labels" checked={showAreas} onChange={onToggleAreas} />
-            {aerialAvailable && <ContentToggle label="Aerial imagery" title="The satellite/aerial backdrop" checked={showAerial} onChange={onToggleAerial} />}
-            {overlayPrintable && <ContentToggle label="Placed reference overlay" title="The placed site-plan overlay — exactly as shown (scale, position, rotation, opacity)" checked={printOverlay} onChange={onTogglePrintOverlay} />}
-            {mapLayersPrintable && <ContentToggle label="Map / GIS layers" title="The live map layers (floodplain, pipelines, utilities…), exactly as shown on the map" checked={printMapLayers} onChange={onToggleMapLayers} />}
-            {buildingsTablePrintable && <ContentToggle label="Buildings table" title="A small corner inset listing each building's name and square footage, plus a total — the same numbers the map labels and the Yield panel show" checked={showBuildingsTable} onChange={onToggleBuildingsTable} />}
-            <ContentToggle label="Stats band" title="The stormwater required-vs-provided bars, the site-metrics line and the screening disclaimer printed below the plan. Off reclaims that space for the plan image." checked={showMetricsBand} onChange={onToggleMetricsBand} />
-          </Section>
-
-          <Section title="PDF markups" accent="var(--accent)">
-            <ContentToggle label="Flatten markups" title="Off (default): your callouts, lines, shapes, clouds and measurements are saved in the PDF as real markups that Bluebeam or Acrobat can move, edit or delete. On: they are printed into the page as a plain picture, like the aerial." checked={!!flattenMarkups} onChange={onToggleFlattenMarkups} />
+          <Section title="Markups" accent="var(--accent)">
+            <ContentToggle label="Flatten markups (unrecoverable)" title="Off: callouts, lines, shapes and measurements stay editable in the PDF. On: they are burned into the page and can't be edited again." checked={!!flattenMarkups} onChange={onToggleFlattenMarkups} />
           </Section>
         </div>
         <div style={panelFooter}>
