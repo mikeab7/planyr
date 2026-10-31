@@ -115,8 +115,9 @@ test.describe("Spreadsheet — drag-select autoscroll", () => {
     };
     const slow = await speed(3);
     const fast = await speed(500); // clamped to the viewport's last pixel row
-    expect(slow).toBeGreaterThan(0);
-    expect(fast).toBeGreaterThan(slow * 1.5);
+    expect(slow, `scrolled ${slow}px at 3px past the edge`).toBeGreaterThan(0);
+    console.log(`speed slow=${slow} fast=${fast}`);
+    expect(fast, `slow ${slow}px vs fast ${fast}px per 0.4 s`).toBeGreaterThan(slow * 1.5);
   });
 
   test("up: from far down the sheet, held above the grid, scrolls back and extends upward", async ({ page }) => {

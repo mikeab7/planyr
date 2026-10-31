@@ -285,9 +285,11 @@ try {
     await tryCheck("C2", "Ctrl+V inside Planyr keeps values, shifted formulas and bold", async () => {
       await fresh();
       await put(0, 0, "Item"); await put(0, 1, "100"); await put(1, 0, "Total"); await put(1, 1, "=B1*2");
-      await select(0, 0, 0, 1); await press(page, "Control+b");
+      await select(0, 0, 0, 1); await press(page, "Control+b"); await settle(300);
+      await select(0, 0, 1, 1);
       const srcBold = await bold(0, 0);            // precondition: the bold the paste must carry really is on the source (else this run measured nothing)
-      await select(0, 0, 1, 1); await press(page, "Control+c"); await settle(500);
+      if (process.env.DEBUGERR) console.log("C2dbg", JSON.stringify({ srcBold, b1: await bold(0, 1), sel: await selection(page) }));
+      await press(page, "Control+c"); await settle(500);
       await clickCell(page, 4, 0); await press(page, "Control+v"); await settle(600);
       const got = [await value(page, 4, 0), await value(page, 4, 1), await value(page, 5, 0), await value(page, 5, 1)];
       const f = await formulaOf(page, 5, 1);

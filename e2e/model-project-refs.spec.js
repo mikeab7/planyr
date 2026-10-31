@@ -16,7 +16,7 @@
  * Run: npx playwright test e2e/model-project-refs.spec.js
  */
 import { test, expect } from "@playwright/test";
-import { armUniverE2E, waitForGrid, enter, enterFormula, expectShown, formulaOf, definedNames, openPalette, defineNameFromSelection, clickCell, runPaletteCommand, inSheet } from "./lib/univerGrid.js";
+import { armUniverE2E, waitForGrid, enter, enterFormula, expectShown, shown, formulaOf, definedNames, openPalette, defineNameFromSelection, clickCell, runPaletteCommand, inSheet } from "./lib/univerGrid.js";
 
 // A 660x660 ft square = 435,600 sf = EXACTLY 10 acres (43,560 sf/ac) — a round number so the
 // assertion doesn't have to fuzzy-match a long decimal.
@@ -50,6 +50,13 @@ async function editSiteAndNotify(page, id, patch) {
   }, [id, patch]);
 }
 
+/** The edit must STAY: the (still-mounted, hidden) Site Planner tab re-saves its own in-memory copy of the site shortly after an injected edit
+ *  and overwrites it (measured: localStorage went back to the old buildings ~1 s later) — a fixture artefact, a real plan edit comes FROM the
+ *  planner. So the edit is re-applied (idempotent) on every poll until the cell shows the expected value. */
+async function editSiteUntilShown(page, id, patch, r, c, expected) {
+  await expect.poll(async () => { await editSiteAndNotify(page, id, patch); return shown(page, r, c); }, { message: `cell (${r},${c}) follows the edit`, timeout: 15000, intervals: [900] }).toBe(expected);
+}
+
 test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (spreadsheet-live-data-refs)", () => {
   test("a project with no parcels yet reads a real #REF!, never a silent zero", async ({ page }) => {
     const id = "e2e-projrefs-empty";
@@ -68,13 +75,11 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
     await expectShown(page, 0, 0, "#REF!"); // no parcels yet
 
     // The source changes — a parcel gets drawn in the (still-mounted-but-hidden) Site Planner tab.
-    await editSiteAndNotify(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: true }] });
-    await expectShown(page, 0, 0, "20"); // 10 ac * 2, live — the cell was never re-typed
+    await editSiteUntilShown(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: true }] }, 0, 0, "20"); // 10 ac * 2, live — the cell was never re-typed
     expect(await formulaOf(page, 0, 0)).toBe("=Site.Acres*2");
 
     // The source changes AGAIN — confirm it keeps following, not just the one time.
-    await editSiteAndNotify(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: false }] }); // parcel deactivated
-    await expectShown(page, 0, 0, "#REF!");
+    await editSiteUntilShown(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: false }] }, 0, 0, "#REF!"); // parcel deactivated
   });
 
   test("Plan.Building1.SF resolves a real building's footprint, and renumbers when an earlier building is deleted", async ({ page }) => {
@@ -94,8 +99,7 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
     await expectShown(page, 1, 0, "20000");
 
     // Delete Building 1 — Building 2 renumbers down to Building 1 (the disclosed rename contract).
-    await editSiteAndNotify(page, id, { els: [{ id: "b2", type: "building", cx: 0, cy: 0, w: 50, h: 40 }] });
-    await expectShown(page, 0, 0, "#NAME?"); // "Building 2" no longer exists
+    await editSiteUntilShown(page, id, { els: [{ id: "b2", type: "building", cx: 0, cy: 0, w: 50, h: 40 }] }, 0, 0, "#NAME?"); // "Building 2" no longer exists
     await expectShown(page, 1, 0, "2000");   // …and Building 1 is now the old Building 2
   });
 
