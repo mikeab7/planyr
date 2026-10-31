@@ -75,6 +75,38 @@ export const PAPER_SIZES = [
   { key: "ansid", label: "ANSI D", note: "22×34″" },
 ];
 
+// NEW-1 (2026-10-30, owner-approved mockup) — the compose screen groups the same sheets by how
+// people say them: three big buttons (size first, name second) plus an "Other size" dropdown.
+// PAPER_SIZES above stays the full key list (every saved key still loads); this is only the UI
+// regrouping. "custom" is not a paper key — it is the fitToFramePage mode (the page takes the
+// dragged frame's shape), listed with the sizes because "Custom" is the standard print term.
+export const PRIMARY_PAPERS = [
+  { key: "letter", size: "8.5 × 11", name: "Letter" },
+  { key: "tabloid", size: "11 × 17", name: "Half-size" },
+  { key: "archd", size: "24 × 36", name: "Full-size" },
+];
+export const OTHER_PAPERS = [
+  { key: "archc", label: "18 × 24 (ARCH C)" },
+  { key: "ansic", label: "17 × 22 (ANSI C)" },
+  { key: "ansid", label: "22 × 34 (ANSI D)" },
+];
+export const CUSTOM_PAPER = "custom";
+export const CUSTOM_PAPER_LABEL = "Custom (match my frame)";
+// What picking `key` (a button or a dropdown entry) does: "custom" turns the fit-to-frame page ON and keeps
+// the paper key (it sets that page's long edge); any stock size sets the paper and turns it OFF.
+export function paperPick(key, paper, fitToFramePage) {
+  if (key === CUSTOM_PAPER) return { paper, fitToFramePage: true };
+  return { paper: key, fitToFramePage: false };
+}
+// Which control shows the current sheet: exactly one of the three buttons, OR the dropdown
+// (a stock "other" size, or "custom"). `fitToFramePage` wins — the page is the frame's shape.
+export function paperChoice(paper, fitToFramePage) {
+  if (fitToFramePage) return { primary: null, other: CUSTOM_PAPER };
+  if (PRIMARY_PAPERS.some((p) => p.key === paper)) return { primary: paper, other: "" };
+  if (OTHER_PAPERS.some((p) => p.key === paper)) return { primary: null, other: paper };
+  return { primary: null, other: "" };
+}
+
 // Lay the sheet out for the given paper/orientation. Returns boxes (in centi-inch
 // units) for every region so the caller can position the nested plan SVG and so
 // composition is deterministic + testable.
@@ -116,7 +148,7 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", metri
   // falls back to a coarse average. Two rows minimum = the historical 64 c-in.
   // B862 — the Stormwater required-vs-provided bar strip (when present) reserves its own
   // rows on top of the text pairs, so the band deepens instead of clipping.
-  // NEW-2 — `includeMetrics: false` (the print menu's "Stats band" toggle, off) reserves
+  // NEW-2 — `includeMetrics: false` (the print menu's "Site summary strip" toggle, off) reserves
   // NO height at all: the plan takes the whole freed strip back rather than leaving a gap,
   // and `metrics` comes back null so buildPrintSheetSvg knows to omit the band (and, with
   // it, the disclaimer note — the two are one thing to the owner, so they go together).
@@ -242,7 +274,7 @@ export function buildPrintSheetSvg({
   s += `<rect x="${r2(L.plan.x)}" y="${r2(L.plan.y)}" width="${r2(L.plan.w)}" height="${r2(L.plan.h)}" fill="none" stroke="${line}" stroke-width="0.75"/>`;
   s += planSvg;
   // metrics band (+ the B862 stormwater required-vs-provided bar strip) — NEW-2: `L.metrics`
-  // is null when the print menu's "Stats band" toggle is off, and the disclaimer note goes
+  // is null when the print menu's "Site summary strip" toggle is off, and the disclaimer note goes
   // with it (it is part of the band, not a separate thing the owner is trying to evade).
   if (L.metrics) s += buildMetricsSvg({ ...L.metrics, pairs: metrics, note, pal, stormwater });
   s += `</svg>`;
