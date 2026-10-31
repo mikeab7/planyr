@@ -25,7 +25,7 @@ import {
   CANVAS, openSpreadsheet, armUniverE2E, seedProject, waitForGrid, canvasBox, cellPoint, columnHeaderPoint, rowHeaderPoint,
   clickCell, dblclickCell, rightClickCell, enter, press, value, shown, formulaOf, styleOf, selection, activeCell, sheetNames,
   flushGrid, expectValue, expectShown, inSheet, formulaBarText, nameBoxInput, sheetTabs, cellInk, parkCursor, countPixels,
-  sheetView, modClickCell, fillHandlePoint, clickPlanyrTool, toolsState, storedWorkbook,
+  sheetView, modClickCell, fillHandlePoint, clickPlanyrTool, toolsState,
 } from "./lib/univerGrid.js";
 
 /** Open the Spreadsheet on a throwaway project via the LEGACY /model slug (route.js keeps it as a permanent alias, so every test
@@ -51,7 +51,6 @@ async function wheelGrid(page, dx, dy, { ctrl = false } = {}) {
   await page.waitForTimeout(450);
 }
 const zoomOf = (page) => inSheet(page, (api, ws) => ws.getZoom());
-const dims = (page) => inSheet(page, (api, ws) => ({ cols: ws.getMaxColumns(), rows: ws.getMaxRows(), colW: (i) => null }));
 const maxCols = (page) => inSheet(page, (api, ws) => ws.getMaxColumns());
 const colWidth = (page, c) => inSheet(page, (api, ws, cc) => ws.getColumnWidth(cc), c);
 const frozen = (page) => inSheet(page, (api, ws) => [ws.getFrozenRows(), ws.getFrozenColumns()]);
@@ -589,6 +588,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     // Real measured geometry at 200% is ~2x the 100% geometry — not just "a bigger number". The facade's cell rect is UNZOOMED, so the
     // proof is where a REAL click lands: at 200% the 2x-scaled point of D4 selects D4, and the unscaled one does not.
     const at = async (r, c, z) => { const p = await cellPoint(page, r, c); const cv = await canvasBox(page); return { x: cv.left + (p.x - cv.left) * z, y: cv.top + (p.y - cv.top) * z, right: cv.left + (p.right - cv.left) * z, p, cv }; };
+    await enter(page, 0, 0, "FROZEN"); // typed at 100%: the facade's cell rect is unzoomed, so every click below is scaled by hand
     const zin = page.locator('button[aria-label="Zoom in"]');
     for (let i = 0; i < 10; i++) await zin.click(); // 100% -> 200%, the +/- buttons' own path
     await page.waitForTimeout(300);
@@ -601,9 +601,8 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
 
     // Freeze panes at 200%: right-click B2... Excel's "freeze panes" semantics (everything above / left of the clicked cell), scroll deep,
     // and the frozen top-left cell must still be painted where it was.
-    await clickCell(page, 9, 9);
-    await enter(page, 0, 0, "FROZEN");
-    await page.mouse.click(...Object.values((({ x, y }) => ({ x, y }))(await at(9, 9, 2)))); // park the outline away from A1
+    const park = await at(9, 9, 2);
+    await page.mouse.click(park.x, park.y); await page.waitForTimeout(200); // park the outline away from A1
     const a1 = await at(0, 0, 2);
     const inkA1 = async () => countPixels(page, { x: a1.x - 50, y: a1.y - 9, width: 100, height: 18 }, "r < 110 && g < 110 && b < 110");
     const inkBefore = await inkA1();

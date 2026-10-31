@@ -304,16 +304,18 @@ export async function clickFormulaBar(page) { await page.locator('[data-u-comp="
 /** Univer's sheet-tab strip: one locator per tab, in order. */
 export const sheetTabs = (page) => page.locator('[data-u-comp="slide-tab-item"]');
 
-/** Type a formula into a cell and commit it with Enter. Univer's name / function hint popup can swallow the FIRST Enter of a formula that
- *  ends in a name (it accepts the highlighted suggestion and keeps the editor open — Excel commits on Enter and only completes on Tab).
- *  This presses Enter once, and a second time only if the cell is still being edited. Returns how many Enters it took (1 = Excel behaviour),
- *  so a spec can assert on it separately instead of hiding the difference. */
-export async function enterFormula(page, r, c, text) {
+/** Type a formula into a cell and commit it with Enter. Univer's name / function hint popup can swallow the Enter of a formula that ends in
+ *  a name or bare function name (measured: `=PI`, `=Site.Acres`, `=Plan.Building2.SF` + Enter after a half-second pause leaves the editor
+ *  open — Excel commits on Enter and completes only on Tab; a SECOND Enter swaps in a different suggestion, so it is not a retry). When that
+ *  happens this commits the way a person does — a click on another cell. Returns "enter" (Excel behaviour) or "click-away", so a spec can
+ *  assert on the difference instead of hiding it. `pause` = ms to wait before Enter (a human pauses; 0 types straight through). */
+export async function enterFormula(page, r, c, text, { pause = 0 } = {}) {
   await clickCell(page, r, c);
   await page.keyboard.type(text, { delay: 8 });
+  if (pause) await page.waitForTimeout(pause);
   await page.keyboard.press("Enter");
   await page.waitForTimeout(450);
-  let enters = 1;
-  if ((await formulaOf(page, r, c)) === null) { await page.keyboard.press("Enter"); await page.waitForTimeout(350); enters = 2; }
-  return enters;
+  if ((await formulaOf(page, r, c)) !== null) return "enter";
+  await clickCell(page, 14, 9); await page.waitForTimeout(300);
+  return "click-away";
 }

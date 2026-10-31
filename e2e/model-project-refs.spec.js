@@ -113,14 +113,15 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
   });
 
   // PRODUCT GAP (found by this port, 2026-10-31 — reported, not weakened, src untouched): in Excel, typing a formula that ends in a name and
-  // pressing Enter COMMITS it. On Univer the name hint popup is open at that moment and the first Enter only accepts the highlighted
-  // suggestion, leaving the editor open until a second Enter. The tests above use enterFormula (a second Enter if needed) because they are
-  // about the NAMES; this one holds the Excel behaviour on its own.
+  // pressing Enter COMMITS it. On Univer the name hint popup is open at that moment and Enter only "accepts" the highlighted suggestion,
+  // leaving the editor open (a second Enter swaps in a DIFFERENT suggestion — measured =Plan.Building2.SF becoming =Plan.Building1.SF).
+  // The tests above use enterFormula (commit by clicking another cell when Enter does not) because they are about the NAMES; this one
+  // holds the Excel behaviour on its own.
   test.fixme("a formula ending in a project name commits on ONE Enter, as in Excel (Univer's name-hint popup takes the first Enter)", async ({ page }) => {
     const id = "e2e-projrefs-one-enter";
     await seedProject(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: true }] });
     await openSheet(page, id);
-    expect(await enterFormula(page, 0, 0, "=Site.Acres"), "Enters needed to commit a formula that ends in a name").toBe(1);
+    expect(await enterFormula(page, 0, 0, "=Site.Acres", { pause: 500 }), "a formula ending in a name must commit on Enter").toBe("enter");
   });
 
   test("a user cannot define a name that shadows a reserved project-data prefix", async ({ page }) => {
