@@ -78,13 +78,15 @@ export function collectSnapshot() {
       // data-header-row, so legacyRow() used to file its controls under "row 1 / row 2" of the APP header and the sweep reported two-line rows that
       // are really two different strips. Its controls are collected flagged `univer` and judged by their own rules in auditSnapshot (one strip, flat,
       // edge to edge, nothing past the window, no half-cut button) instead of the shell's row model.
-      const inUniver = !!el.closest('[data-u-comp="headerbar"]');
+      // (Univer also wraps its formula bar in an unnamed <header> — name box, formula editor — so the whole grid host counts, not just the toolbar strip.)
+      const inUniver = !!el.closest('[data-testid="univer-grid"]');
+      const inUniverToolbar = !!el.closest('[data-u-comp="headerbar"]');
       controls.push({
         label: labelOf(el), tag: el.tagName.toLowerCase(),
         itemId: attrOf(el.closest("[data-toolbar-item-id]"), "data-toolbar-item-id"),
         box, eff,
         exempt: ex ? ex.getAttribute("data-sweep-exempt") : null,
-        univer: inUniver,
+        univer: inUniver, univerToolbar: inUniverToolbar,
         row: inUniver ? null : (attrOf(el.closest("[data-header-row]"), "data-header-row") || legacyRow(el)),
       });
     }
@@ -179,7 +181,7 @@ export function auditSnapshot(s) {
       if (x.w > TOL.overlap && x.h > TOL.overlap) v.push({ kind: "overlap", detail: `Univer toolbar: "${U[i].label}" and "${U[j].label}" overlap by ${x.w.toFixed(1)}×${x.h.toFixed(1)}px` });
     }
   }
-  const seen = U.filter((c) => area(c.eff) > 0);
+  const seen = U.filter((c) => c.univerToolbar && area(c.eff) > 0);   // the toolbar strip only — the formula bar under it is its own strip
   if (seen.length > 1) {
     const mids = seen.map((c) => c.eff.y + c.eff.h / 2);
     const spread = Math.max(...mids) - Math.min(...mids);

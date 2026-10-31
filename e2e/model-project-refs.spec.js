@@ -121,7 +121,7 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
     const id = "e2e-projrefs-one-enter";
     await seedProject(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: true }] });
     await openSheet(page, id);
-    expect(await enterFormula(page, 0, 0, "=Site.Acres", { pause: 500 }), "a formula ending in a name must commit on Enter").toBe("enter");
+    expect(await enterFormula(page, 0, 0, "=Site.Acres", { pause: 500, viaEnter: true }), "a formula ending in a name must commit on Enter").toBe("enter");
   });
 
   test("a user cannot define a name that shadows a reserved project-data prefix", async ({ page }) => {

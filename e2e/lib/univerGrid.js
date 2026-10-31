@@ -304,14 +304,16 @@ export async function clickFormulaBar(page) { await page.locator('[data-u-comp="
 /** Univer's sheet-tab strip: one locator per tab, in order. */
 export const sheetTabs = (page) => page.locator('[data-u-comp="slide-tab-item"]');
 
-/** Type a formula into a cell and commit it with Enter. Univer's name / function hint popup can swallow the Enter of a formula that ends in
- *  a name or bare function name (measured: `=PI`, `=Site.Acres`, `=Plan.Building2.SF` + Enter after a half-second pause leaves the editor
- *  open — Excel commits on Enter and completes only on Tab; a SECOND Enter swaps in a different suggestion, so it is not a retry). When that
- *  happens this commits the way a person does — a click on another cell. Returns "enter" (Excel behaviour) or "click-away", so a spec can
- *  assert on the difference instead of hiding it. `pause` = ms to wait before Enter (a human pauses; 0 types straight through). */
-export async function enterFormula(page, r, c, text, { pause = 0 } = {}) {
+/** Type a formula into a cell and commit it. A formula that ends in a name or bare function name (`=Site.Acres`, `=A1*TaxRate`) is committed
+ *  by CLICKING another cell, because Univer's name / function hint popup owns Enter at that moment: measured, Enter there leaves the editor
+ *  open and can REPLACE what was typed with another suggestion (`=Plan.Building2.SF` became `=Plan.Building1.SF`). Excel commits on Enter —
+ *  that difference is reported in the specs, not hidden. Any other formula (ending in `)`, a digit, ...) is committed with Enter, as a person
+ *  would. Returns "enter" or "click-away". `pause` = ms to wait before Enter (a human pauses; 0 types straight through). */
+export async function enterFormula(page, r, c, text, { pause = 0, viaEnter = false } = {}) {
   await clickCell(page, r, c);
   await page.keyboard.type(text, { delay: 8 });
+  const endsInName = /[A-Za-z_.][A-Za-z0-9_.]*$/.test(text) && !/\)$/.test(text);
+  if (endsInName && !viaEnter) { await clickCell(page, 14, 9); await page.waitForTimeout(300); return "click-away"; }
   if (pause) await page.waitForTimeout(pause);
   await page.keyboard.press("Enter");
   await page.waitForTimeout(450);
