@@ -1,134 +1,145 @@
-/* Spreadsheet selection — NEW-2 (Ctrl+click multi-range), B2530689, 2026-10-29. (Drag-select edge AUTOSCROLL is
- * B2452528 / e2e/model-drag-autoscroll.spec.js; the one test below only checks the two compose.)
- * Real mouse input only (page.mouse / click({modifiers})) — a synthetic event would not exercise the pointer
- * path the owner uses. Seeds a throwaway local project like model-spreadsheet.spec.js; nothing is written
- * to real data.
+/* Spreadsheet selection — NEW-2 (Ctrl+click multi-range), B2530689, 2026-10-29. (Drag-select edge AUTOSCROLL is B2452528 /
+ * e2e/model-drag-autoscroll.spec.js; the last test below only checks the two compose.)
  *
- * Run: npx playwright test e2e/model-multirange-selection.spec.js
+ * PORTED to the Univer grid (NEW-2, 2026-10-31): the grid is a canvas, so the selection is READ from Univer's facade
+ * (`ws.getSelection().getActiveRangeList()`, one entry per range) and cell formatting from `getCellStyle()`; every gesture is the REAL
+ * mouse / keyboard at a point computed from Univer's cell geometry (e2e/lib/univerGrid.js). Seeds a throwaway local project; nothing is
+ * written to real data. Excel for Windows is the spec where Univer differs from the old grid.
+ *
+ * RETIRED (2026-10-31) — nothing: each old test has a port. The old "highlighted cells in the DOM" assertions are now "the selection list
+ * holds exactly these ranges" plus, for the virtualisation test, a PAINTED-pixel check that the highlight is still drawn.
+ *
+ * Run: npx playwright test e2e/model-multirange-selection.spec.js --project=chromium
  */
 import { test, expect } from "@playwright/test";
+import {
+  openSpreadsheet, cellPoint, canvasBox, columnHeaderPoint, enter, clickCell, modClickCell, press, selection, activeCell, styleOf, value,
+  expectValue, clickUniverCommand, scrollGridTo, cellShot, sheetView,
+} from "./lib/univerGrid.js";
+import { createHash } from "node:crypto";
 
-const sheetEl = (page) => page.getByTestId("model-sheet");
-const cell = (page, r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`);
+const open = (page, id) => openSpreadsheet(page, id, { name: "ZZ Selection e2e (throwaway)" });
+const a1s = async (page) => (await selection(page)).map((s) => s.a1);
+const hash = (b) => createHash("sha1").update(b).digest("hex");
+const BOLD = "sheet.command.set-range-bold";
+const CTRL = "Control";
+const isBold = async (page, r, c) => (await styleOf(page, r, c)).bold;
 
-async function open(page, id) {
-  const site = {
-    id, groupId: id, site: "ZZ Selection e2e (throwaway)", name: "ZZ Selection e2e (throwaway)",
-    origin: null, county: "harris", parcels: [], els: [], markups: [], measures: [], callouts: [],
-    settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
-  };
-  await page.addInitScript(([siteId, rec]) => {
-    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [siteId]: rec }));
-  }, [id, site]);
-  await page.goto(`/#/project/${id}/model`);
-  await expect(sheetEl(page)).toBeVisible();
-}
-
-/** The selected cells currently rendered, as "r:c" keys. */
-const selected = (page) => page.evaluate(() =>
-  [...document.querySelectorAll('[data-testid="model-sheet"] [data-selected="true"]')].map((n) => `${n.dataset.row}:${n.dataset.col}`));
-const maxOf = (keys, i) => Math.max(...keys.map((k) => Number(k.split(":")[i])));
-const scrollPos = (page) => sheetEl(page).evaluate((el) => ({ top: el.scrollTop, left: el.scrollLeft }));
-
-// `Control` on Linux/Windows; the app also accepts Meta.
-const CTRL = { modifiers: ["Control"] };
+// Univer is a heavy canvas app and every step here is a real mouse/keyboard gesture with a settle: allow for it (a loaded CI box is ~3x slower).
+test.beforeEach(async ({}, testInfo) => { testInfo.setTimeout(120_000); });
 
 test.describe("NEW-2 — Ctrl+click builds a multi-range selection", () => {
-  test("Ctrl+click A1, C3, E5 → three separate highlighted ranges; bold applies to all three in one undo step", async ({ page }) => {
-    await open(page, "e2e-sel-ctrl");
-    for (const [r, c, v] of [[0, 0, "a"], [2, 2, "b"], [4, 4, "c"]]) { await cell(page, r, c).click(); await page.keyboard.type(v); await page.keyboard.press("Enter"); }
-    await cell(page, 0, 0).click();
-    await cell(page, 2, 2).click(CTRL);
-    await cell(page, 4, 4).click(CTRL);
-    expect((await selected(page)).sort()).toEqual(["0:0", "2:2", "4:4"]);
-    await expect(page.getByTestId("model-active-cell")).toHaveAttribute("data-row", "4"); // the active cell moved to the newest
-    await page.getByTestId("ribbon-bold").click();
-    for (const [r, c] of [[0, 0], [2, 2], [4, 4]]) expect(await cell(page, r, c).evaluate((n) => getComputedStyle(n).fontWeight)).toBe("700");
-    expect(await cell(page, 1, 1).evaluate((n) => getComputedStyle(n).fontWeight)).not.toBe("700");
-    await sheetEl(page).focus();
-    await page.keyboard.press("Control+z"); // ONE undo step reverts all three
-    for (const [r, c] of [[0, 0], [2, 2], [4, 4]]) expect(await cell(page, r, c).evaluate((n) => getComputedStyle(n).fontWeight)).not.toBe("700");
+  test("known-good arm: a plain click selects one cell, and Ctrl+click on an empty cell adds a SEPARATE range", async ({ page }) => {
+    await open(page, "e2e-sel-known");
+    await clickCell(page, 0, 0);
+    expect(await a1s(page)).toEqual(["A1"]);
+    await modClickCell(page, 2, 2, CTRL);
+    expect(await a1s(page)).toEqual(["A1", "C3"]);
   });
 
-  test("Ctrl+click on a selected cell deselects it; a plain click collapses to one range", async ({ page }) => {
+  test("Ctrl+click A1, C3, E5 → three separate ranges; bold applies to all three in one undo step", async ({ page }) => {
+    await open(page, "e2e-sel-ctrl");
+    for (const [r, c, v] of [[0, 0, "a"], [2, 2, "b"], [4, 4, "c"]]) await enter(page, r, c, v);
+    await clickCell(page, 0, 0);
+    await modClickCell(page, 2, 2, CTRL);
+    await modClickCell(page, 4, 4, CTRL);
+    expect(await a1s(page)).toEqual(["A1", "C3", "E5"]);
+    expect(await activeCell(page), "the active cell moved to the newest").toEqual([4, 4]);
+    await clickUniverCommand(page, BOLD);
+    for (const [r, c] of [[0, 0], [2, 2], [4, 4]]) expect(await isBold(page, r, c), `(${r},${c}) bold`).toBe(true);
+    expect(await isBold(page, 1, 1), "an unselected cell stays regular").toBe(false);
+    await clickCell(page, 4, 4);                             // hand the keyboard back to the grid (undo does not need the selection)
+    await press(page, "Control+z");                          // ONE undo step reverts all three
+    for (const [r, c] of [[0, 0], [2, 2], [4, 4]]) expect(await isBold(page, r, c), `(${r},${c}) after undo`).toBe(false);
+  });
+
+  test("Ctrl+click on a selected cell; a plain click collapses to one range", async ({ page }) => {
     await open(page, "e2e-sel-toggle");
-    await cell(page, 0, 0).click();
-    await cell(page, 2, 2).click(CTRL);
-    await cell(page, 2, 2).click(CTRL); // already selected → out
-    expect(await selected(page)).toEqual(["0:0"]);
-    await cell(page, 2, 2).click(CTRL);
-    await cell(page, 5, 5).click();
-    expect(await selected(page)).toEqual(["5:5"]);
+    await clickCell(page, 0, 0);
+    await modClickCell(page, 2, 2, CTRL);
+    expect(await a1s(page)).toEqual(["A1", "C3"]);
+    await modClickCell(page, 2, 2, CTRL); // already selected → out (Excel 365 and the old grid both take the cell out of the selection)
+    expect(await a1s(page)).toEqual(["A1"]);
+    await modClickCell(page, 2, 2, CTRL);
+    await clickCell(page, 5, 5);
+    expect(await a1s(page)).toEqual(["F6"]);
   });
 
   test("Ctrl+drag adds a rectangle, Ctrl+click on a column header adds the whole column, Delete clears every range", async ({ page }) => {
     await open(page, "e2e-sel-ctrl-drag");
-    for (const [r, c] of [[0, 0], [1, 0], [0, 3], [1, 3], [2, 5]]) { await cell(page, r, c).click(); await page.keyboard.type("x"); await page.keyboard.press("Enter"); }
-    await cell(page, 0, 0).click();
-    await page.keyboard.down("Control");
-    const a = await cell(page, 0, 3).boundingBox(), b = await cell(page, 1, 3).boundingBox();
-    await page.mouse.move(a.x + 8, a.y + 8); await page.mouse.down(); await page.mouse.move(b.x + 8, b.y + 8, { steps: 3 }); await page.mouse.up();
-    await page.getByTestId("model-col-header-5").click({ modifiers: ["Control"] });
-    await page.keyboard.up("Control");
-    const keys = await selected(page);
-    expect(keys).toContain("0:0"); expect(keys).toContain("0:3"); expect(keys).toContain("1:3"); expect(keys).toContain("2:5");
-    expect(keys).not.toContain("1:0"); // earlier range is its own rectangle, not a bounding box
-    await sheetEl(page).focus();
-    await page.keyboard.press("Delete");
-    for (const [r, c] of [[0, 0], [0, 3], [1, 3], [2, 5]]) await expect(cell(page, r, c)).toHaveText("");
-    await expect(cell(page, 1, 0)).toHaveText("x"); // outside the selection: kept
+    for (const [r, c] of [[0, 0], [1, 0], [0, 3], [1, 3], [2, 5]]) await enter(page, r, c, "x");
+    await clickCell(page, 0, 0);
+    await page.keyboard.down(CTRL);
+    const a = await cellPoint(page, 0, 3), b = await cellPoint(page, 1, 3);
+    await page.mouse.move(a.left + 8, a.top + 8); await page.mouse.down(); await page.mouse.move(b.left + 8, b.top + 8, { steps: 3 }); await page.mouse.up();
+    const h = await columnHeaderPoint(page, 5);
+    await page.mouse.click(h.x, h.y);
+    await page.keyboard.up(CTRL);
+    await page.waitForTimeout(200);
+    expect(await a1s(page), "the earlier cell stays its own range, the drag is a rectangle, the header adds the whole column").toEqual(["A1", "D1:D2", "F:F"]);
+    await press(page, "Delete");
+    for (const [r, c] of [[0, 0], [0, 3], [1, 3], [2, 5]]) expect(await value(page, r, c), `(${r},${c}) cleared`).toBeNull();
+    expect(await value(page, 1, 0), "outside the selection: kept").toBe("x");
   });
 
   test("Ctrl+Enter fills the typed value into every selected cell", async ({ page }) => {
     await open(page, "e2e-sel-ctrl-enter");
-    await cell(page, 0, 0).click();
-    await cell(page, 2, 2).click(CTRL);
-    await cell(page, 4, 4).click(CTRL);
-    await page.keyboard.type("7");
-    await page.keyboard.press("Control+Enter");
-    for (const [r, c] of [[0, 0], [2, 2], [4, 4]]) await expect(cell(page, r, c)).toHaveText("7");
-    await expect(cell(page, 1, 1)).toHaveText("");
+    await clickCell(page, 0, 0);
+    await modClickCell(page, 2, 2, CTRL);
+    await modClickCell(page, 4, 4, CTRL);
+    await page.keyboard.type("7", { delay: 8 });
+    await press(page, "Control+Enter");
+    for (const [r, c] of [[0, 0], [2, 2], [4, 4]]) await expectValue(page, r, c, 7, `(${r},${c}) filled`);
+    expect(await value(page, 1, 1)).toBeNull();
   });
 
   test("copy on a multi-range selection says so — never a silent no-op", async ({ page }) => {
     await open(page, "e2e-sel-copy-refuse");
-    await cell(page, 0, 0).click();
-    await cell(page, 2, 2).click(CTRL);
-    await page.keyboard.press("Control+c");
+    await enter(page, 0, 0, "a");
+    await clickCell(page, 0, 0);
+    await modClickCell(page, 2, 2, CTRL);
+    await press(page, "Control+c");
     await expect(page.getByTestId("model-file-notice")).toContainText("multiple selections");
   });
 
   test("a multi-range selection still highlights after scrolling away and back (virtualised)", async ({ page }) => {
     await open(page, "e2e-sel-virtual");
-    await cell(page, 0, 0).click();
-    await cell(page, 2, 2).click(CTRL);
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 2000; });
-    await page.waitForTimeout(150);
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; });
-    await page.waitForTimeout(150);
-    expect((await selected(page)).sort()).toEqual(["0:0", "2:2"]);
+    await clickCell(page, 0, 0);
+    await modClickCell(page, 2, 2, CTRL);
+    // known-good: a selected cell is painted differently from an unselected one (the instrument sees the highlight)
+    const sel = hash((await cellShot(page, 2, 2)).buf), plain = hash((await cellShot(page, 4, 4)).buf);
+    expect(sel, "the highlight is visible in the pixels").not.toEqual(plain);
+    await scrollGridTo(page, 400, 0);
+    await page.waitForTimeout(300);
+    await scrollGridTo(page, 0, 0);
+    await page.waitForTimeout(400);
+    expect(await a1s(page)).toEqual(["A1", "C3"]);
+    expect(hash((await cellShot(page, 2, 2)).buf), "C3 is painted selected again after the round trip").toEqual(sel);
   });
 });
 
 test.describe("NEW-2 × B2452528 — a Ctrl+drag rides the shared autoscroll", () => {
   test("Ctrl+drag past the bottom edge, mouse held still, adds a tall range and keeps the earlier cell selected", async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 700 });
     await open(page, "e2e-sel-ctrl-autoscroll");
-    await cell(page, 0, 4).click();
-    const box = await sheetEl(page).boundingBox();
-    const start = await cell(page, 3, 1).boundingBox();
-    await page.keyboard.down("Control");
-    await page.mouse.move(start.x + 10, start.y + 8); await page.mouse.down();
-    await page.mouse.move(start.x + 12, box.y + box.height + 40, { steps: 6 });
-    await page.waitForTimeout(700);
+    await clickCell(page, 0, 4);
+    const box = await canvasBox(page);
+    const start = await cellPoint(page, 3, 1);
+    await page.keyboard.down(CTRL);
+    await page.mouse.move(start.left + 10, start.top + 8); await page.mouse.down();
+    await page.mouse.move(start.left + 12, Math.min(box.bottom + 40, 698), { steps: 6 });
+    await page.waitForTimeout(900);
+    const mid = await selection(page);
     await page.mouse.up();
-    await page.keyboard.up("Control");
-    expect((await scrollPos(page)).top).toBeGreaterThan(0);
-    expect(maxOf(await selected(page), 0)).toBeGreaterThan(25);
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; });
-    await page.waitForTimeout(200);
-    const keys = await selected(page);
-    expect(keys).toContain("0:4");   // the earlier cell is still its own range
-    expect(keys).toContain("3:1");   // and the Ctrl+drag range starts where it was pressed
-    expect(keys).not.toContain("1:4");
+    await page.keyboard.up(CTRL);
+    const v = await sheetView(page);
+    expect(v.top, "the grid scrolled").toBeGreaterThan(0);
+    const after = await selection(page);
+    expect(after.length, "two ranges").toBe(2);
+    expect(after[0].a1, "the earlier cell is still its own range").toBe("E1");
+    expect(after[1].r1, "the Ctrl+drag range starts where it was pressed").toBe(3);
+    expect(after[1].c1).toBe(1);
+    expect(after[1].r2, "…and reaches well past the first screenful").toBeGreaterThan(25);
+    expect(mid[1] && mid[1].r2, "it was still growing while held").toBeGreaterThan(20);
   });
 });

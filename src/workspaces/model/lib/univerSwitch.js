@@ -1,41 +1,28 @@
-/* Model workspace — the owner-only "Try the new grid" switch (Univer spike; docs/SPREADSHEET-UNIVER-SPIKE.md).
+/* Model workspace — which grid the Spreadsheet tab shows, as a hook (NEW-1, 2026-10-31; was the owner-only "Try the new grid" switch
+ * of the Univer spike, docs/SPREADSHEET-UNIVER-SPIKE.md).
  *
- * TWO conditions, both required, and ONLY these:
- *   1. `is_admin()` is CONFIRMED true for the signed-in user — the same owner-only RPC the admin page and the
- *      grading layer use (admin/lib/useIsAdmin.js → adminStatus.js). It fails closed: unknown / error / not-admin /
- *      signed-out are all "not available", so a non-admin sees exactly today's grid and not even a menu row.
- *   2. the person turned it on, remembered PER DEVICE (localStorage). Default OFF.
- * ⛔ No URL flag, env var or second gate. Do not add anyone to `admin_users` to widen it; the cutover is a
- * separate owner decision and, if he makes it, this one file is what changes. */
-import { useCallback, useSyncExternalStore } from "react";
+ * The Univer grid is THE grid for every account. What is left of the old switch is the owner's safety hatch — the decision lives in
+ * `./gridChoice.js` (dependency-free; read it for the rule). This file only adds the React face: the `is_admin()` answer (the same
+ * owner-only RPC the admin page and the grading layer use; it fails closed) and a subscription to the per-device flag. */
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useIsAdmin } from "../../admin/lib/useIsAdmin.js";
+import { chooseGrid, migrateLegacyGridChoice, readRegularGrid, subscribeRegularGrid, writeRegularGrid } from "./gridChoice.js";
 
-export const UNIVER_SWITCH_KEY = "planyr:model:univerGrid";
+// The pre-cutover switch's key is dropped as soon as this chunk runs (also from the shell's warm path), whoever the user is.
+migrateLegacyGridChoice();
 
-export function readUniverSwitch(storage = typeof localStorage === "undefined" ? null : localStorage) {
-  try { return !!storage && storage.getItem(UNIVER_SWITCH_KEY) === "1"; } catch (_) { return false; }
-}
-export function writeUniverSwitch(on, storage = typeof localStorage === "undefined" ? null : localStorage) {
-  try { if (!storage) return false; if (on) storage.setItem(UNIVER_SWITCH_KEY, "1"); else storage.removeItem(UNIVER_SWITCH_KEY); notify(); return true; } catch (_) { return false; }
-}
-// ONE source of truth: the device setting itself. Every reader subscribes to it (this tab's writes via `notify`, another tab's
-// via the `storage` event) instead of seeding a copy into component state (owner rule: shared data is never copied into state).
-const listeners = new Set();
-const notify = () => listeners.forEach((l) => l());
-const subscribe = (l) => {
-  listeners.add(l);
-  const onStorage = (e) => { if (e.key === null || e.key === UNIVER_SWITCH_KEY) l(); };
-  if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
-  return () => { listeners.delete(l); if (typeof window !== "undefined") window.removeEventListener("storage", onStorage); };
-};
-/** The one rule: the Univer grid shows only when the owner gate is open AND the device switch is on. */
-export const univerGridActive = ({ available, on }) => !!available && !!on;
-
-/** `{ available, on, active, setOn }` — `available` is the admin gate, `on` the remembered device choice,
- *  `active` what the workspace actually renders. A non-admin's stored "on" never activates anything. */
+/** `{ grid, active, deciding, available, regular, setRegular }`
+ *    grid      "univer" | "regular" | "deciding" — see gridChoice.chooseGrid
+ *    active    the Univer grid is (or is about to be) the grid: everything that stands down the regular grid's keyboard listens to this
+ *    deciding  show a placeholder, mount neither grid yet
+ *    available the hatch exists for this user (a CONFIRMED admin) — the File ▾ menu row shows only then
+ *    regular   this device asked for the regular grid (only an admin's device can ever make it show)
+ *    setRegular(true) = "Use the regular grid", setRegular(false) = "Use the new grid". */
 export function useUniverSwitch(userId) {
-  const { isAdmin } = useIsAdmin(userId ? { id: userId } : null);
-  const on = useSyncExternalStore(subscribe, () => readUniverSwitch(), () => false);
-  const setOn = useCallback((next) => { writeUniverSwitch(!!next); }, []);
-  return { available: isAdmin, on, active: univerGridActive({ available: isAdmin, on }), setOn };
+  const { isAdmin, status } = useIsAdmin(userId ? { id: userId } : null);
+  const regular = useSyncExternalStore(subscribeRegularGrid, () => readRegularGrid(), () => false);
+  useEffect(() => { migrateLegacyGridChoice(); }, []);
+  const setRegular = useCallback((next) => { writeRegularGrid(!!next); }, []);
+  const grid = chooseGrid({ regular, signedIn: !!userId, adminStatus: status });
+  return { grid, active: grid !== "regular", deciding: grid === "deciding", available: isAdmin, regular, setRegular };
 }

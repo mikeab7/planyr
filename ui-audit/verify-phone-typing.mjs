@@ -227,7 +227,18 @@ const SURFACES = [
     } },
   { id: "site — set location dialog", route: `#/project/${PROJ}/site`, signedIn: false, open: async (p) => { await tapSel(p, '[data-testid="mobile-panels-tab"]'); await p.getByRole("button", { name: /^Land$/ }).first().click(); await p.waitForTimeout(500); await tapSel(p, '[data-testid="set-location-cta"]'); }, scope: '[role="dialog"]' },
   { id: "notes", route: "#/notes", open: async (p) => { if (!LIVE) await p.getByRole("button", { name: /new (page|note)|\+ page|add page/i }).first().click({ timeout: 2500 }).catch(() => {}); await p.waitForTimeout(600); } }, // live: the account's existing "Untitled page" — never create a note
-  { id: "spreadsheet", route: `#/project/${PROJ}/spreadsheet`, open: async () => {} },
+  // NEW-2: the Spreadsheet is the Univer grid (a LAZY canvas chunk) for every account. The old surface scored the formula-bar <input> and the
+  // in-cell <input>; now the DOM text fields a person can see are the name box (+ whatever Univer mounts), so the surface FIRST waits for the
+  // grid and then taps A1 (a real touch) — an empty field list on a surface that never mounted would be vacuous, and "fields found" below
+  // still FAILS on zero fields. COVERAGE GAP, stated rather than hidden: Univer's in-cell editor is a zero-size contenteditable behind the
+  // canvas (listFields skips width-0 nodes on purpose), so the caret the person sees while typing in a cell is NOT scored here any more.
+  { id: "spreadsheet", route: `#/project/${PROJ}/spreadsheet`, open: async (p) => {
+      await p.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 });
+      await p.waitForTimeout(1500);
+      const pt = await p.evaluate(() => { const b = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: b.left + 90, y: b.top + 32 }; });
+      await p.touchscreen.tap(pt.x, pt.y).catch(() => {});
+      await p.waitForTimeout(500);
+    } },
   { id: "schedule — agenda", route: "#/org/schedule", open: async () => {} },
   { id: "schedule — new schedule", route: `#/project/${PROJ}/schedule`, open: async (p) => { await p.getByRole("button", { name: /create|new schedule/i }).first().click({ timeout: 3000 }).catch(() => {}); await p.waitForTimeout(500); } },
   { id: "library", route: `#/project/${PROJ}/library`, open: async () => {} },

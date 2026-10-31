@@ -696,7 +696,7 @@ try {
       { label: "map", hash: "#/site", wait: ".leaflet-container" },
       { label: "plan", hash: "#/project/s_help/site", wait: 'svg[aria-label="Site plan canvas"]', seedPlan: true },
       { label: "schedule", hash: "#/schedule", wait: null },
-      { label: "model", hash: `#/project/${modelSiteId}/model`, wait: '[data-testid="model-sheet"]', seedModel: true },
+      { label: "model", hash: `#/project/${modelSiteId}/model`, wait: 'canvas[id^="univer-sheet-main-canvas"]', seedModel: true }, // NEW-2: the Univer grid is the Spreadsheet (a canvas); the old `model-sheet` DOM grid is gone for every account
       { label: "doc-review", hash: "#/markup", wait: null },
       { label: "library", hash: "#/library", wait: null },
       { label: "notes", hash: "#/notes", wait: null },
@@ -729,8 +729,9 @@ try {
             return cs.visibility !== "hidden" && cs.display !== "none" && Number(cs.opacity || "1") > 0;
           };
           // Exclude generic full-surface containers — the Leaflet map container and the Model
-          // workspace's own sheet grid (`model-sheet`, a single roving-tabindex host for keyboard
-          // grid nav, not a discrete control) both span nearly their whole route/pane. A bbox
+          // workspace's own sheet grid (the Univer canvas host: `univer-grid`, plus the `model-sheet` testid of the
+          // retired DOM grid — a single roving-tabindex host for keyboard grid nav, not a discrete
+          // control) both span nearly their whole route/pane. A bbox
           // "overlap" with something that big is meaningless — the FAB is a small button floating
           // ON TOP of the map/canvas/sheet surface BY DESIGN everywhere in this app (confirmed
           // live on the Model route: it sits over two blank grid cells in the last visible column,
@@ -739,7 +740,8 @@ try {
           const interactive = Array.from(document.querySelectorAll('button, a[href], input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])'))
             .filter((el) => el !== fab && !fab.contains(el) && isVisible(el)
               && !el.classList.contains("leaflet-container")
-              && el.getAttribute("data-testid") !== "model-sheet");
+              && el.getAttribute("data-testid") !== "model-sheet"
+              && el.getAttribute("data-testid") !== "univer-grid");
           // getBoundingClientRect() ignores ancestor CLIPPING — a scrollable list's row scrolled
           // below its own visible scrollport (e.g. a Layers-panel legend row past the fold) still
           // reports its full, real layout rect even though nothing of it is actually painted on

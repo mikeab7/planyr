@@ -129,8 +129,10 @@ await page.close();
   const e2 = []; sp.on("pageerror", e => e2.push(String(e)));
   await sp.goto(base + "/#/project/e2e-fixture-site/spreadsheet", { waitUntil: "domcontentloaded" });
   await sp.waitForSelector("header", { timeout: 40000 }); await pacedWait(sp, 2500);
+  // NEW-2: the Spreadsheet is the Univer grid (a lazy canvas) for every account — "rendered" now means the canvas mounted, not just that the shell header has text
+  const gridUp = await sp.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 }).then(() => true, () => false); await pacedWait(sp, 800);
   const st = await sp.evaluate(() => ({ hash: location.hash, tabs: [...document.querySelectorAll("header [role=tab], header a, header button")].map(x => x.innerText.trim()).filter(Boolean).slice(0, 12), body: document.body.innerText.length }));
-  ok("5 spreadsheet: the Spreadsheet route rendered (header + content)", st.hash.includes("spreadsheet") && st.body > 100, JSON.stringify(st).slice(0, 200));
+  ok("5 spreadsheet: the Spreadsheet route rendered (header + the Univer grid canvas)", st.hash.includes("spreadsheet") && st.body > 100 && gridUp, JSON.stringify({ ...st, gridUp }).slice(0, 200));
   ok("5 spreadsheet: no page errors", e2.length === 0, e2.slice(0, 2).join(" | "));
   if (process.env.SHOT_DIR) await sp.screenshot({ path: process.env.SHOT_DIR + "/live-spreadsheet.png" });
   await sp.close();

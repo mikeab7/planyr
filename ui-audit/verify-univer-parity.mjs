@@ -417,6 +417,47 @@ check("key-ctrl-shift-arrow", "Ctrl+Shift+Arrow extends to the end of the data",
   await reset(); await click(0, 0); await press("Control+Shift+ArrowDown"); const s = (await sel())[0];
   return s && s.r2 === 4 ? PASS(`selected ${s.a1}`) : FAIL(`selected ${s && s.a1}`);
 });
+const activeCell = () => inSheet((api, ws) => { const a = ws.getSelection().getCurrentCell(); return a ? [a.actualRow, a.actualColumn] : null; });
+check("key-nav-basic", "Arrows, Tab / Shift+Tab, Enter / Shift+Enter move the active cell; Shift+Arrow extends", async () => {
+  await reset(); await click(5, 2);
+  const seen = {};
+  await press("Tab"); seen.tab = await activeCell();
+  await press("Shift+Tab"); seen.shiftTab = await activeCell();
+  await press("Enter"); seen.enter = await activeCell();
+  await press("Shift+Enter"); seen.shiftEnter = await activeCell();
+  await press("ArrowRight"); seen.right = await activeCell();
+  await press("Shift+ArrowDown"); const s = (await sel())[0];
+  const want = { tab: [5, 3], shiftTab: [5, 2], enter: [6, 2], shiftEnter: [5, 2], right: [5, 3] };
+  const bad = Object.keys(want).filter((k) => !eq(seen[k], want[k]));
+  if (bad.length) return FAIL(`${bad.map((k) => `${k}=${JSON.stringify(seen[k])} (want ${JSON.stringify(want[k])})`).join("; ")}`);
+  return s && s.r1 === 5 && s.r2 === 6 ? PASS("Tab → D6, Shift+Tab → C6, Enter → C7, Shift+Enter → C6, → D6, Shift+↓ selected rows 6–7") : FAIL(`Shift+Arrow selected ${s && s.a1}`);
+});
+check("key-nav-home-end-page", "Home, Ctrl+Home, Ctrl+End, Ctrl+Shift+Home/End, PageUp/PageDown and Alt+PageUp/PageDown move or extend the selection (the free Univer build does none of them; the plugin does)", async () => {
+  await reset();
+  const fails = [];
+  const expectCell = async (label, want) => { const got = await activeCell(); if (!eq(got, want)) fails.push(`${label}: active ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
+  const expectSel = async (label, r1, r2, c1, c2) => { const x = (await sel())[0]; if (!x || x.r1 !== r1 || x.r2 !== r2 || x.c1 !== c1 || x.c2 !== c2) fails.push(`${label}: selected ${x && x.a1} (rows ${x && x.r1}-${x && x.r2}, cols ${x && x.c1}-${x && x.c2}), want rows ${r1}-${r2}, cols ${c1}-${c2}`); };
+  await click(3, 2); await press("Home"); await expectCell("Home", [3, 0]);
+  await click(3, 2); await press("Shift+Home"); await expectSel("Shift+Home", 3, 3, 0, 2); await expectCell("Shift+Home keeps the active cell", [3, 2]);
+  await click(3, 2); await press("Control+Home"); await expectCell("Ctrl+Home", [0, 0]);
+  await press("Control+End"); await expectCell("Ctrl+End (the last used cell, C5)", [4, 2]);
+  await click(3, 2); await press("Control+Shift+Home"); await expectSel("Ctrl+Shift+Home", 0, 3, 0, 2);
+  await click(1, 0); await press("Control+Shift+End"); await expectSel("Ctrl+Shift+End", 1, 4, 0, 2);
+  const rows = await inSheet((api, ws) => { const v = ws.getVisibleRange(); return v.endRow - v.startRow; });
+  // (after a page move the grid is scrolled and a canvas click point computed from cell geometry no longer maps to that cell — set up with activate())
+  const goto = async (r, c) => { await inSheet((api, ws, [rr, cc]) => { ws.getRange(rr, cc).activate(); }, [r, c]); await press("Control+Home"); if (r || c) await inSheet((api, ws, [rr, cc]) => { ws.getRange(rr, cc).activate(); }, [r, c]); await wait(150); };
+  await goto(0, 0); await press("PageDown"); const down = await activeCell();
+  if (!down || down[1] !== 0 || down[0] < Math.max(1, rows - 1)) fails.push(`PageDown from A1 landed on ${JSON.stringify(down)} (a screen is ~${rows} rows)`);
+  await press("PageUp"); await expectCell("PageUp back to the top", [0, 0]);
+  await goto(2, 0); await press("Shift+PageDown"); const ext = (await sel())[0];
+  if (!ext || ext.r1 !== 2 || ext.r2 <= 2 + 1) fails.push(`Shift+PageDown selected ${ext && ext.a1}`);
+  await goto(2, 0); await press("Alt+PageDown"); const across = await activeCell();
+  if (!across || across[0] !== 2 || across[1] < 2) fails.push(`Alt+PageDown from A3 landed on ${JSON.stringify(across)}`);
+  await press("Alt+PageUp"); await expectCell("Alt+PageUp back to column A", [2, 0]);
+  // In the cell editor Home belongs to the text caret: the selection must not jump.
+  await goto(3, 2); await press("F2"); await press("Home"); await press("Escape"); await expectCell("Home inside the editor leaves the selection alone", [3, 2]);
+  return fails.length ? FAIL(fails.join("; ")) : PASS("Home → A4, Shift+Home → A4:C4 (active C4), Ctrl+Home → A1, Ctrl+End → C5, Ctrl+Shift+Home → A1:C4, Ctrl+Shift+End → A2:C5, PgDn/PgUp a screen, Shift+PgDn extends, Alt+PgDn/PgUp a screen across; Home in the editor did not move the selection");
+});
 check("key-f2", "F2 edits the cell in place with its content", async () => {
   await reset(); await click(0, 1); await press("F2"); await page.keyboard.type("X"); await press("Enter"); await wait(400);
   const v = await val1(0, 1);

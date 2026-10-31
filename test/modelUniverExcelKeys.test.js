@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import {
   CHORD_BINDINGS, META, bindingOf, chordMatches, chordCoverage, UNIVER_UNSUPPORTED_CHORDS, NUMFMT_FOR, dateSerial, timeFraction,
-  structureKind, wholeLineRanges, INSERT_CHOICES, DELETE_CHOICES, SCOPE,
+  structureKind, wholeLineRanges, INSERT_CHOICES, DELETE_CHOICES, SCOPE, NAV_ACTIONS, navPlan,
 } from "../src/workspaces/model/lib/univerExcelKeys/bindings.js";
 import { CHORDS, EDIT_MODE_CHORDS } from "../src/workspaces/model/lib/keymap.js";
 import { allKeyTips } from "../src/workspaces/model/lib/keyTips.js";
@@ -36,14 +36,14 @@ describe("every chord the old grid owns is accounted for on the Univer grid — 
   });
   it("the Keyboard Shortcuts page (derived from the same tables) lists each of them", () => {
     const ids = new Set(ALL_SHORTCUT_ITEMS.map((i) => i.id));
-    for (const b of CHORD_BINDINGS) expect(ids.has(b.nav ? `sheet.nav.${b.nav}` : `sheet.chord.${b.chord}`), b.chord).toBe(true);
+    for (const b of CHORD_BINDINGS) expect(ids.has(b.nav ? `sheet.nav.${b.nav}` : b.match ? `sheet.nav.${b.chord}` : `sheet.chord.${b.chord}`), b.chord).toBe(true);
   });
 });
 
 describe("the binding table", () => {
   it("every chord id exists in the old grid's key tables (one source of truth for WHAT a key means)", () => {
     for (const b of CHORD_BINDINGS) {
-      if (b.nav) continue;
+      if (b.nav || b.match) continue;     // the plugin's own movement keys (Home / End / Page) have their own predicate + table (NAV_ACTIONS)
       expect(CHORDS.some(([id]) => id === b.chord), b.chord).toBe(true);
     }
   });
@@ -135,7 +135,12 @@ describe("the Alt key-tips reach an action for EVERY leaf of the shared table", 
     expect(missing).toEqual([]);
   });
   it("each chord's action id has an entry too", () => {
-    expect(CHORD_BINDINGS.map((b) => b.action).filter((id) => !keyOf(id).test(actions))).toEqual([]);
+    expect(CHORD_BINDINGS.filter((b) => !b.match).map((b) => b.action).filter((id) => !keyOf(id).test(actions))).toEqual([]);
+  });
+  it("every movement action is built from NAV_ACTIONS, and every NAV_ACTIONS entry has exactly one binding", () => {
+    expect(actions).toMatch(/Object\.keys\(NAV_ACTIONS\)\.map\(\(id\) => \[id, navigate\(id\)\]\)/);
+    const bound = CHORD_BINDINGS.filter((b) => b.match).map((b) => b.action).sort();
+    expect(bound).toEqual(Object.keys(NAV_ACTIONS).sort());
   });
 });
 
@@ -148,7 +153,10 @@ describe("wiring facts", () => {
     const importers = [];
     const walk = (d) => { for (const e of readdirSync(new URL(`../${d}`, import.meta.url), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) walk(p); else if (/\.jsx?$/.test(e.name) && /univerExcelKeys\//.test(read(p)) && !p.includes("univerExcelKeys/")) importers.push(p); } };
     walk("src");
-    expect(importers).toEqual(["src/workspaces/model/components/UniverSheet.jsx"]);
+    // The Keyboard Shortcuts page reads the PURE half (bindings.js: no Univer import) so it cannot disagree with the plugin — and only that file.
+    expect(importers).toEqual(["src/shared/keyboard/shortcutsData.js", "src/workspaces/model/components/UniverSheet.jsx"]);
+    expect(read("src/shared/keyboard/shortcutsData.js").match(/univerExcelKeys\/[a-zA-Z]+\.js/g).filter((v, i, a) => a.indexOf(v) === i)).toEqual(["univerExcelKeys/bindings.js"]);
+    expect(read(`${DIR}/bindings.js`)).not.toMatch(/^import .*@univerjs/m);
   });
   it("is built on Univer's command + shortcut services, from the pinned preset packages only (no new dependency, no Pro, no host)", () => {
     const index = read(`${DIR}/index.js`);
@@ -170,5 +178,59 @@ describe("wiring facts", () => {
   it("the Alt listener cancels the keyup that opens a sequence (Windows browsers would otherwise focus their menu bar)", () => {
     const src = read(`${DIR}/keyTipsController.js`);
     expect(src).toMatch(/up = \(e\) => \{[\s\S]*?e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*set\(beginKeyTips\(\)\)/);
+  });
+});
+
+describe("Home / Ctrl+Home / Ctrl+End / Page keys (the free Univer build moves the selection on none of them)", () => {
+  const key = (k, o = {}) => ({ key: k, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...o });
+  it("each key matches exactly one movement binding (Shift / Ctrl / Alt change which)", () => {
+    const which = (e) => CHORD_BINDINGS.filter((b) => b.match && chordMatches(b.chord, e)).map((b) => b.action);
+    expect(which(key("Home"))).toEqual(["nav-home"]);
+    expect(which(key("Home", { shiftKey: true }))).toEqual(["nav-home-extend"]);
+    expect(which(key("Home", { ctrlKey: true }))).toEqual(["nav-start"]);
+    expect(which(key("Home", { ctrlKey: true, shiftKey: true }))).toEqual(["nav-start-extend"]);
+    expect(which(key("End", { ctrlKey: true }))).toEqual(["nav-end"]);
+    expect(which(key("End", { ctrlKey: true, shiftKey: true }))).toEqual(["nav-end-extend"]);
+    expect(which(key("PageDown"))).toEqual(["nav-page-down"]);
+    expect(which(key("PageUp", { shiftKey: true }))).toEqual(["nav-page-up-extend"]);
+    expect(which(key("PageDown", { altKey: true }))).toEqual(["nav-across-right"]);
+    expect(which(key("PageUp", { altKey: true, shiftKey: true }))).toEqual(["nav-across-left-extend"]);
+    expect(which(key("End"))).toEqual([]);                    // a bare End is not an Excel selection key here
+    expect(which(key("a", { ctrlKey: true }))).toEqual([]);
+  });
+  it("the Alt modifier is part of the binding (Alt+PageDown never shares a code with PageDown)", () => {
+    const a = CHORD_BINDINGS.find((b) => b.action === "nav-across-right").keys.map(bindingOf)[0];
+    const p = CHORD_BINDINGS.find((b) => b.action === "nav-page-down").keys.map(bindingOf)[0];
+    expect(a).not.toBe(p);
+    expect(a & META.ALT).toBe(META.ALT);
+  });
+  const S = (o) => ({ active: { row: 3, col: 2 }, range: { startRow: 3, endRow: 3, startColumn: 2, endColumn: 2 }, maxRows: 100, maxCols: 26, used: { row: 9, col: 5 }, rowsPerPage: 20, colsPerPage: 8, ...o });
+  it("Home goes to column A of the active row; Shift+Home extends the same rows back to column A, keeping the active cell", () => {
+    expect(navPlan("nav-home", S())).toEqual({ anchor: { row: 3, col: 0 }, end: { row: 3, col: 0 } });
+    expect(navPlan("nav-home-extend", S({ range: { startRow: 3, endRow: 6, startColumn: 2, endColumn: 4 } }))).toEqual({ anchor: { row: 3, col: 2 }, end: { row: 6, col: 0 } });
+  });
+  it("Ctrl+Home is A1, Ctrl+End the last used cell (nothing on an empty sheet), and the Shift forms run from the active cell", () => {
+    expect(navPlan("nav-start", S())).toEqual({ anchor: { row: 0, col: 0 }, end: { row: 0, col: 0 } });
+    expect(navPlan("nav-end", S())).toEqual({ anchor: { row: 9, col: 5 }, end: { row: 9, col: 5 } });
+    expect(navPlan("nav-end", S({ used: null }))).toBeNull();
+    expect(navPlan("nav-start-extend", S())).toEqual({ anchor: { row: 3, col: 2 }, end: { row: 0, col: 0 } });
+    expect(navPlan("nav-end-extend", S())).toEqual({ anchor: { row: 3, col: 2 }, end: { row: 9, col: 5 } });
+  });
+  it("a page move is a screenful, clamped to the sheet; Shift moves the selection's far corner, not the active cell", () => {
+    expect(navPlan("nav-page-down", S())).toEqual({ anchor: { row: 23, col: 2 }, end: { row: 23, col: 2 } });
+    expect(navPlan("nav-page-up", S())).toEqual({ anchor: { row: 0, col: 2 }, end: { row: 0, col: 2 } });
+    expect(navPlan("nav-page-down", S({ active: { row: 95, col: 2 } }))).toEqual({ anchor: { row: 99, col: 2 }, end: { row: 99, col: 2 } });
+    const sel = S({ range: { startRow: 3, endRow: 8, startColumn: 2, endColumn: 4 } });
+    expect(navPlan("nav-page-down-extend", sel)).toEqual({ anchor: { row: 3, col: 2 }, end: { row: 28, col: 4 } });
+    // the active cell is at the BOTTOM of an upward-extended selection: the far corner is the top
+    const up = S({ active: { row: 8, col: 2 }, range: { startRow: 3, endRow: 8, startColumn: 2, endColumn: 2 } });
+    expect(navPlan("nav-page-up-extend", up)).toEqual({ anchor: { row: 8, col: 2 }, end: { row: 0, col: 2 } });
+    expect(navPlan("nav-across-right", S())).toEqual({ anchor: { row: 3, col: 10 }, end: { row: 3, col: 10 } });
+    expect(navPlan("nav-across-left", S())).toEqual({ anchor: { row: 3, col: 0 }, end: { row: 3, col: 0 } });
+    expect(navPlan("nav-across-right-extend", sel)).toEqual({ anchor: { row: 3, col: 2 }, end: { row: 8, col: 12 } });
+  });
+  it("an unknown action or a missing state plans nothing", () => {
+    expect(navPlan("nav-nowhere", S())).toBeNull();
+    expect(navPlan("nav-home", null)).toBeNull();
   });
 });
