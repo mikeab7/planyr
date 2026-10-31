@@ -87,7 +87,16 @@ try {
   const asNum = (v) => (v instanceof Date ? v.getTime() / 86400000 + 25569 : Number(v));
   ok("K2 the file's =SUM cached result is 300 (formula SUM(B1:B2))", cell("B3") && cell("B3").formula === "SUM(B1:B2)" && res("B3") === 300, JSON.stringify(cell("B3")));
   const close = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
-  ok("E1 cached results equal the grid: PMT, EDATE, interleaved XIRR", close(asNum(res("C1")), grid.pmt) && close(asNum(res("D2")), typeof grid.edate === "number" ? grid.edate : asNum(grid.edate)) && close(asNum(res("F1")), grid.xirr), `file C1=${res("C1")} D2=${res("D2")} F1=${res("F1")}  grid ${grid.pmt} / ${grid.edate} / ${grid.xirr}`);
+  // The grid shows PMT in a currency format and EDATE as a date, so the grid's own text is parsed back to a number / day; the file must match it AND the
+  // independent textbook values (PMT 1498.876029…, 2026-01-15 + 2 months = 2026-03-15, XIRR of -1000 → 1500 over one year = 0.5).
+  const gridNum = (v) => (typeof v === "number" ? v : Number(String(v).replace(/[^0-9.\-]/g, "")));
+  const day = (v) => (v instanceof Date ? Math.round(v.getTime() / 86400000) : NaN);
+  const edateGridDay = typeof grid.edate === "string" && /^\d{4}\/\d{2}\/\d{2}$/.test(grid.edate) ? Math.round(Date.UTC(...grid.edate.split("/").map((x, i) => (i === 1 ? Number(x) - 1 : Number(x)))) / 86400000) : NaN;
+  ok("E1 cached results equal the grid AND the textbook values: PMT, EDATE, interleaved XIRR",
+    Math.abs(asNum(res("C1")) - 1498.876029) < 1e-3 && Math.abs(gridNum(grid.pmt) - asNum(res("C1"))) < 0.01
+    && day(res("D2")) === edateGridDay && day(res("D2")) === Math.round(Date.UTC(2026, 2, 15) / 86400000)
+    && Math.abs(asNum(res("F1")) - 0.5) < 1e-6 && Math.abs(Number(grid.xirr) - asNum(res("F1"))) < 1e-6,
+    `file C1=${res("C1")} D2=${res("D2") instanceof Date ? res("D2").toISOString().slice(0, 10) : res("D2")} F1=${res("F1")}  grid ${JSON.stringify(grid.pmt)} / ${grid.edate} / ${grid.xirr}`);
   ok("E2b the file carries Excel's two-list XIRR and no Planyr-only syntax", /^XIRR\(CHOOSE\(\{1,2\},-1000,1500\),CHOOSE\(\{1,2\},DATE\(2026,1,1\),DATE\(2027,1,1\)\)\)$/.test((cell("F1") || {}).formula || ""), (cell("F1") || {}).formula);
   const notice2 = [...seenNotices].join(" ⏐ ");
   ok("E3 the circular pair is named in the notice (grid and/or export)", /circular reference/.test(notice1 + " " + notice2) && /E1|E2/.test(notice1 + " " + notice2), `grid notice: ${notice1.slice(0, 110)} | export notice: ${notice2.slice(0, 110)}`);
