@@ -77,6 +77,29 @@ describe("the owner's three points (auto FFE 792.8 and typed 793), 'Around the l
   });
 });
 
+describe("V2042032 deviation (owner live 2026-10-31): undisturbed ground reads 'On grade' even when the chip's Exist sample differs", () => {
+  // the owner's live readings: the chip's coarse Exist sample vs the surface's own existing reading
+  const LIVE = [[800.6, 800.7, true], [808.9, 809.2, true], [795.7, 795.6, true], [795.7, 795.6, false]];
+  it("Prop prints the same figure as Exist (≈ included) and the delta is 'On grade' — never a Cut / Fill figure", () => {
+    for (const [ex, prop, coarse] of LIVE) {
+      const t = groundReadout({ el: { status: "value", ft: ex, ...(coarse ? { cellFt: 30 } : {}) }, prop: { status: "value", ft: prop, undisturbed: true } });
+      const exTxt = t.parts.find((p) => p.key === "exist").text.replace(/^Exist /, "").replace(/ ft$/, "");
+      const prTxt = t.parts.find((p) => p.key === "prop").text.replace(/^Prop /, "").replace(/ ft$/, "");
+      expect(prTxt).toBe(exTxt);
+      expect(t.parts.find((p) => p.key === "delta").text).toBe("On grade");
+      expect(t.text).not.toMatch(/Cut|Fill/);
+    }
+  });
+  it("graded ground keeps its real Cut / Fill (the owner's band point: Exist 800.1 · Prop 786.9 · Cut 13.2)", () => {
+    const t = groundReadout({ el: { status: "value", ft: 800.1 }, prop: { status: "value", ft: 786.9 } });
+    expect(t.text).toMatch(/Prop 786\.9 · Cut 13\.2 ft/);
+  });
+  it("with no Exist sample yet, undisturbed Prop still prints its own value and no delta", () => {
+    const t = groundReadout({ el: { status: "pending" }, prop: { status: "value", ft: 800.7, undisturbed: true } });
+    expect(t.text).toMatch(/Prop 800\.7 ft/); expect(t.parts.some((p) => p.key === "delta")).toBe(false);
+  });
+});
+
 describe("where '—' is still the honest answer, and where nothing changed", () => {
   it("off the property it still says '—'", () => {
     const sf = build(792.8, "layout");
