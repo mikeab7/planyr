@@ -66,6 +66,8 @@ import {
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
+import { evalFromPlain, circularNotice } from "./lib/evalValues.js";
+import { planyrSyntaxNote } from "./lib/planyrSyntax.js";
 import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
 import { findInconsistencies } from "./lib/formulaConsistency.js";
 import { fillDown, fillTextToCells, replaceAll, replaceInCellText, fillRight, autoSumPlan } from "./lib/sheetOps.js";
@@ -189,6 +191,9 @@ function EmptyProjectState({ onGoDashboard }) {
     </div>
   );
 }
+
+/** What `workbookEval` is while the Univer grid is showing: no values, no trace graph (the regular grid's trace arrows do not run then). */
+const NO_OLD_EVAL = { get: () => ({ get: () => null }), graph: { hopsFor: () => null, dependentsOf: () => new Set() } };
 
 export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
@@ -935,7 +940,9 @@ export default function ModelApp({
   // own formulas included) to be live inputs, not just the one tab the user happens to be
   // looking at. `.get(activeSheetId)` slices out the visible sheet's own results for
   // SheetView/displayFor/etc, which stay unaware anything changed.
-  const workbookEval = useMemo(() => evaluateWorkbook(workbook, { projectNames }), [workbook, projectNames]);
+  // NEW-1 — with the Univer grid showing, Univer's engine is the only evaluator on screen (and for every export), so the older
+  // evaluator is NOT run at all: nothing the Univer path reads comes from it. It still feeds the regular grid until that grid is retired.
+  const workbookEval = useMemo(() => (univerOn ? NO_OLD_EVAL : evaluateWorkbook(workbook, { projectNames })), [workbook, projectNames, univerOn]);
   const evalResult = workbookEval.get(activeEntry.id);
   const totalRows = sheet.rowCount + padRowCount(sheet, 20);
 
@@ -1082,26 +1089,36 @@ export default function ModelApp({
     try {
       const wbNow = workbookForExport();
       if (!wbNow) return;
-      const blob = await exportWorkbookInWorker(wbNow, { projectNames });
+      // NEW-1 — Univer's engine computes the numbers that go into the file (main thread; the writer runs in a worker).
+      const { evaluateForExport } = await import("./lib/univerEval.js");
+      const evaluated = await evaluateForExport(wbNow, { projectNames });
+      const blob = await exportWorkbookInWorker(evaluated.workbook, { projectNames, evaluated });
       downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
+      const note = [planyrSyntaxNote(evaluated.rewritten), circularNotice(evaluated.circular)].filter(Boolean).join(" ");
+      if (note) setFileNotice({ kind: "warn", text: `Exported. ${note}` });
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
     } finally { setFileBusy(false); }
   }, [workbookForExport, currentFileBaseName, projectNames]);
 
-  const onExportCsv = useCallback(() => {
+  const onExportCsv = useCallback(async () => {
     try {
       const wbNow = workbookForExport();
       if (!wbNow) return;
-      // Straight from the flushed workbook when the Univer grid is showing; otherwise exactly what is on screen, as before.
-      const entry = wbNow === workbook ? activeEntry : (wbNow.sheets.find((e) => e.id === activeSheetId) || activeSheetEntry(wbNow));
-      const csv = wbNow === workbook ? sheetToCsv(sheet, evalResult) : sheetToCsv(entry.sheet, evaluateWorkbook(wbNow, { projectNames }).get(entry.id));
+      // NEW-1 — the numbers in the CSV are Univer's (the same engine that draws the grid and fills the Excel file), computed from the
+      // flushed workbook, whichever grid is showing.
+      const { evaluateForExport } = await import("./lib/univerEval.js");
+      const ev = await evaluateForExport(wbNow, { projectNames });
+      const entry = ev.workbook.sheets.find((e) => e.id === activeSheetId) || activeSheetEntry(ev.workbook);
+      const csv = sheetToCsv(entry.sheet, evalFromPlain(ev.values).get(entry.id));
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       downloadBlob(blob, `${sanitizeFilename(entry.name)}.csv`);
+      const note = circularNotice(ev.circular);
+      if (note) setFileNotice({ kind: "warn", text: `Exported. ${note}` });
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to CSV failed: ${e?.message || e}` });
     }
-  }, [workbookForExport, workbook, activeEntry, activeSheetId, sheet, evalResult, projectNames]);
+  }, [workbookForExport, activeSheetId, projectNames]);
 
   const runXlsxImport = useCallback(async (file) => {
     setFileBusy(true);

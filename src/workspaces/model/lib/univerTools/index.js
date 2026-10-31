@@ -224,7 +224,7 @@ export function installUniverTools(deps) {
   const startTrace = (mode) => () => {
     const wb = recompute(); const cell = activeCell();
     if (!wb || !cell) return false;
-    const ev = evaluateWorkbook(wb, { projectNames: getProjectNames ? getProjectNames() : {} });
+    const ev = evaluateWorkbook(wb, { projectNames: getProjectNames ? getProjectNames() : {}, graphOnly: true });   // the graph only — values are Univer's (lib/univerEval.js)
     live.graph = ev.graph;
     const trace = traceFor(state.trace, mode, state.sheetId, cell.row, cell.col, ev.graph);
     const rendered = renderTrace(trace, ev.graph, state.sheetId);

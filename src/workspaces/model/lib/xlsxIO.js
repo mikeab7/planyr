@@ -37,7 +37,9 @@ import {
   SHEET_VERSION, migrateWorkbook, migrateSheet, colLetterName, isFormulaText,
   formatAt, styleAt, cellKey,
 } from "./sheetModel.js";
-import { evaluateWorkbook, formulaSource, literalTypedValue } from "./sheetEngine.js";
+import { formulaSource, literalTypedValue } from "./sheetEngine.js";
+import { evalFromPlain } from "./evalValues.js";
+import { EXCEL_ERROR_CODES } from "./excelErrors.js";
 import { RESERVED_NAME_PREFIXES } from "./namedRanges.js";
 import {
   parseFormula, FUNCTION_NAMES, parseRefText, colNumToLetters, isDate, isErrVal, serialToYMD,
@@ -147,6 +149,10 @@ function sanitizeExcelSheetName(name, used) {
 
 /* ---- EXPORT ----------------------------------------------------------------------------- */
 
+/** A cached error Excel can store. Anything else (Univer's #CYCLE!/#SPILL!/#CALC!, the older engine's #CIRC!) is written as #VALUE! —
+ *  `fullCalcOnLoad` makes Excel recompute it anyway; an unknown code in the file would be a corrupt cell. */
+const excelErrorCode = (code) => (EXCEL_ERROR_CODES.has(code) ? code : "#VALUE!");
+
 function toExcelScalar(v) {
   if (v == null || (typeof v === "object" && v.k === "blank")) return undefined;
   if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") return v;
@@ -238,13 +244,21 @@ function collectWritableKeys(sheet) {
  *  explanation — and a RE-IMPORT of this same file reads it back as the plain value it now is,
  *  never a dead formula pretending to be live (per the build brief's own "make sure a re-import
  *  does not turn a live reference into a dead literal without the user knowing"). */
-export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) {
+export async function exportWorkbookToXlsxBlob(workbookIn, { projectNames, evaluated } = {}) {
+  // NEW-1 — THE VALUES COME FROM UNIVER'S ENGINE (lib/univerEval.js `evaluateForExport`), never from Planyr's older evaluator. The
+  // caller runs it (on the main thread; the client does it for the worker) and hands the answer in: this file runs inside a
+  // Web Worker and must not import Univer. `evaluated.workbook` is the workbook as Univer was handed it — `[Column]` names and
+  // interleaved XIRR pairs already rewritten to Excel syntax — so the formulas written below are formulas Excel understands.
+  if (!evaluated || !evaluated.workbook || !evaluated.values) {
+    throw new Error("exportWorkbookToXlsxBlob needs `evaluated` (lib/univerEval.js evaluateForExport) — the export no longer has an evaluator of its own.");
+  }
+  const workbook = evaluated.workbook;
   const wb = new ExcelJS.Workbook();
   wb.creator = "Planyr";
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true; // a Planyr-computed cached value must never look stale
 
-  const evalResult = evaluateWorkbook(workbook, { projectNames });
+  const evalResult = evalFromPlain(evaluated.values);
   const usedSheetNames = new Set();
   const excelNameById = new Map();
   for (const entry of workbook.sheets) excelNameById.set(entry.id, sanitizeExcelSheetName(entry.name, usedSheetNames));
@@ -289,7 +303,7 @@ export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) 
             if (scalar !== undefined) wsCell.value = scalar;
             valueIsDate = isDate(res.value);
           } else {
-            wsCell.value = { error: (res && res.error) || "#ERROR!" };
+            wsCell.value = { error: excelErrorCode(res && res.error) };
           }
           wsCell.note = `Planyr live reference "=${src}" — frozen to its resolved value on export (Excel has no equivalent live reference).`;
         } else if (res && res.ok) {
@@ -297,7 +311,7 @@ export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) 
           wsCell.value = result === undefined ? { formula: src } : { formula: src, result };
           valueIsDate = isDate(res.value);
         } else {
-          wsCell.value = { formula: src, result: { error: (res && res.error) || "#ERROR!" } };
+          wsCell.value = { formula: src, result: { error: excelErrorCode(res && res.error) } };
         }
       } else if (raw != null && raw !== "") {
         const v = literalTypedValue(raw);

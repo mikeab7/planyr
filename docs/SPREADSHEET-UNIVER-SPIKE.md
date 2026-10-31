@@ -165,7 +165,7 @@ Estimated **12–16 sessions**, in this order — gaps first, because they are w
 4. ~~**Fix the header-drag-moves difference** (0.5)~~ **DONE 2026-10-30 (B2577680).** **Load time: BUILT 2026-10-31 (B2587920), TARGET NOT MET** — see *Load time (cutover step 4)* below.
 5. **Look** (1–3): *header done 2026-10-30 — one flat left-aligned strip with the tab dropdown, curved undo / redo (B2574352 / B2574353); Univer's own toolbar is kept, themed and flattened.* Still open: the formula bar, the sheet-tab strip and any Planyr-only toolbar items other cutover steps add.
 6. ~~**Port the Planyr-only features** (2–3)~~ **DONE 2026-10-31 (B2586720; live V2035776 pending):** consistency flags and panel, trace arrows, command palette, name manager and the colour convention — on Univer's interface.
-7. **One formula engine** (1–2): today Planyr's engine feeds Excel export, the audit tools and the numbers elsewhere; with Univer on screen the two could disagree on edge cases. Pick one and test the Excel export against it.
+7. ~~**One formula engine**~~ **DONE 2026-10-31 (B2585376)** — Univer's engine, run headless (`lib/univerEval.js`), is the only evaluator for the Excel and CSV export and for everything else that reads a computed value; the older engine is deprecated and kept only as the reference the differential tests compare against. See *One formula engine* below.
 8. **Rewrite the tests that read cells off the page** (~2): the canvas has no cells to query; they move to Univer's interface (the parity checklist is the pattern).
 9. **Dogfood, then default on, then delete the old grid** (1–2): `SheetView.jsx`, `sheetModel.js`'s grid parts and the old engine only once nothing reads them.
 
@@ -221,7 +221,7 @@ How an edit travels: Univer edit → `lib/univerSave.js` (debounce 300 ms, the e
 - **Weight and speed to appear:** ~1.8 MB first download (2.5 MB with the formula worker) and ~2 s to show a 1,000-row sheet, against under a second today — *Load time (cutover step 4)* below says what was tried and why the gap is structural.
 - **The Excel keys you just won are mostly *not* there** and would be rebuilt as plugin code — that is the same kind of work as before, just on someone else's foundation.
 - **A canvas grid is invisible to screen readers and to the page-reading tests** the repo relies on.
-- **Two formula engines** until step 7, and a different function set (it is richer, but `[Column]` references and Planyr-only functions are not understood).
+- ~~Two formula engines~~ — closed by step 7 (see *One formula engine*): one evaluator, no Planyr-only function, and the Planyr-only *spellings* are rewritten with a note.
 - **A young, fast-moving dependency** (1.x, many presets and Pro-only extras). Charts, pivots, printing, history and live collaboration are paid; none are needed today, but you asked not to pay, so they are off the table.
 - ~~**It moves columns when you drag a selected header**~~ — fixed (B2577680): a plain drag extends, Shift+drag moves, as in Excel.
 - **The saved format stays Planyr's**, which is the safe choice, but it means every Univer-only feature (rich text in a cell, vertical merges, data validation) has nowhere to live without changing the model.
@@ -237,3 +237,38 @@ How an edit travels: Univer edit → `lib/univerSave.js` (debounce 300 ms, the e
 - Old grid unchanged: `node ui-audit/verify-univer-switch-off-identical.mjs <baseline-url> <branch-url>` and `node ui-audit/verify-spreadsheet-flat-chrome.mjs <url>`
 - Live: `E2E_LOGIN_KEY=… node ui-audit/verify-univer-live.mjs https://planyr.io`
 - Numbers: `node ui-audit/measure-univer-vs-old.mjs --runs 3` (after `npm run build` and `npx vite build --config ui-audit/univer-sandbox/vite.config.mjs`); sizes: the manifest + gzip snippet in this doc's history; budget: `node ui-audit/perf-bundle-audit.mjs --as-pr --compare .perf/base-stats.json`
+
+
+## One formula engine (cutover step 7 — B2585376, 2026-10-31)
+
+**The decision.** Univer's engine (`@univerjs/engine-formula`) runs headless in the browser and in Node, on the *same* Univer workbook the grid mounts, and is the one evaluator. `lib/univerEval.js` returns the older evaluator's shape, so the display helpers, the CSV writer and the Excel writer needed no change beyond where the numbers come from. The Excel writer runs in a Web Worker and never imports Univer: `exportWorkbookInWorker` computes the values on the main thread and hands them in (`lib/evalValues.js` carries them as plain data). With the Univer grid showing, `ModelApp` does not run the older evaluator at all. What stays on the older code, and why: the **parser and reference-rewrite helpers** of `formula.js` (they read formula *text* — the regular grid's copy/insert/delete and the consistency audit — and compute nothing), and `formula.js` itself as the live engine of the **Schedule's and Cost Estimating's formula columns**. The consistency audit and the trace arrows were never value readers (they work on formula text and the dependency graph); `projectRefs.js` / `planRowsSource.js` *supply* the `Site.*` / `Plan.*` / `Comp.*` values and reach Univer as defined names — they evaluate nothing.
+
+**How it was measured** (`node scripts/measure-formula-engines.mjs`; guarded by `test/modelFormulaEnginesAgree.test.js`): 381 formulas — every context-free formula in the older engine's own suite, plus hand-written reference / lookup / finance / text / date blocks covering all 115 functions — through both engines, plus the acquisition pro-forma (3 sheets, names, project names; `test/fixtures/spreadsheet/proFormaWorkbooks.js`), a `[Column]` table, `chart.xlsx` and `legacy.xls`. (`locked.xlsx` is password-protected and cannot be opened by design; `excel-range.html` is clipboard HTML, not a workbook.) **All 115 function names exist in Univer** — there is no Planyr-only function to register. The pro-forma's numbers (PMT, IPMT, CUMIPMT, NPV, IRR, XIRR, XNPV, lookups, cross-sheet) agree with the older engine to 1e-9.
+
+**The disagreement list** (every row is in `test/fixtures/spreadsheet/engineKnownDiffs.json` with its reason; a new difference fails the build, and so does a listed one that stops happening):
+
+| Class | Count | What happens | Disposition |
+|---|---|---|---|
+| Date result is a plain day number | 9 | `=DATE(…)+31`, `=EOMONTH`, `=WORKDAY`, `=DATEVALUE` come back as the day number; Univer attaches a date format only to a few functions | **Accepted.** Same day; the cell's own format shows it; the exported formula is identical so Excel formats it the same way |
+| Too few arguments (`=PMT(0.1,10)`) | 15 | older `#VALUE!`, Univer `#N/A` / `#NUM!` / `#DIV/0!` | **Accepted** — Excel refuses to accept such a formula |
+| Univer evaluates, the older engine errored | 5 | whole-column `SUM(Data!B:B)`, 2-D `INDEX`, arrays inside `SUMPRODUCT`, text counted as 0 by `AVERAGEA` | **Accepted** — Univer matches Excel |
+| A formula pointing at an empty cell | 2 | older: blank; Univer: 0 | **Accepted** — Excel is the spec |
+| Circular reference | 3 | older `#CIRC!`; Univer calculates **0**, silently | **Fixed as a disclosure**: the evaluator lists the cells; the grid shows a notice after the calculation; the exports append it. The cell itself shows 0, as in Excel |
+| Name defined on one sheet, used on another | 1 | older `#NAME?`; Univer resolves it (the Excel file writes workbook-level names anyway) | **Accepted** |
+| Overflow edges (`AVERAGE(1e308,1e308)`, `DATE+1e12`) | 2 | Excel `#NUM!`; engines differ | **Accepted** — unreachable in a model |
+| Range where one value is expected | 2 | older `#VALUE!`; Univer `#SPILL!` (Excel dynamic arrays) | **Accepted** |
+| `DATEDIF(…,"md")` | 1 | engines differ | **Accepted** — Microsoft documents `"md"` as unreliable |
+
+**Found by the measurement and fixed (not just listed):**
+1. **Typed date text was text to Univer.** `1/15/2027`, `2027-01-15` and every date in an imported Excel file made `EDATE`, `XNPV`, `XIRR` and date subtraction answer `#VALUE!`. The bridge now loads such a literal as a real date serial with a date pattern, as Excel does on entry; the exact text rides in the sidecar and the round trip is unchanged. (A date with no year — `1/15` — is deliberately *not* a date: it would mean a different day every January.)
+2. **A minus sign straight before a name** (`=-Rate`, `=-TotalCost`, `=-Site.Acres`, `=2*-Rate`, `=-TRUE`) answers `#NAME?` in Univer 1.3.1 — a pro-forma staple. Rewritten `-(Name)` on load, in the export, and as it is typed (`lib/univerFormulaGuard.js`, a `beforeCommandExecuted` hook on Univer's own set-range-values mutation; one undo step, as typed). `=-B9` and `=-Sheet!B9` already work and are left alone.
+3. **A date-valued project name** (`Comp.*.Date`) became `#N/A` — it is now `DATE(y,m,d)`.
+
+**Planyr-only syntax, which and why** (`lib/planyrSyntax.js`; migrated on load with a visible note, saved as one ordinary edit, and the Excel file carries the rewritten, Excel-valid text — nothing is silently changed, nothing is registered as a custom function because there is no Planyr-only function):
+- `[Column]` / `[@Column]` → the cell in the formula's own row (`D5`), or the whole column (`D:D`) when it is a whole argument in a range slot of SUM / PRODUCT / MIN / MAX / AVERAGE(A) / COUNT(A) / COUNTIF / SUMIF / AVERAGEIF / MATCH / INDEX / XLOOKUP / VLOOKUP / HLOOKUP — exactly what the older engine meant. Excel and Univer have no such syntax and a formula grammar cannot be extended from outside. An unknown column name is left as typed (it was `#REF!` before).
+- Interleaved `XIRR(v1,d1,v2,d2,…)` / `XNPV(rate,v1,d1,v2,d2,…)` → Excel's two-list form with `CHOOSE({1,2,…},v1,v2,…)` (an Excel array constant cannot hold `DATE(…)`; `CHOOSE` with an index array does, in both Excel and Univer — measured, same answer to 1e-9).
+- `=-Name` → `=-(Name)` (fix 2 above).
+
+**Excel export.** Cached values are Univer's; an error code Excel cannot store (`#CYCLE!`, `#SPILL!`, `#CIRC!`) is written `#VALUE!` (Excel recalculates on open — `fullCalcOnLoad`); a formula reading a `Site.*` / `Plan.*` / `Comp.*` name is still frozen to its value with a cell note. Tested by writing the pro-forma, reading it back with ExcelJS and comparing every cached value with Univer's (60+ formulas), plus the `[Column]` table, the interleaved XIRR and the real fixtures. A real-Excel-written pro-forma was not available in the repo; the live arm V2034432 opens an exported file and compares it to the grid.
+
+**Harnesses.** `test/modelFormulaEnginesAgree.test.js` (CI); ui-audit `verify-univer-formula-engine.mjs` (real keystrokes in the real component: load note + saved rewrite, typed `=-Site.Acres`, typed interleaved XIRR, circular notice, known-good arm) — 6/6 on this branch (with the formula Web Worker confirmed running), 1/5 on the pre-worker `origin/main`. Circular cells in the worker-calculated grid are read from Univer's calculation-processing notification, which reaches the page thread; the trace tool asks the older code for its dependency graph only (`evaluateWorkbook({ graphOnly })`).
