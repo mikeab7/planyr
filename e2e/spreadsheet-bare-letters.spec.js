@@ -50,7 +50,7 @@ test.describe("bare letters on the Spreadsheet", () => {
     await page.keyboard.press("Shift+F");
     await expect.poll(() => cellEditorText(page)).toBe("fF");
     await page.keyboard.press("Enter");
-    await expectValue(page, 0, 0, "fG");
+    await expectValue(page, 0, 0, "fF");
     expect(await fsCalls(page)).toBe(0);
   });
 

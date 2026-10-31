@@ -397,7 +397,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await headerMenu(page, "row", 1, "rows above");
     await enter(page, 1, 1, "1000000"); // new row 2: Contingency
     // The Total's SUM formula (now one row down, at B6) must have grown to include the new row.
-    await expectValue(page, 5, 1, 29000001);
+    await expectValue(page, 5, 1, 29000000);
     expect(await formulaOf(page, 5, 1)).toBe("=SUM(B1:B4)");
 
     // Delete that same row back out via the row-header menu.
@@ -418,7 +418,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await expectValue(page, 0, 2, "Amount");
     // The formula that read "B1" must now read "C1" — proven by its VALUE still resolving to "Amount" at its new home (C2).
     await expectValue(page, 1, 2, "Amount");
-    expect(await formulaOf(page, 1, 2)).toBe("=B1");
+    expect(await formulaOf(page, 1, 2)).toBe("=C1");
     await expectValue(page, 0, 1, null, "the new column B is empty");
   });
 
