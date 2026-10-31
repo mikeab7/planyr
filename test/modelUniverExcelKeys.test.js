@@ -160,7 +160,9 @@ describe("wiring facts", () => {
       for (const m of src.matchAll(/from\s+["'](@univerjs\/[^"']+)["']/g)) expect(["@univerjs/presets", "@univerjs/preset-sheets-core"], `${f} imports ${m[1]}`).toContain(m[1]);
     }
     const pkg = JSON.parse(read("package.json")); const all = { ...pkg.dependencies, ...pkg.devDependencies };
-    expect(Object.keys(all).filter((k) => k.startsWith("@univerjs")).sort()).toEqual(["@univerjs/preset-sheets-core", "@univerjs/preset-sheets-filter", "@univerjs/preset-sheets-find-replace", "@univerjs/preset-sheets-sort", "@univerjs/presets"]);
+    // (the four engine packages — core, engine-formula, sheets, sheets-formula — are the headless evaluator's direct imports,
+    //  lib/univerEval.js, NEW-1 B2585376; they were always installed through the presets, now declared; none is imported by this plugin)
+    expect(Object.keys(all).filter((k) => k.startsWith("@univerjs")).sort()).toEqual(["@univerjs/core", "@univerjs/engine-formula", "@univerjs/preset-sheets-core", "@univerjs/preset-sheets-filter", "@univerjs/preset-sheets-find-replace", "@univerjs/preset-sheets-sort", "@univerjs/presets", "@univerjs/sheets", "@univerjs/sheets-formula"]);
   });
   it("only the pure files are Univer-free (so this test can import them)", () => {
     for (const f of ["bindings.js", "dialogs.js", "keyTipsController.js"]) expect(read(`${DIR}/${f}`), f).not.toMatch(/from\s+["']@univerjs\//);
