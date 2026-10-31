@@ -92,7 +92,13 @@ try {
     await page.waitForTimeout(450);
     await page.evaluate((seed) => {
       const api = window.__planyrUniverRead.api(); const ws = api.getActiveWorkbook().getActiveSheet();
-      ws.getRange(0, 0, 60, 14).clear(); ws.setFrozenRows(0); ws.setFrozenColumns(0);
+      // The sandbox reloads the whole workbook between checks; the real page cannot, so EVERYTHING a check can leave behind is
+      // put back here — contents, formats, merges, hidden rows / columns (Ctrl+9 / Ctrl+0 leave them), sizes, filter, freeze.
+      const base = (window.__liveBase = window.__liveBase || { rh: ws.getRowHeight(0), cw: ws.getColumnWidth(0) });
+      ws.getRange(0, 0, 60, 14).breakApart(); ws.getRange(0, 0, 60, 14).clear();
+      ws.showRows(0, 60); ws.showColumns(0, 14); ws.setRowHeights(0, 60, base.rh); ws.setColumnWidths(0, 14, base.cw);
+      try { const f = ws.getFilter(); if (f) f.remove(); } catch (_) { /* none */ }
+      ws.setFrozenRows(0); ws.setFrozenColumns(0);
       seed.forEach((row, r) => row.forEach((v, c) => { const x = ws.getRange(r, c); if (typeof v === "string" && v.startsWith("=")) x.setFormula(v); else x.setValue(/^\d+$/.test(String(v)) ? Number(v) : v); }));
       ws.getRange(0, 1).setFontWeight("bold"); ws.scrollToCell(0, 0); ws.getRange(0, 0).activate();
     }, SEED);
@@ -113,11 +119,12 @@ try {
   if (armSel !== "C3") { voided = true; throw new Error("VOID — coordinates are not trustworthy on the real page"); }
   const ctx = page.context(); await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE }).catch(() => {});
   parityResults.length = 0;
-  for (const c of checks.filter((x) => LIVE_IDS.includes(x.id))) {
+  const ONLY = (process.env.LIVE_ONLY || "").split(",").filter(Boolean);   // debugging: LIVE_ONLY=id,id runs just those
+  for (const c of checks.filter((x) => LIVE_IDS.includes(x.id) && (!ONLY.length || ONLY.includes(x.id)))) {
     try { const r = await c.fn(); record(c.id, c.label, r.status, r.detail); } catch (e) { record(c.id, c.label, "FAIL", "threw: " + String(e.message).split("\n")[0].slice(0, 200)); }
   }
   const liveFails = parityResults.filter((r) => r.status === "FAIL").map((r) => r.id);
-  ok("D1 the keyboard checklist subset ran against the real app", parityResults.length === LIVE_IDS.length, `${parityResults.filter((r) => r.status === "PASS").length} PASS / ${liveFails.length} FAIL / ${parityResults.filter((r) => r.status === "NOT-IN-OSS").length} not-in-OSS`);
+  ok("D1 the keyboard checklist subset ran against the real app", parityResults.length === (ONLY.length || LIVE_IDS.length) && liveFails.length === 0, `${parityResults.filter((r) => r.status === "PASS").length} PASS / ${liveFails.length} FAIL / ${parityResults.filter((r) => r.status === "NOT-IN-OSS").length} not-in-OSS`);
   log.push({ phase: "D", results: parityResults.slice() });
 
   // ── E. persistence through the SAME path ─────────────────────────────────────────────────────────────────────────────────
@@ -128,7 +135,9 @@ try {
   const row1 = await waitCloud((r) => Object.values(r.data?.sheets?.[0]?.sheet?.cells || {}).includes("persist-check-1"));
   ok("E1 a value typed in Univer reached the cloud row (the same model_sheets path as the regular grid)", !!row1 && Object.values(row1.data.sheets[0].sheet.cells).includes("persist-check-1"), `version ${row1?.version}`);
   const saved = row1 && row1.data.sheets[0].sheet;
-  ok("E2 the saved workbook is in Planyr's own shape (stable column ids, raw text, formulas as typed)", !!saved && saved.columns[0].id === "c1" && saved.cells["c1:9"] === "persist-check-1" && saved.cells["c2:2"] === "=A1+A2", saved ? `c1:9=${saved.cells["c1:9"]} c2:2=${saved.cells["c2:2"]}` : "no row");
+  ok("E2 the saved workbook is in Planyr's own shape (stable column ids, raw text, formulas as typed)", !!saved && saved.columns[0].id === "c1" && saved.cells["c1:9"] === "persist-check-1" && saved.cells[`${saved.columns[1].id}:2`] === "=A1+A2", saved ? `c1:9=${saved.cells["c1:9"]} ${saved.columns[1].id}:2=${saved.cells[`${saved.columns[1].id}:2`]} (column ids ${saved.columns.slice(0, 4).map((c) => c.id).join(",")})` : "no row");
+  // (column B's id is read from the saved columns, not assumed "c2": the keyboard checks above delete columns and undo them, and Univer's
+  // undo of a column delete re-inserts the column under a NEW id — the data follows it, so the cell is stored under whatever id B has now.)
   ok("E3 no 'different copy in the cloud' bar appeared", (await page.locator('[data-testid="model-diverged-bar"]').count()) === 0);
   await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
   await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 30000 }); await page.waitForTimeout(1500);
