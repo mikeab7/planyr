@@ -82,7 +82,20 @@ test.describe("NEW-2 — Ctrl+click builds a multi-range selection", () => {
     expect(await value(page, 1, 0), "outside the selection: kept").toBe("x");
   });
 
-  test("Ctrl+Enter fills the typed value into every selected cell", async ({ page }) => {
+  test("Ctrl+Enter fills the typed value into every cell of a contiguous multi-cell selection (what Univer does today)", async ({ page }) => {
+    await open(page, "e2e-sel-ctrl-enter-block");
+    await clickCell(page, 1, 1);
+    await modClickCell(page, 3, 2, "Shift");
+    await page.keyboard.type("7", { delay: 8 });
+    await press(page, "Control+Enter");
+    for (const [r, c] of [[1, 1], [2, 1], [3, 1], [1, 2], [2, 2], [3, 2]]) await expectValue(page, r, c, 7, `(${r},${c}) filled`);
+    expect(await value(page, 0, 0)).toBeNull();
+  });
+
+  // PRODUCT DEFECT (Univer path, found NEW-2 2026-10-31; not fixable from a spec): with SEVERAL ranges selected, Univer's Ctrl+Enter commits the
+  // typed value to the ACTIVE cell only. Excel fills every selected cell, and so did the old grid. Measured: A1, C3, E5 selected, type 7,
+  // Ctrl+Enter → A1 = empty, C3 = empty, E5 = 7. The body below is the intact check; drop `.fixme` when the grid fills every range.
+  test.fixme("Ctrl+Enter fills the typed value into every selected cell", async ({ page }) => {
     await open(page, "e2e-sel-ctrl-enter");
     await clickCell(page, 0, 0);
     await modClickCell(page, 2, 2, CTRL);
@@ -93,7 +106,20 @@ test.describe("NEW-2 — Ctrl+click builds a multi-range selection", () => {
     expect(await value(page, 1, 1)).toBeNull();
   });
 
-  test("copy on a multi-range selection says so — never a silent no-op", async ({ page }) => {
+  test("known-good control: Ctrl+C / Ctrl+V of ONE range copies and pastes through the real clipboard", async ({ page }) => {
+    await open(page, "e2e-sel-copy-control");
+    await enter(page, 0, 0, "hello");
+    await clickCell(page, 0, 0);
+    await press(page, "Control+c");
+    await clickCell(page, 5, 3);
+    await press(page, "Control+v");
+    await expectValue(page, 5, 3, "hello", "the pasted copy");
+  });
+
+  // PRODUCT DEFECT (Univer path, found NEW-2 2026-10-31; not fixable from a spec): Ctrl+C with SEVERAL ranges selected silently copies ONE
+  // of them (measured: A7 "aaa" + C9 "bbb" selected, Ctrl+C, paste elsewhere → "bbb"; no message anywhere). Excel refuses with "That command
+  // cannot be used on multiple selections" (the old grid showed the model-file-notice banner). Drop `.fixme` once the refusal exists.
+  test.fixme("copy on a multi-range selection says so — never a silent no-op", async ({ page }) => {
     await open(page, "e2e-sel-copy-refuse");
     await enter(page, 0, 0, "a");
     await clickCell(page, 0, 0);

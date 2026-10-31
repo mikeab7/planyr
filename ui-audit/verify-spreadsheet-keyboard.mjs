@@ -287,12 +287,9 @@ try {
       await fresh();
       await put(0, 0, "Item"); await put(0, 1, "100"); await put(1, 0, "Total"); await put(1, 1, "=B1*2");
       await select(0, 0, 0, 1);
-      if (process.env.DEBUGERR) console.log("C2dbg0", JSON.stringify({ sel: await selection(page), act: await activeCell(page), focus: await page.evaluate(() => document.activeElement && (document.activeElement.tagName + "." + (document.activeElement.className || "").toString().slice(0, 40))), vals: [await value(page, 0, 0), await value(page, 0, 1)] }));
       await press(page, "Control+b"); await settle(300);
-      if (process.env.DEBUGERR) console.log("C2dbg1", JSON.stringify({ a1: await styleOf(page, 0, 0) }));
       await select(0, 0, 1, 1);
       const srcBold = await bold(0, 0);            // precondition: the bold the paste must carry really is on the source (else this run measured nothing)
-      if (process.env.DEBUGERR) console.log("C2dbg", JSON.stringify({ srcBold, b1: await bold(0, 1), sel: await selection(page) }));
       await press(page, "Control+c"); await settle(500);
       await clickCell(page, 4, 0); await press(page, "Control+v"); await settle(600);
       const got = [await value(page, 4, 0), await value(page, 4, 1), await value(page, 5, 0), await value(page, 5, 1)];

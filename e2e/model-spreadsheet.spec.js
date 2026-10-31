@@ -25,7 +25,7 @@ import {
   CANVAS, openSpreadsheet, armUniverE2E, seedProject, waitForGrid, canvasBox, cellPoint, columnHeaderPoint, rowHeaderPoint,
   clickCell, dblclickCell, rightClickCell, enter, press, value, shown, formulaOf, styleOf, selection, activeCell, sheetNames,
   flushGrid, expectValue, expectShown, inSheet, formulaBarText, nameBoxInput, sheetTabs, cellInk, parkCursor, countPixels,
-  sheetView, modClickCell, fillHandlePoint, clickPlanyrTool, toolsState,
+  sheetView, modClickCell, fillHandlePoint, clickPlanyrTool, toolsState, visiblePoint, clickVisible, visibleColumnHeader, visibleRowHeader,
 } from "./lib/univerGrid.js";
 
 /** Open the Spreadsheet on a throwaway project via the LEGACY /model slug (route.js keeps it as a permanent alias, so every test
@@ -56,11 +56,18 @@ const colWidth = (page, c) => inSheet(page, (api, ws, cc) => ws.getColumnWidth(c
 const frozen = (page) => inSheet(page, (api, ws) => [ws.getFrozenRows(), ws.getFrozenColumns()]);
 
 /** Right-click a row / column header (a REAL right-click at the header's point) and click one of Univer's own menu items. */
-async function headerMenu(page, kind, index, itemText, { exact = false } = {}) {
-  const p = kind === "row" ? await rowHeaderPoint(page, index) : await columnHeaderPoint(page, index);
+async function headerMenu(page, kind, index, itemText) {
+  const p = kind === "row" ? await visibleRowHeader(page, index) : await visibleColumnHeader(page, index);
   await page.mouse.click(p.x, p.y, { button: "right" });
   await page.waitForTimeout(350);
-  await page.getByText(itemText, { exact }).first().click();
+  // Univer's "Insert [1] rows above" row is one button holding a number box; a press on its left label runs it
+  await page.locator("section button").filter({ hasText: itemText }).first().click({ position: { x: 20, y: 10 } });
+  await page.waitForTimeout(450);
+}
+/** Type an address into the Name Box and press Enter. Ctrl+A first: Univer's box keeps the caret where it was clicked (Excel selects it all). */
+async function jumpTo(page, address) {
+  const nb = nameBoxInput(page);
+  await nb.click(); await page.keyboard.press("Control+a"); await page.keyboard.type(address); await page.keyboard.press("Enter");
   await page.waitForTimeout(400);
 }
 /** Right-click a header and leave the menu open; returns the menu's page rectangle (the fixed popup that holds `marker`). */
@@ -291,7 +298,9 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     for (let i = 0; i < 40 && view.r1 < 300; i++) { await wheelGrid(page, 0, 2500); view = await sheetView(page); }
     expect(view.r1, "the wheel really scrolled the grid deep").toBeGreaterThan(300);
     const deepRow = view.r1 + Math.floor((view.r2 - view.r1) / 2);
-    await enter(page, deepRow, 0, "deep-row-marker");
+    await clickVisible(page, deepRow, 0); // the cell as it is on screen NOW (cellPoint is the unscrolled position)
+    expect(await activeCell(page), "control: the click landed on the deep row, not somewhere at the top").toEqual([deepRow, 0]);
+    await page.keyboard.type("deep-row-marker"); await page.keyboard.press("Enter"); await page.waitForTimeout(200);
     await expectValue(page, deepRow, 0, "deep-row-marker");
 
     await page.reload(); // no explicit flush: the page's own pagehide save is part of what this proves
@@ -318,8 +327,7 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     const start = await maxCols(page);
     expect(start).toBeGreaterThanOrEqual(26);
     // Go to the last column by its address, then add two columns to its right with the header's own menu
-    await nameBoxInput(page).click(); await page.keyboard.press("Control+a"); await page.keyboard.type("Z1"); await page.keyboard.press("Enter");
-    await page.waitForTimeout(400);
+    await jumpTo(page, "Z1");
     await headerMenu(page, "col", 25, "cols right");
     await expect.poll(() => maxCols(page)).toBe(start + 1);
     await headerMenu(page, "col", 25, "cols right");
@@ -343,15 +351,15 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
       const v = await sheetView(page);
       expect(v.offX + v.left * 1000, `scroll moved (offset ${v.offX}, first col ${v.left})`).toBeGreaterThan(last.offX + last.left * 1000);
       last = v;
-      const target = 4 + Math.min(v.left, 2); // a column that is on screen at every offset tried
-      const p = await cellPoint(page, 3, target);
+      const target = v.left + 3; // a column that is on screen at every offset tried
+      const p = await visiblePoint(page, 3, target);
       const cv = await canvasBox(page);
       await page.mouse.click(p.x, cv.top + 10); await page.waitForTimeout(200); // the HEADER above that column
       let s = (await selection(page))[0];
       expect([s.c1, s.c2, s.r1], `header at x=${Math.round(p.x)} selects column ${target} (offset ${v.offX})`).toEqual([target, target, 0]);
       await page.mouse.click(p.x, p.y); await page.waitForTimeout(200);       // the CELL under it, same x
       expect(await activeCell(page), `the cell under the same x is in column ${target}`).toEqual([3, target]);
-      const g = await rowHeaderPoint(page, 3);
+      const g = await visibleRowHeader(page, 3);
       await page.mouse.click(g.x, g.y); await page.waitForTimeout(200);       // the gutter label for row 4
       s = (await selection(page))[0];
       expect([s.r1, s.r2], "the row gutter at row 4's height answers to row 4").toEqual([3, 3]);
@@ -433,12 +441,23 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await expect(nameBoxInput(page), "Ctrl+G moves focus to the Name Box so an address can be typed").toBeFocused();
   });
 
+  // Excel selects the Name Box's whole address when it is clicked, so typing replaces it. Univer's box puts the caret where it was clicked
+  // ("A1" + typed "B15" → "A1B15", which is refused). Every other Name Box test here presses Ctrl+A first to stay independent of this.
+  test.fixme("Name Box: clicking it selects its whole address, so typing replaces it (Excel)", async ({ page }) => {
+    await open(page, "e2e-stage1-namebox-click-selects");
+    await nameBoxInput(page).click();
+    await page.keyboard.type("B15");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => activeCell(page), { message: "click, type, Enter lands on B15 (no Ctrl+A needed)" }).toEqual([14, 1]);
+  });
+
   // ⛔ B1290496 — owner report, relayed verbatim: click the Name Box, type "B15", Enter — the selection moves to B15, but typing
   // "987654" + Enter right after did NOTHING because DOM focus was left on <body>. Clicking B15 with the mouse then typing worked.
   test("Name Box: typing right after a jump lands in the target cell, no intervening click needed", async ({ page }) => {
     await open(page, "e2e-stage1-namebox-focus");
     const nameBox = nameBoxInput(page);
     await nameBox.click();
+    await page.keyboard.press("Control+a"); // (see the fixme below: Univer does not select the box's text on click)
     await page.keyboard.type("B15");
     await page.keyboard.press("Enter");
     await expect.poll(() => activeCell(page)).toEqual([14, 1]);
@@ -526,7 +545,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     for (let i = 0; i < 4; i++) await wheelGrid(page, 0, 1500);
     const v = await sheetView(page);
     expect(v.r1, "control: the grid really scrolled deep").toBeGreaterThan(100);
-    await parkCursor(page, v.r1 + 12, 6);
+    await clickVisible(page, v.r1 + 12, 6); // park the outline on a scrolled cell, away from the frozen row
     const after = await cellInk(page, 0, 0);
     const pt = await cellPoint(page, 0, 0), pt0 = before; // row 1 is still at the top of the grid
     expect(after.dark, "the frozen row's text is still painted after the deep scroll").toBeGreaterThan(20);
@@ -790,7 +809,7 @@ test.describe("Model workspace — B1076480 (context-menu positioning, replaceme
       const s = (await selection(page))[0];
       expect([s.r1, s.r2], `the header at frozen row ${r + 1}'s position selects row ${r + 1}`).toEqual([r, r]);
     }
-    await parkCursor(page, v.r1 + 10, 6);
+    await clickVisible(page, v.r1 + 10, v.c1 + 2);
     const after = await cellInk(page, 0, 0);
     expect(after.dark, "the frozen cell is still painted, not overpainted by a scrolled row").toBeGreaterThan(before.dark * 0.8);
     expect(Math.abs(after.left - before.left)).toBeLessThan(2);
