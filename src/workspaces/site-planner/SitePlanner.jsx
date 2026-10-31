@@ -474,6 +474,7 @@ import { resolveSoils } from "./lib/soils.js";
 import { screeningBfeHeadline, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG, bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { noteReadoutDash } from "./lib/readoutDash.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
@@ -14429,12 +14430,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * extrapolated past its own element: no FFE anywhere → "nosurface"; bare ground outside
    * every graded element and its daylight wedge → "outside"; a pond interior → "pond"
    * (that dirt is borrow in the excavation ledger). */
+  /* ROUND 10 (NEW-2b, owner 2026-10-30: "Exist 800.1 · Prop —" with the whole view inside the graded limit): the readout reads the LAST
+   * GOOD surface while a rebuild is in flight or has failed — the picture the owner is looking at is built from it, so the chip must
+   * agree with it. "—" is said only where the surface really has nothing (outside the limit, a pond), never because a rebuild is
+   * pending; and a "—" INSIDE the limit's own regions is reported once (telemetry `grading-readout-dash`) so a recurrence names its
+   * cause instead of waiting to be reproduced. */
+  const lastGridRef = useRef(null);
+  if (gradeSurface && gradeSurface.grid) lastGridRef.current = gradeSurface.grid; else if (!grOn) lastGridRef.current = null;
   const cursorProp = useMemo(() => {
     if (!cursor) return null;
-    if (!gradeSurface || !gradeSurface.grid) return { status: "none", reason: "nosurface" };
-    return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
+    const grid = (gradeSurface && gradeSurface.grid) || (grOn ? lastGridRef.current : null);
+    if (!grid) return { status: "none", reason: "nosurface" };
+    const r = sampleProposedAt(grid, cursor, gsExistAt);
+    if (r && r.status !== "value") noteReadoutDash(grid, cursor, r, !(gradeSurface && gradeSurface.grid));
+    return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, gradeSurface, gsExistKey]);
+  }, [cursor, gradeSurface, gsExistKey, grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
@@ -25611,7 +25622,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
               {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
-                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} /></Suspense>
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;

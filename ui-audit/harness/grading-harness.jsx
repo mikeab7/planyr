@@ -21,6 +21,7 @@ import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } 
 import { buildContours } from "../../src/workspaces/site-planner/lib/contourTrace.js";
 import { clipPolyline } from "../../src/workspaces/site-planner/lib/polylineClip.js";
 import { ringsPathD } from "../../src/workspaces/site-planner/lib/gradingPaint.js";
+import { planAllContourLabels } from "../../src/workspaces/site-planner/lib/contourLabelPlan.js";
 
 const F = "/test/fixtures/chehaw-218-02007";
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
@@ -162,6 +163,19 @@ function Harness({ data }) {
       // about 1 px per foot (the owner's 50-ft scale bar on his screen), the corner near the opposite edge of the canvas
       return sg > 0 ? fitBox(c.x - 500, c.y - 600, c.x + 850, c.y + 360, 0) : fitBox(c.x - 850, c.y - 360, c.x + 500, c.y + 600, 0);
     }
+    // ROUND 10 (NEW-1/NEW-2, owner 2026-10-30 7:11 PM): `court50nw` / `court50se` — the NW / SE corner of the truck court (the far
+    // corner of its outer — trailer — row where one is attached) at about the 50-ft scale bar, the owner's two review views
+    if (zoom === "court50nw" || zoom === "court50se") {
+      const sg = zoom === "court50nw" ? 1 : -1;
+      const courts = els.filter((e) => e.type === "paving" && e.truckCourt || e.type === "trailer");
+      let c = null; for (const e of courts) for (const p of e.ring) if (!c || sg * (p.x + p.y) < sg * (c.x + c.y)) c = p;
+      if (c) return fitBox(c.x - 675, c.y - 480, c.x + 675, c.y + 480, 0);
+    }
+    // ROUND 10 (NEW-1, owner 2026-10-30 7:15 PM): `edge50` — the middle of the LONGEST EASTERN property edge (a straight run of the band) at the 50-ft scale
+    if (zoom === "edge50") {
+      let best = null; for (let i = 0; i < ring.length; i++) { const a = ring[i], c = ring[(i + 1) % ring.length], l = Math.hypot(c.x - a.x, c.y - a.y); const mx = (a.x + c.x) / 2; if (l >= 300 && (!best || mx > best.mx)) best = { mx, my: (a.y + c.y) / 2, l }; }
+      if (best) return fitBox(best.mx - 700, best.my - 500, best.mx + 700, best.my + 500, 0);
+    }
     // NEW-2 (2026-10-30): `south` — the building's south end at working zoom, both south corners in view (the owner's picture)
     if (zoom === "south") { const x0 = Math.min(...bx), x1 = Math.max(...bx), y1 = Math.max(...by); return fitBox(x0, y1 - 150, x1, y1 + 60, 70); }
     // NEW-5 (2026-10-30): `sw250` / `sw50` — a 250-ft / 50-ft wide window on the building's south-west corner (the owner's two review scales), a little of
@@ -174,7 +188,7 @@ function Harness({ data }) {
     return fitBox(Math.min(...rx), Math.min(...ry), Math.max(...rx), Math.max(...ry), 40);
   }, [qs.get("zoom"), els.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // round 8 (perf): a live zoom about the canvas centre — `window.__harness.zoomBy(1.25)` is one wheel-notch-sized step
-  const [zoomMul, setZoomMul] = useState(1);
+  const [zoomMul, setZoomMul] = useState(+(qs.get("zm") || 1));   // ROUND 10: `?zm=` — the 125-ft view is the 50-ft one at 0.4×
   const ppf = frame.ppf * zoomMul;
   const ox = CW / 2 - (CW / 2 - frame.ox) * zoomMul, oy = CH / 2 - (CH / 2 - frame.oy) * zoomMul;
   const f2p = (p) => ({ x: p.x * ppf + ox, y: p.y * ppf + oy });
@@ -206,6 +220,11 @@ function Harness({ data }) {
     return out;
   }, [existing, model && model.contours && model.contours.daylight]); // eslint-disable-line react-hooks/exhaustive-deps
   window.__harnessExisting = existingDrawn;
+  // the canvas as a feet rect, inset by half a label (so a label's whole box stays on the canvas) — what the app's latched cull rect is to the real planner
+  const viewRectFt = useMemo(() => ({ minX: (26 - ox) / ppf, maxX: (CW - 26 - ox) / ppf, minY: (14 - oy) / ppf, maxY: (CH - 14 - oy) / ppf }), [ox, oy, ppf]);
+  // ROUND 10 (NEW-2): the same planner the app's existing-contour layer uses (terrainLayers.allLineLabels) — every existing line in view labelled at working zoom
+  const daylightFt = model && model.contours && model.contours.daylight ? [...model.contours.daylight.rings, ...model.contours.daylight.holes] : [];
+  const existingLabels = useMemo(() => planAllContourLabels(existingDrawn.map((ln, i) => ({ key: `${ln.level}:${i}`, level: ln.level, isIndex: ln.isIndex, text: `${Math.round(ln.level)} ft`, pts: ln.pts })), ppf, { rect: viewRectFt, opts: { keepOut: daylightFt.length ? (x, y) => { for (const r of daylightFt) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length], ax = a.x * ppf, ay = a.y * ppf, dx = b.x * ppf - ax, dy = b.y * ppf - ay, l2 = dx * dx + dy * dy || 1; let t = ((x - ax) * dx + (y - ay) * dy) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t; if (Math.hypot(x - ax - t * dx, y - ay - t * dy) < 16) return true; } return false; } : null } }), [existingDrawn, ppf, viewRectFt, daylightFt.length]);
   return (
     <>
       <div id="panel" style={{ fontSize: 18, width: 300 }}>
@@ -236,9 +255,10 @@ function Harness({ data }) {
         {existingDrawn.length > 0 && (
           <g data-layer="existing-contours" pointerEvents="none">
             {existingDrawn.map((ln, i) => <polyline key={i} data-existing-level={ln.level} points={ln.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={ln.isIndex ? "#5B2E0D" : "#7C3F12"} strokeWidth={ln.isIndex ? 2.2 : 1.1} strokeDasharray="6 5" opacity={0.8} />)}
+                      {existingLabels.map((lb, i) => { const q = f2p(lb.pt); return <text key={"l" + i} data-existing-label={lb.level} data-label-key={lb.key} transform={`translate(${q.x} ${q.y}) rotate(${lb.deg})`} y={3.5} textAnchor="middle" fontSize={10} fontWeight={700} fill="#5B2E0D" stroke="#FFFFFF" strokeWidth={2.5} paintOrder="stroke" style={{ fontFamily: "ui-monospace, monospace" }}>{lb.text}</text>; })}
           </g>
         )}
-        {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} />}
+        {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} viewRect={viewRectFt} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
         {/* NEW-2 / NEW-5: the selected building's edit buttons, drawn the way SitePlanner's sideAddNodes draws them — through the SAME layout
             (lib/buildingButtons.js: every button OUTSIDE its wall, in one row; the grading corner tags are INSIDE the footprint) — on top of the

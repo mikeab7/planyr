@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildProposedSurface, buildProposedSurfaceSteps } from "./proposedSurface.js";
 import { runChunked } from "./runChunked.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 export const DRAG_POLL_MS = 120;
 
@@ -56,7 +57,9 @@ export function useGradeSurface({ inputs, sig, enabled, offRender, isDragging })
     const stale = () => my !== seq.current;
     buildSurfaceOffRender(inRef.current, { isStale: stale, isDragging: () => !!(dragRef.current && dragRef.current()) })
       .then((s) => { if (!stale() && !(s && s.stale)) setBuilt(s || null); })
-      .catch(() => { if (!stale()) setBuilt(null); });
+      // ROUND 10 (LOUD-FAILURE): a build that THROWS used to blank the surface (`setBuilt(null)`) while the grading picture kept
+      // painting its last model — the chip then read "Prop —" under a full picture. Keep the last good surface and say so.
+      .catch((e) => { if (!stale()) reportClientEvent("grading-surface-build-failed", String((e && e.message) || e), { keptPrevious: true }); });
     return () => { seq.current++; };
   }, [sig, offRender, enabled]);
   return offRender ? built : sync;
