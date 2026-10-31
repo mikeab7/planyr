@@ -267,6 +267,14 @@ describe("nothing else computes a value", () => {
     expect(app).not.toMatch(/sheetToCsv\(entry\.sheet, evaluateWorkbook/);
     expect(read("src/workspaces/model/lib/univerEval.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")).not.toMatch(/sheetEngine|evaluateFormula|evaluateWorkbook\(/);
   });
+  it("the headless evaluator never touches a Univer FACADE — in a page that also loaded the grid it asks for a render service the bare instance lacks (measured live, V2034432)", () => {
+    const src = read("src/workspaces/model/lib/univerEval.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    expect(src).not.toMatch(/\/facade["']/);
+    expect(src).not.toMatch(/FUniver|newAPI\(/);
+    expect(src).toMatch(/ICommandService/);                                  // known-good arm: it listens through the command service
+    // …and starts the calculation itself: in a browser the engine's scheduler waits for a 'rendered' stage a bare instance never reaches (measured live)
+    expect(src).toMatch(/executeCommand\(SetFormulaCalculationStartMutation\.id/);
+  });
   it("the older evaluator says it is deprecated and who may still use it", () => {
     expect(read("src/workspaces/model/lib/sheetEngine.js")).toMatch(/DEPRECATED[\s\S]*univerEval/);
     expect(read("src/shared/formula/formula.js")).toMatch(/univerEval[\s\S]*DEPRECATED/);

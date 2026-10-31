@@ -10,6 +10,12 @@
  * `result.get(sheetId).get(row, col) → { ok, value, error, detail } | null` — so `displayFor`, the CSV writer and the
  * export need no change beyond where the numbers come from.
  *
+ * ⛔ NO FACADE (any Univer package's facade entry, `FUniver.newAPI`): the facade builds on every package that happens to be loaded in the page, and
+ * once the grid's chunk (sheets-ui, engine-render) has been loaded alongside it, `newAPI` asks THIS bare instance for services only a
+ * rendering instance has — "[redi]: Expect 1 dependency item(s) for id engine-render.render-manager.service" — and the export fails.
+ * Measured on planyr.io (V2034432); a Node test cannot see it, because Node never loads those packages. This file talks to Univer's
+ * own command service and unit API only.
+ *
  * LAZY BY DESIGN: this is the only non-grid module that imports @univerjs/*, and every caller reaches it through a
  * dynamic `import()` (a first export downloads the engine; nothing eager does). Same exact pin as the grid (1.3.1),
  * open-source packages only, no network, no licence key.
@@ -19,11 +25,10 @@
  *
  * Planyr-only functions (those the older engine had and Univer does not — see CUSTOM_FUNCTIONS below) are registered
  * as custom functions on the headless instance, and on the grid's instance by `registerPlanyrFunctions`. */
-import { Univer, LocaleType, UniverInstanceType } from "@univerjs/core";
-import { FUniver } from "@univerjs/core/facade";
-import "@univerjs/engine-formula/facade";
-import "@univerjs/sheets/facade";
-import { UniverFormulaEnginePlugin, IFormulaRuntimeService } from "@univerjs/engine-formula";
+import { Univer, LocaleType, UniverInstanceType, ICommandService } from "@univerjs/core";
+import {
+  UniverFormulaEnginePlugin, IFormulaRuntimeService, SetFormulaCalculationNotificationMutation, SetFormulaCalculationResultMutation, SetFormulaCalculationStartMutation,
+} from "@univerjs/engine-formula";
 import { UniverSheetsPlugin } from "@univerjs/sheets";
 import { UniverSheetsFormulaPlugin, CalculationMode } from "@univerjs/sheets-formula";
 import { migrateWorkbook } from "./sheetModel.js";
@@ -95,29 +100,39 @@ export async function evaluateWorkbookUniver(workbookIn, { projectNames, timeout
 
   const univer = new Univer({ locale: LocaleType.EN_US });
   try {
-    univer.registerPlugin(UniverFormulaEnginePlugin);
-    univer.registerPlugin(UniverSheetsPlugin);
-    univer.registerPlugin(UniverSheetsFormulaPlugin, { initialFormulaComputing: CalculationMode.FORCED });
-    const api = FUniver.newAPI(univer);
-    const formula = api.getFormula();
+    univer.registerPlugin(UniverFormulaEnginePlugin, { notExecuteFormula: false });
+    univer.registerPlugin(UniverSheetsPlugin, { notExecuteFormula: false });
+    univer.registerPlugin(UniverSheetsFormulaPlugin, { initialFormulaComputing: CalculationMode.FORCED, notExecuteFormula: false });
+    const injector = univer.__getInjector();
+    const commands = injector.get(ICommandService);
     const patterns = new Map();      // "sheetId:r:c" → the engine's own number-format pattern for a date-returning formula
     const results = new Map();       // "sheetId:r:c" → { v, t }
     let finished = null;
     const finish = new Promise((resolve, reject) => { finished = { resolve, reject }; });
     const timer = setTimeout(() => finished.reject(new Error("Univer's formula engine did not report a result in time")), timeoutMs);
-    const sub1 = formula.calculationResultApplied((res) => {
-      const unit = res && res.unitData && res.unitData[data.id];
-      for (const [sheetId, rows] of Object.entries(unit || {})) for (const [r, cols] of Object.entries(rows)) for (const [c, cell] of Object.entries(cols)) {
-        results.set(`${sheetId}:${r}:${c}`, { v: cell.v, t: cell.t });
-        const p = cell.s && cell.s.n && cell.s.n.pattern;
-        if (p) patterns.set(`${sheetId}:${r}:${c}`, p);
+    const sub = commands.onCommandExecuted((command) => {
+      if (command.id === SetFormulaCalculationResultMutation.id) {
+        const unitData = command.params && command.params.unitData && command.params.unitData[data.id];
+        for (const [sheetId, rows] of Object.entries(unitData || {})) for (const [r, cols] of Object.entries(rows)) for (const [c, cell] of Object.entries(cols)) {
+          results.set(`${sheetId}:${r}:${c}`, { v: cell.v, t: cell.t });
+          const p = cell.s && cell.s.n && cell.s.n.pattern;
+          if (p) patterns.set(`${sheetId}:${r}:${c}`, p);
+        }
+      } else if (command.id === SetFormulaCalculationNotificationMutation.id && command.params && command.params.functionsExecutedState === 3 /* SUCCESS */) {
+        setTimeout(() => finished.resolve(), 0);
       }
     });
-    const sub2 = formula.calculationEnd((state) => { if (state === 3 /* SUCCESS */) setTimeout(() => finished.resolve(), 0); });
-    const fWb = api.createWorkbook(data);
+    const unit = univer.createUnit(UniverInstanceType.UNIVER_SHEET, data);
+    // ⛔ Start the calculation OURSELVES. In a BROWSER page the formula scheduler waits for the instance to reach the "rendered" stage before it
+    // starts (in Node it starts at once); this instance has no renderer, so left alone the initial calculation never begins and the export
+    // reports "the formula engine did not report a result" — measured on planyr.io and in the sandbox page (V2034432). Executing the engine's own
+    // start-calculation command goes straight past the scheduler, in Node and in a browser alike.
+    commands.executeCommand(SetFormulaCalculationStartMutation.id, {
+      forceCalculation: true, dirtyRanges: [], dirtyNameMap: {}, dirtyDefinedNameMap: {}, dirtySuperTableMap: {}, dirtyUnitFeatureMap: {}, dirtyUnitOtherFormulaMap: {}, clearDependencyTreeCache: {}, options: {},
+    }, { onlyLocal: true });
     await finish.finally(() => clearTimeout(timer));
     // The snapshot is the authority for a value (the applied message can arrive in pieces); the message supplies the pattern.
-    const snap = fWb.save();
+    const snap = unit.save();
     for (const entry of workbook.sheets) {
       const sheet = snap.sheets[entry.id];
       const store = bySheet.get(entry.id);
@@ -136,7 +151,7 @@ export async function evaluateWorkbookUniver(workbookIn, { projectNames, timeout
         if (entry) circular.push({ sheetId: c.sheetId, sheetName: entry.name, row: c.row, col: c.column });
       }
     } catch (_) { /* a Univer build without the runtime read: circular cells just are not listed */ }
-    sub1.dispose(); sub2.dispose();
+    sub.dispose();
   } finally {
     try { univer.dispose(); } catch (_) { /* already gone */ }
   }

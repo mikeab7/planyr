@@ -65,6 +65,14 @@ check("worker-on", "The grid's formulas are being calculated in the formula Web 
   const urls = page.workers().map((w) => w.url());
   return urls.length >= 1 ? { status: "PASS", detail: `${urls.length} worker(s): ${urls[0].slice(0, 90)}` } : { status: "FAIL", detail: "no Web Worker on the page — the formula worker did not start, so the checks below ran on the page thread" };
 });
+check("export-eval-with-grid", "The headless evaluator the Excel/CSV export uses works in a page where the grid is mounted (it failed on planyr.io with a render-service error when it used Univer's facade)", async () => {
+  await open(columnRefTable());
+  // Vite's dev server re-optimises its dependencies the first time this lazy module is imported and reloads the page: retry once after it.
+  const run = () => ev(async (w) => { try { const x = await window.__evaluateForExport(w, {}); return { ok: true, sheets: Object.keys(x.values).length, cells: Object.values(x.values).reduce((n, t) => n + Object.keys(t).length, 0) }; } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 220) }; } }, columnRefTable());
+  let r;
+  try { r = await run(); } catch (e) { if (!/context was destroyed|navigation/i.test(String(e.message))) throw e; await open(columnRefTable()); r = await run(); }
+  return r.ok && r.cells > 0 ? { status: "PASS", detail: `${r.cells} formula results from ${r.sheets} sheet(s), grid mounted` } : { status: "FAIL", detail: JSON.stringify(r) };
+});
 check("load-rewrite", "A [Column] workbook opens with a plain-words note, the right numbers, and the rewrite SAVED", async () => {
   await open(columnRefTable());
   const d2 = await gridValue(1, 3), e2 = await gridValue(1, 4), n = await notices(), saved = await lastSaved();
