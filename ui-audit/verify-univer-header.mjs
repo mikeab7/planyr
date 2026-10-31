@@ -17,8 +17,8 @@
  *
  * Where it runs:
  *   default         the standalone host (ui-audit/univer-sandbox) — the real <UniverSheet>, no sign-in needed
- *   --live <base>   the real app signed in as the test account (E2E_LOGIN_KEY), is_admin answered `true` for THIS browser only (a
- *                   visibility switch, not a security boundary), on a throwaway project that is deleted and re-read as gone
+ *   --live <base>   the real app signed in as the test account (E2E_LOGIN_KEY) — the Univer grid is the default for every account now, so there is
+ *                   no switch and no is_admin intercept — on a throwaway project that is deleted and re-read as gone
  * Usage: node ui-audit/verify-univer-header.mjs [--live https://planyr.io] [--shots dir] [--json out.json] */
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
@@ -163,18 +163,16 @@ async function main() {
     signed = { PROJECT };
     try {
       await page.addInitScript(() => { window.__PLANYR_E2E = true; });
-      let hits = 0;
-      await page.route("**/rest/v1/rpc/is_admin*", (route) => { hits++; route.fulfill({ status: 200, contentType: "application/json", body: "true" }); });
       await seedThrowawayPlan(page, PROJECT);
-      await page.evaluate(() => localStorage.setItem("planyr:model:univerGrid", "1"));
-      await openLive();
-      ok("KNOWN-GOOD ARM: the is_admin intercept was hit and the Univer grid is on", hits > 0 && (await page.locator('[data-testid="univer-grid"]').count()) === 1, `${hits} hit(s)`);
-      if (!hits) { voided = true; throw new Error("VOID — the intercept never fired"); }
+      await openLive();                                   // the Univer grid is the default for every account (cutover 2026-10-31): no switch, no is_admin intercept
+      const mounted = (await page.locator('[data-testid="univer-grid"]').count()) === 1;
+      ok("KNOWN-GOOD ARM: the Univer grid is on for the (non-admin) test account with nothing set", mounted);
+      if (!mounted) { voided = true; throw new Error("VOID — the Univer grid did not mount by default"); }
       for (const t of themes) await scenarios(t);
     } catch (e) { console.log("ABORT:", String(e.message).split("\n")[0]); failures++; }
     finally {
       try {
-        await page.evaluate(() => { localStorage.removeItem("planyr:model:univerGrid"); localStorage.removeItem("planyr.theme"); }).catch(() => {});
+        await page.evaluate(() => { localStorage.removeItem("planyr.theme"); }).catch(() => {});
         const out = await page.evaluate(async (id) => { const c = window.pfSupabase; await c.from("model_sheets").delete().eq("id", id); return ((await c.from("model_sheets").select("id").eq("id", id)).data || []).length; }, PROJECT);
         const gone = await cleanupLive(page, { planId: PROJECT }).catch((e) => ({ errors: [String(e)] }));
         ok("CLEANUP: the throwaway workbook row and plan are gone (re-read from the database)", out === 0 && !(gone.errors || []).length && gone.left?.site === 0, `model_sheets rows left ${out}; ${JSON.stringify(gone)}`);

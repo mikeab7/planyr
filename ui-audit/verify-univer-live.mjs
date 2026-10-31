@@ -1,13 +1,15 @@
-/* verify-univer-live — the Univer spike on a REAL deploy, signed in as the throwaway test account on a THROWAWAY project
- * (docs/SPREADSHEET-UNIVER-SPIKE.md, V-entry for B2557488). Nothing of the owner's is read or written; everything it makes is
- * deleted and the database is asked again to prove it is gone (owner rule: test artifacts are always cleared).
+/* verify-univer-live — the Univer grid on a REAL deploy, signed in as the throwaway test account on a THROWAWAY project
+ * (docs/SPREADSHEET-UNIVER-SPIKE.md, V-entries for B2557488 and the default-on cutover). Nothing of the owner's is read or written;
+ * everything it makes is deleted and the database is asked again to prove it is gone (owner rule: test artifacts are always cleared).
  *
- *  A  GATE, non-admin side   the test account is NOT an admin (the real is_admin() RPC says false): the File menu has no
- *                            "Try the new grid" row, a stored "on" activates nothing, and no Univer file is ever requested
- *  B  GATE, admin side       is_admin is answered `true` by a network intercept for THIS browser only — the client gate is a
+ *  A  DEFAULT, non-admin     the test account is NOT an admin (the real is_admin() RPC says false): the Spreadsheet tab opens in the
+ *                            Univer grid with NO switch anywhere (no "Try the new grid", no "Use the regular grid"), a stored
+ *                            "regular grid" flag and the retired "Try the new grid" key change nothing, and the old grid is never in the page
+ *  B  HATCH, admin side      is_admin is answered `true` by a network intercept for THIS browser only — the client gate is a
  *                            visibility switch, not a security boundary (data access is still the test account's own, by RLS).
- *                            KNOWN-GOOD ARM: the intercept must actually have been hit, or the run is VOID.
- *  C  MOUNT                  the switch turns the Univer grid on; time from the click to its first readable cell is reported
+ *                            KNOWN-GOOD ARM: the intercept must actually have been hit, or the run is VOID. The File menu then
+ *                            offers "Use the regular grid"; the round trip regular → new grid works and is remembered per device
+ *  C  MOUNT                  the default open: time from navigation to its first readable cell is reported
  *  D  CHECKLIST (subset)     the same real-keystroke checks as verify-univer-parity, run against the real app
  *  E  PERSISTENCE            a value typed in Univer reaches the SAME model_sheets row (cloud) and shows in the regular grid
  *  F  PROJECT NAMES          =Site.Acres and =Plan.Building1.SF typed in the regular grid show the same numbers in Univer
@@ -23,7 +25,8 @@ const args = process.argv.slice(2);
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const JSON_OUT = (() => { const i = args.indexOf("--json"); return i >= 0 ? args[i + 1] : null; })();
 const PROJECT = `${LIVE_PREFIX}univer-${Date.now().toString(36)}`;
-const SWITCH_KEY = "planyr:model:univerGrid";
+const REGULAR_KEY = "planyr:model:regularGrid";   // the owner-only per-device hatch (lib/gridChoice.js): "1" = this device asks for the regular grid
+const LEGACY_KEY = "planyr:model:univerGrid";     // the retired "Try the new grid" key: removed on load, never read for a decision
 let failures = 0, voided = false;
 const ok = (name, cond, extra = "") => { console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
 const log = [];
@@ -46,44 +49,55 @@ try {
   const waitCloud = async (pred, ms = 30000) => { const t0 = Date.now(); for (;;) { const r = await cloudRow(); if (r && pred(r)) return r; if (Date.now() - t0 > ms) return r; await page.waitForTimeout(700); } };
   const openFileMenu = async () => { await page.click('[data-testid="model-file-menu-btn"]'); await page.waitForTimeout(250); };
 
-  // ── A. gate, non-admin ──────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── A. default-on, non-admin ───────────────────────────────────────────────────────────────────────────────────────────────────
   const realAdmin = await page.evaluate(async () => { const r = await window.pfSupabase.rpc("is_admin"); return r.error ? "error:" + r.error.message : r.data; });
   ok("A0 the test account is NOT an admin per the real is_admin() RPC (so the next checks really are the non-admin view)", realAdmin === false, `rpc says ${JSON.stringify(realAdmin)}`);
   if (realAdmin !== false) { voided = true; throw new Error("VOID — the test account answered is_admin = " + JSON.stringify(realAdmin)); }
+  const gridState = async () => ({ univer: await page.locator('[data-testid="univer-grid"] canvas').count(), old: await page.locator('[data-testid="model-sheet"]').count() });
+  const tOpen = Date.now();
   await openSheet();
+  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
+  await page.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); return !!(a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet()); }, null, { timeout: 90000, polling: 25 });
+  const openMs = Date.now() - tOpen;
+  const g0 = await gridState();
+  ok("A1 a NON-ADMIN opens the Spreadsheet in the Univer grid with no switch to find (and the old grid is not in the page)", g0.univer === 1 && g0.old === 0, `univer canvases ${g0.univer}, old-grid nodes ${g0.old}; open → first readable cell ${openMs} ms (network included, plus this harness's fixed 2.5 s settle)`);
   await openFileMenu();
-  ok("A1 the File menu has NO 'Try the new grid' row", (await page.locator('[data-testid="model-univer-switch"]').count()) === 0);
-  ok("A1b …and does have its ordinary rows (known-good arm: the menu really opened)", (await page.locator('[data-testid="model-export-xlsx"]').count()) === 1);
+  ok("A2 the File menu has NO grid switch row (neither wording)", (await page.locator('[data-testid="model-univer-switch"]').count()) === 0 && !/Try the new grid|Use the regular grid|Use the new grid/.test(await page.locator("body").innerText()));
+  ok("A2b …and does have its ordinary rows (known-good arm: the menu really opened)", (await page.locator('[data-testid="model-export-xlsx"]').count()) === 1);
   await page.keyboard.press("Escape");
-  await page.evaluate((k) => localStorage.setItem(k, "1"), SWITCH_KEY);
+  await page.evaluate(([k, l]) => { localStorage.setItem(k, "1"); localStorage.setItem(l, "0"); }, [REGULAR_KEY, LEGACY_KEY]);
   await openSheet();
-  ok("A2 a stored 'on' activates nothing for a non-admin: the regular grid is showing", (await page.locator('[data-testid="model-sheet"]').count()) === 1 && (await page.locator('[data-testid="univer-grid"]').count()) === 0);
-  ok("A3 no Univer file was ever requested by the non-admin view", requested.length === 0, requested.join(", "));
-  await page.evaluate((k) => localStorage.removeItem(k), SWITCH_KEY);
+  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
+  const g1 = await gridState();
+  ok("A3 a stored 'regular grid' flag changes nothing for a non-admin, and the retired 'Try the new grid' key is dropped", g1.univer === 1 && g1.old === 0 && (await page.evaluate((l) => localStorage.getItem(l), LEGACY_KEY)) === null, `univer ${g1.univer}, old ${g1.old}`);
+  ok("A4 Univer's own files were requested by the non-admin view (it IS the grid)", requested.length > 0, `${requested.length} request(s)`);
+  await page.evaluate((k) => localStorage.removeItem(k), REGULAR_KEY);
 
-  // ── B. gate, admin (intercept) ──────────────────────────────────────────────────────────────────────────────────────────
+  // ── B. the owner's hatch (intercept) ───────────────────────────────────────────────────────────────────────────────────────────
   let hits = 0;
   await page.route("**/rest/v1/rpc/is_admin*", (route) => { hits++; route.fulfill({ status: 200, contentType: "application/json", body: "true" }); });
   await openSheet();
+  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
   await openFileMenu();
   ok("B0 KNOWN-GOOD ARM: the is_admin intercept was actually hit", hits > 0, `${hits} hit(s)`);
   if (!hits) { voided = true; throw new Error("VOID — the intercept never fired, so the admin-side checks would prove nothing"); }
-  ok("B1 the File menu now shows 'Try the new grid'", (await page.locator('[data-testid="model-univer-switch"]').innerText().catch(() => "")).includes("Try the new grid"));
-  const before = requested.length;
-
-  // ── C. mount ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  const resBefore = await page.evaluate(() => performance.getEntriesByType("resource").length);
-  const t0 = Date.now();
+  ok("B1 the File menu now shows 'Use the regular grid' (and the grid is still the new one — admins get it by default too)", (await page.locator('[data-testid="model-univer-switch"]').innerText().catch(() => "")).includes("Use the regular grid") && (await gridState()).univer === 1);
+  await page.click('[data-testid="model-univer-switch"]');
+  await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 });
+  ok("B2 'Use the regular grid' shows the old grid, remembered on this device", (await gridState()).univer === 0 && (await page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY)) === "1");
+  await page.reload({ waitUntil: "load" }); await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 });
+  ok("B3 …and a reload keeps the old grid for the owner (per-device hatch)", (await gridState()).univer === 0);
+  await openFileMenu();
+  ok("B4 the same row now reads 'Use the new grid'", (await page.locator('[data-testid="model-univer-switch"]').innerText().catch(() => "")).includes("Use the new grid"));
   await page.click('[data-testid="model-univer-switch"]');
   await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
   await page.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); return !!(a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet()); }, null, { timeout: 90000, polling: 25 });
-  const mountMs = Date.now() - t0;
-  ok("C1 the switch turns the Univer grid on", true, `click → grid ready in ${mountMs} ms (network included)`);
-  ok("C2 Univer's own files were requested only after the switch", requested.length > before, `${requested.length - before} file request(s), first: ${(requested[before] || "").split("/").pop()}`);
-  const dl = await page.evaluate((n) => { const es = performance.getEntriesByType("resource").slice(n); return { files: es.length, bytes: es.reduce((a, e) => a + (e.transferSize || 0), 0), decoded: es.reduce((a, e) => a + (e.decodedBodySize || 0), 0) }; }, resBefore);
-  ok("C2b what the switch downloads on first use (network, compressed)", dl.files > 0, `${dl.files} files, ${(dl.bytes / 1048576).toFixed(2)} MB transferred (${(dl.decoded / 1048576).toFixed(1)} MB once unpacked)`);
-  ok("C3 the choice is remembered on this device", (await page.evaluate((k) => localStorage.getItem(k), SWITCH_KEY)) === "1");
-  ok("C4 the old grid is gone while Univer is on", (await page.locator('[data-testid="model-sheet"]').count()) === 0);
+  ok("B5 'Use the new grid' comes back to Univer and forgets the device choice", (await gridState()).old === 0 && (await page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY)) === null);
+
+  // ── C. the grid the rest of the run uses ──────────────────────────────────────────────────────────────────────────────────────
+  ok("C1 Univer is showing for the checklist (the default; no click needed)", (await gridState()).univer === 1);
+  const dl = await page.evaluate(() => { const es = performance.getEntriesByType("resource"); return { files: es.length, bytes: es.reduce((a, e) => a + (e.transferSize || 0), 0), decoded: es.reduce((a, e) => a + (e.decodedBodySize || 0), 0) }; });
+  ok("C2 what this tab has downloaded in total (network, compressed)", dl.files > 0, `${dl.files} files, ${(dl.bytes / 1048576).toFixed(2)} MB transferred (${(dl.decoded / 1048576).toFixed(1)} MB once unpacked)`);
   await page.waitForTimeout(1500);
 
   // ── D. the checklist subset, real keys on the real app ─────────────────────────────────────────────────────────────────
@@ -142,7 +156,7 @@ try {
   await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
   await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 30000 }); await page.waitForTimeout(1500);
   ok("E4 switching back shows the regular grid with the value Univer saved", (await oldCell(9, 0).innerText()).trim() === "persist-check-1");
-  ok("E5 switching back to the regular grid forgets the choice on this device", (await page.evaluate((k) => localStorage.getItem(k), SWITCH_KEY)) === null);
+  ok("E5 choosing the regular grid is remembered on this device (the owner's hatch)", (await page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY)) === "1");
 
   // ── F. project names ────────────────────────────────────────────────────────────────────────────────────────────────────
   const typeOld = async (r, c, text) => { await oldCell(r, c).click(); await page.keyboard.type(text); await page.keyboard.press("Enter"); };
@@ -238,14 +252,14 @@ try {
   ok("T0 every tools check ran (none silently skipped)", toolRuns.length === TOOL_IDS.length, `${toolRuns.length} of ${TOOL_IDS.length}`);
   log.push({ phase: "T", tools: toolRuns });
 
-  await page.evaluate((k) => localStorage.removeItem(k), SWITCH_KEY);
+  await page.evaluate((k) => localStorage.removeItem(k), REGULAR_KEY);
 } catch (e) {
   console.log("ABORT:", String(e.message).split("\n")[0]);
   failures++;
 } finally {
   // ── G. cleanup + proof ──────────────────────────────────────────────────────────────────────────────────────────────────
   try {
-    await page.evaluate((k) => localStorage.removeItem(k), SWITCH_KEY).catch(() => {});
+    await page.evaluate((k) => localStorage.removeItem(k), REGULAR_KEY).catch(() => {});
     const out = await page.evaluate(async (id) => { const c = window.pfSupabase; await c.from("model_sheets").delete().eq("id", id); return ((await c.from("model_sheets").select("id").eq("id", id)).data || []).length; }, PROJECT);
     const gone = await cleanupLive(page, { planId: PROJECT }).catch((e) => ({ errors: [String(e)] }));
     ok("G1 the throwaway workbook row and plan are gone (re-read from the database)", out === 0 && !(gone.errors || []).length && gone.left?.site === 0, `model_sheets rows left ${out}; ${JSON.stringify(gone)}`);

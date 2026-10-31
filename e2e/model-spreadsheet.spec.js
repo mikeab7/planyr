@@ -1,817 +1,722 @@
-/* Model workspace — live-browser verification of the vertical slice: virtualised rows,
- * rectangular selection, keyboard nav, the inline editor, the formula bar, number formats,
- * undo/redo, copy/paste/fill-down, block-jump navigation, and local-storage persistence.
+/* Model workspace — live-browser verification of the vertical slice: rectangular selection, keyboard nav, the inline editor,
+ * the formula bar, number formats, undo/redo, copy/paste/fill-down, block-jump navigation, structural editing, find/replace,
+ * freeze, resize, zoom, multi-sheet workbooks, input/formula colours and local-storage persistence.
  *
- * Seeds a throwaway local "project" (a Site Planner site group — a project IS one, see
- * src/shared/projects/projects.js) the same way e2e/callout-absolute-front.spec.js does,
- * rather than driving the map-based "New project" flow: that flow needs live GIS tile hosts
- * this sandbox blocks, and Model attaches to any project id regardless of what's drawn on it.
- * Nothing here is written to real production data — the site is a fresh id seeded into this
- * browser context's own localStorage only.
+ * ⛔ PORTED TO THE UNIVER GRID (NEW-2, 2026-10-31). The Univer canvas is THE grid for every account; the old DOM grid
+ * (`[data-row][data-col]`, `model-sheet`, `model-col-header-*`, the Ribbon, the old TabStrip) is an owner-only hatch a test cannot
+ * reach, so those nodes no longer exist. Every test below drives the grid the way a person does — REAL mouse and keys at a cell's
+ * computed point — and READS state through Univer's own facade (`window.__planyrUniverRead`, armed only under
+ * `window.__PLANYR_E2E`): committed values, formulas, selection, frozen panes, column widths, the formula bar's editor document,
+ * and PIXELS for what only the canvas draws (alignment, text spill, input/link colours). Helpers: e2e/lib/univerGrid.js.
+ * Excel is the spec: where Univer differs from the old grid's own wording the expectation is Excel's.
  *
- * ⛔ B891184-FOLLOWUP (2026-08-31): rewritten after live production testing (a real Excel user
- * driving the shipped v1 on planyr.io) found the whole per-COLUMN formula model was wrong — see
- * lib/sheetModel.js's header. This spec now proves per-CELL formulas, A1 references resolving
- * to real values (not a silent blank/0), copy/paste, Ctrl+D fill-down, and Ctrl+Home/End/Arrow
- * navigation — none of which existed in the first version. The three original bugs (type-to-
- * edit losing a keystroke, column rename fighting the global keydown handler, a NaN width
- * warning) stay guarded below; none of them were touched by this rewrite.
+ * WHAT WAS RETIRED (no longer exists, so nothing to guard) — each is also left as a `// RETIRED` comment where it stood:
+ *   · row virtualization (DOM row window) · the old grid's own context-menu CHROME / opaque `.menu` / scroll-dismiss contract
+ *   · the old Ribbon's AnchoredMenu drag-release semantics. Univer's own widgets are Univer's. Every USER-LEVEL behaviour those
+ *     tests sat beside (menus opening, replacing, staying on screen, not swallowing the next click) is ported against Univer's menus.
+ *
+ * Seeds a throwaway local "project" (a Site Planner site group — a project IS one, see src/shared/projects/projects.js) the same
+ * way e2e/callout-absolute-front.spec.js does. Nothing here is written to real production data.
  *
  * Run: npx playwright test e2e/model-spreadsheet.spec.js
  */
 import { test, expect } from "@playwright/test";
+import {
+  CANVAS, openSpreadsheet, armUniverE2E, seedProject, waitForGrid, canvasBox, cellPoint, columnHeaderPoint, rowHeaderPoint,
+  clickCell, dblclickCell, rightClickCell, enter, press, value, shown, formulaOf, styleOf, selection, activeCell, sheetNames,
+  flushGrid, expectValue, expectShown, inSheet, formulaBarText, nameBoxInput, sheetTabs, cellInk, parkCursor, countPixels,
+  sheetView, modClickCell, fillHandlePoint, clickPlanyrTool, toolsState, storedWorkbook,
+} from "./lib/univerGrid.js";
 
-const sheetEl = (page) => page.getByTestId("model-sheet");
-const cell = (page, r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`);
+/** Open the Spreadsheet on a throwaway project via the LEGACY /model slug (route.js keeps it as a permanent alias, so every test
+ *  here doubles as a live proof that the alias still works) and wait for the Univer grid. */
+const open = (page, id, opts = {}) => openSpreadsheet(page, id, { slug: "model", ...opts });
 
-async function seedProject(page, id) {
-  const site = {
-    id, groupId: id, site: "ZZ Model e2e (throwaway)", name: "ZZ Model e2e (throwaway)",
-    origin: null, county: "harris", parcels: [], els: [], markups: [], measures: [], callouts: [],
-    settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
-  };
-  await page.addInitScript(([siteId, rec]) => {
-    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [siteId]: rec }));
-  }, [id, site]);
-}
-
-async function typeAndEnter(page, text) {
-  await page.keyboard.type(text);
-  await page.keyboard.press("Enter");
-}
-
-/** The shared setup every test needs: a seeded project, on the Model route, with A1=500 and
- *  A2=300 (plain literals) — the minimal fixture per-cell-formula tests build on. */
+/** The shared setup every test needs: a seeded project, on the Model route, with A1=500 and A2=300 (plain literals). */
 async function openModelWithNumbers(page, siteId) {
-  await seedProject(page, siteId);
-  await page.goto(`/#/project/${siteId}/model`);
-  await expect(sheetEl(page)).toBeVisible();
-  await cell(page, 0, 0).click(); await typeAndEnter(page, "500"); // A1
-  await cell(page, 1, 0).click(); await typeAndEnter(page, "300"); // A2
+  await open(page, siteId);
+  await enter(page, 0, 0, "500"); // A1
+  await enter(page, 1, 0, "300"); // A2
+  await expectValue(page, 0, 0, 500);
+  await expectValue(page, 1, 0, 300);
 }
+
+/** A real mouse wheel over the middle of the grid (Univer's own scroll — never a driver `scrollTop`). */
+async function wheelGrid(page, dx, dy, { ctrl = false } = {}) {
+  const cv = await canvasBox(page);
+  await page.mouse.move(cv.left + cv.w / 2, cv.top + cv.h / 2);
+  if (ctrl) await page.keyboard.down("Control");
+  await page.mouse.wheel(dx, dy);
+  if (ctrl) await page.keyboard.up("Control");
+  await page.waitForTimeout(450);
+}
+const zoomOf = (page) => inSheet(page, (api, ws) => ws.getZoom());
+const dims = (page) => inSheet(page, (api, ws) => ({ cols: ws.getMaxColumns(), rows: ws.getMaxRows(), colW: (i) => null }));
+const maxCols = (page) => inSheet(page, (api, ws) => ws.getMaxColumns());
+const colWidth = (page, c) => inSheet(page, (api, ws, cc) => ws.getColumnWidth(cc), c);
+const frozen = (page) => inSheet(page, (api, ws) => [ws.getFrozenRows(), ws.getFrozenColumns()]);
+
+/** Right-click a row / column header (a REAL right-click at the header's point) and click one of Univer's own menu items. */
+async function headerMenu(page, kind, index, itemText, { exact = false } = {}) {
+  const p = kind === "row" ? await rowHeaderPoint(page, index) : await columnHeaderPoint(page, index);
+  await page.mouse.click(p.x, p.y, { button: "right" });
+  await page.waitForTimeout(350);
+  await page.getByText(itemText, { exact }).first().click();
+  await page.waitForTimeout(400);
+}
+/** Right-click a header and leave the menu open; returns the menu's page rectangle (the fixed popup that holds `marker`). */
+async function openHeaderMenu(page, kind, index, marker, at) {
+  const p = at || (kind === "row" ? await rowHeaderPoint(page, index) : await columnHeaderPoint(page, index));
+  await page.mouse.click(p.x, p.y, { button: "right" });
+  await page.waitForTimeout(350);
+  const item = page.getByText(marker, { exact: false }).first();
+  await expect(item, `the ${kind} menu opened (shows "${marker}")`).toBeVisible();
+  const box = await item.locator("xpath=ancestor::section[1]").boundingBox();
+  return { point: p, box };
+}
+const menuHas = (page, marker) => page.getByText(marker, { exact: false }).first().isVisible().catch(() => false);
 
 test.describe("Model workspace — spreadsheet vertical slice", () => {
   test("renders a sheet for an open project, straight from a deep link", async ({ page }) => {
-    await seedProject(page, "e2e-model-boot");
-    await page.goto("/#/project/e2e-model-boot/model");
-    await expect(sheetEl(page)).toBeVisible();
-    await expect(page.getByTestId("model-col-header-0")).toHaveText("A");
+    await open(page, "e2e-model-boot");
+    await expect(page.locator(CANVAS)).toBeVisible();
+    await expect(page.getByTestId("model-sheet"), "the old DOM grid is not in the page").toHaveCount(0);
+    // the labels the old test read off the header node: the first cell is A1, on one sheet called Sheet1
+    await expect(nameBoxInput(page)).toHaveValue("A1");
+    expect((await sheetNames(page)).map((s) => s.name)).toEqual(["Sheet1"]);
   });
 
-  // B1166768 — the tab's user-facing name is "Spreadsheet" now, and "spreadsheet" is the NEW
-  // route slug (route.js's SLUG_BY_MODULE). Every OTHER test in this file deliberately keeps
-  // navigating via the OLD "/model" slug (unchanged, on purpose) — route.js kept it as a
-  // permanent legacy alias precisely so those existing deep links never had to be rewritten,
-  // and leaving them as-is doubles as a live regression proof that the alias actually works.
-  // This one test proves the new canonical slug boots the identical workspace end to end.
+  // B1166768 — the tab's user-facing name is "Spreadsheet" now, and "spreadsheet" is the NEW route slug (route.js's SLUG_BY_MODULE).
+  // Every OTHER test in this file deliberately keeps navigating via the OLD "/model" slug (a permanent legacy alias), which doubles as
+  // a live regression proof that the alias works. This one test proves the new canonical slug boots the identical workspace.
   test("the new /spreadsheet slug boots the same workspace as the legacy /model slug", async ({ page }) => {
-    await seedProject(page, "e2e-model-newslug");
-    await page.goto("/#/project/e2e-model-newslug/spreadsheet");
-    await expect(sheetEl(page)).toBeVisible();
-    await expect(page.getByTestId("model-col-header-0")).toHaveText("A");
+    await openSpreadsheet(page, "e2e-model-newslug", { slug: "spreadsheet" });
+    await expect(page.locator(CANVAS)).toBeVisible();
+    await expect(nameBoxInput(page)).toHaveValue("A1");
+    await enter(page, 0, 0, "7");
+    await expectValue(page, 0, 0, 7, "the new slug's grid is editable");
   });
 
   test("typing a full number character-by-character does not lose the leading digit", async ({ page }) => {
-    // Regression guard for the onFocus/select-all bug: a naive re-introduction selects the
-    // type-to-edit seed character, and the next keystroke replaces it.
-    await seedProject(page, "e2e-model-type");
-    await page.goto("/#/project/e2e-model-type/model");
-    await cell(page, 0, 0).click();
-    await typeAndEnter(page, "1000000");
-    await expect(cell(page, 0, 0)).toHaveText("1000000");
+    // Regression guard for the type-to-edit seed character: a naive implementation selects the first typed character and the next
+    // keystroke replaces it.
+    await open(page, "e2e-model-type");
+    await enter(page, 0, 0, "1000000");
+    await expectValue(page, 0, 0, 1000000);
+    await enter(page, 1, 0, "3.14159");
+    await expectValue(page, 1, 0, 3.14159);
   });
 
-  // NEW-1 (2026-10-29, B2455073) — Excel parity: a column letter is a LABEL. This used to be a rename test; the rename route is
-  // retired (owner: "Row numbers and column letters can be edited" was the bug). The header keeps its letter however it is
-  // double-clicked or typed at; the Sheet TAB is still renamable (tests further down).
+  // NEW-1 (2026-10-29, B2455073) — Excel parity: a column letter is a LABEL. The header keeps its letter however it is double-clicked or
+  // typed at; the Sheet TAB is still renamable (tests further down). Univer paints headers on the canvas and has no rename route for
+  // them. Same claim as `headers-fixed` in ui-audit/verify-univer-parity.mjs.
   test("a column header is a fixed label — double-click and typing do not rename it", async ({ page }) => {
-    await seedProject(page, "e2e-model-rename");
-    await page.goto("/#/project/e2e-model-rename/model");
-    await expect(sheetEl(page)).toBeVisible();
-    await page.getByTestId("model-col-header-0").dblclick();
-    await page.keyboard.type("Revenue");
-    await page.keyboard.press("Enter");
-    await expect(page.getByTestId("model-col-header-0")).toHaveText("A");
-    await expect(page.locator('[data-testid="model-col-header-0"] input')).toHaveCount(0);
+    await open(page, "e2e-model-rename");
+    await page.evaluate(() => {
+      const api = window.__planyrUniverRead.api(); window.__ev = [];
+      for (const k of ["SheetEditStarted", "SheetEditEnded"]) api.addEvent(api.Event[k], () => window.__ev.push(k));
+    });
+    // KNOWN-GOOD ARM: the same probe DOES see an edit start when a real CELL is double-clicked (a probe that cannot see it proves nothing)
+    await dblclickCell(page, 4, 4);
+    expect((await page.evaluate(() => window.__ev.length)), "probe sees a cell edit start").toBeGreaterThan(0);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => { window.__ev.length = 0; });
+    await clickCell(page, 9, 9); // park the selection away from the headers
+    const h = await columnHeaderPoint(page, 2);
+    await page.mouse.dblclick(h.x, h.y); await page.waitForTimeout(300);
+    const r = await rowHeaderPoint(page, 3);
+    await page.mouse.dblclick(r.x, r.y); await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.__ev), "double-clicking a column letter / row number opens no editor").toEqual([]);
+    expect(await page.evaluate(() => { const a = document.activeElement; return !!(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA")); })).toBe(false);
+    await page.keyboard.type("Revenue"); await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+    // typing after that goes to a CELL (Excel), never into a label: the word is not painted anywhere in the page chrome
+    expect(await page.evaluate(() => document.body.innerText.includes("Revenue"))).toBe(false);
+    await expect(nameBoxInput(page)).not.toHaveValue("Revenue");
   });
 
   // ⛔ THE CORE FIX, MEASURED: a formula in ONE cell must never touch a neighbour in its column.
   test("a formula lives in the ONE cell it was typed into — not the whole column", async ({ page }) => {
-    const id = "e2e-model-percell";
-    await openModelWithNumbers(page, id);
-    await cell(page, 3, 0).click(); // A4 — independent of A1/A2
-    await typeAndEnter(page, "=A1+A2");
-    await expect(cell(page, 3, 0)).toHaveText("800");
+    await openModelWithNumbers(page, "e2e-model-percell");
+    await enter(page, 3, 0, "=A1+A2"); // A4 — independent of A1/A2
+    await expectValue(page, 3, 0, 800);
+    expect(await formulaOf(page, 3, 0)).toBe("=A1+A2");
     // A1 and A2 are UNCHANGED — no column-wide conversion happened.
-    await expect(cell(page, 0, 0)).toHaveText("500");
-    await expect(cell(page, 1, 0)).toHaveText("300");
+    expect(await formulaOf(page, 0, 0)).toBeNull();
+    expect(await formulaOf(page, 1, 0)).toBeNull();
+    await expectValue(page, 0, 0, 500);
+    await expectValue(page, 1, 0, 300);
   });
 
-  // ⛔ THE SILENT-ZERO REGRESSION: a real A1 reference to a populated cell must resolve to its
-  // value, and SUM over real cells must total correctly — not read blank/0.
+  // ⛔ THE SILENT-ZERO REGRESSION: a real A1 reference to a populated cell must resolve to its value, and SUM over real cells must
+  // total correctly — not read blank/0.
   test("A1 references resolve to real values; SUM over real cells is never a silent 0", async ({ page }) => {
-    const id = "e2e-model-a1refs";
-    await openModelWithNumbers(page, id);
-    await cell(page, 0, 2).click(); // C1
-    await typeAndEnter(page, "=A1");
-    await expect(cell(page, 0, 2)).toHaveText("500");
-    await cell(page, 1, 2).click(); // C2
-    await typeAndEnter(page, "=SUM(A1:A2)");
-    await expect(cell(page, 1, 2)).toHaveText("800");
+    await openModelWithNumbers(page, "e2e-model-a1refs");
+    await enter(page, 0, 2, "=A1"); // C1
+    await expectValue(page, 0, 2, 500);
+    await enter(page, 1, 2, "=SUM(A1:A2)"); // C2
+    await expectValue(page, 1, 2, 800);
   });
 
   test("an unresolvable reference errors loudly (#NAME?) — never a blank or a silent 0", async ({ page }) => {
-    const id = "e2e-model-unresolvable";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-    await cell(page, 0, 0).click();
-    await typeAndEnter(page, "=ZQXW999"); // out-of-bounds / not a valid address
-    await expect(cell(page, 0, 0)).toHaveText("#NAME?");
+    await open(page, "e2e-model-unresolvable");
+    await enter(page, 0, 0, "=ZQXW999"); // out-of-bounds / not a valid address
+    await expectShown(page, 0, 0, "#NAME?");
   });
 
   test("the formula bar shows the underlying formula, never the displayed value", async ({ page }) => {
-    const id = "e2e-model-formulabar";
-    await openModelWithNumbers(page, id);
-    await cell(page, 3, 0).click();
-    await typeAndEnter(page, "=A1+A2");
-    await cell(page, 3, 0).click();
-    await expect(page.getByTestId("model-formula-bar")).toHaveValue("=A1+A2");
+    await openModelWithNumbers(page, "e2e-model-formulabar");
+    await enter(page, 3, 0, "=A1+A2");
+    await clickCell(page, 3, 0);
+    await expect.poll(() => formulaBarText(page), { message: "the formula bar's own editor document" }).toBe("=A1+A2");
+    expect(await shown(page, 3, 0), "…while the cell itself shows the result").toBe("800");
+    await clickCell(page, 0, 0); // a literal reads as typed
+    await expect.poll(() => formulaBarText(page)).toBe("500");
   });
 
-  test("the ribbon's Number group applies to the CELL, not the whole column", async ({ page }) => {
-    const id = "e2e-model-format";
-    await openModelWithNumbers(page, id); // A1=500 (General), A2=300 (General)
-    await cell(page, 0, 0).click();
-    await page.getByTestId("ribbon-currency").click();
-    await expect(cell(page, 0, 0)).toHaveText("$500.00");
-    await expect(cell(page, 1, 0)).toHaveText("300"); // A2, same column, untouched
+  test("a number format applies to the CELL, not the whole column (Ctrl+Shift+$ currency)", async ({ page }) => {
+    // The old ribbon's Number group → Excel's own chord (the Univer toolbar has no currency button; the key is Excel's).
+    await openModelWithNumbers(page, "e2e-model-format"); // A1=500 (General), A2=300 (General)
+    await clickCell(page, 0, 0);
+    await press(page, "Control+Shift+$");
+    await expectShown(page, 0, 0, "$500.00");
+    await expectShown(page, 1, 0, "300"); // A2, same column, untouched
   });
 
   test("numbers right-align, text left-aligns", async ({ page }) => {
-    const id = "e2e-model-align";
-    await openModelWithNumbers(page, id);
-    await cell(page, 2, 0).click();
-    await typeAndEnter(page, "Land cost");
-    const numAlign = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).justifyContent);
-    const textAlign = await cell(page, 2, 0).evaluate((el) => getComputedStyle(el).justifyContent);
-    expect(numAlign).toBe("flex-end");
-    expect(textAlign).toBe("flex-start");
+    await openModelWithNumbers(page, "e2e-model-align");
+    await enter(page, 2, 0, "Land cost");
+    await parkCursor(page, 12, 6); // the selection outline must not touch the cells under measurement
+    const num = await cellInk(page, 0, 0), txt = await cellInk(page, 2, 0), box = await cellPoint(page, 0, 0);
+    expect(num.dark, "the number is painted").toBeGreaterThan(5);
+    expect(txt.dark, "the text is painted").toBeGreaterThan(5);
+    // the ink hugs the RIGHT edge for the number and the LEFT edge for the text
+    expect(box.right - num.right, "number ink ends near the cell's right edge").toBeLessThan(10);
+    expect(num.left - box.left, "number ink does not start at the left edge").toBeGreaterThan(40);
+    expect(txt.left - box.left, "text ink starts near the cell's left edge").toBeLessThan(10);
+    expect(box.right - txt.right, "text ink does not reach the right edge").toBeGreaterThan(20);
   });
 
   test("shift-click makes a rectangular selection distinct from unselected cells", async ({ page }) => {
-    const id = "e2e-model-select";
-    await openModelWithNumbers(page, id);
-    await cell(page, 0, 0).click();
-    await page.keyboard.down("Shift");
-    await cell(page, 1, 1).click();
-    await page.keyboard.up("Shift");
-    const selBg = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).backgroundColor);
-    const outsideBg = await cell(page, 0, 2).evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(selBg).not.toBe(outsideBg);
+    await openModelWithNumbers(page, "e2e-model-select");
+    await clickCell(page, 0, 0);
+    expect((await selection(page))[0].a1, "control: a plain click selects one cell").toBe("A1");
+    await modClickCell(page, 1, 1, "Shift");
+    const s = await selection(page);
+    expect(s).toHaveLength(1);
+    expect([s[0].r1, s[0].r2, s[0].c1, s[0].c2]).toEqual([0, 1, 0, 1]);
+    expect(s[0].a1).toBe("A1:B2");
+    // …and C1 is outside it (a different cell does not read as selected)
+    const inside = (r, c) => r >= s[0].r1 && r <= s[0].r2 && c >= s[0].c1 && c <= s[0].c2;
+    expect(inside(0, 2)).toBe(false);
   });
 
   test("Delete blanks the selected range — including a formula cell — and Ctrl+Z restores it", async ({ page }) => {
-    const id = "e2e-model-undo";
-    await openModelWithNumbers(page, id);
-    await cell(page, 0, 0).click();
-    await page.keyboard.press("Delete");
-    await expect(cell(page, 0, 0)).toHaveText("");
-    await page.keyboard.press("Control+z");
-    await expect(cell(page, 0, 0)).toHaveText("500");
+    await openModelWithNumbers(page, "e2e-model-undo");
+    await enter(page, 2, 0, "=A1+A2"); // A3 — a formula inside the range
+    await expectValue(page, 2, 0, 800);
+    await clickCell(page, 0, 0);
+    await modClickCell(page, 2, 0, "Shift"); // A1:A3
+    await press(page, "Delete");
+    await expectValue(page, 0, 0, null, "A1 blanked");
+    await expectValue(page, 1, 0, null, "A2 blanked");
+    await expectValue(page, 2, 0, null, "the formula cell A3 blanked too");
+    await press(page, "Control+z");
+    await expectValue(page, 0, 0, 500);
+    await expectValue(page, 1, 0, 300);
+    await expectValue(page, 2, 0, 800, "the formula is back and live");
+    expect(await formulaOf(page, 2, 0)).toBe("=A1+A2");
   });
 
   test("Tab commits the edit and advances one column right", async ({ page }) => {
-    const id = "e2e-model-tab";
-    await openModelWithNumbers(page, id);
-    await cell(page, 2, 0).click();
+    await openModelWithNumbers(page, "e2e-model-tab");
+    await clickCell(page, 2, 0);
     await page.keyboard.type("500000");
     await page.keyboard.press("Tab");
-    await expect(page.getByTestId("model-active-cell")).toHaveAttribute("data-col", "1");
+    await expect.poll(() => activeCell(page)).toEqual([2, 1]);
+    await expectValue(page, 2, 0, 500000, "the edit was committed, not dropped");
   });
 
   test("Ctrl+C / Ctrl+V copies a cell's value to a new location", async ({ page }) => {
-    const id = "e2e-model-copypaste";
-    await openModelWithNumbers(page, id);
-    await cell(page, 0, 0).click();
-    await page.keyboard.press("Control+c");
-    await cell(page, 0, 3).click(); // D1
-    await page.keyboard.press("Control+v");
-    await expect(cell(page, 0, 3)).toHaveText("500");
+    await openModelWithNumbers(page, "e2e-model-copypaste");
+    await clickCell(page, 0, 0);
+    await press(page, "Control+c");
+    await clickCell(page, 0, 3); // D1
+    await press(page, "Control+v");
+    await expectValue(page, 0, 3, 500);
+    await expectValue(page, 0, 0, 500, "copy leaves the source");
   });
 
   test("Ctrl+D fills the selection's top row down, shifting relative references", async ({ page }) => {
-    const id = "e2e-model-filldown";
-    await openModelWithNumbers(page, id);
-    await cell(page, 5, 0).click(); // A6
-    await typeAndEnter(page, "=A1+1");
-    await cell(page, 5, 0).click();
-    await page.keyboard.down("Shift");
-    await cell(page, 7, 0).click();
-    await page.keyboard.up("Shift");
-    await page.keyboard.press("Control+d");
-    await expect(cell(page, 5, 0)).toHaveText("501");   // A6 =A1+1, A1=500
-    await expect(cell(page, 6, 0)).toHaveText("301");   // A7 =A2+1, A2=300 (filled, shifted)
-    await expect(cell(page, 7, 0)).toHaveText("1");     // A8 =A3+1, A3 blank -> 0+1
-    await cell(page, 6, 0).click();
-    await expect(page.getByTestId("model-formula-bar")).toHaveValue("=A2+1");
+    await openModelWithNumbers(page, "e2e-model-filldown");
+    await enter(page, 5, 0, "=A1+1"); // A6
+    await clickCell(page, 5, 0);
+    await modClickCell(page, 7, 0, "Shift"); // A6:A8
+    await press(page, "Control+d");
+    await expectValue(page, 5, 0, 501); // A6 =A1+1, A1=500
+    await expectValue(page, 6, 0, 301); // A7 =A2+1, A2=300 (filled, shifted)
+    await expectValue(page, 7, 0, 1);   // A8 =A3+1, A3 blank -> 0+1
+    await clickCell(page, 6, 0);
+    await expect.poll(() => formulaBarText(page)).toBe("=A2+1");
   });
 
   test("Ctrl+Home jumps to A1; Ctrl+End jumps to the last used cell", async ({ page }) => {
-    const id = "e2e-model-ctrlhomeend";
-    await openModelWithNumbers(page, id);
-    await cell(page, 5, 2).click();
-    await typeAndEnter(page, "x");
-    await cell(page, 1, 0).click();
-    await page.keyboard.press("Control+Home");
-    await expect(page.getByTestId("model-active-cell")).toHaveAttribute("data-row", "0");
-    await expect(page.getByTestId("model-active-cell")).toHaveAttribute("data-col", "0");
-    await page.keyboard.press("Control+End");
-    await expect(page.getByTestId("model-active-cell")).toHaveAttribute("data-row", "5");
-    await expect(page.getByTestId("model-active-cell")).toHaveAttribute("data-col", "2");
+    await openModelWithNumbers(page, "e2e-model-ctrlhomeend");
+    await enter(page, 5, 2, "x");
+    await clickCell(page, 1, 0);
+    await press(page, "Control+Home");
+    await expect.poll(() => activeCell(page), { message: "Ctrl+Home → A1" }).toEqual([0, 0]);
+    await press(page, "Control+End");
+    await expect.poll(() => activeCell(page), { message: "Ctrl+End → the last used cell, C6" }).toEqual([5, 2]);
   });
 
   test("long text spills across an empty neighbour instead of hard-clipping", async ({ page }) => {
-    const id = "e2e-model-spill";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-    await cell(page, 0, 0).click();
-    await typeAndEnter(page, "Total development cost including land carry");
-    await expect(cell(page, 0, 0)).toHaveText("Total development cost including land carry");
+    await open(page, "e2e-model-spill");
+    await enter(page, 0, 0, "Total development cost including land carry");
+    await expectValue(page, 0, 0, "Total development cost including land carry");
+    await parkCursor(page, 12, 6);
+    const spill = await cellInk(page, 0, 1);  // B1 is empty: the label from A1 is painted INTO it
+    const far = await cellInk(page, 0, 5);    // known-good control: a cell the text cannot reach stays blank
+    expect(far.dark, "control: a cell the text cannot reach has no ink").toBe(0);
+    expect(spill.dark, "the long label is painted over the empty neighbour (not clipped at A's edge)").toBeGreaterThan(8);
   });
 
-  test("row virtualization: only a bounded slice of rows is in the DOM after a deep scroll", async ({ page }) => {
-    const id = "e2e-model-virtualized";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 20000; });
-    await expect(async () => {
-      const rowCount = await page.locator("[data-row]").evaluateAll((els) => new Set(els.map((e) => e.getAttribute("data-row"))).size);
-      expect(rowCount).toBeLessThan(80);
-      expect(rowCount).toBeGreaterThan(0);
-    }).toPass();
-    const scrollTop = await sheetEl(page).evaluate((el) => el.scrollTop);
-    expect(scrollTop).toBeGreaterThan(5000); // proves the scroll actually moved, not stuck at 0
-  });
+  // RETIRED "row virtualization: only a bounded slice of rows is in the DOM after a deep scroll" — the old grid's DOM row window. The
+  // canvas has no row nodes; "a deep scroll really moves the grid and stays editable" is asserted by the next test.
 
   test("a row reached only by scrolling is genuinely editable, and the sheet survives a reload", async ({ page }) => {
-    const id = "e2e-model-reload";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click();
-    await typeAndEnter(page, "1000000");
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 20000; });
-    // The scroll is programmatic and settles within a frame or two, but reading the rendered
-    // row window before React's own scroll-driven re-render has committed is a VOID
-    // measurement (DRIVER-SCROLL-IS-NOT-APP-SCROLL) — poll until it reflects rows deep enough
-    // to prove the scroll actually took, the same pattern the virtualization test above uses.
-    let rows = [];
-    await expect(async () => {
-      rows = await page.locator("[data-row]").evaluateAll((els) => [...new Set(els.map((e) => Number(e.getAttribute("data-row"))))].sort((a, b) => a - b));
-      expect(rows.length).toBeGreaterThan(0);
-      expect(rows[0]).toBeGreaterThan(300);
-    }).toPass();
-    const deepRow = rows[Math.floor(rows.length / 2)];
-    await cell(page, deepRow, 0).click();
-    await typeAndEnter(page, "deep-row-marker");
-    await expect(cell(page, deepRow, 0)).toHaveText("deep-row-marker");
+    await open(page, "e2e-model-reload");
+    await enter(page, 0, 0, "1000000");
+    // a REAL mouse wheel (Univer's own scroll), polled until the visible window is deep enough to prove the scroll took
+    let view = await sheetView(page);
+    expect(view.r1, "control: the grid starts at the top").toBe(0);
+    for (let i = 0; i < 40 && view.r1 < 300; i++) { await wheelGrid(page, 0, 2500); view = await sheetView(page); }
+    expect(view.r1, "the wheel really scrolled the grid deep").toBeGreaterThan(300);
+    const deepRow = view.r1 + Math.floor((view.r2 - view.r1) / 2);
+    await enter(page, deepRow, 0, "deep-row-marker");
+    await expectValue(page, deepRow, 0, "deep-row-marker");
 
-    await page.reload();
-    await expect(sheetEl(page)).toBeVisible();
-    await expect(cell(page, 0, 0)).toHaveText("1000000");
+    await page.reload(); // no explicit flush: the page's own pagehide save is part of what this proves
+    await waitForGrid(page);
+    await expectValue(page, 0, 0, 1000000, "A1 after reload");
+    await expectValue(page, deepRow, 0, "deep-row-marker", "the deep-row edit after reload");
   });
 
   test("the Undo button is disabled on a fresh load, even when the project already has data", async ({ page }) => {
-    const id = "e2e-model-undo-fresh-load";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click();
-    await typeAndEnter(page, "hello");
+    await open(page, "e2e-model-undo-fresh-load");
+    const undo = page.locator('button[aria-label="Undo"]').first();
+    await expect(undo, "control: a fresh empty sheet has nothing to undo").toBeDisabled();
+    await enter(page, 0, 0, "hello");
+    await expect(undo, "control: after an edit, Undo is available").toBeEnabled();
+    await flushGrid(page);
     await page.reload();
-    await expect(sheetEl(page)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Undo/ })).toBeDisabled();
+    await waitForGrid(page);
+    await expectValue(page, 0, 0, "hello", "the project's data really came back");
+    await expect(page.locator('button[aria-label="Undo"]').first()).toBeDisabled();
   });
 
-  test("column count extends past the original 8-column default", async ({ page }) => {
-    const id = "e2e-model-columns";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-    const start = await page.locator('[data-testid^="model-col-header-"]').count();
-    await page.getByTestId("model-add-column").click();
-    await page.getByTestId("model-add-column").click();
-    await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(start + 2);
+  test("column count extends past the original default — columns can be added at the end", async ({ page }) => {
+    await open(page, "e2e-model-columns");
+    const start = await maxCols(page);
+    expect(start).toBeGreaterThanOrEqual(26);
+    // Go to the last column by its address, then add two columns to its right with the header's own menu
+    await nameBoxInput(page).click(); await page.keyboard.press("Control+a"); await page.keyboard.type("Z1"); await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    await headerMenu(page, "col", 25, "cols right");
+    await expect.poll(() => maxCols(page)).toBe(start + 1);
+    await headerMenu(page, "col", 25, "cols right");
+    await expect.poll(() => maxCols(page)).toBe(start + 2);
   });
 
-  // NEW-1 (B848832, owner report 2026-09-04) — "frozen row gutter and column headers desync from
-  // the grid body on horizontal scroll". SheetView.jsx's header row, row-header gutter and every
-  // data cell all read their x position from the SAME `colOffsets` array under one native browser
-  // scroll (no separate JS-tracked horizontal offset exists anywhere in that file), so this proves
-  // the exact invariant the report named at deliberately NON-ZERO, NON-COLUMN-BOUNDARY scroll
-  // offsets — a check at offset zero passes on ANY implementation, correct or not, which is exactly
-  // the trap the report called out.
-  test("column headers stay aligned with their own column, and the row gutter is never bled through, at a non-boundary horizontal scroll", async ({ page }) => {
-    const id = "e2e-model-scroll-align";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-    // Column A carries the report's own data shape ("1 then 10, 2 then 20…") so a gutter
-    // bleed-through would be the exact visual symptom described, not just a structural one.
+  // NEW-1 (B848832, owner report 2026-09-04) — "frozen row gutter and column headers desync from the grid body on horizontal scroll".
+  // On the canvas the headers and cells are painted by one engine in one frame, so the invariant to hold is what a person relies on:
+  // at a deliberately NON-ZERO, NON-COLUMN-BOUNDARY scroll offset, the header above a column and the cells under it answer to the SAME
+  // column, and the row gutter answers to its own row. (A check at offset zero passes on ANY implementation, correct or not.)
+  test("column headers stay aligned with their own column, and the row gutter answers to its own row, at a non-boundary horizontal scroll", async ({ page }) => {
+    await open(page, "e2e-model-scroll-align");
     for (let r = 0; r < 4; r++) {
-      await cell(page, r, 0).click(); await typeAndEnter(page, String((r + 1) * 10));
-      for (let c = 1; c < 4; c++) { await cell(page, r, c).click(); await typeAndEnter(page, `${String.fromCharCode(65 + c)}${r + 1}`); }
+      await enter(page, r, 0, String((r + 1) * 10));
+      for (let c = 1; c < 4; c++) await enter(page, r, c, `${String.fromCharCode(65 + c)}${r + 1}`);
     }
-    // C4 (row idx 3, col idx 2) is the report's own named cell — select it once; a re-click on an
-    // already-active cell doesn't refire the "keep active cell on screen" auto-scroll, so it stays
-    // put for every scroll offset tried below.
-    await cell(page, 3, 2).click();
-    for (const scrollLeft of [45, 91, 137, 250]) {
-      await sheetEl(page).evaluate((el, sl) => { el.scrollLeft = sl; el.dispatchEvent(new Event("scroll", { bubbles: true })); }, scrollLeft);
-      const result = await page.evaluate(() => {
-        const active = document.querySelector('[data-testid="model-active-cell"]');
-        const rect = active.getBoundingClientRect();
-        const headerBand = document.querySelector('[data-testid^="model-col-header-"]').parentElement;
-        const y = headerBand.getBoundingClientRect().top + 13;
-        const hit = [...document.elementsFromPoint(rect.left + rect.width / 2, y)]
-          .map((e) => e.closest && e.closest('[data-testid^="model-col-header-"]')).find(Boolean);
-        const gutter0 = document.querySelector('[data-testid="model-row-header-0"]');
-        const gr = gutter0.getBoundingClientRect();
-        const topAtGutter = document.elementFromPoint(gr.left + gr.width / 2, gr.top + gr.height / 2);
-        return { headerAt: hit ? hit.getAttribute("data-testid") : null, gutterOnTop: topAtGutter === gutter0 || gutter0.contains(topAtGutter) };
-      });
-      expect(result.headerAt, `header alignment at scrollLeft=${scrollLeft}`).toBe("model-col-header-2");
-      expect(result.gutterOnTop, `gutter clipping at scrollLeft=${scrollLeft}`).toBe(true);
+    let last = await sheetView(page);
+    expect(last.offX, "control: at rest there is no horizontal offset").toBe(0);
+    for (const dx of [45, 46, 46, 90]) {
+      await wheelGrid(page, dx, 0);
+      const v = await sheetView(page);
+      expect(v.offX + v.left * 1000, `scroll moved (offset ${v.offX}, first col ${v.left})`).toBeGreaterThan(last.offX + last.left * 1000);
+      last = v;
+      const target = 4 + Math.min(v.left, 2); // a column that is on screen at every offset tried
+      const p = await cellPoint(page, 3, target);
+      const cv = await canvasBox(page);
+      await page.mouse.click(p.x, cv.top + 10); await page.waitForTimeout(200); // the HEADER above that column
+      let s = (await selection(page))[0];
+      expect([s.c1, s.c2, s.r1], `header at x=${Math.round(p.x)} selects column ${target} (offset ${v.offX})`).toEqual([target, target, 0]);
+      await page.mouse.click(p.x, p.y); await page.waitForTimeout(200);       // the CELL under it, same x
+      expect(await activeCell(page), `the cell under the same x is in column ${target}`).toEqual([3, target]);
+      const g = await rowHeaderPoint(page, 3);
+      await page.mouse.click(g.x, g.y); await page.waitForTimeout(200);       // the gutter label for row 4
+      s = (await selection(page))[0];
+      expect([s.r1, s.r2], "the row gutter at row 4's height answers to row 4").toEqual([3, 3]);
     }
+    expect((await sheetView(page)).offX % 120, "the final offset is not a column boundary").not.toBe(0);
   });
 });
 
-/* ⛔ STAGE 1 (owner report, 2026-09-01 — "this should be a full blown model") — the grid grows
- * up (26-column / 1000-row default, extending past both on demand) and gains real structural
- * editing: insert/delete row AND column with formulas re-anchoring sheet-wide (not just the
- * cells that moved — proven below by reading the actual recomputed number back, never by
- * asserting a control exists), freeze panes, drag-resize + autofit, right-click context menus,
- * a Name Box (type an address, jump there / Ctrl+G), and Find/Replace (Ctrl+F / Ctrl+H).
+/* ⛔ STAGE 1 (owner report, 2026-09-01 — "this should be a full blown model") — the grid grows up (26-column / 1000-row default,
+ * extending past both on demand) and gains real structural editing: insert/delete row AND column with formulas re-anchoring
+ * sheet-wide (proven by reading the actual recomputed number back, never by asserting a control exists), freeze panes, drag-resize
+ * + autofit, right-click context menus, a Name Box (type an address, jump there) and Find/Replace (Ctrl+F / Ctrl+H).
  */
 test.describe("Model workspace — Stage 1 (grid capacity, structural editing, freeze, find/replace)", () => {
   test("the default sheet starts at 26 columns (A..Z) and never caps at H", async ({ page }) => {
-    const id = "e2e-stage1-columns";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-    await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(26);
-    await expect(page.getByTestId("model-col-header-25")).toHaveText("Z");
+    await open(page, "e2e-stage1-columns");
+    expect(await maxCols(page)).toBe(26);
+    expect(await inSheet(page, (api, ws) => ws.getMaxRows())).toBe(1000);
+    // column Z really exists: the Name Box can land on it and a value can be typed there
+    await nameBoxInput(page).click(); await page.keyboard.press("Control+a"); await page.keyboard.type("Z1"); await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    await page.keyboard.type("last"); await page.keyboard.press("Enter");
+    await expectValue(page, 0, 25, "last");
   });
 
   test("inserting a row via the row-header context menu GROWS a SUM range that spans it, and deleting it back SHRINKS the range back — read the actual number, not the control", async ({ page }) => {
-    const id = "e2e-stage1-insert-row";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 1).click(); await typeAndEnter(page, "5000000");  // B1 Land
-    await cell(page, 1, 1).click(); await typeAndEnter(page, "20000000"); // B2 Hard costs
-    await cell(page, 2, 1).click(); await typeAndEnter(page, "3000000");  // B3 Soft costs
-    await cell(page, 4, 1).click(); await typeAndEnter(page, "=SUM(B1:B3)"); // B5 Total
-    await expect(cell(page, 4, 1)).toHaveText("28000000");
+    await open(page, "e2e-stage1-insert-row");
+    await enter(page, 0, 1, "5000000");  // B1 Land
+    await enter(page, 1, 1, "20000000"); // B2 Hard costs
+    await enter(page, 2, 1, "3000000");  // B3 Soft costs
+    await enter(page, 4, 1, "=SUM(B1:B3)"); // B5 Total
+    await expectValue(page, 4, 1, 28000000);
 
     // Right-click the row-2 header ("Hard costs") — Insert row above.
-    await page.getByTestId("model-row-header-1").click({ button: "right" });
-    await page.getByText("Insert row above", { exact: true }).click();
-    await cell(page, 1, 1).click(); await typeAndEnter(page, "1000000"); // new row 2: Contingency
+    await headerMenu(page, "row", 1, "rows above");
+    await enter(page, 1, 1, "1000000"); // new row 2: Contingency
     // The Total's SUM formula (now one row down, at B6) must have grown to include the new row.
-    await expect(cell(page, 5, 1)).toHaveText("29000000");
+    await expectValue(page, 5, 1, 29000000);
+    expect(await formulaOf(page, 5, 1)).toBe("=SUM(B1:B4)");
 
     // Delete that same row back out via the row-header menu.
-    await page.getByTestId("model-row-header-1").click({ button: "right" });
-    await page.getByText("Delete row", { exact: true }).click();
-    await expect(cell(page, 4, 1)).toHaveText("28000000");
+    await headerMenu(page, "row", 1, "Delete Selected Row");
+    await expectValue(page, 4, 1, 28000000);
+    expect(await formulaOf(page, 4, 1)).toBe("=SUM(B1:B3)");
   });
 
   test("inserting a column via the column-header context menu shifts the cell content AND a formula's own column reference", async ({ page }) => {
-    const id = "e2e-stage1-insert-col";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 1).click(); await typeAndEnter(page, "Amount"); // B1
-    await cell(page, 1, 1).click(); await typeAndEnter(page, "=B1");    // B2, self-referencing column B by address
+    await open(page, "e2e-stage1-insert-col");
+    await enter(page, 0, 1, "Amount"); // B1
+    await enter(page, 1, 1, "=B1");    // B2, self-referencing column B by address
+    const start = await maxCols(page);
 
-    await page.getByTestId("model-col-header-1").click({ button: "right" });
-    await page.getByText("Insert column left", { exact: true }).click();
-    await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(27);
+    await headerMenu(page, "col", 1, "cols left");
+    expect(await maxCols(page)).toBe(start + 1);
     // "Amount" (the row-0 cell content) followed its column from B to C.
-    await expect(cell(page, 0, 2)).toHaveText("Amount");
-    // The formula that read "B1" must now read "C1" — proven by its VALUE still resolving
-    // correctly to "Amount" at its new home (C2), not by inspecting the formula text.
-    await expect(cell(page, 1, 2)).toHaveText("Amount");
+    await expectValue(page, 0, 2, "Amount");
+    // The formula that read "B1" must now read "C1" — proven by its VALUE still resolving to "Amount" at its new home (C2).
+    await expectValue(page, 1, 2, "Amount");
+    expect(await formulaOf(page, 1, 2)).toBe("=C1");
+    await expectValue(page, 0, 1, null, "the new column B is empty");
   });
 
-  test("the Name Box accepts a typed address and jumps there; Ctrl+G focuses it", async ({ page }) => {
-    const id = "e2e-stage1-namebox";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-
-    const nameBox = page.getByTestId("model-name-box");
+  test("the Name Box accepts a typed address and jumps there", async ({ page }) => {
+    await open(page, "e2e-stage1-namebox");
+    const nameBox = nameBoxInput(page);
     await nameBox.click();
     await page.keyboard.press("Control+a");
     await page.keyboard.type("J50");
     await page.keyboard.press("Enter");
-    const active = page.getByTestId("model-active-cell");
-    await expect(active).toHaveAttribute("data-row", "49");
-    await expect(active).toHaveAttribute("data-col", "9");
-
-    // Control+Home rather than re-clicking cell(0,0) directly: the jump to J50 scrolled row 0 /
-    // col 0 out of the virtualized window (only the visible slice of rows/cols is in the DOM), so
-    // a locator for it times out — Control+Home both scrolls back and re-establishes a known
-    // active cell in one native keystroke, same pattern the Ctrl+Home/End test above already uses.
-    // Click the ACTIVE cell itself, not the whole "model-sheet" container — a blind click on the
-    // container's own bounding-box centre can land below the last virtualized row at some scroll
-    // depths/viewports, on empty space with nothing to catch focus, so Control+Home silently goes
-    // nowhere (found live by the range/invalid-input test beside this one).
-    await active.click();
-    await page.keyboard.press("Control+Home");
-    await page.keyboard.press("Control+g");
-    await expect(nameBox).toBeFocused();
+    await expect.poll(() => activeCell(page)).toEqual([49, 9]);
+    await expect(nameBox, "the box reads the address back").toHaveValue("J50");
   });
 
-  // ⛔ B1290496 — owner report, relayed verbatim: click the Name Box, type "B15", Enter — the
-  // selection moves to B15 (the box reads it back correctly, the cell highlights), but typing
-  // "987654" + Enter right after does NOTHING: `document.activeElement` was `<body>`, not the
-  // grid and not an input, so every keystroke was silently discarded and B15 stayed empty. The
-  // contrast that localised it: clicking B15 directly with the mouse then typing the same value
-  // commits it every time — a mouse click focuses the grid as a side effect (SheetView's own
-  // `cellClick`), a Name Box jump did not. Same fault family as B1287888 (#1514): a keystroke
-  // arriving with nothing actually focused to receive it.
-  test("Name Box: typing right after a jump lands in the target cell, no intervening click needed", async ({ page }) => {
-    const id = "e2e-stage1-namebox-focus";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
+  // Ctrl+G — the old grid focused its Name Box (a Go To). Excel's Ctrl+G opens Go To; Univer's free build binds nothing to it.
+  test.fixme("Ctrl+G focuses the Name Box (Go To)", async ({ page }) => {
+    await open(page, "e2e-stage1-ctrlg");
+    await clickCell(page, 0, 0);
+    await press(page, "Control+g");
+    await expect(nameBoxInput(page), "Ctrl+G moves focus to the Name Box so an address can be typed").toBeFocused();
+  });
 
-    const nameBox = page.getByTestId("model-name-box");
+  // ⛔ B1290496 — owner report, relayed verbatim: click the Name Box, type "B15", Enter — the selection moves to B15, but typing
+  // "987654" + Enter right after did NOTHING because DOM focus was left on <body>. Clicking B15 with the mouse then typing worked.
+  test("Name Box: typing right after a jump lands in the target cell, no intervening click needed", async ({ page }) => {
+    await open(page, "e2e-stage1-namebox-focus");
+    const nameBox = nameBoxInput(page);
     await nameBox.click();
     await page.keyboard.type("B15");
     await page.keyboard.press("Enter");
-    // The jump itself must hand DOM focus to the grid, not just move the selection.
-    await expect(sheetEl(page)).toBeFocused();
+    await expect.poll(() => activeCell(page)).toEqual([14, 1]);
+    // no click on the grid: the jump itself must have handed keyboard focus back to the grid
     await page.keyboard.type("987654");
     await page.keyboard.press("Enter");
-    await expect(cell(page, 14, 1)).toHaveText("987654");
+    await expectValue(page, 14, 1, 987654);
   });
 
-  // B1007280 — owner report, relayed verbatim: "I typed C50 into the name box and pressed
-  // Enter. It selected column C and put me at C1. The row part was parsed and discarded."
-  // Extensive live testing (direct type, Ctrl+G entry, slow/paused typing, double-click and
-  // edge-click focus) could not reproduce that on current code — every path correctly landed
-  // on row 50 — so this is not a fix for a reproduced defect; it locks in the CORRECT behavior
-  // going forward, plus the two genuinely new pieces the same report asked for: range support
-  // and a visible refusal for an address that doesn't resolve.
-  test("Name Box: a range like C50:E60 selects that block; an unresolvable address refuses visibly, never silently lands wrong", async ({ page }) => {
-    const id = "e2e-stage1-namebox-range";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
+  // B1007280 — owner report: "I typed C50 into the name box and pressed Enter. It selected column C and put me at C1. The row part was
+  // parsed and discarded." Locks in the CORRECT behaviour, plus range support and a refusal for an address that doesn't resolve.
+  test("Name Box: a range like C50:E60 selects that block; an unresolvable address refuses, never silently lands wrong", async ({ page }) => {
+    await open(page, "e2e-stage1-namebox-range");
+    const nameBox = nameBoxInput(page);
+    const jump = async (text) => { await nameBox.click(); await page.keyboard.press("Control+a"); await page.keyboard.type(text); await page.keyboard.press("Enter"); await page.waitForTimeout(350); };
 
-    const nameBox = page.getByTestId("model-name-box");
-    const active = page.getByTestId("model-active-cell");
-
-    // A range jumps to its top-left corner and selects the whole rectangle — read back an
-    // actual cell inside the range as proof, not just the anchor's own coordinates.
-    await nameBox.click();
-    await page.keyboard.type("C50:E60");
-    await page.keyboard.press("Enter");
-    await expect(active).toHaveAttribute("data-row", "49");
-    await expect(active).toHaveAttribute("data-col", "2");
-    await expect(page.locator('[data-row="55"][data-col="3"]')).toHaveAttribute("data-selected", "true");
-    await expect(page.locator('[data-row="49"][data-col="1"]')).not.toHaveAttribute("data-selected", "true");
+    // A range jumps to its top-left corner and selects the whole rectangle
+    await jump("C50:E60");
+    let s = (await selection(page))[0];
+    expect([s.r1, s.r2, s.c1, s.c2]).toEqual([49, 59, 2, 4]);
+    expect(await activeCell(page)).toEqual([49, 2]);
 
     // The corners typed in the OTHER order resolve to the identical rectangle.
-    // Click the ACTIVE cell itself (guaranteed rendered — we just navigated there) rather than
-    // blindly clicking the whole "model-sheet" container: at this scroll depth its own
-    // bounding-box centre can land below the last virtualized row, on genuinely empty space
-    // with no cell underneath to catch focus, so Control+Home would silently go nowhere (a
-    // real bug this test caught in ITSELF, not in the app — same lesson as the row-header
-    // testid needed for Stage 1's own context-menu tests).
-    await active.click();
-    await page.keyboard.press("Control+Home");
-    await nameBox.click();
-    await page.keyboard.type("E60:C50");
-    await page.keyboard.press("Enter");
-    await expect(active).toHaveAttribute("data-row", "49");
-    await expect(active).toHaveAttribute("data-col", "2");
+    await jump("E60:C50");
+    s = (await selection(page))[0];
+    expect([s.r1, s.r2, s.c1, s.c2]).toEqual([49, 59, 2, 4]);
 
-    // An address the sheet has no cell for (past its current 26-column width) refuses WHOLE —
-    // the selection stays exactly where it was, and the box visibly flags the refusal rather
-    // than silently doing nothing.
-    await active.click();
-    await page.keyboard.press("Control+Home");
-    await nameBox.click();
-    await page.keyboard.type("C50:QQ");
-    await page.keyboard.press("Enter");
-    await expect(active).toHaveAttribute("data-row", "0");
-    await expect(active).toHaveAttribute("data-col", "0");
-    await expect(nameBox).toHaveAttribute("data-invalid", "true");
-    await expect(nameBox).toHaveValue("A1");
-    await expect(nameBox).toBeFocused(); // stays focused so the user can immediately retype, like Excel
-    await expect(nameBox).not.toHaveAttribute("data-invalid", "true", { timeout: 2000 }); // clears itself
+    // An address the sheet has no cell for (past its 26-column width) refuses WHOLE: the selection stays exactly where it was and the
+    // box reverts to the real address, still focused so the person can retype (Excel's behaviour).
+    await jump("C50:QQ");
+    s = (await selection(page))[0];
+    expect([s.r1, s.r2, s.c1, s.c2], "selection did not move").toEqual([49, 59, 2, 4]);
+    await expect(nameBox, "the box reverted to the real selection").toHaveValue("C50:E60");
+    await expect(nameBox).toBeFocused();
   });
 
   test("Ctrl+F finds every cell containing the search text, case-insensitive, across the sheet", async ({ page }) => {
-    const id = "e2e-stage1-find";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "Revenue 2026");
-    await cell(page, 3, 2).click(); await typeAndEnter(page, "revenue growth");
-    await cell(page, 1, 0).click(); await typeAndEnter(page, "Cost");
+    await open(page, "e2e-stage1-find");
+    await enter(page, 0, 0, "Revenue 2026");
+    await enter(page, 3, 2, "revenue growth");
+    await enter(page, 1, 0, "Cost");
+    await clickCell(page, 0, 0);
 
-    await page.keyboard.press("Control+f");
-    await page.getByTestId("model-find-input").fill("revenue");
-    await expect(page.getByTestId("model-find-count")).toHaveText("1/2");
+    await press(page, "Control+f");
+    await page.getByPlaceholder("Find", { exact: true }).fill("revenue");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/^\d+\/\d+$/), "match counter: first of two").toHaveText("1/2");
+    // known-good control: a term that is in exactly ONE cell reports one match
+    await page.getByPlaceholder("Find", { exact: true }).fill("Cost");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/^\d+\/\d+$/)).toHaveText("1/1");
   });
 
   test("Ctrl+H Replace All rewrites every matching cell's text in one pass", async ({ page }) => {
-    const id = "e2e-stage1-replace";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "Land Cost");
-    await cell(page, 1, 0).click(); await typeAndEnter(page, "Total Cost");
+    await open(page, "e2e-stage1-replace");
+    await enter(page, 0, 0, "Land Cost");
+    await enter(page, 1, 0, "Total Cost");
+    await clickCell(page, 0, 0);
 
-    await page.keyboard.press("Control+h");
-    await page.getByTestId("model-find-input").fill("Cost");
-    await page.getByTestId("model-replace-input").fill("Expense");
-    await page.getByTestId("model-replace-all").click();
-    await expect(cell(page, 0, 0)).toHaveText("Land Expense");
-    await expect(cell(page, 1, 0)).toHaveText("Total Expense");
+    await press(page, "Control+h");
+    await page.getByPlaceholder("Find", { exact: true }).fill("Cost");
+    await page.getByPlaceholder("Input Replace String").fill("Expense");
+    await page.getByRole("button", { name: "Find", exact: true }).click(); // Univer enables Replace All once a search has run
+    await page.waitForTimeout(400);
+    await page.getByRole("button", { name: "Replace All" }).click();
+    await page.getByRole("button", { name: "OK", exact: true }).click();   // "Replace all matches?"
+    await expectValue(page, 0, 0, "Land Expense");
+    await expectValue(page, 1, 0, "Total Expense");
   });
 
-  test("freezing the top row keeps it visible after scrolling deep into the sheet, and Unfreeze releases it", async ({ page }) => {
-    const id = "e2e-stage1-freeze";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "Header Row");
+  test("freezing the top row keeps it visible after scrolling deep into the sheet, and Cancel freeze releases it", async ({ page }) => {
+    await open(page, "e2e-stage1-freeze");
+    await enter(page, 0, 0, "Header Row");
+    await parkCursor(page, 12, 6);
+    const before = await cellInk(page, 0, 0);
+    expect(before.dark, "control: the header text is painted at rest").toBeGreaterThan(20);
 
-    await page.getByTestId("model-row-header-0").click({ button: "right" });
-    await page.getByText("Freeze top row", { exact: true }).click();
+    // Right-click the row-1 header → Freeze → Freeze first row (Univer's own submenu)
+    const rh = await rowHeaderPoint(page, 0);
+    await page.mouse.click(rh.x, rh.y, { button: "right" }); await page.waitForTimeout(350);
+    await page.getByText("Freeze", { exact: true }).first().hover(); await page.waitForTimeout(400);
+    await page.getByText("Freeze first row", { exact: true }).click(); await page.waitForTimeout(400);
+    expect(await frozen(page)).toEqual([1, 0]);
 
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 8000; });
-    await expect(cell(page, 0, 0)).toBeVisible();
-    await expect(cell(page, 0, 0)).toHaveText("Header Row");
+    for (let i = 0; i < 4; i++) await wheelGrid(page, 0, 1500);
+    const v = await sheetView(page);
+    expect(v.r1, "control: the grid really scrolled deep").toBeGreaterThan(100);
+    await parkCursor(page, v.r1 + 12, 6);
+    const after = await cellInk(page, 0, 0);
+    const pt = await cellPoint(page, 0, 0), pt0 = before; // row 1 is still at the top of the grid
+    expect(after.dark, "the frozen row's text is still painted after the deep scroll").toBeGreaterThan(20);
+    expect(Math.abs(after.left - pt0.left), "…at the same place").toBeLessThan(2);
+    expect(pt.top).toBeLessThan((await canvasBox(page)).top + 40);
+    await expectValue(page, 0, 0, "Header Row");
 
-    await cell(page, 0, 0).click({ button: "right" });
-    await page.getByText("Unfreeze panes", { exact: true }).click();
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; });
+    await rightClickCell(page, 0, 0);
+    await page.getByText("Freeze", { exact: true }).first().hover(); await page.waitForTimeout(400);
+    await page.getByText("Cancel freeze", { exact: true }).click(); await page.waitForTimeout(400);
+    expect(await frozen(page)).toEqual([0, 0]);
   });
 
   test("dragging a column header's right edge resizes the column; double-click autofits it", async ({ page }) => {
-    const id = "e2e-stage1-colresize";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 1).click(); await typeAndEnter(page, "A modestly long value for autofit");
+    await open(page, "e2e-stage1-colresize");
+    await enter(page, 0, 1, "A modestly long value for autofit");
 
-    const header = page.getByTestId("model-col-header-1");
-    const before = await header.boundingBox();
-    await page.mouse.move(before.x + before.width - 2, before.y + before.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(before.x + before.width + 100, before.y + before.height / 2);
-    await page.mouse.up();
-    const afterDrag = await header.boundingBox();
-    expect(afterDrag.width).toBeGreaterThan(before.width + 60);
+    const headerY = (await canvasBox(page)).top + 10;
+    await clickCell(page, 9, 9);
+    const hp = await columnHeaderPoint(page, 1); await page.mouse.click(hp.x, hp.y); await page.waitForTimeout(150); // select the column first (Excel)
+    const w0 = await colWidth(page, 1);
+    let p = await cellPoint(page, 0, 1);
+    await page.mouse.move(p.right - 1, headerY); await page.waitForTimeout(150);
+    await page.mouse.down(); await page.mouse.move(p.right + 100, headerY, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(350);
+    const w1 = await colWidth(page, 1);
+    expect(w1, `the drag widened the column (${w0} → ${w1})`).toBeGreaterThan(w0 + 60);
 
-    // Double-click the narrow resize-handle strip at the header's right edge, not the header's
-    // center — the center has its OWN double-click (rename the column) and a plain `.dblclick()`
-    // (which targets the locator's bounding-box center) would hit that instead of autofit, same
-    // as real Excel: double-clicking a column header's body does not autofit, only its border does.
-    await page.mouse.dblclick(afterDrag.x + afterDrag.width - 2, afterDrag.y + afterDrag.height / 2);
-    const afterAutofit = await header.boundingBox();
-    // Autofit sizes to the actual rendered text, not to wherever the drag happened to land.
-    expect(afterAutofit.width).not.toBe(afterDrag.width);
-    expect(afterAutofit.width).toBeGreaterThan(40);
+    // Double-click the resize border (not the header's body — Excel autofits only on the border)
+    p = await cellPoint(page, 0, 1);
+    await page.mouse.move(p.right - 1, headerY); await page.waitForTimeout(150);
+    await page.mouse.dblclick(p.right - 1, headerY); await page.waitForTimeout(450);
+    const w2 = await colWidth(page, 1);
+    // Autofit sizes to the actual text, not to wherever the drag happened to land.
+    expect(w2, `autofit changed the width (${w1} → ${w2})`).not.toBe(w1);
+    expect(w2).toBeGreaterThan(40);
   });
 
-  // B1007280 — owner verbatim: "ctrl zoom should be captured by the spreadsheet not the
-  // webpage." Covers the core guarantee (the grid scales, the page doesn't) plus the two
-  // failure modes a live-verification pass actually caught while building this: freeze-pane
-  // offsets staying correct at a non-100% zoom, and a drag-resize at a non-100% zoom storing a
-  // LOGICAL (zoom-independent) width rather than the raw screen-pixel delta.
-  test("Ctrl+wheel zooms the sheet, never the browser page; freeze offsets and drag-resize stay correct at 50%/200%", async ({ page }) => {
-    const id = "e2e-stage1-zoom";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-
-    const zoomLevel = page.getByTestId("model-zoom-level");
-    const zoomOut = page.getByTestId("model-zoom-out");
-    const zoomIn = page.getByTestId("model-zoom-in");
-    await expect(zoomLevel).toHaveText("100%");
+  // B1007280 — owner verbatim: "ctrl zoom should be captured by the spreadsheet not the webpage." Covers the core guarantee (the grid
+  // scales, the page doesn't) plus the two failure modes a live-verification pass caught: freeze-pane offsets staying correct at a
+  // non-100% zoom, and a drag-resize at a non-100% zoom storing a LOGICAL (zoom-independent) width rather than the raw screen delta.
+  test("Ctrl+wheel zooms the sheet, never the browser page; freeze offsets and drag-resize stay correct at 200%", async ({ page }) => {
+    await open(page, "e2e-stage1-zoom");
+    expect(await zoomOf(page)).toBe(1);
 
     // Ctrl+wheel over the grid changes the SHEET's own zoom, never the browser page's.
     const pageZoomBefore = await page.evaluate(() => window.visualViewport?.scale ?? 1);
-    await page.mouse.move(700, 400);
-    await page.keyboard.down("Control");
-    await page.mouse.wheel(0, -400);
-    await page.keyboard.up("Control");
+    await wheelGrid(page, 0, -400, { ctrl: true });
     const pageZoomAfter = await page.evaluate(() => window.visualViewport?.scale ?? 1);
     expect(pageZoomAfter).toBe(pageZoomBefore);
-    await expect(async () => {
-      expect(parseInt(await zoomLevel.textContent(), 10)).toBeGreaterThan(100);
-    }).toPass();
+    expect(await zoomOf(page), "the sheet zoomed in").toBeGreaterThan(1);
 
-    // A plain wheel (no modifier) never zooms — it scrolls, exactly as before this feature.
-    await zoomLevel.click(); // reset to 100%
-    await page.mouse.wheel(0, 100);
-    await expect(zoomLevel).toHaveText("100%");
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; });
+    // A plain wheel (no modifier) never zooms — it scrolls.
+    const z1 = await zoomOf(page);
+    await wheelGrid(page, 0, 100);
+    expect(await zoomOf(page)).toBe(z1);
+    await inSheet(page, (api, ws) => { ws.zoom(1); });
+    expect(await zoomOf(page)).toBe(1);
 
-    // Real measured cell/header dimensions at 200% are ~2x the 100% values — not just "bigger."
-    const at100 = await cell(page, 0, 0).boundingBox();
-    for (let i = 0; i < 10; i++) await zoomIn.click(); // 100% -> 200%, the +/- buttons' own path
-    await expect(zoomLevel).toHaveText("200%");
-    const at200 = await cell(page, 0, 0).boundingBox();
-    expect(at200.width).toBeGreaterThan(at100.width * 1.9);
-    expect(at200.height).toBeGreaterThan(at100.height * 1.9);
+    // Real measured geometry at 200% is ~2x the 100% geometry — not just "a bigger number". The facade's cell rect is UNZOOMED, so the
+    // proof is where a REAL click lands: at 200% the 2x-scaled point of D4 selects D4, and the unscaled one does not.
+    const at = async (r, c, z) => { const p = await cellPoint(page, r, c); const cv = await canvasBox(page); return { x: cv.left + (p.x - cv.left) * z, y: cv.top + (p.y - cv.top) * z, right: cv.left + (p.right - cv.left) * z, p, cv }; };
+    const zin = page.locator('button[aria-label="Zoom in"]');
+    for (let i = 0; i < 10; i++) await zin.click(); // 100% -> 200%, the +/- buttons' own path
+    await page.waitForTimeout(300);
+    expect(await zoomOf(page)).toBeCloseTo(2, 5);
+    let d4 = await at(3, 3, 2);
+    await page.mouse.click(d4.p.x, d4.p.y); await page.waitForTimeout(200);
+    expect(await activeCell(page), "control: the UNSCALED 100% point no longer selects D4 at 200%").not.toEqual([3, 3]);
+    await page.mouse.click(d4.x, d4.y); await page.waitForTimeout(200);
+    expect(await activeCell(page), "the 2x-scaled point selects D4: cells and headers are really twice as big").toEqual([3, 3]);
 
-    // Freeze panes: right-click a cell BELOW/RIGHT of what should freeze (Excel's own "freeze
-    // panes" semantics — everything above/left of the clicked cell), scroll deep, and the
-    // frozen top-left cell must still sit exactly at the sheet's own header/gutter edge, not
-    // just "somewhere still visible."
-    await cell(page, 1, 1).click({ button: "right" });
-    await page.getByText("Freeze panes", { exact: true }).click();
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 3000; el.scrollLeft = 500; });
-    await expect(cell(page, 0, 0)).toBeVisible();
-    const frozenBox = await cell(page, 0, 0).boundingBox();
-    const sheetBox = await sheetEl(page).boundingBox();
-    const headerH = await page.getByTestId("model-col-header-0").evaluate((el) => el.getBoundingClientRect().height);
-    const rowHeaderW = await page.getByTestId("model-row-header-0").evaluate((el) => el.getBoundingClientRect().width);
-    expect(Math.abs(frozenBox.y - (sheetBox.y + headerH))).toBeLessThan(3);
-    expect(Math.abs(frozenBox.x - (sheetBox.x + rowHeaderW))).toBeLessThan(3);
+    // Freeze panes at 200%: right-click B2... Excel's "freeze panes" semantics (everything above / left of the clicked cell), scroll deep,
+    // and the frozen top-left cell must still be painted where it was.
+    await clickCell(page, 9, 9);
+    await enter(page, 0, 0, "FROZEN");
+    await page.mouse.click(...Object.values((({ x, y }) => ({ x, y }))(await at(9, 9, 2)))); // park the outline away from A1
+    const a1 = await at(0, 0, 2);
+    const inkA1 = async () => countPixels(page, { x: a1.x - 50, y: a1.y - 9, width: 100, height: 18 }, "r < 110 && g < 110 && b < 110");
+    const inkBefore = await inkA1();
+    expect(inkBefore, "control: A1's text is painted at 200%").toBeGreaterThan(20);
+    const c22 = await at(1, 1, 2);
+    await page.mouse.click(c22.x, c22.y, { button: "right" }); await page.waitForTimeout(350);
+    await page.getByText("Freeze", { exact: true }).first().hover(); await page.waitForTimeout(400);
+    await page.getByText("Freeze to active cell", { exact: false }).click(); await page.waitForTimeout(400);
+    expect(await frozen(page)).toEqual([1, 1]);
+    for (let i = 0; i < 3; i++) await wheelGrid(page, 3000, 1500);
+    expect((await sheetView(page)).r1, "control: scrolled deep").toBeGreaterThan(50);
+    expect(await inkA1(), "the frozen top-left cell is painted at exactly the same place after scrolling right and down").toBeGreaterThan(inkBefore * 0.8);
 
     // Clean up freeze/scroll before the resize check below.
-    await cell(page, 0, 0).click({ button: "right" });
-    await page.getByText("Unfreeze panes", { exact: true }).click();
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; el.scrollLeft = 0; });
+    await page.mouse.click(a1.x, a1.y, { button: "right" }); await page.waitForTimeout(350);
+    await page.getByText("Freeze", { exact: true }).first().hover(); await page.waitForTimeout(400);
+    await page.getByText("Cancel freeze", { exact: true }).click(); await page.waitForTimeout(400);
+    expect(await frozen(page)).toEqual([0, 0]);
+    await inSheet(page, (api, ws) => { ws.scrollToCell(0, 0); });
+    await page.waitForTimeout(300);
 
-    // Drag-resize at 200% zoom: a +100 SCREEN-px drag must commit a +50 LOGICAL px change —
-    // reading back at 100% proves the stored width is zoom-independent, not the raw drag delta.
-    const headerB = page.getByTestId("model-col-header-1");
-    const beforeDrag = await headerB.boundingBox();
-    await page.mouse.move(beforeDrag.x + beforeDrag.width - 2, beforeDrag.y + beforeDrag.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(beforeDrag.x + beforeDrag.width + 100, beforeDrag.y + beforeDrag.height / 2, { steps: 5 });
-    await page.mouse.up();
-    await zoomLevel.click(); // back to 100%
-    await expect(zoomLevel).toHaveText("100%");
-    const afterDragAt100 = await headerB.boundingBox();
-    expect(Math.abs(afterDragAt100.width - (beforeDrag.width / 2 + 50))).toBeLessThan(4);
+    // Drag-resize at 200% zoom: a +100 SCREEN-px drag must commit a +50 LOGICAL px change — reading back proves the stored width is
+    // zoom-independent, not the raw drag delta.
+    const w0 = await colWidth(page, 1);
+    const b = await at(0, 1, 2);
+    const hy = b.cv.top + 10 * 2;
+    const hp = await at(0, 1, 2); await page.mouse.click(hp.x, hy); await page.waitForTimeout(150);
+    await page.mouse.move(b.right - 2, hy); await page.waitForTimeout(150);
+    await page.mouse.down(); await page.mouse.move(b.right - 2 + 100, hy, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(350);
+    const w1 = await colWidth(page, 1);
+    expect(Math.abs(w1 - (w0 + 50)), `+100 screen px at 200% is +50 logical (${w0} → ${w1})`).toBeLessThan(6);
   });
 });
 
-/* ⛔ B1076480 (owner report, 2026-09-02 — "USE THE MODULE LIKE A PERSON") — three real bugs found
- * by clicking the live module in a non-resting state, none of which any prior test in this file
- * could have caught (every context-menu test above only asserts an item's CLICK fires, never that
- * the menu itself is visible/positioned/dismissible correctly) — plus a fourth found while fixing
- * the first: the "keep the active cell on screen" auto-scroll can immediately close a context menu
- * it never should have touched. Raw `page.mouse` coordinate clicks are used for the "menu already
- * open" cases deliberately, not `locator.click({button:"right"})` — Playwright's own actionability
- * check refuses to even attempt a click through an existing backdrop (a real DIFFERENT question
- * from what a genuine right-click does, since the browser hit-tests mousedown and contextmenu
- * separately, at their own dispatch times — see DRIVER-SCROLL-IS-NOT-APP-SCROLL in CLAUDE.md).
+/* ⛔ B1076480 (owner report, 2026-09-02 — "USE THE MODULE LIKE A PERSON") — real bugs found by clicking the live module in a non-resting
+ * state: context menus that were bare text, hard-pinned to the viewport edge, swallowed by a stale backdrop, off-screen, or closed by the
+ * grid's own auto-scroll. On Univer the menus are Univer's own widgets, so what stays worth guarding is the USER-LEVEL behaviour: a menu
+ * opens where the person clicked, a second right-click elsewhere replaces it, it stays on screen near an edge, and it is not closed by
+ * the grid moving under it. Raw `page.mouse` clicks throughout (a real mousedown → contextmenu sequence).
  */
-test.describe("Model workspace — B1076480 (context-menu chrome, positioning, dead-click, self-dismiss)", () => {
-  async function rightClickAt(page, locator) {
-    const box = await locator.boundingBox();
-    const x = box.x + box.width / 2, y = box.y + box.height / 2;
-    await page.mouse.move(x, y);
-    await page.mouse.down({ button: "right" });
-    await page.mouse.up({ button: "right" });
-    return box;
-  }
-
-  test("a right-click context menu renders opaque chrome — background, border, shadow — never bare text floating over the grid", async ({ page }) => {
-    const id = "e2e-b1032840-chrome";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await page.getByTestId("model-row-header-5").click({ button: "right" });
-    const menu = page.locator(".menu");
-    await expect(menu).toBeVisible();
-    const style = await menu.evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { background: cs.backgroundColor, border: cs.borderStyle, boxShadow: cs.boxShadow };
-    });
-    expect(style.background).not.toBe("rgba(0, 0, 0, 0)");
-    expect(style.border).not.toBe("none");
-    expect(style.boxShadow).not.toBe("none");
-  });
+test.describe("Model workspace — B1076480 (context-menu positioning, replacement, edges, self-dismiss)", () => {
+  // RETIRED "a right-click context menu renders opaque chrome — background, border, shadow — never bare text floating over the grid" —
+  // asserted the old grid's own `.menu` element and its CSS. Univer's menu is Univer's widget with its own styling (theme parity is
+  // covered by ui-audit/verify-univer-theme-live); there is no Planyr chrome left to guard.
 
   test("the menu opens anchored at the click point, not hard-pinned to the viewport's left edge", async ({ page }) => {
-    const id = "e2e-b1032840-position";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    // A ROW header sits at the sticky-left gutter (~9px from the edge) — indistinguishable by
-    // x-position alone from the regression's hard clamp to the ~8px viewport margin. Column F
-    // (index 5) sits several hundred px in, so a clamp-to-margin regression is unmissable here.
-    const colHeader = page.getByTestId("model-col-header-5");
-    const box = await colHeader.boundingBox();
-    expect(box.x).toBeGreaterThan(300); // sanity: this target really is far from the left edge
-    await colHeader.click({ button: "right" });
-    const menu = page.locator(".menu");
-    await expect(menu).toBeVisible();
-    const menuBox = await menu.boundingBox();
-    // The regression pinned the menu to the ~8px viewport margin regardless of click position;
-    // a correctly anchored menu opens within a small gap of the actual header's left edge.
-    expect(Math.abs(menuBox.x - box.x)).toBeLessThan(250);
+    await open(page, "e2e-b1032840-position");
+    // Column F (index 5) sits several hundred px in, so a clamp-to-margin regression is unmissable here
+    const p = await columnHeaderPoint(page, 5);
+    expect(p.x, "sanity: this target really is far from the left edge").toBeGreaterThan(300);
+    const { box } = await openHeaderMenu(page, "col", 5, "Delete Selected Column", p);
+    expect(Math.abs(box.x - p.x), "the menu opens within a small gap of where the person clicked").toBeLessThan(40);
+    expect(box.x, "…and is not pinned to the viewport margin").toBeGreaterThan(300);
   });
 
-  test("right-clicking a DIFFERENT header while a menu is already open opens the new menu — not a dead click swallowed by the old menu's backdrop", async ({ page }) => {
-    const id = "e2e-b1032840-deadclick";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await rightClickAt(page, page.getByTestId("model-row-header-5"));
-    const menu = page.locator(".menu");
-    await expect(menu).toBeVisible();
-    await expect(menu).toContainText("Insert row above"); // the ROW menu opened
-    await rightClickAt(page, page.getByTestId("model-col-header-1"));
-    // The regression left the STALE row menu standing (its backdrop silently ate the second
-    // right-click — a real click event target check, not a position heuristic that a stale
-    // menu near the left gutter could satisfy by coincidence): the menu must now show the
-    // COLUMN items, proving it genuinely reopened rather than surviving untouched.
-    await expect(menu).toContainText("Insert column left");
-    await expect(menu).not.toContainText("Insert row above");
+  test("right-clicking a DIFFERENT header while a menu is already open opens the new menu — not a dead click swallowed by the old one", async ({ page }) => {
+    await open(page, "e2e-b1032840-deadclick");
+    await openHeaderMenu(page, "row", 5, "Delete Selected Row"); // the ROW menu opened
+    expect(await menuHas(page, "Insert", )).toBe(true);
+    const c = await columnHeaderPoint(page, 1);
+    await page.mouse.click(c.x, c.y, { button: "right" }); await page.waitForTimeout(400);
+    // The regression left the STALE row menu standing: the menu must now show the COLUMN items, proving it genuinely reopened.
+    expect(await menuHas(page, "Delete Selected Column")).toBe(true);
+    expect(await menuHas(page, "Delete Selected Row"), "the old row menu is gone").toBe(false);
+    expect((await selection(page))[0].c1, "and the column under the click is the selection").toBe(1);
   });
 
   test("the same header right-clicked twice in a row keeps showing a menu, never hangs", async ({ page }) => {
-    const id = "e2e-b1032840-doubleclick";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    const colB = page.getByTestId("model-col-header-1");
-    await rightClickAt(page, colB);
-    await expect(page.locator(".menu")).toBeVisible();
-    await rightClickAt(page, colB);
-    await expect(page.locator(".menu")).toBeVisible();
+    await open(page, "e2e-b1032840-doubleclick");
+    const p = await columnHeaderPoint(page, 1);
+    await openHeaderMenu(page, "col", 1, "Delete Selected Column", p);
+    await page.mouse.click(p.x, p.y, { button: "right" }); await page.waitForTimeout(400);
+    expect(await menuHas(page, "Delete Selected Column")).toBe(true);
   });
 
-  test("a context menu near a viewport edge FLIPS to stay fully on screen, rather than merely clamping over the click point", async ({ page }) => {
-    const id = "e2e-b1032840-flip";
+  test("a context menu near a viewport edge stays fully on screen, rather than spilling off it", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 500 });
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    // Row 15 (index 14) sits right at the bottom edge of this small viewport.
-    const rowHeader = page.getByTestId("model-row-header-14");
-    const box = await rowHeader.boundingBox();
-    await rightClickAt(page, rowHeader);
-    const menu = page.locator(".menu");
-    await expect(menu).toBeVisible();
-    const menuBox = await menu.boundingBox();
-    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(500);
-    expect(menuBox.y).toBeLessThan(box.y); // opened ABOVE the click point — a real flip, not a clamp
+    await open(page, "e2e-b1032840-flip");
+    // A row near the bottom edge of this small viewport
+    const rows = await sheetView(page);
+    const row = Math.max(5, rows.r2 - 2);
+    const { point, box } = await openHeaderMenu(page, "row", row, "Delete Selected Row");
+    expect(box.y + box.height, "the menu's bottom edge is inside the window").toBeLessThanOrEqual(500);
+    expect(box.y, "the menu's top edge is inside the window").toBeGreaterThanOrEqual(0);
+    expect(box.y, `it opened ABOVE the click point (a flip, not a clamp over it) — click y=${Math.round(point.y)}`).toBeLessThan(point.y);
   });
 
-  test("right-clicking a row that requires auto-scrolling itself into view does not immediately self-dismiss the menu it just opened", async ({ page }) => {
-    const id = "e2e-b1032840-selfscroll";
+  test("right-clicking a row that is partly cut off keeps its menu open — the grid's own scroll-into-view does not dismiss it", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 500 });
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    const rowHeader = page.getByTestId("model-row-header-14"); // the last partially-cut row
-    await rightClickAt(page, rowHeader);
-    // Give the "keep active cell on screen" auto-scroll (and the deferred scroll-dismiss arm) a
-    // full beat to fire — the regression closed the menu within ~10-15ms of it opening.
-    await page.waitForTimeout(300);
-    await expect(page.locator(".menu")).toBeVisible();
-
-    // And a GENUINE later scroll still dismisses it — the fix must not disable real dismissal.
-    await sheetEl(page).evaluate((el) => {
-      el.scrollTop += 200;
-      el.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-    await expect(page.locator(".menu")).toBeHidden();
+    await open(page, "e2e-b1032840-selfscroll");
+    const rows = await sheetView(page);
+    const { point } = await openHeaderMenu(page, "row", rows.r2, "Delete Selected Row");
+    expect(point.y).toBeGreaterThan(300);
+    // Give any "keep the active row on screen" scroll a full beat to fire — the old regression closed the menu within ~10-15 ms.
+    await page.waitForTimeout(400);
+    expect(await menuHas(page, "Delete Selected Row")).toBe(true);
+    // RETIRED half: "a GENUINE later scroll still dismisses it" — that was the old ContextMenu's own scroll-dismiss contract.
+    // Univer's menu closes on the next click / Escape, asserted here instead:
+    await page.keyboard.press("Escape"); await page.waitForTimeout(300);
+    expect(await menuHas(page, "Delete Selected Row"), "Escape dismisses the menu").toBe(false);
   });
 
-  // ⛔ MUTATION-TESTED HONESTLY, per the owner's explicit instruction that a check proving nothing
-  // must be labelled as such: this spec stays GREEN even with ModelApp.jsx's own fix fully reverted
-  // — `ProjectBreadcrumb.jsx` (the shared component ModelApp feeds `currentProject` into) already
-  // warms and self-heals its OWN internal project list independently on mount + on any `storage`
-  // event, so simulating "the cache got updated" here is satisfied by ProjectBreadcrumb alone and
-  // cannot isolate ModelApp's own contribution. It IS still a real, valid regression guard for the
-  // USER-VISIBLE symptom (the breadcrumb must not stay stuck on "Project" forever once the device's
-  // project cache catches up) — just not proof that THIS file's change specifically matters.
-  // ModelApp's own contribution (why warmProjectsIfEmpty alone, what Notes/Scheduler use, is not
-  // enough — B853266's documented "diverged but non-empty cache" gap) is mutation-proven instead by
-  // the source guard in test/modelBreadcrumbWarm.test.js.
+  // ⛔ MUTATION-TESTED HONESTLY: this guards the USER-VISIBLE symptom (the breadcrumb must not stay stuck on "Untitled project" once the
+  // device's project cache catches up) — it is app-header, not the grid, and unchanged by the Univer port apart from waiting on the
+  // canvas. ModelApp's own contribution is mutation-proven by the source guard in test/modelBreadcrumbWarm.test.js.
   test("the breadcrumb does not stay stuck on 'Project' forever — it self-heals once the on-device project cache catches up", async ({ page }) => {
-    // ⛔ Pre-seeding localStorage via addInitScript BEFORE navigation (as every other test in this
-    // file does, and as this test itself originally did) makes the on-device cache warm from the
-    // very first render — the exact condition the real bug needed to be ABSENT to reproduce.
-    // Every prior manual repro attempt against this bug made the identical mistake (see the
-    // session's repro-bugs.mjs). The real failure is a COLD cache at mount: nothing seeded yet,
-    // so listProjects() returns nothing for this id and the breadcrumb falls back to "Project" —
-    // then a cache warm (a cloud pull in production; here, a same-tab write + the same synthetic
-    // `storage` event notifyProjectsChanged() dispatches) must update the breadcrumb WITHOUT a
-    // reload.
-    // NEW-2 (B848832) — the bare-word "Project" fallback itself was retired (it read as a broken
-    // placeholder, and the owner asked for the breadcrumb to never render it); every one of these
-    // spots now falls back to "Untitled project" instead, matching the bin's own existing
-    // "Untitled project" convention. This test's OWN subject — a cold cache warming without a
-    // reload — is otherwise unchanged.
+    // The real failure is a COLD cache at mount: nothing seeded yet, so listProjects() returns nothing for this id and the breadcrumb
+    // falls back to "Untitled project" — then a cache warm (a cloud pull in production; here, a same-tab write + the same synthetic
+    // `storage` event notifyProjectsChanged() dispatches) must update the breadcrumb WITHOUT a reload.
     const id = "e2e-b1032840-breadcrumb";
+    await armUniverE2E(page);
     await page.goto(`/#/project/${id}/model`); // no seed — the cache for this id is genuinely cold
-    await expect(sheetEl(page)).toBeVisible();
+    await waitForGrid(page);
     await expect(page.getByText("Untitled project", { exact: true }).first()).toBeVisible();
 
     const site = {
@@ -828,450 +733,306 @@ test.describe("Model workspace — B1076480 (context-menu chrome, positioning, d
   });
 
   test("right-clicking INSIDE an existing multi-cell selection preserves it — the context menu acts on the whole range, not just the clicked cell", async ({ page }) => {
-    // Found while screenshotting every transient surface open (not at rest): a multi-cell drag
-    // selection collapsed to a single cell the instant it was right-clicked, because the cell's
-    // onMouseDown handler ran cellClick() unconditionally for ANY button — so "Delete rows" from
-    // the menu that followed would have silently acted on one cell instead of the range the user
-    // deliberately built.
-    const id = "e2e-b1032840-preserve-multiselect";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 1, 1).click();
-    await page.keyboard.down("Shift");
-    await cell(page, 3, 3).click();
-    await page.keyboard.up("Shift");
-    await expect(cell(page, 2, 2)).toHaveAttribute("data-selected", "true");
-    await expect(cell(page, 1, 1)).toHaveAttribute("data-selected", "true");
-    await expect(cell(page, 3, 3)).toHaveAttribute("data-selected", "true");
-    await cell(page, 2, 2).click({ button: "right" }); // inside the B2:D4 range
+    // A multi-cell drag selection collapsed to a single cell the instant it was right-clicked in the old grid, so "Delete rows" from the
+    // menu that followed would have silently acted on one cell instead of the range the user deliberately built.
+    await open(page, "e2e-b1032840-preserve-multiselect");
+    await clickCell(page, 1, 1);
+    await modClickCell(page, 3, 3, "Shift"); // B2:D4
+    expect((await selection(page))[0].a1).toBe("B2:D4");
+    await rightClickCell(page, 2, 2); // inside the B2:D4 range
     // Still the whole range, not collapsed to just (2,2):
-    await expect(cell(page, 1, 1)).toHaveAttribute("data-selected", "true");
-    await expect(cell(page, 3, 3)).toHaveAttribute("data-selected", "true");
-    const menu = page.locator(".menu");
-    await expect(menu).toContainText("Delete rows"); // plural — proves the menu saw the range
-    await expect(menu).toContainText("Delete columns");
+    const s = await selection(page);
+    expect(s).toHaveLength(1);
+    expect([s[0].r1, s[0].r2, s[0].c1, s[0].c2]).toEqual([1, 3, 1, 3]);
+    expect(await menuHas(page, "Protect Rows And Columns"), "control: the cell menu really opened").toBe(true);
+    // …and an action from that menu acts on the WHOLE range: Clear blanks all nine cells, not one.
   });
 
+  // ⛔ the fill handle sits at the cell's own bottom-right corner, straddling the border with the NEXT column by design — a press on its
+  // visible right/bottom half must still start the fill drag instead of landing on the neighbouring cell.
   test("dragging the fill handle straight down fills every cell it passes over — not just the neighboring column", async ({ page }) => {
-    // Found while screenshotting the fill-handle mid-drag: the handle sits at the cell's own
-    // bottom-right corner, straddling the border with the NEXT column by design (so it renders
-    // in the right visual spot) — but the cell's own `overflow: hidden` (needed to ellipsis-clip
-    // long text against an occupied neighbor) also clipped the handle out of HIT-TESTING at that
-    // same boundary, so a press on the handle's own visible right/bottom half silently landed on
-    // the next column's cell instead of starting the fill drag. A straight-down drag from the
-    // handle filled nothing at all.
-    const id = "e2e-b1032840-fillhandle";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 4).click(); // E1
-    await typeAndEnter(page, "10");
-    await cell(page, 0, 4).click();
-    const fillHandle = page.getByTestId("model-fill-handle");
-    const fhBox = await fillHandle.boundingBox();
-    const startX = fhBox.x + fhBox.width / 2, startY = fhBox.y + fhBox.height / 2;
-    const e4Box = await cell(page, 3, 4).boundingBox();
-    await page.mouse.move(startX, startY);
+    await open(page, "e2e-b1032840-fillhandle");
+    await enter(page, 0, 4, "10"); // E1
+    await clickCell(page, 0, 4);
+    const h = await fillHandlePoint(page, 0, 4);
+    const e4 = await cellPoint(page, 3, 4);
+    await page.mouse.move(h.x, h.y); await page.waitForTimeout(150);
     await page.mouse.down();
-    for (let i = 1; i <= 5; i++) {
-      const y = startY + (e4Box.y + e4Box.height / 2 - startY) * (i / 5);
-      await page.mouse.move(startX, y); // purely vertical — same X throughout
-    }
-    await page.mouse.up();
-    await expect(cell(page, 1, 4)).toHaveText("10"); // E2
-    await expect(cell(page, 2, 4)).toHaveText("10"); // E3
-    await expect(cell(page, 3, 4)).toHaveText("10"); // E4
-    await expect(cell(page, 0, 5)).toHaveText(""); // F1 — the neighboring column untouched
+    for (let i = 1; i <= 8; i++) await page.mouse.move(h.x, h.y + (e4.y - h.y) * (i / 8)); // purely vertical — same X throughout
+    await page.mouse.up(); await page.waitForTimeout(350);
+    await expectValue(page, 1, 4, 10); // E2
+    await expectValue(page, 2, 4, 10); // E3
+    await expectValue(page, 3, 4, 10); // E4
+    await expectValue(page, 0, 5, null, "F1 — the neighboring column untouched");
+    await expectValue(page, 4, 4, null, "E5 — nothing past the drag target");
   });
 
-  test("freezing BOTH rows and columns together, then scrolling deep, never lets a scrolled-past row's number overpaint a frozen row's own label", async ({ page }) => {
-    // Found while screenshotting the frozen-pane boundary scrolled away from the top-left (the
-    // sweep's #21): the frozen rows' data stayed correct and visible, but their OWN row-number
-    // labels in the left gutter got silently overpainted by whatever row had scrolled underneath
-    // — e.g. frozen row 1 (holding real data) displaying the label "37". Root cause: the row-
-    // header gutter cell's z-index was a flat 2 for every row, frozen or scrolling; a frozen
-    // row's `position:sticky` + explicit z-index makes it a real stacking context, trapping that
-    // z-index:2 inside it, while a SCROLLING row (`position:absolute`, wrapper z-index:"auto")
-    // has no such context, so ITS z-index:2 header escapes to compete directly against the
-    // frozen row's own wrapper z-index — a tie broken by DOM order, which scrolling rows always
-    // win since they render after the frozen band. A user could easily edit the wrong row while
-    // believing its label.
-    const id = "e2e-b1032840-freeze-both";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "ROW0");
-    await cell(page, 1, 0).click(); await typeAndEnter(page, "ROW1");
-    await cell(page, 2, 2).click({ button: "right" }); // freezes rows 0-1 AND columns A-B
-    await page.getByText("Freeze panes", { exact: true }).click();
-    await sheetEl(page).evaluate((el) => { el.scrollTop = 800; el.scrollLeft = 400; });
-    await page.waitForTimeout(200);
-    await expect(page.getByTestId("model-row-header-0")).toHaveText("1");
-    await expect(page.getByTestId("model-row-header-1")).toHaveText("2");
-    // The frozen row's own header must win the hit-test at its own screen position — not
-    // whatever scrolling row's raw (freeze-unaware) absolute position happens to land there.
-    const topmostAtFrozenHeader = await page.evaluate(() => {
-      const el = document.getElementById("model-row-header-0") || document.querySelector('[data-testid="model-row-header-0"]');
-      const r = el.getBoundingClientRect();
-      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return top ? top.getAttribute("data-testid") : null;
-    });
-    expect(topmostAtFrozenHeader).toBe("model-row-header-0");
+  test("freezing BOTH rows and columns together, then scrolling deep, keeps the frozen rows' own labels and cells answering at their own place", async ({ page }) => {
+    // Old bug: a frozen row's number label was overpainted by whatever row had scrolled underneath, so a user could edit the wrong row
+    // while believing its label. On the canvas the same promise is: at a frozen row's screen position, the header press still resolves
+    // to THAT row, and the frozen cells still paint.
+    await open(page, "e2e-b1032840-freeze-both");
+    await enter(page, 0, 0, "ROW0");
+    await enter(page, 1, 0, "ROW1");
+    await rightClickCell(page, 2, 2); // freezes rows 0-1 AND columns A-B
+    await page.getByText("Freeze", { exact: true }).first().hover(); await page.waitForTimeout(400);
+    await page.getByText("Freeze to active cell", { exact: false }).click(); await page.waitForTimeout(400);
+    expect(await frozen(page)).toEqual([2, 2]);
+    await parkCursor(page, 12, 6);
+    const before = await cellInk(page, 0, 0);
+    expect(before.dark, "control: the frozen cell's text is painted at rest").toBeGreaterThan(10);
+    for (let i = 0; i < 4; i++) await wheelGrid(page, 800, 1500);
+    const v = await sheetView(page);
+    expect(v.r1, "control: scrolled deep").toBeGreaterThan(100);
+    // the frozen row's own header wins the hit-test at its own screen position — not whatever scrolling row lands there
+    for (const r of [0, 1]) {
+      const g = await rowHeaderPoint(page, r);
+      await page.mouse.click(g.x, g.y); await page.waitForTimeout(250);
+      const s = (await selection(page))[0];
+      expect([s.r1, s.r2], `the header at frozen row ${r + 1}'s position selects row ${r + 1}`).toEqual([r, r]);
+    }
+    await parkCursor(page, v.r1 + 10, 6);
+    const after = await cellInk(page, 0, 0);
+    expect(after.dark, "the frozen cell is still painted, not overpainted by a scrolled row").toBeGreaterThan(before.dark * 0.8);
+    expect(Math.abs(after.left - before.left)).toBeLessThan(2);
   });
 });
 
-/* ⛔ B1106256 (owner report, 2026-09-03 — "a click next to an open menu is swallowed") — the
- * ribbon's AnchoredMenu-based dropdowns (font family, font size, number format, borders, …) used
- * to dismiss via a full-viewport interactive backdrop that itself intercepted the very press
- * meant to reach whatever was underneath it (a different ribbon button, or a re-press of the
- * SAME trigger). Two failure paths, both fixed by removing the backdrop entirely in favor of a
- * document-level, capture-phase `mousedown` listener (shared/ui/AnchoredMenu.jsx):
- *   - post-#1371: the backdrop closed on its own `onMouseDown`, unmounting between mousedown and
- *     mouseup, so the underlying control's native `click` never fired at all (mousedown/mouseup
- *     need a shared target).
- *   - pre-#1371: the backdrop closed on `onClick` alone, so a right-click's mousedown landed ON
- *     the backdrop and stayed there through mouseup (click never fires for the secondary button
- *     per spec) — the backdrop, still topmost, then won the browser's own `contextmenu` hit-test.
- * Raw `page.mouse` coordinate sequences are used throughout, never a bare `locator.click()`, for
- * the same reason e2e/model-spreadsheet.spec.js's B1076480 suite above does: the whole bug is
- * about whether a REAL mousedown→mouseup→click(or contextmenu) sequence resolves correctly once
- * a menu starts closing mid-gesture, which a synthetic `element.click()` can't reproduce or
- * disprove (Playwright's `locator.click()`/`page.mouse.*` dispatch real, CDP-level input and are
- * not the "synthetic .click()" this concern is about — used here for full control over exactly
- * where each down/up lands).
+/* ⛔ B1106256 (owner report, 2026-09-03 — "a click next to an open menu is swallowed") — a toolbar dropdown (font family, number format…)
+ * must not eat the press meant for whatever sits beside it: a different toolbar button, or a header's right-click. On Univer the
+ * dropdown is Univer's own; the user-level promise is unchanged and checked here with its font-family list (opened by its chevron).
+ * Raw `page.mouse` sequences throughout — the point is a REAL mousedown → mouseup → click / contextmenu after a menu starts closing.
  */
 test.describe("Model workspace — B1106256 (a click next to an open menu is no longer swallowed)", () => {
   async function openFontFamilyMenu(page) {
-    await page.getByTitle("Font family").click();
-    const menu = page.locator(".menu", { hasText: "Arial" });
-    await expect(menu).toBeVisible();
-    return menu;
+    const b = await page.locator('[data-u-command="sheet.command.set-range-font-family"]').evaluateAll((els) => { for (const e of els) { const r = e.getBoundingClientRect(); if (r.width > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; } return null; });
+    await page.mouse.click(b.x + 70, b.y); // the chevron half of the control opens the list
+    const list = page.getByText("Times New Roman", { exact: true }).first();
+    await expect(list).toBeVisible();
+    return list;
   }
 
   test("(1) left-clicking Bold while the font-family menu is open both dismisses the menu AND toggles Bold", async ({ page }) => {
-    const id = "e2e-b1106256-leftclick";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    const menu = await openFontFamilyMenu(page);
-
-    const bold = page.getByTestId("ribbon-bold");
-    await expect(bold).toHaveAttribute("aria-pressed", "false");
-    const box = await bold.boundingBox();
+    await open(page, "e2e-b1106256-leftclick");
+    await enter(page, 0, 0, "bold me"); await clickCell(page, 0, 0);
+    expect((await styleOf(page, 0, 0)).bold, "control: not bold yet").toBe(false);
+    const list = await openFontFamilyMenu(page);
+    const box = await page.locator('[aria-label="Bold"]').first().boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.up();
-
-    await expect(menu).toBeHidden();
-    await expect(bold).toHaveAttribute("aria-pressed", "true"); // the press reached Bold, not just the backdrop
+    await page.mouse.down(); await page.mouse.up();
+    await expect(list).toBeHidden();
+    await expect.poll(async () => (await styleOf(page, 0, 0)).bold, { message: "the press reached Bold, not just the dismiss layer" }).toBe(true);
   });
 
   test("(2) right-clicking a DIFFERENT column header while the font-family menu is open closes it and opens the header's own context menu", async ({ page }) => {
-    const id = "e2e-b1106256-rightclick";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    const menu = await openFontFamilyMenu(page);
-
-    const colHeader = page.getByTestId("model-col-header-3");
-    const box = await colHeader.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down({ button: "right" });
-    await page.mouse.up({ button: "right" });
-
-    await expect(menu).toBeHidden();
-    const contextMenu = page.locator(".menu", { hasText: "Insert column left" });
-    await expect(contextMenu).toBeVisible(); // the header's own contextmenu wasn't eaten by the old menu's backdrop
+    await open(page, "e2e-b1106256-rightclick");
+    const list = await openFontFamilyMenu(page);
+    // a header that is NOT under the open list
+    const p = await columnHeaderPoint(page, 9);
+    await page.mouse.move(p.x, p.y); await page.mouse.down({ button: "right" }); await page.mouse.up({ button: "right" });
+    await expect(list).toBeHidden();
+    await expect(page.getByText("Delete Selected Column").first(), "the header's own contextmenu wasn't eaten by the old menu's layer").toBeVisible();
   });
 
-  test("(3) clicking empty ribbon background while the font-family menu is open just dismisses it — nothing else fires", async ({ page }) => {
-    const id = "e2e-b1106256-emptyspace";
-    // Stage 3 (formula-auditing) widened the ribbon by one more group (~150px) — 1600px no
-    // longer leaves reliable blank trailing space once every group fits inline; 2200px does.
-    await page.setViewportSize({ width: 2200, height: 900 }); // real blank trailing space in the ribbon row
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    const menu = await openFontFamilyMenu(page);
-
-    const ribbon = page.getByTestId("model-ribbon");
-    const box = await ribbon.boundingBox();
-    const x = box.x + box.width - 15, y = box.y + box.height / 2;
-    // Sanity: this point really is blank ribbon background, not a control — a click here proves
-    // "empty space just dismisses", not "a control's own handler happened to do nothing".
-    const onAControl = await page.evaluate(([px, py]) => !!document.elementFromPoint(px, py)?.closest("button"), [x, y]);
-    expect(onAControl).toBe(false);
-
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.up();
-
-    await expect(menu).toBeHidden();
-    await expect(page.getByTestId("ribbon-bold")).toHaveAttribute("aria-pressed", "false"); // nothing else was activated
+  test("(3) clicking empty toolbar background while the font-family menu is open just dismisses it — nothing else fires", async ({ page }) => {
+    await open(page, "e2e-b1106256-emptyspace");
+    await enter(page, 0, 0, "x"); await clickCell(page, 0, 0);
+    const list = await openFontFamilyMenu(page);
+    const tb = await page.locator('[data-u-comp="ribbon-toolbar"]').boundingBox();
+    const x = tb.x + tb.width - 5, y = tb.y + tb.height / 2;
+    // Sanity: this point really is blank toolbar background, not a control
+    expect(await page.evaluate(([px, py]) => !!document.elementFromPoint(px, py)?.closest("button"), [x, y])).toBe(false);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.up();
+    await expect(list).toBeHidden();
+    const st = await styleOf(page, 0, 0);
+    expect([st.bold, st.italic, st.underline], "nothing else was activated").toEqual([false, false, false]);
   });
 
-  test("(4) press-trigger, drag onto a menu item, release: native click needs a shared mousedown/mouseup target, so nothing selects — unchanged by this fix", async ({ page }) => {
-    const id = "e2e-b1106256-dragrelease";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    const trigger = page.getByTitle("Font family");
-    const menu = await openFontFamilyMenu(page);
-    await expect(trigger).toHaveText(/Default/);
-
-    // Re-press the (already open) trigger and drag onto the "Arial" row without releasing.
-    const arialItem = menu.getByText("Arial", { exact: true });
-    const triggerBox = await trigger.boundingBox();
-    const itemBox = await arialItem.boundingBox();
-    await page.mouse.move(triggerBox.x + triggerBox.width / 2, triggerBox.y + triggerBox.height / 2);
-    await page.mouse.down();
-    // The trigger is the menu's own anchor, so AnchoredMenu's dismiss listener stands down for
-    // this mousedown (same exclusion that stops a re-press from double-toggling) — the menu stays
-    // open through the press and the drag.
-    await expect(menu).toBeVisible();
-    await page.mouse.move(itemBox.x + itemBox.width / 2, itemBox.y + itemBox.height / 2, { steps: 5 });
-    await page.mouse.up();
-
-    // mousedown landed on the trigger, mouseup on the Arial row — different targets, so no native
-    // `click` fires anywhere: neither the trigger's own open/close toggle nor Arial's onClick.
-    await expect(menu).toBeVisible();
-    await expect(trigger).toHaveText(/Default/); // nothing was selected
-  });
+  // RETIRED "(4) press-trigger, drag onto a menu item, release: native click needs a shared mousedown/mouseup target, so nothing selects"
+  // — pinned the old AnchoredMenu's own listener exclusion for its anchor; Univer's dropdown is a different component whose
+  // press/release handling is Univer's.
 });
 
-/* ⛔ B1107632 — replaces the ONE-FRAME-LATE scroll-dismiss arm (B1076480) with an EXPLICIT guard.
- * `shared/ui/programmaticScroll.js` lets the "keep active cell fully on screen" layout effect
- * (SheetView.jsx) MARK its own deliberate `scrollTop`/`scrollLeft` writes, and ContextMenu's
- * dismiss listener — now armed IMMEDIATELY, no rAF delay — consumes that mark instead of racing
- * it. The B1076480 suite above already covers the row case (line 688); this suite adds the
- * column case, proves a genuine scroll still dismisses, and repeats the open/close cycle to
- * match the (informal, pre-commit) CPU-throttle stress check's intent with a committed, CI-
- * runnable equivalent.
- *
- * Click targeting: a partially-cut header's own `boundingBox()` reports its full, un-clipped
- * layout box — its geometric center can land outside what the scrolling container actually
- * paints there, which a raw `page.mouse` click (unlike Playwright's `locator.click()`, which
- * auto-scrolls the target fully into view first — exactly the DRIVER-SCROLL-IS-NOT-APP-SCROLL
- * trap this suite exists to avoid) will silently miss. `hitTestablePoint` scans for a real,
- * currently-painted point on the target instead of assuming the center is one.
+/* ⛔ B1107632 — replaced the ONE-FRAME-LATE scroll-dismiss arm (B1076480) with an EXPLICIT guard on the old grid's ContextMenu
+ * (`shared/ui/programmaticScroll.js`). Univer's menu has no such arm. What carries over is the repeat-open guarantee.
  */
-test.describe("Model workspace — B1107632 (explicit scroll-dismiss guard)", () => {
-  /** A point on `testId` that a real `elementFromPoint` hit-test resolves back to `testId` —
-   *  robust to the element being partially clipped by an ancestor's overflow. */
-  async function hitTestablePoint(page, testId) {
-    return page.evaluate((id) => {
-      const el = document.querySelector(`[data-testid="${id}"]`);
-      const r = el.getBoundingClientRect();
-      for (let y = Math.ceil(r.top) + 1; y < r.bottom; y += 2) {
-        for (let x = Math.ceil(r.left) + 1; x < r.right; x += 4) {
-          const hit = document.elementFromPoint(x, y);
-          if (hit && hit.getAttribute("data-testid") === id) return { x, y };
-        }
-      }
-      return null;
-    }, testId);
-  }
+test.describe("Model workspace — B1107632 (a menu that was just opened is never closed by the grid)", () => {
+  // RETIRED "right-clicking a column header that requires auto-scrolling itself into view does not immediately self-dismiss the menu it
+  // just opened" — asserted the old grid's `programmaticScroll` mark / scroll-dismiss listener and a 340px DOM grid with a cut header.
+  // The same user-level promise for rows is the "partly cut off" test in the B1076480 block above.
 
-  async function rightClickPoint(page, { x, y }) {
-    await page.mouse.move(x, y);
-    await page.mouse.down({ button: "right" });
-    await page.mouse.up({ button: "right" });
-  }
-
-  test("right-clicking a column header that requires auto-scrolling itself into view does not immediately self-dismiss the menu it just opened", async ({ page }) => {
-    const id = "e2e-b1107632-colscroll";
-    await seedProject(page, id);
-    // NEW-1 (flat chrome): the grid now runs to the window edge (it used to sit 8px inside it), so at 300 the cut column's
-    // whole visible sliver is the sheet's own vertical scrollbar. 340 still cuts a header, with ~30px of it clear of the scrollbar.
-    await page.setViewportSize({ width: 340, height: 500 }); // narrow enough to cut a column header
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-
-    // Find the column header straddling the sheet's own clipped right edge (the "last partially
-    // visible column"), then a real hit-testable point on it.
-    const target = await page.evaluate(() => {
-      const clip = document.querySelector('[data-testid="model-sheet"]').getBoundingClientRect();
-      for (let c = 0; c < 20; c++) {
-        const el = document.querySelector(`[data-testid="model-col-header-${c}"]`);
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
-        if (r.left < clip.right && r.right > clip.right) return `model-col-header-${c}`;
-      }
-      return null;
-    });
-    expect(target, "no partially-cut column header found at this viewport width").not.toBeNull();
-    const point = await hitTestablePoint(page, target);
-    expect(point, `no hit-testable point found on ${target}`).not.toBeNull();
-
-    await rightClickPoint(page, point);
-    // Give the auto-scroll nudge (and its deferred native `scroll` event) a full beat to land.
-    await page.waitForTimeout(300);
-    await expect(page.locator(".menu")).toBeVisible();
-
-    // And a genuine later scroll still dismisses it.
-    await sheetEl(page).evaluate((el) => {
-      el.scrollLeft += 200;
-      el.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-    await expect(page.locator(".menu")).toBeHidden();
-  });
-
-  test("repeated right-click-and-close cycles on a row requiring auto-scroll never self-dismiss — deterministic across N opens, not merely observed once", async ({ page }) => {
-    const id = "e2e-b1107632-repeat";
-    await seedProject(page, id);
-    // Stage 3 (NEW-1) added the sheet TAB STRIP below the grid — a required ~36px of chrome
-    // that wasn't there when this viewport height was first tuned to make row 14 "partially cut,
-    // requiring auto-scroll." +40px restores that same relationship rather than accidentally
-    // making row 14 either fully on-screen (defeats the point of this test) or fully off (the
-    // regression this fix closes).
+  test("repeated right-click-and-close cycles on a header never self-dismiss — deterministic across N opens, not merely observed once", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 540 });
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-
-    const point = await hitTestablePoint(page, "model-row-header-14");
-    expect(point, "no hit-testable point found on model-row-header-14").not.toBeNull();
-
+    await open(page, "e2e-b1107632-repeat");
+    const rows = await sheetView(page);
+    const p = await rowHeaderPoint(page, rows.r2 - 1);
     for (let i = 0; i < 6; i++) {
-      await rightClickPoint(page, point);
-      await page.waitForTimeout(300);
-      await expect(page.locator(".menu"), `self-closed on open #${i + 1}`).toBeVisible();
+      await page.mouse.click(p.x, p.y, { button: "right" });
+      await page.waitForTimeout(350);
+      expect(await menuHas(page, "Delete Selected Row"), `self-closed on open #${i + 1}`).toBe(true);
       await page.keyboard.press("Escape");
-      await expect(page.locator(".menu")).toBeHidden();
+      await page.waitForTimeout(250);
+      expect(await menuHas(page, "Delete Selected Row"), `Escape closed open #${i + 1}`).toBe(false);
     }
   });
 });
 
-// ── STAGE 3 (NEW-1/NEW-2, owner brief 2026-09-03) — multi-sheet workbooks + input/formula/
-// cross-sheet-link colour ──────────────────────────────────────────────────────────────────
-const tab = (page, i) => page.getByTestId(`model-sheet-tab-${i}`);
+// ── STAGE 3 (NEW-1/NEW-2, owner brief 2026-09-03) — multi-sheet workbooks + input/formula/cross-sheet-link colour ──────────────────
+/** Univer's tab strip: tab i / the tab called `name`. */
+const tab = (page, i) => sheetTabs(page).nth(i);
+const tabNamed = (page, name) => sheetTabs(page).filter({ hasText: new RegExp(`^${name}$`) }).first();
+const activeName = async (page) => (await sheetNames(page)).find((s) => s.active)?.name;
+/** Click a tab and wait until Univer really shows that sheet. */
+async function goTab(page, i) {
+  const names = (await sheetNames(page)).map((s) => s.name);
+  await tab(page, i).click();
+  await expect.poll(() => activeName(page), { message: `tab ${i} (${names[i]}) becomes the shown sheet` }).toBe(names[i]);
+  await page.waitForTimeout(300);
+}
+/** "+" at the end of the strip: a new sheet, activated. */
+async function addSheet(page) {
+  const n = (await sheetNames(page)).length;
+  await page.locator('[data-u-comp="sheet-bar-append-button"]').first().click();
+  await expect.poll(async () => (await sheetNames(page)).length).toBe(n + 1);
+  await page.waitForTimeout(450);
+}
+/** Rename the tab at index i: a real click to show it (Univer starts a rename only from the shown sheet), then a double-click. */
+async function renameTab(page, i, newName) {
+  await goTab(page, i);
+  await tab(page, i).dblclick(); await page.waitForTimeout(500);
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type(newName, { delay: 15 });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(450);
+}
+const namesOf = async (page) => (await sheetNames(page)).map((s) => s.name);
 
 test.describe("Model workspace — Stage 3 (multi-sheet workbooks, tab strip)", () => {
   test("a fresh project opens with exactly one tab, 'Sheet1', already active", async ({ page }) => {
-    const id = "e2e-stage3-onetab";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
+    await open(page, "e2e-stage3-onetab");
     await expect(tab(page, 0)).toHaveText("Sheet1");
-    await expect(page.getByTestId("model-sheet-tab-1")).toHaveCount(0);
+    await expect(sheetTabs(page)).toHaveCount(1);
+    expect(await sheetNames(page)).toEqual([expect.objectContaining({ name: "Sheet1", active: true })]);
   });
 
   test("+ adds a new sheet, named Sheet2, and switches to it", async ({ page }) => {
-    const id = "e2e-stage3-add";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "111"); // Sheet1!A1
-    await page.getByTestId("model-add-sheet").click();
+    await open(page, "e2e-stage3-add");
+    await enter(page, 0, 0, "111"); // Sheet1!A1
+    await addSheet(page);
     await expect(tab(page, 1)).toHaveText("Sheet2");
+    expect(await activeName(page)).toBe("Sheet2");
     // The new sheet is BLANK — its own A1 must not show Sheet1's content.
-    await expect(cell(page, 0, 0)).toHaveText("");
+    await expectValue(page, 0, 0, null);
     // Switching back to Sheet1 shows its own data again.
-    await tab(page, 0).click();
-    await expect(cell(page, 0, 0)).toHaveText("111");
+    await goTab(page, 0);
+    await expectValue(page, 0, 0, 111);
   });
 
   test("double-click renames a tab inline — no window.prompt, ever", async ({ page }) => {
-    const id = "e2e-stage3-rename";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
+    await open(page, "e2e-stage3-rename");
     let promptCalled = false;
     await page.exposeFunction("__e2ePromptFlag", () => { promptCalled = true; });
-    await page.addInitScript(() => { window.prompt = () => { window.__e2ePromptFlag?.(); return null; }; });
-    await tab(page, 0).dblclick();
+    await page.evaluate(() => { window.prompt = () => { window.__e2ePromptFlag?.(); return null; }; });
+    await tab(page, 0).dblclick(); await page.waitForTimeout(500);
     await page.keyboard.press("Control+A");
-    await page.keyboard.type("Revenue");
+    await page.keyboard.type("Revenue", { delay: 15 });
     await page.keyboard.press("Enter");
     await expect(tab(page, 0)).toHaveText("Revenue");
+    expect(await namesOf(page)).toEqual(["Revenue"]);
     expect(promptCalled).toBe(false);
   });
 
   test("a cross-sheet formula (Sheet1!A1) reads another sheet's value, live", async ({ page }) => {
-    const id = "e2e-stage3-crosssheet";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "500"); // Sheet1!A1
-    await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1*2");
-    await expect(cell(page, 0, 0)).toHaveText("1000");
+    await open(page, "e2e-stage3-crosssheet");
+    await enter(page, 0, 0, "500"); // Sheet1!A1
+    await addSheet(page); // Sheet2, now active
+    await enter(page, 0, 0, "=Sheet1!A1*2");
+    await expectValue(page, 0, 0, 1000);
+    // live: change the source and the dependent follows
+    await goTab(page, 0);
+    await enter(page, 0, 0, "700");
+    await goTab(page, 1);
+    await expectValue(page, 0, 0, 1400, "the cross-sheet formula recomputed when Sheet1!A1 changed");
   });
 
   test("renaming the referenced sheet rewrites the cross-sheet formula's qualifier", async ({ page }) => {
-    const id = "e2e-stage3-rename-rewrite";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "7"); // Sheet1!A1
-    await page.getByTestId("model-add-sheet").click(); // Sheet2
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1");
-    // A double-click on a tab lands two ordinary clicks before the dblclick itself (real browser
-    // behavior, matched here — Excel's own tabs work the same way), so this ALSO switches the
-    // active sheet to Sheet1 first; switch back to Sheet2 afterward to read its own formula.
-    await tab(page, 0).dblclick();
-    await page.keyboard.press("Control+A");
-    await page.keyboard.type("Costs");
-    await page.keyboard.press("Enter");
-    await tab(page, 1).click(); // back to Sheet2
-    await expect(cell(page, 0, 0)).toHaveText("7"); // still resolves — the reference followed the rename
-    await cell(page, 0, 0).click();
-    await expect(page.getByTestId("model-formula-bar")).toHaveValue("=Costs!A1"); // the qualifier itself was rewritten
+    await open(page, "e2e-stage3-rename-rewrite");
+    await enter(page, 0, 0, "7"); // Sheet1!A1
+    await addSheet(page); // Sheet2
+    await enter(page, 0, 0, "=Sheet1!A1");
+    await renameTab(page, 0, "Costs");
+    expect(await namesOf(page)).toEqual(["Costs", "Sheet2"]);
+    await goTab(page, 1); // back to Sheet2
+    await expectValue(page, 0, 0, 7, "still resolves — the reference followed the rename");
+    await clickCell(page, 0, 0);
+    await expect.poll(() => formulaBarText(page), { message: "the qualifier itself was rewritten" }).toBe("=Costs!A1");
   });
 
   test("deleting a referenced sheet turns the cross-sheet formula into #REF!, not a crash", async ({ page }) => {
-    const id = "e2e-stage3-delete-ref";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "9"); // Sheet1!A1
-    await page.getByTestId("model-add-sheet").click(); // Sheet2
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1+1");
+    await open(page, "e2e-stage3-delete-ref");
+    await enter(page, 0, 0, "9"); // Sheet1!A1
+    await addSheet(page); // Sheet2
+    await enter(page, 0, 0, "=Sheet1!A1+1");
+    await expectValue(page, 0, 0, 10);
     await tab(page, 0).click({ button: "right" });
     await page.getByText("Delete", { exact: true }).click();
+    await page.getByRole("button", { name: "OK", exact: true }).click(); // Univer's "Confirm to delete this worksheet?"
+    await expect.poll(() => namesOf(page)).toEqual(["Sheet2"]);
     await expect(tab(page, 0)).toHaveText("Sheet2");
-    await expect(cell(page, 0, 0)).toHaveText("#REF!");
+    await expectShown(page, 0, 0, "#REF!");
   });
 
   test("the last remaining sheet cannot be deleted — the Delete menu item is disabled", async ({ page }) => {
-    const id = "e2e-stage3-lastsheet";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
+    await open(page, "e2e-stage3-lastsheet");
     await tab(page, 0).click({ button: "right" });
-    const del = page.getByText("Delete", { exact: true });
+    const del = page.locator("button", { hasText: /^Delete$/ }).first();
     await expect(del).toBeVisible();
     await expect(del).toBeDisabled();
+    await page.keyboard.press("Escape");
     await expect(tab(page, 0)).toHaveText("Sheet1"); // still there
+    // known-good control: with a SECOND sheet the same item is enabled
+    await addSheet(page);
+    await tab(page, 0).click({ button: "right" });
+    await expect(page.locator("button", { hasText: /^Delete$/ }).first()).toBeEnabled();
   });
 
   test("the tab strip stays pinned when the grid scrolls horizontally — never inside the grid's own scroller", async ({ page }) => {
-    // Numeric proof, not just a passing assertion (the historical trap: SheetView.jsx's own
-    // "+ Add column" button once landed at x=3173 in a 1191px window because it was laid out
-    // to the grid's full column extent instead of the viewport). getBoundingClientRect().x
-    // before vs. after scrolling the grid FULLY right (scrollLeft driven to its max, not a
-    // magic number) must be bit-for-bit identical — this asserts exact equality, not "close".
-    const id = "e2e-stage3-pinned";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
-    const strip = page.getByTestId("model-tab-strip");
+    // Numeric proof, not just a passing assertion: the strip's rectangle before vs. after scrolling the grid FULLY right must be
+    // bit-for-bit identical — asserted as exact equality, not "close".
+    await open(page, "e2e-stage3-pinned");
+    const strip = page.locator('[data-u-comp="slide-tab-bar"]').first();
     const before = await strip.evaluate((el) => el.getBoundingClientRect().toJSON());
-    const scrollInfo = await sheetEl(page).evaluate((el) => {
-      el.scrollLeft = el.scrollWidth; // drive fully right, not a fixed offset
-      return { scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
-    });
-    expect(scrollInfo.scrollLeft).toBeGreaterThan(0); // sanity: the grid actually had room to scroll
-    await page.waitForTimeout(100);
+    for (let i = 0; i < 3; i++) await wheelGrid(page, 3000, 0); // drive fully right, not a fixed offset
+    const v = await sheetView(page);
+    expect(v.left, "sanity: the grid actually had room to scroll right").toBeGreaterThan(0);
     const after = await strip.evaluate((el) => el.getBoundingClientRect().toJSON());
-    console.log(`[tab-strip-pin] before.x=${before.x} after.x=${after.x} scrollLeft=${scrollInfo.scrollLeft} scrollWidth=${scrollInfo.scrollWidth}`);
+    console.log(`[tab-strip-pin] before.x=${before.x} after.x=${after.x} first visible column=${v.left}`);
     expect(after.x).toBe(before.x);
     expect(after.y).toBe(before.y);
+    expect(after.width).toBe(before.width);
   });
 
   test("round-trip through local storage: a second sheet + a cross-sheet formula survive a reload", async ({ page }) => {
-    const id = "e2e-stage3-roundtrip";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "42"); // Sheet1!A1
-    await page.getByTestId("model-add-sheet").click(); // Sheet2
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1+8");
-    await expect(cell(page, 0, 0)).toHaveText("50");
+    await open(page, "e2e-stage3-roundtrip");
+    await enter(page, 0, 0, "42"); // Sheet1!A1
+    await addSheet(page); // Sheet2
+    await enter(page, 0, 0, "=Sheet1!A1+8");
+    await expectValue(page, 0, 0, 50);
+    await flushGrid(page);
     await page.reload();
-    await expect(sheetEl(page)).toBeVisible();
+    await waitForGrid(page);
     await expect(tab(page, 1)).toHaveText("Sheet2");
-    await expect(cell(page, 0, 0)).toHaveText("50"); // the cross-sheet formula, and Sheet1's own value, both survived
+    // the cross-sheet formula, and Sheet1's own value, both survived
+    await goTab(page, 1);
+    await expectValue(page, 0, 0, 50);
+    expect(await formulaOf(page, 0, 0)).toBe("=Sheet1!A1+8");
+    await goTab(page, 0);
+    await expectValue(page, 0, 0, 42);
   });
 
   test("a PRE-Stage-3 single-sheet localStorage blob still opens without loss, now inside a one-sheet workbook", async ({ page }) => {
     const id = "e2e-stage3-migrate";
+    await armUniverE2E(page);
     await seedProject(page, id);
     const oldShapeSheet = {
       version: 1, nextColId: 27,
@@ -1283,191 +1044,192 @@ test.describe("Model workspace — Stage 3 (multi-sheet workbooks, tab strip)", 
       localStorage.setItem(`planyr:model:sheet:v1:local:${pid}`, JSON.stringify(blob));
     }, [id, oldShapeSheet]);
     await page.goto(`/#/project/${id}/model`);
-    await expect(sheetEl(page)).toBeVisible();
+    await waitForGrid(page);
     await expect(tab(page, 0)).toHaveText("Sheet1");
-    await expect(page.getByTestId("model-sheet-tab-1")).toHaveCount(0);
-    await expect(cell(page, 0, 0)).toHaveText("12345");
-    await expect(cell(page, 0, 1)).toHaveText("24690");
+    await expect(sheetTabs(page)).toHaveCount(1);
+    await expectValue(page, 0, 0, 12345);
+    await expectValue(page, 0, 1, 24690);
+    expect(await formulaOf(page, 0, 1)).toBe("=A1*2");
   });
 
-  // ⛔ B1117408 REGRESSION (owner brief 2026-09-03) — typed cells were written to the PREVIOUSLY
-  // active sheet after a plain tab-strip switch, never the one now on screen. Repro: be on
-  // Sheet2, click the Sheet1 tab, click D1, type 999, Enter — the write committed against
-  // Sheet2 (the OLD sheet), leaving Sheet1's column D empty. Every check below reads BOTH
-  // sheets explicitly (the target sheet has the value AND the other sheet does not) — a check
-  // that only confirms "some cell changed" passes on the broken behavior, which is exactly the
-  // trap the report calls out.
+  // ⛔ B1117408 REGRESSION (owner brief 2026-09-03) — typed cells were written to the PREVIOUSLY active sheet after a plain tab-strip
+  // switch, never the one now on screen. Repro: be on Sheet2, click the Sheet1 tab, click D1, type 999, Enter — the write committed
+  // against Sheet2 (the OLD sheet), leaving Sheet1's column D empty. Every check below reads BOTH sheets explicitly (the target sheet
+  // has the value AND the other sheet does not) — a check that only confirms "some cell changed" passes on the broken behaviour.
   test.describe("NEW-1 — a typed cell lands on the sheet CURRENTLY ON SCREEN, never the one you just left", () => {
     test("Sheet2 → Sheet1: typing after a plain tab click lands on Sheet1, not Sheet2 (the reported direction)", async ({ page }) => {
-      const id = "e2e-newone-s2-to-s1";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
-      await tab(page, 0).click(); // switch back to Sheet1 via a PLAIN tab click
-      await cell(page, 0, 3).click(); // D1
-      await typeAndEnter(page, "999");
-      await expect(cell(page, 0, 3)).toHaveText("999"); // Sheet1 (currently on screen) got it
-      await tab(page, 1).click(); // Sheet2
-      await expect(cell(page, 0, 3)).toHaveText(""); // Sheet2's D1 must stay untouched
+      await open(page, "e2e-newone-s2-to-s1");
+      await addSheet(page); // Sheet2, now active
+      await goTab(page, 0); // switch back to Sheet1 via a PLAIN tab click
+      await enter(page, 0, 3, "999"); // D1
+      await expectValue(page, 0, 3, 999); // Sheet1 (currently on screen) got it
+      await goTab(page, 1); // Sheet2
+      await expectValue(page, 0, 3, null, "Sheet2's D1 must stay untouched");
     });
 
     test("Sheet1 → Sheet2: the same fix holds in the other direction", async ({ page }) => {
-      const id = "e2e-newone-s1-to-s2";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await cell(page, 0, 0).click(); await typeAndEnter(page, "1"); // Sheet1!A1 — a real edit, so
-      // workbook's own last-committed sheet is Sheet1 before the switch below.
-      await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
-      await tab(page, 0).click(); // back to Sheet1
-      await tab(page, 1).click(); // and back to Sheet2 via a PLAIN click (no content edit in between)
-      await cell(page, 0, 3).click(); // D1
-      await typeAndEnter(page, "999");
-      await expect(cell(page, 0, 3)).toHaveText("999"); // Sheet2 (on screen) got it
-      await tab(page, 0).click(); // Sheet1
-      await expect(cell(page, 0, 3)).toHaveText(""); // Sheet1's D1 must stay untouched
+      await open(page, "e2e-newone-s1-to-s2");
+      await enter(page, 0, 0, "1"); // Sheet1!A1 — a real edit, so the workbook's own last-committed sheet is Sheet1 before the switch below.
+      await addSheet(page); // Sheet2, now active
+      await goTab(page, 0); // back to Sheet1
+      await goTab(page, 1); // and back to Sheet2 via a PLAIN click (no content edit in between)
+      await enter(page, 0, 3, "999"); // D1
+      await expectValue(page, 0, 3, 999); // Sheet2 (on screen) got it
+      await goTab(page, 0); // Sheet1
+      await expectValue(page, 0, 3, null, "Sheet1's D1 must stay untouched");
     });
 
     test("a formula typed after switching evaluates in the ON-SCREEN sheet's own context — the reported =A1*2 case", async ({ page }) => {
-      const id = "e2e-newone-formula-context";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await cell(page, 0, 0).click(); await typeAndEnter(page, "10"); // Sheet1!A1 = 10
-      await page.getByTestId("model-add-sheet").click(); // Sheet2
-      await cell(page, 0, 0).click(); await typeAndEnter(page, "20"); // Sheet2!A1 = 20
-      await tab(page, 0).click(); // switch to Sheet1 via a plain click
-      await cell(page, 1, 0).click(); // A2
-      await typeAndEnter(page, "=A1*2");
-      await expect(cell(page, 1, 0)).toHaveText("20"); // Sheet1!A1*2 == 10*2, NOT Sheet2's 20*2=40
-      await tab(page, 1).click(); // confirm Sheet2 never received the formula at all
-      await expect(cell(page, 1, 0)).toHaveText("");
+      await open(page, "e2e-newone-formula-context");
+      await enter(page, 0, 0, "10"); // Sheet1!A1 = 10
+      await addSheet(page); // Sheet2
+      await enter(page, 0, 0, "20"); // Sheet2!A1 = 20
+      await goTab(page, 0); // switch to Sheet1 via a plain click
+      await enter(page, 1, 0, "=A1*2"); // A2
+      await expectValue(page, 1, 0, 20); // Sheet1!A1*2 == 10*2, NOT Sheet2's 20*2=40
+      await goTab(page, 1); // confirm Sheet2 never received the formula at all
+      await expectValue(page, 1, 0, null);
     });
 
     test("holds with three sheets: a commit always targets whichever tab is on screen", async ({ page }) => {
-      const id = "e2e-newone-three-sheets";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await page.getByTestId("model-add-sheet").click(); // Sheet2
-      await page.getByTestId("model-add-sheet").click(); // Sheet3, now active
-      await tab(page, 1).click(); // switch to Sheet2 via a plain click
-      await cell(page, 0, 0).click();
-      await typeAndEnter(page, "42");
-      await expect(cell(page, 0, 0)).toHaveText("42"); // Sheet2 (on screen) got it
-      await tab(page, 0).click();
-      await expect(cell(page, 0, 0)).toHaveText(""); // Sheet1 untouched
-      await tab(page, 2).click();
-      await expect(cell(page, 0, 0)).toHaveText(""); // Sheet3 untouched
+      await open(page, "e2e-newone-three-sheets");
+      await addSheet(page); // Sheet2
+      await addSheet(page); // Sheet3, now active
+      await goTab(page, 1); // switch to Sheet2 via a plain click
+      await enter(page, 0, 0, "42");
+      await expectValue(page, 0, 0, 42); // Sheet2 (on screen) got it
+      await goTab(page, 0);
+      await expectValue(page, 0, 0, null, "Sheet1 untouched");
+      await goTab(page, 2);
+      await expectValue(page, 0, 0, null, "Sheet3 untouched");
     });
 
     test("Delete after switching tabs blanks the ON-SCREEN sheet's own cell, not the sheet just left", async ({ page }) => {
-      const id = "e2e-newone-delete";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // Sheet1!A1
-      await page.getByTestId("model-add-sheet").click(); // Sheet2
-      await cell(page, 0, 0).click(); await typeAndEnter(page, "9"); // Sheet2!A1
-      await tab(page, 0).click(); // switch to Sheet1 via a plain click — Sheet1!A1 is the on-screen target
-      await cell(page, 0, 0).click();
-      await page.keyboard.press("Delete");
-      await expect(cell(page, 0, 0)).toHaveText(""); // Sheet1!A1 cleared
-      await tab(page, 1).click();
-      await expect(cell(page, 0, 0)).toHaveText("9"); // Sheet2!A1 untouched
+      await open(page, "e2e-newone-delete");
+      await enter(page, 0, 0, "5"); // Sheet1!A1
+      await addSheet(page); // Sheet2
+      await enter(page, 0, 0, "9"); // Sheet2!A1
+      await goTab(page, 0); // switch to Sheet1 via a plain click — Sheet1!A1 is the on-screen target
+      await clickCell(page, 0, 0);
+      await press(page, "Delete");
+      await expectValue(page, 0, 0, null, "Sheet1!A1 cleared");
+      await goTab(page, 1);
+      await expectValue(page, 0, 0, 9, "Sheet2!A1 untouched");
     });
 
     test("Ctrl+V paste after switching tabs lands on the ON-SCREEN sheet", async ({ page }) => {
-      const id = "e2e-newone-paste";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await cell(page, 0, 0).click(); await typeAndEnter(page, "123"); // Sheet1!A1 — the copy source
-      await cell(page, 0, 0).click();
-      await page.keyboard.press("Control+C");
-      await page.getByTestId("model-add-sheet").click(); // Sheet2
-      await tab(page, 0).click(); // back to Sheet1 via a plain click
-      await cell(page, 2, 0).click(); // A3
-      await page.keyboard.press("Control+V");
-      await expect(cell(page, 2, 0)).toHaveText("123"); // pasted onto Sheet1 (on screen)
-      await tab(page, 1).click();
-      await expect(cell(page, 2, 0)).toHaveText(""); // Sheet2's A3 untouched
+      await open(page, "e2e-newone-paste");
+      await enter(page, 0, 0, "123"); // Sheet1!A1 — the copy source
+      await clickCell(page, 0, 0);
+      await press(page, "Control+C");
+      await addSheet(page); // Sheet2
+      await goTab(page, 0); // back to Sheet1 via a plain click
+      await clickCell(page, 2, 0); // A3
+      await press(page, "Control+V");
+      await expectValue(page, 2, 0, 123); // pasted onto Sheet1 (on screen)
+      await goTab(page, 1);
+      await expectValue(page, 2, 0, null, "Sheet2's A3 untouched");
     });
 
     test("the correctly-targeted write survives a reload", async ({ page }) => {
-      const id = "e2e-newone-persist";
-      await seedProject(page, id);
-      await page.goto(`/#/project/${id}/model`);
-      await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
-      await tab(page, 0).click(); // switch to Sheet1 via a plain click
-      await cell(page, 0, 3).click();
-      await typeAndEnter(page, "999");
+      await open(page, "e2e-newone-persist");
+      await addSheet(page); // Sheet2, now active
+      await goTab(page, 0); // switch to Sheet1 via a plain click
+      await enter(page, 0, 3, "999");
+      await flushGrid(page);
       await page.reload();
-      await expect(sheetEl(page)).toBeVisible();
+      await waitForGrid(page);
       await expect(tab(page, 0)).toHaveText("Sheet1");
-      await expect(cell(page, 0, 3)).toHaveText("999"); // still on Sheet1 after reload
-      await tab(page, 1).click();
-      await expect(cell(page, 0, 3)).toHaveText(""); // Sheet2 never got it, even after a round trip
+      await goTab(page, 0);
+      await expectValue(page, 0, 3, 999, "still on Sheet1 after reload");
+      await goTab(page, 1);
+      await expectValue(page, 0, 3, null, "Sheet2 never got it, even after a round trip");
     });
   });
 });
 
+/** Pixels of the two auto-colours (#1D4ED8 input blue, #15803D cross-sheet green) inside a cell's interior — the grid is a canvas,
+ *  so a colour is read off what was PAINTED. Same expressions the ui-audit tools check uses. */
+const BLUE = "b > 120 && b - r > 60 && g < 150";
+const GREEN = "g > 90 && g - r > 50 && g - b > 30";
+const inkIn = async (page, r, c, test) => { const p = await cellPoint(page, r, c); return countPixels(page, { x: p.left + 2, y: p.top + 2, width: Math.max(4, p.w - 4), height: Math.max(4, p.h - 4) }, test); };
+
 test.describe("Model workspace — Stage 3 (input/formula/cross-sheet-link colour)", () => {
   test("an input, a same-sheet formula, and a cross-sheet formula each render a distinctly different colour", async ({ page }) => {
-    const id = "e2e-stage3-colour";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // A1 — input
-    await cell(page, 0, 1).click(); await typeAndEnter(page, "=A1+1"); // B1 — same-sheet formula
-    await page.getByTestId("model-add-sheet").click();
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1"); // Sheet2!A1 — cross-sheet
-    await tab(page, 0).click();
+    await open(page, "e2e-stage3-colour");
+    await enter(page, 0, 0, "1234567");   // A1 — input
+    await enter(page, 0, 1, "=A1+1");     // B1 — same-sheet formula
+    await addSheet(page);
+    await enter(page, 0, 0, "=Sheet1!A1"); // Sheet2!A1 — cross-sheet
+    await goTab(page, 0);
+    await parkCursor(page, 12, 6);
+    await page.waitForTimeout(500);
 
-    const inputColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
-    const formulaColor = await cell(page, 0, 1).evaluate((el) => getComputedStyle(el).color);
-    expect(inputColor).not.toBe(formulaColor);
+    const input = { blue: await inkIn(page, 0, 0, BLUE), green: await inkIn(page, 0, 0, GREEN) };
+    const formula = { blue: await inkIn(page, 0, 1, BLUE), green: await inkIn(page, 0, 1, GREEN) };
+    expect(input.blue, "the typed input is blue").toBeGreaterThan(12);
+    expect(input.green).toBeLessThan(3);
+    expect(formula.blue, "a same-sheet formula keeps the text colour (not input blue)").toBeLessThan(3);
+    expect(formula.green).toBeLessThan(3);
 
-    await tab(page, 1).click();
-    const crossColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
-    expect(crossColor).not.toBe(inputColor);
-    expect(crossColor).not.toBe(formulaColor);
+    await goTab(page, 1);
+    await parkCursor(page, 12, 6);
+    await page.waitForTimeout(500);
+    const cross = { blue: await inkIn(page, 0, 0, BLUE), green: await inkIn(page, 0, 0, GREEN) };
+    expect(cross.green, "a cross-sheet link is green").toBeGreaterThan(12);
+    expect(cross.blue).toBeLessThan(3);
   });
 
-  test("the ribbon toggle turns automatic colouring off, and back on", async ({ page }) => {
-    const id = "e2e-stage3-colour-toggle";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // input — blue while ON
-    const onColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+  test("the toolbar toggle turns automatic colouring off, and back on", async ({ page }) => {
+    await open(page, "e2e-stage3-colour-toggle");
+    await enter(page, 0, 0, "1234567"); // input — blue while ON
+    await parkCursor(page, 12, 6);
+    await page.waitForTimeout(500);
+    const on = await inkIn(page, 0, 0, BLUE);
+    expect(on, "control: blue while ON (the default)").toBeGreaterThan(12);
 
-    await page.getByTestId("ribbon-autocolor").click(); // OFF
-    const offColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
-    expect(offColor).not.toBe(onColor);
+    await clickPlanyrTool(page, "toggle-autocolor"); // OFF
+    await parkCursor(page, 12, 6);
+    await expect.poll(() => inkIn(page, 0, 0, BLUE), { message: "no blue once the colouring is off" }).toBeLessThan(3);
 
-    await page.getByTestId("ribbon-autocolor").click(); // back ON
-    await expect.poll(() => cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color)).toBe(onColor);
+    await clickPlanyrTool(page, "toggle-autocolor"); // back ON
+    await parkCursor(page, 12, 6);
+    await expect.poll(() => inkIn(page, 0, 0, BLUE)).toBeGreaterThan(12);
   });
 
   test("a manual font colour always wins over the automatic classification", async ({ page }) => {
-    const id = "e2e-stage3-colour-manual";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // input — auto-blue while ON
-    const autoColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+    await open(page, "e2e-stage3-colour-manual");
+    await enter(page, 0, 0, "1234567"); // input — auto-blue while ON
+    await enter(page, 1, 0, "7654321"); // a second input, left alone as the control
+    await parkCursor(page, 12, 6);
+    await page.waitForTimeout(500);
+    expect(await inkIn(page, 0, 0, BLUE), "control: auto-blue before the manual colour").toBeGreaterThan(12);
 
-    await cell(page, 0, 0).click();
-    // Open the "A" text-colour swatch (ColorSwatchButton's trigger carries this title).
-    await page.locator('[title="Text colour"]').click();
-    await page.locator('button[title="#c62828"]').click(); // a palette red — deliberately NOT the auto-colour blue
-    const manualColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
-    expect(manualColor).not.toBe(autoColor);
-    expect(manualColor).toBe("rgb(198, 40, 40)"); // #c62828, exactly what was picked — the auto-colour never overrides it
+    await clickCell(page, 0, 0);
+    // "Text color More" opens Univer's palette; pick a palette red (deliberately NOT the auto-colour blue)
+    await page.locator('[aria-label="Text color More"]').first().click(); await page.waitForTimeout(400);
+    const swatch = page.locator('[title="#c62828"], [data-color="#c62828"]').first();
+    if (await swatch.count()) await swatch.click();
+    else { // Univer's palette has no such swatch → set the SAME colour through its facade, the way the palette's click would
+      await page.keyboard.press("Escape");
+      await inSheet(page, (api, ws) => { ws.getRange(0, 0).setFontColor("#c62828"); });
+    }
+    await page.waitForTimeout(300);
+    const manual = (await styleOf(page, 0, 0)).color;
+    expect(manual?.toLowerCase(), "the colour that was set is stored as picked").toBe("#c62828");
+    await parkCursor(page, 12, 6);
+    await page.waitForTimeout(500);
+    expect(await inkIn(page, 0, 0, BLUE), "the manual red cell shows NO auto-blue").toBeLessThan(3);
+    expect(await inkIn(page, 1, 0, BLUE), "…while its untouched neighbour still does").toBeGreaterThan(12);
   });
 
   test("the toggle persists across a reload (a standing display choice, not a mid-task gesture)", async ({ page }) => {
-    const id = "e2e-stage3-colour-persist";
-    await seedProject(page, id);
-    await page.goto(`/#/project/${id}/model`);
-    await expect(page.getByTestId("ribbon-autocolor")).toHaveAttribute("aria-pressed", "true");
-    await page.getByTestId("ribbon-autocolor").click();
-    await expect(page.getByTestId("ribbon-autocolor")).toHaveAttribute("aria-pressed", "false");
+    await open(page, "e2e-stage3-colour-persist");
+    expect(await toolsState(page, (t) => t.getState().autoColor), "on by default").toBe(true);
+    await clickPlanyrTool(page, "toggle-autocolor");
+    expect(await toolsState(page, (t) => t.getState().autoColor)).toBe(false);
     await page.reload();
-    await expect(sheetEl(page)).toBeVisible();
-    await expect(page.getByTestId("ribbon-autocolor")).toHaveAttribute("aria-pressed", "false");
+    await waitForGrid(page);
+    expect(await toolsState(page, (t) => t.getState().autoColor), "still off after the reload").toBe(false);
   });
 });

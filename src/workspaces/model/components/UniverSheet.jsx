@@ -344,6 +344,15 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       const mq = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
       if (mq && mq.addEventListener) mq.addEventListener("change", applyTheme);
       L.mq = mq; L.applyTheme = applyTheme;
+      // The app's floating Help "?" lives in the bottom-right corner of every route and clears whatever marks itself `data-canvas-corner`
+      // (src/shared/ui/cornerClearance.js). Univer's footer — sheet tabs, the zoom slider and "100%" — runs along that whole edge, so the
+      // button sat ON the zoom readout and the footer's menu (measured on phone widths, 2026-10-31). Stamp the footer, and again if Univer
+      // re-renders it, so the button rests above it instead.
+      const stampFooter = () => { const f = hostRef.current && hostRef.current.querySelector("footer"); if (f && !f.hasAttribute("data-canvas-corner")) f.setAttribute("data-canvas-corner", "univer-footer"); };
+      stampFooter();
+      const moFooter = new MutationObserver(stampFooter);
+      moFooter.observe(hostRef.current, { childList: true, subtree: true });
+      L.moFooter = moFooter;
 
       // The page may be going away: URGENT, so the host persists synchronously instead of waiting for a render that may never come.
       // beforeunload covers a tab close / reload; pagehide covers the cases that never fire it (mobile, back-forward cache).
@@ -386,6 +395,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       try { L.onReady && L.onReady(null); } catch (_) {}
       try { L.off && L.off.dispose && L.off.dispose(); } catch (_) {}
       try { L.mo && L.mo.disconnect(); } catch (_) {}
+      try { L.moFooter && L.moFooter.disconnect(); } catch (_) {}
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
       try { L.formulaGuard && L.formulaGuard(); } catch (_) {}

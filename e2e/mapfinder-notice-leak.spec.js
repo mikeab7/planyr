@@ -90,7 +90,10 @@ test.describe("NEW-1 (B1462256) — a map-mode notice must not survive the flip 
  */
 test.describe("NEW-1 (B2041360) — a Site-map hint must not survive leaving the Site workspace", () => {
   for (const [label, hash] of [["Dashboard", "#/"], ["Schedule", "#/schedule"], ["Review", "#/markup"],
-    ["Library", "#/library"], ["Notes", "#/notes"], ["Spreadsheet", "#/spreadsheet"]]) {
+    ["Library", "#/library"], ["Notes", "#/notes"], ["Spreadsheet", "#/spreadsheet"],
+    // NEW-2: with a PROJECT open the Spreadsheet is the Univer grid (a lazy canvas, painted full-bleed where the map's portal was) — the arm above only ever
+    // judged the project-less empty state. Same assertions, now over the real grid.
+    ["Spreadsheet (a project open: the Univer grid)", `#/project/${site.id}/spreadsheet`]]) {
     test(`select-parcels tip is gone on ${label}`, async ({ page }) => {
       await openMapWithSeededSite(page);
       await page.getByTestId("map-toolbar-select-parcels").click();
@@ -99,6 +102,8 @@ test.describe("NEW-1 (B2041360) — a Site-map hint must not survive leaving the
 
       await page.evaluate((h) => { window.location.hash = h; }, hash);
       await expect(page.getByTestId("map-toolbar-draw"), "the Site map must no longer be on screen").toBeHidden({ timeout: 15_000 });
+      // `#/spreadsheet` with no project is the "No spreadsheet open" empty state (no canvas); the project-scoped arm below it mounts the Univer grid — wait for it
+      if (/Univer grid/.test(label)) await expect(page.locator('canvas[id^="univer-sheet-main-canvas"]')).toBeVisible({ timeout: 60_000 });
       await expect(tip, `the Site-map tip must not paint over ${label}`).toHaveCount(0, { timeout: 2_000 });
       await expect(page.locator('[data-floating-notice="1"] [data-testid="select-parcels-tip"]')).toHaveCount(0);
     });

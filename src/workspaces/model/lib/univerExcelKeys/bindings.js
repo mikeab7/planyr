@@ -23,6 +23,7 @@ const KC = Object.freeze({
   SPACE: 32, D0: 48, D1: 49, D3: 51, D4: 52, D5: 53, D7: 55, D9: 57,
   SEMICOLON: 186, SEMICOLON_FF: 59, EQUAL: 187, EQUAL_FF: 61, MINUS: 189, MINUS_FF: 173, QUOTE: 222, BACKTICK: 192,
   NUM_ADD: 107, NUM_SUBTRACT: 109,
+  PAGE_UP: 33, PAGE_DOWN: 34, END: 35, HOME: 36,
 });
 
 /** The contexts a chord may fire in (resolved against Univer's focus flags in `./index.js`).
@@ -31,7 +32,13 @@ const KC = Object.freeze({
 export const SCOPE = Object.freeze({ READY: "ready", INLINE: "inline" });
 
 /** [chord id, Univer-side action id, scope, key combos]. `key` is a `{ code, shift?, mod? }` — `mod` defaults to true. */
-const k = (code, shift = false, mod = true) => ({ code, shift, mod });
+const k = (code, shift = false, mod = true, alt = false) => ({ code, shift, mod, alt });
+// Navigation keys (NEW-1, cutover 2026-10-31): the free Univer build does NOT move the selection on Home, Ctrl+Home, Ctrl+End, Ctrl+Shift+Home/End or
+// PageUp/PageDown (measured with real keys on the standalone host — only the arrow/Tab/Enter family and Ctrl+Arrow move it), and these are the basic
+// Excel muscle memory the old grid had. `match` is the predicate on `e.key` (the old grid's keymap.js leaves Ctrl+Home / Ctrl+End to its own
+// handler, so they are spelled out here).
+const isMod = (e) => !!(e.ctrlKey || e.metaKey);
+const plainKey = (key, { mod = false, shift = false, alt = false } = {}) => (e) => e.key === key && isMod(e) === mod && !!e.shiftKey === shift && !!e.altKey === alt;
 export const CHORD_BINDINGS = Object.freeze([
   // Format
   { chord: "strikethrough", action: "strikethrough", scope: SCOPE.INLINE, keys: [k(KC.D5)] },
@@ -58,15 +65,66 @@ export const CHORD_BINDINGS = Object.freeze([
   // Selection (keymap.js `navAction` types, not CHORDS entries)
   { chord: "select-row", nav: "select-row", action: "select-row", scope: SCOPE.READY, keys: [k(KC.SPACE, true, false)] },
   { chord: "select-column", nav: "select-column", action: "select-column", scope: SCOPE.READY, keys: [k(KC.SPACE, false, true)] },
+  // Move / extend (the pure plan is `navPlan` below; the action runs it)
+  { chord: "nav-home", action: "nav-home", scope: SCOPE.READY, keys: [k(KC.HOME, false, false)], match: plainKey("Home") },
+  { chord: "nav-home-extend", action: "nav-home-extend", scope: SCOPE.READY, keys: [k(KC.HOME, true, false)], match: plainKey("Home", { shift: true }) },
+  { chord: "nav-start", action: "nav-start", scope: SCOPE.READY, keys: [k(KC.HOME)], match: plainKey("Home", { mod: true }) },
+  { chord: "nav-start-extend", action: "nav-start-extend", scope: SCOPE.READY, keys: [k(KC.HOME, true)], match: plainKey("Home", { mod: true, shift: true }) },
+  { chord: "nav-end", action: "nav-end", scope: SCOPE.READY, keys: [k(KC.END)], match: plainKey("End", { mod: true }) },
+  { chord: "nav-end-extend", action: "nav-end-extend", scope: SCOPE.READY, keys: [k(KC.END, true)], match: plainKey("End", { mod: true, shift: true }) },
+  { chord: "nav-page-down", action: "nav-page-down", scope: SCOPE.READY, keys: [k(KC.PAGE_DOWN, false, false)], match: plainKey("PageDown") },
+  { chord: "nav-page-up", action: "nav-page-up", scope: SCOPE.READY, keys: [k(KC.PAGE_UP, false, false)], match: plainKey("PageUp") },
+  { chord: "nav-page-down-extend", action: "nav-page-down-extend", scope: SCOPE.READY, keys: [k(KC.PAGE_DOWN, true, false)], match: plainKey("PageDown", { shift: true }) },
+  { chord: "nav-page-up-extend", action: "nav-page-up-extend", scope: SCOPE.READY, keys: [k(KC.PAGE_UP, true, false)], match: plainKey("PageUp", { shift: true }) },
+  { chord: "nav-across-right", action: "nav-across-right", scope: SCOPE.READY, keys: [k(KC.PAGE_DOWN, false, false, true)], match: plainKey("PageDown", { alt: true }) },
+  { chord: "nav-across-left", action: "nav-across-left", scope: SCOPE.READY, keys: [k(KC.PAGE_UP, false, false, true)], match: plainKey("PageUp", { alt: true }) },
+  { chord: "nav-across-right-extend", action: "nav-across-right-extend", scope: SCOPE.READY, keys: [k(KC.PAGE_DOWN, true, false, true)], match: plainKey("PageDown", { shift: true, alt: true }) },
+  { chord: "nav-across-left-extend", action: "nav-across-left-extend", scope: SCOPE.READY, keys: [k(KC.PAGE_UP, true, false, true)], match: plainKey("PageUp", { shift: true, alt: true }) },
 ]);
 
+/** Which move each nav action makes — the table `navPlan` reads. `dir` is +1 / -1 for the page moves. */
+export const NAV_ACTIONS = Object.freeze({
+  "nav-home": { kind: "row-start" }, "nav-home-extend": { kind: "row-start", extend: true },
+  "nav-start": { kind: "start" }, "nav-start-extend": { kind: "start", extend: true },
+  "nav-end": { kind: "used-end" }, "nav-end-extend": { kind: "used-end", extend: true },
+  "nav-page-down": { kind: "page", dir: 1 }, "nav-page-up": { kind: "page", dir: -1 },
+  "nav-page-down-extend": { kind: "page", dir: 1, extend: true }, "nav-page-up-extend": { kind: "page", dir: -1, extend: true },
+  "nav-across-right": { kind: "across", dir: 1 }, "nav-across-left": { kind: "across", dir: -1 },
+  "nav-across-right-extend": { kind: "across", dir: 1, extend: true }, "nav-across-left-extend": { kind: "across", dir: -1, extend: true },
+});
+
+/** Excel's Home / Ctrl+Home / Ctrl+End / PageUp / PageDown (+ Shift, + Alt across) as a PURE plan: where the selection's anchor and end go.
+ *  `s` = { active:{row,col}, range:{startRow,endRow,startColumn,endColumn} (the selection's range), maxRows, maxCols, used:{row,col}|null,
+ *          rowsPerPage, colsPerPage }.  Returns { anchor, end } (equal = a single cell) or null when there is nothing to do (Ctrl+End on an empty sheet).
+ *  Without Shift the selection collapses to one cell; with Shift it runs from the ACTIVE cell to the new end, and a page move starts from the
+ *  selection's moving corner (the one opposite the active cell) — the old grid's behaviour (SheetView.jsx `navAction`), kept the same. */
+export function navPlan(action, s) {
+  const spec = NAV_ACTIONS[action];
+  if (!spec || !s || !s.active) return null;
+  const clamp = (v, hi) => Math.max(0, Math.min(hi - 1, v));
+  const a = s.active, r = s.range || { startRow: a.row, endRow: a.row, startColumn: a.col, endColumn: a.col };
+  const movingRow = a.row === r.startRow ? r.endRow : r.startRow;
+  const movingCol = a.col === r.startColumn ? r.endColumn : r.startColumn;
+  let end;
+  switch (spec.kind) {
+    case "row-start": end = { row: spec.extend ? movingRow : a.row, col: 0 }; break;
+    case "start": end = { row: 0, col: 0 }; break;
+    case "used-end": if (!s.used) return null; end = { row: s.used.row, col: s.used.col }; break;
+    case "page": end = { row: clamp((spec.extend ? movingRow : a.row) + spec.dir * Math.max(1, s.rowsPerPage || 1), s.maxRows), col: spec.extend ? movingCol : a.col }; break;
+    case "across": end = { row: spec.extend ? movingRow : a.row, col: clamp((spec.extend ? movingCol : a.col) + spec.dir * Math.max(1, s.colsPerPage || 1), s.maxCols) }; break;
+    default: return null;
+  }
+  return spec.extend ? { anchor: { row: a.row, col: a.col }, end } : { anchor: end, end };
+}
+
 /** Univer's numeric binding for a combo. */
-export const bindingOf = ({ code, shift, mod }) => code | (shift ? META.SHIFT : 0) | (mod ? META.MOD : 0);
+export const bindingOf = ({ code, shift, mod, alt }) => code | (shift ? META.SHIFT : 0) | (mod ? META.MOD : 0) | (alt ? META.ALT : 0);
 
 /** Does this keystroke mean `chord`? Delegates to the SAME predicates the old grid uses. */
 export function chordMatches(chord, e) {
   const b = CHORD_BINDINGS.find((x) => x.chord === chord);
   if (!b || !e || typeof e.key !== "string") return false;
+  if (b.match) return !!b.match(e);
   if (b.nav) { const n = navAction(e); return !!n && n.type === b.nav; }
   const row = CHORDS.find(([id]) => id === chord);
   return !!row && !!row[2](e);

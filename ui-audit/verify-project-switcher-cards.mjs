@@ -227,6 +227,8 @@ console.log("\n8. Company scope keeps the tab you are on");
 const TABS = [["site", "site-planner"], ["notes", "notes"], ["library", "library"], ["schedule", "scheduler"], ["spreadsheet", "model"], ["markup", "doc-review"]];
 for (const [slug, mod] of TABS) {
   await gotoRoute(`#/project/${CURRENT}/${slug}`);
+  // NEW-2: the Spreadsheet is the lazy Univer grid for every account — let it mount before the switch (the old DOM grid mounted with the route)
+  if (slug === "spreadsheet") await page.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 });
   await open();
   await page.click('[data-testid="project-org"]');
   await page.waitForTimeout(1200);

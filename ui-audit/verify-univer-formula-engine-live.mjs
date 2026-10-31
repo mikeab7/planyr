@@ -1,7 +1,7 @@
 /* verify-univer-formula-engine-live — V2034432 (B2585376, one formula engine) on a REAL deploy.
  * SIGNED IN as the throwaway test account on ONE throwaway project (deleted and re-asked at the end — owner rule 15).
- * `is_admin` is answered `true` by a network intercept for THIS browser only (a visibility switch for the Univer grid; data access
- * stays the test account's own). Builds a workbook with the real grid (facade writes + REAL keystrokes for the typed formulas),
+ * The Univer grid is the default for every account (cutover 2026-10-31): the test account, NOT an admin, sees it with no switch and no
+ * is_admin intercept. Builds a workbook with the real grid (facade writes + REAL keystrokes for the typed formulas),
  * lets the formula Web Worker calculate it, then File ▾ → Export to Excel and re-reads the .xlsx with ExcelJS:
  *   K  known-good arm   =SUM(B1:B2) = 300 in the grid AND as the cached result in the file (VOID if the grid does not say 300)
  *   E1 every cached result in the file equals the number the grid shows for that cell (SUM, PMT, EDATE, interleaved XIRR)
@@ -21,7 +21,6 @@ const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const WANT = args.includes("--build") ? args[args.indexOf("--build") + 1] : null;
 const JSON_OUT = args.includes("--json") ? args[args.indexOf("--json") + 1] : null;
 const A = `${LIVE_PREFIX}fe-${Date.now().toString(36)}`;
-const SWITCH_KEY = "planyr:model:univerGrid";
 const out = [];
 let failures = 0, voided = null;
 const ok = (name, cond, extra = "") => { out.push({ name, pass: !!cond, extra }); console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
@@ -33,10 +32,7 @@ try {
   await assertMeasurable(page, "verify-univer-formula-engine-live");
   await seedThrowawayPlan(page, A);
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
-  await page.route("**/rest/v1/rpc/is_admin*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "true" }));
   await page.goto(`${BASE}/?cb=${Date.now()}#/project/${A}/spreadsheet`, { waitUntil: "load" });
-  await page.evaluate(([k]) => localStorage.setItem(k, "1"), [SWITCH_KEY]);
-  await page.reload({ waitUntil: "load" });
   await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
   await page.waitForFunction(() => window.__planyrUniverRead && window.__planyrUniverRead.api() && window.__planyrUniverRead.api().getActiveWorkbook());
   const served = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()));
@@ -104,7 +100,6 @@ try {
   if (e.void) console.log(String(e.message)); else { failures++; console.log("FAIL — threw: " + String(e.stack || e).split("\n").slice(0, 3).join(" | ")); }
 } finally {
   try {
-    await page.evaluate(([k]) => localStorage.removeItem(k), [SWITCH_KEY]).catch(() => {});
     await page.evaluate(async (pid) => { await window.pfSupabase.from("model_sheets").delete().eq("id", pid); await window.pfSupabase.from("project_folders").delete().eq("project_id", pid); }, A).catch(() => {});
     const cl = await cleanupLive(page, { planId: A }).catch((e) => ({ errors: [String(e)], left: {} }));
     const ms = await page.evaluate(async (pid) => ((await window.pfSupabase.from("model_sheets").select("id").eq("id", pid)).data || []).length, A).catch(() => -1);

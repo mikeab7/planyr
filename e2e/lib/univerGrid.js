@@ -141,3 +141,179 @@ export async function clickToolbar(page, label) {
   await btn.click();
   await settle(page, 200);
 }
+
+/* ---- NEW-2 additions (audit tools / palette / file I/O specs) — ADD-ONLY ---------------------------------------------------------- */
+
+/** The Planyr tools controller (window.__planyrUniverRead.tools()) — run `body(tools, arg)` in the page and return its serialisable result. */
+export function toolsState(page, body, arg) {
+  return page.evaluate(`((arg) => { const t = window.__planyrUniverRead.tools(); return (${body.toString()})(t, arg); })(${JSON.stringify(arg ?? null)})`);
+}
+
+/** Bring the Formulas tab (where the Planyr tools sit) into Univer's one header strip. A no-op when it is already showing. */
+export async function showFormulasTab(page) {
+  const seen = () => page.evaluate(() => [...document.querySelectorAll('[data-u-command="planyr.tools.trace-precedents"]')].some((e) => e.getBoundingClientRect().width > 0));
+  if (await seen()) return;
+  await page.click('[data-u-comp="headerbar"] a[data-state]'); await page.waitForTimeout(350);
+  await page.getByText("Formulas", { exact: true }).first().click(); await page.waitForTimeout(600);
+}
+/** Click one of the Planyr tool buttons on the real toolbar (`trace-precedents`, `trace-dependents`, `trace-clear`, `toggle-inconsistencies`, `toggle-name-manager`, `toggle-autocolor`...). */
+export async function clickPlanyrTool(page, id) {
+  await showFormulasTab(page);
+  await page.locator(`[data-u-command="planyr.tools.${id}"]`).first().click();
+  await page.waitForTimeout(450);
+}
+/** How many pixels inside `clip` ({x,y,width,height}) satisfy `test` — a boolean expression of r, g, b — read off the page's own screenshot. */
+export async function countPixels(page, clip, test) {
+  const buf = await page.screenshot({ clip });
+  return page.evaluate(async ({ b64, src }) => {
+    const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data; const f = new Function("r", "g", "b", `return ${src};`); let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (f(d[i], d[i + 1], d[i + 2])) n++;
+    return n;
+  }, { b64: buf.toString("base64"), src: test });
+}
+/** Pixel tests used by the tools' canvas drawing (same colours the ui-audit parity checks use). */
+export const PIXEL = {
+  ORANGE: "r > 150 && g < 140 && b < 90 && r - b > 80",   // the inconsistency corner marker
+  ARROW: "b > 150 && b - r > 80 && g < 170",              // the trace arrow
+};
+/** The top-left 11 px of a cell, where the inconsistency marker is drawn. */
+export const cornerClip = async (page, r, c) => { const p = await cellPoint(page, r, c); return { x: p.left + 1, y: p.top + 1, width: 11, height: 11 }; };
+/** The page rectangle spanning cells (r1,c1)..(r2,c2). */
+export const gridClip = async (page, r1, c1, r2, c2) => { const a = await cellPoint(page, r1, c1), b = await cellPoint(page, r2, c2); return { x: a.left, y: a.top, width: b.right - a.left, height: b.bottom - a.top }; };
+
+/** Open the command palette with a REAL Ctrl+K from the grid. */
+export async function openPalette(page) {
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("model-command-palette-input")).toBeVisible();
+  await expect(page.getByTestId("model-command-palette-input"), "the palette input has focus, so a person's next keystrokes land in it").toBeFocused();
+}
+/** Open the palette, type `query`, press Enter — exactly how a person drives it. */
+export async function runPaletteCommand(page, query) {
+  await openPalette(page);
+  await page.keyboard.type(query, { delay: 12 });
+  await page.waitForTimeout(250);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("model-command-palette-input"), "the palette closes the moment a command runs").toHaveCount(0);
+  await page.waitForTimeout(450);
+}
+/** Define a workbook name over the CURRENT selection through the Name Manager (opened from the palette), then close the panel. */
+export async function defineNameFromSelection(page, name) {
+  await runPaletteCommand(page, "Name Manager");
+  await page.getByTestId("name-manager-new-input").fill(name);
+  await page.getByTestId("name-manager-create").click();
+  await page.waitForTimeout(500);
+  await page.getByTestId("name-manager").getByTitle("Close (Esc)").click();
+  await page.waitForTimeout(200);
+}
+/** The workbook's defined names as Univer holds them: [{ name, ref }]. */
+export const definedNames = (page) => page.evaluate(() => {
+  const r = (window.__planyrUniverRead.api().getActiveWorkbook().save().resources || []).find((x) => x.name === "SHEET_DEFINED_NAME_PLUGIN");
+  return r ? Object.values(JSON.parse(r.data)).map((d) => ({ name: d.name, ref: d.formulaOrRefString })) : [];
+});
+
+/* ---- NEW-2 additions (clear-cell / indent / drag / multi-range / editor specs) — ADD-ONLY ---------------------------------------- */
+
+/** Click a Univer toolbar button by its command id (`planyr.sheet.command.increase-indent`, `sheet.command.set-range-bold`…). The toolbar
+ *  keeps a hidden 0×0 measuring copy of every item, so the VISIBLE one is picked. THROWS if there is none (never a silent no-op). */
+export async function clickUniverCommand(page, cmd) {
+  const box = await page.locator(`[data-u-command="${cmd}"]`).evaluateAll((els) => { for (const e of els) { const r = e.getBoundingClientRect(); if (r.width > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; } return null; });
+  if (!box) throw new Error(`clickUniverCommand: no visible toolbar button for ${cmd}`);
+  await page.mouse.click(box.x, box.y); await settle(page, 250);
+}
+/** Park the cursor on a far-away cell so its outline can never touch the cells under measurement. */
+export const parkCursor = (page, r = 20, c = 8) => clickCell(page, r, c);
+
+const _decode = (page, buf, fn) => page.evaluate(async ([b64, src]) => {
+  const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+  const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+  return new Function("d", "w", "h", `return (${src})(d, w, h);`)(g.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+}, [buf.toString("base64"), fn.toString()]);
+/** PNG of one cell's interior (2 px inset: no grid line, no selection outline when the cursor is parked elsewhere). */
+export async function cellShot(page, r, c) {
+  const p = await cellPoint(page, r, c);
+  const buf = await page.screenshot({ clip: { x: p.left + 2, y: p.top + 2, width: Math.max(4, p.w - 4), height: Math.max(4, p.h - 4) } });
+  return { buf, left: p.left + 2, top: p.top + 2, w: Math.max(4, p.w - 4) };
+}
+/** The painted text ink of a cell: absolute page-x of its left / right-most DARK pixel and the dark-pixel count (-1 / 0 for an empty cell). */
+export async function cellInk(page, r, c) {
+  const s = await cellShot(page, r, c);
+  const e = await _decode(page, s.buf, (d, w, h) => { let left = -1, right = -1, dark = 0; for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; if (d[i] < 110 && d[i + 1] < 110 && d[i + 2] < 110) { dark++; if (left < 0) left = x; right = x; } } return { left, right, dark }; });
+  return { left: e.left < 0 ? -1 : s.left + e.left, right: e.right < 0 ? -1 : s.left + e.right, dark: e.dark, buf: s.buf };
+}
+/** The active sheet's scroll state + the rows / columns currently on screen. `r1`/`c1` change only when the grid really scrolled. */
+export const sheetView = (page) => inSheet(page, (api, ws) => { const v = ws.getVisibleRange(); const s = ws.getScrollState(); return { r1: v.startRow, r2: v.endRow, c1: v.startColumn, c2: v.endColumn, top: s.sheetViewStartRow, left: s.sheetViewStartColumn, offX: s.offsetX, offY: s.offsetY }; });
+/** Scroll the grid so a cell is at its top-left (Univer's own scroll, not a driver scroll). */
+export const scrollGridTo = (page, r, c) => inSheet(page, (api, ws, [rr, cc]) => { ws.scrollToCell(rr, cc); }, [r, c]);
+/** Hold the mouse perfectly STILL for `ms` (a MessageChannel-free wait is fine: the page's own rAF drives Univer's autoscroll). */
+export const holdStill = (page, ms) => page.waitForTimeout(ms);
+/** The persisted workbook this device saved for a local (signed-out) project — what a reload would read back. */
+export const storedWorkbook = (page, projectId) => page.evaluate((id) => { try { return JSON.parse(localStorage.getItem(`planyr:model:sheet:v1:local:${id}`)); } catch (_) { return null; } }, projectId);
+/** The saved indent level of one cell of the first sheet (0 when none), read from the persisted workbook. */
+export const storedIndent = async (page, projectId, r, c) => {
+  const wb = await storedWorkbook(page, projectId); const sh = wb && wb.sheets && wb.sheets[0] && wb.sheets[0].sheet;
+  const col = sh && sh.columns && sh.columns[c]; const st = sh && col && sh.styles && sh.styles[`${col.id}:${r}`];
+  return st && st.indent ? st.indent : 0;
+};
+/** Widths of the first `n` columns, and every cell rect of one row — the geometry an indent / a clear must never change. */
+export const rowGeometry = (page, r, n = 6) => inSheet(page, (api, ws, [rr, nn]) => { const out = []; for (let c = 0; c < nn; c++) { const rc = ws.getRange(rr, c).getCellRect(); const o = typeof rc === "string" ? JSON.parse(rc) : rc; out.push({ x: Math.round(o.x * 100) / 100, w: Math.round(o.width * 100) / 100, y: Math.round(o.y * 100) / 100, h: Math.round(o.height * 100) / 100, colW: ws.getColumnWidth(c) }); } return out; }, [r, n]);
+/** The Univer facade's current selection's bottom-right "fill handle" point (page coords), from the active range's cell rect. */
+export const fillHandlePoint = async (page, r, c) => { const p = await cellPoint(page, r, c); return { x: p.right - 1, y: p.bottom - 1 }; };
+/** A click with a modifier key HELD (Shift / Control) — `page.mouse.click` takes no modifiers, so hold the real key around it. */
+export async function modClickCell(page, r, c, key) { const p = await cellPoint(page, r, c); await page.keyboard.down(key); await page.mouse.click(p.x, p.y); await page.keyboard.up(key); await settle(page, 160); }
+/** Open a Univer toolbar DROPDOWN (e.g. `sheet.command.set-horizontal-text-align`) and pick one option by its visible text ("center", "top"…). */
+export async function chooseFromToolbarMenu(page, cmd, optionText) {
+  const box = await page.locator(`[data-u-command="${cmd}"]`).evaluateAll((els) => { for (const e of els) { const r = e.getBoundingClientRect(); if (r.width > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; } return null; });
+  if (!box) throw new Error(`chooseFromToolbarMenu: no visible toolbar control for ${cmd}`);
+  await page.mouse.click(box.x, box.y); await settle(page, 300);
+  await page.getByText(optionText, { exact: true }).last().click(); await settle(page, 250);
+}
+
+/** Add a sheet with the real "+" at the end of Univer's sheet-tab strip; Univer activates the new sheet. Waits for the count to grow. */
+export async function addSheetViaTab(page) {
+  const before = (await sheetNames(page)).length;
+  await page.locator('[data-u-comp="sheet-bar-append-button"]').first().click();
+  await expect.poll(async () => (await sheetNames(page)).length, { message: "a new sheet appears" }).toBe(before + 1);
+  await page.waitForTimeout(500);
+}
+/** Click a sheet's tab by its visible name (real click on Univer's tab strip). */
+export async function clickSheetTab(page, name) {
+  await page.locator('[data-u-comp="slide-tab-bar"], .univer-sheet-bar, body').first();
+  await page.getByText(name, { exact: true }).last().click();
+  await page.waitForTimeout(500);
+}
+
+/* ---- NEW-2 additions (model-spreadsheet / bare-letters / tab-switch / cell-editor-undo specs) — ADD-ONLY -------------------------- */
+
+/** What the FORMULA BAR holds right now (its own editor document — a canvas, so it is read from Univer, not the DOM). A cell with a
+ *  formula reads "=A1+A2" there, never its computed value. Trailing paragraph mark removed. */
+export const formulaBarText = (page) => page.evaluate(() => {
+  const d = window.__planyrUniverRead.api().getDocument("__INTERNAL_EDITOR__DOCS_FORMULA_BAR");
+  return d ? String(d.getBody().dataStream).replace(/\r\n$/, "") : null;
+});
+/** The text currently IN FLIGHT in the in-cell editor (typed, not yet committed). "" when no edit is open. */
+export const cellEditorText = (page) => page.evaluate(() => {
+  const d = window.__planyrUniverRead.api().getDocument("__INTERNAL_EDITOR__DOCS_NORMAL");
+  return d ? String(d.getBody().dataStream).replace(/\r\n$/, "") : null;
+});
+/** The Name Box (the address box left of the formula bar) — a real <input>. */
+export const nameBoxInput = (page) => page.locator('[data-u-comp="defined-name"] input').first();
+/** Click into the formula bar (its editor is a canvas; the first one in the strip is the visible one). */
+export async function clickFormulaBar(page) { await page.locator('[data-u-comp="formula-editor"] canvas').first().click(); await settle(page, 300); }
+/** Univer's sheet-tab strip: one locator per tab, in order. */
+export const sheetTabs = (page) => page.locator('[data-u-comp="slide-tab-item"]');
+
+/** Type a formula into a cell and commit it with Enter. Univer's name / function hint popup can swallow the FIRST Enter of a formula that
+ *  ends in a name (it accepts the highlighted suggestion and keeps the editor open — Excel commits on Enter and only completes on Tab).
+ *  This presses Enter once, and a second time only if the cell is still being edited. Returns how many Enters it took (1 = Excel behaviour),
+ *  so a spec can assert on it separately instead of hiding the difference. */
+export async function enterFormula(page, r, c, text) {
+  await clickCell(page, r, c);
+  await page.keyboard.type(text, { delay: 8 });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(450);
+  let enters = 1;
+  if ((await formulaOf(page, r, c)) === null) { await page.keyboard.press("Enter"); await page.waitForTimeout(350); enters = 2; }
+  return enters;
+}

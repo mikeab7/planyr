@@ -49,7 +49,9 @@ export const ROUTES = [
   { id: "review", hash: `#/project/${PROJECT}/markup`, ready: "header" },
   { id: "library", hash: `#/project/${PROJECT}/library`, ready: "header" },
   { id: "notes", hash: `#/project/${PROJECT}/notes`, ready: "header" },
-  { id: "spreadsheet", hash: `#/project/${PROJECT}/spreadsheet`, ready: "header" },
+  // NEW-2: the Spreadsheet is the Univer grid for every account — a LAZY chunk whose own <header> (toolbar) is swept as shell chrome. `also` holds the
+  // measurement until its canvas has mounted: sweeping the "header" of the loading placeholder would be vacuous (and would stop sweeping Univer's strip).
+  { id: "spreadsheet", hash: `#/project/${PROJECT}/spreadsheet`, ready: "header", also: 'canvas[id^="univer-sheet-main-canvas"]' },
   { id: "food", hash: "#/food", ready: "header" },
 ];
 
@@ -123,7 +125,9 @@ async function settle(page, label) {
 async function gotoRoute(page, route) {
   await page.goto(`${BASE}/${route.hash}`, { waitUntil: "load" });
   if (page.url().indexOf(route.hash) < 0) await page.evaluate((h) => { location.hash = h; }, route.hash);
-  return page.waitForSelector(route.ready, { state: "attached", timeout: 30000 }).then(() => true, () => false);
+  const first = await page.waitForSelector(route.ready, { state: "attached", timeout: 30000 }).then(() => true, () => false);
+  if (!first || !route.also) return first;
+  return page.waitForSelector(route.also, { state: "attached", timeout: 60000 }).then(() => true, () => false);
 }
 
 /** Open each shared toolbar's More menu, list its items, close with Escape, confirm focus came back. */
@@ -152,7 +156,7 @@ async function checkMenus(page, snap) {
 
 async function sweepRoute({ page }, route, heightsToRun, pass, results) {
   const ready = await gotoRoute(page, route);
-  if (!ready) results.push({ route: route.id, w: 0, h: 0, pass, violations: [{ kind: "route-not-ready", detail: `selector ${route.ready} never appeared — measuring a half-rendered route would be vacuous` }] });
+  if (!ready) results.push({ route: route.id, w: 0, h: 0, pass, violations: [{ kind: "route-not-ready", detail: `selector ${route.also ? route.ready + " + " + route.also : route.ready} never appeared — measuring a half-rendered route would be vacuous` }] });
   for (const h of heightsToRun) {
     for (const w of widths) {
       await page.setViewportSize({ width: w, height: h });

@@ -16,7 +16,7 @@ import {
 } from "@univerjs/presets";
 import { MULTI_SELECTION_MESSAGE } from "../../../../shared/selection/rangeSelection.js";
 import {
-  NUMFMT_FOR, TODAY_PATTERN, TIME_PATTERN, dateSerial, timeFraction, INSERT_CHOICES, DELETE_CHOICES, structureKind, wholeLineRanges,
+  NUMFMT_FOR, TODAY_PATTERN, TIME_PATTERN, dateSerial, timeFraction, INSERT_CHOICES, DELETE_CHOICES, structureKind, wholeLineRanges, NAV_ACTIONS, navPlan,
 } from "./bindings.js";
 import { promptChoice, promptNumber } from "./dialogs.js";
 import { INDENT_COMMAND_IDS } from "../univerIndent.js";
@@ -123,6 +123,36 @@ export function createActions(env) {
     await run(UNIVER.setSelections, { unitId: s.unitId, subUnitId: s.sheetId, selections });
   };
 
+  // ---- Home / End / Page keys (the free build moves the selection on none of them — see bindings.js `navPlan`) ----------------------
+  const navigate = (action) => async () => {
+    const s = here(); if (!s || s.ranges.length === 0) return;
+    const range = s.ranges[s.ranges.length - 1];
+    const visible = typeof s.ws.getVisibleRange === "function" ? s.ws.getVisibleRange() : null;
+    const lastRow = typeof s.ws.getLastRow === "function" ? s.ws.getLastRow() : -1;
+    const lastCol = typeof s.ws.getLastColumn === "function" ? s.ws.getLastColumn() : -1;
+    const plan = navPlan(action, {
+      active: s.active, range, maxRows: s.maxRows, maxCols: s.maxCols,
+      used: lastRow >= 0 && lastCol >= 0 ? { row: lastRow, col: lastCol } : null,
+      rowsPerPage: visible ? Math.max(1, visible.endRow - visible.startRow) : 20,
+      colsPerPage: visible ? Math.max(1, visible.endColumn - visible.startColumn) : 8,
+    });
+    if (!plan) return;
+    const { anchor, end } = plan;
+    if (anchor.row === end.row && anchor.col === end.col) s.ws.getRange(end.row, end.col).activate();
+    else {
+      const r = { startRow: Math.min(anchor.row, end.row), endRow: Math.max(anchor.row, end.row), startColumn: Math.min(anchor.col, end.col), endColumn: Math.max(anchor.col, end.col), rangeType: RANGE_TYPE.NORMAL };
+      await run(UNIVER.setSelections, { unitId: s.unitId, subUnitId: s.sheetId, selections: [{
+        range: r, style: null,
+        primary: { startRow: anchor.row, endRow: anchor.row, startColumn: anchor.col, endColumn: anchor.col, actualRow: anchor.row, actualColumn: anchor.col, isMerged: false, isMergedMainCell: false },
+      }] });
+    }
+    // Scroll ONLY when the target is off screen: `scrollToCell` puts the cell at the view's origin, so calling it for a cell already in view
+    // would shift the sheet under a person who just pressed Home.
+    const v = typeof s.ws.getVisibleRange === "function" ? s.ws.getVisibleRange() : null;
+    const inView = v && end.row >= v.startRow && end.row <= v.endRow && end.col >= v.startColumn && end.col <= v.endColumn;
+    if (!inView && typeof s.ws.scrollToCell === "function") s.ws.scrollToCell(end.row, end.col);
+  };
+
   // ---- date / time / copy above --------------------------------------------------------------------------------------
   const stamp = (serial, pattern) => async () => {
     const s = here(); if (!s) return;
@@ -226,6 +256,7 @@ export function createActions(env) {
     "hide-rows": lines("row", true), "unhide-rows": lines("row", false),
     "hide-columns": lines("column", true), "unhide-columns": lines("column", false),
     "select-row": selectLine("row"), "select-column": selectLine("column"),
+    ...Object.fromEntries(Object.keys(NAV_ACTIONS).map((id) => [id, navigate(id)])),
     // Alt key-tip leaves (lib/keyTips.js ids) that are not chords
     bold: () => run(UNIVER.bold), italic: () => run(UNIVER.italic), underline: () => run(UNIVER.underline),
     "indent-decrease": indent("decrease"), "indent-increase": indent("increase"),

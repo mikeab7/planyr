@@ -25,3 +25,22 @@
   margin-right: 8px; padding: 0 10px 0 4px; height: 24px; border-right: 1px solid var(--chrome-divider);
 }
 .planyr-univer [data-u-comp="headerbar"] a[data-state] svg { color: var(--text-primary) !important; }
+
+/* Touch (phone / tablet): Univer's own toolbar and footer buttons are 24 px square — under the 44 px a finger needs. Same fix as the app header
+ * (src/index.css NEW-6d): the VISIBLE button is unchanged and an invisible halo extends its hit area up and down (the strips are packed too tightly
+ * for a wider one to avoid stealing a neighbour's edge). Only where the pointer is coarse; a mouse sees exactly what it did. */
+@media (pointer: coarse) {
+  .planyr-univer [data-u-comp="headerbar"] button,
+  .planyr-univer footer button { position: relative; }
+  .planyr-univer [data-u-comp="headerbar"] button::after,
+  .planyr-univer footer button::after { content: ""; position: absolute; left: -2px; right: -2px; top: -10px; bottom: -10px; }
+}
+
+/* Phone portrait: Univer's footer is a 4-column grid whose first column (the sheet tabs) is whatever the other three leave. At a 320–393 wide screen the
+ * zoom readout (a 68 px select) and the gridlines toggle took everything, so the tab strip was 12 px wide — the sheet's own name was invisible, hidden
+ * behind the scroll arrows (measured on WebKit at iPhone SE / 15 widths, 2026-10-31). Drop those two (a phone zooms by pinch; Fit and − / + stay) so
+ * the tab keeps ~150 px. Desktop and tablet widths are untouched. */
+@media (max-width: 480px) {
+  .planyr-univer footer [class*="w-[68px]"] { display: none !important; }
+  .planyr-univer footer > section > div:nth-child(2) { display: none !important; }
+}
