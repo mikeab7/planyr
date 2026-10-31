@@ -288,6 +288,15 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-parcel-list-layout.mjs && node ui-audit/verify-parcel-numbers-stable.mjs
+      # Planner per-pointer-move rule (the Site Planner speed round, NEW-3, 2026-10-31). Owner: "improve the speed of the software."
+      # The rule: no feature may add per-pointer-move work to the planner — a zoom step, a pan or a building drag rebuilds no
+      # grading surface, posts no worker job and re-encodes no picture, and a pan commits React about once per move. Judged as
+      # COUNTS (a shared runner cannot be trusted with a millisecond; the 4x-throttled timing budgets are `npm run perf:planner`,
+      # on demand) on the owner's Concept A with grading, contours, cut/fill and paper on. It builds and serves its own copy of
+      # the grading harness (port 5198) and runs a KNOWN-SLOW arm that must fail, or the run is VOID. Red on the pre-fix engine
+      # (10 picture re-encodes in 10 drag moves). Uses the Chromium installed above; ~30 s.
+      - name: Planner per-pointer-move rule (zoom / pan / drag rebuild and re-encode nothing — speed round NEW-3)
+        run: node ui-audit/verify-planner-perf.mjs --counts
       # Critical interaction lane (B1857904/B1857905, reliability programme R2). A SMALL,
       # deterministic subset of e2e/ — reused, not duplicated — wired into the required build so a
       # real interaction regression can no longer merge silently, closing the gap the reliability

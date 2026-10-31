@@ -577,10 +577,15 @@ export default function GradingController({ input, onModel }) {
   }, [bandRes, contourDaylightKey, curLimitSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- Cut & Fill picture: the SLOPES of the focused assembly (all buildings when none selected) ---------------- */
+  // PERF (the speed round, NEW-2): WHICH cells the picture paints, as a value. The memo below used to key on `facts` (a new Map on
+  // every pointer move of a building drag, because the building's ring moved) and so re-coloured and re-encoded the whole picture
+  // — cellsPixels + a PNG data URL — on every move, of a surface that is not rebuilt until the release. Under a grading limit the
+  // scope is always the whole graded area; otherwise it is the focused assembly's ids, which a drag does not change.
+  const cutfillScope = !grid || grid.limit || !selBuildingId ? "all"
+    : [...new Set(labelIds.flatMap((id) => { const F = facts.get(id); return F ? F.aIds : []; }))].sort().join(",");
   const cutfill = useMemo(() => {
     if (!cfg.layers.cutfill || !grid || !grid.cells.length) return null;
-    const set = new Set();
-    for (const id of labelIds) { const F = facts.get(id); if (F) for (const x of F.aIds) set.add(x); }
+    const set = new Set(cutfillScope === "all" ? [] : cutfillScope.split(","));
     // ROUND 4: under a grading limit the slopes belong to the graded area as a whole — always the whole picture
     const cells = grid.limit ? grid.cells : selBuildingId ? grid.cells.filter((c) => set.has(c.elId)) : grid.cells;
     if (!cells.length) return null;
@@ -602,7 +607,7 @@ export default function GradingController({ input, onModel }) {
       daylightRings: sh ? sh.daylight : [], innerRings: sh ? sh.inner : [], bandMode: sh ? sh.mode : null, bandSource: sh ? sh.source : null, bandStale: !!(sh && gradeSurface && sh.key !== gradeSurface.surfaceKey),
       bandReady: !!sh, bandLimitSig: sh ? sh.limitSig : "",
     };
-  }, [cfg.layers.cutfill, grid, gradeSurface, selBuildingId, facts, labelIds.join(","), bandShapes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfg.layers.cutfill, grid, gradeSurface, selBuildingId, cutfillScope, bandShapes]);
 
 
   /* ---------------- ROUND 5 (NEW-6) — the paper background: the parcel, out to the daylight line plus a margin ---------------- */

@@ -38,13 +38,17 @@ async function load() {
 }
 
 const ringOf = (e) => e.ring;
+// the query string, read ONCE (it was re-parsed dozens of times per render — bench overhead the planner does not have)
+const QS = new URLSearchParams(location.search);
+// one object for the whole session, like SitePlanner's memoised PAL (a fresh one per render would defeat GradingCanvas's memo)
+const HARNESS_PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
 function Harness({ data }) {
   const { dem, origin, ring, sb } = data;
   const [els, setEls] = useState(() => {
-    const bx = +(new URLSearchParams(location.search).get("bx") ?? -560), by = +(new URLSearchParams(location.search).get("by") ?? -1326);
+    const bx = +(QS.get("bx") ?? -560), by = +(QS.get("by") ?? -1326);
     // ?owner=1 — the owner's real 636,916 SF cross-dock (problem report 6cea9895), moved from his plan's origin into this frame
     // ?owner=2 — the owner's Concept A as of 2026-10-30 (1429 × 650 at 259°; B2500224 ×2)
-    const ownerQ = new URLSearchParams(location.search).get("owner");
+    const ownerQ = QS.get("owner");
     if (ownerQ === "1" || ownerQ === "2") {
       const ROWS = ownerQ === "2" ? CHEHAW_CONCEPT_A_ROWS : CHEHAW_CROSS_DOCK_ROWS;
       const o = lngLatToFeet(OWNER_ORIGIN.lon, OWNER_ORIGIN.lat, data.origin.lon, data.origin.lat);
@@ -55,7 +59,7 @@ function Harness({ data }) {
         ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
       }));
     }
-    if (new URLSearchParams(location.search).get("none") === "1") return [];     // no building on the plan: the panel's empty state
+    if (QS.get("none") === "1") return [];     // no building on the plan: the panel's empty state
     const one = [
       { id: "b1", type: "building", ring: rect(bx, by, 520, 300) },
       { id: "c1", type: "paving", truckCourt: true, attachedTo: "b1", ring: rect(bx, by + 300, 520, 130), dockStack: { x: bx + 260, y: by + 150 } },
@@ -64,11 +68,11 @@ function Harness({ data }) {
     ];
     // ?bump=1 — two corner bump-outs (dog-ears) on b1, exactly the shape makeDogEar stamps: a building element
     // attached to its host, dogEar set. They must grade as part of b1's pad, never as buildings of their own.
-    if (new URLSearchParams(location.search).get("bump") === "1") {
+    if (QS.get("bump") === "1") {
       one.push({ id: "d1", type: "building", attachedTo: "b1", noFit: true, noLabel: true, dock: "none", dogEar: { side: "s", sign: -1 }, padElevFt: 1, ring: rect(bx, by + 300, 55, 60) });
       one.push({ id: "d2", type: "building", attachedTo: "b1", noFit: true, noLabel: true, dock: "none", dogEar: { side: "s", sign: 1 }, ring: rect(bx + 465, by + 300, 55, 60) });
     }
-    if (new URLSearchParams(location.search).get("two") !== "1") return one;
+    if (QS.get("two") !== "1") return one;
     // a second, smaller building well to the east, with its own court
     const x2 = bx + 900;
     return one.concat([
@@ -76,18 +80,18 @@ function Harness({ data }) {
       { id: "c2", type: "paving", truckCourt: true, attachedTo: "b2", ring: rect(x2, by + 200, 300, 110), dockStack: { x: x2 + 150, y: by + 100 } },
     ]);
   });
-  const [settings, setSettings] = useState({ grading: { enabled: new URLSearchParams(location.search).get("off") !== "1",
+  const [settings, setSettings] = useState({ grading: { enabled: QS.get("off") !== "1",
     // round 4: the limit MODE (?mode=boundary), the proposed contours (?contours=1)
-    limitMode: new URLSearchParams(location.search).get("mode") === "boundary" ? "boundary" : "layout",
+    limitMode: QS.get("mode") === "boundary" ? "boundary" : "layout",
     // round 8: the grading margin inside the property line (?margin=, default 10) and the undisturbed buffer (?buffer=)
-    ...(new URLSearchParams(location.search).get("margin") != null ? { gradingMarginFt: +new URLSearchParams(location.search).get("margin") } : {}),
-    ...(new URLSearchParams(location.search).get("buffer") != null ? { undisturbedBufferFt: +new URLSearchParams(location.search).get("buffer") } : {}),
-    layers: { buildable: new URLSearchParams(location.search).get("buildable") !== "0", cutfill: new URLSearchParams(location.search).get("cutfill") !== "0", contours: new URLSearchParams(location.search).get("contours") === "1",
-      paper: new URLSearchParams(location.search).get("paper") !== "0" } } });
+    ...(QS.get("margin") != null ? { gradingMarginFt: +QS.get("margin") } : {}),
+    ...(QS.get("buffer") != null ? { undisturbedBufferFt: +QS.get("buffer") } : {}),
+    layers: { buildable: QS.get("buildable") !== "0", cutfill: QS.get("cutfill") !== "0", contours: QS.get("contours") === "1",
+      paper: QS.get("paper") !== "0" } } });
   const [limitEdit, setLimitEdit] = useState(null);
   const [model, setModel] = useState(null);
   const [headEl, setHeadEl] = useState(null);
-  const [sel, setSel] = useState(new URLSearchParams(location.search).get("sel") === "none" ? null : new URLSearchParams(location.search).get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");   // ?sel=none — nothing selected (NEW-2: the corner tags go home)
+  const [sel, setSel] = useState(QS.get("sel") === "none" ? null : QS.get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");   // ?sel=none — nothing selected (NEW-2: the corner tags go home)
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
   const cfg = gradingCfg(settings.grading);
   const planOn = cfg.enabled;
@@ -111,7 +115,7 @@ function Harness({ data }) {
   const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
   const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
-  const qs = new URLSearchParams(location.search);
+  const qs = QS;
   const rockFt = qs.get("rock") ? +qs.get("rock") : null, pondCy = +(qs.get("pond") || 0);
   const rockPolys = useMemo(() => {
     if (rockFt == null) return null;
@@ -143,12 +147,19 @@ function Harness({ data }) {
     // a real gesture's shape: dragging=true, one assembly move per pointer step, then release (dragging=false + a final commit)
     dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings,
     zoomBy: (m) => setZoomMul((z) => z * m) };
-  const PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
+  const PAL = HARNESS_PAL;
   // ROUND 5 (NEW-4) — `?zoom=site|bldg|ne|nw` frames the 1400×1000 canvas on the parcel, the (first) building, or one zoom
   // closer at the building's NE corner — the three pictures the harness judges. `?ppf=` is the older explicit scale.
   const CW = 1400, CH = 1000;
   const frame = useMemo(() => {
     const zoom = qs.get("zoom");
+    // PERF (NEW-1, the speed round): `?scale=500|125|50` — the owner's three scale-bar views, centred on the (first) building:
+    // a ~120 px bar reading that many feet, so 0.24 / 0.96 / 2.4 px per foot. `?ppf=` is the older explicit scale.
+    if (qs.get("scale")) {
+      const ppf0 = 120 / +qs.get("scale"); const b0 = els.length ? els[0].ring : ring;
+      const cx = b0.reduce((a, p) => a + p.x, 0) / b0.length, cy = b0.reduce((a, p) => a + p.y, 0) / b0.length;
+      return { ppf: ppf0, ox: CW / 2 - cx * ppf0, oy: CH / 2 - cy * ppf0 };
+    }
     if (!zoom) { const ppf0 = +(qs.get("ppf") || 0.9); return { ppf: ppf0, ox: 1000, oy: 1450 }; }
     const fitBox = (x0, y0, x1, y1, pad) => { const ppf0 = Math.min(CW / (x1 - x0 + 2 * pad), CH / (y1 - y0 + 2 * pad)); const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2; return { ppf: ppf0, ox: CW / 2 - cx * ppf0, oy: CH / 2 - cy * ppf0 }; };
     const b = els.length ? els[0].ring : ring;
@@ -186,12 +197,28 @@ function Harness({ data }) {
     if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
     const rx = ring.map((p) => p.x), ry = ring.map((p) => p.y);
     return fitBox(Math.min(...rx), Math.min(...ry), Math.max(...rx), Math.max(...ry), 40);
-  }, [qs.get("zoom"), els.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [qs.get("zoom"), qs.get("scale"), els.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // round 8 (perf): a live zoom about the canvas centre — `window.__harness.zoomBy(1.25)` is one wheel-notch-sized step
   const [zoomMul, setZoomMul] = useState(+(qs.get("zm") || 1));   // ROUND 10: `?zm=` — the 125-ft view is the 50-ft one at 0.4×
   const ppf = frame.ppf * zoomMul;
-  const ox = CW / 2 - (CW / 2 - frame.ox) * zoomMul, oy = CH / 2 - (CH / 2 - frame.oy) * zoomMul;
-  const f2p = (p) => ({ x: p.x * ppf + ox, y: p.y * ppf + oy });
+  // PERF (NEW-1): a pan the way SitePlanner pans (B1440's anchor) — while the pointer is down the drawing is NOT re-emitted, one
+  // group carries the translate (`panD`); the release folds the travel into the view in ONE commit (`panOff`).
+  const [panD, setPanD] = useState(null);
+  const [panOff, setPanOff] = useState({ x: 0, y: 0 });
+  const ox = CW / 2 - (CW / 2 - frame.ox) * zoomMul + panOff.x, oy = CH / 2 - (CH / 2 - frame.oy) * zoomMul + panOff.y;
+  window.__harnessPan = {
+    start: () => setPanD({ x: 0, y: 0 }),
+    move: (dx, dy) => setPanD((d) => ({ x: (d ? d.x : 0) + dx, y: (d ? d.y : 0) + dy })),
+    end: () => setPanD((d) => { if (d) setPanOff((o) => ({ x: o.x + d.x, y: o.y + d.y })); return null; }),
+  };
+  // PERF guard's KNOWN-SLOW arm (`?perfMutant=1`, ui-audit/verify-planner-perf.mjs): while a pan or a drag is in flight, every render
+  // burns 30 ms and a drag move re-encodes a picture — exactly the per-pointer-move work the guard exists to catch. Never set otherwise.
+  if (qs.get("perfMutant") === "1" && (panD || dragRef.current)) {
+    const t = performance.now(); while (performance.now() - t < 30) { /* busy */ }
+    if (dragRef.current) { const c = document.createElement("canvas"); c.width = c.height = 64; c.toDataURL(); }
+  }
+  // stable across renders with the same view, like SitePlanner's `f2p` (useCallback on the render view)
+  const f2p = React.useCallback((p) => ({ x: p.x * ppf + ox, y: p.y * ppf + oy }), [ppf, ox, oy]);
   // the EXISTING contours (what the app's Contour-lines layer draws): traced off the DEM on a 6 ft lattice over the parcel,
   // then — while the proposed contours are on — kept OUTSIDE the graded area with the same clipper the worker uses
   const existing = useMemo(() => {
@@ -245,6 +272,7 @@ function Harness({ data }) {
           onApplyMoveFix={(id, mv) => model.actions.applyMoveFix(id, mv)} />
       </div>
       <svg id="canvas" width={CW} height={CH} style={{ background: "#9aa88f" }}>
+      <g data-pan-group="1" transform={panD ? `translate(${panD.x} ${panD.y})` : undefined}>
         {/* the paper background — the very bottom of the drawing, exactly as SitePlanner paints it */}
         {planOn && model && model.paper && (
           <g data-layer="paper" pointerEvents="none" transform={`translate(${f2p({ x: 0, y: 0 }).x} ${f2p({ x: 0, y: 0 }).y}) scale(${ppf})`}>
@@ -288,6 +316,7 @@ function Harness({ data }) {
         })()}
         {limitEdit && Array.isArray(settings.grading.limitRing) && <polygon data-grading-limit-edit="1" points={settings.grading.limitRing.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#1d4ed8" strokeWidth="1.5" strokeDasharray="6 4" />}
         <polygon points={ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#0a0" strokeWidth="1.5" />
+      </g>
       </svg>
     </>
   );
