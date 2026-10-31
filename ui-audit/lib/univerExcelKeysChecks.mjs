@@ -53,7 +53,8 @@ export function registerExcelKeyChecks(h) {
   const altTap = async () => { await pg().keyboard.down("Alt"); await pg().keyboard.up("Alt"); await wait(160); };
   const alt = async (letters) => { await altTap(); for (const ch of letters) { await key(ch); await wait(140); } await wait(250); };
   const tipPanel = () => ev(() => { const p = document.querySelector('[data-testid="excel-keys-keytip-panel"]'); return p && p.style.display !== "none" ? p.innerText.replace(/\s+/g, " ") : null; });
-  const notices = () => ev(() => (window.__notices || []).slice());
+  // The sandbox host records every notice in window.__notices; the real page shows them as an on-screen message, so read the page text too.
+  const notices = () => ev(() => [...(window.__notices || []), document.body.innerText]);
   /** put values / formulas straight into the sheet (setup only — the key under test is always a real keystroke); the same on the sandbox and the live page */
   const put = (cells) => inSheet((api, ws, list) => { for (const [r, c, v] of list) ws.getRange(r, c).setValue(v); }, cells);
   const dlg = (testid) => ev((t) => !!document.querySelector(`[data-testid="${t}"]`), testid);
