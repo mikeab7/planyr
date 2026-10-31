@@ -506,9 +506,9 @@ try {
           }
         }
       }
-      const tolOf = (med) => Math.max(0.1 * med, 0.15 * r.cell);
+      const tolOf = (med) => 0.05 * med;   // ROUND 10: 5% flat — the old `max(10%, 0.15 cell)` was 0.9 ft on a 4 ft spacing and let a 20% scatter through (owner 2026-10-30 7:15 PM)
       const uneven = runs.filter((sp) => { const med = [...sp].sort((x, y) => x - y)[sp.length >> 1]; return sp.some((v) => Math.abs(v - med) > tolOf(med)); });
-      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 10% / 0.15 cell)`, runs.length >= 2 && uneven.length === 0, `${runs.length} transects judged · ${skippedBent} skipped where the line's ground bends · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
+      check(`(o) ${tag}: the drawn band contours are evenly spaced along every transect across a straight run (within 5% of the median; the PNG transect proof is verify-grading-round10)`, runs.length >= 2 && uneven.length === 0, `${runs.length} transects judged · ${skippedBent} skipped where the line's ground bends · uneven ${uneven.length}${uneven.length ? " e.g. " + uneven[0].map((v) => v.toFixed(1)).join(" ") : ""}`);
       await page.close();
     }
     // the owner's path: the plan opens "Around the layout", then "To the boundary" is chosen in the panel — at NO moment after the

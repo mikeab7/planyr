@@ -141,6 +141,7 @@ import ViewMenu from "./components/ViewMenu.jsx";
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
 import { propsPanelTitle } from "./lib/propsPanelTitle.js";
 import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
+import { GRADING_GLYPH } from "./components/railGlyphs.js";
 import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
@@ -474,6 +475,7 @@ import { resolveSoils } from "./lib/soils.js";
 import { screeningBfeHeadline, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG, bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { noteReadoutDash } from "./lib/readoutDash.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
@@ -724,8 +726,8 @@ const RAIL_ICONS = {
   analysis: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.2 15.2 4.8 4.8" /></>,
   // Drainage
   drainage: <path d="M3 7.5c3-6 6 6 9 0s6 6 9 0M3 16.5c3-6 6 6 9 0s6 6 9 0" />,
-  // Grading (owner-only) — a hill drawn as nested contour lines on a ground line
-  grading: <><path d="M3 20h18" /><path d="M6 20c0-6 3-10 6-10s6 4 6 10" /><path d="M9.5 20c0-3 1.2-5 2.5-5s2.5 2 2.5 5" /></>,
+  // Grading (owner-only) — three nested contour lines of a knoll + a filled spot-elevation triangle (artwork: components/railGlyphs.js)
+  grading: <>{GRADING_GLYPH.contours.map((d) => <path key={d} d={d} />)}<path d={GRADING_GLYPH.spot} fill="currentColor" strokeWidth={GRADING_GLYPH.spotStrokeWidth} /></>,
   // Yield
   yield: <path d="M19 4H5l7 8-7 8h14" />,
   // Properties
@@ -14429,12 +14431,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * extrapolated past its own element: no FFE anywhere → "nosurface"; bare ground outside
    * every graded element and its daylight wedge → "outside"; a pond interior → "pond"
    * (that dirt is borrow in the excavation ledger). */
+  /* ROUND 10 (NEW-2b, owner 2026-10-30: "Exist 800.1 · Prop —" with the whole view inside the graded limit): the readout reads the LAST
+   * GOOD surface while a rebuild is in flight or has failed — the picture the owner is looking at is built from it, so the chip must
+   * agree with it. "—" is said only where the surface really has nothing (outside the limit, a pond), never because a rebuild is
+   * pending; and a "—" INSIDE the limit's own regions is reported once (telemetry `grading-readout-dash`) so a recurrence names its
+   * cause instead of waiting to be reproduced. */
+  const lastGridRef = useRef(null);
+  if (gradeSurface && gradeSurface.grid) lastGridRef.current = gradeSurface.grid; else if (!grOn) lastGridRef.current = null;
   const cursorProp = useMemo(() => {
     if (!cursor) return null;
-    if (!gradeSurface || !gradeSurface.grid) return { status: "none", reason: "nosurface" };
-    return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
+    const grid = (gradeSurface && gradeSurface.grid) || (grOn ? lastGridRef.current : null);
+    if (!grid) return { status: "none", reason: "nosurface" };
+    const r = sampleProposedAt(grid, cursor, gsExistAt);
+    if (r && r.status !== "value") noteReadoutDash(grid, cursor, r, !(gradeSurface && gradeSurface.grid));
+    return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, gradeSurface, gsExistKey]);
+  }, [cursor, gradeSurface, gsExistKey, grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
@@ -25611,7 +25623,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
               {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
-                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} /></Suspense>
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;

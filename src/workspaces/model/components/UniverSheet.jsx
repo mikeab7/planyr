@@ -21,11 +21,12 @@
  * Open-source @univerjs/* only (no @univerjs-pro, no license key, no Univer server). xlsx / csv stay on the
  * existing ExcelJS / SheetJS path; this file never touches Univer's exchange packages. */
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
-import { createUniver, LocaleType, mergeLocales, defaultTheme, ICommandService, CommandType, InterceptorEffectEnum } from "@univerjs/presets";
+import { createUniver, LocaleType, mergeLocales, defaultTheme, ICommandService, CommandType, InterceptorEffectEnum, IUndoRedoService } from "@univerjs/presets";
 import {
   UniverSheetsCorePreset, CalculationMode, IDefinedNamesService, SetDefinedNameMutation, RemoveDefinedNameMutation,
   SheetInterceptorService, INTERCEPTOR_POINT, SetRangeValuesCommand, IconManager,
   IRenderManagerService, HeaderMoveRenderController, SheetSkeletonManagerService, getCoordByOffset,
+  SetDefinedNameCommand, RemoveDefinedNameCommand, SheetExtension, SHEET_EXTENSION_TYPE,
 } from "@univerjs/preset-sheets-core";
 import { UniverSheetsSortPreset } from "@univerjs/preset-sheets-sort";
 import { UniverSheetsFilterPreset } from "@univerjs/preset-sheets-filter";
@@ -47,6 +48,8 @@ import {
 import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
 import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
+import { installUniverTools } from "../lib/univerTools/index.js";
+import UniverToolPanels from "./UniverTools.jsx";
 import { createSaveController } from "../lib/univerSave.js";
 import UniverFormulaWorker from "../lib/univerFormulaWorker.js?worker";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
@@ -73,14 +76,16 @@ const isDark = () => {
   return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
 };
 
-export default function UniverSheet({ workbook, projectNames, onChange, onNotice, onReady, onError }) {
+export default function UniverSheet({ workbook, projectNames, viewKey, onChange, onNotice, onReady, onError }) {
   const hostRef = useRef(null);
   const live = useRef({});                 // everything the long-lived Univer callbacks read (never stale)
   live.current.onChange = onChange;
   live.current.onNotice = onNotice;
   live.current.onReady = onReady;
   live.current.onError = onError;
+  live.current.viewKey = viewKey;
   const [error, setError] = useState(null);
+  const [tools, setTools] = useState(null);                       // the Planyr-only tools' controller (consistency flags, trace, names, palette, colours)
   const incoming = useMemo(() => canonicalJson(migrateWorkbook(workbook)), [workbook]);
 
   // ---- mount: create Univer once, load the workbook, wire edit detection ----------------------------------------------
@@ -137,6 +142,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         L.unitId = fWb.getId();
         const active = migrated.sheets.find((s) => s.id === migrated.activeSheetId);
         if (active) { try { fWb.setActiveSheet(fWb.getSheetBySheetId(active.id)); } catch (_) { /* first sheet stays active */ } }
+        if (L.tools) L.tools.attachUnit(L.unitId);                  // a rebuilt workbook is a NEW unit: its sheet component needs the trace layer again
         return fWb;
       };
       L.load = load;
@@ -259,6 +265,22 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         univerAPI, injector: L.injector, SheetInterceptorService, INTERCEPTOR_POINT, InterceptorEffectEnum,
         SetRangeValuesCommand, ICommandService, CommandType, IconManager, createElement,
       });
+      // The Planyr-only tools (NEW-1, cutover step 6): consistency flags + panel, trace arrows, command palette (Ctrl+K), Name Manager, the
+      // input / formula colour convention. Everything is read through the bridge and written through Univer commands (lib/univerTools/).
+      L.tools = installUniverTools({
+        univerAPI, injector: L.injector, host: hostRef.current, viewKey: L.viewKey,
+        U: {
+          ICommandService, CommandType, IUndoRedoService, IDefinedNamesService, SetDefinedNameCommand, RemoveDefinedNameCommand,
+          SheetInterceptorService, INTERCEPTOR_POINT, InterceptorEffectEnum, SheetExtension, SHEET_EXTENSION_TYPE,
+          IRenderManagerService, SheetSkeletonManagerService, IconManager, createElement,
+        },
+        snapshot: () => { const r = snapshot(); return r ? r.workbook : null; },
+        getSidecar: () => L.sidecar,
+        setSidecar: (next) => { L.sidecar = next; },
+        getProjectNames: () => L.projectNames || {},
+        notice: (t) => { if (live.current.onNotice) live.current.onNotice(t); },
+      });
+      setTools(L.tools);
       ensureHeaderGate(L.unitId);
       if (L.onReady) {
         L.onReady({
@@ -309,6 +331,7 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         api: () => (e2e() ? univerAPI : null),
         sidecar: () => (e2e() ? L.sidecar : null),
         flush: () => { if (e2e()) flush(); return e2e(); },
+        tools: () => (e2e() ? L.tools : null),
         excelKeys: () => (e2e() ? { registered: L.excelKeys && L.excelKeys.registered, tips: L.excelKeys && L.excelKeys.keyTips.state, run: (id) => L.excelKeys.runAction(id) } : null),
         // harness-only: the header-drag gate's state and the controller's view of what is pending
         gate: () => (e2e() ? L.gate : null),
@@ -332,11 +355,12 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       try { L.detach && L.detach(); } catch (_) {}
       try { L.excelKeys && L.excelKeys.dispose(); } catch (_) {}
       try { L.indent && L.indent.dispose(); } catch (_) {}
+      try { L.tools && L.tools.dispose(); } catch (_) {}
       try { clearTimeout(L.gateTimer); L.detachGate && L.detachGate(); } catch (_) {}
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
       try { L.univer && L.univer.dispose(); } catch (_) {}
       try { L.worker && L.worker.terminate(); } catch (_) {}            // a Worker handed to the RPC plugin is OURS to stop
-      L.univer = null; L.worker = null; L.univerAPI = null; L.unitId = null; L.save = null;
+      L.univer = null; L.worker = null; L.univerAPI = null; L.unitId = null; L.save = null; L.tools = null;
       if (typeof window !== "undefined") delete window.__planyrUniverRead;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Univer is created ONCE; later changes arrive through the effects below
@@ -385,7 +409,12 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       </div>
     );
   }
-  return <div ref={hostRef} data-testid="univer-grid" className="planyr-univer" style={{ flex: "1 1 auto", minHeight: 0, position: "relative", overflow: "hidden" }} />;
+  return (
+    <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <UniverToolPanels tools={tools} />
+      <div ref={hostRef} data-testid="univer-grid" className="planyr-univer" style={{ flex: "1 1 auto", minHeight: 0, position: "relative", overflow: "hidden" }} />
+    </div>
+  );
 }
 
 export { PROJECT_NAME_ID_PREFIX };

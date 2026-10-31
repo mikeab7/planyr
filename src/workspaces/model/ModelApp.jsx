@@ -1972,6 +1972,7 @@ export default function ModelApp({
                 key={univerScope}
                 workbook={workbook}
                 projectNames={projectNames}
+                viewKey={viewPrefsKey}
                 onChange={onUniverChange}
                 onNotice={showNotice}
                 onError={reportUniverSaveError}
