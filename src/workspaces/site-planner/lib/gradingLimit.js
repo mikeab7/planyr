@@ -257,16 +257,18 @@ export function autoGradingLimit({ rings, shoulderFt = LIMIT_DEFAULTS.shoulderFt
 export const PROPERTY_LIMIT_DEFAULTS = Object.freeze({ marginFt: 10, bufferFt: 0 });
 const plCache = new Map();
 export function propertyLimit({ parcelRings = [], holes = [], marginFt = PROPERTY_LIMIT_DEFAULTS.marginFt, bufferFt = PROPERTY_LIMIT_DEFAULTS.bufferFt } = {}) {
-  const m = Number.isFinite(marginFt) && marginFt > 0 ? marginFt : 0, b = Number.isFinite(bufferFt) && bufferFt > 0 ? bufferFt : 0;
+  // NEW-1 (Grading panel layout): the margin is SIGNED — positive = inside the property line (today's meaning, unchanged for every
+  // stored plan), negative = PAST the line (a limit of disturbance beyond it, e.g. with an easement). The buffer is never negative.
+  const m = Number.isFinite(marginFt) ? marginFt : 0, b = Number.isFinite(bufferFt) && bufferFt > 0 ? bufferFt : 0;
   const d = m + b;
   const rings = (parcelRings || []).filter(isRing), hs = (holes || []).filter(isRing);
   const key = [d, rings.map(ringHash).join(","), hs.map(ringHash).join(",")].join("~");
   const hit = plCache.get(key);
   if (hit) return hit;
   let regions = unionRings(rings);
-  if (d > 0 && regions.length) regions = regionsOf(offsetPaths(regionsToPaths(regions), -d, "miter"));
+  if (d !== 0 && regions.length) regions = regionsOf(offsetPaths(regionsToPaths(regions), -d, "miter"));
   let holeRings = hs;
-  if (d > 0 && hs.length) holeRings = bufferRings(hs, d).map((r) => r.outer);
+  if (d !== 0 && hs.length) holeRings = bufferRings(hs, d).map((r) => r.outer);
   const out = { rings: regions.map((r) => r.outer), holes: regions.flatMap((r) => r.holes).concat(holeRings), marginFt: m, bufferFt: b, insetFt: d };
   plCache.set(key, out);
   if (plCache.size > CACHE_MAX) plCache.delete(plCache.keys().next().value);

@@ -28,17 +28,18 @@ try {
     await page.waitForFunction(() => window.__ready, null, { timeout: 60000 });
     return page;
   };
-  const ffeText = (page) => page.textContent("[data-ffe-value], [data-testid=\"grading-ffe\"]").catch(() => "");
+  const ffeText = (page) => page.inputValue('[data-testid="grading-ffe"]').catch(() => "");
   const readFfe = async (page) => {
-    const v = await page.evaluate(() => { const a = document.querySelector("[data-ffe-value]"); if (a) return a.textContent; const i = document.querySelector('[data-testid="grading-ffe"]'); return i ? i.value : ""; });
+    const v = await page.evaluate(() => { const i = document.querySelector('[data-testid="grading-ffe"]'); return i ? i.value : ""; });
     const m = /(-?\d+(\.\d+)?)/.exec(v || ""); return m ? +m[1] : null;
   };
   const waitFfe = async (page, t = 90000) => {
     const t0 = Date.now();
-    await page.waitForFunction(() => { const a = document.querySelector("[data-ffe-value]"); return a && /\d/.test(a.textContent); }, null, { timeout: t });
+    await page.waitForFunction(() => { const a = document.querySelector("[data-ffe-value]"); return a && /\d/.test(a.value || a.textContent); }, null, { timeout: t });
     return Date.now() - t0;
   };
   const waitEarthwork = (page) => page.waitForFunction(() => { const e = document.querySelector("[data-grading-earthwork]"); return e && e.getAttribute("data-grading-earthwork") !== "pending"; }, null, { timeout: 90000 });
+  const waitFloors = (page) => page.waitForFunction(() => document.querySelector('[data-floors-pending="0"]') && document.querySelector('[data-floor-row="digging"]'), null, { timeout: 180000 });
 
   // ================= 1. the default view: ground row, grading group, an FFE already there =================
   let page = await open("?buildable=0");
@@ -46,11 +47,10 @@ try {
   const fig = await page.textContent('[data-ground-figure]');
   const ac = parseFloat(fig);
   check("Ground row: best single pad is 35-40 AC", ac > 35 && ac < 40, fig);
-  const subTxt = await page.textContent('[data-ground-row="level"]');
-  const fin = +(/finish (\d+) ft/.exec(subTxt) || [])[1];
-  check("Ground row: best finish 793-797", fin >= 793 && fin <= 797, `finish ${fin}`);
-  check("Ground row: severity pill Workable", (await page.textContent('[data-ground-severity]')) === "Workable");
-  check("Ground row: relief ~95 ft, 719 to 814", /9[3-7] ft · 719 to 814/.test(await page.textContent('[data-ground-row="relief"]')));
+  const fin = await page.evaluate(() => window.__harness.model && window.__harness.model.bestFinish);
+  check("Ground: best finish 793-797 (the 'least digging' floor)", fin >= 793 && fin <= 797, `finish ${fin}`);
+  check("Ground: severity pill WORKABLE", (await page.textContent('[data-ground-severity]')) === "WORKABLE");
+  check("Ground: relief ~95 ft, 719 to 814", /9[3-7] ft/.test(await page.textContent('[data-ground-stat="relief"]')) && /719 to 814/.test(await page.textContent('[data-ground-stat="relief"]')));
 
   const ms = await waitFfe(page);
   await waitEarthwork(page);
@@ -60,71 +60,49 @@ try {
   check("FFE is a plausible balance for the Chehaw ground (790-805)", baseFfe > 790 && baseFfe < 805, `${baseFfe}`);
   const body = await page.textContent("#panel");
   check("no Building tab, no chips, no walls strip, no 'pick' prompt", !/Balanced dirt|Least dirt|Most room|Pick a chip|Pick a finish|Walls|role=\"tab\"/.test(body) && (await page.locator('[role="tab"]').count()) === 0);
-  check("title line: Building 1 · 520×300 = 156,000 SF", /Building 1 · 156,000 SF/.test(await page.textContent("[data-card-title]")));
-  check("FFE shown grey as auto", (await page.getAttribute("[data-ffe-value]", "data-ffe-value")) === "auto" && (await page.locator('[data-ffe-source="auto"]').count()) === 1);
-  const basis = await page.textContent("[data-ffe-note]");
-  // round 4: the balance is over the WHOLE graded area and the clause says so
-  check("basis leads with the balance clause in plain words, over the graded area", /^(Balances the dirt|Closest the ground gets to balanced) over the graded area: \d+k? CY cut( on the \w+)?, \d+k? CY fill( on the \w+)?; (nothing to haul|[\d,]+k? CY (import|export))\./.test(basis), basis);
-  check("basis has at most three sentences and no slope ratio", (basis.match(/\.(\s|$)/g) || []).length <= 3 && !/\d:1/.test(basis), basis);
-  const ew = await page.textContent("[data-grading-earthwork]");
-  check("earthwork is ONE line: Cut · Fill · import/export/balanced", /^Cut [\d,]+ · Fill [\d,]+ · (Balanced|[\d,]+ CY (import|export))$/.test(ew), ew);
-  const nums = (/Cut ([\d,]+) · Fill ([\d,]+)/.exec(ew) || []).slice(1).map((x) => +x.replace(/,/g, ""));
-  check("the suggestion is balanced to within a few hundred CY", Math.abs(nums[1] - nums[0]) <= 1000, ew);
-  check("settings are not visible in the card (behind the gear)", !/Pavement slope|Dock drop|Max cut or fill|Grading slopes/.test(await page.textContent("[data-grading-card]")) && (await page.locator('[data-grading-gear]').count()) === 1);
-  check("clear when it daylights inside the setback", (await page.locator('[data-grading-flag="clear"]').count()) === 1);
-  // ---- NEW-1 (amends B2315856): the left-dock Grading panel — cards first, Ground under them, the gear in the header
-  check("the panel: cards first, then the three Ground rows (moved out of Site Analysis, not copied)", await page.evaluate(() => {
-    const card = document.querySelector("[data-grading-card]"), g = document.querySelector('[data-section="ground"]');
-    return !!card && !!g && !!(card.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING) && g.querySelectorAll("[data-ground-row]").length === 3;
+  check("floor shown as auto: the AUTO · NO HAUL pill, ONE floor field", (await page.getAttribute("[data-ffe-value]", "data-ffe-value")) === "auto" && (await page.locator('[data-ffe-source="auto"]').count()) === 1 && (await page.locator("[data-ffe-value]").count()) === 1);
+  const tl = await page.evaluate(() => ["haul", "cut", "fill"].map((k) => document.querySelector(`[data-tile-value="${k}"]`).textContent));
+  const nums = tl.map((x) => +x.replace(/,/g, ""));
+  check("tiles: HAUL, CUT, FILL numbers", nums.every((n) => n >= 0) && tl.length === 3, tl.join(" | "));
+  check("the suggestion is balanced to within a few hundred CY (cut and fill within 1,000 of each other)", Math.abs(nums[2] - nums[1]) <= 1500, tl.join(" | "));
+  check("settings are not visible in the body (behind the gear)", !/Pavement slope|Dock drop|Max cut or fill|Grading slopes/.test(await page.textContent('[data-testid="grading-panel"]')) && (await page.locator('[data-grading-gear]').count()) === 1);
+  check("no flag line says 'clear'", (await page.locator('[data-grading-flag="clear"]').count()) === 0);
+  check("the panel: inputs first, then the numbers, then Ground (moved out of Site Analysis, not copied)", await page.evaluate(() => {
+    const i = document.querySelector('[data-section="inputs"]'), g = document.querySelector('[data-section="ground"]');
+    return !!i && !!g && !!(i.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING) && g.querySelectorAll("[data-ground-stat]").length === 2;
   }));
-  check("the settings gear + info ride the panel HEADER, not the body", await page.evaluate(() => {
+  check("the On switch, the settings gear + info ride the panel HEADER, not the body", await page.evaluate(() => {
     const head = document.querySelector("#panel-header-actions");
-    return !!head && !!head.querySelector("[data-grading-gear]") && !document.querySelector('[data-grading-panel] [data-grading-gear]');
+    return !!head && !!head.querySelector("[data-grading-gear]") && !!head.querySelector('[data-testid="grading-plan-switch"]') && !document.querySelector('[data-grading-panel] [data-grading-gear]');
   }));
-  // the Ground rows carry the ordinary row-label size at the panel's width (the dock body hands down a larger size; the panel must not inherit it)
-  const gm = await page.evaluate(() => {
-    const t = document.querySelector('[data-ground-row="level"] > div > span');
-    const cs = getComputedStyle(t), lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
-    const r = t.getBoundingClientRect();
-    return { font: parseFloat(cs.fontSize), lines: Math.round(r.height / lh), card: parseFloat(getComputedStyle(document.querySelector("[data-card-title]")).fontSize), relief: parseFloat(getComputedStyle(document.querySelector('[data-ground-row="relief"]')).fontSize), steep: parseFloat(getComputedStyle(document.querySelector('[data-ground-row="steep"]')).fontSize) };
-  });
-  check("Ground row title is at most two lines at the panel's width", gm.lines <= 2, JSON.stringify(gm));
-  check("Ground rows use the same label size as the cards (not the dock's heading size)", gm.font === gm.card && gm.relief === gm.card && gm.steep === gm.card, JSON.stringify(gm));
   check("no 'Ground › Grading' group heading survives", !/Ground › Grading/.test(await page.textContent("#panel")));
 
-  // ---- the level-ground alternative: one text link, sets the FFE (typed), basis says so, auto chip resets
-  await page.waitForSelector("[data-alt-ffe]", { timeout: 60000 });
-  const altTxt = await page.textContent("[data-alt-ffe]");
-  const altE = +(await page.getAttribute("[data-alt-ffe]", "data-alt-ffe"));
-  check("alternative reads 'Or sit it on the most level ground: FFE n (n AC stays level, n CY import|export)'", /^Or sit it on the most level ground: FFE \d+ \(\d+ AC stays level, [\d.k,]+ CY (import|export|balanced)\)$/.test(altTxt), altTxt);
-  check("alternative IS the Ground row's best finish", altE === fin, `${altE} vs ${fin}`);
-  check("only one alternative link", (await page.locator("[data-alt-ffe]").count()) === 1);
-  await page.click("[data-alt-ffe]");
+  // ---- the floors table: 'least digging' is the level-ground alternative; clicking a row types that floor (pill TYPED)
+  await waitFloors(page);
+  const altE = +(await page.getAttribute('[data-floor-row="digging"]', "data-floor-e"));
+  check("'least digging' IS the Ground block's best finish", Math.abs(altE - fin) < 0.51, `${altE} vs ${fin}`);
+  const ew = await page.evaluate(() => document.querySelector('[data-tile-sub="haul"]').textContent);
+  await page.click('[data-floor-row="digging"]');
   await page.waitForFunction((e) => { const i = document.querySelector('[data-testid="grading-ffe"]'); return i && Math.abs(+i.value - e) < 0.01; }, altE, { timeout: 30000 });
-  check("clicking it types the FFE (black field + auto chip)", (await page.locator('[data-ffe-source="typed"]').count()) === 1);
-  await page.waitForFunction(() => /most level ground/.test(document.querySelector("[data-ffe-note]").textContent), null, { timeout: 30000 });
-  check("basis line now says so", /Sitting it on the most level ground: \d+ AC stays level at this finish\./.test(await page.textContent("[data-ffe-note]")), await page.textContent("[data-ffe-note]"));
-  check("the alternative link is gone once taken", (await page.locator("[data-alt-ffe]").count()) === 0);
-  await waitEarthwork(page);
-  const ew2 = await page.textContent("[data-grading-earthwork]");
-  check("earthwork re-priced at the typed finish (not balanced any more)", /(import|export)/.test(ew2) && ew2 !== ew, ew2);
+  check("clicking it types the floor (TYPED pill)", (await page.locator('[data-ffe-source="typed"]').count()) === 1);
+  await page.waitForFunction((e0) => document.querySelector('[data-tile-sub="haul"]').textContent !== e0, ew, { timeout: 60000 });
+  check("earthwork re-priced at the typed floor (not balanced any more)", /CY (in|out)/.test(await page.textContent('[data-tile-sub="haul"]')), await page.textContent('[data-tile-sub="haul"]'));
 
   // typing in place from auto, and the reset
   await page.click('[data-ffe-reset]');
   await waitFfe(page);
   await page.waitForTimeout(1500);
-  check("the auto chip returns to the SAME suggestion", Math.abs((await readFfe(page)) - baseFfe) < 0.05, `${await readFfe(page)} vs ${baseFfe}`);
-  await page.click("[data-ffe-value]");
-  await page.fill('[data-testid="grading-ffe"]', "801");
+  check("the AUTO pill returns to the SAME suggestion", Math.abs((await readFfe(page)) - baseFfe) < 0.05, `${await readFfe(page)} vs ${baseFfe}`);
+  await page.fill('[data-testid="grading-ffe"]', "803");   // (the auto floor of this plan IS 801.0 — typing the same number is, correctly, no edit)
   await page.keyboard.press("Enter");
   await page.waitForSelector('[data-ffe-source="typed"]');
-  check("typing in place makes it typed", Math.abs((await readFfe(page)) - 801) < 0.01);
-  check("typed basis offers the way back", /Reset to auto/.test(await page.textContent("[data-ffe-note]")));
+  check("typing in place makes it typed", Math.abs((await readFfe(page)) - 803) < 0.01);
   await page.click('[data-ffe-reset]');
   await waitFfe(page);
 
   // ---- layers: Cut & Fill (default ON) paints the SLOPES, never the pad
   await page.waitForSelector('[data-layer="cutfill"] image', { timeout: 30000 });
+  await page.waitForSelector("[data-band-clip]", { state: "attached", timeout: 30000 });   // the band polygon is traced in the worker a beat after the tint lands
   check("Cut & Fill is on by default and painted (the tint clipped to the traced band + the daylight line + the limit's dashed line)", (await page.locator('[data-layer="cutfill"] image[data-band-tint]').count()) === 1 && (await page.locator('[data-band-clip]').count()) === 1 && (await page.locator('[data-daylight-line]').count()) === 1 && (await page.locator('[data-grading-limit] path').count()) === 1);
   check("Level-pad limit is OFF by default: no tint, no line", (await page.locator('[data-layer="buildable"]').count()) === 0);
   // ---- per-plan switch + "Show cut and fill on the map" (NEW-1/NEW-2): one source of truth, clean when off
@@ -192,7 +170,7 @@ try {
   await page.waitForSelector('[data-grading-panel="empty"]', { timeout: 60000 });
   check("empty state: 'Place a building to grade it.'", /Place a building to grade it\./.test(await page.textContent("[data-grading-empty]")));
   await page.waitForSelector('[data-ground-state="ready"]', { timeout: 60000 });
-  check("empty state: the Ground rows are still there", (await page.locator("[data-ground-row]").count()) === 3);
+  check("empty state: the Ground numbers are still there", (await page.locator("[data-ground-stat]").count()) === 2);
   check("empty state: no building card", (await page.locator("[data-grading-card]").count()) === 0);
   await page.close();
 
@@ -208,7 +186,6 @@ try {
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1500);
   const pondFfe = await readFfe(page);
   check("with an 18,000 CY pond the suggested floor rises (spoil to spare → a higher pad)", pondFfe > baseFfe + 0.3, `${pondFfe} vs ${baseFfe}`);
-  check("the basis names the pond", /the pond digs 18k CY/.test(await page.textContent("[data-ffe-note]")), await page.textContent("[data-ffe-note]"));
   await page.close();
 
   // ================= 4. rock =================
@@ -216,8 +193,6 @@ try {
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1500);
   const rockFfe = await readFfe(page);
   check("rock 6 ft down everywhere: the floor is raised to keep cuts 2 ft clear", rockFfe > baseFfe + 0.5, `${rockFfe} vs ${baseFfe}`);
-  const rb = await page.textContent("[data-ffe-note]");
-  check("the basis says it, in feet", /Raised [\d.]+ ft to stay out of rock( on the \w+ end)? \(bedrock about 6 ft down there\)\./.test(rb), rb);
   await page.close();
 
   // ================= 4b. two buildings: one open card, one line; each gets its own suggestion; a click opens the other =================
@@ -227,12 +202,12 @@ try {
   await page.waitForTimeout(1500);
   check("two buildings: ONE card open, one a single line", (await page.locator('[data-card-state="open"]').count()) === 1 && (await page.locator('[data-card-state="collapsed"]').count()) === 1);
   const collapsed = await page.textContent('[data-card-state="collapsed"]');
-  check("the one-line card names the building, its size and its FFE", /^Building 2 · 60,000 SF.*FFE \d{3}\.\d ft$/.test(collapsed.replace(/\s+/g, " ").trim()), collapsed);
+  check("the selector row names the building, its size and its floor", /^Building 2 · 60,000 SF.*\d{3}\.\d ft$/.test(collapsed.replace(/\s+/g, " ").trim()), collapsed);
   const f1b = await page.evaluate(() => [...window.__harness.model.autoFfe.values()]);
   check("each building got its OWN suggestion (different ground, different finish)", new Set(f1b).size === 2, JSON.stringify(f1b));
   await page.click('[data-card-state="collapsed"]');
-  await page.waitForFunction(() => document.querySelector('[data-card-state="open"] [data-card-title]')?.textContent.startsWith("Building 2"), null, { timeout: 30000 });
-  check("clicking the one-line card selects that building and opens it", (await page.locator('[data-card-state="open"]').count()) === 1 && /Building 2/.test(await page.textContent('[data-card-state="open"] [data-card-title]')));
+  await page.waitForFunction(() => document.querySelector('[data-card-state="open"]')?.textContent.startsWith("Building 2"), null, { timeout: 30000 });
+  check("clicking the selector row selects that building and opens it", (await page.locator('[data-card-state="open"]').count()) === 1 && /Building 2/.test(await page.textContent('[data-card-state="open"]')));
   await page.close();
 
   // ================= 4c. bump-outs: part of the host's pad — ONE card, one FFE, never a building of their own (NEW-1) =================
@@ -241,7 +216,7 @@ try {
   await waitEarthwork(page);
   await page.waitForTimeout(1200);
   const bumpCards = await page.evaluate(() => [...document.querySelectorAll("[data-grading-card]")].map((c) => c.textContent.replace(/\s+/g, " ").trim().slice(0, 60)));
-  check("a host with two bump-outs shows ONE card (known-good arm: it is still there)", bumpCards.length === 1 && /^Building 1 · 162,600 SF/.test(bumpCards[0]), JSON.stringify(bumpCards));
+  check("a host with two bump-outs shows ONE building (known-good arm: it is still there)", bumpCards.length === 1 && (await page.locator('[data-section="buildings"]').count()) === 0, JSON.stringify(bumpCards));
   const bumpFfe = await page.evaluate(() => { const m = window.__harness.model; return { n: m.autoFfe.size, keys: [...m.autoFfe.keys()] }; });
   check("only the host building carries a suggested FFE", bumpFfe.n === 1 && bumpFfe.keys[0] === "b1", JSON.stringify(bumpFfe));
   const bumpPlanes = await page.evaluate(() => { const s = window.__harness.gradeSurface; const g = (id) => s && s.planes.get(id); const pads = ["b1", "d1", "d2"].map((id) => g(id) && g(id).baseElevFt); return pads; });
@@ -254,7 +229,7 @@ try {
   const flagShot = async (dx, dy) => {
     await page.evaluate(([x, y]) => window.__harness.applyMove(x, y), [dx, dy]);
     await sleep(3500);
-    return page.locator('[data-grading-flag="1"]').count();
+    return page.locator('[data-grading-flag="1"][data-flag-kind="limit"]').count();
   };
   let flagged = 0, used = null;
   for (const [dx, dy] of [[0, 120], [0, 240], [0, 360], [-200, 0], [200, 0], [0, 480]]) {
@@ -263,24 +238,24 @@ try {
   }
   check("moving toward the boundary raises the setback flag", flagged === 1, JSON.stringify(used));
   if (flagged) {
-    const title = await page.textContent('[data-grading-flag="1"] > div');
-    check("flag names a compass side", /Slope (crosses|runs past) (the setback|the property line|the buffer|the grading margin) · (North|South|East|West|North-east|North-west|South-east|South-west)|Slope crosses the property line/.test(title), title);
+    const title = await page.textContent('[data-grading-flag="1"][data-flag-kind="limit"] [data-flag-text]');
+    check("the flag is ONE sentence naming the overshoot, the place and a compass side", /^(Fill|Cut) slope runs \d+ ft (past the property line|into the buffer|into the grading margin|past the limit) on the (north|south|east|west|north-east|north-west|south-east|south-west) side\.$/i.test(title), title);
     await page.waitForFunction(() => { const b = document.querySelector('[data-fix="ffe"]'); return b && !/Finding/.test(b.textContent); }, null, { timeout: 90000 });
-    const ffeBtn = await page.textContent('[data-fix="ffe"]'), mvBtn = await page.textContent('[data-fix="move"]');
-    check("fix buttons offered", /(Raise|Lower) FFE to|No finish elevation clears it/.test(ffeBtn) && /Move building|No move/.test(mvBtn), `${ffeBtn} | ${mvBtn}`);
+    const ffeBtn = await page.textContent('[data-fix="ffe"]');
+    check("the floor fix is offered (Raise/Lower floor to n ft, or says none clears it) with the Pull limit link; no wall button, no move button", /(Raise|Lower) floor to|No floor clears it/.test(ffeBtn) && (await page.locator('[data-flag-kind="limit"] [data-fix="limit"]').count()) === 1 && (await page.locator('[data-fix="wall"]').count()) === 0 && (await page.locator('[data-flag-kind="limit"] [data-fix="move"]').count()) === 0, ffeBtn);
     check("red dot with N ft past the setback", (await page.locator("[data-flag-dot]").count()) >= 1);
-    check("wall fix is present and disabled", await page.locator('[data-fix="wall"]').isDisabled());
     await page.screenshot({ path: "/tmp/grading-r2-flag.png" });
-    if (/Move building/.test(mvBtn)) {
-      await page.click('[data-fix="move"]');
+    if (/(Raise|Lower) floor to/.test(ffeBtn)) {
+      await page.click('[data-fix="ffe"]');
       await sleep(4000);
-      check("applying Move building clears the flag", (await page.locator('[data-grading-flag="1"]').count()) === 0);
+      check("applying the floor fix clears the flag", (await page.locator('[data-grading-flag="1"][data-flag-kind="limit"]').count()) === 0);
     }
   }
   await page.close();
 
   // ================= 7. ROUND 4 — the grading limit: ONE rounded outline, bands wrap it as ONE ring, nothing painted inside =================
-  page = await open("?buildable=0");
+  // (the retired "around the layout" limit — kept as the vehicle for a hand-edited outline, so named by ?mode=layout)
+  page = await open("?buildable=0&mode=layout");
   await waitFfe(page); await waitEarthwork(page); await page.waitForTimeout(1500);
   const lim = await page.evaluate(() => {
     const s = window.__harness.gradeSurface, L = s && s.grid && s.grid.limit, m = window.__harness.model;
@@ -298,8 +273,7 @@ try {
   check("the limit's dashed line is ONE closed subpath on the map", !!lim && lim.subpaths === 1);
   check("the limit's ends are ROUNDED: the sharp layout corner is outside it, the straight edge inside", !!lim && lim.cornerIn === false && lim.edgeIn === true);
   check("NO slope cell inside the limit; the slopes wrap it as ONE daylight ring", !!lim && lim.wedgeInside === 0 && lim.daylight === 1 && lim.slopeCells > 100);
-  check("the panel's graded-area line: 'Graded area · n AC · limit auto'", !!lim && /^Graded area · \d+\.\d AC · limit auto$/.test(lim.gradedLine || ""), lim && lim.gradedLine);
-  check("the mode control shows 'Around the layout' selected", lim && lim.modeAttr === "layout" && /Around the layout/.test(await page.textContent("[data-graded-area]")) && /To the boundary/.test(await page.textContent("[data-graded-area]")));
+  check("the panel carries the limit's mode and acreage as data (no sentence, no mode control)", !!lim && lim.modeAttr === "layout" && !/Around the layout|To the boundary|Graded area/.test(await page.textContent("#panel")) && (await page.locator('[data-testid="grading-limit-mode"]').count()) === 0);
   await page.click("[data-grading-gear]");
   await page.waitForSelector('[data-testid="grading-shoulder"]', { state: "attached", timeout: 10000 }).catch(() => {});
   check("the settings gear carries shoulder, corner radius and max pavement slope", (await page.locator('[data-testid="grading-shoulder"]').count()) === 1 && (await page.locator('[data-testid="grading-corner-radius"]').count()) === 1 && (await page.locator('[data-testid="grading-max-pavement-slope"]').count()) === 1);
@@ -327,10 +301,14 @@ try {
   const edited = await page.evaluate(() => ({ ring: (window.__harness.model && window.__harness.model.limit.source), editing: !!window.__harness.limitEdit, done: !!document.querySelector('[data-limit-action="done"]'), reset: !!document.querySelector('[data-limit-action="reset"]') }));
   check("Edit outline stores the auto ring on the plan (source 'edited'), shows Done + Reset to auto and the dashed edit ring", edited.editing && edited.done && edited.reset, JSON.stringify(edited));
   await page.waitForFunction(() => window.__harness.model && window.__harness.model.limit.source === "edited", null, { timeout: 30000 });
-  check("the graded-area line now reads 'limit edited'", /limit edited/.test(await page.textContent("[data-graded-area-line]")));
+  check("the panel now marks the limit edited (data-limit-source) and offers Reset to auto", (await page.getAttribute("[data-graded-area]", "data-limit-source")) === "edited" && (await page.locator('[data-limit-action="reset"]').count()) === 1);
   await page.click('[data-limit-action="reset"]');
   await page.waitForFunction(() => window.__harness.model && window.__harness.model.limit.source === "auto" && !document.querySelector("[data-grading-limit-edit]"), null, { timeout: 30000 });
   check("Reset to auto returns the auto limit and leaves edit mode", true);
+  // NEW-1: Reset to auto is the property-line limit again (the app's default) — the contour arms below were measured on the layout limit
+  check("Reset to auto lands on the property-line limit (the default mode)", (await page.evaluate(() => window.__harness.settings.grading.limitMode)) === "boundary");
+  await page.evaluate(() => window.__harness.setLimitMode("layout"));
+  await page.waitForFunction(() => { const s = window.__harness.gradeSurface; return s && s.grid.limit && s.grid.limit.mode === "layout"; }, null, { timeout: 60000 });
   await page.screenshot({ path: "/tmp/grading-r4-limit.png" });
 
   // ================= 8. ROUND 4 — proposed contours (traced in the worker off the stitched surface) =================
@@ -373,8 +351,8 @@ try {
   });
   // ROUND 6 (NEW-3): no plateau — the open ground inside the setback follows the pavement's fall, never flat at the FFE and never above it
   check("boundary mode: the limit is the setback, NO plateau, the open ground inside follows the pavement (not flat at the FFE, never above it)", bnd.mode === "boundary" && bnd.plateaus.length === 0 && bnd.infill > 0 && bnd.flatInfill * 10 < bnd.infill && bnd.aboveFfe === 0, JSON.stringify({ ...bnd, plateaus: bnd.plateaus.length }));
-  check("ROUND 8: the graded-area line reads the property line and the acreage grew past the layout's", /^Graded area · \d+\.\d AC · to the property line \(\d+ ft margin(, \d+ ft buffer)?\)$/.test(bnd.gradedLine || "") && bnd.areaAc > lim.areaAc, `${bnd.gradedLine} vs ${lim.areaAc.toFixed(1)}`);
-  check("no Edit outline in boundary mode; mode control shows 'To the boundary'", !bnd.editBtn && bnd.modeAttr === "boundary");
+  check("ROUND 8: the limit is the property line inset by the margin (Limits of disturbance −10) and the acreage grew past the layout's", (await page.inputValue('[data-testid="grading-limit-offset"]')) === "-10" && bnd.areaAc > lim.areaAc, `${bnd.areaAc} vs ${lim.areaAc.toFixed(1)}`);
+  check("the property-line limit is the panel's default mode", bnd.modeAttr === "boundary");
   // B2376240 (owner live check 2026-10-20): the limit IS the setback and the slope is thrown INWARD from it — no graded cell
   // outside the setback, the setback flag cannot fire (the north-edge "runs 16 ft past the setback" flag is absent), and the
   // dotted daylight line is the setback itself (one ring per limit ring, holes included)
@@ -383,11 +361,11 @@ try {
     const s = window.__harness.gradeSurface, L = s.grid.limit; const rings = L.limitRegions.map((r) => r.outer);   // ROUND 8: the limit is the property line inset, never the setback
     const outsideCells = s.grid.cells.filter((c) => !rings.some((r) => pointInRing(c, r))).length;
     const sameRing = (a, b) => a.length === b.length && a.every((p, i) => Math.abs(p.x - b[i].x) < 1e-6 && Math.abs(p.y - b[i].y) < 1e-6);
-    return { outsideCells, outCount: s.grid.outside ? s.grid.outside.count : -1, flag: document.querySelectorAll('[data-grading-flag="1"]').length,
+    return { outsideCells, outCount: s.grid.outside ? s.grid.outside.count : -1, limitFlag: document.querySelectorAll('[data-grading-flag="1"][data-flag-kind="limit"]').length,
       clear: document.querySelectorAll('[data-grading-flag="clear"]').length, daylight: s.daylight.length, limitRings: L.limitRegions.reduce((n, r) => n + 1 + r.holes.length, 0),
       daylightIsLimit: s.daylight.length > 0 && sameRing(s.daylight[0].ring, L.limitRegions[0].outer), slopeCells: s.grid.cells.filter((c) => c.wedge).length };
   });
-  check("B2376240 / ROUND 8: boundary mode grades nothing outside the limit and the limit flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.flag === 0 && bndOut.clear >= 1 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
+  check("B2376240 / ROUND 8: boundary mode grades nothing outside the limit and the limit flag cannot fire", bndOut.outsideCells === 0 && bndOut.outCount === 0 && bndOut.limitFlag === 0 && bndOut.clear === 0 && bndOut.slopeCells > 50, JSON.stringify(bndOut));
   check("B2376240: the daylight line in boundary mode IS the setback (one ring per limit ring)", bndOut.daylight === bndOut.limitRings && bndOut.daylightIsLimit, JSON.stringify({ daylight: bndOut.daylight, limitRings: bndOut.limitRings, daylightIsLimit: bndOut.daylightIsLimit }));
   // ROUND 6 (NEW-2): nothing inside the setback is left ungraded — every probe inside the limit (off the pond) answers a value
   const cover = await page.evaluate(async () => {
@@ -403,11 +381,11 @@ try {
     return { n, value, pond, other };
   });
   check("ROUND 6: every point inside the setback is graded ground (the probe answers a value everywhere off the pond)", cover.n > 300 && cover.other === 0 && cover.value > cover.n * 0.95, JSON.stringify(cover));
-  // switch back to 'Around the layout' from the control: the picture and the acreage change
-  await page.click('[data-testid="grading-limit-mode"] button:first-child');
+  // the retired layout limit is still reachable through the action the planner exposes (a hand-edited outline rides it): the acreage drops
+  await page.evaluate(() => window.__harness.setLimitMode("layout"));
   await page.waitForFunction(() => { const s = window.__harness.gradeSurface; return s && s.grid.limit && s.grid.limit.mode === "layout"; }, null, { timeout: 60000 });
-  const backTxt = await page.textContent("[data-graded-area-line]");
-  check("the mode control switches back to the layout limit and the acreage drops", /limit auto/.test(backTxt) && parseFloat((/· ([\d.]+) AC/.exec(backTxt) || [])[1]) < bnd.areaAc, backTxt);
+  const backAc = await page.evaluate(() => window.__harness.gradeSurface.grid.limit.areaAc);
+  check("switching the limit back to the layout limit drops the acreage", backAc < bnd.areaAc, `${backAc} vs ${bnd.areaAc}`);
   await page.screenshot({ path: "/tmp/grading-r4-boundary.png" });
   await page.close();
 

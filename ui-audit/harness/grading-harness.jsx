@@ -13,6 +13,7 @@ import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeS
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
 import { offsetPolygon } from "../../src/workspaces/site-planner/lib/parcelOffset.js";
+import { pointInRegions } from "../../src/workspaces/site-planner/lib/gradingLimit.js";
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
 import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
@@ -78,6 +79,8 @@ function Harness({ data }) {
   });
   const [settings, setSettings] = useState({ grading: { enabled: new URLSearchParams(location.search).get("off") !== "1",
     // round 4: the limit MODE (?mode=boundary), the proposed contours (?contours=1)
+    // NEW-1: the APP's default is now the property-line limit (gradingCfg), but this harness keeps `layout` unless told otherwise — the engine sections of
+    // verify-grading-harness were measured on it. `?mode=boundary` is the app's default mode (verify-grading-panel-layout passes it).
     limitMode: new URLSearchParams(location.search).get("mode") === "boundary" ? "boundary" : "layout",
     // round 8: the grading margin inside the property line (?margin=, default 10) and the undisturbed buffer (?buffer=)
     ...(new URLSearchParams(location.search).get("margin") != null ? { gradingMarginFt: +new URLSearchParams(location.search).get("margin") } : {}),
@@ -109,7 +112,7 @@ function Harness({ data }) {
   // SitePlanner's wiring: the grading layer builds the surface OFF the render path and holds it while a drag is in flight.
   const dragRef = React.useRef(false);
   const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
-  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.layers.spots, cfg.terraceDepthFt, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
   const qs = new URLSearchParams(location.search);
   const rockFt = qs.get("rock") ? +qs.get("rock") : null, pondCy = +(qs.get("pond") || 0);
@@ -130,7 +133,7 @@ function Harness({ data }) {
       setLimitEdit({ highlight: span || null });
     },
     doneEditLimit: () => setLimitEdit(null),
-    resetLimit: () => { setLimitEdit(null); grCfg({ limitRing: null }); },
+    resetLimit: () => { setLimitEdit(null); grCfg({ limitRing: null, limitMode: "boundary" }); },
   };
   const input = { base, origin, gsInputs, gsSig, gradeSurface, selBuildingId: sel, multiBuildings: sel ? 1 : 0, rawBuilding: els.find((e) => e.id === sel) || null,
     limitEditing: !!limitEdit, limitHighlight: limitEdit ? limitEdit.highlight : null,
@@ -142,7 +145,9 @@ function Harness({ data }) {
   window.__harness = { els, model, setSel, gradeSurface, limitEdit, setLimitEdit, ring,
     // a real gesture's shape: dragging=true, one assembly move per pointer step, then release (dragging=false + a final commit)
     dragStart: () => { dragRef.current = true; }, dragEnd: () => { dragRef.current = false; setEls((a) => a.map((e) => ({ ...e }))); }, applyMove: (dx, dy) => setEls((a) => shiftAssembly(a.map((e) => ({ ...e, ring: e.ring })), new Set(a.map((e) => e.id)), dx, dy)), setSettings, settings,
-    zoomBy: (m) => setZoomMul((z) => z * m) };
+    zoomBy: (m) => setZoomMul((z) => z * m), setLimitMode: limitActions.setLimitMode,
+    // NEW-1: is a feet point inside the grading limit the surface carries NOW? (the "Limits of disturbance" check)
+    pointInLimit: (pt) => { const L = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; return !!L && pointInRegions(pt, L.limitRegions || L.regions); } };
   const PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
   // ROUND 5 (NEW-4) — `?zoom=site|bldg|ne|nw` frames the 1400×1000 canvas on the parcel, the (first) building, or one zoom
   // closer at the building's NE corner — the three pictures the harness judges. `?ppf=` is the older explicit scale.
@@ -235,6 +240,7 @@ function Harness({ data }) {
           onPlanOn={(v) => setSettings((s) => ({ grading: { ...s.grading, enabled: v } }))}
           onShowOnMap={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, cutfill: v } } }))}
           onShowContours={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, contours: v } } }))}
+          showSpots={settings.grading.layers.spots !== false} onShowSpots={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, spots: v } } }))} PAL={PAL}
           showPaper={settings.grading.layers.paper !== false} onShowPaper={(v) => setSettings((s) => ({ grading: { ...s.grading, layers: { ...s.grading.layers, paper: v } } }))}
           onPullLimit={(id, span) => limitActions.editLimit(span)}
           model={planOn ? model : null} headerSlot={headEl} dockDropFt={4} buildableOn={!!(model && model.cfg.layers.buildable)}

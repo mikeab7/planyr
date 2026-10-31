@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { gradingCfg } from "../src/workspaces/site-planner/lib/gradingBase.js";
-import { GradingPanel, OFF_LINE } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { GradingPanel, OFF_LINE, GradingHeaderActions } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
 import { plannerSource } from "./helpers/plannerSource.js";
 
 const sp = plannerSource();
@@ -44,18 +44,20 @@ describe("grading is off per plan until switched on", () => {
 
 describe("the Grading panel body", () => {
   const html = (p) => renderToStaticMarkup(React.createElement(GradingPanel, p));
-  it("off: the switch and one line, nothing else", () => {
+  it("off: one line, nothing else in the body (the On switch rides the panel header)", () => {
     const h = html({ planOn: false, model: null });
-    expect(h).toContain("Grade this plan");
     expect(h).toContain(OFF_LINE);
     expect(OFF_LINE).toBe("Turn this on to suggest finish elevations and show cut and fill for this plan.");
-    expect(h).not.toContain("Show cut and fill on the map");
+    expect(h).not.toContain("Cut &amp; fill");
     expect(h).not.toContain('data-section="grading"');
     expect(h).not.toContain("data-ground");
+    const head = renderToStaticMarkup(React.createElement(GradingHeaderActions, { model: null, planOn: false, onPlanOn() {} }));
+    expect(head).toContain('data-testid="grading-plan-switch"'); expect(head).not.toContain("data-grading-gear");
   });
-  it("on: the show-on-map checkbox appears, unchecked by default", () => {
-    const h = html({ planOn: true, model: null });
-    expect(h).toContain("Show cut and fill on the map");
+  it("on: the Cut & fill pill appears, unchecked by default", () => {
+    const m = { cfg: gradingCfg({}), setback: { usingPropertyLine: false }, demStatus: "ready", ground: { status: "idle", summary: null, retry() {} }, cards: [], rock: { status: "idle" }, limit: null, actions: { typeFfe() {}, resetFfe() {} } };
+    const h = html({ planOn: true, model: m });
+    expect(h).toContain("Cut &amp; fill");
     expect(h).toMatch(/data-testid="grading-show-on-map"(?![^>]*checked)/);
   });
 });

@@ -20,12 +20,19 @@ export const GRADING_DEFAULTS = Object.freeze({
   pavementSlopePct: 1.5, minPavementSlopePct: 0.5, maxCutFillFt: 12, slopeRatio: 2, lotDropFt: 0.5, shoulderFt: 5,
   // ROUND 4 (B2349120): the grading limit's own settings — the shoulder past the pavement, the rounding radius of the
   // limit's outside corners, the max pavement slope a seam may bend a plane to, and the limit MODE.
-  cornerRadiusFt: LIMIT_DEFAULTS.cornerRadiusFt, maxPavementSlopePct: 5, limitMode: "layout",
+  cornerRadiusFt: LIMIT_DEFAULTS.cornerRadiusFt, maxPavementSlopePct: 5,
+  // NEW-1 (Grading panel layout, owner 2026-10-31): the panel no longer offers "Around the layout / To the boundary" — the limit of
+  // disturbance is ONE signed number off the property line, i.e. the boundary limit. "layout" survives only as the vehicle for a
+  // hand-edited outline (Edit outline) and for callers/tests that name it.
+  limitMode: "boundary",
+  // Fill or cut past which a terrace or wall is usual — the panel's depth flag anywhere in the slopes (a threshold, not a limit).
+  terraceDepthFt: 12,
   // ROUND 6 (NEW-3): the slope the open ground inside the limit falls at, away from the pavement / pad edges it touches.
   openGroundSlopePct: 2,
   // ROUND 8 (NEW-2): the limit of disturbance is the property line inset by a working margin and any undisturbed buffer
   // the zoning sets along the adjoining property — never the building setback.
   gradingMarginFt: PROPERTY_LIMIT_DEFAULTS.marginFt, undisturbedBufferFt: PROPERTY_LIMIT_DEFAULTS.bufferFt,
+  limitPastMaxFt: 50,   // NEW-1: how far PAST the property line the limit of disturbance may be set (the panel's +50)
 });
 export const SLOPE_RATIOS = Object.freeze([2, 3, 4]);
 
@@ -41,7 +48,7 @@ export function gradingCfg(g) {
   const d = num(src.maxCutFillFt);
   const r = num(src.slopeRatio);
   const sh = num(src.shoulderFt), cr = num(src.cornerRadiusFt), mp = num(src.maxPavementSlopePct), og = num(src.openGroundSlopePct);
-  const gm = num(src.gradingMarginFt), ub = num(src.undisturbedBufferFt);
+  const gm = num(src.gradingMarginFt), ub = num(src.undisturbedBufferFt), td = num(src.terraceDepthFt);
   const ring = Array.isArray(src.limitRing) && src.limitRing.length >= 3 && src.limitRing.every((q) => q && Number.isFinite(q.x) && Number.isFinite(q.y)) ? src.limitRing : null;
   return {
     pavementSlopePct: p == null ? GRADING_DEFAULTS.pavementSlopePct : Math.max(GRADING_DEFAULTS.minPavementSlopePct, p),
@@ -53,7 +60,9 @@ export function gradingCfg(g) {
     // (round 4, B2349122): all OFF until asked for.
     layers: { buildable: !!(src.layers && src.layers.buildable), cutfill: !!(src.layers && src.layers.cutfill), contours: !!(src.layers && src.layers.contours),
       // ROUND 5 (NEW-6): the paper background under the grading picture — ON by default while grading is on, per plan
-      paper: !(src.layers && src.layers.paper === false) },
+      paper: !(src.layers && src.layers.paper === false),
+      // NEW-1: the "Spot elevations" pill — the spot elevations / fall arrows / corner pills printed with Cut & fill; ON by default
+      spots: !(src.layers && src.layers.spots === false) },
     // ROUND 4 — the grading limit: its mode ("layout" = around the graded elements, "boundary" = the setback itself),
     // the owner's edited outline (layout mode only; null = auto), the shoulder, the corner radius, the max pavement slope.
     limitMode: LIMIT_MODES.includes(src.limitMode) ? src.limitMode : GRADING_DEFAULTS.limitMode,
@@ -62,7 +71,10 @@ export function gradingCfg(g) {
     cornerRadiusFt: cr == null || cr < 0 ? GRADING_DEFAULTS.cornerRadiusFt : cr,
     maxPavementSlopePct: mp == null || mp <= 0 ? GRADING_DEFAULTS.maxPavementSlopePct : mp,
     openGroundSlopePct: og == null || og < 0 ? GRADING_DEFAULTS.openGroundSlopePct : og,
-    gradingMarginFt: gm == null || gm < 0 ? GRADING_DEFAULTS.gradingMarginFt : gm,
+    // SIGNED (NEW-1): positive = inside the property line (the stored meaning of every existing plan), negative = past it, down to
+    // -LIMIT_PAST_MAX_FT. The panel shows the opposite sign ("Limits of disturbance": negative inside) — gradingPanelModel.limitOffsetFt.
+    gradingMarginFt: gm == null || gm < -GRADING_DEFAULTS.limitPastMaxFt ? GRADING_DEFAULTS.gradingMarginFt : gm,
+    terraceDepthFt: td == null || td <= 0 ? GRADING_DEFAULTS.terraceDepthFt : td,
     undisturbedBufferFt: ub == null || ub < 0 ? GRADING_DEFAULTS.undisturbedBufferFt : ub,
   };
 }
@@ -187,7 +199,7 @@ export function parcelsSig(parcels, baseSetback) {
 export function useGradingBase({ enabled, origin, parcels, gradingSettings, baseSetback, extraRings = null, aisleFt = LIMIT_DEFAULTS.aisleFt }) {
   const g = gradingSettings || null;
   const cfgKey = JSON.stringify([g && g.enabled, g && g.pavementSlopePct, g && g.maxCutFillFt, g && g.slopeRatio, g && g.layers && g.layers.buildable, g && g.layers && g.layers.cutfill,
-    g && g.layers && g.layers.contours, g && g.layers && g.layers.paper, g && g.limitMode, g && g.shoulderFt, g && g.cornerRadiusFt, g && g.maxPavementSlopePct, g && g.openGroundSlopePct, g && g.gradingMarginFt, g && g.undisturbedBufferFt, g && Array.isArray(g.limitRing) ? ringSig(g.limitRing) : null]);
+    g && g.layers && g.layers.contours, g && g.layers && g.layers.paper, g && g.layers && g.layers.spots, g && g.limitMode, g && g.shoulderFt, g && g.cornerRadiusFt, g && g.maxPavementSlopePct, g && g.openGroundSlopePct, g && g.gradingMarginFt, g && g.undisturbedBufferFt, g && g.terraceDepthFt, g && Array.isArray(g.limitRing) ? ringSig(g.limitRing) : null]);
   const cfg = useMemo(() => gradingCfg(g), [cfgKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const psig = enabled ? parcelsSig(parcels, baseSetback) : "";
   const parcelsRef = useRef(parcels); parcelsRef.current = parcels;

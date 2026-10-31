@@ -32,16 +32,16 @@ import {
 import { loadTerrain } from "../lib/terrainLazy.js";
 import { LIMIT_MODE_LABEL, unionRings, bufferRings, bandRegions, pointInRegions } from "../lib/gradingLimit.js";
 import { limitSigOf, tracedOnLimit, publishedContours, publishedBand } from "../lib/gradingPicture.js";
-import {
-  suggestFfe, courtReport, cutFillCentroids, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps,
-  balanceClause, dockClause, rockClause, depthClause, floorClause, composeBasis,
-} from "../lib/ffeSuggest.js";
+import { suggestFfe, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps } from "../lib/ffeSuggest.js";
 import { feetToLatLngPair } from "../lib/mapLock.js";
 import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
   ringsPathD, contourLinesToFeet, ringsToLatticePx, GRADING_PAPER_RGB, GRADING_PAPER_OPACITY, bandField, bandRingsToFeet,
 } from "../lib/gradingPaint.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
+import {
+  gridDepthStats, floorStatsOf, haulTile, cutTile, fillTile, depthFlags, limitFlagSentence, seamFlags, rockFlag, sweepFloorStats, floorRows,
+} from "../lib/gradingPanelModel.js";
 
 const EMPTY = [];
 // ROUND 7: the contours' own daylight line is usable as the band's outer edge only when it was traced off the SAME surface
@@ -171,6 +171,9 @@ export default function GradingController({ input, onModel }) {
   const cfgSig = `${cfg.pavementSlopePct}|${cfg.slopeRatio}|${cfg.maxCutFillFt}|${input.dockDropFt}|${base.existKey}|${setback ? setback.sig : ""}|${floorFt ?? ""}|${pondTotal}|${rockKey}`;
 
   const autoRef = useRef(new Map());           // id → { sig, ffe, info } | { sig, failed }
+  // NEW-1: the balanced ("no haul") floor of the FOCUSED building while its floor is TYPED — the panel's floors table needs it, and
+  // autoRef deliberately holds only buildings that take the suggestion. Never written to the plan, never merged into the surface.
+  const balRef = useRef(new Map());
   const [autoVer, setAutoVer] = useState(0);
   const [solvingId, setSolvingId] = useState(null);
   const autoSeq = useRef(0);
@@ -211,16 +214,25 @@ export default function GradingController({ input, onModel }) {
   useEffect(() => {
     const my = ++autoSeq.current;
     const store = autoRef.current;
-    for (const id of [...store.keys()]) if (!buildings.some((b) => b.id === id) || typedOf(id) != null) { store.delete(id); bump(); }
+    // typing a floor hands the building's suggestion to balRef (the floors table keeps its no-haul row without a re-solve); resetting
+    // to auto hands it back — neither re-runs the solver, because nothing the suggestion depends on moved
+    for (const id of [...store.keys()]) if (!buildings.some((b) => b.id === id) || typedOf(id) != null) { const e0 = store.get(id); if (e0 && !e0.failed && id === focusId && typedOf(id) != null) balRef.current.set(id, e0); store.delete(id); bump(); }
+    for (const id of [...balRef.current.keys()]) {
+      if (!buildings.some((b) => b.id === id)) { balRef.current.delete(id); bump(); continue; }
+      if (typedOf(id) == null) { const e1 = balRef.current.get(id); if (e1 && !store.has(id)) store.set(id, e1); balRef.current.delete(id); bump(); }
+      else if (id !== focusId) { balRef.current.delete(id); bump(); }
+    }
     if (!ready) { setSolvingId(null); return undefined; }
     const sigOf = (id) => `${geoSig.get(id)}#${cfgSig}#${pondShareOf(id)}`;
     const stale = () => my !== autoSeq.current;
     const run = async () => {
       for (const b of buildings) {
         if (stale()) return;
-        if (typedOf(b.id) != null) continue;
+        const typedNow = typedOf(b.id) != null;
+        if (typedNow && b.id !== focusId) continue;            // a typed floor needs no suggestion — except the focused one's (the floors table)
+        const into = typedNow ? balRef.current : store;
         const sig = sigOf(b.id);
-        const cur = store.get(b.id);
+        const cur = into.get(b.id);
         if (cur && cur.sig === sig) continue;
         // a drag is in flight: the ground under the building is still moving — wait for the release
         for (let k = 0; k < 60 && inRef.current.isDragging && inRef.current.isDragging(); k++) { await sleep(150); if (stale()) return; }
@@ -228,14 +240,14 @@ export default function GradingController({ input, onModel }) {
         let r = null, err = null;
         try { r = await solveAuto(b.id, my); } catch (e) { err = String((e && e.message) || e); }
         if (stale() || (r && r.stale)) return;
-        store.set(b.id, r && Number.isFinite(r.ffe) ? { sig, ffe: r.ffe, info: r } : { sig, failed: true, error: err });
+        into.set(b.id, r && Number.isFinite(r.ffe) ? { sig, ffe: r.ffe, info: r } : { sig, failed: true, error: err });
         bump();
       }
       if (!stale()) setSolvingId(null);
     };
     const t = setTimeout(run, 120);
     return () => clearTimeout(t);
-  }, [ready, geoKey, cfgSig, typedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, geoKey, cfgSig, typedKey, focusId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const autoFfe = useMemo(() => {
     const m = new Map();
@@ -243,6 +255,8 @@ export default function GradingController({ input, onModel }) {
     return m;
   }, [autoVer]); // eslint-disable-line react-hooks/exhaustive-deps
   const ffeOf = (id) => { const t = typedOf(id); if (t != null) return t; const a = autoRef.current.get(id); return a && a.ffe != null ? a.ffe : null; };
+  // the balanced floor whether or not the owner typed one (NEW-1)
+  const balancedOf = (id) => { const a = typedOf(id) != null ? balRef.current.get(id) : autoRef.current.get(id); return a && a.ffe != null ? a.ffe : null; };
 
   /* ---------------- per-building facts read off the live surface ---------------- */
   const facts = useMemo(() => {
@@ -267,13 +281,54 @@ export default function GradingController({ input, onModel }) {
     const t = setTimeout(async () => {
       const gi = inRef.current.gsInputs;
       const aIds = assemblyIds(gi.els, focusId);
-      const r = await runChunked((function* () { yield; const s = yield* buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, focusId, altE) }); return s ? cardEarthwork(s.grid, aIds) : null; })(), { isStale: () => my !== altSeq.current });
-      if (my !== altSeq.current || !r || r.stale) return;
-      setAlt({ id: focusId, E: altE, areaAc: best.areaAc, cutCy: r.cutCy, fillCy: r.fillCy, netCy: r.netCy });
+      const r = await runChunked((function* () { yield; const s = yield* buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, focusId, altE) }); return s ? { ew: cardEarthwork(s.grid, aIds), depth: gridDepthStats(s.grid) } : null; })(), { isStale: () => my !== altSeq.current });
+      if (my !== altSeq.current || !r || r.stale || !r.ew) return;
+      setAlt({ id: focusId, E: altE, areaAc: best.areaAc, cutCy: r.ew.cutCy, fillCy: r.ew.fillCy, netCy: r.ew.netCy, depth: r.depth });
     }, 300);
     return () => clearTimeout(t);
   }, [ready, focusId, altE, geoSig.get(focusId), cfgSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const altForFocus = alt && alt.id === focusId ? alt : null;
+
+  /* ---------------- NEW-1: the floors table + the haul-by-floor curve, for the focused building ---------------- */
+  // Seven surface builds across ±6 ft of the balanced floor (every 2 ft; the curve is interpolated to every half foot), two more
+  // around the smallest slope footprint, all in the chunked scheduler, superseded by a token and started only after the inputs settle and the picture is up —
+  // never on the input path. "Least digging" is the level-ground alternative (`alt`), whose stats the alt effect already built.
+  const [floorsRes, setFloorsRes] = useState(null);
+  const fSeq = useRef(0);
+  const balE = focusId ? balancedOf(focusId) : null;
+  const floorsKey = ready && focusId && balE != null ? `${focusId}|${balE}|${geoSig.get(focusId)}|${cfgSig}|${pondShareOf(focusId)}` : "";
+  useEffect(() => {
+    if (!floorsKey) { fSeq.current++; setFloorsRes(null); return undefined; }
+    const my = ++fSeq.current;
+    const id = focusId, E0 = balE, pond = pondShareOf(focusId);
+    const t = setTimeout(async () => {
+      const gi = inRef.current.gsInputs;
+      const aIds = assemblyIds(gi.els, id);
+      function* statsAt(f) {
+        const s = yield* buildProposedSurfaceSteps({ ...gi, els: withFfe(gi.els, id, f) });
+        return s && s.grid ? floorStatsOf(cardEarthwork(s.grid, aIds), gridDepthStats(s.grid), pond) : null;
+      }
+      try {
+        const r = await runChunked(sweepFloorStats(statsAt, E0), { isStale: () => my !== fSeq.current });
+        if (my !== fSeq.current || !r || r.stale) return;
+        setFloorsRes({ id, key: floorsKey, E0, samples: r.samples, nohaul: r.nohaul, slopes: r.slopes, curve: r.curve });
+      } catch (e) {
+        if (my === fSeq.current) setFloorsRes({ id, key: floorsKey, E0, samples: [], nohaul: null, slopes: null, curve: [], error: String((e && e.message) || e) });
+      }
+    }, 1500);   // after the picture's own work (band + contour traces start within ~100 ms of a surface landing) — the table is secondary to the picture
+    return () => clearTimeout(t);
+  }, [floorsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the depth flags of the focused building (past the pad max / past the terrace depth anywhere) — needed by the move search below
+  const anyDepth = useMemo(() => gridDepthStats(grid), [grid]);
+  const focusDepth = useMemo(() => {
+    const F = focusId ? facts.get(focusId) : null, b = focusId ? buildings.find((x) => x.id === focusId) : null;
+    if (!F || !b || !grid || !F.earthwork) return { pad: null, flags: [] };
+    const pad = padDepths(grid, focusId);
+    const cs = padCorners(b.ring);
+    const half = cs ? { x: Math.hypot(cs[1].x - cs[0].x, cs[1].y - cs[0].y) / 2, y: Math.hypot(cs[2].x - cs[1].x, cs[2].y - cs[1].y) / 2 } : { x: 100, y: 100 };
+    const whereOf = (d, scope) => (scope === "pad" ? padSpotWord(d, F.centre, half) : fourWay(d.x - F.centre.x, d.y - F.centre.y, 30));
+    return { pad, flags: depthFlags({ pad, anywhere: anyDepth, maxCutFillFt: cfg.maxCutFillFt, terraceDepthFt: cfg.terraceDepthFt, whereOf }) };
+  }, [focusId, facts, grid, anyDepth, cfg.maxCutFillFt, cfg.terraceDepthFt, buildings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- the flag's two fixes (background search, superseded by token) ---------------- */
   const [fixes, setFixes] = useState({ id: null, status: "idle", ffe: null, move: null });
@@ -294,16 +349,14 @@ export default function GradingController({ input, onModel }) {
     const flag = focusFacts.flag;
     const start = setTimeout(async () => {
       try {
-        const ffeFix = Number.isFinite(cur)
+        // the limit flag's fix: the nearest floor at which the slopes daylight inside the limit. (The old "Move building" search is
+        // gone from here: the depth flags' "Second pad" runs its own move search ON CLICK — `findSecondPad` below — so a plan whose
+        // ground is steep never pays for up to 48 surface builds just by being open.)
+        const ffeFix = flag && Number.isFinite(cur)
           ? await runChunked(findFfeFix(function* (f) { const n = yield* outAt(withFfe(gi.els, focusId, f)); return n == null ? null : n === 0; }, cur), { isStale: stale })
           : null;
         if (stale() || (ffeFix && ffeFix.stale)) return;
-        const moveFix = await runChunked(findMoveFix(
-          function* (dx, dy) { const n = yield* outAt(shiftAssembly(gi.els, aIds, dx, dy)); return n === 0; },
-          { buildingCentre: centreOf(bPrepared.ring), offendCentroid: flag.centroid },
-        ), { isStale: stale });
-        if (stale() || (moveFix && moveFix.stale)) return;
-        setFixes({ id: focusId, status: "done", ffe: ffeFix || null, move: moveFix || null, limit: flag.limit && flag.span ? { span: flag.span } : null });
+        setFixes({ id: focusId, status: "done", ffe: ffeFix || null, move: null, limit: flag && flag.limit && flag.span ? { span: flag.span } : null });
       } catch (e) {
         if (!stale()) setFixes({ id: focusId, status: "failed", ffe: null, move: null, error: String((e && e.message) || e) });
       }
@@ -331,52 +384,6 @@ export default function GradingController({ input, onModel }) {
     return () => { rockLiveSeq.current++; };
   }, [rockLiveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ---------------- the basis, in plain words ---------------- */
-  const basisFor = (b, ffe, isAuto) => {
-    const F = facts.get(b.id);
-    if (!F || !F.earthwork || ffe == null) return { text: "", clauses: [] };
-    const clauses = [];
-    const e = F.earthwork;
-    const info = isAuto ? (autoRef.current.get(b.id) || {}).info : null;
-    const cents = cutFillCentroids(grid, scopeIds(grid, F.aIds));
-    const wholeArea = !!(grid && grid.limit);
-    const sideOf = (c) => (c ? fourWay(c.x - F.centre.x, c.y - F.centre.y, 30) : null);
-    const aliveInfo = info && Math.abs(info.ffe - ffe) < 0.05 ? info : null;
-    if (isAuto && aliveInfo) {
-      clauses.push({ id: "balance", text: balanceClause({ e, cutSide: sideOf(cents.cut), fillSide: sideOf(cents.fill), pondCy: pondShareOf(b.id), pondWhole: pondTotal > 0 && buildings.length > 1 ? pondTotal : null, achieved: aliveInfo.achieved, wholeArea }) });
-      if (aliveInfo.floored) clauses.push({ id: "floor", text: floorClause(floorFt) });
-      if (aliveInfo.rock) {
-        const sd = aliveInfo.rock.at ? fourWay(aliveInfo.rock.at.x - F.centre.x, aliveInfo.rock.at.y - F.centre.y, 30) : null;
-        clauses.push({ id: "rock", text: rockClause({ raisedFt: aliveInfo.rock.raisedFt, sideWord: sd, depthFt: aliveInfo.rock.depthFt }) });
-      }
-    } else if (!isAuto) {
-      const a = altForFocus && b.id === focusId ? altForFocus : null;
-      if (a && Math.abs(a.E - ffe) < 0.05) clauses.push({ id: "balance", text: `Sitting it on the most level ground: ${Math.round(a.areaAc)} AC stays level at this finish.` });
-      else clauses.push({ id: "balance", text: "Your number. Reset to auto for the balanced finish." });
-    }
-    // live checks on the surface the cards and the map both show
-    // The live rock scan runs off the render path (rockLive, below); a scan for an older surface is ignored.
-    const v = rockLive.key === rockLiveKey ? rockLive.byId.get(b.id) : null;
-    if (v && !(isAuto && aliveInfo && aliveInfo.rock)) {
-      if (v.raiseFt > 0.04 && v.at) {
-        const sd = fourWay(v.at.x - F.centre.x, v.at.y - F.centre.y, 30);
-        clauses.push({ id: "rock", text: `Cut runs into rock${sd ? ` on the ${sd} end` : ""} (bedrock about ${Math.max(1, Math.round(v.depthFt))} ft down there); ${f1(Math.ceil(v.raiseFt * 10) / 10).replace(/\.0$/, "")} ft more FFE would clear it.` });
-      }
-    }
-    const courts = gradeSurface ? courtReport({ grid, planes: gradeSurface.planes, els, buildingId: b.id, ids: F.aIds, existAt: gsInputs.existAt, centre: F.centre }) : [];
-    const dk = dockClause(courts);
-    if (dk) clauses.push({ id: "docks", text: dk });
-    const pd = padDepths(grid, b.id);
-    const limit = cfg.maxCutFillFt;
-    const worst = [pd.cut && { ...pd.cut, kind: "cut" }, pd.fill && { ...pd.fill, kind: "fill" }].filter(Boolean).filter((d) => d.ft > limit).sort((a, c) => c.ft - a.ft)[0];
-    if (worst) {
-      const cs = padCorners(b.ring);
-      const half = cs ? { x: Math.hypot(cs[1].x - cs[0].x, cs[1].y - cs[0].y) / 2, y: Math.hypot(cs[2].x - cs[1].x, cs[2].y - cs[1].y) / 2 } : { x: 100, y: 100 };
-      clauses.push({ id: "depth", text: depthClause({ ft: worst.ft, word: padSpotWord(worst, F.centre, half), kind: worst.kind, limitFt: limit }) });
-    }
-    return { text: composeBasis(clauses), clauses, courts };
-  };
-
   /* ---------------- the cards ---------------- */
   const cards = useMemo(() => buildings.map((b) => {
     const F = facts.get(b.id);
@@ -390,11 +397,34 @@ export default function GradingController({ input, onModel }) {
       ffe, isAuto, solving: isAuto && ffe == null && !(a && a.failed), failed: !!(isAuto && a && a.failed), focus,
       earthwork: F ? F.earthwork : null, flag: F ? F.flag : null,
     };
+    // the selector's "!" (only drawn with several buildings): the focused one reuses focusDepth's numbers, the others scan the lattice ONCE
+    card.flagged = buildings.length < 2 ? false : !!(F && F.flag) || (grid ? (() => { const pd = focus && focusDepth.pad ? focusDepth.pad : padDepths(grid, b.id); return (pd.cut && pd.cut.ft > cfg.maxCutFillFt) || (pd.fill && pd.fill.ft > cfg.maxCutFillFt); })() : false);
     if (focus && ffe != null) {
-      const bs = basisFor(b, ffe, isAuto);
-      card.basis = bs.text;
       card.fixes = fixes.id === b.id ? fixes : { id: b.id, status: "idle", ffe: null, move: null };
-      card.alt = altForFocus && Math.abs(altForFocus.E - ffe) >= 0.25 ? altForFocus : null;
+      // NEW-1 — the approved layout's numbers: HAUL first, then cut and fill with their deepest / tallest; threshold-only flags
+      // (one sentence each, no ground descriptions); the three suggested floors and the haul-by-floor curve
+      const e = F && F.earthwork;
+      const pond = pondShareOf(b.id);
+      card.haulCy = e ? e.netCy - pond : null;
+      card.tiles = e ? { haul: haulTile(card.haulCy), cut: cutTile(e.cutCy, anyDepth.cut ? anyDepth.cut.ft : 0), fill: fillTile(e.fillCy, anyDepth.fill ? anyDepth.fill.ft : 0) } : null;
+      const flags = [];
+      if (F && F.flag) flags.push({ id: "limit", kind: "limit", text: limitFlagSentence(F.flag), span: F.flag.span, actions: ["ffe", "limit"] });
+      flags.push(...focusDepth.flags);
+      if (grid) flags.push(...seamFlags(grid.seams, gradeSurface && gradeSurface.planes, cfg.maxPavementSlopePct));
+      const rv = rockLive.key === rockLiveKey ? rockLive.byId.get(b.id) : null;
+      const rf = rockFlag(rv, rv && rv.at && F ? (() => { const sd = fourWay(rv.at.x - F.centre.x, rv.at.y - F.centre.y, 30); return sd ? `${sd} end` : null; })() : null);
+      if (rf) flags.push(rf);
+      card.flags = flags;
+      const fr = floorsRes && floorsRes.id === b.id ? floorsRes : null;
+      const al = altForFocus && altForFocus.id === b.id ? altForFocus : null;
+      card.floors = {
+        rows: floorRows({
+          nohaul: balE != null ? { E: balE, stats: fr && fr.nohaul ? fr.nohaul : null } : null,
+          digging: al ? { E: al.E, areaAc: al.areaAc, stats: floorStatsOf({ cutCy: al.cutCy, fillCy: al.fillCy, netCy: al.netCy }, al.depth, pond) } : null,
+          slopes: fr && fr.slopes ? { E: fr.slopes.E, stats: fr.slopes } : null,
+        }, ffe),
+        curve: fr ? fr.curve : [], pending: !fr || fr.key !== floorsKey, balancedE: balE,
+      };
       card.court = gradeSurface && F ? (() => {
         const aIds = F.aIds;
         for (const id of aIds) {
@@ -409,7 +439,7 @@ export default function GradingController({ input, onModel }) {
       })() : null;
     }
     return card;
-  }), [buildings, facts, focusId, autoVer, fixes, altForFocus, gradeSurface, grid, solvingId, namesKey, typedKey_(input), rockLive]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [buildings, facts, focusId, autoVer, fixes, altForFocus, gradeSurface, grid, solvingId, namesKey, typedKey_(input), rockLive, floorsRes, focusDepth, anyDepth, cfg.maxCutFillFt, cfg.maxPavementSlopePct]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- canvas labels: the court / lot spots and the four pad-corner pills ---------------- */
   const labels = useMemo(() => {
@@ -629,6 +659,26 @@ export default function GradingController({ input, onModel }) {
   // "Move building n ft <direction>" was proven at THIS finish elevation. A live suggestion would re-solve for the new
   // spot and could walk the slope back across the line, so applying the move freezes the suggestion to a typed number.
   const applyMoveFix = (id, mv) => inRef.current.actions.moveAssembly(id, mv.dx, mv.dy, typedOf(id) == null ? ffeOf(id) : null);
+  // NEW-1 — "Second pad" (a depth flag's link): move the assembly away from the deepest spot, in 5-ft steps up to 240 ft, until that
+  // depth is back under the flag's threshold. Searched ON CLICK in the chunked scheduler — never on open (up to 48 surface builds, each
+  // re-resolving the limit). Resolves { dx, dy, distFt, direction } or null.
+  const secondPadSeq = useRef(0);
+  const findSecondPad = async (id, flag) => {
+    const I = inRef.current, gi = I.gsInputs;
+    const aIds = assemblyIds(gi.els, id), b = gi.els.find((e) => e.id === id);
+    if (!b || !flag) return null;
+    const my = ++secondPadSeq.current;
+    const depthOk = (g2) => {
+      if (!g2) return false;
+      if (flag.scope === "pad") { const pd = padDepths(g2, id)[flag.depthKind]; return !pd || pd.ft <= flag.thresholdFt; }
+      const st = gridDepthStats(g2)[flag.depthKind]; return !st || st.ft <= flag.thresholdFt;
+    };
+    const r = await runChunked(findMoveFix(
+      function* (dx, dy) { const s2 = yield* buildProposedSurfaceSteps({ ...gi, els: shiftAssembly(gi.els, aIds, dx, dy) }); return depthOk(s2 && s2.grid); },
+      { buildingCentre: centreOf(b.ring), offendCentroid: flag.at },
+    ), { isStale: () => my !== secondPadSeq.current });
+    return r && !r.stale ? r : null;
+  };
 
   /* ---------------- publish ---------------- */
   const buildingName = (id) => (input.buildingNames && input.buildingNames.get(id)) || "the building";
@@ -665,7 +715,7 @@ export default function GradingController({ input, onModel }) {
         sub: cfg.layers.cutfill || cfg.layers.contours ? "the parcel, out past the slopes" : "shows while cut and fill or contours are on",
         info: "Fills the parcel — out to the daylight line plus a margin — with the sheet's flat white while cut and fill or the proposed contours are on, so the aerial drops out under the grading picture. Everything drawn (existing and proposed contours, the bands, the limit, the daylight line, the setback, the elements) paints on top of it; the aerial stays outside it. Turn it off to see the imagery again." },
     ],
-    actions: { typeFfe, resetFfe, applyMoveFix,
+    actions: { typeFfe, resetFfe, applyMoveFix, findSecondPad,
       setLimitMode: (m) => inRef.current.actions.setLimitMode && inRef.current.actions.setLimitMode(m),
       editLimit: (span) => inRef.current.actions.editLimit && inRef.current.actions.editLimit(span || null),
       doneEditLimit: () => inRef.current.actions.doneEditLimit && inRef.current.actions.doneEditLimit(),
