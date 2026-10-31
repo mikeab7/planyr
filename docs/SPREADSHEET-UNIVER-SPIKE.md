@@ -162,12 +162,29 @@ Estimated **12–16 sessions**, in this order — gaps first, because they are w
 1. ~~**Harden the save path** (1–1.5)~~ **DONE 2026-10-30 (B2577681)** — see *Save path* below.
 2. **Fill the Excel-key gaps as one Planyr plugin on Univer** (2) — **DONE 2026-10-30 (B2573632):** Ctrl+1 and number-format dialog, the Ctrl+Shift format keys, Shift+Space / Ctrl+Space, Ctrl+9 / 0, Ctrl+Plus / Minus, Ctrl+;, Ctrl+5, copy-above, Alt key-tips. 33 strict checks in `ui-audit/lib/univerExcelKeysChecks.mjs`, every one red on the build before the plugin.
 3. **Decide indent** (1): ✅ DONE (owner: keep and draw it) — B2572784; stored as the cell's own padding, drawn by a render interceptor, buttons + command ids on the Start tab.
-4. ~~**Fix the header-drag-moves difference** (0.5)~~ **DONE 2026-10-30 (B2577680).** The load time — prune the unused language files, try the background worker (1) — is still open.
+4. ~~**Fix the header-drag-moves difference** (0.5)~~ **DONE 2026-10-30 (B2577680).** **Load time: BUILT 2026-10-31 (B2587920), TARGET NOT MET** — see *Load time (cutover step 4)* below.
 5. **Look** (1–3): *header done 2026-10-30 — one flat left-aligned strip with the tab dropdown, curved undo / redo (B2574352 / B2574353); Univer's own toolbar is kept, themed and flattened.* Still open: the formula bar, the sheet-tab strip and any Planyr-only toolbar items other cutover steps add.
 6. ~~**Port the Planyr-only features** (2–3)~~ **DONE 2026-10-31 (B2586720; live V2035776 pending):** consistency flags and panel, trace arrows, command palette, name manager and the colour convention — on Univer's interface.
 7. **One formula engine** (1–2): today Planyr's engine feeds Excel export, the audit tools and the numbers elsewhere; with Univer on screen the two could disagree on edge cases. Pick one and test the Excel export against it.
 8. **Rewrite the tests that read cells off the page** (~2): the canvas has no cells to query; they move to Univer's interface (the parity checklist is the pattern).
 9. **Dogfood, then default on, then delete the old grid** (1–2): `SheetView.jsx`, `sheetModel.js`'s grid parts and the old engine only once nothing reads them.
+
+## Load time (cutover step 4 — B2587920, 2026-10-31)
+
+**The target was "within 25% of the old grid, and no language files downloaded on an English sheet". The second half is met (and was already true at run time); the first is not.** Measured with `ui-audit/measure-univer-tti.mjs` (production builds, 1,000 rows × 12 columns with a SUM per row, median of 5, a brand-new browser each run, the last formula cell must hold a number) and, on the real deploy, `ui-audit/verify-univer-load-live.mjs` (V2036976).
+
+| localhost, ms | old grid | Univer before | Univer after |
+|---|---|---|---|
+| Cold open (navigation → values) | 546 | 1997 (3.66×) | 2044 (3.78×) |
+| Tab click after the hover warm-up | 401 | 1365 (3.40×) | 1300 (3.04×) |
+| 5,000 rows, cold | 1001 | 3279 | 3293 |
+| 5,000 rows, click: page blocked while opening | 573 | 1183 | 894 |
+
+**What was built.** (1) *Prune*: `scripts/vite-plugin-univer-prune.mjs` removes Univer's 77 lazy hyphenation-language chunks (a spreadsheet never hyphenates; `en-us` stays; the build fails if a Univer upgrade changes the table). Deploy: 262 → 188 JS files, 23.6 → 21.9 MB raw JS. **Honest correction to the spike's claim:** those files were never downloaded on an English sheet (0 requested, before and after) — the saving is deploy size, not first-load time; and they are 77 files / ~1 MB compressed, not "about 200 / 3.2 MB". (2) *Formula worker*: `lib/univerFormulaWorker.js` (the sheets-core preset's own worker entry). It costs **+0.7 MB compressed** (the main thread still needs the engine for function help, so the engine ships twice) and buys back the main thread (page blocked 24% less at 5,000 rows), **not wall-clock**. (3) *Warm-up*: hovering the Spreadsheet tab, and `ModelApp` itself, start the Univer chunk (`lib/univerWarm.js`, `modulePrefetch.js`) — only on a device whose switch is on. Live, the chunk request used to start ~250 ms after ModelApp, behind the admin check.
+
+**Why it cannot reach 25% without changing the grid (measured, CPU profile + lifecycle timeline).** A warm open: ~160 ms to build, then **Univer's own fixed 300 ms wait before it paints** (inside the package) plus ~350 ms of layout and drawing, then ~270 ms for the formula pass — ≈ 1.3 s against 0.43 s. Cold adds the download and ~400 ms to run 7 MB of JavaScript. No Planyr function is a hot spot. The one remaining lever that is not a patch — showing formula values from cache — saves ~0.27 s and depends on the step-7 engine decision: B2587921.
+
+**Live baseline before this change (build 02bff42, test account):** the 1,000-row sheet cold took 2026 ms against 704 ms for the regular grid (2.88×); the same workbook empty was 1036 vs 915 (1.13×) — so on the real app the gap is data and calculation, not the download.
 
 ## Planyr-only tools on Univer (cutover step 6 — B2586720, 2026-10-31)
 
@@ -201,7 +218,7 @@ How an edit travels: Univer edit → `lib/univerSave.js` (debounce 300 ms, the e
 
 ## What argues against cutover
 
-- **Weight and speed to appear:** ~1.8 MB first download and ~2 s to show a 1,000-row sheet, against under a second today.
+- **Weight and speed to appear:** ~1.8 MB first download (2.5 MB with the formula worker) and ~2 s to show a 1,000-row sheet, against under a second today — *Load time (cutover step 4)* below says what was tried and why the gap is structural.
 - **The Excel keys you just won are mostly *not* there** and would be rebuilt as plugin code — that is the same kind of work as before, just on someone else's foundation.
 - **A canvas grid is invisible to screen readers and to the page-reading tests** the repo relies on.
 - **Two formula engines** until step 7, and a different function set (it is richer, but `[Column]` references and Planyr-only functions are not understood).

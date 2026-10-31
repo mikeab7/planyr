@@ -78,6 +78,14 @@ function warmSequenceDoc() {
   } catch (_) { /* best-effort */ }
 }
 
+/* NEW-1 (B2587264) — the Spreadsheet's Univer grid is a SECOND lazy chunk (1.8 MB compressed) that ModelApp loads only once the grid
+ * mounts, i.e. after the click. Warm it the same way, but only where it will be used (lib/univerWarm.js decides) and when the
+ * browser is idle, because evaluating it costs the page's main thread a few tenths of a second. */
+function warmUniverGrid() {
+  const run = () => { import("../workspaces/model/lib/univerWarm.js").then((m) => m.warmUniver()).catch(() => { /* best-effort */ }); };
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1500 }); else setTimeout(run, 200);
+}
+
 /** Warm one module's chunk (and its iframe doc, for Schedule). Idempotent.
  *
  * Call this ONLY from a navigation-intent gesture (tab hover / pointerdown). There is
@@ -87,6 +95,7 @@ export function prefetchModule(id) {
   warmed.add(id);
   try { IMPORTERS[id]?.(); } catch (_) { /* best-effort */ }
   if (id === "scheduler") warmSequenceDoc();
+  if (id === "model") warmUniverGrid();
 }
 
 /* NEW-1 (2026-10-22, work-laptop report) — a HOVER is only a hint, so it waits for the page to be quiet. `prefetchModule` is an
