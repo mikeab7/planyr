@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { registerExcelKeyChecks } from "./lib/univerExcelKeysChecks.mjs";
+import { registerUniverToolsChecks } from "./lib/univerToolsChecks.mjs";
 import { createWorkbook, setRaw, setCellStyle } from "../src/workspaces/model/lib/sheetModel.js";
 
 const args = process.argv.slice(2);
@@ -68,6 +69,9 @@ async function reset(workbook = seedWorkbook()) {
   await ev(([wb]) => { window.__saved.length = 0; window.__notices = []; window.__sandboxLoad(wb, {}); }, [workbook]);
   await wait(500);
   await ev(() => { const api = window.__planyrUniverRead.api(); api.getActiveWorkbook().getActiveSheet().getRange(0, 0).activate(); });
+  // The input / formula colour convention is ON by default (as in the old grid) and recolours typed text; the ink checks below measure DARK text,
+  // so they start with it off. ui-audit/lib/univerToolsChecks.mjs `tools-color` turns it on itself and asserts the colours.
+  await ev(() => { const t = window.__planyrUniverRead.tools && window.__planyrUniverRead.tools(); if (t && t.getState().autoColor) t.run("planyr.tools.toggle-autocolor"); });
   await wait(350);
   await ev(() => { window.__ev = []; const api = window.__planyrUniverRead.api(); if (window.__evOff) window.__evOff.forEach((f) => f.dispose && f.dispose()); window.__evOff = ["SheetEditStarted", "SheetEditEnded"].map((k) => api.addEvent(api.Event[k], () => window.__ev.push(k))); });
 }
@@ -445,6 +449,11 @@ check("key-fill", "Ctrl+D fills down, Ctrl+R fills right", async () => {
 // The Excel keys the free Univer build lacks, added by the Planyr plugin (NEW-1): strict checks in ui-audit/lib/univerExcelKeysChecks.mjs.
 registerExcelKeyChecks({
   check, PASS, FAIL, reset, click, press, sel, cell, val1, inSheet, ev, wait, hiddenState, heldClick, eq, page: () => page,
+  model: { createWorkbook, setRaw },
+});
+// The Planyr-only tools (NEW-1, cutover step 6): consistency flags + panel, trace arrows, command palette, Name Manager, input / formula colours — ui-audit/lib/univerToolsChecks.mjs.
+registerUniverToolsChecks({
+  check, PASS, FAIL, reset, click, press, sel, cell, val1, inSheet, ev, wait, eq, pt, clickToolbar, savedLast, flushSave, page: () => page,
   model: { createWorkbook, setRaw },
 });
 
