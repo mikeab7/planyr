@@ -5,7 +5,8 @@ import {
   createSheet, createWorkbook, applyToActiveSheet, commitCellText, setRowsHidden, setColumnsHidden, isRowHidden, isColumnHidden,
   insertRowAt, deleteRowAt, migrateSheet, activeSheetEntry,
 } from "../src/workspaces/model/lib/sheetModel.js";
-import { exportWorkbookToXlsxBlob, importXlsxToWorkbook } from "../src/workspaces/model/lib/xlsxIO.js";
+import { exportViaUniver } from "./fixtures/spreadsheet/exportViaUniver.js";
+import { importXlsxToWorkbook } from "../src/workspaces/model/lib/xlsxIO.js";
 
 describe("hidden rows", () => {
   it("hide / unhide a run; a no-op returns the SAME sheet (no undo frame minted)", () => {
@@ -48,7 +49,7 @@ describe("Excel round-trip keeps hidden rows and columns", () => {
     wb = applyToActiveSheet(wb, (s) => commitCellText(commitCellText(s, 0, 0, "a"), 0, 3, "d")); // a value in D so column B sits inside the used range
     wb = applyToActiveSheet(wb, (s) => setRowsHidden(s, 2, 2, true));
     wb = applyToActiveSheet(wb, (s) => setColumnsHidden(s, 1, 1, true));
-    const blob = await exportWorkbookToXlsxBlob(wb);
+    const blob = await exportViaUniver(wb);
     const buf = await blob.arrayBuffer();
     const x = new ExcelJS.Workbook(); await x.xlsx.load(buf);
     const ws = x.worksheets[0];

@@ -25,7 +25,7 @@ import { createUniver, LocaleType, mergeLocales, defaultTheme, ICommandService, 
 import {
   UniverSheetsCorePreset, CalculationMode, IDefinedNamesService, SetDefinedNameMutation, RemoveDefinedNameMutation,
   SheetInterceptorService, INTERCEPTOR_POINT, SetRangeValuesCommand, IconManager,
-  IRenderManagerService, HeaderMoveRenderController, SheetSkeletonManagerService, getCoordByOffset,
+  IRenderManagerService, HeaderMoveRenderController, SheetSkeletonManagerService, getCoordByOffset, IFormulaRuntimeService,
 } from "@univerjs/preset-sheets-core";
 import { UniverSheetsSortPreset } from "@univerjs/preset-sheets-sort";
 import { UniverSheetsFilterPreset } from "@univerjs/preset-sheets-filter";
@@ -47,6 +47,9 @@ import {
 import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
 import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
+import { installFormulaGuard } from "../lib/univerFormulaGuard.js";
+import { circularNotice } from "../lib/evalValues.js";
+import { migratePlanyrSyntaxInWorkbook, planyrSyntaxNote } from "../lib/planyrSyntax.js";
 import { createSaveController } from "../lib/univerSave.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
@@ -101,6 +104,22 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       L.univer = univer; L.univerAPI = univerAPI;
       L.injector = univer.__getInjector();
       // The Excel keys the free Univer build lacks (Ctrl+1, Ctrl+Shift+$%!~#, Shift/Ctrl+Space, Ctrl+9/0, Ctrl+Plus/Minus, Ctrl+;, Alt key-tips…)
+      // A formula typed or pasted in the same spellings gets the same rewrite before the cell is written (lib/univerFormulaGuard.js).
+      L.formulaGuard = installFormulaGuard({ injector: L.injector, ICommandService });
+      // Univer (like Excel) calculates a circular reference as 0, which looks like an answer: after each calculation, say so out loud.
+      try {
+        const sub = univerAPI.getFormula().calculationEnd((state) => {
+          if (disposed || state !== 3 /* FormulaExecutedStateType.SUCCESS */) return;
+          try {
+            const refs = L.injector.get(IFormulaRuntimeService).getAllRuntimeData().circularReferences || [];
+            const wb = L.unitId && univerAPI.getWorkbook(L.unitId);
+            const list = refs.filter((c) => c.unitId === L.unitId).map((c) => { const ws = wb && wb.getSheetBySheetId(c.sheetId); return { sheetName: ws ? ws.getSheetName() : c.sheetId, row: c.row, col: c.column }; });
+            const key = JSON.stringify(list);
+            if (key !== L.circularKey) { L.circularKey = key; if (list.length && L.onNotice) L.onNotice(circularNotice(list)); }
+          } catch (_) { /* the read is a courtesy; the calculation itself is untouched */ }
+        });
+        L.circularSub = sub;
+      } catch (_) { /* no formula facade in this build */ }
       L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
       // Curved undo / redo (NEW-2, B2574353): toolbar glyphs resolve by name through Univer's IconManager (not the facade's
       // registerComponent, which is a different registry). Replace the built-in ones; the toolbar draws them on its next render.
@@ -109,7 +128,11 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
 
       const load = (wb) => {
         const migrated = migrateWorkbook(wb);
-        const { data, sidecar } = workbookToUniver(migrated);
+        // NEW-1 (one formula engine): [Column] names, interleaved XIRR/XNPV pairs and `=-Name` are rewritten to the spelling Univer's
+        // engine calculates, with a visible note — and SAVED that way (the baseline stays the stored text, so the first flush after
+        // this load sees a difference and commits the rewrite as one ordinary edit).
+        const { workbook: forUniver, rewritten } = migratePlanyrSyntaxInWorkbook(migrated);
+        const { data, sidecar } = workbookToUniver(forUniver);
         const defs = projectNamesToDefinedNames(live.current.projectNames);
         if (Object.keys(defs).length) {
           const res = data.resources.find((r) => r.name === "SHEET_DEFINED_NAME_PLUGIN");
@@ -122,6 +145,11 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
         L.projectDefs = defs;
         const fWb = univerAPI.createWorkbook(data);
         L.unitId = fWb.getId();
+        if (rewritten.length) {
+          L.save.schedule();
+          const note = planyrSyntaxNote(rewritten);
+          if (note && L.onNotice) L.onNotice(note);
+        }
         const active = migrated.sheets.find((s) => s.id === migrated.activeSheetId);
         if (active) { try { fWb.setActiveSheet(fWb.getSheetBySheetId(active.id)); } catch (_) { /* first sheet stays active */ } }
         return fWb;
@@ -317,6 +345,8 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       try { L.mo && L.mo.disconnect(); } catch (_) {}
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
+      try { L.formulaGuard && L.formulaGuard(); } catch (_) {}
+      try { L.circularSub && L.circularSub.dispose(); } catch (_) {}
       try { L.excelKeys && L.excelKeys.dispose(); } catch (_) {}
       try { L.indent && L.indent.dispose(); } catch (_) {}
       try { clearTimeout(L.gateTimer); L.detachGate && L.detachGate(); } catch (_) {}

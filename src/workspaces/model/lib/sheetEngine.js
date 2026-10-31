@@ -1,4 +1,11 @@
-/* Model workspace — wires the sheet data model to the shared formula engine
+/* ⛔ DEPRECATED FOR VALUES (NEW-1, cutover step 7, 2026-10-31): THE SPREADSHEET'S EVALUATOR IS NOW UNIVER'S ENGINE, run headless —
+ * lib/univerEval.js. The Excel export, the CSV export and every other reader of a computed value ask it; with the Univer grid showing, ModelApp
+ * does not run this file at all. It stays only (a) to feed the regular grid until that grid is retired (cutover step 9), and (b) as the
+ * REFERENCE the differential suite compares Univer against (test/modelFormulaEnginesAgree.test.js; the disagreement list is
+ * test/fixtures/spreadsheet/engineKnownDiffs.json, explained in docs/SPREADSHEET-UNIVER-SPIKE.md). Do not add a new caller. The
+ * display helpers below (displayFor / displayKindFor / displayColorFor, which format a value) take either evaluator's answer.
+ *
+ * Model workspace — wires the sheet data model to the shared formula engine
  * (src/shared/formula/formula.js). Imported DIRECTLY, no mirror/copy, per the build brief.
  *
  * ⛔ B891184-FOLLOWUP (live production finding, 2026-08-31): this file used to evaluate

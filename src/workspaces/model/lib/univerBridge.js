@@ -27,7 +27,8 @@
  *   · vertical merges and any Univer-only feature (data validation, conditional formats, notes) — Planyr
  *     stores horizontal merges only, so a vertical merge is reported in `notes`, not saved.
  *   · `[Column]` same-row formulas and any Planyr-only function — Univer cannot evaluate them.
- *   · typed date TEXT ("1/15/2027") is text to Univer (Planyr types it as a date).
+ *   · (typed date text — "1/15/2027", "2027-01-15" — is NOT lossy any more: it loads as a real date serial with a date pattern,
+ *     as Excel does on entry, so date arithmetic, EDATE, XNPV and XIRR work on it; the exact text rides in the sidecar.)
  *   · rich text inside a cell collapses to its plain text. */
 import { colLetterName, DEFAULT_ROW_H, migrateWorkbook } from "./sheetModel.js";
 import { indentOfStyle, storedIndentStyle } from "./univerIndent.js";
@@ -51,7 +52,7 @@ const MAPPED_STYLE_KEYS = new Set(["bold", "italic", "underline", "strike", "fon
 /** Does the remembered raw text still mean what Univer's cell holds? (A stale sidecar entry must never win.) */
 function sameLiteral(kept, cell, canon) {
   const typed = typeLiteral(kept);
-  if (typed.kind === "number") return typeof cell.v === "number" && cell.v === typed.value;
+  if (typed.kind === "number" || typed.kind === "date") return typeof cell.v === "number" && cell.v === typed.value;
   if (typed.kind === "bool") return canon === (typed.value ? "TRUE" : "FALSE") && (cell.t === T_BOOL || typeof cell.v === "boolean");
   return kept === canon;
 }
@@ -70,8 +71,24 @@ export function canonicalRaw(v, t) {
   return v == null ? "" : String(v);
 }
 
+const EXCEL_EPOCH_OFFSET_DAYS = 25569; // Excel serial of 1970-01-01
+/** A typed date with a full year — ISO `2027-01-15` or `1/15/2027` / `1/15/27` — as { serial (Excel), pattern }, else null. A
+ *  date with no year ("1/15") is deliberately NOT one: it would mean a different date every January. */
+export function typedDate(raw) {
+  const s = String(raw ?? "").trim();
+  let y, m, d, pattern;
+  let hit = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (hit) { y = +hit[1]; m = +hit[2]; d = +hit[3]; pattern = "yyyy-mm-dd"; }
+  else if ((hit = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(s))) { m = +hit[1]; d = +hit[2]; y = hit[3].length === 2 ? 2000 + +hit[3] : +hit[3]; pattern = hit[3].length === 2 ? "m/d/yy" : "m/d/yyyy"; }
+  else return null;
+  const t = Date.UTC(y, m - 1, d);
+  const back = new Date(t);
+  if (!(m >= 1 && m <= 12 && back.getUTCFullYear() === y && back.getUTCMonth() === m - 1 && back.getUTCDate() === d)) return null;
+  return { serial: t / 86400000 + EXCEL_EPOCH_OFFSET_DAYS, pattern };
+}
+
 /** What Planyr's own `literalTypedValue` makes of a raw literal, without importing the engine:
- *  { kind: "number"|"bool"|"text", value }. Mirrors it for numbers (`$`, `,`, `%`) and booleans. */
+ *  { kind: "number"|"bool"|"date"|"text", value }. Mirrors it for numbers (`$`, `,`, `%`), booleans and typed dates. */
 export function typeLiteral(raw) {
   const s = String(raw ?? "").trim();
   if (/^(true|false)$/i.test(s)) return { kind: "bool", value: s.toLowerCase() === "true" };
@@ -82,6 +99,8 @@ export function typeLiteral(raw) {
     const n = Number(t);
     return { kind: "number", value: pct ? n / 100 : n };
   }
+  const dt = typedDate(s);
+  if (dt) return { kind: "date", value: dt.serial, pattern: dt.pattern };
   return { kind: "text", value: String(raw) };
 }
 
@@ -171,6 +190,7 @@ function styleFromUniver(s) {
 function literalToUniverCell(raw) {
   const typed = typeLiteral(raw);
   if (typed.kind === "number") return { cell: { v: typed.value, t: T_NUMBER }, pattern: inferLiteralPattern(raw) };
+  if (typed.kind === "date") return { cell: { v: typed.value, t: T_NUMBER }, pattern: typed.pattern };
   if (typed.kind === "bool") return { cell: { v: typed.value ? 1 : 0, t: T_BOOL }, pattern: null };
   return { cell: { v: String(raw), t: T_STRING }, pattern: null };
 }
@@ -345,7 +365,7 @@ export function univerToWorkbook(data, { sidecar, activeSheetId, formulaOf } = {
           else {
             cells[key] = canon;
             if (typeof cell.v === "string") {
-              if (typeLiteral(canon).kind !== "text") note("text that looks like a number or TRUE/FALSE becomes a number in Planyr");
+              if (!["text", "date"].includes(typeLiteral(canon).kind)) note("text that looks like a number or TRUE/FALSE becomes a number in Planyr");
               else if (canon.trim().startsWith("=")) note("text beginning with = would be read as a formula by Planyr");
             }
           }
@@ -454,7 +474,7 @@ export function sidecarAfterStructure(sidecar, sheetId, { op, index, count = 1 }
 }
 
 /** Site.* / Plan.* / Comp.* (lib/projectRefs.js `buildProjectNames`) → Univer defined names. A computed name
- *  is a constant formula; an error value becomes the matching error literal. `isDate` values carry a serial. */
+ *  is a constant formula; an error value becomes the matching error literal; a date becomes DATE(y,m,d). */
 export function projectNamesToDefinedNames(projectNames) {
   const out = {};
   for (const entry of Object.values(projectNames || {})) {
@@ -465,7 +485,11 @@ export function projectNamesToDefinedNames(projectNames) {
     else if (typeof v === "boolean") body = v ? "TRUE" : "FALSE";
     else if (typeof v === "string") body = `"${v.replace(/"/g, '""')}"`;
     else if (v && v.k === "error") body = v.code || "#N/A";
-    else if (v && typeof v === "object" && typeof v.serial === "number") body = String(v.serial);
+    else if (v && typeof v === "object" && v.k === "date" && Number.isFinite(v.s)) {
+      // Planyr counts days from 1970; DATE(y,m,d) lets Univer type the result as a date (and show it as one).
+      const dt = new Date(v.s * 86400000);
+      body = `DATE(${dt.getUTCFullYear()},${dt.getUTCMonth() + 1},${dt.getUTCDate()})`;
+    } else if (v && typeof v === "object" && typeof v.serial === "number") body = String(v.serial);
     else body = "#N/A";
     const id = `${PROJECT_NAME_ID_PREFIX}${entry.name.toLowerCase()}`;
     out[id] = { id, name: entry.name, formulaOrRefString: `=${body}` };

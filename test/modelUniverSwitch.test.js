@@ -70,8 +70,11 @@ describe("what the Univer code may import", () => {
   it("only UniverSheet.jsx imports @univerjs/*; everything else reaches it through the lazy boundary", () => {
     const importers = walk("src").filter((f) => /from\s+["']@univerjs\/|import\s+["']@univerjs\/|import\(["']@univerjs\//.test(read(f)));
     // The Excel-keys plugin (NEW-1) is part of the same lazy chunk: UniverSheet.jsx is its only importer (asserted below).
+    // lib/univerEval.js (NEW-1, one formula engine) is the headless evaluator: it imports the engine packages, and every caller reaches it
+    // through a dynamic import() (asserted in modelFormulaEnginesAgree), so it too rides a lazy chunk.
     expect(importers).toEqual([
       "src/workspaces/model/components/UniverSheet.jsx",
+      "src/workspaces/model/lib/univerEval.js",
       "src/workspaces/model/lib/univerExcelKeys/actions.js",
       "src/workspaces/model/lib/univerExcelKeys/index.js",
     ]);
@@ -81,7 +84,7 @@ describe("what the Univer code may import", () => {
     expect(app).toMatch(/const UniverSheet = lazy\(\(\) => import\("\.\/components\/UniverSheet\.jsx"\)\)/);
     expect(app).not.toMatch(/^import .*UniverSheet/m);
     expect(app).not.toMatch(/univerBridge|univerTheme/);
-    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx");
+    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx" && f !== "src/workspaces/model/lib/univerEval.js");
     expect(staticImporters).toEqual([]);
   });
   it("makes no call to a Univer host and uses no Pro / license / server configuration", () => {

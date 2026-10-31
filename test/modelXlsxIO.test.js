@@ -24,7 +24,8 @@ import {
   mergeRange, unsupportedFormulaAt, workbookHasContent,
 } from "../src/workspaces/model/lib/sheetModel.js";
 import { defineName } from "../src/workspaces/model/lib/namedRanges.js";
-import { exportWorkbookToXlsxBlob, importXlsxToWorkbook, checkFormulaSupport } from "../src/workspaces/model/lib/xlsxIO.js";
+import { exportViaUniver } from "./fixtures/spreadsheet/exportViaUniver.js";
+import { importXlsxToWorkbook, checkFormulaSupport } from "../src/workspaces/model/lib/xlsxIO.js";
 import { FUNCTION_NAMES } from "../src/shared/formula/formula.js";
 
 function buildFixtureWorkbook() {
@@ -67,7 +68,7 @@ describe("checkFormulaSupport", () => {
 describe("exportWorkbookToXlsxBlob + re-read with ExcelJS directly (the owner's VERIFY spec)", () => {
   it("writes formulas as FORMULA STRINGS, not flattened values, and carries formatting/merges/names", async () => {
     const wb = buildFixtureWorkbook();
-    const blob = await exportWorkbookToXlsxBlob(wb);
+    const blob = await exportViaUniver(wb);
     expect(blob.size).toBeGreaterThan(0);
 
     const raw = new ExcelJS.Workbook();
@@ -114,7 +115,7 @@ describe("exportWorkbookToXlsxBlob + re-read with ExcelJS directly (the owner's 
 
   it("re-imports the SAME file into Planyr with the same values AND the same formulas", async () => {
     const wb = buildFixtureWorkbook();
-    const blob = await exportWorkbookToXlsxBlob(wb);
+    const blob = await exportViaUniver(wb);
     const { workbook: wb2, unsupportedCount } = await importXlsxToWorkbook(Buffer.from(await blob.arrayBuffer()));
 
     expect(unsupportedCount).toBe(0);
@@ -263,7 +264,7 @@ describe("exportWorkbookToXlsxBlob — a project-data reference is exported as i
 
   it("writes the RESOLVED VALUE, never the formula text, plus an explanatory note", async () => {
     const wb = fixtureWithProjectRef();
-    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: PROJECT_NAMES });
+    const blob = await exportViaUniver(wb, { projectNames: PROJECT_NAMES });
     const raw = new ExcelJS.Workbook();
     await raw.xlsx.load(Buffer.from(await blob.arrayBuffer()));
     const cell = raw.worksheets[0].getCell("A1");
@@ -274,7 +275,7 @@ describe("exportWorkbookToXlsxBlob — a project-data reference is exported as i
 
   it("re-importing that file reads back a plain value — never a dead formula pretending to be live", async () => {
     const wb = fixtureWithProjectRef();
-    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: PROJECT_NAMES });
+    const blob = await exportViaUniver(wb, { projectNames: PROJECT_NAMES });
     const { workbook: reimported } = await importXlsxToWorkbook(Buffer.from(await blob.arrayBuffer()));
     const cell0 = reimported.sheets[0].sheet.cells["c1:0"];
     expect(cell0).not.toMatch(/^=/);
@@ -285,7 +286,7 @@ describe("exportWorkbookToXlsxBlob — a project-data reference is exported as i
     let wb = createWorkbook();
     wb = applyToActiveSheet(wb, (s) => commitCellText(s, 0, 0, "=Site.Acres"));
     const errNames = { "site.acres": { name: "Site.Acres", computed: true, value: { k: "error", code: "#REF!" } } };
-    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: errNames });
+    const blob = await exportViaUniver(wb, { projectNames: errNames });
     const raw = new ExcelJS.Workbook();
     await raw.xlsx.load(Buffer.from(await blob.arrayBuffer()));
     const cell = raw.worksheets[0].getCell("A1");
@@ -296,7 +297,7 @@ describe("exportWorkbookToXlsxBlob — a project-data reference is exported as i
     let wb = createWorkbook();
     wb = applyToActiveSheet(wb, (s) => commitCellText(s, 0, 0, "10"));
     wb = applyToActiveSheet(wb, (s) => commitCellText(s, 1, 0, "=SUM(A1)"));
-    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: PROJECT_NAMES });
+    const blob = await exportViaUniver(wb, { projectNames: PROJECT_NAMES });
     const raw = new ExcelJS.Workbook();
     await raw.xlsx.load(Buffer.from(await blob.arrayBuffer()));
     expect(raw.worksheets[0].getCell("A2").type).toBe(ExcelJS.ValueType.Formula);
