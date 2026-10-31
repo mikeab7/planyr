@@ -19,11 +19,13 @@ import { Button, SegmentedControl, IconButton } from "../../../shared/ui/control
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import RowInfo from "../../../shared/ui/RowInfo.jsx";
+import { PondSettingsIcon } from "./elementMenuIcons.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { LIMIT_MODES, LIMIT_MODE_LABEL } from "../lib/gradingLimit.js";
 import { CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels, planContourDraw } from "../lib/gradingPaint.js";
+import { planAllContourLabels, pathToPieces, CONTOUR_LABEL_ALL } from "../lib/contourLabelPlan.js";
 import { fmtCyShort, netWord } from "../lib/ffeSuggest.js";
 import { placeCornerTag, pillWidth, CORNER_TAG_PILL_H } from "../lib/padCornerTag.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
@@ -297,7 +299,7 @@ export function GradingHeaderActions({ model, dockDropFt, onCfg, onDockDrop }) {
         { text: "The finished floor is suggested for you: the dirt balanced on site, with the pond's spoil counted as fill, held out of rock, and the docks kept on the low side where the ground allows. Type your own number any time; the small auto chip takes it back." },
         { text: `Grading stays inside the property line, less the grading margin and any undisturbed buffer set in Grading settings. The setback limits buildings, not earthwork.` },
       ]} />
-      <IconButton ref={gearRef} size={24} aria-label="Grading settings" aria-expanded={open} data-grading-gear="1" onClick={() => setOpen((o) => !o)}>⚙</IconButton>
+      <IconButton ref={gearRef} size={24} aria-label="Grading settings" aria-expanded={open} data-grading-gear="1" onClick={() => setOpen((o) => !o)}>{/* NEW-4 (ROUND 10): a drawn gear — the ⚙ text glyph sits high and left of its own em box, so it read off-centre in its square */}<PondSettingsIcon size={14} /></IconButton>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={gearRef} placement="below-right" width={280} gap={6}
         panelStyle={{ ...menuPanelStyle, padding: "10px 12px" }}>
         <GradingSettings model={model} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />
@@ -408,13 +410,22 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
 /* The grading pictures + labels. Everything rides the planner's own feet→screen transform (`f2p`, `rppf`);
  * the cut/fill image is a single <image> and the outlines one path each in feet space with a non-scaling
  * stroke, so a pan never recomputes a thing (VIEW-INDEPENDENT-ONCE). */
-export function GradingCanvas({ model, f2p, rppf, PAL }) {
+export function GradingCanvas({ model, f2p, rppf, PAL, viewRect = null }) {
   const { buildable, cutfill, labels, cfg, contours, limit } = model;
   const bandClipId = `grading-band-${useId().replace(/:/g, "")}`;
   // ROUND 6 (NEW-1): what is drawn at this zoom — index only with the parcel filling the map, every level with the building
   // filling it, a band thinned to a coarser interval where its lines would touch — then the labels of the pieces drawn
   const drawPlan = useMemo(() => planContourDraw(contours, rppf), [contours, rppf]);
-  const placedLabels = useMemo(() => placeContourLabels(drawPlan.labels, rppf), [drawPlan, rppf]);
+  // ROUND 10 (NEW-2): from working zoom in, EVERY drawn line (index and intermediate) carries its elevation — one label per line on a
+  // straight stretch, never on another label; farther out the index labels the tracer chose stay (lib/contourLabelPlan.js)
+  const placedLabels = useMemo(() => {
+    if (rppf >= CONTOUR_LABEL_ALL.minPpf) {
+      const lines = [];
+      for (const lv of drawPlan.levels) pathToPieces(lv.d).forEach((pts, i) => lines.push({ key: `${lv.level}:${i}`, level: lv.level, isIndex: lv.isIndex, pts }));
+      return planAllContourLabels(lines, rppf, { rect: viewRect });   // `viewRect` (feet) = the planner's LATCHED cull rect: stations are offered only where they can be seen
+    }
+    return placeContourLabels(drawPlan.labels, rppf);
+  }, [drawPlan, rppf, viewRect]);
   const o = f2p({ x: 0, y: 0 });
   const feetG = (d, stroke, w, dash, cap = "butt") => (
     <g transform={`translate(${o.x} ${o.y}) scale(${rppf})`}>

@@ -65,7 +65,7 @@ export function drainSteps(gen) {
   return r.value;
 }
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
-import { resolveGradingLimit, pointInRegions, regionsAreaSf } from "./gradingLimit.js";
+import { resolveGradingLimit, pointInRegions, regionsAreaSf, throwEdge } from "./gradingLimit.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 import { plainDec2 as f2 } from "../../../shared/units/numberFormat.js";
 
@@ -844,10 +844,18 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   // bounds it too, so the surface meets existing ground ON the line (d → 0 there) and a proposed contour of level E ends
   // exactly where the existing contour of level E crosses the setback. Nothing outside the limit is ever graded here.
   let bs = null;
+  const throwRounded = boundary ? throwEdge(limit.regions, Number.isFinite(limit.cornerRadiusFt) ? limit.cornerRadiusFt : 0) : { regions: limit.regions, arcs: [] };
   if (boundary && typeof existAt === "function") {
     const xs = [], ys = [], zs = [];
     let zMin = Infinity, zMax = -Infinity;
     for (const r of limit.regions) for (const ring of [r.outer, ...r.holes]) for (const smp of sampleRing(ring, LIMIT_SAMPLE_FT)) {
+      const gz = existAt(smp);
+      if (gz == null || !isFinite(gz)) continue;
+      xs.push(smp.x); ys.push(smp.y); zs.push(gz);
+      if (gz < zMin) zMin = gz; if (gz > zMax) zMax = gz;
+    }
+    // ROUND 10 (NEW-1): the throw edge's ARCS (the limit's convex corners rounded) bound the surface too — see gradingLimit.throwEdge
+    if (throwRounded.arcs.length) for (const arc of throwRounded.arcs) for (const smp of arc) {
       const gz = existAt(smp);
       if (gz == null || !isFinite(gz)) continue;
       xs.push(smp.x); ys.push(smp.y); zs.push(gz);
@@ -864,11 +872,17 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     }
   }
   const limitIdx = FAST_LIMIT ? regionEdgeIndex(limit.regions) : { nearest: (pt) => nearestOnRegions(pt, limit.regions) };
+  // ROUND 10: the nearest point on the ROUNDED throw edge bounds the surface exactly, like the limit's own (an arc is circular, not a polyline)
+  const throwIdx = throwRounded.arcs.length ? (FAST_LIMIT ? regionEdgeIndex(throwRounded.regions) : { nearest: (pt) => nearestOnRegions(pt, throwRounded.regions) }) : null;
   const bandZ = (pt, ze) => {
     if (!bs) return ze;
     let L = -Infinity, U = Infinity;
     const nl = limitIdx.nearest(pt);
     if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
+    if (throwIdx) {
+      const nt = throwIdx.nearest(pt);
+      if (nt && nt.q) { const gq = existAt(nt.q); if (gq != null && isFinite(gq)) { const dq = nt.d / apronRatio; if (gq - dq > L) L = gq - dq; if (gq + dq < U) U = gq + dq; } }
+    }
     // a sample further than ratio × the largest possible |ze − z(b)| constrains nothing
     const R = apronRatio * Math.max(Math.abs(ze - bs.zMin), Math.abs(ze - bs.zMax)) + 1, R2 = R * R;
     const bx = bs.x, by = bs.y, bz = bs.z;
