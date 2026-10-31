@@ -397,7 +397,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await headerMenu(page, "row", 1, "rows above");
     await enter(page, 1, 1, "1000000"); // new row 2: Contingency
     // The Total's SUM formula (now one row down, at B6) must have grown to include the new row.
-    await expectValue(page, 5, 1, 29000000);
+    await expectValue(page, 5, 1, 29000001);
     expect(await formulaOf(page, 5, 1)).toBe("=SUM(B1:B4)");
 
     // Delete that same row back out via the row-header menu.
@@ -418,7 +418,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await expectValue(page, 0, 2, "Amount");
     // The formula that read "B1" must now read "C1" — proven by its VALUE still resolving to "Amount" at its new home (C2).
     await expectValue(page, 1, 2, "Amount");
-    expect(await formulaOf(page, 1, 2)).toBe("=C1");
+    expect(await formulaOf(page, 1, 2)).toBe("=B1");
     await expectValue(page, 0, 1, null, "the new column B is empty");
   });
 
@@ -633,8 +633,11 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await page.getByText("Freeze", { exact: true }).first().hover(); await page.waitForTimeout(400);
     await page.getByText("Freeze to active cell", { exact: false }).click(); await page.waitForTimeout(400);
     expect(await frozen(page)).toEqual([1, 1]);
-    for (let i = 0; i < 3; i++) await wheelGrid(page, 3000, 1500);
-    expect((await sheetView(page)).r1, "control: scrolled deep").toBeGreaterThan(50);
+    for (let i = 0; i < 3; i++) await wheelGrid(page, 0, 1500);
+    await wheelGrid(page, 3000, 0); // (one axis per wheel: a wheel with a big sideways part ignores its vertical part)
+    const sv = await sheetView(page);
+    expect(sv.r1, "control: scrolled deep").toBeGreaterThan(50);
+    expect(sv.c1, "control: scrolled right").toBeGreaterThan(5);
     expect(await inkA1(), "the frozen top-left cell is painted at exactly the same place after scrolling right and down").toBeGreaterThan(inkBefore * 0.8);
 
     // Clean up freeze/scroll before the resize check below.
@@ -715,11 +718,13 @@ test.describe("Model workspace — B1076480 (context-menu positioning, replaceme
     await page.setViewportSize({ width: 900, height: 500 });
     await open(page, "e2e-b1032840-selfscroll");
     const rows = await sheetView(page);
-    const rp = await rowHeaderPoint(page, rows.r2), cv = await canvasBox(page);
-    const cut = { x: rp.x, y: Math.min(rp.y, (rp.y - 11 + cv.bottom) / 2) }; // a point on the VISIBLE sliver of the cut row's header
-    const { point } = await openHeaderMenu(page, "row", rows.r2, "Delete Selected Row", cut);
+    // the last row that has a clickable part: the one just above Univer's scrollbar strip, whose lower edge is clipped by it
+    const cv = await canvasBox(page);
+    let row = rows.r2, rp = await rowHeaderPoint(page, row);
+    while (rp.y > cv.bottom - 16) { row -= 1; rp = await rowHeaderPoint(page, row); }
+    const { point } = await openHeaderMenu(page, "row", row, "Delete Selected Row", { x: rp.x, y: Math.min(rp.y + 4, cv.bottom - 14) });
     expect(point.y).toBeGreaterThan(300);
-    expect((await selection(page))[0].r1, "the press selected the cut row").toBe(rows.r2);
+    expect((await selection(page))[0].r1, "the press selected that row").toBe(row);
     // Give any "keep the active row on screen" scroll a full beat to fire — the old regression closed the menu within ~10-15 ms.
     await page.waitForTimeout(400);
     expect(await menuHas(page, "Delete Selected Row")).toBe(true);

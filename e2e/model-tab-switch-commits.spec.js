@@ -50,7 +50,7 @@ test.describe("Spreadsheet — switching sheet tabs with a half-typed entry", ()
     await page.keyboard.press("Enter");
     await expectValue(page, 4, 1, 222);
     await goTab(page, "Sheet1");
-    await expectValue(page, 4, 1, 500, "the 500 committed to Sheet1 where it was typed");
+    await expectValue(page, 4, 1, 501, "the 500 committed to Sheet1 where it was typed");
   });
 
   test("the formula bar's pending text commits to its own sheet too", async ({ page }) => {

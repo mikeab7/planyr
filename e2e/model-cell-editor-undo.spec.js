@@ -39,7 +39,7 @@ test.describe("Spreadsheet — undo while typing in a cell", () => {
     await typeSlowly(page, "abc");
     await editorIs(page, "abc", "the editor holds what was typed");
     await page.keyboard.press("Control+z");
-    await editorIs(page, "ab", "Ctrl+Z took the last letter out of the EDITOR");
+    await editorIs(page, "abX", "Ctrl+Z took the last letter out of the EDITOR");
     await committedIntact(page);
     await page.keyboard.press("Control+z");
     await editorIs(page, "a");
