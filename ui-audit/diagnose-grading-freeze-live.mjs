@@ -93,7 +93,7 @@ try {
     await page.locator('button[title="Analysis"]').click({ timeout: 30000 });
     // wait for the grading card's FFE (the suggestion), then let the screening + paints settle
     let ffe = null;
-    for (let i = 0; i < 90; i++) { ffe = await page.evaluate(() => { const a = document.querySelector("[data-ffe-value]"); return a ? a.textContent : null; }); if (ffe && /\d/.test(ffe)) break; await page.waitForTimeout(1000); }
+    for (let i = 0; i < 90; i++) { ffe = await page.evaluate(() => { const a = document.querySelector("[data-ffe-value]"); return a ? (a.value || a.textContent) : null; }); if (ffe && /\d/.test(ffe)) break; await page.waitForTimeout(1000); }
     await page.waitForTimeout(8000);
     let dragFrames = null;
     if (doDrag) {
