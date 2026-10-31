@@ -321,3 +321,24 @@ export async function enterFormula(page, r, c, text, { pause = 0, viaEnter = fal
   await clickCell(page, 14, 9); await page.waitForTimeout(300);
   return "click-away";
 }
+
+/* ---- NEW-2 additions (scrolled-view clicking) — ADD-ONLY ------------------------------------------------------------------------- */
+
+/** Page point of a cell in the view AS IT IS NOW (scrolled, with frozen rows / columns honoured). `cellPoint` is the cell's position on
+ *  the UNSCROLLED sheet (Univer's `getCellRect` ignores the scroll), so after a scroll use this one. Valid at 100% zoom. The cell must be
+ *  on screen — check `sheetView(page)` first. */
+export const visiblePoint = (page, r, c) => inSheet(page, (api, ws, [rr, cc]) => {
+  const rc = (a, b) => { const x = ws.getRange(a, b).getCellRect(); return typeof x === "string" ? JSON.parse(x) : x; };
+  const st = ws.getScrollState(), fr = ws.getFrozenRows(), fc = ws.getFrozenColumns();
+  const o = rc(rr, cc), origin = rc(0, 0), s0 = rc(st.sheetViewStartRow, st.sheetViewStartColumn);
+  const frozenH = fr > 0 ? rc(fr, 0).y - origin.y : 0, frozenW = fc > 0 ? rc(0, fc).x - origin.x : 0;
+  const y = rr < fr ? o.y : origin.y + frozenH + (o.y - s0.y) - st.offsetY;
+  const x = cc < fc ? o.x : origin.x + frozenW + (o.x - s0.x) - st.offsetX;
+  const cv = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect();
+  return { x: cv.left + x + o.width / 2, y: cv.top + y + o.height / 2, left: cv.left + x, top: cv.top + y, w: o.width, h: o.height, right: cv.left + x + o.width, bottom: cv.top + y + o.height };
+}, [r, c]);
+/** Click a cell that is on screen in the current scrolled view. */
+export async function clickVisible(page, r, c, opts = {}) { const p = await visiblePoint(page, r, c); await page.mouse.click(p.x, p.y, opts); await settle(page); }
+/** Header points for the current (scrolled) view: the strip above a column / left of a row. */
+export async function visibleColumnHeader(page, c) { const p = await visiblePoint(page, 0, c); const cv = await canvasBox(page); return { x: p.x, y: cv.top + 10 }; }
+export async function visibleRowHeader(page, r) { const p = await visiblePoint(page, r, 0); const cv = await canvasBox(page); return { x: cv.left + 20, y: p.y }; }

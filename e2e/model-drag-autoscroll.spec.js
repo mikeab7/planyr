@@ -100,24 +100,27 @@ test.describe("Spreadsheet — drag-select autoscroll", () => {
     await openSheet(page, "e2e-drag-speed");
     const b = await canvasBox(page);
     const a = await cellPoint(page, 0, 0);
+    // Rate is measured PER ANIMATION FRAME (scroll distance / frames painted while held), not per wall-clock second: Univer's autoscroll is
+    // frame-driven, so a loaded machine that paints fewer frames scrolls less in 0.4 s at EVERY distance and would blur a wall-clock ratio.
     const speed = async (past) => {
       await page.mouse.move(a.left + 20, a.top + 8);
       await page.mouse.down();
       await page.mouse.move(a.left + 20, below(b, past));
+      await page.evaluate(() => { window.__fr = 0; const f = () => { window.__fr++; window.__frId = requestAnimationFrame(f); }; f(); });
       const t0 = (await scrollPos(page)).top;
       await hold(page, 400);
       const t1 = (await scrollPos(page)).top;
+      const frames = await page.evaluate(() => { cancelAnimationFrame(window.__frId); return window.__fr; });
       await page.mouse.up();
       await scrollGridTo(page, 0, 0);
       await clickCell(page, 0, 0);
       await hold(page, 250);
-      return t1 - t0;
+      return (t1 - t0) / Math.max(1, frames);
     };
     const slow = await speed(3);
     const fast = await speed(500); // clamped to the viewport's last pixel row
-    expect(slow, `scrolled ${slow}px at 3px past the edge`).toBeGreaterThan(0);
-    console.log(`speed slow=${slow} fast=${fast}`);
-    expect(fast, `slow ${slow}px vs fast ${fast}px per 0.4 s`).toBeGreaterThan(slow * 1.5);
+    expect(slow, `scrolled ${slow} px/frame at 3px past the edge`).toBeGreaterThan(0);
+    expect(fast, `slow ${slow} vs fast ${fast} px per frame`).toBeGreaterThan(slow * 1.5);
   });
 
   test("up: from far down the sheet, held above the grid, scrolls back and extends upward", async ({ page }) => {

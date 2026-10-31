@@ -40,21 +40,28 @@ async function openSheet(page, id) {
 
 /** Mutate the seeded site's content IN PLACE and fire the exact same cross-workspace
  *  notification `storage.js`'s `saveSite` dispatches on a real save — proving the real,
- *  production wiring, not a fixture-only convenience. */
+ *  production wiring, not a fixture-only convenience.
+ *
+ *  THE FIXTURE MUST STAY PUT. The (still-mounted, hidden) Site Planner tab reacts to that notification by re-saving ITS OWN in-memory copy
+ *  of the site ~0.5–0.75 s later and overwrites the injected edit (measured: localStorage went back from ["b2"] to ["b1","b2"]); the
+ *  Spreadsheet reads the site 600 ms after the notification, so on a real machine the old grid won that race by luck and a heavier page
+ *  loses it. A real plan edit comes FROM the planner, so there is nothing to overwrite. The test double: once an edit is injected, the
+ *  planner's own writes to the sites store are dropped (our writes carry `__fixtureWrite`). Not applied until the first injected edit. */
 async function editSiteAndNotify(page, id, patch) {
   await page.evaluate(([siteId, p]) => {
-    const store = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
-    store[siteId] = { ...store[siteId], ...p, updatedAt: Date.now() };
-    localStorage.setItem("planarfit:sites:v1", JSON.stringify(store));
+    if (!window.__sitesGuard) {
+      window.__sitesGuard = true;
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { if (k === "planarfit:sites:v1" && !window.__fixtureWrite) return undefined; return orig.call(this, k, v); };
+    }
+    window.__fixtureWrite = true;
+    try {
+      const store = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+      store[siteId] = { ...store[siteId], ...p, updatedAt: Date.now() };
+      localStorage.setItem("planarfit:sites:v1", JSON.stringify(store));
+    } finally { window.__fixtureWrite = false; }
     window.dispatchEvent(new StorageEvent("storage", { key: `planarfit:siteContent:v1:${siteId}` }));
   }, [id, patch]);
-}
-
-/** The edit must STAY: the (still-mounted, hidden) Site Planner tab re-saves its own in-memory copy of the site shortly after an injected edit
- *  and overwrites it (measured: localStorage went back to the old buildings ~1 s later) — a fixture artefact, a real plan edit comes FROM the
- *  planner. So the edit is re-applied (idempotent) on every poll until the cell shows the expected value. */
-async function editSiteUntilShown(page, id, patch, r, c, expected) {
-  await expect.poll(async () => { await editSiteAndNotify(page, id, patch); return shown(page, r, c); }, { message: `cell (${r},${c}) follows the edit`, timeout: 15000, intervals: [900] }).toBe(expected);
 }
 
 test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (spreadsheet-live-data-refs)", () => {

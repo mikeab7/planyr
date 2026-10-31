@@ -76,24 +76,22 @@ const ok = (id, name, cond, extra = "") => {
 };
 const wants = (sec) => ONLY.length === 0 || ONLY.includes(sec);
 
-let browser, page, signed = null, projectId;
+let browser, page, ctx = null, signed = null, projectId;
 const origin = new URL(BASE).origin;
 const stamp = Date.now().toString(36);
 let seq = 0;
+const pageErrors = [];
+const watch = (pg) => pg.on("pageerror", (e) => pageErrors.push(e.message));
 if (SIGNED_IN) {
   signed = await openSignedIn({ base: BASE });
   page = signed.page;
   projectId = FIXTURE_SITE_ID;
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
+  watch(page);
 } else {
   browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
-  page = await ctx.newPage();
-  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
 }
-const pageErrors = [];
-page.on("pageerror", (e) => pageErrors.push(e.message));
 
 /** A clean grid for the next check. Local: a brand-new throwaway project in a fresh page load. Signed in: clear the fixture sheet in place. */
 const fresh = async () => {
@@ -103,24 +101,27 @@ const fresh = async () => {
     await page.waitForTimeout(300);
     return;
   }
+  // A brand-new browser CONTEXT per check (clean storage, no pending debounced write that could land on the next project — measured: reusing one page
+  // and swapping the hash in place let an edit made just before the swap re-appear in the NEXT project's workbook after a reload).
+  if (ctx) await ctx.close().catch(() => {});
+  ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
+  page = await ctx.newPage();
+  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
+  watch(page);
   const id = `zz-kbd-${stamp}-${++seq}`;
   await seedProject(page, id, "ZZ Keyboard (throwaway)");
-  // a hash-only goto keeps the old document, so the init script that seeds THIS project would not run: reload to start from the new project's seed
-  // (never via about:blank — the seeding script touches localStorage, which an about:blank document refuses with an uncaught error)
   await page.goto(`${BASE}/#/project/${id}/spreadsheet`, { waitUntil: "load" });
-  if (seq > 1) await page.reload({ waitUntil: "load" });
   await waitForGrid(page);
   if (seq === 1) await assertMeasurable(page, "verify-spreadsheet-keyboard");
   await page.mouse.move(5, 5);
 };
 
 // ---- helpers (real mouse / real keys only) ----
-const kb = page.keyboard;
 const put = async (r, c, text) => enter(page, r, c, text);
 // A range selected with a real click + Shift+click. The check that follows must not act until Univer's OWN selection reports that range — on a loaded
 // machine a key pressed in the gap acts on the previous selection (measured: Ctrl+B landed on the wrong cells and C2 read a bold-less source).
 const select = async (r1, c1, r2, c2) => {
-  await clickCell(page, r1, c1); await kb.down("Shift"); await clickCell(page, r2, c2); await kb.up("Shift");
+  await clickCell(page, r1, c1); await page.keyboard.down("Shift"); await clickCell(page, r2, c2); await page.keyboard.up("Shift");
   const want = [Math.min(r1, r2), Math.max(r1, r2), Math.min(c1, c2), Math.max(c1, c2)].join(",");
   for (let i = 0; i < 25; i++) { const sel = await selection(page); if (sel.length === 1 && [sel[0].r1, sel[0].r2, sel[0].c1, sel[0].c2].join(",") === want) return; await settle(80); }
   throw new Error(`the selection never became ${want}`);
@@ -186,14 +187,14 @@ try {
       await page.mouse.click(colP.x, colP.y, { button: "right" }); await settle(450);
       const t1 = await text();
       if (process.env.DEBUGERR) console.log("COLMENU", JSON.stringify(t1.slice(0, 400)));
-      await kb.press("Escape"); await settle(250);
+      await page.keyboard.press("Escape"); await settle(250);
       const need = (t, words) => words.filter((w) => !new RegExp(w, "i").test(t));
       const missCol = need(t1, ["Insert", "Delete", "Clear", "Hide", "(Column )?width"]);
       const rp = await rowHeaderPoint(page, 4);
       await page.mouse.click(rp.x, rp.y); await settle(200);
       await page.mouse.click(rp.x, rp.y, { button: "right" }); await settle(450);
       const t2 = await text();
-      await kb.press("Escape"); await settle(200);
+      await page.keyboard.press("Escape"); await settle(200);
       const missRow = need(t2, ["Insert", "Delete", "Clear", "Hide", "(Row )?height"]);
       ok("H8", "column and row header menus carry the Excel items", missCol.length === 0 && missRow.length === 0, `missingCol=${missCol} missingRow=${missRow}`);
     });
@@ -246,12 +247,12 @@ try {
     await tryCheck("K3", "an unknown letter and a click cancel the key-tip sequence", async () => {
       await fresh();
       await clickCell(page, 0, 0);
-      await kb.down("Alt"); await kb.up("Alt"); await settle(250);
+      await page.keyboard.down("Alt"); await page.keyboard.up("Alt"); await settle(250);
       const opened = await tipPanel();
-      await kb.press("h"); await settle(200);
-      await kb.press("q"); await settle(250);
+      await page.keyboard.press("h"); await settle(200);
+      await page.keyboard.press("q"); await settle(250);
       const cancelled = (await tipPanel()) === null;
-      await kb.down("Alt"); await kb.up("Alt"); await settle(250); await kb.press("h"); await settle(200);
+      await page.keyboard.down("Alt"); await page.keyboard.up("Alt"); await settle(250); await page.keyboard.press("h"); await settle(200);
       const reopened = await tipPanel();
       await clickCell(page, 3, 3);
       const clickCancelled = (await tipPanel()) === null;
@@ -285,7 +286,10 @@ try {
     await tryCheck("C2", "Ctrl+V inside Planyr keeps values, shifted formulas and bold", async () => {
       await fresh();
       await put(0, 0, "Item"); await put(0, 1, "100"); await put(1, 0, "Total"); await put(1, 1, "=B1*2");
-      await select(0, 0, 0, 1); await press(page, "Control+b"); await settle(300);
+      await select(0, 0, 0, 1);
+      if (process.env.DEBUGERR) console.log("C2dbg0", JSON.stringify({ sel: await selection(page), act: await activeCell(page), focus: await page.evaluate(() => document.activeElement && (document.activeElement.tagName + "." + (document.activeElement.className || "").toString().slice(0, 40))), vals: [await value(page, 0, 0), await value(page, 0, 1)] }));
+      await press(page, "Control+b"); await settle(300);
+      if (process.env.DEBUGERR) console.log("C2dbg1", JSON.stringify({ a1: await styleOf(page, 0, 0) }));
       await select(0, 0, 1, 1);
       const srcBold = await bold(0, 0);            // precondition: the bold the paste must carry really is on the source (else this run measured nothing)
       if (process.env.DEBUGERR) console.log("C2dbg", JSON.stringify({ srcBold, b1: await bold(0, 1), sel: await selection(page) }));
