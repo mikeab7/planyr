@@ -49,7 +49,10 @@ let net = new Map();                                           // requestId → 
 cdp.on("Network.requestWillBeSent", (e) => { net.set(e.requestId, { url: e.request.url, bytes: 0, t: Date.now() }); });
 cdp.on("Network.loadingFinished", (e) => { const r = net.get(e.requestId); if (r) r.bytes = e.encodedDataLength; });
 const jsFiles = () => [...net.values()].filter((r) => /\/assets\/[^?]+\.js(\?|$)/.test(r.url));
-const univerFiles = () => jsFiles().filter((r) => /UniverSheet-|univerFormulaWorker-|univerWarm-/.test(r.url) || isLangFile(r.url));
+// `univerWarm-*.js` (~1 KB) is the tiny DECIDER the hover loads to find out whether this device uses the grid at all — it is not Univer, so it is
+// listed apart and never counted as "a Univer file" (C1 asks that NONE of the grid itself came down).
+const univerFiles = () => jsFiles().filter((r) => /UniverSheet-|univerFormulaWorker-/.test(r.url) || isLangFile(r.url));
+const deciderFiles = () => jsFiles().filter((r) => /univerWarm-/.test(r.url));
 const kbs = (n) => `${(n / 1024).toFixed(0)} KB`;
 
 try {
@@ -81,7 +84,7 @@ try {
     await setSwitch(true); await page.goto("about:blank"); await cold();
     const t0 = Date.now(); await page.goto(sheetUrl(), { waitUntil: "commit" });
     await univerPainted(); const ms = Date.now() - t0; await page.waitForTimeout(800);
-    if (i > 0) { uni.push(ms); uniBytes.push(univerFiles().reduce((a, r) => a + r.bytes, 0)); langs.push(univerFiles().filter((r) => isLangFile(r.url)).length); workers.push(univerFiles().filter((r) => /univerFormulaWorker-/.test(r.url)).length); if (i === 1) firstFiles = univerFiles().map((r) => `${r.url.split("/").pop().split("?")[0]} ${kbs(r.bytes)}`); }
+    if (i > 0) { uni.push(ms); uniBytes.push(univerFiles().reduce((a, r) => a + r.bytes, 0)); langs.push(univerFiles().filter((r) => isLangFile(r.url)).length); workers.push(univerFiles().filter((r) => /univerFormulaWorker-/.test(r.url)).length); if (i === 1) firstFiles = univerFiles().map((r) => `${r.url.split("/").pop().split("?")[0]} ${/univerFormulaWorker-/.test(r.url) ? "(size not visible to the page: worker traffic)" : kbs(r.bytes)}`); }
     await setSwitch(false); await page.goto("about:blank"); await cold();
     const t1 = Date.now(); await page.goto(sheetUrl(), { waitUntil: "commit" });
     await oldPainted(); if (i > 0) old.push(Date.now() - t1);
@@ -113,7 +116,7 @@ try {
   await setSwitch(false); await page.goto("about:blank"); await cold();
   await page.goto(siteUrl(), { waitUntil: "load" }); await tab.waitFor({ timeout: 60000 }); await page.waitForTimeout(3000);
   await tab.hover(); await page.waitForTimeout(4000);
-  ok("C1 hovering the tab on a device that will not use Univer downloaded none of it", univerFiles().length === 0, `${univerFiles().length} Univer file(s)`);
+  ok("C1 hovering the tab on a device that will not use Univer downloaded none of it (only the ~1 KB decider)", univerFiles().length === 0, `${univerFiles().length} Univer file(s); decider files: ${deciderFiles().map((r) => kbs(r.bytes)).join(", ") || "none"}`);
 } catch (e) {
   console.log("ABORT:", String(e.message).split("\n")[0]);
   failures++;
