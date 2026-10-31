@@ -475,14 +475,14 @@ import { resolveSoils } from "./lib/soils.js";
 import { screeningBfeHeadline, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG, bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
-import { noteReadoutDash } from "./lib/readoutDash.js";
+import { noteReadoutDash, noteReadoutNoSurface, readoutDashFacts } from "./lib/readoutDash.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
-import { useGradeSurface } from "./lib/useGradeSurface.js";
+import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, ruleSignature, patchFloodplainRule, subscribeFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
@@ -14421,9 +14421,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const grAnyFfe = grOn && gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   // Owner-only grading layer: built OFF the render path (chunked, previous surface kept, held while a drag is in flight —
   // problem report 6cea9895); every other account keeps the render-path memo byte for byte (lib/useGradeSurface.js).
+  const gsStatsRef = useRef(null);
+  if (gsStatsRef.current === null) gsStatsRef.current = newGradeBuildStats();
+  const gsEnabled = (fmEffectivePadFt != null || grAnyFfe) && gsEls.length > 0;
   const gradeSurface = useGradeSurface({
-    inputs: gsInputs, sig: gsSig, enabled: (fmEffectivePadFt != null || grAnyFfe) && gsEls.length > 0,
-    offRender: grOn, isDragging: () => !!drag.current,
+    inputs: gsInputs, sig: gsSig, enabled: gsEnabled,
+    offRender: grOn, isDragging: () => !!drag.current, statsRef: gsStatsRef,
   });
   /* NEW-2(c/e) — the PROPOSED elevation under the cursor, read from the very surface the
    * earthwork rows price off (`gradeSurface.grid.owners`) rather than re-derived, so the
@@ -14441,12 +14444,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const cursorProp = useMemo(() => {
     if (!cursor) return null;
     const grid = (gradeSurface && gradeSurface.grid) || (grOn ? lastGridRef.current : null);
-    if (!grid) return { status: "none", reason: "nosurface" };
+    if (!grid) {
+      // NEW-1 (B2585313 ×2): the one path the round-10 instrument could not see — say it, once per page load, with the build's state
+      if (grOn) { const st = gsStatsRef.current || {}; noteReadoutNoSurface({ grOn, enabled: gsEnabled, hasBuilt: false, hasKept: !!lastGridRef.current, lastBuildOutcome: st.lastBuildOutcome || null, buildSeq: st.buildSeq || 0, isDragging: !!drag.current }, cursor); }
+      return { status: "none", reason: "nosurface" };
+    }
     const r = sampleProposedAt(grid, cursor, gsExistAt);
     if (r && r.status !== "value") noteReadoutDash(grid, cursor, r, !(gradeSurface && gradeSurface.grid));
     return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, gradeSurface, gsExistKey, grOn]);
+  /* NEW-1 (B2585313 ×2) — `window.__plannerGradeReadout()`: the chip's whole state in ONE call, so a live check answers without a
+   * reproduction. Owner-only (installed only while the grading gate is on for this planner), READ-ONLY, and armed at CALL time
+   * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the owner's tab, or the E2E flag; otherwise it returns null. */
+  const gradeReadoutRef = useRef(null);
+  gradeReadoutRef.current = { cursor, cursorProp, gradeSurface, grOn, gsEnabled };
+  useEffect(() => {
+    if (typeof window === "undefined" || !grOn) return undefined;
+    const hook = () => {
+      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
+      const L = gradeReadoutRef.current || {}, st = gsStatsRef.current || {};
+      const kept = lastGridRef.current, grid = (L.gradeSurface && L.gradeSurface.grid) || (L.grOn ? kept : null);
+      const f = grid && L.cursor ? readoutDashFacts(grid, L.cursor, L.cursorProp, !(L.gradeSurface && L.gradeSurface.grid)) : null;
+      const now = Date.now();
+      return {
+        enabled: !!L.gsEnabled, grOn: !!L.grOn, hasBuilt: !!(L.gradeSurface && L.gradeSurface.grid), hasKept: !!kept,
+        buildSeq: st.buildSeq || 0, lastBuildMs: st.lastBuildMs ?? null, lastBuildOutcome: st.lastBuildOutcome || null,
+        isDragging: !!drag.current, sigChangesLast10s: (st.sigChanges || []).filter((t) => now - t <= 10000).length,
+        cursor: L.cursor ? { x: Math.round(L.cursor.x * 10) / 10, y: Math.round(L.cursor.y * 10) / 10 } : null,
+        cursorStatus: L.cursorProp ? L.cursorProp.status : null, cursorReason: L.cursorProp ? L.cursorProp.reason || (L.cursorProp.undisturbed ? "undisturbed" : null) : null,
+        cursorFt: L.cursorProp && Number.isFinite(L.cursorProp.ft) ? Math.round(L.cursorProp.ft * 10) / 10 : null,
+        inLimit: f ? f.inLimit : null, limitMode: f ? f.mode : null, limitRegionCount: f ? f.limitRegionCount : 0, limitBbox: f ? f.limitBbox : null,
+        cursorBbox: L.cursor ? [L.cursor.x, L.cursor.y, L.cursor.x, L.cursor.y].map((v) => Math.round(v * 10) / 10) : null,
+      };
+    };
+    window.__plannerGradeReadout = hook;
+    return () => { if (window.__plannerGradeReadout === hook) window.__plannerGradeReadout = null; };
+  }, [grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write

@@ -76,6 +76,7 @@ export function groundReadout({ el = null, prop = null } = {}) {
   if (prop) {
     if (prop.status === "value") {
       parts.push({ key: "prop", text: `Prop ${f1(prop.ft)}`, numeric: true });
+      if (prop.undisturbed) notes.push("Past the graded area — the grading leaves this ground as it is, so the proposed grade is the existing grade.");
     } else {
       parts.push({ key: "prop", text: "Prop —", numeric: false });
       const r = PROP_REASON[prop.reason] || PROP_REASON.outside;

@@ -99,7 +99,9 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
     expect(sp).toMatch(/\.\.\.\(grOn && e\.type !== "building" \? \{ hostId:/);
     expect(sp).toMatch(/\.\.\.\(grOn \? \[`gr:\$\{grBase\.sig\}`/);
     // the build condition (moved into the useGradeSurface call, problem report 6cea9895) — and the off-render build is the GATE's
-    expect(sp).toMatch(/enabled: \(fmEffectivePadFt != null \|\| grAnyFfe\) && gsEls\.length > 0,\s*offRender: grOn,/);
+    // (NEW-1, B2585313 ×2: the condition is named `gsEnabled` so the readout hook can report it — same expression, same call)
+    expect(sp).toMatch(/const gsEnabled = \(fmEffectivePadFt != null \|\| grAnyFfe\) && gsEls\.length > 0;/);
+    expect(sp).toMatch(/enabled: gsEnabled,\s*offRender: grOn,/);
   });
   it("nobody was added to admin_users by this work", () => {
     for (const dir of [LIB, COMP]) for (const f of readdirSync(fileURLToPath(new URL(dir, import.meta.url)))) {

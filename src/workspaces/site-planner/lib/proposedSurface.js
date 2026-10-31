@@ -1301,7 +1301,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     return { status: "value", ft: g0 + wedgeDz(ze, g0, nr.d, apronRatio, 0), elId: `limit:${nr.k}`, cls: "transition", wedge: true };
   };
   return {
-    cells, owners: graded, pondRings, apronsOn, zOf, shoulderFt: 0,
+    cells, owners: graded, pondRings, parcelRings, apronsOn, zOf, shoulderFt: 0,
     grading: { slopeRatio: apronRatio, shoulderFt: spec.shoulderFt ?? G.shoulderFt, ramp: false },
     limit: {
       // ROUND 9 (B2500224 ×2): `sig` is THE limit's identity (its definition — gradingLimit.resolveGradingLimit `defSig`) — every picture traced off this surface (band, contours, the
@@ -1446,10 +1446,28 @@ export function gradedAreaEarthwork(grid) {
  *
  * Returns { status:"value", ft, elId, cls, wedge } or { status:"none", reason } where
  * reason ∈ "nosurface" | "pond" | "outside" | "void". Pure. */
+/* NEW-1 (B2585313 ×2, owner live check 2026-10-31 on Concept A, "Around the layout", 50-ft NW view): the chip read "Prop —" at
+ * three points on the white paper — measured on the real Concept A fixture they sit 150–530 ft PAST the daylight line, inside the
+ * property, where the grading leaves the ground alone. That ground HAS a proposed elevation: it is the existing one (the slope ties
+ * to it at the daylight line and nothing beyond is touched), so the chip says so — "Prop = Exist · On grade", marked `undisturbed`
+ * — instead of a dash that reads as "the surface is broken". Only inside the PROPERTY (`grid.parcelRings`), only where the ground is
+ * known; a pond, a DEM void and ground off the property keep their honest "—". The probe itself (which the contour lattice reads)
+ * is unchanged. */
+function undisturbedOr(grid, pt, existAt, r) {
+  if (!r || r.status === "value" || r.reason !== "outside") return r;
+  const pr = Array.isArray(grid.parcelRings) ? grid.parcelRings : [];
+  if (!pr.length || typeof existAt !== "function") return r;
+  let inside = false;
+  for (const ring of pr) if (ring && ring.length >= 3 && pointInRing(pt, ring)) { inside = true; break; }
+  if (!inside) return r;
+  const g0 = existAt(pt);
+  if (g0 == null || !Number.isFinite(g0)) return r;
+  return { status: "value", ft: g0, elId: null, cls: "undisturbed", wedge: false, undisturbed: true };
+}
 export function sampleProposedAt(grid, pt, existAt) {
   if (!grid || !Array.isArray(grid.owners) || !grid.owners.length || !pt ||
     !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return { status: "none", reason: "nosurface" };
-  if (grid.limit && typeof grid.probe === "function") return grid.probe(pt);   // ROUND 4 — the one stitched surface
+  if (grid.limit && typeof grid.probe === "function") return undisturbedOr(grid, pt, existAt, grid.probe(pt));   // ROUND 4 — the one stitched surface
   for (const pr of grid.pondRings || []) if (pointInRing(pt, pr)) return { status: "none", reason: "pond" };
   for (const g of grid.owners) {
     if (pt.x < g.bbox[0] || pt.x > g.bbox[2] || pt.y < g.bbox[1] || pt.y > g.bbox[3]) continue;
