@@ -48,6 +48,7 @@ import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
 import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
 import { createSaveController } from "../lib/univerSave.js";
+import UniverFormulaWorker from "../lib/univerFormulaWorker.js?worker";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
 // ONE header strip, everything left-aligned (NEW-1, B2574352): Univer's "collapsed" ribbon folds the Start / Formulas / Data / View
@@ -89,12 +90,24 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
     try {
       const dark0 = isDark();
       const theme = buildUniverTheme(defaultTheme, readTokens(), { dark: dark0 });
+      // The formula engine runs in a Web Worker (lib/univerFormulaWorker.js) so a calculation never blocks the grid. If a worker
+      // cannot start, Univer calculates on the page as before — slower, never wrong — and the console says so.
+      let worker = null;
+      try {
+        worker = new UniverFormulaWorker();
+        // A worker that dies mid-session would leave every formula silently stale: say so, and where it can be fixed (a reload).
+        worker.addEventListener("error", (e) => {
+          console.error("UniverSheet: the formula worker stopped", e && e.message);
+          if (!disposed && live.current.onNotice) live.current.onNotice("The new grid's formula calculator stopped, so formula results may be out of date. Reload the page to restart it.");
+        });
+      } catch (err) { console.error("UniverSheet: could not start the formula worker; calculating on the page", err); worker = null; }
+      L.worker = worker;
       const { univer, univerAPI } = createUniver({
         locale: LocaleType.EN_US,
         locales: { [LocaleType.EN_US]: mergeLocales(coreEnUS, sortEnUS, filterEnUS, findEnUS) },
         theme, darkMode: dark0,
         presets: [
-          UniverSheetsCorePreset({ container: hostRef.current, ribbonType: RIBBON_TYPE, formula: { initialFormulaComputing: CalculationMode.WHEN_EMPTY } }),
+          UniverSheetsCorePreset({ container: hostRef.current, ribbonType: RIBBON_TYPE, ...(worker ? { workerURL: worker } : {}), formula: { initialFormulaComputing: CalculationMode.WHEN_EMPTY } }),
           UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsFindReplacePreset(),
         ],
       });
@@ -322,7 +335,8 @@ export default function UniverSheet({ workbook, projectNames, onChange, onNotice
       try { clearTimeout(L.gateTimer); L.detachGate && L.detachGate(); } catch (_) {}
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
       try { L.univer && L.univer.dispose(); } catch (_) {}
-      L.univer = null; L.univerAPI = null; L.unitId = null; L.save = null;
+      try { L.worker && L.worker.terminate(); } catch (_) {}            // a Worker handed to the RPC plugin is OURS to stop
+      L.univer = null; L.worker = null; L.univerAPI = null; L.unitId = null; L.save = null;
       if (typeof window !== "undefined") delete window.__planyrUniverRead;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Univer is created ONCE; later changes arrive through the effects below

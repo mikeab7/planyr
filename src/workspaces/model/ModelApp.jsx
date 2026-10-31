@@ -100,7 +100,12 @@ import FileMenu from "./components/FileMenu.jsx";
 // Univer spike (owner-only; docs/SPREADSHEET-UNIVER-SPIKE.md) — the switch is the ONLY touch to the existing grid. The grid
 // itself is a lazy chunk, so none of @univerjs/* is in any bundle a non-owner (or an owner with the switch off) downloads.
 import { useUniverSwitch } from "./lib/univerSwitch.js";
+import { warmUniver } from "./lib/univerWarm.js";
 const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
+// NEW-1 (B2587264) — a device that uses the Univer grid starts fetching its chunk the moment THIS chunk runs, in parallel with the
+// admin check and the workbook load, instead of after them (measured live: the chunk request began ~250 ms after ModelApp arrived).
+// A no-op for any device whose switch is off (lib/univerWarm.js); the real mount below still decides whether the grid shows.
+warmUniver();
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 // NEW-1 (open an uploaded Excel in Spreadsheet) — a Library file opened as an editable workbook.

@@ -74,6 +74,8 @@ describe("what the Univer code may import", () => {
       "src/workspaces/model/components/UniverSheet.jsx",
       "src/workspaces/model/lib/univerExcelKeys/actions.js",
       "src/workspaces/model/lib/univerExcelKeys/index.js",
+      // The formula engine's Web Worker (NEW-1, B2587264) — its OWN bundle, started only by UniverSheet.jsx (test/modelUniverWorker).
+      "src/workspaces/model/lib/univerFormulaWorker.js",
     ]);
   });
   it("ModelApp loads UniverSheet with React.lazy and never statically (so it can only ride its own chunk)", () => {
@@ -81,7 +83,7 @@ describe("what the Univer code may import", () => {
     expect(app).toMatch(/const UniverSheet = lazy\(\(\) => import\("\.\/components\/UniverSheet\.jsx"\)\)/);
     expect(app).not.toMatch(/^import .*UniverSheet/m);
     expect(app).not.toMatch(/univerBridge|univerTheme/);
-    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx");
+    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet(?![A-Za-z])|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx");
     expect(staticImporters).toEqual([]);
   });
   it("makes no call to a Univer host and uses no Pro / license / server configuration", () => {
