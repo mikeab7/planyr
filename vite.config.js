@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
 import univerPrune from "./scripts/vite-plugin-univer-prune.mjs";
+import spreadsheetPreload from "./scripts/vite-plugin-spreadsheet-preload.mjs";
 import { UNSAFE_BUILDS } from "./src/app/unsafeBuilds.js";
 
 // PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
@@ -218,6 +219,8 @@ export default defineConfig(({ command }) => ({
     recomputeProbe(),
     /* NEW-1 (B2587264) — drop the ~77 unused per-language hyphenation files Univer's render engine would otherwise emit. */
     univerPrune(),
+    /* NEW-1 (B2604xxx) — a page opening ON the Spreadsheet starts fetching its chunks at t=0 instead of three hops later (see the plugin's header). */
+    spreadsheetPreload(),
     pdfjsAssets(),
     chunkModuleStats(),
     buildStamp(),

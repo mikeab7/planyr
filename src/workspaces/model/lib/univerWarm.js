@@ -23,6 +23,12 @@ export function warmUniver({ force = false, storage } = {}) {
   if (warm) return warm;
   if (!force && !univerWantedHere(storage)) return null;
   migrateLegacyGridChoice(storage);
-  warm = import("../components/UniverSheet.jsx").catch((err) => { warm = null; console.warn("univerWarm: could not warm the grid chunk (it will load when the grid opens)", err); });
+  warm = import("../components/UniverSheet.jsx").then((mod) => {
+    // Chunk in hand: now build the framework instance ahead of time, at idle (components/univerFramework.js — it is a no-op when a grid is
+    // already mounted, and UniverSheet takes the waiting instance when it mounts). Held to idle because building it costs main-thread time.
+    const build = () => { try { mod.prewarmFramework && mod.prewarmFramework(); } catch (_) { /* best-effort */ } };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(build, { timeout: 2500 }); else setTimeout(build, 300);
+    return mod;
+  }).catch((err) => { warm = null; console.warn("univerWarm: could not warm the grid chunk (it will load when the grid opens)", err); });
   return warm;
 }

@@ -8,10 +8,11 @@
  *   --cur-dist  the build under test (default `dist`).
  * The workbook is 1,000 rows × 12 columns, the last column a SUM per row. A run ends at the first moment the grid is DRAWN and BOTH the first
  * cell and the LAST formula cell hold a readable number (Univer: its canvas is up and its model holds both; old grid: the page text holds a number).
- * Three arms per grid, each in a BRAND-NEW browser context unless noted:
- *   COLD    navigation straight to #/project/<id>/spreadsheet — cold HTTP cache, the whole app boots.
- *   CLICK   the Site route is open and settled; the pointer rests on the Spreadsheet tab (the app's own warm-up), then the tab is clicked.
- *   REPEAT  the same URL a second time in the SAME context (HTTP cache and compiled-code cache warm) — what a returning user sees.
+ * Four arms per grid, each in a BRAND-NEW browser context unless noted:
+ *   COLD    navigation straight to #/project/<id>/spreadsheet — cold HTTP cache, the whole app boots. A FIRST visit on this device.
+ *   CLICK   the Site route is open and settled; the pointer rests on the Spreadsheet tab (the app's own warm-up), then the tab is clicked. First visit.
+ *   REPEAT  the same URL a second time in the SAME context (HTTP cache, compiled-code cache AND the device's calculation cache warm) — a returning user.
+ *   RETURN  a returning user's tab click: the workbook was opened (and its results remembered) earlier in this context, then Site route → hover → click.
  * The statement is the MEDIAN of RUNS (default 5); raw runs printed. Also per run: main-thread BLOCKED time (the browser's long tasks inside the window).
  *
  * FOREGROUND-OR-VOID: every page asserts a visible tab with a live rAF before it is timed (lib/tabTiming.mjs).
@@ -38,7 +39,7 @@ const JSON_OUT = val("--json", null);
 const LABEL = val("--label", "");
 const REF_DIST = val("--ref-dist", null);
 const CUR_DIST = val("--cur-dist", "dist");
-const ONLY = new Set(val("--only", "cold,click,repeat").split(","));
+const ONLY = new Set(val("--only", "cold,click,repeat,return").split(","));
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const REF = "http://localhost:4173", CUR = "http://localhost:4198";
 const SETTLE_MS = 1500;                 // how long the pointer "rests" on the tab: the warm-up (idle callback, chunk fetch + evaluate) has to be done
@@ -81,7 +82,7 @@ async function main() {
   await serve("current preview", CUR_DIST, 4198);
   const browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
   const wb = rowsWorkbook(ROWS, COLS);
-  const R = {}; for (const k of ["cold", "click", "repeat"]) R[k] = { old: [], uni: [], oldBlock: [], uniBlock: [] };
+  const R = {}; for (const k of ["cold", "click", "repeat", "return"]) R[k] = { old: [], uni: [], oldBlock: [], uniBlock: [] };
   let voided = null;
 
   const newPage = async (ctx, pid) => {
@@ -116,12 +117,24 @@ async function main() {
         await ready(page, kind);
         if (ONLY.has("cold")) await record("cold", kind, page, Date.now() - t0, 0);
         if (ONLY.has("repeat")) {                      // the SAME context, a moment later: caches warm, a new tab load
-          await page.waitForTimeout(1200);
+          await page.waitForTimeout(3500);               // long enough for the device-local calculation cache to be written (debounced ~1.2 s after the results settle)
           await page.goto("about:blank");
           const page2 = await newPage(ctx, pid); await page.close();
           const mark = 0; const t1 = Date.now(); await page2.goto(`${base}/#/project/${pid}/spreadsheet`, { waitUntil: "commit" });
           await ready(page2, kind); await record("repeat", kind, page2, Date.now() - t1, mark);
         }
+        await ctx.close();
+      }
+      if (ONLY.has("return")) {
+        const ctx = await newCtx(); const first = await newPage(ctx, pid);
+        await first.goto(`${base}/#/project/${pid}/spreadsheet`, { waitUntil: "load" }); await ready(first, kind); await first.waitForTimeout(3500); await first.close();
+        const page = await newPage(ctx, pid);
+        await page.goto(`${base}/#/project/${pid}`, { waitUntil: "load" });
+        const tab = page.locator('[data-testid="module-tab-model"]').first(); await tab.waitFor({ timeout: 60000 });
+        await page.waitForTimeout(1500); await assertMeasurable(page, "measure-univer-tti");
+        await tab.hover(); await page.waitForTimeout(SETTLE_MS);
+        const mark = await page.evaluate(() => performance.now()); const t0 = Date.now(); await tab.click();
+        await ready(page, kind); await record("return", kind, page, Date.now() - t0, mark);
         await ctx.close();
       }
       if (ONLY.has("click")) {
@@ -142,7 +155,7 @@ async function main() {
 
   console.log(`\nTIME TO INTERACTIVE — ${ROWS}-row × ${COLS}-column sheet, real app both sides, median of ${RUNS}, localhost${LABEL ? "  [" + LABEL + "]" : ""}`);
   const ratios = {}; let pass = !voided;
-  for (const arm of ["cold", "click", "repeat"]) {
+  for (const arm of ["cold", "click", "repeat", "return"]) {
     if (!ONLY.has(arm)) continue;
     const a = R[arm]; const ratio = median(a.uni) / median(a.old); ratios[arm] = ratio;
     console.log(`  ${arm.toUpperCase().padEnd(6)} old grid ${fmt(a.old)}   blocked ${fmt(a.oldBlock)}`);

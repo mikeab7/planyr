@@ -27,14 +27,39 @@ export function pruneHyphenationLoaders(code) {
   return { code: out, removed };
 }
 
+/* ── Univer's fixed 300 ms before it paints (NEW-1, B2604xxx — measured) ─────────────────────────────────────────────────────────────
+ * `@univerjs/ui`'s SingleUnitUIController, once the first unit exists (stage Ready), waits `window.setTimeout(…, 300)` and ONLY THEN attaches
+ * the render unit to the page and moves to the Rendered stage — which is also what starts the first formula pass. The 300 is a hard-coded
+ * cushion for the React shell to settle (there is no config key for it), and it is paid on every open: ~0.3 s of a ~1.3 s open on the machine
+ * that measured it. The contents of that callback are untouched; only the delay changes, to RENDER_DELAY_MS.
+ * LOUD-FAILURE: matched by shape, exactly once; if a Univer upgrade moves it the BUILD FAILS naming this file (the grid would otherwise
+ * quietly go back to waiting). Guard: repo-root `test/` **univerPrune** (the transform + its failure modes) and ui-audit **verify-univer-parity**
+ * (every canvas, key and paint check passes with the shorter delay). */
+export const RENDER_DELAY_MS = 0;
+const UI_FILE = /[\\/]@univerjs[\\/]ui[\\/]lib[\\/]es[\\/]index\.js$/;
+const RENDER_TIMER_OPEN = "this._renderTimeout = window.setTimeout(() => {";
+const RENDER_TIMER_CLOSE = /\n(\t+)\}, 300\);/;
+
+export function shortenRenderDelay(code, delay = RENDER_DELAY_MS) {
+  const at = code.indexOf(RENDER_TIMER_OPEN);
+  if (at < 0 || code.indexOf(RENDER_TIMER_OPEN, at + 1) >= 0) throw new Error("vite-plugin-univer-prune: @univerjs/ui no longer has exactly one `_renderTimeout = window.setTimeout(` — the Univer upgrade moved the 300 ms render delay; update scripts/vite-plugin-univer-prune.mjs");
+  const rest = code.slice(at);
+  const m = RENDER_TIMER_CLOSE.exec(rest);
+  if (!m || m.index > 4000) throw new Error("vite-plugin-univer-prune: could not find the `}, 300);` that closes Univer's render timer — the shape changed; update scripts/vite-plugin-univer-prune.mjs");
+  const out = code.slice(0, at) + rest.slice(0, m.index) + `\n${m[1]}}, ${delay});` + rest.slice(m.index + m[0].length);
+  return { code: out };
+}
+
 export default function univerPrune() {
   return {
     name: "planyr-univer-prune",
     apply: "build",
     enforce: "pre",
     transform(code, id) {
-      if (!ENGINE_FILE.test(id.split("?")[0])) return null;
-      return { code: pruneHyphenationLoaders(code).code, map: null };
+      const file = id.split("?")[0];
+      if (ENGINE_FILE.test(file)) return { code: pruneHyphenationLoaders(code).code, map: null };
+      if (UI_FILE.test(file)) return { code: shortenRenderDelay(code).code, map: null };
+      return null;
     },
   };
 }
