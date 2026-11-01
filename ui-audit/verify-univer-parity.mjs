@@ -700,10 +700,15 @@ async function main() {
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   page = await ctx.newPage();
   page.on("pageerror", (e) => console.log("PAGEERROR", String(e.message).slice(0, 200)));
-  await page.goto(`${BASE}/ui-audit/univer-sandbox/index.html${process.env.PARITY_PREWARM === "1" ? "?prewarm=1" : ""}`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE}/ui-audit/univer-sandbox/index.html${process.env.PARITY_PREWARM === "1" ? "?prewarm=1" : process.env.PARITY_PREWARM === "real" ? "?prewarm=real" : ""}`, { waitUntil: "networkidle" });
   await page.waitForFunction(() => window.__planyrUniverRead && window.__planyrUniverRead.api() && window.__sandboxLoad);
   await assertMeasurable(page, "verify-univer-parity");
   // PARITY_PREWARM=1 runs the WHOLE checklist on a grid that adopted a framework instance built ahead of time; a run that did not adopt one is VOID, not scored.
+  if (process.env.PARITY_PREWARM === "real") {            // the unit was built from the device copy ahead of the mount and ADOPTED as the workbook (B2607857)
+    const c = await page.evaluate(() => window.__planyrUniverRead.calc());
+    if (!(c.prewarmed === true && c.adopted === true)) { console.log(`VOID — PARITY_PREWARM=real but the grid did not adopt a pre-built REAL unit (${JSON.stringify(c)})`); await browser.close(); process.exit(2); }
+    console.log("PARITY_PREWARM=real — every check below runs on an ADOPTED pre-built grid whose unit was built from the stored workbook");
+  }
   if (process.env.PARITY_PREWARM === "1") {
     const adopted = await page.evaluate(() => window.__planyrUniverRead.calc().prewarmed);
     if (adopted !== true) { console.log("VOID — PARITY_PREWARM=1 but the grid did not adopt a pre-built instance"); await browser.close(); process.exit(2); }

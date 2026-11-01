@@ -119,7 +119,7 @@ describe("what the Univer code may import", () => {
     expect(app).toMatch(/const UniverSheet = lazy\(\(\) => import\("\.\/components\/UniverSheet\.jsx"\)\)/);
     expect(app).not.toMatch(/^import .*UniverSheet/m);
     expect(app).not.toMatch(/univerBridge|univerTheme/);
-    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet(?![A-Za-z])|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx" && f !== "src/workspaces/model/components/univerFramework.js" && f !== "src/workspaces/model/lib/univerEval.js");
+    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet(?![A-Za-z])|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx" && f !== "src/workspaces/model/components/univerFramework.js" && f !== "src/workspaces/model/lib/univerEval.js" && f !== "src/workspaces/model/lib/univerUnitPrep.js");   // univerUnitPrep (B2607857) is the pure workbook→unit step, imported by UniverSheet + univerFramework only
     expect(staticImporters).toEqual([]);
   });
   it("makes no call to a Univer host and uses no Pro / license / server configuration", () => {

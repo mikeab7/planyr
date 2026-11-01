@@ -74,8 +74,10 @@ describe("wiring", () => {
   it("ModelApp primes the read; UniverSheet seeds in load() and writes after a settled calculation, not while an edit is pending", () => {
     expect(read("src/workspaces/model/ModelApp.jsx")).toMatch(/primeCalcCache\(viewPrefsKey\)/);
     const g = read("src/workspaces/model/components/UniverSheet.jsx");
-    expect(g).toMatch(/entryFits\(entry, h, migrated\)/);
-    expect(g).toMatch(/seedValues\(data, entry\.v\)/);
+    expect(g).toMatch(/prepareUnit\(wb, \{ entry: peekCalc\(L\.viewKey\), defs \}\)/);
+    const prep = read("src/workspaces/model/lib/univerUnitPrep.js");                       // the seeding itself lives in the one workbook→unit step
+    expect(prep).toMatch(/entryFits\(entry, hash, migrated\)/);
+    expect(prep).toMatch(/seedValues\(data, entry\.v\)/);
     expect(g).toMatch(/L\.save\.hasPending\(\) && tries < 6/);
     expect(g).toMatch(/L\.storedCanon = canonicalJson\(migrateWorkbook\(next\)\)/);        // the hash is of what will be STORED, not of Univer's round-trip form
   });

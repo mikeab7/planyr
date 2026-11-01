@@ -9,6 +9,7 @@ import { createWorkbook, migrateWorkbook } from "../../src/workspaces/model/lib/
 import { evaluateWorkbook } from "../../src/workspaces/model/lib/sheetEngine.js";
 
 window.__PLANYR_E2E = true;
+const REAL = new URLSearchParams(location.search).get("prewarm") === "real";
 window.__saved = [];
 // Planyr's OWN formula engine, in the same page, so the measurement script times both engines in one Chromium.
 window.__oldEngine = { evaluateWorkbook, migrateWorkbook };
@@ -31,7 +32,7 @@ function Host() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <UniverSheet
-        workbook={wb} projectNames={names}
+        workbook={wb} projectNames={names} viewKey={REAL ? "sbx" : undefined}
         onChange={(next, notes, meta) => {
           window.__saved.push({ wb: next, notes, urgent: !!(meta && meta.urgent) });
           if (meta && meta.urgent) { try { localStorage.setItem("sandbox:persisted", JSON.stringify(next)); } catch (_) {} }
@@ -45,7 +46,17 @@ function Host() {
 }
 // ?prewarm=1 — build the framework instance AHEAD of the mount, exactly as the Spreadsheet tab's hover does (components/univerFramework.js), and give it
 // time to reach Rendered, so the whole parity checklist can be run against the ADOPTED-instance path (verify-univer-parity.mjs, PARITY_PREWARM=1).
-if (new URLSearchParams(location.search).get("prewarm") === "1") {
-  window.__prewarmBuilt = prewarmFramework();
+// ?prewarm=real — the same, but the instance is built from the DEVICE COPY of the workbook (B2607857): the initial workbook is stored where the app keeps a
+// project's workbook and the pre-build is told the project, so the grid ADOPTS a unit that already holds the real workbook (PARITY_PREWARM=real).
+const PREWARM = new URLSearchParams(location.search).get("prewarm");
+if (PREWARM === "1" || PREWARM === "real") {
+  let opts = {};
+  if (REAL) {
+    const wb0 = window.__sandboxInitial || createWorkbook();
+    window.__sandboxInitial = wb0;
+    localStorage.setItem("planyr:model:sheet:v1:local:sbx", JSON.stringify(wb0));
+    opts = { projectId: "sbx", userId: null };
+  }
+  window.__prewarmBuilt = prewarmFramework(opts);
   setTimeout(() => createRoot(document.getElementById("root")).render(<Host />), 1500);
 } else createRoot(document.getElementById("root")).render(<Host />);

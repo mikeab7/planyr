@@ -217,6 +217,33 @@ Measured with the rig rewritten to put BOTH grids in the real app (`ui-audit/mea
 
 **The target is NOT met.** Reached: 1.33× (return), 1.57× (repeat), 2.10× (click, first visit), 2.93× (cold, first visit). Cold cannot reach 1.25× by any amount of tuning: running 7 MB of JavaScript (≈0.3 s of the page's main thread), starting Univer and drawing its first frame is ≥ 0.8 s against the old grid's 0.53 s. **The one thing that would get there:** do the work before the click — for a tab click, build the REAL workbook's unit inside the pre-built grid (the project is in the URL, its workbook is in the device store: ≈ −0.25 s, return ≈ 1.0–1.1×); for a cold open, ship less JavaScript on the way in (a lighter grid, or a static first screen drawn while Univer starts). Filed as B2607857.
 
+### Load time, round 3 (B2611456, 2026-11-01) — owner: "Keep going" — build the real workbook inside the pre-built grid
+
+Same rig (`ui-audit/measure-univer-tti.mjs`, the old grid = a frozen pre-cutover build), 1,000 rows × 12 columns with a SUM per row, medians of 5, localhost. "Main" is `d55f63b` (the end of round 2) measured again the same hour.
+
+| arm (ms) | old grid | main (before) | after round 3 | ratio before → after |
+|---|---|---|---|---|
+| **Cold** — first visit, URL straight to the Spreadsheet | 533 → 577 | 1620 | **1554** | 3.04× → **2.69×** |
+| **Click** — first visit, pointer rests on the tab, click | 376 → 408 | 816 | **346** | 2.17× → **0.85×** |
+| **Repeat** — same URL again, caches warm | 480 → 493 | 834 | **849** | 1.74× → **1.72×** |
+| **Return** — workbook opened here before, tab click | 393 → 413 | 506 | **339** | 1.29× → **0.82×** |
+
+**Click and Return are now FASTER than the old grid** (the target was within 25% slower). **Cold and Repeat — a page that OPENS on the Spreadsheet URL — are not, and nothing built here moves them** (below).
+
+**What was built.**
+1. **The REAL unit is built before the click** (`lib/univerUnitPrep.js` `prepareUnit` — the pure "workbook → everything Univer needs" step `load()` also uses; `components/univerFramework.js` `prewarmFramework({ projectId, userId })`). When the pointer rests on the tab of a project page and this device holds that project's workbook (`modelStore.readLocalSheet`, the account read synchronously from the stored session by `lib/deviceUser.js`), the off-screen instance is built WITH it: formulas seeded from the remembered results, calculated and drawn before the click.
+2. **Adoption, exactly when it is safe** (`UniverSheet.jsx` `adoptable`): the click adopts the waiting unit only when it was built for the same scope AND the workbook the grid mounts with has the SAME canonical text. Anything else — an edit elsewhere, a cloud copy that won, org / Library-file mode, no stored copy — drops it and runs the ordinary `load()`. What the unit's first calculation said while nobody listened (circular references) is kept and handed over.
+3. **The grid no longer mounts with ModelApp's blank first-render workbook** (`ModelApp.jsx` `gridWorkbookReady`). The load effect that reads the device copy runs just after the first render; a grid that mounted in between built a blank unit and threw it away for the real one — a second full load on EVERY open, found because the first cut never adopted (`adoptWhy.canon: false`, lengths 1,265 vs 215,520). Library files keep their own loading phase.
+
+**Measured and NOT kept.**
+- *Build the unit at once on a page that is opening on the Spreadsheet* (instead of at idle): Repeat 834 → **1373** ms. All of Univer's start-up ran AHEAD of the page's own mount instead of beside it; nothing overlapped because the work is CPU-bound on one thread. Reverted and pinned (`test/modelUniversePrewarm`).
+- *Drop the Sort / Filter / Find presets from the first load:* −230 KB raw (6%), ratios unchanged (cold 2.59× vs 2.76× in a noisy run, repeat 1.67× vs 1.68×); not worth losing features.
+- *Preload the formula worker's file at t=0:* Chrome ignored `rel=preload as=worker` (the request still started at mount), and the worker has ≈ 700 ms between mount and the first calculation to arrive anyway — it is not on the critical path.
+
+**Why Cold and Repeat stay over (the floor, measured).** A page opening on the Spreadsheet runs the app's own boot (≈ 450 ms of main-thread work before the grid mounts — the old grid pays it too, which is why ITS total is 0.5 s) and then Univer's start-up on the same thread: ≈ 850 ms of long tasks on a first visit (profile: a flat spread — GC, canvas set-up, dependency-injection, menu building, parse/compile of a 3.9 MB chunk; no single hot spot), ≈ 350 ms with the HTTP cache warm. Nothing can be hidden behind a hover on a direct URL load, and there is no idle time to move it into (building it earlier only reorders the same CPU work — measured above). The two things that would change it are a **lighter first screen** (a static picture of the sheet from the stored workbook while Univer starts — not "interactive" by the strict definition used here) or **shipping less of Univer** (the docs editor, 1.4 MB of the chunk, is needed the moment a cell is edited). Both are product calls; neither is built.
+
+**Guards.** `test/univerRealUnit` (`prepareUnit` canon / seeding / names, `deviceUserId`, the adoption rule pinned in source), `test/modelUniversePrewarm`, `test/univerCalcCache`; `ui-audit/verify-univer-adopt-real-unit.mjs` (real browser, four arms — adopt, stale-at-click, no stored copy, circular — with an independent sum as the known-good arm, VOID unless arm 1 adopts; mutation-proven: with the canonical-text check bypassed the stale arm shows 390.5 instead of 4632, with the circular hand-over removed the notice is missing); `verify-univer-parity` with `PARITY_PREWARM=real` (the whole 80-check checklist on an ADOPTED real unit; VOID unless adopted); `verify-univer-load-live` B3b (the live click adopts).
+
 ## Planyr-only tools on Univer (cutover step 6 — B2586720, 2026-10-31)
 
 One plugin, `src/workspaces/model/lib/univerTools/` (+ `components/UniverTools.jsx`), installed by ONE call in `UniverSheet.jsx` and disposed with it. It imports nothing from `@univerjs` — Univer's services arrive by injection — so the "only UniverSheet.jsx imports Univer" rule and its unit tests still hold. **One rule set, two grids:** the old grid's pure libraries run unchanged on the Planyr workbook the bridge builds from Univer's live state (`snapshot()`), so a flag, an arrow, a colour or a name means exactly what it means on the old grid, and the saved workbook format does not change.

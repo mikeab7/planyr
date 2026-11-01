@@ -11,7 +11,7 @@ const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
 describe("components/univerFramework.js", () => {
   const src = strip(read("src/workspaces/model/components/univerFramework.js"));
   it("builds off-screen but LAID OUT (display:none would give Univer a zero-size canvas), marks it, and never when a grid is alive or one waits", () => {
-    expect(src).toMatch(/if \(typeof document === "undefined" \|\| pool \|\| alive > 0\) return false;/);
+    expect(src).toMatch(/if \(typeof document === "undefined" \|\| pool \|\| alive > 0 \|\| building\) return false;/);
     expect(src).toMatch(/left:-20000px/);
     expect(src).not.toMatch(/display:\s*none/);
     expect(src).toMatch(/data-univer-prewarm/);
@@ -23,7 +23,7 @@ describe("components/univerFramework.js", () => {
     expect(src).toMatch(/p\.container\.remove\(\)/);
   });
   it("creates a placeholder workbook only when asked (Univer starts its sheet plugins, and so reaches Ready, only once a unit exists)", () => {
-    expect(src).toMatch(/if \(blank\) unitId = univerAPI\.createWorkbook/);
+    expect(src).toMatch(/else if \(blank\) unitId = univerAPI\.createWorkbook/);
   });
 });
 
@@ -51,7 +51,8 @@ describe("the warm-up builds it at idle, only after the chunk is in hand", () =>
   const src = strip(read("src/workspaces/model/lib/univerWarm.js"));
   it("calls prewarmFramework from an idle callback inside the import's .then", () => {
     expect(src).toMatch(/\.then\(\(mod\) => \{[\s\S]*requestIdleCallback\(build/);
-    expect(src).toMatch(/mod\.prewarmFramework && mod\.prewarmFramework\(\)/);
+    expect(src).not.toMatch(/routeIsSpreadsheet/);      // MEASURED worse (B2607857): never build at once on a page that is opening on the Spreadsheet
+    expect(src).toMatch(/mod\.prewarmFramework && mod\.prewarmFramework\(\{ projectId, userId: projectId \? deviceUserId\(\) : null \}\)/);
   });
   it("reads this project's remembered formula results at hover time too (dynamic import: the shell must not take the storage layer in statically)", () => {
     expect(src).toMatch(/import\("\.\/univerCalcCache\.js"\)\.then\(\(m\) => m\.primeCalcCache\(id\)\)/);
@@ -64,6 +65,7 @@ describe("ModelApp holds the grid back for the cache read — and cannot be held
   it("mounts the grid only once the read settled, with a hard cap", () => {
     expect(src).toMatch(/const CALC_WAIT_MS = 150;/);
     expect(src).toMatch(/setTimeout\(done, CALC_WAIT_MS\)/);
-    expect(src).toMatch(/univerOn && !calcReady \?/);
+    expect(src).toMatch(/univerOn && !\(calcReady && gridWorkbookReady\) \?/);
+    expect(src).toMatch(/const gridWorkbookReady = fileMode \|\| ready;/);
   });
 });
