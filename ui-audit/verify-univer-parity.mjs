@@ -99,6 +99,10 @@ const heldClick = async (r, c, key) => { const p = await pt(r, c); await page.ke
 const savedLast = () => (savedLastImpl ? savedLastImpl() : ev(() => window.__saved[window.__saved.length - 1] || null));
 const flushSave = async () => { if (flushSaveImpl) return flushSaveImpl(); await ev(() => window.__planyrUniverRead.flush()); await wait(200); };
 
+/** The notices the host showed since `clearNotices()`: the sandbox host collects them in `window.__notices`; on the real app they are the
+ *  `model-notice` strip (shown ~7 s), so there "cleared" means waiting for the strip to go. */
+const noticesNow = () => ev(() => (Array.isArray(window.__notices) ? window.__notices.map((t) => String((t && t.text) || t)) : [((document.querySelector('[data-testid="model-notice"]') || {}).innerText) || ""].filter(Boolean)));
+const clearNotices = async () => { await ev(() => { if (Array.isArray(window.__notices)) window.__notices = []; }); for (let i = 0; i < 40; i++) { if (!(await noticesNow()).length) return; await wait(300); } };
 const checks = [];
 const check = (id, label, fn) => checks.push({ id, label, fn });
 const PASS = (detail) => ({ status: "PASS", detail });
@@ -446,31 +450,6 @@ check("key-enter-commits-formula", "Enter commits a formula that ends in a funct
   await press("Control+z"); const back = await val1(7, 6);
   return back === null || back === undefined || back === "" ? PASS("=PI + Enter with the hint list open committed exactly =PI (not a suggestion), moved to G9, and undid in one step") : FAIL(`Ctrl+Z left ${JSON.stringify(back)}`);
 });
-check("paste-empty-says-so", "Pasting an empty clipboard says so in words (never a silent no-op); a real paste says nothing", async () => {
-  await reset(); await click(4, 4);
-  const empty = () => ev(() => { const dt = new DataTransfer(); const e = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }); (document.activeElement || document.body).dispatchEvent(e); });
-  await empty(); await wait(300);
-  const said = await ev(() => window.__notices.slice());
-  const ok = said.some((t) => /nothing to paste/i.test(String(t && t.text || t)));
-  // control: a paste carrying text raises no such notice
-  await ev(() => { window.__notices = []; const dt = new DataTransfer(); dt.setData("text/plain", "x"); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); });
-  await wait(300);
-  const quiet = !(await ev(() => window.__notices.slice())).some((t) => /nothing to paste/i.test(String(t && t.text || t)));
-  return ok && quiet ? PASS("empty paste → 'There's nothing to paste…'; a paste with text → no such notice") : FAIL(`empty paste said ${JSON.stringify(said)}; text paste quiet=${quiet}`);
-});
-check("multi-range-copy-cut-refused", "Ctrl+C and Ctrl+X with several ranges selected say so in words (Excel: 'cannot be used on multiple selections') and copy nothing", async () => {
-  await reset(); await click(0, 0); await heldClick(2, 2, "Control"); await wait(200);
-  const n = (await sel()).length;
-  await ev(() => { window.__notices = []; });
-  await press("Control+c"); const a = await ev(() => window.__notices.slice());
-  await ev(() => { window.__notices = []; });
-  await press("Control+x"); const b = await ev(() => window.__notices.slice());
-  const says = (l) => l.some((t) => /multiple selections/i.test(String(t && t.text || t)));
-  // control: one range copies without that message
-  await click(4, 4); await ev(() => { window.__notices = []; }); await press("Control+c"); const c = await ev(() => window.__notices.slice());
-  if (n < 2) return FAIL(`KNOWN-GOOD ARM: only ${n} range(s) were selected`);
-  return says(a) && says(b) && !says(c) ? PASS("two ranges: Ctrl+C and Ctrl+X both say 'multiple selections'; a single range copies quietly") : FAIL(`copy said ${JSON.stringify(a)}, cut said ${JSON.stringify(b)}, single-range copy said ${JSON.stringify(c)}`);
-});
 check("key-sheet-tabs", "Ctrl+PgDn / Ctrl+PgUp step to the next / previous sheet tab and stop at the ends (Excel)", async () => {
   await reset();
   await inSheet((api) => { const wb = api.getActiveWorkbook(); wb.insertSheet("Second"); wb.insertSheet("Third"); wb.getSheets()[0].activate(); });
@@ -488,15 +467,17 @@ check("key-sheet-tabs", "Ctrl+PgDn / Ctrl+PgUp step to the next / previous sheet
 });
 check("key-nav-home-end-page", "Home, Ctrl+Home, Ctrl+End, Ctrl+Shift+Home/End, PageUp/PageDown and Alt+PageUp/PageDown move or extend the selection (the free Univer build does none of them; the plugin does)", async () => {
   await reset();
+  // Two clicks on the SAME cell within ~0.5 s are a double-click (the editor opens and the keys then belong to it) — every re-click below waits it out.
+  const reclick = async (r, c) => { await wait(650); await click(r, c); };
   const fails = [];
   const expectCell = async (label, want) => { const got = await activeCell(); if (!eq(got, want)) fails.push(`${label}: active ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
   const expectSel = async (label, r1, r2, c1, c2) => { const x = (await sel())[0]; if (!x || x.r1 !== r1 || x.r2 !== r2 || x.c1 !== c1 || x.c2 !== c2) fails.push(`${label}: selected ${x && x.a1} (rows ${x && x.r1}-${x && x.r2}, cols ${x && x.c1}-${x && x.c2}), want rows ${r1}-${r2}, cols ${c1}-${c2}`); };
-  await click(3, 2); await press("Home"); await expectCell("Home", [3, 0]);
-  await click(3, 2); await press("Shift+Home"); await expectSel("Shift+Home", 3, 3, 0, 2); await expectCell("Shift+Home keeps the active cell", [3, 2]);
-  await click(3, 2); await press("Control+Home"); await expectCell("Ctrl+Home", [0, 0]);
+  await reclick(3, 2); await press("Home"); await expectCell("Home", [3, 0]);
+  await reclick(3, 2); await press("Shift+Home"); await expectSel("Shift+Home", 3, 3, 0, 2); await expectCell("Shift+Home keeps the active cell", [3, 2]);
+  await reclick(3, 2); await press("Control+Home"); await expectCell("Ctrl+Home", [0, 0]);
   await press("Control+End"); await expectCell("Ctrl+End (the last used cell, C5)", [4, 2]);
-  await click(3, 2); await press("Control+Shift+Home"); await expectSel("Ctrl+Shift+Home", 0, 3, 0, 2);
-  await click(1, 0); await press("Control+Shift+End"); await expectSel("Ctrl+Shift+End", 1, 4, 0, 2);
+  await reclick(3, 2); await press("Control+Shift+Home"); await expectSel("Ctrl+Shift+Home", 0, 3, 0, 2);
+  await reclick(1, 0); await press("Control+Shift+End"); await expectSel("Ctrl+Shift+End", 1, 4, 0, 2);
   const rows = await inSheet((api, ws) => { const v = ws.getVisibleRange(); return v.endRow - v.startRow; });
   // (after a page move the grid is scrolled and a canvas click point computed from cell geometry no longer maps to that cell — set up with activate())
   const goto = async (r, c) => { await inSheet((api, ws, [rr, cc]) => { ws.getRange(rr, cc).activate(); }, [r, c]); await press("Control+Home"); if (r || c) await inSheet((api, ws, [rr, cc]) => { ws.getRange(rr, cc).activate(); }, [r, c]); await wait(150); };
@@ -511,6 +492,32 @@ check("key-nav-home-end-page", "Home, Ctrl+Home, Ctrl+End, Ctrl+Shift+Home/End, 
   // In the cell editor Home belongs to the text caret: the selection must not jump.
   await goto(3, 2); await press("F2"); await press("Home"); await press("Escape"); await expectCell("Home inside the editor leaves the selection alone", [3, 2]);
   return fails.length ? FAIL(fails.join("; ")) : PASS("Home → A4, Shift+Home → A4:C4 (active C4), Ctrl+Home → A1, Ctrl+End → C5, Ctrl+Shift+Home → A1:C4, Ctrl+Shift+End → A2:C5, PgDn/PgUp a screen, Shift+PgDn extends, Alt+PgDn/PgUp a screen across; Home in the editor did not move the selection");
+});
+check("paste-empty-says-so", "Pasting an empty clipboard says so in words (never a silent no-op); a real paste says nothing", async () => {
+  await reset(); await click(4, 4); await clearNotices();
+  await ev(() => { const dt = new DataTransfer(); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); });
+  await wait(400);
+  const said = await noticesNow();
+  const ok = said.some((t) => /nothing to paste/i.test(t));
+  // control: a paste carrying text raises no such notice
+  await clearNotices();
+  await ev(() => { const dt = new DataTransfer(); dt.setData("text/plain", "x"); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); });
+  await wait(400);
+  const quiet = !(await noticesNow()).some((t) => /nothing to paste/i.test(t));
+  return ok && quiet ? PASS("empty paste → 'There's nothing to paste…'; a paste with text → no such notice") : FAIL(`empty paste said ${JSON.stringify(said)}; text paste quiet=${quiet}`);
+});
+check("multi-range-copy-cut-refused", "Ctrl+C and Ctrl+X with several ranges selected say so in words (Excel: 'cannot be used on multiple selections') and copy nothing", async () => {
+  await reset(); await click(0, 0); await heldClick(2, 2, "Control"); await wait(200);
+  const n = (await sel()).length;
+  await clearNotices();
+  await press("Control+c"); const a = await noticesNow();
+  await clearNotices();
+  await press("Control+x"); const b = await noticesNow();
+  const says = (l) => l.some((t) => /multiple selections/i.test(t));
+  // control: one range copies without that message
+  await click(4, 4); await clearNotices(); await press("Control+c"); const c = await noticesNow();
+  if (n < 2) return FAIL(`KNOWN-GOOD ARM: only ${n} range(s) were selected`);
+  return says(a) && says(b) && !says(c) ? PASS("two ranges: Ctrl+C and Ctrl+X both say 'multiple selections'; a single range copies quietly") : FAIL(`copy said ${JSON.stringify(a)}, cut said ${JSON.stringify(b)}, single-range copy said ${JSON.stringify(c)}`);
 });
 check("key-f2", "F2 edits the cell in place with its content", async () => {
   await reset(); await click(0, 1); await press("F2"); await page.keyboard.type("X"); await press("Enter"); await wait(400);
