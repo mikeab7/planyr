@@ -2,7 +2,7 @@
  * opening on the Spreadsheet, finds the right chunks, and fails the BUILD when it cannot. */
 import { describe, it, expect } from "vitest";
 import vm from "node:vm";
-import { spreadsheetChunkSet, preloadScript, LAST_ROUTE_KEY } from "../scripts/vite-plugin-spreadsheet-preload.mjs";
+import { spreadsheetChunkSet, preloadScript, isAppPage, LAST_ROUTE_KEY } from "../scripts/vite-plugin-spreadsheet-preload.mjs";
 import { readFileSync } from "node:fs";
 
 const chunk = (fileName, facadeModuleId, imports = []) => ({ type: "chunk", fileName, facadeModuleId, imports });
@@ -63,5 +63,14 @@ describe("preloadScript — only a page opening on the Spreadsheet pays", () => 
 describe("registration", () => {
   it("the app's Vite config registers the plugin", () => {
     expect(readFileSync(new URL("../vite.config.js", import.meta.url), "utf8")).toMatch(/^\s*spreadsheetPreload\(\),/m);
+  });
+});
+
+describe("isAppPage — only the app's own index.html is preloaded for (the ui-audit harness build has no Model chunk and must still build)", () => {
+  it("accepts the root index.html and refuses every other entry page", () => {
+    expect(isAppPage({ path: "/index.html" })).toBe(true);
+    expect(isAppPage({ path: "/ui-audit/harness/grading-harness.html", filename: "/r/ui-audit/harness/grading-harness.html" })).toBe(false);
+    expect(isAppPage({ path: "/landing.html" })).toBe(false);
+    expect(isAppPage(null)).toBe(false);
   });
 });

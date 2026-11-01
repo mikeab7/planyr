@@ -42,6 +42,12 @@ export function preloadScript(files, base = "/") {
     + `if(!go)return;var f=${list},d=document;for(var i=0;i<f.length;i++){var l=d.createElement("link");l.rel="modulepreload";l.href=f[i];d.head.appendChild(l)}}catch(e){}})();`;
 }
 
+/** True only for the app's own root index.html (pure — unit-tested). */
+export function isAppPage(ctx) {
+  const p = String((ctx && (ctx.path || ctx.filename)) || "").replace(/\\/g, "/");
+  return p === "/index.html" || /(^|\/)planyr\/index\.html$/.test(p) || p === "index.html";
+}
+
 export default function spreadsheetPreload() {
   let base = "/";
   return {
@@ -52,7 +58,9 @@ export default function spreadsheetPreload() {
       order: "post",
       handler(html, ctx) {
         if (!ctx || !ctx.bundle) return html;
-        // only the main app page (the standalone landing / legal pages are not built through here)
+        // only the main app page: a build with another entry (the ui-audit harness builds, the standalone landing / legal pages) has no Model chunk
+        // to find, and that is not a failure — but the real index.html below still throws if its chunks are missing (LOUD-FAILURE)
+        if (!isAppPage(ctx)) return html;
         const files = spreadsheetChunkSet(ctx.bundle);
         return { html, tags: [{ tag: "script", children: preloadScript(files, base), injectTo: "head-prepend" }] };
       },
