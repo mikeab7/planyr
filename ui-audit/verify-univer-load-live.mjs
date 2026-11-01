@@ -145,7 +145,7 @@ try {
   }
   for (let i = 0; i < 12; i++) {                                // let the calculation settle and its results be remembered on this device (polled, with what is pending)
     await page.waitForTimeout(1000);
-    const st = await page.evaluate(() => new Promise((res) => { const pend = window.__planyrUniverRead.pending(); try { const rq = indexedDB.open("planyr"); rq.onsuccess = () => { const q = rq.result.transaction("kv", "readonly").objectStore("kv").getAllKeys(); q.onsuccess = () => res({ pend, keys: q.result.filter((k) => String(k).startsWith("model:calc:")).length }); }; rq.onerror = () => res({ pend, keys: "err" }); } catch (e) { res({ pend, keys: String(e) }); } }));
+    const st = await page.evaluate(() => new Promise((res) => { const pend = window.__planyrUniverRead.pending(); setTimeout(() => res({ pend, keys: "timeout" }), 4000); try { const rq = indexedDB.open("planyr"); rq.onsuccess = () => { const q = rq.result.transaction("kv", "readonly").objectStore("kv").getAllKeys(); q.onsuccess = () => res({ pend, keys: q.result.filter((k) => String(k).startsWith("model:calc:")).length }); }; rq.onerror = () => res({ pend, keys: "err" }); } catch (e) { res({ pend, keys: String(e) }); } }));
     if (process.env.DIAG && i === 11) console.log('   idbLog', JSON.stringify(await page.evaluate(() => window.__idbLog)));
     if (process.env.DIAG) console.log(`   t+${i + 1}s pending=${st.pend} calc keys=${st.keys}`);
     if (st.keys === 1) break;
