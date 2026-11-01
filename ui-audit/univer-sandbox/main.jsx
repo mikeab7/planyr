@@ -4,7 +4,7 @@
  * app (signed in as the test account) — this page exists because the sandbox has no owner account to switch on. */
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import UniverSheet from "../../src/workspaces/model/components/UniverSheet.jsx";
+import UniverSheet, { prewarmFramework } from "../../src/workspaces/model/components/UniverSheet.jsx";
 import { createWorkbook, migrateWorkbook } from "../../src/workspaces/model/lib/sheetModel.js";
 import { evaluateWorkbook } from "../../src/workspaces/model/lib/sheetEngine.js";
 
@@ -43,4 +43,9 @@ function Host() {
     </div>
   );
 }
-createRoot(document.getElementById("root")).render(<Host />);
+// ?prewarm=1 — build the framework instance AHEAD of the mount, exactly as the Spreadsheet tab's hover does (components/univerFramework.js), and give it
+// time to reach Rendered, so the whole parity checklist can be run against the ADOPTED-instance path (verify-univer-parity.mjs, PARITY_PREWARM=1).
+if (new URLSearchParams(location.search).get("prewarm") === "1") {
+  window.__prewarmBuilt = prewarmFramework();
+  setTimeout(() => createRoot(document.getElementById("root")).render(<Host />), 1500);
+} else createRoot(document.getElementById("root")).render(<Host />);

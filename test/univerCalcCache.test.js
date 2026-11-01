@@ -10,12 +10,11 @@ const wbWith = (cells) => { let wb = createWorkbook(); let sh = wb.sheets[0].she
 const base = () => wbWith([[0, 0, "2"], [0, 1, "3"], [0, 2, "=A1*B1"], [1, 0, "10"], [1, 2, "=SUM(A1:A2)"]]);
 
 describe("calcHash — equal inputs only", () => {
-  it("is stable for the same workbook and names, and changes with any cell, any name, or the names' order-independent content", () => {
+  it("is stable for the same workbook and names, and changes with any cell", () => {
     const a = canonicalJson(migrateWorkbook(base()));
-    expect(calcHash(a, { x: 1 })).toBe(calcHash(a, { x: 1 }));
-    expect(calcHash(a, { x: 1 })).not.toBe(calcHash(a, { x: 2 }));
+    expect(calcHash(a)).toBe(calcHash(a));
     const edited = canonicalJson(migrateWorkbook(wbWith([[0, 0, "2"], [0, 1, "4"], [0, 2, "=A1*B1"], [1, 0, "10"], [1, 2, "=SUM(A1:A2)"]])));
-    expect(calcHash(edited, { x: 1 })).not.toBe(calcHash(a, { x: 1 }));
+    expect(calcHash(edited)).not.toBe(calcHash(a));
   });
   it("hashes differ for different strings (no trivial collision) and are deterministic", () => {
     expect(cyrb53("abc")).toBe(cyrb53("abc")); expect(cyrb53("abc")).not.toBe(cyrb53("abd")); expect(cyrb53("abc", 7)).not.toBe(cyrb53("abc", 0));
@@ -23,12 +22,13 @@ describe("calcHash — equal inputs only", () => {
 });
 
 describe("cacheUnsafe — volatile and spilling formulas are never cached", () => {
-  it.each(["=TODAY()", "=NOW()+1", "=RAND()", "=OFFSET(A1,1,0)", "=INDIRECT(\"A1\")", "=SEQUENCE(3)", "=FILTER(A1:A3,A1:A3>1)", "=UNIQUE(A1:A9)", "=sort(A1:A3)"])("%s", (f) => {
+  it.each(["=TODAY()", "=NOW()+1", "=RAND()", "=OFFSET(A1,1,0)", "=INDIRECT(\"A1\")", "=SEQUENCE(3)", "=FILTER(A1:A3,A1:A3>1)", "=UNIQUE(A1:A9)", "=sort(A1:A3)", "=Site.Acres*2", "=SUM(A1:A2)+Plan.Building1.SF", "=Comp.Foo.RentPSF"])("%s", (f) => {
     expect(cacheUnsafe(wbWith([[0, 0, f]]))).toBe(true);
   });
   it("an ordinary workbook is safe; text that merely mentions a function is not a formula", () => {
     expect(cacheUnsafe(base())).toBe(false);
     expect(cacheUnsafe(wbWith([[0, 0, "TODAY() is a function"], [0, 1, "=SUM(A1:A1)"]]))).toBe(false);
+    expect(cacheUnsafe(wbWith([[0, 0, "=MySite.Total+1"], [0, 1, "=Sheet2.A1"]]))).toBe(false);          // a user's own dotted name / sheet reference is not live project data
   });
 });
 
@@ -44,8 +44,8 @@ describe("collectValues / seedValues — only formula cells, round trip through 
     expect(data.sheets[sheetId].cellData[0][2].v).toBe(6);
     expect(data.sheets[sheetId].cellData[0][0].v).toBe(2);                         // untouched literal
   });
-  it("a snapshot holding a volatile or spilling formula caches nothing", () => {
-    for (const f of ["=TODAY()", "=SEQUENCE(3)"]) expect(collectValues({ sheets: { s: { cellData: { 0: { 0: { f, v: 1, t: 2 } } } } }, resources: [] })).toBeNull();
+  it("a snapshot holding a volatile, spilling or project-data formula caches nothing", () => {
+    for (const f of ["=TODAY()", "=SEQUENCE(3)", "=Site.Acres*2"]) expect(collectValues({ sheets: { s: { cellData: { 0: { 0: { f, v: 1, t: 2 } } } } }, resources: [] })).toBeNull();
   });
   it("a snapshot carrying array-formula data caches nothing", () => {
     const snap = { sheets: { s: { cellData: { 0: { 0: { f: "=A2", v: 1, t: 2 } } } } }, resources: [{ name: "SHEET_ARRAY_FORMULA_PLUGIN", data: JSON.stringify({ s: { 0: { 0: { startRow: 0 } } } }) }] };
@@ -60,7 +60,7 @@ describe("collectValues / seedValues — only formula cells, round trip through 
 });
 
 describe("entryFits — the one rule", () => {
-  const wb = base(); const h = calcHash(canonicalJson(migrateWorkbook(wb)), {});
+  const wb = base(); const h = calcHash(canonicalJson(migrateWorkbook(wb)));
   it("needs an equal hash, values, and a safe workbook", () => {
     expect(entryFits({ h, v: { s: {} } }, h, wb)).toBe(true);
     expect(entryFits({ h: h + "x", v: { s: {} } }, h, wb)).toBe(false);

@@ -6,6 +6,7 @@
  *                   have turned Univer's recalculation off)
  *   4  STALE         the stored workbook is changed BEHIND the cache's back → not seeded, values correct (a hash mismatch is a miss)
  *   5  VOLATILE      a workbook with =TODAY() is never seeded
+ *   6  PROJECT DATA  a workbook reading live project data (=Site.Acres) is never seeded — it changes without any edit to the workbook
  * KNOWN-GOOD ARM: arm 1's values are compared with an independent JS sum, and arm 2's seeded count must equal the formula count (else VOID).
  * Run: node ui-audit/verify-univer-calc-cache.mjs [--dist dist] */
 import { chromium } from "@playwright/test";
@@ -20,11 +21,12 @@ const PORT = 4197, BASE = `http://localhost:${PORT}`, ROWS = 200, COLS = 12;
 let failures = 0, voided = null;
 const ok = (name, cond, extra = "") => { console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
 
-function workbook({ volatile = false, a1 = null } = {}) {
+function workbook({ volatile = false, projectData = false, a1 = null } = {}) {
   const wb = createWorkbook(); const sh = wb.sheets[0].sheet; const cells = {};
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) cells[`${sh.columns[c].id}:${r}`] = c === COLS - 1 ? `=SUM(A${r + 1}:K${r + 1})` : String(((r * 31 + c * 7) % 1000) + 0.5);
   if (a1 !== null) cells[`${sh.columns[0].id}:0`] = String(a1);
   if (volatile) cells[`${sh.columns[0].id}:${ROWS + 1}`] = "=TODAY()";
+  if (projectData) cells[`${sh.columns[0].id}:${ROWS + 1}`] = "=Site.Acres+0";
   return { ...wb, sheets: [{ ...wb.sheets[0], sheet: { ...sh, rowCount: ROWS + 10, cells } }] };
 }
 const rowSum = (r, a1 = null) => { let s = 0; for (let c = 0; c < COLS - 1; c++) s += (r === 0 && c === 0 && a1 !== null) ? a1 : (((r * 31 + c * 7) % 1000) + 0.5); return s; };
@@ -91,6 +93,12 @@ try {
     let p = await s.open(); await p.waitForTimeout(4500); await p.close();
     p = await s.open(); const c = await s.calc(p);
     ok("5 VOLATILE: a workbook with =TODAY() is never seeded", c.seeded === 0, `seeded ${c.seeded}`);
+    await p.close(); await s.ctx.close(); }
+  // ── 6 live project data ──
+  { const s = await session("p", workbook({ projectData: true }));
+    let p = await s.open(); await p.waitForTimeout(4500); await p.close();
+    p = await s.open(); const c = await s.calc(p);
+    ok("6 PROJECT DATA: a workbook reading =Site.Acres is never seeded", c.seeded === 0, `seeded ${c.seeded}`);
     await p.close(); await s.ctx.close(); }
   await browser.close();
 } catch (e) { console.log("ABORT:", String(e.message).split("\n")[0]); failures++; }

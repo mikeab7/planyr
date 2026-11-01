@@ -216,7 +216,9 @@ export function installUniverTools(deps) {
     }
     if (extensionOn === main) return;
     try { if (!extension) extension = makeExtension(); main.register(extension); extensionOn = main; } catch (err) { console.error("UniverTools: could not register the trace layer", err); }   // eslint-disable-line no-console
-    recompute();
+    // NOT synchronously: the first recompute converts the whole sheet back to a Planyr workbook and scans it for inconsistent formulas (~50 ms on
+    // 12,000 cells), right on the path to the first paint, and nothing on screen needs the answer yet (the corner markers appear a beat later).
+    scheduleRefresh();
   };
 
   // ---- 3. commands ----------------------------------------------------------------------------------------------------------

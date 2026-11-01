@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { pruneHyphenationLoaders, MIN_ENTRIES } from "../scripts/vite-plugin-univer-prune.mjs";
+import { pruneHyphenationLoaders, shortenRenderDelay, RENDER_DELAY_MS, MIN_ENTRIES } from "../scripts/vite-plugin-univer-prune.mjs";
 import { isLangFile } from "../ui-audit/lib/univerLangFiles.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -58,5 +58,31 @@ describe("the prune is registered everywhere a Univer bundle is made", () => {
     const sb = read("ui-audit/univer-sandbox/vite.config.mjs");
     expect(sb).toMatch(/plugins:\s*\[react\(\),\s*univerPrune\(\)\]/);
     expect(sb).toMatch(/worker:\s*\{\s*plugins:\s*\(\)\s*=>\s*\[univerPrune\(\)\]\s*\}/);
+  });
+});
+
+describe("shortenRenderDelay — Univer's fixed 300 ms before it paints", () => {
+  const shape = (n) => `class C {\n\t_bootstrap() {\n\t\t\ttry {\n\t\t\t\tthis._renderTimeout = window.setTimeout(() => {\n\t\t\t\t\tdoRender();\n\t\t\t\t\tthis.stage = 2;\n\t\t\t\t}, ${n});\n\t\t\t} catch (e) {}\n\t}\n}\nsetTimeout(x, 300);`;
+  it("changes ONLY that timer's delay, leaves its body and every other 300 alone", () => {
+    const { code } = shortenRenderDelay(shape(300), 0);
+    expect(code).toContain("}, 0);\n\t\t\t} catch (e) {}");
+    expect(code).toContain("doRender();");
+    expect(code).toContain("setTimeout(x, 300);");              // an unrelated timer elsewhere in the file is untouched
+    expect(code).not.toMatch(/\}, 300\);\n\t\t\t\} catch/);
+  });
+  it("FAILS the build when the timer is not found exactly once, or its close is not where it was", () => {
+    expect(() => shortenRenderDelay("nothing here")).toThrow(/moved the 300 ms render delay/);
+    expect(() => shortenRenderDelay(shape(300) + shape(300))).toThrow(/exactly one/);
+    expect(() => shortenRenderDelay("this._renderTimeout = window.setTimeout(() => {\n x \n} , 250);")).toThrow(/could not find/);
+  });
+  it.skipIf(!existsSync(join(ROOT, "node_modules/@univerjs/ui/lib/es/index.js")))("works on the REAL installed @univerjs/ui: exactly one delay moves, to RENDER_DELAY_MS", () => {
+    const src = readFileSync(join(ROOT, "node_modules/@univerjs/ui/lib/es/index.js"), "utf8");
+    const { code } = shortenRenderDelay(src);
+    expect(code.length - src.length).toBe(String(RENDER_DELAY_MS).length - 3);
+    const at = code.indexOf("this._renderTimeout = window.setTimeout(");
+    expect(code.slice(at, at + 2600)).toMatch(new RegExp(`\\}, ${RENDER_DELAY_MS}\\);\\n\\t+\\} catch`));
+  });
+  it("is applied to @univerjs/ui in the build (the plugin dispatches on the file)", () => {
+    expect(readFileSync(join(ROOT, "scripts/vite-plugin-univer-prune.mjs"), "utf8")).toMatch(/UI_FILE\.test\(file\)\) return \{ code: shortenRenderDelay\(code\)\.code/);
   });
 });

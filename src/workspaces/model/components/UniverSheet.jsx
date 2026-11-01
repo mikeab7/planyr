@@ -67,6 +67,8 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
   // ---- mount: create Univer once, load the workbook, wire edit detection ----------------------------------------------
   useEffect(() => {
     let disposed = false;
+    const mk = (n) => { try { performance.mark(`uv:${n}`); } catch (_) { /* marks are a courtesy */ } };   // read by ui-audit/measure-univer-tti.mjs --marks
+    mk("effect");
     const L = live.current;
     try {
       // A framework instance built ahead of time (components/univerFramework.js, started when the pointer rested on the tab) is TAKEN here:
@@ -81,6 +83,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         L.unitId = pre.unitId;
       }
       noteGridMounted(); L.counted = true;
+      mk("framework");
       const { univer, univerAPI, worker } = fw;
       L.worker = worker;
       // A worker that dies mid-session would leave every formula silently stale: say so, and where it can be fixed (a reload).
@@ -109,7 +112,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
             if (L.save.hasPending() && tries < 6) { scheduleCalcWrite(tries + 1); return; }
             try {
               if (!L.storedCanon) return;
-              const h = calcHash(L.storedCanon, L.loadDefs || {});
+              const h = calcHash(L.storedCanon);
               const have = peekCalc(L.viewKey);
               if (have && have.h === h) return;                                   // nothing new to remember
               const fWb = univerAPI.getWorkbook(L.unitId);
@@ -134,6 +137,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         ];
         L.circularSub = { dispose: () => subs.forEach((d) => { try { d.dispose(); } catch (_) { /* already gone */ } }) };
       } catch (_) { /* no formula facade in this build */ }
+      mk("guard+circular");
       L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
       // Curved undo / redo (NEW-2, B2574353): toolbar glyphs resolve by name through Univer's IconManager (not the facade's
       // registerComponent, which is a different registry). Replace the built-in ones; the toolbar draws them on its next render.
@@ -159,8 +163,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         try {
           const entry = peekCalc(L.viewKey);
           L.storedCanon = canonicalJson(migrated);                              // the workbook as it is STORED — what the next open will load
-          L.loadDefs = defs;                                                    // the names THIS load could see; later-arriving names (comps) recalculate their dependents as ever
-          const h = calcHash(L.storedCanon, defs);
+          const h = calcHash(L.storedCanon);
           L.cacheSeeded = entryFits(entry, h, migrated) ? seedValues(data, entry.v) : 0; L.cacheHash = h;
         } catch (_) { L.cacheSeeded = 0; }
         if (L.unitId) { try { univerAPI.disposeUnit(L.unitId); } catch (_) { /* already gone */ } }
@@ -294,7 +297,9 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       });
       L.off = off;
 
+      mk("keys+icons+save");
       load(workbook);
+      mk("load");
       // Indent (needs the sheets services, which exist once a workbook does): drawn + Increase/Decrease buttons and command ids (lib/univerIndent.js — Univer 1.x has no indent of its own).
       L.indent = installUniverIndent({
         univerAPI, injector: L.injector, SheetInterceptorService, INTERCEPTOR_POINT, InterceptorEffectEnum,
@@ -302,6 +307,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       });
       // The Planyr-only tools (NEW-1, cutover step 6): consistency flags + panel, trace arrows, command palette (Ctrl+K), Name Manager, the
       // input / formula colour convention. Everything is read through the bridge and written through Univer commands (lib/univerTools/).
+      mk("indent");
       L.tools = installUniverTools({
         univerAPI, injector: L.injector, host: hostRef.current, viewKey: L.viewKey,
         U: {
@@ -315,6 +321,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         getProjectNames: () => L.projectNames || {},
         notice: (t) => { if (live.current.onNotice) live.current.onNotice(t); },
       });
+      mk("tools");
       setTools(L.tools);
       ensureHeaderGate(L.unitId);
       if (L.onReady) {
@@ -384,6 +391,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         gateInstalls: () => (e2e() ? { n: L.gateInstalls || 0, error: L.gateError || null } : null),
         pending: () => (e2e() ? L.save.hasPending() : null),
       };
+      mk("done");
     } catch (err) {
       setError(err);
       // eslint-disable-next-line no-console

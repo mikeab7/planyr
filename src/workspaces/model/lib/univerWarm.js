@@ -17,12 +17,18 @@ import { migrateLegacyGridChoice, readRegularGrid } from "./gridChoice.js";
 /** Will THIS device show the Univer grid (as far as it can tell without asking who the user is)? */
 export const univerWantedHere = (storage = typeof localStorage === "undefined" ? null : localStorage) => !readRegularGrid(storage);
 
+/** The project the page is on, from the URL — the Spreadsheet tab opens THIS project's workbook, whose scope key (ModelApp's `viewPrefsKey`) is the project id. */
+const projectIdFromHash = (hash = typeof location === "undefined" ? "" : location.hash) => { const m = /^#\/project\/([^/?#]+)/.exec(hash || ""); return m ? decodeURIComponent(m[1]) : null; };
+
 let warm = null;
 /** Start loading + evaluating the Univer chunk. Returns the promise (or null when this device will not use the grid). */
 export function warmUniver({ force = false, storage } = {}) {
   if (warm) return warm;
   if (!force && !univerWantedHere(storage)) return null;
   migrateLegacyGridChoice(storage);
+  // Read this project's remembered formula results from the device store NOW (lib/univerCalcCache.js), so they are in memory when the grid mounts.
+  // (A dynamic import: the always-loaded shell must not take the storage layer in statically.)
+  try { const id = projectIdFromHash(); if (id) import("./univerCalcCache.js").then((m) => m.primeCalcCache(id)).catch(() => { /* best-effort */ }); } catch (_) { /* best-effort */ }
   warm = import("../components/UniverSheet.jsx").then((mod) => {
     // Chunk in hand: now build the framework instance ahead of time, at idle (components/univerFramework.js — it is a no-op when a grid is
     // already mounted, and UniverSheet takes the waiting instance when it mounts). Held to idle because building it costs main-thread time.

@@ -14,15 +14,13 @@
  * Cost of the choice: the FIRST open on a device calculates as today; every open after it does not.
  *
  * CORRECT BY CONSTRUCTION. An entry is used only when its `h` equals the hash of EXACTLY what is about to load — the whole workbook (every
- * cell, every sheet) plus the project names that become defined names — and the workbook holds no volatile function. Any edit, from any
+ * cell, every sheet) — and the workbook reads nothing that can change without an edit (no volatile function, no spill, no live project data). Any edit, from any
  * source (this grid, the owner's regular-grid hatch, another device's cloud copy, an import), changes the hash, so a stale value can never
  * be shown. A wrong guess costs nothing: the entry is ignored and Univer calculates as before.
- * THE NAMES ARE KEYED AS THE LOAD SAW THEM. Site.* / Plan.* arrive synchronously with the workbook, Comp.* only after a network fetch, so a key
- * that included the names present at WRITE time would never match the names present at the next LOAD. The key holds the names the load could
- * see; names that arrive later are applied the way they always were — as a defined-name change, which recalculates exactly their dependents.
- * The one visible consequence: a formula that reads a late-arriving name shows its last settled answer until that name lands (it used to show
- * #NAME? or blank), and then the live answer.
- * NEVER SEEDED: a workbook with a volatile function (NOW/TODAY/RAND…: its answer changes without an edit) or an array/spilling formula
+ * LIVE PROJECT DATA IS NEVER CACHED. A formula that reads `Site.*` / `Plan.*` / `Comp.*` depends on the project's plan and comps, which change without any edit
+ * to the workbook — and which arrive at different moments depending on how the tab was reached (measured: the names visible at the grid's first load
+ * differ between a direct URL and a tab click), so no key over them can be both right and stable. A workbook containing one is simply not cached.
+ * ALSO NEVER SEEDED: a workbook with a volatile function (NOW/TODAY/RAND…: its answer changes without an edit) or an array/spilling formula
  * (Univer keeps spilled cells apart from the cell the formula sits in; seeding only the anchor would lose the spill).
  * Pure functions + a tiny async store; no Univer import (the Model chunk primes the read, the Univer chunk consumes it). */
 import { idbGet, idbPut } from "../../site-planner/lib/localDb.js";
@@ -31,6 +29,8 @@ export const CALC_KEY_PREFIX = "model:calc:v1:";
 export const MAX_ENTRY_CHARS = 2_000_000;
 /** Functions whose answer can change with no edit at all, or that read what a cell-by-cell cache cannot see. */
 export const VOLATILE_RE = /\b(NOW|TODAY|RAND|RANDBETWEEN|RANDARRAY|OFFSET|INDIRECT|CELL|INFO)\s*\(/i;
+/** A formula that reads live project data (Site.Acres, Plan.Building1.SF, Comp.<title>.RentPSF…). */
+export const PROJECT_NAME_RE = /(^|[^A-Za-z0-9_.])(Site|Plan|Comp)\.[A-Za-z_]/i;
 /** Functions whose result can SPILL into neighbouring cells. */
 export const SPILL_RE = /\b(SEQUENCE|FILTER|SORT|SORTBY|UNIQUE|TRANSPOSE|MMULT|MINVERSE|TEXTSPLIT|XLOOKUP|HSTACK|VSTACK|TAKE|DROP|EXPAND|WRAPROWS|WRAPCOLS|CHOOSEROWS|CHOOSECOLS|RANDARRAY|ARRAYFORMULA|FLATTEN)\s*\(/i;
 
@@ -43,10 +43,9 @@ export function cyrb53(str, seed = 0) {
   return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
-/** The key of what is about to load: the canonical workbook text + the defined names it will carry. Equal text ⇒ equal inputs. */
-export function calcHash(canonicalWorkbook, definedNames) {
-  const defs = JSON.stringify(definedNames || {});
-  return `${cyrb53(canonicalWorkbook)}.${cyrb53(canonicalWorkbook, 7)}.${canonicalWorkbook.length}.${cyrb53(defs, 3)}`;
+/** The key of what is about to load: the canonical workbook text. Equal text ⇒ equal inputs (nothing else may feed a cached formula — see `cacheUnsafe`). */
+export function calcHash(canonicalWorkbook) {
+  return `${cyrb53(canonicalWorkbook)}.${cyrb53(canonicalWorkbook, 7)}.${canonicalWorkbook.length}`;
 }
 
 /** Does any formula in this Planyr workbook make a cache unsafe (volatile or spilling)? */
@@ -54,7 +53,7 @@ export function cacheUnsafe(workbook) {
   for (const entry of (workbook && workbook.sheets) || []) {
     const cells = (entry.sheet && entry.sheet.cells) || {};
     for (const raw of Object.values(cells)) {
-      if (typeof raw === "string" && raw.charCodeAt(0) === 61 /* = */ && (VOLATILE_RE.test(raw) || SPILL_RE.test(raw))) return true;
+      if (typeof raw === "string" && raw.charCodeAt(0) === 61 /* = */ && (VOLATILE_RE.test(raw) || SPILL_RE.test(raw) || PROJECT_NAME_RE.test(raw))) return true;
     }
   }
   return false;
@@ -66,7 +65,7 @@ export function collectValues(snap) {
   if (!snap || typeof snap !== "object" || !snap.sheets) return null;
   // a formula that is volatile or can spill (the same rule as `cacheUnsafe`, read from the snapshot's own formula text)
   for (const sheet of Object.values(snap.sheets)) for (const row of Object.values(sheet.cellData || {})) for (const cell of Object.values(row || {})) {
-    if (cell && typeof cell.f === "string" && (VOLATILE_RE.test(cell.f) || SPILL_RE.test(cell.f))) return null;
+    if (cell && typeof cell.f === "string" && (VOLATILE_RE.test(cell.f) || SPILL_RE.test(cell.f) || PROJECT_NAME_RE.test(cell.f))) return null;
   }
   for (const res of snap.resources || []) {
     if (/ARRAY|SPILL/i.test(String(res.name)) && res.data && !/^\s*(\{\s*\}|\[\s*\]|null|)\s*$/.test(String(res.data))) {
