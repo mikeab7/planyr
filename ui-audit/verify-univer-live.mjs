@@ -53,7 +53,7 @@ try {
   const realAdmin = await page.evaluate(async () => { const r = await window.pfSupabase.rpc("is_admin"); return r.error ? "error:" + r.error.message : r.data; });
   ok("A0 the test account is NOT an admin per the real is_admin() RPC (so the next checks really are the non-admin view)", realAdmin === false, `rpc says ${JSON.stringify(realAdmin)}`);
   if (realAdmin !== false) { voided = true; throw new Error("VOID — the test account answered is_admin = " + JSON.stringify(realAdmin)); }
-  const gridState = async () => ({ univer: await page.locator('[data-testid="univer-grid"] canvas').count(), old: await page.locator('[data-testid="model-sheet"]').count() });
+  const gridState = async () => ({ univer: await page.locator('[data-testid="univer-grid"]').count(), old: await page.locator('[data-testid="model-sheet"]').count() });
   const tOpen = Date.now();
   await openSheet();
   await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
@@ -123,6 +123,7 @@ try {
   const LIVE_IDS = ["undo-typing", "bare-letter", "headers-fixed", "header-select", "ctrl-click", "key-bold", "key-italic", "key-underline", "key-select-all", "key-f2", "key-f4", "key-alt-enter", "key-ctrl-enter", "key-fill", "clip-internal", "clip-cut", "fill-handle", "undo-redo-all",
     // the Excel keys the Planyr plugin adds (NEW-1, B2573632) — the same strict checks as the sandbox run
     "key-strike", "key-format-cells", "key-currency", "key-percent", "key-number", "key-date", "key-general", "key-border", "key-row-col", "key-insert-delete", "key-hide", "key-today", "key-copy-above",
+    "key-nav-basic", "key-nav-home-end-page", "key-enter-commits-formula", "key-sheet-tabs", "paste-empty-says-so", "multi-range-copy-cut-refused",   // the cutover fixes (B2604256 / B2604258)
     "excel-keys-editor-guard", "excel-keys-namebox-guard", "alt-keytips", "alt-h-o-i", "alt-h-o-a", "alt-h-o-w", "alt-h-o-h", "alt-h-b-a-n-o-t", "alt-h-h-h-f-c", "alt-h-a-l-c-r-t-m-b", "alt-h-5-h-6", "alt-h-w", "alt-h-m-m-u-c", "alt-h-i-r-c-h-d-r-c", "alt-h-e-a-f-c", "alt-h-s-s-o-f", "alt-w-f-f-r-c", "alt-h-0-h-9-h-k-h-p-h-1-3-h-n"];
   // KNOWN-GOOD ARM for coordinates on the real page
   await liveReset();
