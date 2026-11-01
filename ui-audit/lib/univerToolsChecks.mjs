@@ -37,7 +37,7 @@ export function registerUniverToolsChecks(h) {
   };
   const ORANGE = "r > 150 && g < 140 && b < 90 && r - b > 80";            // the flag marker (#C2410C)
   const ARROW = "b > 150 && b - r > 80 && g < 170";                   // the trace arrow (#2563EB)
-  const INPUT_BLUE = "b > 120 && b - r > 60 && g < 150";                        // typed-input text (#1D4ED8)
+  const INPUT_BLUE = "b > 120 && b - r > 60 && g < 150";                        // typed-input text (#1E40AF)
   const cornerClip = async (r, c) => { const p = await pt(r, c); return { x: p.left + 1, y: p.top + 1, width: 11, height: 11 }; };
   const gridClip = async () => { const a = await pt(0, 0), b = await pt(9, 5); return { x: a.left, y: a.top, width: b.right - a.left, height: b.bottom - a.top }; };
   const park = () => click(20, 10);
@@ -221,7 +221,7 @@ export function registerUniverToolsChecks(h) {
     const on = await inkOf(0);
     // the colour is a DRAWING choice: nothing about it reaches the saved workbook
     const sheet = await savedSheet();
-    const unchanged = sheet && Object.values(sheet.styles || {}).every((s) => !/^#(1D4ED8|15803D)$/i.test(String(s.color || "")));
+    const unchanged = sheet && Object.values(sheet.styles || {}).every((s) => !/^#(1D4ED8|1E40AF|15803D)$/i.test(String(s.color || "")));
     return manual < 3 && off < 3 && on >= 12 && unchanged
       ? PASS(`input blue ${input} px, formula ${formula} px; a red font colour won (${manual} blue px); toggled off ${off} px, back on ${on} px; no colour written into the saved cells`)
       : FAIL(`manual-colour cell ${manual} blue px (want <3); toggled off ${off} (want <3); back on ${on} (want ≥12); saved styles untouched ${unchanged}`);

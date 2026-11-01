@@ -75,7 +75,7 @@ export function withDismissal(sidecar, sheetId, key, dismissed) {
 /** Blue for a typed input, green for a formula that links to another sheet, nothing for an ordinary formula (it keeps the grid's
  *  text colour) — the old grid's convention (`SheetView` AUTO_COLOR_TOKEN: `--info-text` / `--success-text`). Concrete colours,
  *  because Univer's canvas takes a colour string; its dark mode inverts them through its own colour service, as it does any colour. */
-export const AUTO_COLORS = Object.freeze({ input: "#1D4ED8", "cross-sheet": "#15803D" }); // design-exempt: canvas text colour string = the old grid's --info-text / --success-text, resolved (no var() on a canvas)
+export const AUTO_COLORS = Object.freeze({ input: "#1E40AF", "cross-sheet": "#15803D" }); // design-exempt: canvas text colour string = the old grid's --info-text / --success-text, resolved (no var() on a canvas)
 
 const KIND_CACHE = new Map();
 /** "input" | "formula" | "cross-sheet" | null (empty) for one cell's raw text. Runs the OLD grid's `cellColorKind` on a one-cell

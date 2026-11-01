@@ -1197,7 +1197,7 @@ test.describe("Model workspace — Stage 3 (multi-sheet workbooks, tab strip)", 
   });
 });
 
-/** Pixels of the two auto-colours (#1D4ED8 input blue, #15803D cross-sheet green) inside a cell's interior — the grid is a canvas,
+/** Pixels of the two auto-colours (#1E40AF input blue, #15803D cross-sheet green) inside a cell's interior — the grid is a canvas,
  *  so a colour is read off what was PAINTED. Same expressions the ui-audit tools check uses. */
 const BLUE = "b > 120 && b - r > 60 && g < 150";
 const GREEN = "g > 90 && g - r > 50 && g - b > 30";
