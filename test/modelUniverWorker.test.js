@@ -24,8 +24,10 @@ describe("lib/univerFormulaWorker.js — worker-safe", () => {
   });
 });
 
-describe("UniverSheet.jsx — the grid's side of the worker", () => {
-  const src = read("src/workspaces/model/components/UniverSheet.jsx");
+describe("the grid's side of the worker (components/univerFramework.js builds it; UniverSheet.jsx watches it)", () => {
+  const fw = read("src/workspaces/model/components/univerFramework.js");
+  const sheet = read("src/workspaces/model/components/UniverSheet.jsx");
+  const src = fw + "\n" + sheet;
   it("imports the worker through Vite's ?worker and gives the Worker to the core preset", () => {
     expect(src).toMatch(/import UniverFormulaWorker from "\.\.\/lib\/univerFormulaWorker\.js\?worker"/);
     expect(src).toMatch(/workerURL: worker/);

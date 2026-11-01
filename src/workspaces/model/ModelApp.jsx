@@ -104,7 +104,9 @@ import FileMenu from "./components/FileMenu.jsx";
 // Spreadsheet tab (src/app/modulePrefetch.js + the warm below), so none of @univerjs/* rides any other workspace's bundle.
 import { useUniverSwitch } from "./lib/univerSwitch.js";
 import { warmUniver } from "./lib/univerWarm.js";
+import { primeCalcCache, calcCacheSettled } from "./lib/univerCalcCache.js";
 const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
+const CALC_WAIT_MS = 150;                      // the most the grid waits for the device-local calculation cache to be read
 // NEW-1 (B2587264) — every device starts fetching the grid's chunk the moment THIS chunk runs, in parallel with the
 // admin check and the workbook load, instead of after them (measured live: the chunk request began ~250 ms after ModelApp arrived).
 // A no-op only on a device that asked for the owner's regular-grid hatch (lib/univerWarm.js); the real mount below still decides.
@@ -483,6 +485,19 @@ export default function ModelApp({
   // people (or two tabs) looking at the same model have no reason to share a zoom level.
   const [zoom, setZoom] = useState(() => readZoom(viewPrefsKey));
   useEffect(() => { setZoom(readZoom(viewPrefsKey)); }, [viewPrefsKey]);
+  // The grid's calculation cache (lib/univerCalcCache.js) is read from this device's large store, and the grid is mounted only once that read
+  // has settled (or after CALC_WAIT_MS, whichever is first): its first `load()` is synchronous and cannot wait for a read, and a read still in
+  // flight at that moment is a silent miss. When the Univer chunk is still downloading the read is long finished, so this costs nothing then;
+  // on a warm tab click it is a few milliseconds, repaid many times over by a first paint that is already complete.
+  const [calcReadyKey, setCalcReadyKey] = useState(null);
+  useEffect(() => {
+    if (!univerOn) return undefined;
+    let live = true; const done = () => { if (live) setCalcReadyKey(viewPrefsKey); };
+    primeCalcCache(viewPrefsKey).then(done, done);
+    const t = setTimeout(done, CALC_WAIT_MS);
+    return () => { live = false; clearTimeout(t); };
+  }, [univerOn, viewPrefsKey]);
+  const calcReady = !univerOn || calcCacheSettled(viewPrefsKey) || calcReadyKey === viewPrefsKey;
   const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(viewPrefsKey, z); }, [viewPrefsKey]);
 
   // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour toggle. Same "view preference,
@@ -1990,6 +2005,8 @@ export default function ModelApp({
           {univer.deciding ? (
             // The owner's device asked for the regular grid and the admin answer is still coming — mount neither grid.
             <div role="status" data-testid="model-grid-deciding" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
+          ) : univerOn && !calcReady ? (
+            <div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
           ) : univerOn ? (
             // The Univer grid (every account) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
             // pieces below. Edits come back as a whole Planyr workbook through the SAME `commit` (and so the same write-through,

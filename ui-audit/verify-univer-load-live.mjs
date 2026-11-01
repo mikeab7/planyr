@@ -5,8 +5,12 @@
  *  A  COLD     browser cache cleared each run: navigation → a painted Univer grid with its first cell readable, median of RUNS, against the
  *              same page with the regular grid (switch off). Reports the served files and their COMPRESSED sizes (CDP encodedDataLength — what
  *              crossed the wire), the formula worker, and how many hyphenation language files were requested.
+ *             (NEW-1, B2607856) Also: the Univer chunk was REQUESTED within PRELOAD_MS of the page's first request (the t=0 preload of a Spreadsheet URL).
  *  B  HOVER    Site route open, a default device (no stored grid choice): resting the pointer on the Spreadsheet tab must fetch the Univer chunk BEFORE the click
  *              (that is the whole point of the warm-up); then the click → a painted grid is timed.
+ *  B' PREBUILT (B2607856) the hover must leave a grid BUILT off-screen, and the click must ADOPT it (it ends up inside the grid host).
+ *  B" RETURN   after the workbook was opened once on this device the grid takes its formula results from the device's calculation cache
+ *              (seeded = the formula count), the numbers are still right, and an edit still reaches its dependents.
  *  C  NON-USER a device on the OWNER'S regular-grid hatch must NOT download the Univer chunk when it hovers the tab (1.8 MB for nothing).
  *  D  CLEANUP  the throwaway plan is gone.
  *
@@ -40,6 +44,8 @@ const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.fl
 let failures = 0, voided = false;
 const ok = (name, cond, extra = "") => { console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
 const log = {};
+const PRELOAD_MS = 250;                                // the Univer chunk must be requested this soon after the first request of a Spreadsheet URL
+const rowSum = (r, a1 = null) => { let t = 0; for (let c = 0; c < COLS - 1; c++) t += (r === 0 && c === 0 && a1 !== null) ? a1 : (((r * 31 + c * 7) % 1000) + 0.5); return t; };
 
 const s = await openSignedIn({ base: BASE });
 const { page } = s;
@@ -76,15 +82,23 @@ try {
   // "painted" = the canvas is up AND the first cell and the LAST formula cell both hold numbers (the formula pass is inside the figure).
   const univerPainted = () => page.waitForFunction(([lr, lc]) => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); const ws = a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet(); try { return !!ws && !!document.querySelector('[data-testid="univer-grid"] canvas') && typeof ws.getRange(0, 0).getValue() === "number" && typeof ws.getRange(lr, lc).getValue() === "number"; } catch (_) { return false; } }, [ROWS - 1, COLS - 1], { timeout: 90000, polling: 25 });
   const oldPainted = () => page.waitForFunction(() => { const s = document.querySelector('[data-testid="model-sheet"]'); return !!s && /\d\.\d/.test(s.innerText); }, null, { timeout: 90000, polling: 25 });
-  const cold = async () => { await cdp.send("Network.clearBrowserCache"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }); net = new Map(); };
+  // "cold" = a FIRST visit on this device: the HTTP cache AND the device's calculation cache (IndexedDB `model:calc:`) are emptied; the sign-in stays.
+  const cold = async () => {
+    await cdp.send("Network.clearBrowserCache"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+    await page.evaluate(() => new Promise((res) => { try { const rq = indexedDB.open("planyr"); rq.onsuccess = () => { try { const st = rq.result.transaction("kv", "readwrite").objectStore("kv"); const k = st.getAllKeys(); k.onsuccess = () => { for (const key of k.result) if (String(key).startsWith("model:calc:")) st.delete(key); res(true); }; k.onerror = () => res(false); } catch (_) { res(false); } }; rq.onerror = () => res(false); } catch (_) { res(false); } }));
+    net = new Map();
+  };
+  const lastSum = () => page.evaluate(([lr, lc]) => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(lr, lc).getValue(), [ROWS - 1, COLS - 1]);
+  const calcInfo = () => page.evaluate(() => window.__planyrUniverRead.calc());
 
   // ── A. cold, Univer vs the regular grid ──────────────────────────────────────────────────────────────────────
-  const uni = [], old = [], uniBytes = [], langs = [], workers = [];
+  const uni = [], old = [], uniBytes = [], langs = [], workers = [], gridAt = [];
   let firstFiles = [];
   for (let i = 0; i < RUNS + 1; i++) {                    // run 0 only establishes that the account's data is in place; it is not counted
     await setSwitch(true); await page.goto("about:blank"); await cold();
     const t0 = Date.now(); await page.goto(sheetUrl(), { waitUntil: "commit" });
     await univerPainted(); const ms = Date.now() - t0; await page.waitForTimeout(800);
+    if (i > 0) { const g = jsFiles().find((r) => /\/assets\/UniverSheet-/.test(r.url)); const first0 = jsFiles().reduce((m, r) => Math.min(m, r.t), Infinity); gridAt.push(g ? g.t - first0 : null); }
     if (i > 0) { uni.push(ms); uniBytes.push(univerFiles().reduce((a, r) => a + r.bytes, 0)); langs.push(univerFiles().filter((r) => isLangFile(r.url)).length); workers.push(univerFiles().filter((r) => /univerFormulaWorker-/.test(r.url)).length); if (i === 1) firstFiles = univerFiles().map((r) => `${r.url.split("/").pop().split("?")[0]} ${/univerFormulaWorker-/.test(r.url) ? "(size not visible to the page: worker traffic)" : kbs(r.bytes)}`); }
     await setSwitch(false); await page.goto("about:blank"); await cold();
     const t1 = Date.now(); await page.goto(sheetUrl(), { waitUntil: "commit" });
@@ -98,7 +112,9 @@ try {
   ok("A1 the Univer grid painted on the real deploy", uni.length === RUNS, `median ${mu} ms`);
   ok("A2 NO hyphenation language file was requested on this English sheet", langs.every((n) => n === 0), langs.join(", "));
   ok("A3 the formula engine ran in its worker (its file was requested)", workers.every((n) => n >= 1), workers.join(", "));
-  log.cold = { uni, old, uniBytes, firstFiles, ratio: mu / mo };
+  ok(`A4 the Univer chunk was REQUESTED within ${PRELOAD_MS} ms of the page's first request (the t=0 preload; it used to start three hops later)`, gridAt.every((x) => x !== null && x <= PRELOAD_MS), `${gridAt.map((x) => (x === null ? "never" : Math.round(x))).join(", ")} ms`);
+  ok("A5 the numbers are right (the last SUM equals an independent sum)", Math.abs((await lastSum()) - rowSum(ROWS - 1)) < 1e-6, `${await lastSum()}`);
+  log.cold = { uni, old, uniBytes, firstFiles, ratio: mu / mo, gridAt };
 
   // ── B. hover warms the chunk before the click ────────────────────────────────────────────────────────────────
   await setSwitch(true); await page.goto("about:blank"); await cold(); await cdp.send("Network.setCacheDisabled", { cacheDisabled: false });
@@ -108,10 +124,28 @@ try {
   await tab.hover(); await page.waitForTimeout(4000);
   const warmed = univerFiles().filter((r) => /UniverSheet-/.test(r.url));
   ok("B1 resting on the Spreadsheet tab fetched the Univer chunk BEFORE any click", beforeHover === 0 && warmed.length === 1, `before hover ${beforeHover} Univer file(s); after ${warmed.length}${warmed[0] ? " (" + kbs(warmed[0].bytes) + ")" : ""}`);
+  const prebuilt = await page.locator("body > [data-univer-prewarm]").count();
+  ok("B1b resting on the tab left a grid BUILT off-screen, waiting", prebuilt === 1, `${prebuilt} waiting`);
   const t2 = Date.now(); await tab.click(); await univerPainted(); const clickMs = Date.now() - t2;
   console.log(`   hover then click → painted Univer grid: ${clickMs} ms`);
-  ok("B2 the click painted the grid", true, `${clickMs} ms`);
+  const adopted = await page.locator('[data-testid="univer-grid"] [data-univer-prewarm]').count();
+  ok("B2 the click ADOPTED that grid (it now sits inside the grid host) and painted", adopted === 1 && (await calcInfo()).prewarmed === true, `${clickMs} ms`);
   log.hover = { warmedBytes: warmed[0] && warmed[0].bytes, clickMs };
+  await page.waitForTimeout(3500);                              // let the calculation settle and its results be remembered on this device
+
+  // ── B". RETURN: the workbook was opened on this device before ─────────────────────────────────────────────────────────
+  await page.goto("about:blank"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: false }); net = new Map();
+  await page.goto(siteUrl(), { waitUntil: "load" }); await tab.waitFor({ timeout: 60000 }); await page.waitForTimeout(2500);
+  await tab.hover(); await page.waitForTimeout(3500);
+  const t3 = Date.now(); await tab.click(); await univerPainted(); const retMs = Date.now() - t3;
+  const info = await calcInfo();
+  console.log(`   RETURN (workbook opened on this device before), tab click → painted: ${retMs} ms; formula cells seeded from the cache: ${info.seeded}`);
+  ok("B3 the grid took its formula results from the device's cache", info.seeded === ROWS, `seeded ${info.seeded} of ${ROWS}`);
+  ok("B4 …and the numbers are still right", Math.abs((await lastSum()) - rowSum(ROWS - 1)) < 1e-6, `${await lastSum()}`);
+  await page.evaluate(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 0).setValue(1000));
+  let followed = true; try { await page.waitForFunction(([w]) => Math.abs(Number(window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 11).getValue()) - w) < 1e-6, [rowSum(0, 1000)], { timeout: 20000, polling: 25 }); } catch (_) { followed = false; }
+  ok("B5 an edit in the seeded grid reaches its dependent (recalculation is intact)", followed);
+  log.return = { retMs, seeded: info.seeded };
 
   // ── C. a device on the owner's regular-grid hatch must not download it ─────────────────────────────────────────────────────
   await setSwitch(false); await page.goto("about:blank"); await cold();

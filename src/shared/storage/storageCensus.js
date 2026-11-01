@@ -35,6 +35,7 @@ export const REBUILD = {
   NONE: null,
   GIS: "gis-service",       // a published GIS endpoint will serve it again on the next pan
   CLOUD: "cloud",           // a copy exists in the signed-in user's account
+  RECOMPUTE: "recompute",   // the value is derived — recalculating the data it came from gives it back (the spreadsheet's calculation cache)
   IDB_MIRROR: "idb-mirror", // mirrored in the large store (but the mirror is best-effort — see below)
 };
 
@@ -82,6 +83,14 @@ export const IDB_CLASSES = [
   {
     id: "history", label: "Version history", rebuild: REBUILD.IDB_MIRROR, reclaimable: false,
     match: (k) => has(k, "planarfit:sites:history"),
+  },
+  {
+    /* The Spreadsheet's calculation cache (NEW-1, B2604xxx): formula results remembered per workbook so a reload paints complete (lib/univerCalcCache.js).
+     * Entirely derived — an entry is used only when its hash equals the workbook about to load, and losing it costs one recalculation.
+     * NOT in the bulk-reclaim set on purpose: the shared reclaim path (storageReclaim.js) only knows the GIS namespaces, and this class is
+     * small (one entry per workbook, capped at ~2 MB) — it is classified so the storage panel names it instead of calling it "Other". */
+    id: "calccache", label: "Spreadsheet results", rebuild: REBUILD.RECOMPUTE, reclaimable: false,
+    match: (k) => has(k, "model:calc:"),
   },
   {
     /* Performance recordings (NEW-1). In the LARGE tier deliberately — TIER-BY-REBUILDABILITY:

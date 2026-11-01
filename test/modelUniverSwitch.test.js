@@ -105,6 +105,8 @@ describe("what the Univer code may import", () => {
     // through a dynamic import() (asserted in modelFormulaEnginesAgree), so it too rides a lazy chunk.
     expect(importers).toEqual([
       "src/workspaces/model/components/UniverSheet.jsx",
+      // The framework builder (NEW-1, B2604xxx): Univer's presets + the pre-built instance. Part of the SAME lazy chunk — UniverSheet.jsx is its only importer.
+      "src/workspaces/model/components/univerFramework.js",
       "src/workspaces/model/lib/univerEval.js",
       "src/workspaces/model/lib/univerExcelKeys/actions.js",
       "src/workspaces/model/lib/univerExcelKeys/index.js",
@@ -117,7 +119,7 @@ describe("what the Univer code may import", () => {
     expect(app).toMatch(/const UniverSheet = lazy\(\(\) => import\("\.\/components\/UniverSheet\.jsx"\)\)/);
     expect(app).not.toMatch(/^import .*UniverSheet/m);
     expect(app).not.toMatch(/univerBridge|univerTheme/);
-    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet(?![A-Za-z])|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx" && f !== "src/workspaces/model/lib/univerEval.js");
+    const staticImporters = walk("src").filter((f) => /^import .*(UniverSheet(?![A-Za-z])|univerBridge|univerTheme)/m.test(read(f)) && f !== "src/workspaces/model/components/UniverSheet.jsx" && f !== "src/workspaces/model/components/univerFramework.js" && f !== "src/workspaces/model/lib/univerEval.js");
     expect(staticImporters).toEqual([]);
   });
   it("makes no call to a Univer host and uses no Pro / license / server configuration", () => {

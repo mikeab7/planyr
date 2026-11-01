@@ -21,31 +21,21 @@
  * Open-source @univerjs/* only (no @univerjs-pro, no license key, no Univer server). xlsx / csv stay on the
  * existing ExcelJS / SheetJS path; this file never touches Univer's exchange packages. */
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
-import { createUniver, LocaleType, mergeLocales, defaultTheme, ICommandService, CommandType, InterceptorEffectEnum, IUndoRedoService } from "@univerjs/presets";
+import { defaultTheme, LifecycleService, ICommandService, CommandType, InterceptorEffectEnum, IUndoRedoService } from "@univerjs/presets";
 import {
-  UniverSheetsCorePreset, CalculationMode, IDefinedNamesService, SetDefinedNameMutation, RemoveDefinedNameMutation,
+  IDefinedNamesService, SetDefinedNameMutation, RemoveDefinedNameMutation,
   SheetInterceptorService, INTERCEPTOR_POINT, SetRangeValuesCommand, IconManager,
   IRenderManagerService, HeaderMoveRenderController, SheetSkeletonManagerService, getCoordByOffset,
   SetDefinedNameCommand, RemoveDefinedNameCommand, SheetExtension, SHEET_EXTENSION_TYPE,
 } from "@univerjs/preset-sheets-core";
-import { UniverSheetsSortPreset } from "@univerjs/preset-sheets-sort";
-import { UniverSheetsFilterPreset } from "@univerjs/preset-sheets-filter";
-import { UniverSheetsFindReplacePreset } from "@univerjs/preset-sheets-find-replace";
-import coreEnUS from "@univerjs/preset-sheets-core/locales/en-US";
-import sortEnUS from "@univerjs/preset-sheets-sort/locales/en-US";
-import filterEnUS from "@univerjs/preset-sheets-filter/locales/en-US";
-import findEnUS from "@univerjs/preset-sheets-find-replace/locales/en-US";
-import "@univerjs/preset-sheets-core/lib/index.css";
-import "@univerjs/preset-sheets-sort/lib/index.css";
-import "@univerjs/preset-sheets-filter/lib/index.css";
-import "@univerjs/preset-sheets-find-replace/lib/index.css";
 import "./univerSheet.css";
+import { buildFramework, takePrewarmed, noteGridMounted, noteGridUnmounted, readTokens, isDark } from "./univerFramework.js";
 import { CURVED_ICONS } from "./univerIcons.jsx";
 import { migrateWorkbook, canonicalJson } from "../lib/sheetModel.js";
 import {
   workbookToUniver, univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
 } from "../lib/univerBridge.js";
-import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
+import { buildUniverTheme } from "../lib/univerTheme.js";
 import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
 import { installFormulaGuard } from "../lib/univerFormulaGuard.js";
@@ -54,29 +44,12 @@ import { migratePlanyrSyntaxInWorkbook, planyrSyntaxNote } from "../lib/planyrSy
 import { installUniverTools } from "../lib/univerTools/index.js";
 import UniverToolPanels from "./UniverTools.jsx";
 import { createSaveController } from "../lib/univerSave.js";
-import UniverFormulaWorker from "../lib/univerFormulaWorker.js?worker";
+import { calcHash, peekCalc, writeCalc, seedValues, collectValues, entryFits } from "../lib/univerCalcCache.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
-// ONE header strip, everything left-aligned (NEW-1, B2574352): Univer's "collapsed" ribbon folds the Start / Formulas / Data / View
-// tab strip into a dropdown at the strip's left edge and packs that tab's tools right beside it. (The default, "classic", is a
-// centred tab row ABOVE the tool row = two headers.) Configuration only — the package is not forked; see univerSheet.css.
-const RIBBON_TYPE = "collapsed";
 const STRUCTURE_OPS = {
   "sheet.mutation.insert-row": "insert-row", "sheet.mutation.remove-row": "remove-row",
   "sheet.mutation.insert-col": "insert-col", "sheet.mutation.remove-col": "remove-col",
-};
-
-const readTokens = () => {
-  const cs = getComputedStyle(document.documentElement);
-  const out = {};
-  for (const [k, v] of Object.entries(THEME_TOKEN_VARS)) out[k] = cs.getPropertyValue(v).trim();
-  return out;
-};
-const isDark = () => {
-  const t = document.documentElement.getAttribute("data-theme");
-  if (t === "dark") return true;
-  if (t === "light") return false;
-  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
 };
 
 export default function UniverSheet({ workbook, projectNames, viewKey, onChange, onNotice, onReady, onError }) {
@@ -94,31 +67,31 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
   // ---- mount: create Univer once, load the workbook, wire edit detection ----------------------------------------------
   useEffect(() => {
     let disposed = false;
+    const mk = (n) => { try { performance.mark(`uv:${n}`); } catch (_) { /* marks are a courtesy */ } };   // read by ui-audit/measure-univer-tti.mjs --marks
+    mk("effect");
     const L = live.current;
     try {
-      const dark0 = isDark();
-      const theme = buildUniverTheme(defaultTheme, readTokens(), { dark: dark0 });
-      // The formula engine runs in a Web Worker (lib/univerFormulaWorker.js) so a calculation never blocks the grid. If a worker
-      // cannot start, Univer calculates on the page as before — slower, never wrong — and the console says so.
-      let worker = null;
-      try {
-        worker = new UniverFormulaWorker();
-        // A worker that dies mid-session would leave every formula silently stale: say so, and where it can be fixed (a reload).
-        worker.addEventListener("error", (e) => {
-          console.error("UniverSheet: the formula worker stopped", e && e.message);
-          if (!disposed && live.current.onNotice) live.current.onNotice("The new grid's formula calculator stopped, so formula results may be out of date. Reload the page to restart it.");
-        });
-      } catch (err) { console.error("UniverSheet: could not start the formula worker; calculating on the page", err); worker = null; }
+      // A framework instance built ahead of time (components/univerFramework.js, started when the pointer rested on the tab) is TAKEN here:
+      // its element moves into place and `load()` below replaces its placeholder workbook. Otherwise build one now. Either way everything
+      // from here on is wired exactly the same.
+      const pre = takePrewarmed();
+      const fw = pre || buildFramework({ container: hostRef.current });
+      if (pre) {
+        pre.container.style.cssText = "position:absolute;inset:0";
+        hostRef.current.appendChild(pre.container);
+        L.prewarmed = true;
+        L.unitId = pre.unitId;
+      }
+      noteGridMounted(); L.counted = true;
+      mk("framework");
+      const { univer, univerAPI, worker } = fw;
       L.worker = worker;
-      const { univer, univerAPI } = createUniver({
-        locale: LocaleType.EN_US,
-        locales: { [LocaleType.EN_US]: mergeLocales(coreEnUS, sortEnUS, filterEnUS, findEnUS) },
-        theme, darkMode: dark0,
-        presets: [
-          UniverSheetsCorePreset({ container: hostRef.current, ribbonType: RIBBON_TYPE, ...(worker ? { workerURL: worker } : {}), formula: { initialFormulaComputing: CalculationMode.WHEN_EMPTY } }),
-          UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsFindReplacePreset(),
-        ],
+      // A worker that dies mid-session would leave every formula silently stale: say so, and where it can be fixed (a reload).
+      if (worker) worker.addEventListener("error", (e) => {
+        console.error("UniverSheet: the formula worker stopped", e && e.message);
+        if (!disposed && live.current.onNotice) live.current.onNotice("The new grid's formula calculator stopped, so formula results may be out of date. Reload the page to restart it.");
       });
+      if (pre && pre.dark !== isDark()) { try { univerAPI.setTheme(buildUniverTheme(defaultTheme, readTokens(), { dark: isDark() })); univerAPI.toggleDarkMode(isDark()); } catch (_) { /* theme only */ } }
       L.univer = univer; L.univerAPI = univerAPI;
       L.injector = univer.__getInjector();
       // The Excel keys the free Univer build lacks (Ctrl+1, Ctrl+Shift+$%!~#, Shift/Ctrl+Space, Ctrl+9/0, Ctrl+Plus/Minus, Ctrl+;, Alt key-tips…)
@@ -130,11 +103,30 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       try {
         const fw = univerAPI.getFormula();
         let found = [];
+        // After a calculation settles, remember its results on this device for the next open (lib/univerCalcCache.js). Debounced, and only
+        // once no edit is waiting to be saved — the values must belong to the workbook that will be stored.
+        const scheduleCalcWrite = (tries = 0) => {
+          clearTimeout(L.calcTimer);
+          L.calcTimer = setTimeout(() => {
+            if (disposed || !L.unitId || !L.save) return;
+            if (L.save.hasPending() && tries < 6) { scheduleCalcWrite(tries + 1); return; }
+            try {
+              if (!L.storedCanon) return;
+              const h = calcHash(L.storedCanon);
+              const have = peekCalc(L.viewKey);
+              if (have && have.h === h) return;                                   // nothing new to remember
+              const fWb = univerAPI.getWorkbook(L.unitId);
+              if (!fWb) return;
+              writeCalc(L.viewKey, h, collectValues(fWb.save()));                 // null when a formula is volatile or can spill → the old entry is dropped
+            } catch (_) { /* a cache write is a courtesy */ }
+          }, 1200);
+        };
         const subs = [
-          fw.calculationStart(() => { found = []; }),
+          fw.calculationStart(() => { found = []; clearTimeout(L.calcTimer); }),
           fw.calculationProcessing((p) => { if (p && Array.isArray(p.circularReferences) && p.circularReferences.length) found = p.circularReferences; }),
           fw.calculationEnd((state) => {
             if (disposed || state !== 3 /* FormulaExecutedStateType.SUCCESS */) return;
+            scheduleCalcWrite();
             try {
               const wb = L.unitId && univerAPI.getWorkbook(L.unitId);
               const list = found.filter((c) => c.unitId === L.unitId).map((c) => { const ws = wb && wb.getSheetBySheetId(c.sheetId); return { sheetName: ws ? ws.getSheetName() : c.sheetId, row: c.row, col: c.column }; });
@@ -145,6 +137,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         ];
         L.circularSub = { dispose: () => subs.forEach((d) => { try { d.dispose(); } catch (_) { /* already gone */ } }) };
       } catch (_) { /* no formula facade in this build */ }
+      mk("guard+circular");
       L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
       // Curved undo / redo (NEW-2, B2574353): toolbar glyphs resolve by name through Univer's IconManager (not the facade's
       // registerComponent, which is a different registry). Replace the built-in ones; the toolbar draws them on its next render.
@@ -164,6 +157,15 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
           if (res) res.data = JSON.stringify({ ...JSON.parse(res.data), ...defs });
           else data.resources.push({ name: "SHEET_DEFINED_NAME_PLUGIN", data: JSON.stringify(defs) });
         }
+        // THE CALCULATION CACHE (lib/univerCalcCache.js): formula results remembered on this device. Used only when the hash of EXACTLY this
+        // workbook + these names matches, so a stale value cannot appear; with a value in a formula cell Univer (WHEN_EMPTY) does not wait to
+        // calculate it, and the first paint is complete. A miss is today's behaviour.
+        try {
+          const entry = peekCalc(L.viewKey);
+          L.storedCanon = canonicalJson(migrated);                              // the workbook as it is STORED — what the next open will load
+          const h = calcHash(L.storedCanon);
+          L.cacheSeeded = entryFits(entry, h, migrated) ? seedValues(data, entry.v) : 0; L.cacheHash = h;
+        } catch (_) { L.cacheSeeded = 0; }
         if (L.unitId) { try { univerAPI.disposeUnit(L.unitId); } catch (_) { /* already gone */ } }
         L.sidecar = sidecar;
         L.save.baseline(migrated);
@@ -201,6 +203,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         canonical: canonicalJson,
         snapshot,
         emit: (next, notes, meta) => {
+          try { L.storedCanon = canonicalJson(migrateWorkbook(next)); } catch (_) { L.storedCanon = null; }   // what the next open will load (lib/univerCalcCache.js)
           if (notes.length && L.onNotice) L.onNotice(`Saved, but not everything Univer can hold fits Planyr's workbook: ${notes.join("; ")}.`);
           if (L.onChange) L.onChange(next, notes, meta);
         },
@@ -294,7 +297,9 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       });
       L.off = off;
 
+      mk("keys+icons+save");
       load(workbook);
+      mk("load");
       // Indent (needs the sheets services, which exist once a workbook does): drawn + Increase/Decrease buttons and command ids (lib/univerIndent.js — Univer 1.x has no indent of its own).
       L.indent = installUniverIndent({
         univerAPI, injector: L.injector, SheetInterceptorService, INTERCEPTOR_POINT, InterceptorEffectEnum,
@@ -302,6 +307,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       });
       // The Planyr-only tools (NEW-1, cutover step 6): consistency flags + panel, trace arrows, command palette (Ctrl+K), Name Manager, the
       // input / formula colour convention. Everything is read through the bridge and written through Univer commands (lib/univerTools/).
+      mk("indent");
       L.tools = installUniverTools({
         univerAPI, injector: L.injector, host: hostRef.current, viewKey: L.viewKey,
         U: {
@@ -315,6 +321,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         getProjectNames: () => L.projectNames || {},
         notice: (t) => { if (live.current.onNotice) live.current.onNotice(t); },
       });
+      mk("tools");
       setTools(L.tools);
       ensureHeaderGate(L.unitId);
       if (L.onReady) {
@@ -376,12 +383,15 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         sidecar: () => (e2e() ? L.sidecar : null),
         flush: () => { if (e2e()) flush(); return e2e(); },
         tools: () => (e2e() ? L.tools : null),
+        // harness-only: how many formula cells the calculation cache seeded at the last load, whether this grid took a pre-built instance, and Univer's lifecycle stage
+        calc: () => (e2e() ? { seeded: L.cacheSeeded || 0, hash: L.cacheHash || null, prewarmed: !!L.prewarmed, stage: (() => { try { return L.injector.get(LifecycleService).stage; } catch (_) { return null; } })() } : null),
         excelKeys: () => (e2e() ? { registered: L.excelKeys && L.excelKeys.registered, tips: L.excelKeys && L.excelKeys.keyTips.state, run: (id) => L.excelKeys.runAction(id) } : null),
         // harness-only: the header-drag gate's state and the controller's view of what is pending
         gate: () => (e2e() ? L.gate : null),
         gateInstalls: () => (e2e() ? { n: L.gateInstalls || 0, error: L.gateError || null } : null),
         pending: () => (e2e() ? L.save.hasPending() : null),
       };
+      mk("done");
     } catch (err) {
       setError(err);
       // eslint-disable-next-line no-console
@@ -399,7 +409,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
       try { L.formulaGuard && L.formulaGuard(); } catch (_) {}
-      try { L.circularSub && L.circularSub.dispose(); } catch (_) {}
+      try { L.circularSub && L.circularSub.dispose(); clearTimeout(L.calcTimer); } catch (_) {}
       try { L.excelKeys && L.excelKeys.dispose(); } catch (_) {}
       try { L.indent && L.indent.dispose(); } catch (_) {}
       try { L.tools && L.tools.dispose(); } catch (_) {}
@@ -407,6 +417,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       try { L.univerAPI && L.univerAPI.dispose(); } catch (_) {}
       try { L.univer && L.univer.dispose(); } catch (_) {}
       try { L.worker && L.worker.terminate(); } catch (_) {}            // a Worker handed to the RPC plugin is OURS to stop
+      if (L.counted) { noteGridUnmounted(); L.counted = false; }
       L.univer = null; L.worker = null; L.univerAPI = null; L.unitId = null; L.save = null; L.tools = null;
       if (typeof window !== "undefined") delete window.__planyrUniverRead;
     };
@@ -465,3 +476,5 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
 }
 
 export { PROJECT_NAME_ID_PREFIX };
+// The shell's warm-up (lib/univerWarm.js) builds the framework ahead of time through this — the grid chunk is its only door.
+export { prewarmFramework } from "./univerFramework.js";
