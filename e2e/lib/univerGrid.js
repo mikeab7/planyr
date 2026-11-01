@@ -237,9 +237,11 @@ export async function cellShot(page, r, c) {
   return { buf, left: p.left + 2, top: p.top + 2, w: Math.max(4, p.w - 4) };
 }
 /** The painted text ink of a cell: absolute page-x of its left / right-most DARK pixel and the dark-pixel count (-1 / 0 for an empty cell). */
+/** Text ink in a cell, by LUMINANCE (any dark-enough colour — black text AND the input-blue the colour convention paints on typed values, which the
+ *  all-channels-below-110 test used to miss once typed numbers/labels correctly turned blue). `.dark` = pixel count. */
 export async function cellInk(page, r, c) {
   const s = await cellShot(page, r, c);
-  const e = await _decode(page, s.buf, (d, w, h) => { let left = -1, right = -1, dark = 0; for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; if (d[i] < 110 && d[i + 1] < 110 && d[i + 2] < 110) { dark++; if (left < 0) left = x; right = x; } } return { left, right, dark }; });
+  const e = await _decode(page, s.buf, (d, w, h) => { let left = -1, right = -1, dark = 0; for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; if (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] < 130) { dark++; if (left < 0) left = x; right = x; } } return { left, right, dark }; });
   return { left: e.left < 0 ? -1 : s.left + e.left, right: e.right < 0 ? -1 : s.left + e.right, dark: e.dark, buf: s.buf };
 }
 /** The active sheet's scroll state + the rows / columns currently on screen. `r1`/`c1` change only when the grid really scrolled. */

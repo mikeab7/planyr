@@ -153,6 +153,15 @@ export function createActions(env) {
     if (!inView && typeof s.ws.scrollToCell === "function") s.ws.scrollToCell(end.row, end.col);
   };
 
+  // ---- sheet tabs: Ctrl+PgUp / Ctrl+PgDn (previous / next, no wrap — Excel) --------------------------------------------------
+  const stepSheet = (dir) => async () => {
+    const wb = env.api.getActiveWorkbook(); if (!wb) return;
+    const sheets = wb.getSheets(); const cur = wb.getActiveSheet();
+    const i = sheets.findIndex((x) => x.getSheetId() === cur.getSheetId());
+    const next = sheets[i + dir];
+    if (next) next.activate();
+  };
+
   // ---- date / time / copy above --------------------------------------------------------------------------------------
   const stamp = (serial, pattern) => async () => {
     const s = here(); if (!s) return;
@@ -256,6 +265,7 @@ export function createActions(env) {
     "hide-rows": lines("row", true), "unhide-rows": lines("row", false),
     "hide-columns": lines("column", true), "unhide-columns": lines("column", false),
     "select-row": selectLine("row"), "select-column": selectLine("column"),
+    "sheet-prev": stepSheet(-1), "sheet-next": stepSheet(1),
     ...Object.fromEntries(Object.keys(NAV_ACTIONS).map((id) => [id, navigate(id)])),
     // Alt key-tip leaves (lib/keyTips.js ids) that are not chords
     bold: () => run(UNIVER.bold), italic: () => run(UNIVER.italic), underline: () => run(UNIVER.underline),

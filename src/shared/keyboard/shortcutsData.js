@@ -321,6 +321,7 @@ const CHORD_LABELS = {
   "insert-date": "Enter today's date", "insert-time": "Enter the current time", "copy-above-formula": "Copy the formula from the cell above",
   "copy-above-value": "Copy the value from the cell above",
   "insert-cells": "Insert row / column (cells prompt when a block is selected)", "delete-cells": "Delete row / column (cells prompt when a block is selected)",
+  "sheet-prev": "Previous sheet tab", "sheet-next": "Next sheet tab",
   "hide-rows": "Hide the selected rows", "unhide-rows": "Unhide rows", "hide-columns": "Hide the selected columns", "unhide-columns": "Unhide columns",
 };
 /* The plugin's selection-movement keys (bindings.js `NAV_ACTIONS`): label + the keys as a person reads them. */

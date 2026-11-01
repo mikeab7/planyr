@@ -24,7 +24,7 @@ import { COMMANDS } from "../commandRegistry.js";
 import { readAutoColor, writeAutoColor } from "../sheetColorMode.js";
 import { rawAt } from "../sheetModel.js";
 import {
-  entryOf, activeFlagsOf, flagLookup, markerFor, dismissKey, withDismissal, autoColorFor, traceFor, renderTrace, traceShapes,
+  entryOf, activeFlagsOf, flagLookup, markerFor, dismissKey, withDismissal, autoColorFor, isDefaultInk, traceFor, renderTrace, traceShapes,
   definedNameParams, nameIdFor,
 } from "./model.js";
 import { buildPaletteRows, TOOL_COMMAND_IDS, UNIVER_EXEC } from "./palette.js";
@@ -153,7 +153,7 @@ export function installUniverTools(deps) {
         const hasFormula = base.f != null || base.si != null;
         const raw = base.f != null ? base.f : (hasFormula ? "=" : (base.p ? "x" : (base.v == null ? "" : String(base.v))));
         const isError = hasFormula && typeof base.v === "string" && /^#[A-Z0-9/!?]+$/.test(base.v);
-        const color = autoColorFor({ raw, hasManualColor: !!(style && style.cl && style.cl.rgb), isError, sheetName: ctx.worksheet.getName() });
+        const color = autoColorFor({ raw, hasManualColor: !!(style && style.cl && style.cl.rgb && !isDefaultInk(style.cl.rgb)), isError, sheetName: ctx.worksheet.getName() });
         if (color) { out = { ...out, s: { ...(style || {}), cl: { rgb: color } } }; changed = true; }
       }
       return next(changed ? out : cell);

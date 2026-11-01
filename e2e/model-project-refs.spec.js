@@ -121,7 +121,7 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
   // leaving the editor open (a second Enter swaps in a DIFFERENT suggestion — measured =Plan.Building2.SF becoming =Plan.Building1.SF).
   // The tests above use enterFormula (commit by clicking another cell when Enter does not) because they are about the NAMES; this one
   // holds the Excel behaviour on its own.
-  test.fixme("a formula ending in a project name commits on ONE Enter, as in Excel (Univer's name-hint popup takes the first Enter)", async ({ page }) => {
+  test("a formula ending in a project name commits on ONE Enter, as in Excel (Univer's name-hint popup takes the first Enter)", async ({ page }) => {
     const id = "e2e-projrefs-one-enter";
     await seedProject(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: true }] });
     await openSheet(page, id);

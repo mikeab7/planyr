@@ -226,4 +226,21 @@ export function registerUniverToolsChecks(h) {
       ? PASS(`input blue ${input} px, formula ${formula} px; a red font colour won (${manual} blue px); toggled off ${off} px, back on ${on} px; no colour written into the saved cells`)
       : FAIL(`manual-colour cell ${manual} blue px (want <3); toggled off ${off} (want <3); back on ${on} (want ≥12); saved styles untouched ${unchanged}`);
   });
+
+  // A number a PERSON types is input-blue too. Univer's cell editor stamps the theme's default text colour on every cell it commits, which used to read
+  // as "a colour you set" — so only cells LOADED from a workbook were ever blue (the check above loads them through the bridge and could not see it).
+  check("tools-color-typed", "A number typed into a cell with the keyboard turns input-blue (the editor's default-ink stamp is not a colour choice); a number typed after the toggle is off stays plain", async () => {
+    await reset(wbOf((sh) => sh));
+    await tools((t) => { if (!t.getState().autoColor) t.run("planyr.tools.toggle-autocolor"); return true; });
+    await click(0, 0); await pg().keyboard.type("1234567", { delay: 12 }); await press("Enter"); await wait(300);
+    await park(); await wait(700);
+    const inkOf = async (r) => { const p = await pt(r, 0); return countPx({ x: p.left + 2, y: p.top + 2, width: Math.max(4, p.w - 4), height: Math.max(4, p.h - 4) }, INPUT_BLUE); };
+    const typed = await inkOf(0);
+    await tools((t) => { if (t.getState().autoColor) t.run("planyr.tools.toggle-autocolor"); return true; });
+    await click(1, 0); await pg().keyboard.type("7654321", { delay: 12 }); await press("Enter"); await wait(300);
+    await park(); await wait(700);
+    const plain = await inkOf(1);
+    await tools((t) => { if (!t.getState().autoColor) t.run("planyr.tools.toggle-autocolor"); return true; });
+    return typed >= 12 && plain < 3 ? PASS(`a typed number shows ${typed} blue pixels; with the colour convention off, the next one shows ${plain}`) : FAIL(`typed with the convention on: ${typed} blue px (want >= 12); typed with it off: ${plain} (want < 3)`);
+  });
 }

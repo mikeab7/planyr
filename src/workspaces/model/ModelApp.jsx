@@ -1146,9 +1146,13 @@ export default function ModelApp({
   }, [commit]);
 
   const onImportXlsxFile = useCallback((file) => {
-    if (workbookHasContent(workbook)) { setPendingXlsxImport({ file, sheetCount: workbook.sheets.length }); return; }
+    // "Does this workbook have anything in it?" must be asked of what is ON SCREEN. With the Univer grid showing, an edit made in the last few hundred
+    // ms is still inside its save debounce and not yet in `workbook`, so a quick File ▾ → Import would replace it without asking. `flushUniver()` hands
+    // over the grid's workbook as it is NOW (null when the regular grid shows).
+    const shown = (flushUniver() || {}).workbook || workbook;
+    if (workbookHasContent(shown)) { setPendingXlsxImport({ file, sheetCount: shown.sheets.length }); return; }
     runXlsxImport(file);
-  }, [workbook, runXlsxImport]);
+  }, [workbook, runXlsxImport, flushUniver]);
 
   const onConfirmXlsxImport = useCallback(() => {
     const pending = pendingXlsxImport;

@@ -24,7 +24,7 @@ describe("every chord the old grid owns is accounted for on the Univer grid — 
     expect(cov.length).toBe(CHORDS.length);
   });
   it("the named gaps are exactly the ones this item leaves to other work, each with its reason", () => {
-    expect(Object.keys(UNIVER_UNSUPPORTED_CHORDS).sort()).toEqual(["autosum", "repeat-last", "save-now", "sheet-add", "sheet-next", "sheet-prev"]);
+    expect(Object.keys(UNIVER_UNSUPPORTED_CHORDS).sort()).toEqual(["autosum", "repeat-last", "save-now", "sheet-add"]);
     for (const why of Object.values(UNIVER_UNSUPPORTED_CHORDS)) expect(why.length).toBeGreaterThan(10);
   });
   it("every key the owner listed for this item is bound", () => {

@@ -62,6 +62,9 @@ export const CHORD_BINDINGS = Object.freeze([
   { chord: "unhide-rows", action: "unhide-rows", scope: SCOPE.READY, keys: [k(KC.D9, true)] },
   { chord: "hide-columns", action: "hide-columns", scope: SCOPE.READY, keys: [k(KC.D0)] },
   { chord: "unhide-columns", action: "unhide-columns", scope: SCOPE.READY, keys: [k(KC.D0, true)] },
+  // Sheet tabs (Excel: Ctrl+PgUp / Ctrl+PgDn — previous / next sheet, no wrap)
+  { chord: "sheet-prev", action: "sheet-prev", scope: SCOPE.READY, keys: [k(KC.PAGE_UP)] },
+  { chord: "sheet-next", action: "sheet-next", scope: SCOPE.READY, keys: [k(KC.PAGE_DOWN)] },
   // Selection (keymap.js `navAction` types, not CHORDS entries)
   { chord: "select-row", nav: "select-row", action: "select-row", scope: SCOPE.READY, keys: [k(KC.SPACE, true, false)] },
   { chord: "select-column", nav: "select-column", action: "select-column", scope: SCOPE.READY, keys: [k(KC.SPACE, false, true)] },
@@ -136,8 +139,6 @@ export const UNIVER_UNSUPPORTED_CHORDS = Object.freeze({
   autosum: "Alt+= (AutoSum) is not wired to a Univer command yet",
   "repeat-last": "F4 outside the editor (repeat last action) has no Univer equivalent",
   "sheet-add": "Shift+F11 (new sheet) is the sheet-tab '+' button on the Univer grid",
-  "sheet-prev": "Ctrl+PgUp (previous sheet) is owned by the host's tab switching",
-  "sheet-next": "Ctrl+PgDn (next sheet) is owned by the host's tab switching",
   "save-now": "Ctrl+S is the host save path (UniverSheet's debounced flush), not a grid key",
 });
 /** Every CHORDS id must be accounted for exactly once: native, plugin, or a named gap. Used by the unit test. */

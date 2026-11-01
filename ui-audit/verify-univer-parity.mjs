@@ -432,6 +432,60 @@ check("key-nav-basic", "Arrows, Tab / Shift+Tab, Enter / Shift+Enter move the ac
   if (bad.length) return FAIL(`${bad.map((k) => `${k}=${JSON.stringify(seen[k])} (want ${JSON.stringify(want[k])})`).join("; ")}`);
   return s && s.r1 === 5 && s.r2 === 6 ? PASS("Tab → D6, Shift+Tab → C6, Enter → C7, Shift+Enter → C6, → D6, Shift+↓ selected rows 6–7") : FAIL(`Shift+Arrow selected ${s && s.a1}`);
 });
+check("key-enter-commits-formula", "Enter commits a formula that ends in a function / name even with the hint list open (Excel); the next cell is selected; Tab-less", async () => {
+  await reset(); await click(7, 6);
+  await page.keyboard.type("=PI", { delay: 30 }); await wait(500);
+  const hint = await ev(() => [...document.querySelectorAll('section[class*="univer-fixed"] ul[class*="univer-list-none"]')].some((u) => u.getBoundingClientRect().width > 0 && u.querySelector("li")));
+  await press("Enter"); await wait(300);
+  const v = await val1(7, 6), f = await inSheet((api, ws) => ws.getRange(7, 6).getFormula());
+  const at = await activeCell();
+  if (!hint) return FAIL("KNOWN-GOOD ARM: the hint list was not open when Enter was pressed, so this proved nothing");
+  // `=PI` without its brackets is #NAME? in Excel too — what matters is that Enter COMMITTED exactly what was typed (the hint list used to swallow it).
+  if (f !== "=PI") return FAIL(`Enter left the cell uncommitted or changed it: value ${JSON.stringify(v)}, formula ${JSON.stringify(f)}`);
+  if (!eq(at, [8, 6])) return FAIL(`committed, but the selection is at ${JSON.stringify(at)} not G9`);
+  await press("Control+z"); const back = await val1(7, 6);
+  return back === null || back === undefined || back === "" ? PASS("=PI + Enter with the hint list open committed exactly =PI (not a suggestion), moved to G9, and undid in one step") : FAIL(`Ctrl+Z left ${JSON.stringify(back)}`);
+});
+check("paste-empty-says-so", "Pasting an empty clipboard says so in words (never a silent no-op); a real paste says nothing", async () => {
+  await reset(); await click(4, 4);
+  const empty = () => ev(() => { const dt = new DataTransfer(); const e = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }); (document.activeElement || document.body).dispatchEvent(e); });
+  await empty(); await wait(300);
+  const said = await ev(() => window.__notices.slice());
+  const ok = said.some((t) => /nothing to paste/i.test(String(t && t.text || t)));
+  // control: a paste carrying text raises no such notice
+  await ev(() => { window.__notices = []; const dt = new DataTransfer(); dt.setData("text/plain", "x"); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); });
+  await wait(300);
+  const quiet = !(await ev(() => window.__notices.slice())).some((t) => /nothing to paste/i.test(String(t && t.text || t)));
+  return ok && quiet ? PASS("empty paste → 'There's nothing to paste…'; a paste with text → no such notice") : FAIL(`empty paste said ${JSON.stringify(said)}; text paste quiet=${quiet}`);
+});
+check("multi-range-copy-cut-refused", "Ctrl+C and Ctrl+X with several ranges selected say so in words (Excel: 'cannot be used on multiple selections') and copy nothing", async () => {
+  await reset(); await click(0, 0); await heldClick(2, 2, "Control"); await wait(200);
+  const n = (await sel()).length;
+  await ev(() => { window.__notices = []; });
+  await press("Control+c"); const a = await ev(() => window.__notices.slice());
+  await ev(() => { window.__notices = []; });
+  await press("Control+x"); const b = await ev(() => window.__notices.slice());
+  const says = (l) => l.some((t) => /multiple selections/i.test(String(t && t.text || t)));
+  // control: one range copies without that message
+  await click(4, 4); await ev(() => { window.__notices = []; }); await press("Control+c"); const c = await ev(() => window.__notices.slice());
+  if (n < 2) return FAIL(`KNOWN-GOOD ARM: only ${n} range(s) were selected`);
+  return says(a) && says(b) && !says(c) ? PASS("two ranges: Ctrl+C and Ctrl+X both say 'multiple selections'; a single range copies quietly") : FAIL(`copy said ${JSON.stringify(a)}, cut said ${JSON.stringify(b)}, single-range copy said ${JSON.stringify(c)}`);
+});
+check("key-sheet-tabs", "Ctrl+PgDn / Ctrl+PgUp step to the next / previous sheet tab and stop at the ends (Excel)", async () => {
+  await reset();
+  await inSheet((api) => { const wb = api.getActiveWorkbook(); wb.insertSheet("Second"); wb.insertSheet("Third"); wb.getSheets()[0].activate(); });
+  await wait(300); await click(2, 2);
+  const name = () => inSheet((api) => api.getActiveWorkbook().getActiveSheet().getSheetName());
+  const seen = [await name()];
+  await press("Control+PageDown"); seen.push(await name());
+  await press("Control+PageDown"); seen.push(await name());
+  await press("Control+PageDown"); seen.push(await name());           // at the last: stays
+  await press("Control+PageUp"); seen.push(await name());
+  await press("Control+PageUp"); seen.push(await name());
+  await press("Control+PageUp"); seen.push(await name());             // at the first: stays
+  const want = [seen[0], "Second", "Third", "Third", "Second", seen[0], seen[0]];
+  return eq(seen, want) ? PASS(`${seen.join(" → ")}`) : FAIL(`${seen.join(" → ")}, wanted ${want.join(" → ")}`);
+});
 check("key-nav-home-end-page", "Home, Ctrl+Home, Ctrl+End, Ctrl+Shift+Home/End, PageUp/PageDown and Alt+PageUp/PageDown move or extend the selection (the free Univer build does none of them; the plugin does)", async () => {
   await reset();
   const fails = [];

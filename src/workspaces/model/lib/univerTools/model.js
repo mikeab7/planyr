@@ -9,6 +9,7 @@
  *
  * What this file adds is only the translation to a canvas: which cells get a marker, where an arrow starts and ends in sheet
  * coordinates, which name edit is which Univer defined-name call, and the key a dismissal is stored under. */
+import { PALETTES } from "../../../../shared/theme/palette.js";
 import { findInconsistencies } from "../formulaConsistency.js";
 import { isInconsistencyDismissed } from "../sheetModel.js";
 import { cellColorKind } from "../sheetEngine.js";
@@ -94,6 +95,12 @@ export function colorKindOfRaw(raw, sheetName) {
 /** The text colour to DRAW a cell with, or null to leave it alone. A colour the person set (`style.cl`) always wins, as on the old
  *  grid; an error value keeps the error colour; only an input or a cross-sheet link is recoloured. `raw` is the cell's typed text
  *  (a formula as `=...`, a literal as typed) — what the bridge calls the raw text. */
+/** Univer's cell editor stamps the theme's DEFAULT text colour (`cl`) on every cell it commits, so a typed number carried an explicit colour and read as
+ *  "the person chose a colour" — typed inputs never turned input-blue (measured: 0 blue pixels after typing 1234567; cells loaded from a stored workbook
+ *  did). A colour equal to the app's own default ink, in either theme, is not a choice. */
+const DEFAULT_INK = new Set([PALETTES.light.textPrimary, PALETTES.dark.textPrimary].map((c) => String(c).toLowerCase()));
+export const isDefaultInk = (rgb) => !!rgb && DEFAULT_INK.has(String(rgb).toLowerCase());
+
 export function autoColorFor({ raw, hasManualColor, isError, sheetName }) {
   if (hasManualColor || isError) return null;
   const kind = colorKindOfRaw(raw, sheetName);

@@ -1235,7 +1235,7 @@ test.describe("Model workspace — Stage 3 (input/formula/cross-sheet-link colou
 
   // DEFECT (reported): a number a person TYPES never turns blue. Univer's cell editor stamps an explicit text colour (cl #1B1E26) on every
   // cell it commits, and the colour rule treats any explicit colour as "a colour you set". Loaded cells paint blue (test above).
-  test.fixme("a number TYPED by a person is input-blue too", async ({ page }) => {
+  test("a number TYPED by a person is input-blue too", async ({ page }) => {
     await open(page, "e2e-stage3-colour-typed");
     await enter(page, 0, 0, "1234567");
     await parkCursor(page, 12, 6);
