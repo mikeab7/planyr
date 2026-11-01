@@ -33,18 +33,19 @@ import { buildFramework, takePrewarmed, noteGridMounted, noteGridUnmounted, read
 import { CURVED_ICONS } from "./univerIcons.jsx";
 import { migrateWorkbook, canonicalJson } from "../lib/sheetModel.js";
 import {
-  workbookToUniver, univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
+  univerToWorkbook, sidecarAfterStructure, projectNamesToDefinedNames, PROJECT_NAME_ID_PREFIX,
 } from "../lib/univerBridge.js";
+import { prepareUnit } from "../lib/univerUnitPrep.js";
 import { buildUniverTheme } from "../lib/univerTheme.js";
 import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
 import { installFormulaGuard } from "../lib/univerFormulaGuard.js";
 import { circularNotice } from "../lib/evalValues.js";
-import { migratePlanyrSyntaxInWorkbook, planyrSyntaxNote } from "../lib/planyrSyntax.js";
+import { planyrSyntaxNote } from "../lib/planyrSyntax.js";
 import { installUniverTools } from "../lib/univerTools/index.js";
 import UniverToolPanels from "./UniverTools.jsx";
 import { createSaveController } from "../lib/univerSave.js";
-import { calcHash, peekCalc, writeCalc, seedValues, collectValues, entryFits, countValues } from "../lib/univerCalcCache.js";
+import { calcHash, peekCalc, writeCalc, collectValues, countValues } from "../lib/univerCalcCache.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
 const STRUCTURE_OPS = {
@@ -70,6 +71,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
     const mk = (n) => { try { performance.mark(`uv:${n}`); } catch (_) { /* marks are a courtesy */ } };   // read by ui-audit/measure-univer-tti.mjs --marks
     mk("effect");
     const L = live.current;
+    let reportCircular = () => {};
     try {
       // A framework instance built ahead of time (components/univerFramework.js, started when the pointer rested on the tab) is TAKEN here:
       // its element moves into place and `load()` below replaces its placeholder workbook. Otherwise build one now. Either way everything
@@ -82,6 +84,12 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         L.prewarmed = true;
         L.unitId = pre.unitId;
       }
+      // THE REAL UNIT, WAITING (B2607857): when the instance was pre-built from this project's stored workbook and the workbook this grid mounts
+      // with is byte-for-byte the same one (canonical text, and the same scope), that unit — already seeded, calculated and drawn off-screen —
+      // IS the workbook: adopt it instead of rebuilding. Anything else (a cloud copy that won, an edit elsewhere, org / file mode) falls
+      // through to the normal `load()`, which drops the waiting unit.
+      const adoptable = !!(pre && pre.prep && pre.viewKey === L.viewKey && pre.prep.storedCanon && pre.prep.storedCanon === incoming);
+      L.adoptWhy = pre ? { prep: !!pre.prep, key: pre.viewKey === L.viewKey ? true : `${pre.viewKey} vs ${L.viewKey}`, canon: pre.prep ? pre.prep.storedCanon === incoming : null, lens: pre.prep ? [incoming.length, pre.prep.storedCanon.length] : null } : null;   // harness-only (calc())
       noteGridMounted(); L.counted = true;
       mk("framework");
       const { univer, univerAPI, worker } = fw;
@@ -123,6 +131,15 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
           }, 1200);
         };
         L.scheduleCalcWrite = scheduleCalcWrite;
+        // Circular cells (Univer calculates them as 0, which looks like an answer) → one notice per distinct set.
+        reportCircular = (refs) => {
+          try {
+            const wb = L.unitId && univerAPI.getWorkbook(L.unitId);
+            const list = refs.filter((c) => c.unitId === L.unitId).map((c) => { const ws = wb && wb.getSheetBySheetId(c.sheetId); return { sheetName: ws ? ws.getSheetName() : c.sheetId, row: c.row, col: c.column }; });
+            const key = JSON.stringify(list);
+            if (key !== L.circularKey) { L.circularKey = key; if (list.length && L.onNotice) L.onNotice(circularNotice(list)); }
+          } catch (_) { /* the read is a courtesy; the calculation itself is untouched */ }
+        };
         const subs = [
           fw.calculationStart(() => { found = []; clearTimeout(L.calcTimer); }),
           fw.calculationProcessing((p) => { if (p && Array.isArray(p.circularReferences) && p.circularReferences.length) found = p.circularReferences; }),
@@ -132,12 +149,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
             if (disposed || (state !== 3 /* SUCCESS */ && state !== 2 /* NOT_EXECUTED */)) return;
             scheduleCalcWrite();
             if (state !== 3) return;
-            try {
-              const wb = L.unitId && univerAPI.getWorkbook(L.unitId);
-              const list = found.filter((c) => c.unitId === L.unitId).map((c) => { const ws = wb && wb.getSheetBySheetId(c.sheetId); return { sheetName: ws ? ws.getSheetName() : c.sheetId, row: c.row, col: c.column }; });
-              const key = JSON.stringify(list);
-              if (key !== L.circularKey) { L.circularKey = key; if (list.length && L.onNotice) L.onNotice(circularNotice(list)); }
-            } catch (_) { /* the read is a courtesy; the calculation itself is untouched */ }
+            reportCircular(found);
           }),
         ];
         L.circularSub = { dispose: () => subs.forEach((d) => { try { d.dispose(); } catch (_) { /* already gone */ } }) };
@@ -149,44 +161,43 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       const icons = L.injector.get(IconManager);
       for (const [name, icon] of Object.entries(CURVED_ICONS)) { icons.delete(name); icons.register(name, icon); }
 
-      const load = (wb) => {
-        const migrated = migrateWorkbook(wb);
-        // NEW-1 (one formula engine): [Column] names, interleaved XIRR/XNPV pairs and `=-Name` are rewritten to the spelling Univer's
-        // engine calculates, with a visible note — and SAVED that way (the baseline stays the stored text, so the first flush after
-        // this load sees a difference and commits the rewrite as one ordinary edit).
-        const { workbook: forUniver, rewritten } = migratePlanyrSyntaxInWorkbook(migrated);
-        const { data, sidecar } = workbookToUniver(forUniver);
-        const defs = projectNamesToDefinedNames(live.current.projectNames);
-        if (Object.keys(defs).length) {
-          const res = data.resources.find((r) => r.name === "SHEET_DEFINED_NAME_PLUGIN");
-          if (res) res.data = JSON.stringify({ ...JSON.parse(res.data), ...defs });
-          else data.resources.push({ name: "SHEET_DEFINED_NAME_PLUGIN", data: JSON.stringify(defs) });
-        }
-        // THE CALCULATION CACHE (lib/univerCalcCache.js): formula results remembered on this device. Used only when the hash of EXACTLY this
-        // workbook + these names matches, so a stale value cannot appear; with a value in a formula cell Univer (WHEN_EMPTY) does not wait to
-        // calculate it, and the first paint is complete. A miss is today's behaviour.
-        try {
-          const entry = peekCalc(L.viewKey);
-          L.storedCanon = canonicalJson(migrated);                              // the workbook as it is STORED — what the next open will load
-          const h = calcHash(L.storedCanon);
-          L.cacheSeeded = entryFits(entry, h, migrated) ? seedValues(data, entry.v) : 0; L.cacheHash = h;
-        } catch (_) { L.cacheSeeded = 0; }
-        if (L.unitId) { try { univerAPI.disposeUnit(L.unitId); } catch (_) { /* already gone */ } }
-        L.sidecar = sidecar;
+      // What both a fresh load and an adopted unit do once a unit exists: the sidecar, the save baseline, the stored form, the notices.
+      const settleUnit = (prep, migrated) => {
+        L.storedCanon = prep.storedCanon; L.cacheHash = prep.hash; L.cacheSeeded = prep.seeded;
+        L.sidecar = prep.sidecar;
         L.save.baseline(migrated);
-        L.projectDefs = defs;
-        const fWb = univerAPI.createWorkbook(data);
+        L.projectDefs = prep.defs || {};
+      };
+      const noteRewritten = (prep) => {
+        if (!prep.rewritten.length) return;
+        L.save.schedule();
+        const note = planyrSyntaxNote(prep.rewritten);
+        if (note && L.onNotice) L.onNotice(note);
+      };
+      const load = (wb) => {
+        const defs = projectNamesToDefinedNames(live.current.projectNames);
+        const prep = prepareUnit(wb, { entry: peekCalc(L.viewKey), defs });
+        prep.defs = defs;
+        if (L.unitId) { try { univerAPI.disposeUnit(L.unitId); } catch (_) { /* already gone */ } }
+        settleUnit(prep, prep.migrated);
+        const fWb = univerAPI.createWorkbook(prep.data);
         L.unitId = fWb.getId();
-        if (rewritten.length) {
-          L.save.schedule();
-          const note = planyrSyntaxNote(rewritten);
-          if (note && L.onNotice) L.onNotice(note);
-        }
-        const active = migrated.sheets.find((s) => s.id === migrated.activeSheetId);
+        noteRewritten(prep);
+        const active = prep.migrated.sheets.find((s) => s.id === prep.migrated.activeSheetId);
         if (active) { try { fWb.setActiveSheet(fWb.getSheetBySheetId(active.id)); } catch (_) { /* first sheet stays active */ } }
         if (L.tools) L.tools.attachUnit(L.unitId);                  // a rebuilt workbook is a NEW unit: its sheet component needs the trace layer again
         if (L.scheduleCalcWrite) L.scheduleCalcWrite();             // and remember its results even if no calculation-end notice ever comes (cleared again by a calculation that starts)
         return fWb;
+      };
+      // Take the waiting unit as the workbook (see `adoptable`). The calculation it ran while waiting spoke before this grid was listening:
+      // hand over its circular references, and make sure its results get remembered.
+      const adopt = () => {
+        const prep = { ...pre.prep, defs: {} };
+        settleUnit(prep, migrateWorkbook(workbook));
+        noteRewritten(prep);
+        L.adopted = true;
+        if (pre.found && pre.found.length) reportCircular(pre.found);
+        if (L.scheduleCalcWrite) L.scheduleCalcWrite();
       };
       L.load = load;
 
@@ -304,7 +315,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       L.off = off;
 
       mk("keys+icons+save");
-      load(workbook);
+      if (adoptable) adopt(); else load(workbook);
       mk("load");
       // Indent (needs the sheets services, which exist once a workbook does): drawn + Increase/Decrease buttons and command ids (lib/univerIndent.js — Univer 1.x has no indent of its own).
       L.indent = installUniverIndent({
@@ -390,7 +401,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         flush: () => { if (e2e()) flush(); return e2e(); },
         tools: () => (e2e() ? L.tools : null),
         // harness-only: how many formula cells the calculation cache seeded at the last load, whether this grid took a pre-built instance, and Univer's lifecycle stage
-        calc: () => (e2e() ? { seeded: L.cacheSeeded || 0, hash: L.cacheHash || null, prewarmed: !!L.prewarmed, stage: (() => { try { return L.injector.get(LifecycleService).stage; } catch (_) { return null; } })() } : null),
+        calc: () => (e2e() ? { seeded: L.cacheSeeded || 0, hash: L.cacheHash || null, prewarmed: !!L.prewarmed, adopted: !!L.adopted, adoptWhy: L.adoptWhy || null, stage: (() => { try { return L.injector.get(LifecycleService).stage; } catch (_) { return null; } })() } : null),
         excelKeys: () => (e2e() ? { registered: L.excelKeys && L.excelKeys.registered, tips: L.excelKeys && L.excelKeys.keyTips.state, run: (id) => L.excelKeys.runAction(id) } : null),
         // harness-only: the header-drag gate's state and the controller's view of what is pending
         gate: () => (e2e() ? L.gate : null),

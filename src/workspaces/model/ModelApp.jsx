@@ -498,6 +498,10 @@ export default function ModelApp({
     return () => { live = false; clearTimeout(t); };
   }, [univerOn, viewPrefsKey]);
   const calcReady = !univerOn || calcCacheSettled(viewPrefsKey) || calcReadyKey === viewPrefsKey;
+  // The grid mounts with the workbook that is LOADED, never with ModelApp's blank first-render placeholder: the load effect that reads the device copy
+  // runs just after the first render, and a grid that mounted in between built a blank unit, then threw it away for the real one (and could not adopt a
+  // unit pre-built for the real workbook — B2607857). A Library file (`fileMode`) has its own loading phase and never sets `ready`.
+  const gridWorkbookReady = fileMode || ready;
   const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(viewPrefsKey, z); }, [viewPrefsKey]);
 
   // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour toggle. Same "view preference,
@@ -2005,7 +2009,7 @@ export default function ModelApp({
           {univer.deciding ? (
             // The owner's device asked for the regular grid and the admin answer is still coming — mount neither grid.
             <div role="status" data-testid="model-grid-deciding" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
-          ) : univerOn && !calcReady ? (
+          ) : univerOn && !(calcReady && gridWorkbookReady) ? (
             <div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
           ) : univerOn ? (
             // The Univer grid (every account) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four

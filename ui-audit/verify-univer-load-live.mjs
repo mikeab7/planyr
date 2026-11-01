@@ -163,11 +163,12 @@ try {
     console.log("   DIAG calc cache on this device:", JSON.stringify(dump), " grid hash:", info.hash, " url:", page.url());
   }
   ok("B3 the grid took its formula results from the device's cache", info.seeded === ROWS, `seeded ${info.seeded} of ${ROWS}`);
+  ok("B3b the click ADOPTED a unit built from the stored workbook before the click (the signed-in account's device copy was found)", info.adopted === true, JSON.stringify(info.adoptWhy));
   ok("B4 …and the numbers are still right", Math.abs((await lastSum()) - rowSum(ROWS - 1)) < 1e-6, `${await lastSum()}`);
   await page.evaluate(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 0).setValue(1000));
   let followed = true; try { await page.waitForFunction(([w]) => Math.abs(Number(window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 11).getValue()) - w) < 1e-6, [rowSum(0, 1000)], { timeout: 20000, polling: 25 }); } catch (_) { followed = false; }
   ok("B5 an edit in the seeded grid reaches its dependent (recalculation is intact)", followed);
-  log.return = { retMs, seeded: info.seeded };
+  log.return = { retMs, seeded: info.seeded, adopted: info.adopted };
 
   // ── C. a device on the owner's regular-grid hatch must not download it ─────────────────────────────────────────────────────
   await setSwitch(false); await page.goto("about:blank"); await cold();

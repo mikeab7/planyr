@@ -13,6 +13,7 @@
  * must not pull the admin check (and through it the whole Supabase client) in just to read a localStorage flag.
  * Best-effort and idempotent: a failed warm is retried by the real mount. */
 import { migrateLegacyGridChoice, readRegularGrid } from "./gridChoice.js";
+import { deviceUserId } from "./deviceUser.js";
 
 /** Will THIS device show the Univer grid (as far as it can tell without asking who the user is)? */
 export const univerWantedHere = (storage = typeof localStorage === "undefined" ? null : localStorage) => !readRegularGrid(storage);
@@ -32,7 +33,13 @@ export function warmUniver({ force = false, storage } = {}) {
   warm = import("../components/UniverSheet.jsx").then((mod) => {
     // Chunk in hand: now build the framework instance ahead of time, at idle (components/univerFramework.js — it is a no-op when a grid is
     // already mounted, and UniverSheet takes the waiting instance when it mounts). Held to idle because building it costs main-thread time.
-    const build = () => { try { mod.prewarmFramework && mod.prewarmFramework(); } catch (_) { /* best-effort */ } };
+    // The project the page is on, and who is signed in (read from the stored session — lib/deviceUser.js), tell it WHICH workbook to build ahead:
+    // the device's copy of this project's workbook becomes the real unit, so the click only has to show it (B2607857).
+    const build = () => {
+      try { const projectId = projectIdFromHash(); mod.prewarmFramework && mod.prewarmFramework({ projectId, userId: projectId ? deviceUserId() : null }); } catch (_) { /* best-effort */ }
+    };
+    // Held to idle time. (MEASURED, B2607857: building at once on a page that is OPENING on the Spreadsheet made it slower — 1.37 s against 0.83 s on a
+    // repeat visit — because the whole of Univer's start-up ran ahead of the page's own mount instead of beside it; the grid mount builds for itself.)
     if (typeof requestIdleCallback === "function") requestIdleCallback(build, { timeout: 2500 }); else setTimeout(build, 300);
     return mod;
   }).catch((err) => { warm = null; console.warn("univerWarm: could not warm the grid chunk (it will load when the grid opens)", err); });
