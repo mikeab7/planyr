@@ -2157,7 +2157,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     let cancelled = false, handle = null;
     import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
       if (cancelled) return;
-      handle = addVectorLabels(L, map, { mode: "site", includePois: false });
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, decorateFallback: (layer) => throttleTilePruning(layer) }); // NEW-1: one prune per burst
       labelsRef.current = handle;
     }).catch((e) => console.error("MapFinder: vector labels failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); labelsRef.current = null; };

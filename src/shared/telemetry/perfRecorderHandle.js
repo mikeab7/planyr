@@ -57,6 +57,12 @@ export function bindPerfRefusal(fn) { _refusal = typeof fn === "function" ? fn :
 export function perfCaptureRefusal() { try { return _refusal ? _refusal() : null; } catch (_) { return null; } }
 
 /** Is a recorder listening? Drives whether the manual control is offered at all. */
+/* NEW-1 (2026-11-01) — the recorder's read-only recent-window summary (perfRecorder.perfRecentWindow), bound at install so a
+ * reader (the planner's `window.__plannerPerf()`) never has to import the lazily-loaded recorder chunk. */
+let _recent = null;
+export function bindPerfRecent(fn) { _recent = typeof fn === "function" ? fn : null; }
+export function perfRecent(windowMs) { try { return _recent ? _recent(windowMs) : null; } catch (_) { return null; } }
+
 export function perfRecorderArmed() { return !!_capture; }
 
 /** "That felt slow just now." Returns true if a capture was TAKEN — see `perfCaptureDelivery`
@@ -111,4 +117,4 @@ export function noteLayerContext(overlays) {
 export function perfContext() { return { planId: _planId, planSwitches: _planSwitches, ppf: _ppf, layers: _layers }; }
 
 /** Test-only reset. */
-export function __resetPerfHandle() { _refusal = null; _capture = null; _delivery = null; _planId = null; _planSwitches = 0; _ppf = NaN; _layers = ""; }
+export function __resetPerfHandle() { _recent = null; _refusal = null; _capture = null; _delivery = null; _planId = null; _planSwitches = 0; _ppf = NaN; _layers = ""; }
