@@ -10,7 +10,10 @@
  *  8 a workbook with a chart: opens, the banner names it, the original is intact
  *  9 a password-protected file and a text file renamed .xlsx: a plain "couldn't be opened" panel naming the file, not a blank grid
  * 10 File ▸ Open Excel or CSV file… inside Spreadsheet files it into the Library and opens it   11 phone width (Chromium, not WebKit)
- * KNOWN-GOOD ARM: step 2 must show the seeded values before anything is judged. Run: E2E_LOGIN_KEY=… node ui-audit/verify-spreadsheet-file-live.mjs [base] */
+ * KNOWN-GOOD ARM: step 2 must show the seeded values before anything is judged.
+ * PORTED to the Univer grid (NEW-2, 2026-10-31): the grid is a canvas, so cells are typed with REAL mouse/keyboard at a cell's computed
+ * point and READ through Univer's facade (`window.__planyrUniverRead`, armed by `window.__PLANYR_E2E`, set before every navigation);
+ * the sheet tabs are Univer's own tab strip. Needs a deploy that serves the default-on Univer grid. Run: E2E_LOGIN_KEY=… node ui-audit/verify-spreadsheet-file-live.mjs [base] */
 import ExcelJS from "exceljs";
 import { readFileSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -40,6 +43,7 @@ async function multiSheet() {
 
 const s = await openSignedIn({ base: BASE });
 const { page } = s;
+await page.addInitScript(() => { window.__PLANYR_E2E = true; });   // armed for every full navigation below (the facade answers only when set before load)
 const made = [];            // review ids to clean up
 const driveKeys = new Set();
 try {
@@ -77,8 +81,20 @@ try {
     made.push(ids[0]);
     return ids[0];
   };
-  const cell = (r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`);
-  const cellText = async (r, c) => (await cell(r, c).first().innerText()).trim();
+  // ---- the Univer grid: canvas cells, driven by real input and read through the facade ----
+  const gridReady = async () => {
+    await page.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 });
+    await page.waitForFunction(() => { const h = window.__planyrUniverRead; const api = h && h.api && h.api(); const wb = api && api.getActiveWorkbook && api.getActiveWorkbook(); return !!(wb && wb.getActiveSheet && wb.getActiveSheet()); }, null, { timeout: 60000 });
+    await page.waitForTimeout(900);   // Univer paints ~300 ms after it is ready; a click before that lands on nothing
+  };
+  const inSheet = (fn, arg) => page.evaluate(`((arg) => { const api = window.__planyrUniverRead.api(); const ws = api.getActiveWorkbook().getActiveSheet(); return (${fn.toString()})(api, ws, arg); })(${JSON.stringify(arg ?? null)})`);
+  const cellPoint = (r, c) => inSheet((api, ws, [rr, cc]) => { const q = ws.getRange(rr, cc).getCellRect(); const o = typeof q === "string" ? JSON.parse(q) : q; const cv = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: cv.left + o.x + o.width / 2, y: cv.top + o.y + o.height / 2 }; }, [r, c]);
+  const cellText = async (r, c) => String(await inSheet((api, ws, [rr, cc]) => ws.getRange(rr, cc).getDisplayValue(), [r, c]) ?? "").trim();
+  const cellRaw = (r, c) => inSheet((api, ws, [rr, cc]) => ws.getRange(rr, cc).getDisplayValue(), [r, c]);       // untrimmed
+  const formulaAt = (r, c) => inSheet((api, ws, [rr, cc]) => ws.getRange(rr, cc).getFormula() || null, [r, c]);
+  const sheetCount = () => page.evaluate(() => window.__planyrUniverRead.api().getActiveWorkbook().getSheets().length);
+  const clickTab = async (i) => { await page.locator('[data-u-comp="slide-tab-item"]').nth(i).click(); await settle(600); };
+  const typeInto = async (r, c, text) => { const p = await cellPoint(r, c); await page.mouse.click(p.x, p.y); await settle(250); await page.keyboard.type(text, { delay: 8 }); await page.keyboard.press("Enter"); await settle(400); };
   const waitSaved = async (id, nSources) => {
     const t0 = Date.now();
     while (Date.now() - t0 < 60000) {
@@ -89,8 +105,8 @@ try {
     }
     throw new Error(`save never landed for ${id} (wanted ${nSources} stored versions)`);
   };
-  const typeInto = async (r, c, text) => { await cell(r, c).first().click(); await page.keyboard.type(text); await page.keyboard.press("Enter"); };
   const openRow = async (name) => { await rowFor(name).first().click(); await page.waitForSelector('[data-testid="model-root"]', { timeout: 30000 }); };
+  const openRowGrid = async (name) => { await openRow(name); await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await gridReady(); };
 
   // ---- 1 + 2: upload, open ----
   await goLibrary();
@@ -99,22 +115,20 @@ try {
   const multiId = await upload(multiName, multi, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   const before = await rec(multiId);
   ok("1 uploaded: the Library record has the original as its one stored version", (before.sources || []).length === 1);
-  await openRow(multiName);
-  await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 });
-  await settle(1500);
+  await openRowGrid(multiName);
   ok("2 the Spreadsheet tab is showing (route)", /\/spreadsheet$/.test(new URL(page.url()).hash));
   ok("2 file bar names the file and says edits save to it", /proforma\.xlsx/.test(await page.getByTestId("model-file-name").innerText()) && /edits save to this file/i.test(await page.getByTestId("model-file-bar").innerText()));
-  ok("2 KNOWN-GOOD ARM: both sheet tabs are there", (await page.locator('[data-testid^="model-sheet-tab-"]').count()) === 2);
+  ok("2 KNOWN-GOOD ARM: both sheet tabs are there", (await sheetCount()) === 2);
   ok("2 the value, the formula's computed value and the date (as a date) show", (await cellText(0, 2)) === "1000" && (await cellText(1, 2)) === "1/1/2024");
-  ok("2 header keeps its stray spaces (a leading blank column A, text ' Land ')", (await cellText(0, 0)) === "" && (await cell(0, 1).first().innerText()).includes("Land"));
+  ok("2 header keeps its stray spaces (a leading blank column A, text ' Land ')", (await cellText(0, 0)) === "" && (await cellRaw(0, 1)).includes("Land"));
   ok("2 nothing to apologise for: no 'won't carry over' banner", (await page.getByTestId("model-file-notes").count()) === 0);
-  await page.locator('[data-testid="model-sheet-tab-1"]').click(); await settle(500);
+  await clickTab(1);
   ok("2 the cross-sheet formula shows its computed value", (await cellText(0, 2)) === "2000");
 
   // ---- 3: edit a value and a formula ----
-  await page.locator('[data-testid="model-sheet-tab-0"]').click(); await settle(500);
+  await clickTab(0);
   await typeInto(0, 2, "5000");
-  await page.locator('[data-testid="model-sheet-tab-1"]').click(); await settle(500);
+  await clickTab(1);
   ok("3 the dependent formula recomputed on screen", (await cellText(0, 2)) === "10000");
   await typeInto(1, 2, "=C1+1");
   ok("3 a formula typed in a second cell computes", (await cellText(1, 2)) === "10001");
@@ -124,13 +138,11 @@ try {
 
   // ---- 4: cache-busted reload, re-open ----
   await goLibrary(true);
-  await openRow(multiName);
-  await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await settle(1500);
-  await page.locator('[data-testid="model-sheet-tab-1"]').click(); await settle(500);
+  await openRowGrid(multiName);
+  await clickTab(1);
   ok("4 after a cache-busted reload the edits persisted and computed (10000 / 10001)", (await cellText(0, 2)) === "10000" && (await cellText(1, 2)) === "10001");
-  await cell(1, 2).first().click();
-  ok("4 the second cell is still a FORMULA (formula bar shows =C1+1)", (await page.getByTestId("model-formula-bar").inputValue()) === "=C1+1");
-  await page.locator('[data-testid="model-sheet-tab-0"]').click(); await settle(500);
+  ok("4 the second cell is still a FORMULA (Univer holds =C1+1, not just its value)", (await formulaAt(1, 2)) === "=C1+1");
+  await clickTab(0);
   ok("4 the date is still a date after the round trip", (await cellText(1, 2)) === "1/1/2024");
 
   // ---- 5: Download as Excel, re-read outside the app ----
@@ -154,8 +166,7 @@ try {
   const csvName = `${T}-comps.csv`;
   const csvBytes = Buffer.from("Name,Rent\nAlpha,7.25\nBeta,8\n");
   const csvId = await upload(csvName, csvBytes, "text/csv");
-  await openRow(csvName);
-  await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await settle(1500);
+  await openRowGrid(csvName);
   ok("7 the CSV opened with its note that edits go to a new Excel copy", /new Excel (file|copy)/i.test(await page.getByTestId("model-file-bar").innerText() + await page.getByTestId("model-file-notes").innerText().catch(() => "")));
   await typeInto(1, 1, "9.5");
   const t0 = Date.now();
@@ -166,14 +177,14 @@ try {
   ok("7 the CSV bytes are unchanged", same(await bytesOf((await rec(csvId)).sources[0].driveKey), csvBytes));
   await goLibrary();
   ok("7 a '.xlsx' copy sits in the Library beside it", (await rowFor(`${T}-comps.xlsx`).count()) === 1);
-  await openRow(csvName); await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await settle(1500);
+  await openRowGrid(csvName);
   ok("7 clicking the CSV again opens the EDITED copy (9.5), with the note", (await cellText(1, 1)) === "9.5" && /editable Excel copy/i.test(await page.getByTestId("model-file-notes").innerText().catch(() => "")));
 
   // ---- 8: a chart ----
   await goLibrary();
   const chartName = `${T}-dash.xlsx`;
   const chartId = await upload(chartName, fx("chart.xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  await openRow(chartName); await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await settle(1500);
+  await openRowGrid(chartName);
   ok("8 the chart workbook opens and the banner names the chart", /1 chart/i.test(await page.getByTestId("model-file-notes").innerText().catch(() => "")));
   ok("8 its cells are there (Row 1)", (await cellText(1, 0)) === "Row 1");
   ok("8 the original is intact in the Library", same(await bytesOf((await rec(chartId)).sources[0].driveKey), fx("chart.xlsx")));
@@ -184,7 +195,7 @@ try {
   await upload(lockName, fx("locked.xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   await openRow(lockName); await page.waitForSelector('[data-testid="model-file-problem"]', { timeout: 60000 });
   const lockText = await page.getByTestId("model-file-problem-text").innerText();
-  ok("9 password-protected: a plain panel names the file and the password", lockText.includes("locked.xlsx") && /password/i.test(lockText) && (await page.getByTestId("model-sheet").count()) === 0);
+  ok("9 password-protected: a plain panel names the file and the password", lockText.includes("locked.xlsx") && /password/i.test(lockText) && (await page.locator('canvas[id^="univer-sheet-main-canvas"]').count()) === 0);
   await page.getByTestId("model-file-problem-close").click(); await settle(800);
   await goLibrary();
   const fakeName = `${T}-fake.xlsx`;
@@ -200,7 +211,7 @@ try {
   const door = `${T}-door.xlsx`;
   const doorWb = new ExcelJS.Workbook(); doorWb.addWorksheet("Door").getCell("A1").value = "via the File menu";
   await page.getByTestId("model-open-file-input").setInputFiles({ name: door, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from(await doorWb.xlsx.writeBuffer()) });
-  await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 90000 }); await settle(1500);
+  await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 90000 }); await gridReady();
   const doorIds = await idFor(`${T}-door`); doorIds.forEach((i) => made.push(i));
   ok("10 File ▸ Open Excel or CSV file… filed it in the Library and opened it", doorIds.length === 1 && (await cellText(0, 0)) === "via the File menu");
 

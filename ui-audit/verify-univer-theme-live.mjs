@@ -3,8 +3,8 @@
  * deleted and the database is asked again to prove it). Same pixel measurements as the sandbox run
  * (ui-audit/lib/univerThemeContrast.mjs), taken on the real app after the deploy, with the served build read in the SAME call.
  *
- * is_admin is answered `true` by a network intercept for THIS browser only (the switch is a visibility gate, not a security
- * boundary); the choice of theme goes through the app's own storage key (`planyr.theme`, read by ThemeProvider at load), and
+ * The Univer grid is the DEFAULT for every account (cutover 2026-10-31), so the test account — NOT an admin — sees it with no switch and no
+ * is_admin intercept; the choice of theme goes through the app's own storage key (`planyr.theme`, read by ThemeProvider at load), and
  * the two flip-while-open scenarios set the same `data-theme` attribute ThemeProvider writes.
  * KNOWN-GOOD ARM: the bottom sheet tab must read on a fresh mount, or the run is VOID.
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-univer-theme-live.mjs [base=https://planyr.io] [--json out.json] */
@@ -18,7 +18,7 @@ const args = process.argv.slice(2);
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const JSON_OUT = (() => { const i = args.indexOf("--json"); return i >= 0 ? args[i + 1] : null; })();
 const PROJECT = `${LIVE_PREFIX}univer-theme-${Date.now().toString(36)}`;
-const SWITCH_KEY = "planyr:model:univerGrid", THEME_KEY = "planyr.theme";
+const THEME_KEY = "planyr.theme";
 let failures = 0, voided = false;
 const all = [];
 
@@ -30,11 +30,9 @@ try {
   console.log(`served build: ${build}  account: ${s.proof.email}  base: ${BASE}`);
   await seedThrowawayPlan(page, PROJECT);
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
-  let hits = 0;
-  await page.route("**/rest/v1/rpc/is_admin*", (route) => { hits++; route.fulfill({ status: 200, contentType: "application/json", body: "true" }); });
   const url = () => `${BASE}/?cb=${Date.now()}#/project/${PROJECT}/spreadsheet`;
   const mount = async (theme) => {
-    await page.evaluate(([k, v, sk]) => { localStorage.setItem(k, v); localStorage.setItem(sk, "1"); }, [THEME_KEY, theme, SWITCH_KEY]);
+    await page.evaluate(([k, v]) => { localStorage.setItem(k, v); }, [THEME_KEY, theme]);
     await page.goto(url(), { waitUntil: "load" });
     await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 120000 });
     await page.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); return !!(a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet()); }, null, { timeout: 90000, polling: 250 });
@@ -53,7 +51,6 @@ try {
     for (const t of plan.then) await setTheme(page, t);
     all.push(await scenario(page, plan.name, plan.then));
   }
-  if (!hits) { voided = true; throw new Error("VOID — the is_admin intercept never fired"); }
 
   for (const sc of all) {
     console.log(`\n── ${sc.name}  [data-theme=${sc.colours.theme} univer-dark=${sc.colours.univerDark}]  icon ${sc.colours.toolbarIconColor} on ${sc.colours.toolbarBg} · strip ${sc.colours.stripBg}`);
@@ -61,7 +58,7 @@ try {
   }
 } catch (e) { console.log(String(e.message).split("\n")[0]); if (!voided) failures++; }
 try {
-  await page.evaluate(([k, sk]) => { localStorage.removeItem(k); localStorage.removeItem(sk); }, [THEME_KEY, SWITCH_KEY]).catch(() => {});
+  await page.evaluate(([k]) => { localStorage.removeItem(k); }, [THEME_KEY]).catch(() => {});
   const out = await page.evaluate(async (id) => { const c = window.pfSupabase; await c.from("model_sheets").delete().eq("id", id); return ((await c.from("model_sheets").select("id").eq("id", id)).data || []).length; }, PROJECT);
   const gone = await cleanupLive(page, { planId: PROJECT }).catch((e) => ({ errors: [String(e)] }));
   const clean = out === 0 && !(gone.errors || []).length && gone.left?.site === 0;

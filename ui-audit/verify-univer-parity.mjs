@@ -417,6 +417,101 @@ check("key-ctrl-shift-arrow", "Ctrl+Shift+Arrow extends to the end of the data",
   await reset(); await click(0, 0); await press("Control+Shift+ArrowDown"); const s = (await sel())[0];
   return s && s.r2 === 4 ? PASS(`selected ${s.a1}`) : FAIL(`selected ${s && s.a1}`);
 });
+const activeCell = () => inSheet((api, ws) => { const a = ws.getSelection().getCurrentCell(); return a ? [a.actualRow, a.actualColumn] : null; });
+check("key-nav-basic", "Arrows, Tab / Shift+Tab, Enter / Shift+Enter move the active cell; Shift+Arrow extends", async () => {
+  await reset(); await click(5, 2);
+  const seen = {};
+  await press("Tab"); seen.tab = await activeCell();
+  await press("Shift+Tab"); seen.shiftTab = await activeCell();
+  await press("Enter"); seen.enter = await activeCell();
+  await press("Shift+Enter"); seen.shiftEnter = await activeCell();
+  await press("ArrowRight"); seen.right = await activeCell();
+  await press("Shift+ArrowDown"); const s = (await sel())[0];
+  const want = { tab: [5, 3], shiftTab: [5, 2], enter: [6, 2], shiftEnter: [5, 2], right: [5, 3] };
+  const bad = Object.keys(want).filter((k) => !eq(seen[k], want[k]));
+  if (bad.length) return FAIL(`${bad.map((k) => `${k}=${JSON.stringify(seen[k])} (want ${JSON.stringify(want[k])})`).join("; ")}`);
+  return s && s.r1 === 5 && s.r2 === 6 ? PASS("Tab → D6, Shift+Tab → C6, Enter → C7, Shift+Enter → C6, → D6, Shift+↓ selected rows 6–7") : FAIL(`Shift+Arrow selected ${s && s.a1}`);
+});
+check("key-enter-commits-formula", "Enter commits a formula that ends in a function / name even with the hint list open (Excel); the next cell is selected; Tab-less", async () => {
+  await reset(); await click(7, 6);
+  await page.keyboard.type("=PI", { delay: 30 }); await wait(500);
+  const hint = await ev(() => [...document.querySelectorAll('section[class*="univer-fixed"] ul[class*="univer-list-none"]')].some((u) => u.getBoundingClientRect().width > 0 && u.querySelector("li")));
+  await press("Enter"); await wait(300);
+  const v = await val1(7, 6), f = await inSheet((api, ws) => ws.getRange(7, 6).getFormula());
+  const at = await activeCell();
+  if (!hint) return FAIL("KNOWN-GOOD ARM: the hint list was not open when Enter was pressed, so this proved nothing");
+  // `=PI` without its brackets is #NAME? in Excel too — what matters is that Enter COMMITTED exactly what was typed (the hint list used to swallow it).
+  if (f !== "=PI") return FAIL(`Enter left the cell uncommitted or changed it: value ${JSON.stringify(v)}, formula ${JSON.stringify(f)}`);
+  if (!eq(at, [8, 6])) return FAIL(`committed, but the selection is at ${JSON.stringify(at)} not G9`);
+  await press("Control+z"); const back = await val1(7, 6);
+  return back === null || back === undefined || back === "" ? PASS("=PI + Enter with the hint list open committed exactly =PI (not a suggestion), moved to G9, and undid in one step") : FAIL(`Ctrl+Z left ${JSON.stringify(back)}`);
+});
+check("paste-empty-says-so", "Pasting an empty clipboard says so in words (never a silent no-op); a real paste says nothing", async () => {
+  await reset(); await click(4, 4);
+  const empty = () => ev(() => { const dt = new DataTransfer(); const e = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }); (document.activeElement || document.body).dispatchEvent(e); });
+  await empty(); await wait(300);
+  const said = await ev(() => window.__notices.slice());
+  const ok = said.some((t) => /nothing to paste/i.test(String(t && t.text || t)));
+  // control: a paste carrying text raises no such notice
+  await ev(() => { window.__notices = []; const dt = new DataTransfer(); dt.setData("text/plain", "x"); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); });
+  await wait(300);
+  const quiet = !(await ev(() => window.__notices.slice())).some((t) => /nothing to paste/i.test(String(t && t.text || t)));
+  return ok && quiet ? PASS("empty paste → 'There's nothing to paste…'; a paste with text → no such notice") : FAIL(`empty paste said ${JSON.stringify(said)}; text paste quiet=${quiet}`);
+});
+check("multi-range-copy-cut-refused", "Ctrl+C and Ctrl+X with several ranges selected say so in words (Excel: 'cannot be used on multiple selections') and copy nothing", async () => {
+  await reset(); await click(0, 0); await heldClick(2, 2, "Control"); await wait(200);
+  const n = (await sel()).length;
+  await ev(() => { window.__notices = []; });
+  await press("Control+c"); const a = await ev(() => window.__notices.slice());
+  await ev(() => { window.__notices = []; });
+  await press("Control+x"); const b = await ev(() => window.__notices.slice());
+  const says = (l) => l.some((t) => /multiple selections/i.test(String(t && t.text || t)));
+  // control: one range copies without that message
+  await click(4, 4); await ev(() => { window.__notices = []; }); await press("Control+c"); const c = await ev(() => window.__notices.slice());
+  if (n < 2) return FAIL(`KNOWN-GOOD ARM: only ${n} range(s) were selected`);
+  return says(a) && says(b) && !says(c) ? PASS("two ranges: Ctrl+C and Ctrl+X both say 'multiple selections'; a single range copies quietly") : FAIL(`copy said ${JSON.stringify(a)}, cut said ${JSON.stringify(b)}, single-range copy said ${JSON.stringify(c)}`);
+});
+check("key-sheet-tabs", "Ctrl+PgDn / Ctrl+PgUp step to the next / previous sheet tab and stop at the ends (Excel)", async () => {
+  await reset();
+  await inSheet((api) => { const wb = api.getActiveWorkbook(); wb.insertSheet("Second"); wb.insertSheet("Third"); wb.getSheets()[0].activate(); });
+  await wait(300); await click(2, 2);
+  const name = () => inSheet((api) => api.getActiveWorkbook().getActiveSheet().getSheetName());
+  const seen = [await name()];
+  await press("Control+PageDown"); seen.push(await name());
+  await press("Control+PageDown"); seen.push(await name());
+  await press("Control+PageDown"); seen.push(await name());           // at the last: stays
+  await press("Control+PageUp"); seen.push(await name());
+  await press("Control+PageUp"); seen.push(await name());
+  await press("Control+PageUp"); seen.push(await name());             // at the first: stays
+  const want = [seen[0], "Second", "Third", "Third", "Second", seen[0], seen[0]];
+  return eq(seen, want) ? PASS(`${seen.join(" → ")}`) : FAIL(`${seen.join(" → ")}, wanted ${want.join(" → ")}`);
+});
+check("key-nav-home-end-page", "Home, Ctrl+Home, Ctrl+End, Ctrl+Shift+Home/End, PageUp/PageDown and Alt+PageUp/PageDown move or extend the selection (the free Univer build does none of them; the plugin does)", async () => {
+  await reset();
+  const fails = [];
+  const expectCell = async (label, want) => { const got = await activeCell(); if (!eq(got, want)) fails.push(`${label}: active ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
+  const expectSel = async (label, r1, r2, c1, c2) => { const x = (await sel())[0]; if (!x || x.r1 !== r1 || x.r2 !== r2 || x.c1 !== c1 || x.c2 !== c2) fails.push(`${label}: selected ${x && x.a1} (rows ${x && x.r1}-${x && x.r2}, cols ${x && x.c1}-${x && x.c2}), want rows ${r1}-${r2}, cols ${c1}-${c2}`); };
+  await click(3, 2); await press("Home"); await expectCell("Home", [3, 0]);
+  await click(3, 2); await press("Shift+Home"); await expectSel("Shift+Home", 3, 3, 0, 2); await expectCell("Shift+Home keeps the active cell", [3, 2]);
+  await click(3, 2); await press("Control+Home"); await expectCell("Ctrl+Home", [0, 0]);
+  await press("Control+End"); await expectCell("Ctrl+End (the last used cell, C5)", [4, 2]);
+  await click(3, 2); await press("Control+Shift+Home"); await expectSel("Ctrl+Shift+Home", 0, 3, 0, 2);
+  await click(1, 0); await press("Control+Shift+End"); await expectSel("Ctrl+Shift+End", 1, 4, 0, 2);
+  const rows = await inSheet((api, ws) => { const v = ws.getVisibleRange(); return v.endRow - v.startRow; });
+  // (after a page move the grid is scrolled and a canvas click point computed from cell geometry no longer maps to that cell — set up with activate())
+  const goto = async (r, c) => { await inSheet((api, ws, [rr, cc]) => { ws.getRange(rr, cc).activate(); }, [r, c]); await press("Control+Home"); if (r || c) await inSheet((api, ws, [rr, cc]) => { ws.getRange(rr, cc).activate(); }, [r, c]); await wait(150); };
+  await goto(0, 0); await press("PageDown"); const down = await activeCell();
+  if (!down || down[1] !== 0 || down[0] < Math.max(1, rows - 1)) fails.push(`PageDown from A1 landed on ${JSON.stringify(down)} (a screen is ~${rows} rows)`);
+  await press("PageUp"); await expectCell("PageUp back to the top", [0, 0]);
+  await goto(2, 0); await press("Shift+PageDown"); const ext = (await sel())[0];
+  if (!ext || ext.r1 !== 2 || ext.r2 <= 2 + 1) fails.push(`Shift+PageDown selected ${ext && ext.a1}`);
+  await goto(2, 0); await press("Alt+PageDown"); const across = await activeCell();
+  if (!across || across[0] !== 2 || across[1] < 2) fails.push(`Alt+PageDown from A3 landed on ${JSON.stringify(across)}`);
+  await press("Alt+PageUp"); await expectCell("Alt+PageUp back to column A", [2, 0]);
+  // In the cell editor Home belongs to the text caret: the selection must not jump.
+  await goto(3, 2); await press("F2"); await press("Home"); await press("Escape"); await expectCell("Home inside the editor leaves the selection alone", [3, 2]);
+  return fails.length ? FAIL(fails.join("; ")) : PASS("Home → A4, Shift+Home → A4:C4 (active C4), Ctrl+Home → A1, Ctrl+End → C5, Ctrl+Shift+Home → A1:C4, Ctrl+Shift+End → A2:C5, PgDn/PgUp a screen, Shift+PgDn extends, Alt+PgDn/PgUp a screen across; Home in the editor did not move the selection");
+});
 check("key-f2", "F2 edits the cell in place with its content", async () => {
   await reset(); await click(0, 1); await press("F2"); await page.keyboard.type("X"); await press("Enter"); await wait(400);
   const v = await val1(0, 1);

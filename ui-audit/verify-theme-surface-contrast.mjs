@@ -141,8 +141,15 @@ async function run(theme, vpName, signedIn) {
       });
     }
   }
-  for (const [label, hash] of [["review", "#/markup"], ["library", "#/library"], ["schedule", "#/schedule"], ["notes", "#/notes"], ["spreadsheet", "#/spreadsheet"]]) {
+  for (const [label, hash] of [["review", "#/markup"], ["library", "#/library"], ["schedule", "#/schedule"], ["notes", "#/notes"], ["spreadsheet", "#/spreadsheet"], ["spreadsheet-grid", `#/project/${demoSite.id}/spreadsheet`]]) {
     await go(hash);
+    // NEW-2: `#/spreadsheet` (no project) is the "No spreadsheet open" empty state — it never showed the grid, so this sweep never saw the Spreadsheet's
+    // own surface at all. "spreadsheet-grid" opens the seeded project's Spreadsheet = the UNIVER grid (a lazy canvas chunk, mounted seconds after the route):
+    // wait for the canvas and FAIL LOUDLY (not "skipped") if it never comes, then sweep its DOM chrome (toolbar, formula bar, tab strip, menus).
+    if (label === "spreadsheet-grid") {
+      await page.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 });
+      await page.waitForTimeout(1200);
+    }
     await tryDo(label, async () => {});
   }
   await go("#/site");

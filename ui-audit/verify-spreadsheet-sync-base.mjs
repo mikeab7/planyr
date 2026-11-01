@@ -6,6 +6,10 @@
  *  C  cache-busted reload → NO bar, the values show, and the reload bumped nothing   D  edit → the cloud version advances
  *  E  stale-but-CLEAN device copy + newer cloud → the cloud copy shows, no bar        F  both sides dirty since the base → the bar DOES appear, nothing is pushed
  * The run is VOID (not scored) if step B's arm does not show the key-order difference — without it a pass proves nothing.
+ * PORTED to the Univer grid (NEW-2, 2026-10-31): cells are typed with REAL mouse/keyboard at a cell's computed point and read through Univer's
+ * facade (`window.__planyrUniverRead`, armed by `window.__PLANYR_E2E` before every navigation). The saved workbook keeps Planyr's own shape, but
+ * its cell keys now come out of the bridge in ROW-MAJOR order (not typing order), so the known-good arm uses J1 (key "c10:0", longer) before
+ * C... A3-style short keys: row-major puts c10:0 BEFORE c4:2 while jsonb puts the shorter c4:2 first — the condition that raised the false bar.
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-spreadsheet-sync-base.mjs [base] */
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive } from "./lib/liveFixtures.mjs";
@@ -18,6 +22,7 @@ const ok = (name, cond, extra = "") => { console.log(`${cond ? "PASS" : "FAIL"} 
 
 const s = await openSignedIn({ base: BASE });
 const { page } = s;
+await page.addInitScript(() => { window.__PLANYR_E2E = true; });   // armed for every full navigation below
 try {
   await assertMeasurable(page, "verify-spreadsheet-sync-base");
   const build = (await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()))).build;
@@ -26,17 +31,20 @@ try {
   const uid = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
   const lsKey = `planyr:model:sheet:v1:${uid}:${PROJECT}`, metaKey = `planyr:model:sheet:meta:v1:${uid}:${PROJECT}`;
   const url = () => `${BASE}/?cb=${Date.now()}#/project/${PROJECT}/spreadsheet`;
-  const cell = (r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`);
   const cloudRow = () => page.evaluate(async (id) => { const q = await window.pfSupabase.from("model_sheets").select("data, version").eq("id", id).maybeSingle(); return q.data || null; }, PROJECT);
   const waitCloud = async (pred, ms = 25000) => { const t0 = Date.now(); for (;;) { const r = await cloudRow(); if (r && pred(r)) return r; if (Date.now() - t0 > ms) return r; await page.waitForTimeout(500); } };
-  const open = async () => { await page.goto(url(), { waitUntil: "load" }); await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 }); await page.waitForTimeout(4000); };
+  const open = async () => { await page.goto(url(), { waitUntil: "load" }); await page.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 });
+    await page.waitForFunction(() => { const h = window.__planyrUniverRead; const api = h && h.api && h.api(); const wb = api && api.getActiveWorkbook && api.getActiveWorkbook(); return !!(wb && wb.getActiveSheet && wb.getActiveSheet()); }, null, { timeout: 60000 });
+    await page.waitForTimeout(4000); };
+  const inSheet = (fn, arg) => page.evaluate(`((arg) => { const api = window.__planyrUniverRead.api(); const ws = api.getActiveWorkbook().getActiveSheet(); return (${fn.toString()})(api, ws, arg); })(${JSON.stringify(arg ?? null)})`);
+  const cellPoint = (r, c) => inSheet((api, ws, [rr, cc]) => { const q = ws.getRange(rr, cc).getCellRect(); const o = typeof q === "string" ? JSON.parse(q) : q; const cv = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: cv.left + o.x + o.width / 2, y: cv.top + o.y + o.height / 2 }; }, [r, c]);
   const bar = () => page.locator('[data-testid="model-diverged-bar"]').count();
-  const type = async (r, c, text) => { await cell(r, c).click(); await page.keyboard.type(text); await page.keyboard.press("Enter"); };
-  const cellText = async (r, c) => (await cell(r, c).first().innerText()).trim();
+  const type = async (r, c, text) => { const p = await cellPoint(r, c); await page.mouse.click(p.x, p.y); await page.waitForTimeout(250); await page.keyboard.type(text, { delay: 8 }); await page.keyboard.press("Enter"); await page.waitForTimeout(400); };
+  const cellText = async (r, c) => String(await inSheet((api, ws, [rr, cc]) => ws.getRange(rr, cc).getDisplayValue(), [r, c]) ?? "").trim();
 
-  // A — typed in an order whose jsonb order differs (c4:10 typed before c4:2; the longer key before the shorter)
+  // A — cells whose device order (row-major) differs from jsonb's (shorter key first): J1 = "c10:0" comes before D3 = "c4:2" on the device
   await open();
-  await type(10, 3, "zz Costs"); await type(2, 3, "zz Additional"); await type(0, 0, "zz Land");
+  await type(0, 9, "zz Costs"); await type(2, 3, "zz Additional"); await type(0, 0, "zz Land");
   const r1 = await waitCloud((r) => r.data?.sheets?.[0]?.sheet?.cells?.["c1:0"] === "zz Land");
   ok("A  the edits reached the cloud", !!r1 && r1.data.sheets[0].sheet.cells["c1:0"] === "zz Land", `version ${r1?.version}`);
   if (!r1) throw new Error("nothing reached the cloud — cannot continue");
