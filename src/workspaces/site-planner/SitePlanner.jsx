@@ -18,6 +18,7 @@ import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale } from "../../shared/telemetry/perfRecorderHandle.js";
+import { installPlannerPerf } from "./lib/plannerPerf.js";
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker, undoOwnership, undoRiskEnvelope, groupRowsIntoOperations, describeOperation } from "./lib/operationEnvelope.js";
@@ -2957,7 +2958,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let cancelled = false, handle = null;
     import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
       if (cancelled) return;
-      handle = addVectorLabels(L, map, { mode: "site", includePois: false, onStatus: applyRoadNamesOpacity });
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, onStatus: applyRoadNamesOpacity,
+        /* NEW-1 (2026-11-01) — the raster road-names fallback gets the basemap layers' tile hygiene: one prune per burst, not
+         * one per tile (B854832), and a retained-tile ceiling (NEW-7). Measured: its per-tile prune was the single largest
+         * main-thread cost of a zoom step on a graded plan. */
+        decorateFallback: (layer) => {
+          throttleTilePruning(layer);
+          boundTileCache(layer, () => tileCacheLimit({
+            containerW: (geoWrapRef.current && geoWrapRef.current.clientWidth) || 1600,
+            containerH: (geoWrapRef.current && geoWrapRef.current.clientHeight) || 1000,
+            tileSizePx: (layer.getTileSize && layer.getTileSize().x) || 256,
+            keepBuffer: (layer.options && layer.options.keepBuffer) || 2,
+          }));
+        } });
       applyRoadNamesOpacity();
     }).catch((e) => console.error("SitePlanner: road names failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); };
@@ -14480,6 +14493,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     window.__plannerGradeReadout = hook;
     return () => { if (window.__plannerGradeReadout === hook) window.__plannerGradeReadout = null; };
+  }, [grOn]);
+  /* NEW-1 (2026-11-01) — `window.__plannerPerf()`: the last minute of long frames WITH script attribution, the blocked-vs-waiting
+   * split, repeating timers and which grading layers were drawn — so a "the graded plan is slow" report is answered in one call,
+   * not a guess (lib/plannerPerf.js). Same gate and arming as `__plannerGradeReadout`: owner-only (installed while the grading gate
+   * is on), read-only, armed at call time by `?planyrDiag=1`. */
+  const plannerPerfRef = useRef(null);
+  plannerPerfRef.current = { ppf: view.ppf, grOn, gsEnabled, buildMs: (gsStatsRef.current || {}).lastBuildMs ?? null };
+  useEffect(() => {
+    if (typeof window === "undefined" || !grOn) return undefined;
+    const hook = installPlannerPerf(window, { extra: () => { const P = plannerPerfRef.current || {}; return { ppf: Number.isFinite(P.ppf) ? Math.round(P.ppf * 1000) / 1000 : null, gradingPlanOn: !!P.gsEnabled, lastGradeBuildMs: P.buildMs }; } });
+    return () => { if (window.__plannerPerf === hook) window.__plannerPerf = null; };
   }, [grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the

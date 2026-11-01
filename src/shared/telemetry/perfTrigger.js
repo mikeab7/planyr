@@ -319,7 +319,11 @@ export const inSlowRun = (s) => s.slowRunN > 0 && s.slowRunMs < s.cfg.slowWatchM
 function fireFreeze(s, t, ms, via) {
   s.fires++;
   s.lastFireAt = t;
-  s.lastVerdict = { source: "freeze", via: via === "task" ? "task" : "frame", freezeMs: Math.round(ms) };
+  /* NEW-1 (2026-11-01) — "render": a long animation frame whose main thread was NOT blocked (LoAF blockingDuration small) — the
+   * frame waited on drawing / the compositor while the page's code was idle. Kept apart from "task" so a slow-DRAWING episode can
+   * never again read as the page's JavaScript holding the main thread (the 2026-10-31 owner capture: 127 "long tasks", every one
+   * blockingDuration 0, no script attributed). */
+  s.lastVerdict = { source: "freeze", via: via === "task" || via === "render" ? via : "frame", freezeMs: Math.round(ms) };
 }
 
 /* Seal the baseline as the MEDIAN of the collected frames. Median, not mean: a collection pause

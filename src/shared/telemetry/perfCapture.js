@@ -57,6 +57,10 @@ export const CAPTURE_NUMERIC_KEYS = [
   "worstWindowMeanMs", "worstWindowSlowFraction", "worstWindowRatio", "worstWindowFrames", "worstWindowAtMs",
   "p50Ms", "p95Ms", "p99Ms", "maxMs", "jankFrames",
   "longTasks", "longTaskMs", "longTaskMaxMs",
+  /* NEW-1 (2026-11-01) — of `longTaskMs`, how much the main thread was actually BLOCKED (LoAF blockingDuration summed). A long
+   * animation frame's duration includes waiting for the frame to be drawn; on a machine that draws slowly that wait is most of it,
+   * so `longTaskMs` alone cannot tell "the page's code was busy" from "frames came slowly". 0 where the browser has no LoAF. */
+  "longTaskBlockMs",
   "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
   "ppf", "editsSinceLoad", "planSwitches", "dpr", "viewportW", "viewportH", "hardwareThreads",
   "deviceMemoryGB", "recorderSelfUs", "counterSamples", "sentRows",
@@ -85,7 +89,7 @@ export const CAPTURE_ENUM_KEYS = [
 
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
   "bootTrigger", // NEW-3 — "single" | "cumulative", which bar the boot judgment tripped; see BOOT_TRIGGER_VOCAB
-  "freezeVia",   // B2319137 ×2/×4 — "frame" | "task" | "sustained", which signal saw the freeze; see FREEZE_VIA_VOCAB
+  "freezeVia",   // B2319137 ×2/×4 — "frame" | "task" | "sustained" | "render" (NEW-1), which signal saw the freeze; see FREEZE_VIA_VOCAB
   "part",        // NEW-2 (B1317824) — a supplement row's series: "f" frames | "c" counters | "t" tasks; see PART_VOCAB
 ];
 
@@ -96,7 +100,7 @@ export const PART_VOCAB = ["f", "c", "t"];
 export const BOOT_TRIGGER_VOCAB = ["", "single", "cumulative"];
 
 /* A capture's `freezeVia` may only ever be one of these. */
-export const FREEZE_VIA_VOCAB = ["", "frame", "task", "sustained"];   // "sustained" — B2319137 ×4, a run of slow frames (perfTrigger.feedSlowRun)
+export const FREEZE_VIA_VOCAB = ["", "frame", "task", "sustained", "render"];   // "render" — NEW-1 2026-11-01, a long frame the main thread did NOT block   // "sustained" — B2319137 ×4, a run of slow frames (perfTrigger.feedSlowRun)
 
 /* A capture's `note` may only ever be one of these. It exists so a capture can say something
  * about itself ("baseline never sealed") without opening a free-text channel.
@@ -218,6 +222,7 @@ export function buildCapture(parts) {
   num("longTasks", p.longTasks);
   num("longTaskMs", p.longTaskMs);
   num("longTaskMaxMs", p.longTaskMaxMs);
+  num("longTaskBlockMs", p.longTaskBlockMs);
 
   /* The scene, at the moment of capture. */
   num("heapMB", p.heapMB, 1);
