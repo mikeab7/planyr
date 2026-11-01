@@ -89,6 +89,9 @@ export function collectValues(snap) {
   return n ? out : null;
 }
 
+/** How many formula cells an entry's `v` (or `collectValues`' result) holds — so a fuller answer can replace a partial one. */
+export function countValues(v) { let n = 0; if (v && typeof v === "object") for (const t of Object.values(v)) n += t && typeof t === "object" ? Object.keys(t).length : 0; return n; }
+
 /** Put the remembered values onto the formula cells of a Univer workbook-data object (mutates `data`). Returns how many cells were seeded. */
 export function seedValues(data, values) {
   let n = 0;

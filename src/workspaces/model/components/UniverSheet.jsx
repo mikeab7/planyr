@@ -44,7 +44,7 @@ import { migratePlanyrSyntaxInWorkbook, planyrSyntaxNote } from "../lib/planyrSy
 import { installUniverTools } from "../lib/univerTools/index.js";
 import UniverToolPanels from "./UniverTools.jsx";
 import { createSaveController } from "../lib/univerSave.js";
-import { calcHash, peekCalc, writeCalc, seedValues, collectValues, entryFits } from "../lib/univerCalcCache.js";
+import { calcHash, peekCalc, writeCalc, seedValues, collectValues, entryFits, countValues } from "../lib/univerCalcCache.js";
 import { createShiftGate, HEADER_MOVE_GATE_PRIORITY, pressOnSelectedHeader } from "../lib/univerHeaderMove.js";
 
 const STRUCTURE_OPS = {
@@ -114,19 +114,24 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
               if (!L.storedCanon) return;
               const h = calcHash(L.storedCanon);
               const have = peekCalc(L.viewKey);
-              if (have && have.h === h) return;                                   // nothing new to remember
               const fWb = univerAPI.getWorkbook(L.unitId);
               if (!fWb) return;
-              writeCalc(L.viewKey, h, collectValues(fWb.save()));                 // null when a formula is volatile or can spill → the old entry is dropped
+              const vals = collectValues(fWb.save());                             // null when a formula is volatile or can spill → the old entry is dropped
+              if (have && have.h === h && countValues(vals) <= countValues(have.v)) return;   // nothing new to remember (a fuller answer than a partial one still replaces it)
+              writeCalc(L.viewKey, h, vals);
             } catch (_) { /* a cache write is a courtesy */ }
           }, 1200);
         };
+        L.scheduleCalcWrite = scheduleCalcWrite;
         const subs = [
           fw.calculationStart(() => { found = []; clearTimeout(L.calcTimer); }),
           fw.calculationProcessing((p) => { if (p && Array.isArray(p.circularReferences) && p.circularReferences.length) found = p.circularReferences; }),
           fw.calculationEnd((state) => {
-            if (disposed || state !== 3 /* FormulaExecutedStateType.SUCCESS */) return;
+            // MEASURED live on planyr.io: the first calculation after a load can end as NOT_EXECUTED (2) with every value already in place, and a
+            // writer that waited for SUCCESS (3) alone never remembered anything until the first edit. Any end schedules the (verified) write.
+            if (disposed || (state !== 3 /* SUCCESS */ && state !== 2 /* NOT_EXECUTED */)) return;
             scheduleCalcWrite();
+            if (state !== 3) return;
             try {
               const wb = L.unitId && univerAPI.getWorkbook(L.unitId);
               const list = found.filter((c) => c.unitId === L.unitId).map((c) => { const ws = wb && wb.getSheetBySheetId(c.sheetId); return { sheetName: ws ? ws.getSheetName() : c.sheetId, row: c.row, col: c.column }; });
@@ -180,6 +185,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         const active = migrated.sheets.find((s) => s.id === migrated.activeSheetId);
         if (active) { try { fWb.setActiveSheet(fWb.getSheetBySheetId(active.id)); } catch (_) { /* first sheet stays active */ } }
         if (L.tools) L.tools.attachUnit(L.unitId);                  // a rebuilt workbook is a NEW unit: its sheet component needs the trace layer again
+        if (L.scheduleCalcWrite) L.scheduleCalcWrite();             // and remember its results even if no calculation-end notice ever comes (cleared again by a calculation that starts)
         return fWb;
       };
       L.load = load;
