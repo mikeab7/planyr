@@ -70,7 +70,6 @@ export const PALETTE_UNAVAILABLE = Object.freeze({
   "import-xlsx": "the File menu's Import", "import-csv": "the File menu's Import",
   "save-now": "the grid saves on its own (and on every way out)",
   "sheet-duplicate": "right-click the sheet tab", "sheet-rename": "double-click the sheet tab",
-  "sheet-prev": "the sheet tabs", "sheet-next": "the sheet tabs",
   autosum: "Univer's own AutoSum button, Formulas tab", "repeat-last": "no Univer equivalent",
   "fill-right": "Ctrl+R",
 });
