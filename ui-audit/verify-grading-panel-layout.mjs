@@ -173,6 +173,26 @@ try {
   check("dark theme renders (screenshot saved)", true);
   await page.close();
 
+  // ================= 2b. a plan SAVED on the retired "around the layout" mode (V2034896 step 2: the owner's Concept A) =================
+  // loaded through the APP's path (?app=1): the panel says -10 AND the map draws the property-line limit — the same one a plan saved on
+  // the property line draws — and there is no mode control anywhere
+  {
+    const limitOfPage = async (qs) => {
+      const p2 = await (await browser.newContext({ viewport: { width: 1500, height: 1500 } })).newPage();
+      p2.on("pageerror", (e) => errs.push(String(e)));
+      await p2.goto(`${BASE}/ui-audit/harness/grading-harness.html?owner=2&buildable=0&zoom=site&app=1${qs}`);
+      await p2.waitForFunction(() => window.__ready, null, { timeout: 60000 });
+      await p2.waitForFunction(() => window.__harness.gradeSurface && window.__harness.gradeSurface.grid && window.__harness.gradeSurface.grid.limit, null, { timeout: 180000 });
+      const r = await p2.evaluate(() => { const L = window.__harness.gradeSurface.grid.limit; const xs = L.limitRegions.flatMap((q) => q.outer.map((v) => v.x)), ys = L.limitRegions.flatMap((q) => q.outer.map((v) => v.y));
+        return { mode: L.mode, bbox: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map((v) => Math.round(v * 10) / 10), stored: window.__harness.settings.grading.limitMode, field: document.querySelector('[data-testid="grading-limit-offset"]').value, modeCtl: document.querySelectorAll('[data-testid="grading-limit-mode"]').length }; });
+      await p2.close();
+      return r;
+    };
+    const saved = await limitOfPage("&mode=layout"), onLine = await limitOfPage("&mode=boundary");
+    check("a plan saved on 'layout' with no outline draws the PROPERTY-LINE limit (known-good arm: the same plan saved on the property line)", saved.stored === "layout" && saved.mode === "boundary" && onLine.mode === "boundary" && JSON.stringify(saved.bbox) === JSON.stringify(onLine.bbox), JSON.stringify({ saved, onLine }));
+    check("…and its panel reads -10 with no mode control", saved.field === "-10" && saved.modeCtl === 0);
+  }
+
   // ================= 3. several buildings: a thin selector, ONE set of blocks =================
   page = await open("&sel=none");
   await page.close();

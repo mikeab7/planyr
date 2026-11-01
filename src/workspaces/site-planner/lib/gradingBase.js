@@ -42,7 +42,12 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
  * existing B826 ones): pavement slope %, max cut-or-fill under a pad (ft), grading slope ratio (H:V), and
  * whether grading is on for the plan (default OFF) and which of the two map layers are shown (both default OFF). Pavement
  * slope is never below 0.5%. */
-export function gradingCfg(g) {
+/* `opts.engineLayout` — ENGINE TESTS AND THE UI HARNESS ONLY: keep a bare `limitMode: "layout"` as named so the retired "around the layout"
+ * limit can still be exercised. The APP never passes it (useGradingBase), so there a stored "layout" with NO hand-edited outline reads as
+ * the property-line limit at the stored margin (NEW-1 follow-up, V2034896 step 2: the owner's Concept A was saved on the old layout mode, so
+ * its panel read −10 while the map still drew the old layout limit, with no control left to change it). "layout" survives in the app only
+ * as the vehicle for a hand-edited outline (`limitRing`). */
+export function gradingCfg(g, opts) {
   const src = g || {};
   const p = num(src.pavementSlopePct);
   const d = num(src.maxCutFillFt);
@@ -65,7 +70,8 @@ export function gradingCfg(g) {
       spots: !(src.layers && src.layers.spots === false) },
     // ROUND 4 — the grading limit: its mode ("layout" = around the graded elements, "boundary" = the setback itself),
     // the owner's edited outline (layout mode only; null = auto), the shoulder, the corner radius, the max pavement slope.
-    limitMode: LIMIT_MODES.includes(src.limitMode) ? src.limitMode : GRADING_DEFAULTS.limitMode,
+    limitMode: !LIMIT_MODES.includes(src.limitMode) ? GRADING_DEFAULTS.limitMode
+      : src.limitMode === "layout" && !ring && !(opts && opts.engineLayout) ? "boundary" : src.limitMode,
     limitRing: ring,
     shoulderFt: sh == null || sh < 0 ? GRADING_DEFAULTS.shoulderFt : sh,
     cornerRadiusFt: cr == null || cr < 0 ? GRADING_DEFAULTS.cornerRadiusFt : cr,
