@@ -80,7 +80,8 @@ describe("univerHeader verdict", () => {
 });
 
 describe("the component is wired to the rules", () => {
-  const src = readFileSync(new URL("../src/workspaces/model/components/UniverSheet.jsx", import.meta.url), "utf8");
+  // The preset options now live in components/univerFramework.js (which can also build the instance ahead of the click); the icons in UniverSheet.jsx.
+  const src = ["UniverSheet.jsx", "univerFramework.js"].map((f) => readFileSync(new URL(`../src/workspaces/model/components/${f}`, import.meta.url), "utf8")).join("\n");
   it("runs Univer's collapsed ribbon (one strip) and replaces the undo / redo glyphs through its icon registry", () => {
     expect(src).toMatch(/RIBBON_TYPE = "collapsed"/);
     expect(src).toMatch(/ribbonType: RIBBON_TYPE/);
