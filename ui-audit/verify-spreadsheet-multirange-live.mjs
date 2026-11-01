@@ -86,8 +86,8 @@ try {
   await enter(page, 12, 0, "aaa"); await enter(page, 14, 2, "bbb");
   await clickCell(page, 12, 0); await modClickCell(page, 14, 2, CTRL);
   await press(page, "Control+c"); await page.waitForTimeout(400);
-  const notice = await page.getByTestId("model-file-notice").innerText().catch(() => "");
-  known("B6 Ctrl+C on several ranges shows the multiple-selections message (Excel refuses)", /multiple selections/i.test(notice), `no message shown; the clipboard silently took one range`);
+  const notice = await page.getByTestId("model-notice").innerText().catch(() => "");
+  ok("B6 Ctrl+C on several ranges shows the multiple-selections message (Excel refuses; fixed in the default-on cutover, B2604256)", /multiple selections/i.test(notice), `notice strip said ${JSON.stringify(notice)}`);
   console.log("served build at the end:", await build());
 } catch (e) { console.log("ERROR", (e && e.stack) || e); failures++; }
 finally {

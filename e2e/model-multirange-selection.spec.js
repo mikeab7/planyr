@@ -116,16 +116,15 @@ test.describe("NEW-2 — Ctrl+click builds a multi-range selection", () => {
     await expectValue(page, 5, 3, "hello", "the pasted copy");
   });
 
-  // PRODUCT DEFECT (Univer path, found NEW-2 2026-10-31; not fixable from a spec): Ctrl+C with SEVERAL ranges selected silently copies ONE
-  // of them (measured: A7 "aaa" + C9 "bbb" selected, Ctrl+C, paste elsewhere → "bbb"; no message anywhere). Excel refuses with "That command
-  // cannot be used on multiple selections" (the old grid showed the model-file-notice banner). Drop `.fixme` once the refusal exists.
+  // FIXED by the default-on cutover (B2604256): Ctrl+C with SEVERAL ranges used to copy ONE of them silently (measured: A7 "aaa" + C9 "bbb", Ctrl+C,
+  // paste elsewhere → "bbb"). Excel refuses with "…won't work on multiple selections"; the plugin now says so (the app's `model-notice` strip).
   test("copy on a multi-range selection says so — never a silent no-op", async ({ page }) => {
     await open(page, "e2e-sel-copy-refuse");
     await enter(page, 0, 0, "a");
     await clickCell(page, 0, 0);
     await modClickCell(page, 2, 2, CTRL);
     await press(page, "Control+c");
-    await expect(page.getByTestId("model-file-notice")).toContainText("multiple selections");
+    await expect(page.getByTestId("model-notice")).toContainText("multiple selections");
   });
 
   test("a multi-range selection still highlights after scrolling away and back (virtualised)", async ({ page }) => {

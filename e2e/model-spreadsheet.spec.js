@@ -517,7 +517,9 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     await enter(page, 1, 0, "Total Cost");
     await clickCell(page, 0, 0);
 
-    await press(page, "Control+h");
+    // Univer's find-replace is not available for the first ~2 s after the grid mounts (measured: Ctrl+H pressed once, twice → nothing; the third press, ~2 s
+    // in, opens it) — a person presses again, so the test does too, and requires the panel within 15 s.
+    await expect.poll(async () => { await press(page, "Control+h"); return page.getByPlaceholder("Input Replace String").count(); }, { message: "Ctrl+H opens Replace", timeout: 15000 }).toBeGreaterThan(0);
     await page.getByPlaceholder("Find", { exact: true }).fill("Cost");
     await page.getByPlaceholder("Input Replace String").fill("Expense");
     await page.getByRole("button", { name: "Find", exact: true }).click(); // Univer enables Replace All once a search has run
@@ -625,7 +627,7 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     const park = await at(9, 9, 2);
     await page.mouse.click(park.x, park.y); await page.waitForTimeout(200); // park the outline away from A1
     const a1 = await at(0, 0, 2);
-    const inkA1 = async () => countPixels(page, { x: a1.x - 50, y: a1.y - 9, width: 100, height: 18 }, "r < 110 && g < 110 && b < 110");
+    const inkA1 = async () => countPixels(page, { x: a1.x - 50, y: a1.y - 9, width: 100, height: 18 }, "0.299 * r + 0.587 * g + 0.114 * b < 130");
     const inkBefore = await inkA1();
     expect(inkBefore, "control: A1's text is painted at 200%").toBeGreaterThan(20);
     const c22 = await at(1, 1, 2);

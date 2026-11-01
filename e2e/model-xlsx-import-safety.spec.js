@@ -121,8 +121,12 @@ test.describe("Model workspace — Import Excel safety (NEW-1/NEW-2)", () => {
     await enter(page, 0, 0, "keep me");
     await expectValue(page, 0, 0, "keep me");
 
-    // 1 — zero bytes: a plain refusal that names the file; no prompt, no change.
+    // 1 — zero bytes: the workbook has content, so it ASKS first (nothing is read yet); once the person says Replace, the file is refused in plain
+    //     words that name it, and the workbook is exactly as it was.
     await page.setInputFiles("[data-testid=model-import-xlsx-input]", { name: "empty.xlsx", mimeType: XLSX_MIME, buffer: Buffer.alloc(0) });
+    const askFirst = page.getByTestId("model-import-replace-confirm");
+    await expect(askFirst).toBeVisible();
+    await askFirst.getByRole("button", { name: "Replace" }).click();
     const notice = page.getByTestId("model-file-notice");
     await expect(notice).toContainText("empty.xlsx");
     const text = ((await notice.textContent()) || "").toLowerCase();
