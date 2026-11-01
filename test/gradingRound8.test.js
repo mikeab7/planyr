@@ -39,7 +39,7 @@ function chehawScene() {
   const setback = gradingSetback([{ id: "pc", points: ring, setbacks: sb, active: true }], 25);
   const gsEls = (FFE) => els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) }));
   const build = (FFE, { mode = "boundary", maxCells, g = {} } = {}) => {
-    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true }, ...g });
+    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true }, ...g }, { engineLayout: true });
     return buildProposedSurface({ els: gsEls(FFE), ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [],
       opts: { existKey: `r8:${mode}:${FFE}:${maxCells || ""}:${JSON.stringify(g)}`, ...(maxCells ? { maxCells } : {}) }, grading: gradingPack(cfg, setback) });
   };
@@ -225,17 +225,19 @@ describe("NEW-2 — the boundary limit is the property line less a grading margi
     expect(pointInRegions({ x: 5, y: 300 }, r.regions)).toBe(false);        // inside the 10 ft margin
     expect(pack.limit.basis).toEqual({ kind: "property", marginFt: 10, bufferFt: 0 });
   });
-  it("the gear rows are normalised (default 10 ft margin, 0 buffer; 0 allowed; a negative falls back)", () => {
+  it("the margin is SIGNED now (NEW-1): 0 allowed, a negative is past the line, beyond -50 falls back", () => {
     expect(GRADING_DEFAULTS.gradingMarginFt).toBe(10);
     expect(gradingCfg({}).gradingMarginFt).toBe(10);
     expect(gradingCfg({ gradingMarginFt: 0 }).gradingMarginFt).toBe(0);
     expect(gradingCfg({ undisturbedBufferFt: 50 }).undisturbedBufferFt).toBe(50);
-    expect(gradingCfg({ gradingMarginFt: -3 }).gradingMarginFt).toBe(10);
+    expect(gradingCfg({ gradingMarginFt: -3 }).gradingMarginFt).toBe(-3);
+    expect(gradingCfg({ gradingMarginFt: -80 }).gradingMarginFt).toBe(10);
   });
   it("the panel words: 'to the property line (10 ft margin)', and a flag reads past the property line / into the buffer / into the margin", () => {
     expect(limitBasisPhrase({ marginFt: 10, bufferFt: 0 })).toBe("to the property line (10 ft margin)");
     expect(limitBasisPhrase({ marginFt: 5, bufferFt: 25 })).toBe("to the property line (5 ft margin, 25 ft buffer)");
     expect(limitBasisPhrase({ marginFt: 0, bufferFt: 0 })).toBe("to the property line (no margin)");
+    expect(limitBasisPhrase({ marginFt: -20, bufferFt: 0 })).toBe("to the property line (20 ft past the line)");
     expect(limitCrossPlace({ marginFt: 10, bufferFt: 0 }, true)).toBe("past the property line");
     expect(limitCrossPlace({ marginFt: 10, bufferFt: 25 }, false)).toBe("into the buffer");
     expect(limitCrossPlace({ marginFt: 10, bufferFt: 0 }, false)).toBe("into the grading margin");
@@ -244,7 +246,7 @@ describe("NEW-2 — the boundary limit is the property line less a grading margi
     // a building pushed 30 ft from the west property line, deep cut: the 2:1 slope runs into the margin / past the line
     const els = [{ id: "b", type: "building", ring: rect(30, 200, 300, 200), padElevFt: 780 }];
     const sb = gradingSetback([{ id: "pc", points: parcel, setbacks: [25, 25, 25, 25], active: true }], 0);
-    const pack = gradingPack(gradingCfg({ enabled: true, limitMode: "layout", shoulderFt: 0 }), sb);
+    const pack = gradingPack(gradingCfg({ enabled: true, limitMode: "layout", shoulderFt: 0 }, { engineLayout: true }), sb);
     const r = buildProposedSurface({ els, ffeFt: 780, existAt: () => 800, parcelRings: sb.parcelRings, grading: pack, opts: { existKey: "r8-flag" } });
     const f = describeFlag(r, new Set(["b"]), { buildingCentre: { x: 180, y: 300 }, elements: els, slopeRatio: 2 });
     expect(f).not.toBeNull();

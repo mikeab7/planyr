@@ -66,6 +66,8 @@ import {
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
+import { evalFromPlain, circularNotice } from "./lib/evalValues.js";
+import { planyrSyntaxNote } from "./lib/planyrSyntax.js";
 import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
 import { findInconsistencies } from "./lib/formulaConsistency.js";
 import { fillDown, fillTextToCells, replaceAll, replaceInCellText, fillRight, autoSumPlan } from "./lib/sheetOps.js";
@@ -97,14 +99,15 @@ import {
 } from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
-// Univer spike (owner-only; docs/SPREADSHEET-UNIVER-SPIKE.md) — the switch is the ONLY touch to the existing grid. The grid
-// itself is a lazy chunk, so none of @univerjs/* is in any bundle a non-owner (or an owner with the switch off) downloads.
+// The Univer grid is THE grid for every account (cutover steps 8–9a, docs/SPREADSHEET-UNIVER-SPIKE.md); lib/univerSwitch.js only decides
+// whether the OWNER's safety hatch (the regular grid, per device) is in force. The grid itself is a lazy chunk, loaded with the
+// Spreadsheet tab (src/app/modulePrefetch.js + the warm below), so none of @univerjs/* rides any other workspace's bundle.
 import { useUniverSwitch } from "./lib/univerSwitch.js";
 import { warmUniver } from "./lib/univerWarm.js";
 const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
-// NEW-1 (B2587264) — a device that uses the Univer grid starts fetching its chunk the moment THIS chunk runs, in parallel with the
+// NEW-1 (B2587264) — every device starts fetching the grid's chunk the moment THIS chunk runs, in parallel with the
 // admin check and the workbook load, instead of after them (measured live: the chunk request began ~250 ms after ModelApp arrived).
-// A no-op for any device whose switch is off (lib/univerWarm.js); the real mount below still decides whether the grid shows.
+// A no-op only on a device that asked for the owner's regular-grid hatch (lib/univerWarm.js); the real mount below still decides.
 warmUniver();
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
@@ -190,6 +193,9 @@ function EmptyProjectState({ onGoDashboard }) {
   );
 }
 
+/** What `workbookEval` is while the Univer grid is showing: no values, no trace graph (the regular grid's trace arrows do not run then). */
+const NO_OLD_EVAL = { get: () => ({ get: () => null }), graph: { hopsFor: () => null, dependentsOf: () => new Set() } };
+
 export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
   projectId, crossProject, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
@@ -208,8 +214,10 @@ export default function ModelApp({
   const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
   const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
   const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
-  // Univer spike — `univer.active` is true only for a CONFIRMED is_admin() user who turned "Try the new grid" on (this device).
-  // While it is, Univer owns the keyboard and the clipboard, so the grid-level window listeners below stand down (`gridKeysOn`).
+  // The Univer grid is the grid for every account. `univer.active` is false ONLY for the owner's hatch: a CONFIRMED is_admin() user on
+  // a device that chose "Use the regular grid" (lib/gridChoice.js). While Univer shows it owns the keyboard and the clipboard, so
+  // the regular grid's window listeners below stand down (`gridKeysOn`). `univer.deciding` = that device's admin answer is still
+  // coming: neither grid is mounted yet (a placeholder shows).
   const univer = useUniverSwitch(userId);
   const univerOn = univer.active;
   const gridKeysOn = isActive && !univerOn;
@@ -600,13 +608,13 @@ export default function ModelApp({
   // hook's "start uploading what I'm leaving" step — both then see the newest edit.
   useLayoutEffect(() => () => { flushUniver(); }, [univerScope, activeFileId, flushUniver]);
   useEffect(() => { if (!isActive) flushUniver(); }, [isActive, flushUniver]);
-  const setUniverOn = useCallback(async (on) => {
+  const setRegularGrid = useCallback(async (regular) => {
     const h = univerHandleRef.current;
     if (h) {
       await Promise.race([h.commitEditing ? h.commitEditing() : null, new Promise((r) => setTimeout(r, 400))]);
       flushUniver();
     } else { sheetViewRef.current?.commitPending?.(); formulaBarRef.current?.commitPending?.(); }
-    univer.setOn(on);
+    univer.setRegular(regular);
   }, [flushUniver, univer]);
   const closeFile = useCallback(async () => {
     flushUniver();
@@ -935,7 +943,9 @@ export default function ModelApp({
   // own formulas included) to be live inputs, not just the one tab the user happens to be
   // looking at. `.get(activeSheetId)` slices out the visible sheet's own results for
   // SheetView/displayFor/etc, which stay unaware anything changed.
-  const workbookEval = useMemo(() => evaluateWorkbook(workbook, { projectNames }), [workbook, projectNames]);
+  // NEW-1 — with the Univer grid showing, Univer's engine is the only evaluator on screen (and for every export), so the older
+  // evaluator is NOT run at all: nothing the Univer path reads comes from it. It still feeds the regular grid until that grid is retired.
+  const workbookEval = useMemo(() => (univerOn ? NO_OLD_EVAL : evaluateWorkbook(workbook, { projectNames })), [workbook, projectNames, univerOn]);
   const evalResult = workbookEval.get(activeEntry.id);
   const totalRows = sheet.rowCount + padRowCount(sheet, 20);
 
@@ -1082,26 +1092,36 @@ export default function ModelApp({
     try {
       const wbNow = workbookForExport();
       if (!wbNow) return;
-      const blob = await exportWorkbookInWorker(wbNow, { projectNames });
+      // NEW-1 — Univer's engine computes the numbers that go into the file (main thread; the writer runs in a worker).
+      const { evaluateForExport } = await import("./lib/univerEval.js");
+      const evaluated = await evaluateForExport(wbNow, { projectNames });
+      const blob = await exportWorkbookInWorker(evaluated.workbook, { projectNames, evaluated });
       downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
+      const note = [planyrSyntaxNote(evaluated.rewritten), circularNotice(evaluated.circular)].filter(Boolean).join(" ");
+      if (note) setFileNotice({ kind: "warn", text: `Exported. ${note}` });
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
     } finally { setFileBusy(false); }
   }, [workbookForExport, currentFileBaseName, projectNames]);
 
-  const onExportCsv = useCallback(() => {
+  const onExportCsv = useCallback(async () => {
     try {
       const wbNow = workbookForExport();
       if (!wbNow) return;
-      // Straight from the flushed workbook when the Univer grid is showing; otherwise exactly what is on screen, as before.
-      const entry = wbNow === workbook ? activeEntry : (wbNow.sheets.find((e) => e.id === activeSheetId) || activeSheetEntry(wbNow));
-      const csv = wbNow === workbook ? sheetToCsv(sheet, evalResult) : sheetToCsv(entry.sheet, evaluateWorkbook(wbNow, { projectNames }).get(entry.id));
+      // NEW-1 — the numbers in the CSV are Univer's (the same engine that draws the grid and fills the Excel file), computed from the
+      // flushed workbook, whichever grid is showing.
+      const { evaluateForExport } = await import("./lib/univerEval.js");
+      const ev = await evaluateForExport(wbNow, { projectNames });
+      const entry = ev.workbook.sheets.find((e) => e.id === activeSheetId) || activeSheetEntry(ev.workbook);
+      const csv = sheetToCsv(entry.sheet, evalFromPlain(ev.values).get(entry.id));
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       downloadBlob(blob, `${sanitizeFilename(entry.name)}.csv`);
+      const note = circularNotice(ev.circular);
+      if (note) setFileNotice({ kind: "warn", text: `Exported. ${note}` });
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to CSV failed: ${e?.message || e}` });
     }
-  }, [workbookForExport, workbook, activeEntry, activeSheetId, sheet, evalResult, projectNames]);
+  }, [workbookForExport, activeSheetId, projectNames]);
 
   const runXlsxImport = useCallback(async (file) => {
     setFileBusy(true);
@@ -1126,9 +1146,13 @@ export default function ModelApp({
   }, [commit]);
 
   const onImportXlsxFile = useCallback((file) => {
-    if (workbookHasContent(workbook)) { setPendingXlsxImport({ file, sheetCount: workbook.sheets.length }); return; }
+    // "Does this workbook have anything in it?" must be asked of what is ON SCREEN. With the Univer grid showing, an edit made in the last few hundred
+    // ms is still inside its save debounce and not yet in `workbook`, so a quick File ▾ → Import would replace it without asking. `flushUniver()` hands
+    // over the grid's workbook as it is NOW (null when the regular grid shows).
+    const shown = (flushUniver() || {}).workbook || workbook;
+    if (workbookHasContent(shown)) { setPendingXlsxImport({ file, sheetCount: shown.sheets.length }); return; }
     runXlsxImport(file);
-  }, [workbook, runXlsxImport]);
+  }, [workbook, runXlsxImport, flushUniver]);
 
   const onConfirmXlsxImport = useCallback(() => {
     const pending = pendingXlsxImport;
@@ -1916,7 +1940,7 @@ export default function ModelApp({
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
               onOpenFile={onOpenFileFromComputer}
-              univerSwitch={univer.available ? { on: univer.on, setOn: setUniverOn } : null}
+              univerSwitch={univer.available ? { regular: univer.regular, setRegular: setRegularGrid } : null}
             />
             {!univerOn && (
               <>
@@ -1963,11 +1987,14 @@ export default function ModelApp({
               onUseCloud={onUseCloudCopy}
             />
           )}
-          {univerOn ? (
-            // Univer spike (owner-only, switch on) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
+          {univer.deciding ? (
+            // The owner's device asked for the regular grid and the admin answer is still coming — mount neither grid.
+            <div role="status" data-testid="model-grid-deciding" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
+          ) : univerOn ? (
+            // The Univer grid (every account) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
             // pieces below. Edits come back as a whole Planyr workbook through the SAME `commit` (and so the same write-through,
             // cloud push, file-mode save and undo frame) as every other edit — persistence is not touched.
-            <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the new grid…</div>}>
+            <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>}>
               <UniverSheet
                 key={univerScope}
                 workbook={workbook}

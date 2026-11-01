@@ -14,7 +14,7 @@ describe("gradingCfg", () => {
   it("defaults: 1.5% pavement, 12 ft depth, 2:1", () => {
     const c = gradingCfg(undefined);
     expect([c.pavementSlopePct, c.maxCutFillFt, c.slopeRatio]).toEqual([1.5, 12, 2]);
-    expect(c.layers).toEqual({ buildable: false, cutfill: false, contours: false, paper: true });     // per-plan: the map layers OFF until asked for; the paper background ON (ROUND 5, NEW-6)
+    expect(c.layers).toEqual({ buildable: false, cutfill: false, contours: false, paper: true, spots: true });     // per-plan: the map layers OFF until asked for; the paper background ON (ROUND 5, NEW-6)
     expect(c.enabled).toBe(false);                                        // grading itself is OFF for a plan until switched on
   });
   it("pavement slope is never below 0.5%; ratio is 2/3/4 only; depth must be positive", () => {
@@ -23,7 +23,7 @@ describe("gradingCfg", () => {
     expect(gradingCfg({ slopeRatio: 3 }).slopeRatio).toBe(3);
     expect(gradingCfg({ slopeRatio: 5 }).slopeRatio).toBe(2);
     expect(gradingCfg({ maxCutFillFt: -4 }).maxCutFillFt).toBe(12);
-    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false, paper: true });
+    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false, paper: true, spots: true });
     expect(GRADING_DEFAULTS.shoulderFt).toBe(5);
   });
   it("ROUND 6: the open-ground slope defaults to 2%, a typed value rides into the engine pack, a negative one is refused", () => {
@@ -74,9 +74,9 @@ describe("gradingSetback — the existing setback feature, else the property lin
 
 describe("gradingCfg layer defaults", () => {
   it("Level-pad limit and Cut & Fill are both OFF until asked for; grading is a per-plan switch, OFF until turned on", () => {
-    expect(gradingCfg({}).layers).toEqual({ buildable: false, cutfill: false, contours: false, paper: true });
-    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false, paper: true });
-    expect(gradingCfg({ layers: { cutfill: true } }).layers).toEqual({ buildable: false, cutfill: true, contours: false, paper: true });
+    expect(gradingCfg({}).layers).toEqual({ buildable: false, cutfill: false, contours: false, paper: true, spots: true });
+    expect(gradingCfg({ layers: { buildable: true } }).layers).toEqual({ buildable: true, cutfill: false, contours: false, paper: true, spots: true });
+    expect(gradingCfg({ layers: { cutfill: true } }).layers).toEqual({ buildable: false, cutfill: true, contours: false, paper: true, spots: true });
     expect(gradingCfg({}).enabled).toBe(false);
     expect(gradingCfg({ enabled: true }).enabled).toBe(true);
     expect(gradingCfg({ enabled: "yes" }).enabled).toBe(false);
@@ -91,17 +91,16 @@ describe("panels render (static markup)", () => {
     ground: { status: "ready", retry() {}, summary: { best: { E: 795, areaAc: 37.46 }, parcelAc: 73.98, severity: { id: "workable", label: "Workable", tone: "green" }, relief: { reliefFt: 95, lowFt: 719.3, highFt: 814.3, steepShare: 0.04 } } },
     bestFinish: 795, actions, cards: [], rock: { status: "ready", count: 0, retry: noop }, ...over,
   });
-  it("Ground: the three rows, the severity pill, the show-on-map button", () => {
+  it("Ground (NEW-1): a severity pill, TWO numbers, the show-on-map button — no floor, no steepness row, no paragraph", () => {
     const html = renderToStaticMarkup(React.createElement(GroundSection, { model: model(), onToggleBuildable() {} }));
-    expect(html).toContain("Level ground at 2:1, no walls");
-    expect(html).toContain("37.5 of 74.0 AC");
-    expect(html).toContain("best single pad, finish 795 ft · no more than 12 ft of cut or fill");
-    expect(html).toContain("Workable");
-    expect(html).toContain("Relief across the parcel");
-    expect(html).toContain("95 ft · 719 to 814");
-    expect(html).toContain("Ground steeper than 15%");
-    expect(html).toContain(">4%<");
+    expect(html).toContain("37.5 of 74 AC");
+    expect(html).toContain("one pad at 2:1, no walls");
+    expect(html).toContain("95 ft");
+    expect(html).toContain("relief · 719 to 814");
+    expect(html).toContain("WORKABLE");
+    expect(html.match(/data-ground-stat=/g).length).toBe(2);
     expect(html).toContain("Show buildable area on map");
+    for (const gone of ["Level ground at", "best single pad", "finish 795", "steeper than 15%", "Relief across the parcel", "data-ground-row"]) expect(html).not.toContain(gone);
   });
   it("Ground: with the line on the same button reads Hide", () => {
     const html = renderToStaticMarkup(React.createElement(GroundSection, { model: model(), onToggleBuildable() {}, buildableOn: true }));
@@ -113,85 +112,114 @@ describe("panels render (static markup)", () => {
     expect(f).toContain("Couldn&#x27;t read the ground"); expect(f).toContain("Retry");
   });
 
+  const stats = (haulCy, cut, fill) => ({ haulCy, deepestCutFt: cut, tallestFillFt: fill, cutCy: 0, fillCy: 0, netCy: haulCy, slopeSf: 0 });
   const card = (over = {}) => ({
     id: "b1", name: "Building 1", sf: 217500, ffe: 799.8, isAuto: true, solving: false, failed: false, focus: true,
-    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 615, balanced: false, dirtCy: 107881 },
-    flag: null, basis: "Balances the dirt: 54k CY cut on the north, 54k CY fill on the south; 600 CY import. Docks sit on the low side, so the courts drain away from the building.",
-    fixes: { id: "b1", status: "idle", ffe: null, move: null },
-    alt: { id: "b1", E: 795, areaAc: 37.6, cutCy: 4000, fillCy: 75000, netCy: 71000 },
+    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 615, balanced: false, dirtCy: 107881 }, haulCy: 615,
+    tiles: { haul: { big: "0", sub: "balanced", tone: "green", dir: "none" }, cut: { big: "53,600", sub: "deepest 14 ft" }, fill: { big: "54,200", sub: "tallest 19 ft" } },
+    flags: [], flagged: false, flag: null, fixes: { id: "b1", status: "idle", ffe: null, move: null },
+    floors: { pending: false, balancedE: 799.8, curve: [{ E: 794, haulCy: -9000 }, { E: 799.8, haulCy: 0 }, { E: 806, haulCy: 9000 }], rows: [
+      { key: "nohaul", E: 799.8, names: ["nohaul"], label: "no haul", sub: "", stats: stats(0, 14, 19), current: true },
+      { key: "digging", E: 795, names: ["digging"], label: "least digging", sub: "38 AC stays on natural grade", stats: stats(-6000, 10, 12), current: false },
+      { key: "slopes", E: 802.5, names: ["slopes"], label: "shortest slopes", sub: "", stats: stats(4000, 12, 16), current: false },
+    ] },
     ...over,
   });
-  const group = (cards, extra = {}) => renderToStaticMarkup(React.createElement(GradingPanel, { model: model({ cards, ...extra }), dockDropFt: 4, onCfg: noop, onDockDrop: noop, onSelectBuilding: noop, onApplyFfeFix: noop, onApplyMoveFix: noop, onToggleBuildable: noop }));
+  const group = (cards, extra = {}, props = {}) => renderToStaticMarkup(React.createElement(GradingPanel, { model: model({ cards, limit: { mode: "boundary", source: "auto", sig: "s" }, actions: { typeFfe: noop, resetFfe: noop, findSecondPad: noop, editLimit: noop, doneEditLimit: noop, resetLimit: noop }, ...extra }), dockDropFt: 4, onCfg: noop, onDockDrop: noop, onSelectBuilding: noop, onApplyFfeFix: noop, onApplyMoveFix: noop, onToggleBuildable: noop, ...props }));
   it("Grading panel: with no building it says so in one line, and the Ground section still shows", () => {
     const html = group([]);
     expect(html).toContain("Place a building to grade it.");
     expect(html).toContain('data-grading-panel="empty"');
     expect(html).toContain('data-section="ground"');
     expect(html).not.toContain("data-grading-card");
+    expect(html).not.toContain('data-testid="grading-ffe"');   // no building, no floor
   });
-  it("Grading panel: cards first, the Ground section under them", () => {
+  it("Grading panel (NEW-1): inputs, then HAUL/CUT/FILL, flags, floors, on the map, ground — in that order", () => {
+    const html = group([card({ flags: [{ id: "f", kind: "depth-fill", text: "Fill reaches 31 ft on the south side. Past 12 ft, sites usually terrace or wall.", actions: ["second-pad"] }] })]);
+    const at = (k) => html.indexOf(`data-section="${k}"`);
+    for (const k of ["inputs", "tiles", "flags", "floors", "on-the-map", "ground"]) expect(at(k)).toBeGreaterThan(-1);
+    expect(at("inputs")).toBeLessThan(at("tiles")); expect(at("tiles")).toBeLessThan(at("flags")); expect(at("flags")).toBeLessThan(at("floors"));
+    expect(at("floors")).toBeLessThan(at("on-the-map")); expect(at("on-the-map")).toBeLessThan(at("ground"));
+    expect(html.indexOf('data-tile="haul"')).toBeLessThan(html.indexOf('data-tile="cut"'));
+    expect(html.indexOf('data-tile="cut"')).toBeLessThan(html.indexOf('data-tile="fill"'));
+  });
+  it("one building: no card chrome, no selector; the floor is shown in ONE place with the AUTO · NO HAUL pill", () => {
     const html = group([card()]);
-    expect(html).toContain('data-grading-panel="cards"');
-    expect(html.indexOf("data-grading-card")).toBeGreaterThan(-1);
-    expect(html.indexOf('data-section="ground"')).toBeGreaterThan(html.indexOf("data-grading-card"));
-    expect(html).not.toContain("Ground › Grading");
-  });
-  it("Grading panel: no model yet reads as loading, never blank", () => {
-    const html = renderToStaticMarkup(React.createElement(GradingPanel, { model: null }));
-    expect(html).toContain("Reading the ground");
-    expect(html).toContain('data-grading-panel="loading"');
-  });
-  it("one card: title, FFE already filled in (grey = auto), the basis, ONE alternative link, the earthwork line — and NO tab, NO chips, NO 'pick' prompt", () => {
-    const html = group([card()]);
-    expect(html).toContain("Building 1 · 217,500 SF");
-    expect(html).toContain("FFE 799.8 ft");
+    expect(html).not.toContain('data-section="buildings"');
+    expect(html.match(/data-ffe-value=/g).length).toBe(1);
+    expect(html).toContain('value="799.8"');
+    expect(html).toContain("AUTO · NO HAUL");
     expect(html).toContain('data-ffe-source="auto"');
-    expect(html).toContain("Balances the dirt: 54k CY cut on the north");
-    expect(html).toContain("Or sit it on the most level ground: FFE 795 (38 AC stays level, 71k CY import)");
-    expect(html).toContain("Cut 53,600 · Fill 54,200 · 600 CY import");
-    expect(html).toContain("Slopes daylight inside the property line.");
-    for (const gone of ["Balanced dirt", "Least dirt", "Most room", "Pick a chip", "Pick a finish elevation", "role=\"tab\"", "Walls", "data-ffe-basis"]) expect(html).not.toContain(gone);
+    expect(html).toContain("Finished floor"); expect(html).toContain("Limits of disturbance"); expect(html).toContain("ft from property line"); expect(html).toContain("Slopes");
   });
-  it("the settings are NOT in the card: the pavement slope, dock drop, depth and ratio live behind the gear", () => {
+  it("Limits of disturbance shows −10 on a fresh plan (the stored inside-margin is +10) and +20 past the line", () => {
     const html = group([card()]);
-    for (const hidden of ["Pavement slope", "Dock drop", "Max cut or fill under a pad", "Grading slopes", "5 ft shoulder"]) expect(html).not.toContain(hidden);
-    expect(html).not.toContain('data-grading-gear="1"');   // the gear rides the panel HEADER (portal slot), not the body
-    const head = renderToStaticMarkup(React.createElement(GradingHeaderActions, { model: model({ cards: [card()] }), dockDropFt: 4, onCfg: noop, onDockDrop: noop }));
-    expect(head).toContain('data-grading-gear="1"');
-    expect(head).toContain('aria-label="Grading settings"');
+    expect(html).toMatch(/data-testid="grading-limit-offset"[^>]*value="-10"/);
+    const out = group([card()], { cfg: gradingCfg({ gradingMarginFt: -20 }) });
+    expect(out).toMatch(/data-testid="grading-limit-offset"[^>]*value="\+20"/);
   });
-  it("a typed FFE is black with the small auto chip that resets", () => {
-    const html = group([card({ isAuto: false, ffe: 801, basis: "Your number. Reset to auto for the balanced finish." })]);
-    expect(html).toContain('data-ffe-source="typed"'); expect(html).toContain('data-ffe-reset="1"');
+  it("tiles: HAUL big number with its one-word sub-line, CUT with 'deepest', FILL with 'tallest'", () => {
+    const html = group([card({ tiles: { haul: { big: "4,300", sub: "4,300 CY in", tone: "amber", dir: "in" }, cut: { big: "53,600", sub: "deepest 14 ft" }, fill: { big: "54,200", sub: "tallest 19 ft" } } })]);
+    expect(html).toContain("4,300 CY in"); expect(html).toContain("deepest 14 ft"); expect(html).toContain("tallest 19 ft");
+    expect(group([card()])).toContain(">balanced<");
+  });
+  it("a clear plan shows NO flag at all (no 'clear' line, no 'Slopes daylight' sentence)", () => {
+    const html = group([card()]);
+    expect(html).not.toContain("data-grading-flag"); expect(html).not.toContain("daylight inside"); expect(html).not.toContain('data-grading-flag="clear"');
+  });
+  it("floors table: three rows, the current one marked, the sub-label under least digging, the haul-by-floor curve beneath", () => {
+    const html = group([card()]);
+    expect(html.match(/data-floor-row=/g).length).toBe(3);
+    expect(html).toContain("799.8 · no haul"); expect(html).toContain("795.0 · least digging"); expect(html).toContain("802.5 · shortest slopes");
+    expect(html).toContain("38 AC stays on natural grade");
+    expect(html).toMatch(/data-floor-row="nohaul"[^>]*data-floor-current="1"/);
+    expect(html).toContain("Other floors to try"); expect(html).toContain("Haul by floor"); expect(html).toContain('data-haul-curve="1"'); expect(html).toContain('data-haul-current="1"');
+  });
+  it("the settings are NOT in the body: pavement slope, dock drop, buffer, terrace depth live behind the gear (which rides the header)", () => {
+    const html = group([card()]);
+    for (const hidden of ["Pavement slope", "Dock drop", "Max cut or fill under a pad", "Undisturbed buffer", "terrace or wall is usual", "Grading margin"]) expect(html).not.toContain(hidden);
+    expect(html).not.toContain('data-grading-gear="1"');
+    for (const gone of ["Around the layout", "To the boundary", "daylight inside", "faces uphill", "steeper than"]) expect(html).not.toContain(gone);
+    const head = renderToStaticMarkup(React.createElement(GradingHeaderActions, { model: model({ cards: [card()] }), planOn: true, dockDropFt: 4, onCfg: noop, onDockDrop: noop }));
+    expect(head).toContain('data-grading-gear="1"'); expect(head).toContain('aria-label="Grading settings"'); expect(head).toContain('data-testid="grading-plan-switch"');
+  });
+  it("a typed floor reads TYPED and the pill resets it", () => {
+    const html = group([card({ isAuto: false, ffe: 801 })]);
+    expect(html).toContain('data-ffe-source="typed"'); expect(html).toContain('data-ffe-reset="1"'); expect(html).toContain(">TYPED<");
     expect(html).toContain('value="801"');
   });
-  it("solving shows an ellipsis (never an empty field); a failed price says so", () => {
-    expect(group([card({ ffe: null, solving: true, earthwork: null, basis: undefined, alt: null })])).toContain("FFE … ft");
-    expect(group([card({ ffe: null, failed: true, earthwork: null, basis: undefined, alt: null })])).toContain("FFE — ft");
-    expect(group([card({ ffe: null, solving: true, earthwork: null, alt: null })], { demStatus: "failed" })).toContain("no suggestion yet");
+  it("solving shows an ellipsis (never an empty field)", () => {
+    expect(group([card({ ffe: null, solving: true, tiles: null, floors: null })])).toContain('placeholder="…"');
+    expect(group([card({ ffe: null, failed: true, tiles: null, floors: null })])).toContain('placeholder="—"');
+    expect(group([card({ ffe: null, solving: true, tiles: null, floors: null })], { demStatus: "failed" })).toContain("Couldn&#x27;t read the ground");
   });
-  it("a balanced pad reads Balanced; an export reads CY export", () => {
-    expect(group([card({ earthwork: { cutCy: 50000, fillCy: 50100, netCy: 100 } })])).toContain("Balanced");
-    expect(group([card({ earthwork: { cutCy: 60000, fillCy: 50000, netCy: -10000 } })])).toContain("10,000 CY export");
-  });
-  it("the selected card is expanded; the rest are one line each and name their FFE", () => {
-    const html = group([card(), card({ id: "b2", name: "Building 2", sf: 140000, ffe: 801.2, focus: false, flag: { text: { title: "Slope crosses the setback · East", body: "x" } } })]);
+  it("several buildings: a thin selector above ONE set of blocks; ON THE MAP and GROUND appear once", () => {
+    const html = group([card(), card({ id: "b2", name: "Building 2", sf: 140000, ffe: 801.2, focus: false, flagged: true, flags: [], tiles: null, floors: null })]);
+    expect(html).toContain('data-section="buildings"');
     expect(html).toContain('data-card-state="open"'); expect(html).toContain('data-card-state="collapsed"');
-    expect(html).toContain("Building 2 · 140,000 SF"); expect(html).toContain("FFE 801.2 ft");
+    expect(html).toContain("Building 2 · 140,000 SF"); expect(html).toContain("801.2 ft");
+    expect(html.match(/data-section="on-the-map"/g).length).toBe(1); expect(html.match(/data-section="ground"/g).length).toBe(1);
+    expect(html.match(/data-ffe-value=/g).length).toBe(1);   // never two floors on screen at once
   });
-  it("the flag card is exactly as shipped: side, element, overshoot, the two fixes, the disabled wall line", () => {
-    const flag = { text: { title: "Slope crosses the setback · South", body: "The fill slope off the truck court runs 18 ft past the line at 2:1. Pick a fix:" } };
-    const html = group([card({ flag, fixes: { id: "b1", status: "done", ffe: { ffe: 791, delta: -2.5 }, move: { distFt: 35, direction: "north", dx: 0, dy: -35 } } })]);
-    expect(html).toContain("Slope crosses the setback · South");
-    expect(html).toContain("Lower FFE to 791.0 ft");
-    expect(html).toContain("Move building 35 ft north");
-    expect(html).toMatch(/<button disabled[^>]*data-fix="wall"/);
-    expect(html).not.toContain("Slopes daylight inside the property line.");
+  it("a flag is one sentence plus the action links it owns — the move fix reads 'Second pad' (searched on click, never on open)", () => {
+    const flag = { id: "d", kind: "depth-fill", thresholdFt: 12, text: "Fill reaches 31 ft on the south side. Past 12 ft, sites usually terrace or wall.", actions: ["second-pad"] };
+    const html = group([card({ flags: [flag] })]);
+    expect(html).toContain("Fill reaches 31 ft on the south side. Past 12 ft, sites usually terrace or wall.");
+    expect(html).toMatch(/data-fix="move"[^>]*>Second pad</);
+    expect(html).not.toMatch(/<button[^>]*data-fix="move"[^>]*disabled/);
+    expect(html).not.toContain("data-fix=\"wall\"");
   });
-  it("with no clearing fix, the buttons are disabled and say so", () => {
-    const html = group([card({ flag: { text: { title: "t", body: "b" } }, fixes: { id: "b1", status: "done", ffe: null, move: null } })]);
-    expect(html).toContain("No finish elevation clears it");
-    expect(html).toMatch(/<button disabled[^>]*data-fix="ffe"/);
+  it("with no clearing fix the link is disabled", () => {
+    const flag = { id: "L", kind: "limit", text: "Fill slope runs 14 ft past the property line on the south side.", actions: ["ffe", "limit"] };
+    const html = group([card({ flags: [flag], fixes: { id: "b1", status: "done", ffe: null, move: null } })]);
+    expect(html).toContain("No floor clears it");
+    expect(html).toMatch(/<button[^>]*data-fix="ffe"[^>]*disabled/);
+  });
+  it("ON THE MAP: four pills, the legend in the picture's own colours", () => {
+    const html = group([card()], {}, { showSpots: true });
+    for (const t of ["grading-show-on-map", "grading-show-contours", "grading-show-paper", "grading-show-spots"]) expect(html).toContain(`data-testid="${t}"`);
+    for (const l of ["cut", "fill", "limit", "existing"]) expect(html).toContain(`data-legend="${l}"`);
+    expect(html).toContain("rgb(181,84,28)"); expect(html).toContain("rgb(43,108,176)");
   });
 });
 

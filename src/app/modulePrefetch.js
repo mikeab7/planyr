@@ -78,9 +78,10 @@ function warmSequenceDoc() {
   } catch (_) { /* best-effort */ }
 }
 
-/* NEW-1 (B2587264) — the Spreadsheet's Univer grid is a SECOND lazy chunk (1.8 MB compressed) that ModelApp loads only once the grid
- * mounts, i.e. after the click. Warm it the same way, but only where it will be used (lib/univerWarm.js decides) and when the
- * browser is idle, because evaluating it costs the page's main thread a few tenths of a second. */
+/* NEW-1 (B2587264; every account since the cutover, 2026-10-31) — the Spreadsheet's Univer grid IS the Spreadsheet tab now: it is a
+ * SECOND lazy chunk (1.8 MB compressed) that ModelApp loads once the grid mounts, i.e. after the click. So warming the Model module
+ * warms it too, like any other module's chunk — held to when the browser is idle, because evaluating it costs the page's main thread
+ * a few tenths of a second. The one device it skips is an owner's that chose the regular-grid hatch (lib/univerWarm.js decides). */
 function warmUniverGrid() {
   const run = () => { import("../workspaces/model/lib/univerWarm.js").then((m) => m.warmUniver()).catch(() => { /* best-effort */ }); };
   if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1500 }); else setTimeout(run, 200);

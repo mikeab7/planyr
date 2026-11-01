@@ -131,7 +131,7 @@ export function describeFlag(surface, ids, { buildingCentre, elements = [], slop
     if (basis && basis.kind === "property") {
       const place = limitCrossPlace(basis, property);
       return {
-        side: cap(side), over, kind, property, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
+        side: cap(side), over, kind, property, place, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
         span: { pt: centroid, radiusFt: Math.max(60, Math.sqrt(out.sf) / 2) },
         text: {
           title: `Slope runs ${place} · ${cap(side)}`,

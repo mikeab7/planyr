@@ -27,7 +27,7 @@ const JSON_OUT = args.includes("--json") ? args[args.indexOf("--json") + 1] : nu
 const STAMP = Date.now().toString(36);
 const A = `${LIVE_PREFIX}usave-a-${STAMP}`, B = `${LIVE_PREFIX}usave-b-${STAMP}`;
 const T = `zzusave${STAMP}`;
-const SWITCH_KEY = "planyr:model:univerGrid";
+const SWITCH_KEY = "planyr:model:regularGrid";   // the owner-only per-device hatch (lib/gridChoice.js): "1" = the REGULAR grid. Univer is the default.
 const out = [];
 let failures = 0, voided = null;
 const ok = (name, cond, extra = "") => { out.push({ name, pass: !!cond, extra }); console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
@@ -58,7 +58,7 @@ try {
   const waitGrid = async () => { await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 }); await page.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); return !!(a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet()); }, null, { timeout: 90000, polling: 25 }); await page.waitForTimeout(1500); };
   const openSheet = async (id, { univer = true } = {}) => {
     await page.goto(url(id), { waitUntil: "load" });
-    await page.evaluate(([k, on]) => (on ? localStorage.setItem(k, "1") : localStorage.removeItem(k)), [SWITCH_KEY, univer]);
+    await page.evaluate(([k, on]) => (on ? localStorage.removeItem(k) : localStorage.setItem(k, "1")), [SWITCH_KEY, univer]);
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector('[data-testid="model-root"]', { timeout: 60000 });
     if (univer) await waitGrid(); else { await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 }); await page.waitForTimeout(1500); }
@@ -181,7 +181,7 @@ try {
   if (!fileIds[0]) VOID("the fixture file never reached doc_reviews"); madeReviews.push(fileIds[0]);
   const rec = () => page.evaluate(async (i) => (await window.pfSupabase.from("doc_reviews").select("data").eq("id", i).single()).data?.data, fileIds[0]);
   const bytesOf = async (driveKey) => { driveKeys.add(driveKey); const b64 = await page.evaluate(async (k) => { const { data: { session } } = await window.pfSupabase.auth.getSession(); const r = await fetch(`/api/files?key=${encodeURIComponent(k)}`, { headers: { authorization: `Bearer ${session.access_token}` } }); const u = new Uint8Array(await r.arrayBuffer()); let str = ""; for (let i = 0; i < u.length; i += 0x8000) str += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(str); }, driveKey); return Buffer.from(b64, "base64"); };
-  await page.evaluate(([k]) => localStorage.setItem(k, "1"), [SWITCH_KEY]);
+  await page.evaluate(([k]) => localStorage.removeItem(k), [SWITCH_KEY]);       // Univer is the default: no device choice at all
   await rowFor().first().click(); await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await waitGrid();
   ok("F1a KNOWN-GOOD ARM: the Library file opened in the Univer grid with its own values", (await uVal(0, 0)) === "alpha" && (await uVal(0, 1)) === 1000, `A1=${JSON.stringify(await uVal(0, 0))} B1=${JSON.stringify(await uVal(0, 1))}`);
   if ((await uVal(0, 0)) !== "alpha") VOID("file mode did not show the file's values in Univer");
@@ -196,7 +196,7 @@ try {
   const wbO = new ExcelJS.Workbook(); if (r1.sources.length >= 2) await wbO.xlsx.load(await bytesOf(r1.sources[r1.sources.length - 1].driveKey));
   ok("F1c the stored file holds the edit AND the file's own values and formula (re-read with ExcelJS — the Excel side)", stored.includes("file-edit") && stored.includes("alpha") && stored.includes("2000"), `cells: ${stored.join(", ")}`);
   ok("F1d …and the upload is still stored, byte for byte, as the oldest version", r1.sources.length >= 2 && Buffer.compare(await bytesOf(r1.sources[r1.sources.length - 1].driveKey), xlBuf) === 0);
-  await page.evaluate(([k]) => localStorage.removeItem(k), [SWITCH_KEY]);
+  await page.evaluate(([k]) => localStorage.setItem(k, "1"), [SWITCH_KEY]);     // the owner's hatch: reopen the same file in the regular grid
   await page.goto(`${BASE}/?cb=${Date.now()}#/project/${A}/library`, { waitUntil: "load" });
   await page.waitForSelector('[data-testid="library-unified"]', { timeout: 60000 }); await page.waitForTimeout(2000);
   await rowFor().first().click(); await page.waitForSelector('[data-testid="model-file-bar"]', { timeout: 60000 }); await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 }); await page.waitForTimeout(1500);
@@ -205,7 +205,7 @@ try {
 
   // ── O1 org workbook ─────────────────────────────────────────────────────────────────────────────────────────────────────
   orgIdsBefore = await page.evaluate(async () => ((await window.pfSupabase.from("org_model_sheets").select("id")).data || []).map((r) => r.id));
-  await page.evaluate(([k]) => localStorage.setItem(k, "1"), [SWITCH_KEY]);
+  await page.evaluate(([k]) => localStorage.removeItem(k), [SWITCH_KEY]);       // back to the default grid for the org workbook
   await page.goto(`${BASE}/?cb=${Date.now()}#/org/spreadsheet`, { waitUntil: "load" });
   await page.waitForSelector('[data-testid="org-workbook-new"]', { timeout: 60000 }); await page.waitForTimeout(1500);
   await page.click('[data-testid="org-workbook-new"]'); await waitGrid();

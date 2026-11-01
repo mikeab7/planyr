@@ -66,7 +66,7 @@ try {
     return page;
   };
   const waitPicture = async (page) => {
-    await page.waitForFunction(() => { const a = document.querySelector("[data-ffe-value]"); return a && /\d/.test(a.textContent); }, null, { timeout: 120000 });
+    await page.waitForFunction(() => { const a = document.querySelector("[data-ffe-value]"); return a && /\d/.test(a.value || a.textContent); }, null, { timeout: 120000 });
     await page.waitForFunction(() => { const e = document.querySelector("[data-grading-earthwork]"); return e && e.getAttribute("data-grading-earthwork") !== "pending"; }, null, { timeout: 120000 });
     await page.waitForSelector('[data-layer="contours"] path', { state: "attached", timeout: 120000 });
     await page.waitForSelector('[data-layer="existing-contours"] polyline', { state: "attached", timeout: 60000 });
@@ -517,7 +517,7 @@ try {
       const page = await open(`?buildable=0&contours=1&zoom=ne50&mode=layout&owner=2`);
       await waitPicture(page);
       const layoutSig = await page.evaluate(() => document.querySelector("[data-graded-area]").getAttribute("data-limit-sig"));
-      await page.locator('[data-testid="grading-limit-mode"]').getByText("To the boundary").click();
+      await page.evaluate(() => window.__harness.setLimitMode("boundary"));   // NEW-1: the panel has no mode control any more — drive the same action the planner exposes
       await page.waitForFunction(() => document.querySelector("[data-graded-area]")?.getAttribute("data-limit-mode") === "boundary", null, { timeout: 120000 });
       const seen = [];
       for (let k = 0; k < 60; k++) {

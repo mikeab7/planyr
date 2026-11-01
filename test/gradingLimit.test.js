@@ -216,7 +216,9 @@ describe("the stitched surface inside the limit (NEW-2)", () => {
     expect(sh.cls).toBe("infill"); expect(sh.ft).toBeCloseTo(edge, 0);
     const out = z(130, 240);                        // 5 ft past the limit: on the 2:1 slope (2.5 ft down from the edge)
     expect(out.wedge).toBe(true); expect(out.ft).toBeCloseTo(edge - 5 / 2, 0);
-    expect(z(130, 300).status).toBe("none");        // daylit: nothing proposed
+    // daylit: the grading proposes nothing here — the probe says so, and the chip reads the ground as undisturbed (B2585313 ×2)
+    expect(s.grid.probe({ x: 130, y: 300 }).status).toBe("none");
+    const dl = z(130, 300); expect(dl.undisturbed).toBe(true); expect(dl.ft).toBe(flat({ x: 130, y: 300 }));
   });
   it("the readout and the lattice are one surface: cell dz == probe − ground", () => {
     let n = 0;
@@ -360,7 +362,9 @@ describe("boundary mode never grades outside the setback and never flags (B23762
     // the probe agrees with the lattice at a band cell and refuses a point outside the limit
     const c0 = slope[Math.floor(slope.length / 2)];
     expect(sampleProposedAt(s.grid, c0, tilt).ft).toBeCloseTo(c0.propFt, 6);
-    expect(sampleProposedAt(s.grid, { x: -340, y: 0 }, tilt).status).toBe("none");
+    expect(s.grid.probe({ x: -340, y: 0 }).status).toBe("none");
+    const past = sampleProposedAt(s.grid, { x: -340, y: 0 }, tilt);   // on the property past the limit: undisturbed ground (B2585313 ×2)
+    expect(past.status === "none" || (past.undisturbed && past.ft === tilt({ x: -340, y: 0 }))).toBe(true);
   });
   it("the real Chehaw ground: zero cells outside the ring, zero flagged, the surface still builds in budget", () => {
     const F = new URL("./fixtures/chehaw-218-02007", import.meta.url).pathname;

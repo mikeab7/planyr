@@ -28,7 +28,7 @@ function conceptA() {
   const setback = gradingSetback([{ id: "pc", points: ring, active: true }], 25);
   const gsEls = (FFE) => els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) }));
   const build = (FFE, mode) => {
-    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } });
+    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true });
     return buildProposedSurface({ els: gsEls(FFE), ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [],
       opts: { existKey: `r9:${mode}:${FFE}` }, grading: gradingPack(cfg, setback) });
   };

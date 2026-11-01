@@ -65,7 +65,10 @@ export async function parseSpreadsheetInWorker(buffer, fileName, opts = {}) {
 }
 
 /** A Planyr workbook -> a real .xlsx Blob (formulas as formulas, formats, merges, widths, freeze panes). */
-export async function exportWorkbookInWorker(workbook, { projectNames, ...opts } = {}) {
-  const d = await run({ op: "export", workbook, projectNames: projectNames || null }, [], { label: "The Excel download", ...opts });
+export async function exportWorkbookInWorker(workbook, { projectNames, evaluated, ...opts } = {}) {
+  // NEW-1 — the cached values in the file come from Univer's engine, run HERE on the main thread (the worker never imports Univer);
+  // the answer is plain data and rides along with the workbook it was computed for.
+  const ev = evaluated || await (await import("./univerEval.js")).evaluateForExport(workbook, { projectNames });
+  const d = await run({ op: "export", workbook: ev.workbook, projectNames: projectNames || null, evaluated: { workbook: ev.workbook, values: ev.values } }, [], { label: "The Excel download", ...opts });
   return d.blob;
 }

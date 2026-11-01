@@ -5,9 +5,9 @@
  *  A  COLD     browser cache cleared each run: navigation → a painted Univer grid with its first cell readable, median of RUNS, against the
  *              same page with the regular grid (switch off). Reports the served files and their COMPRESSED sizes (CDP encodedDataLength — what
  *              crossed the wire), the formula worker, and how many hyphenation language files were requested.
- *  B  HOVER    Site route open, the device switch on: resting the pointer on the Spreadsheet tab must fetch the Univer chunk BEFORE the click
+ *  B  HOVER    Site route open, a default device (no stored grid choice): resting the pointer on the Spreadsheet tab must fetch the Univer chunk BEFORE the click
  *              (that is the whole point of the warm-up); then the click → a painted grid is timed.
- *  C  NON-USER a device whose switch is OFF must NOT download the Univer chunk when it hovers the tab (1.8 MB for nothing).
+ *  C  NON-USER a device on the OWNER'S regular-grid hatch must NOT download the Univer chunk when it hovers the tab (1.8 MB for nothing).
  *  D  CLEANUP  the throwaway plan is gone.
  *
  * VERDICT RULES (what fails the run): a hyphenation language file requested on an English sheet · no formula worker request · the Univer chunk
@@ -28,7 +28,7 @@ const val = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const RUNS = Number(val("--runs", 3));
 const JSON_OUT = val("--json", null);
 const PROJECT = `${LIVE_PREFIX}load-${Date.now().toString(36)}`;
-const SWITCH_KEY = "planyr:model:univerGrid";
+const SWITCH_KEY = "planyr:model:regularGrid";   // the owner-only per-device hatch (lib/gridChoice.js): "1" = the REGULAR grid; absent = Univer, the default
 // The spec's fixture: 1,000 rows × 12 columns, the last column a SUM formula per row (the same sheet measure-univer-tti.mjs builds).
 const ROWS = 1000, COLS = 12;
 function fixtureWorkbook() {
@@ -71,7 +71,8 @@ try {
   await page.route("**/rest/v1/rpc/is_admin*", (route) => { hits++; route.fulfill({ status: 200, contentType: "application/json", body: "true" }); });
   const sheetUrl = () => `${BASE}/?cb=${Date.now()}#/project/${PROJECT}/spreadsheet`;
   const siteUrl = () => `${BASE}/?cb=${Date.now()}#/project/${PROJECT}`;
-  const setSwitch = (on) => page.evaluate(([k, v]) => { if (v) localStorage.setItem(k, "1"); else localStorage.removeItem(k); }, [SWITCH_KEY, on]);
+  // `on` = this device uses the UNIVER grid (the default: no stored choice); off = the owner's regular-grid hatch (admin is answered true below).
+  const setSwitch = (on) => page.evaluate(([k, v]) => { if (v) localStorage.removeItem(k); else localStorage.setItem(k, "1"); }, [SWITCH_KEY, on]);
   // "painted" = the canvas is up AND the first cell and the LAST formula cell both hold numbers (the formula pass is inside the figure).
   const univerPainted = () => page.waitForFunction(([lr, lc]) => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); const ws = a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet(); try { return !!ws && !!document.querySelector('[data-testid="univer-grid"] canvas') && typeof ws.getRange(0, 0).getValue() === "number" && typeof ws.getRange(lr, lc).getValue() === "number"; } catch (_) { return false; } }, [ROWS - 1, COLS - 1], { timeout: 90000, polling: 25 });
   const oldPainted = () => page.waitForFunction(() => { const s = document.querySelector('[data-testid="model-sheet"]'); return !!s && /\d\.\d/.test(s.innerText); }, null, { timeout: 90000, polling: 25 });
@@ -112,7 +113,7 @@ try {
   ok("B2 the click painted the grid", true, `${clickMs} ms`);
   log.hover = { warmedBytes: warmed[0] && warmed[0].bytes, clickMs };
 
-  // ── C. a device with the switch OFF must not download it ─────────────────────────────────────────────────────
+  // ── C. a device on the owner's regular-grid hatch must not download it ─────────────────────────────────────────────────────
   await setSwitch(false); await page.goto("about:blank"); await cold();
   await page.goto(siteUrl(), { waitUntil: "load" }); await tab.waitFor({ timeout: 60000 }); await page.waitForTimeout(3000);
   await tab.hover(); await page.waitForTimeout(4000);

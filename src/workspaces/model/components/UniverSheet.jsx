@@ -1,8 +1,8 @@
-/* Model workspace — the Univer grid (owner-only SPIKE; docs/SPREADSHEET-UNIVER-SPIKE.md). Lazy chunk: nothing in
- * this file, and none of @univerjs/*, is imported by any eagerly loaded module.
+/* Model workspace — the Univer grid: THE grid on the Spreadsheet tab for every account (docs/SPREADSHEET-UNIVER-SPIKE.md). Lazy
+ * chunk: nothing in this file, and none of @univerjs/*, is imported by any eagerly loaded module.
  *
- * It REPLACES nothing. ModelApp mounts it instead of the Ribbon / FormulaBar / SheetView / TabStrip ONLY while the
- * owner-only switch is on (lib/univerSwitch.js); every other account renders exactly today's grid.
+ * ModelApp mounts it instead of the Ribbon / FormulaBar / SheetView / TabStrip, everywhere except the owner's per-device
+ * regular-grid hatch (lib/gridChoice.js, lib/univerSwitch.js). The regular grid is deprecated, pending deletion.
  *
  * DATA FLOW (one direction each way, through the bridge — lib/univerBridge.js):
  *   Planyr workbook ──workbookToUniver──▶ Univer          (mount, and again only if the workbook changes from
@@ -48,6 +48,9 @@ import {
 import { buildUniverTheme, THEME_TOKEN_VARS } from "../lib/univerTheme.js";
 import { installExcelKeys } from "../lib/univerExcelKeys/index.js";
 import { installUniverIndent } from "../lib/univerIndent.js";
+import { installFormulaGuard } from "../lib/univerFormulaGuard.js";
+import { circularNotice } from "../lib/evalValues.js";
+import { migratePlanyrSyntaxInWorkbook, planyrSyntaxNote } from "../lib/planyrSyntax.js";
 import { installUniverTools } from "../lib/univerTools/index.js";
 import UniverToolPanels from "./UniverTools.jsx";
 import { createSaveController } from "../lib/univerSave.js";
@@ -119,6 +122,29 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       L.univer = univer; L.univerAPI = univerAPI;
       L.injector = univer.__getInjector();
       // The Excel keys the free Univer build lacks (Ctrl+1, Ctrl+Shift+$%!~#, Shift/Ctrl+Space, Ctrl+9/0, Ctrl+Plus/Minus, Ctrl+;, Alt key-tips…)
+      // A formula typed or pasted in the same spellings gets the same rewrite before the cell is written (lib/univerFormulaGuard.js).
+      L.formulaGuard = installFormulaGuard({ injector: L.injector, ICommandService });
+      // Univer (like Excel) calculates a circular reference as 0, which looks like an answer: after each calculation, say so out loud.
+      // The calculation runs in the formula Web Worker, so the circular cells are read from Univer's "calculation processing"
+      // notification (it reaches this thread either way) — not from the engine's runtime service, which only the worker holds.
+      try {
+        const fw = univerAPI.getFormula();
+        let found = [];
+        const subs = [
+          fw.calculationStart(() => { found = []; }),
+          fw.calculationProcessing((p) => { if (p && Array.isArray(p.circularReferences) && p.circularReferences.length) found = p.circularReferences; }),
+          fw.calculationEnd((state) => {
+            if (disposed || state !== 3 /* FormulaExecutedStateType.SUCCESS */) return;
+            try {
+              const wb = L.unitId && univerAPI.getWorkbook(L.unitId);
+              const list = found.filter((c) => c.unitId === L.unitId).map((c) => { const ws = wb && wb.getSheetBySheetId(c.sheetId); return { sheetName: ws ? ws.getSheetName() : c.sheetId, row: c.row, col: c.column }; });
+              const key = JSON.stringify(list);
+              if (key !== L.circularKey) { L.circularKey = key; if (list.length && L.onNotice) L.onNotice(circularNotice(list)); }
+            } catch (_) { /* the read is a courtesy; the calculation itself is untouched */ }
+          }),
+        ];
+        L.circularSub = { dispose: () => subs.forEach((d) => { try { d.dispose(); } catch (_) { /* already gone */ } }) };
+      } catch (_) { /* no formula facade in this build */ }
       L.excelKeys = installExcelKeys({ univerAPI, injector: L.injector, host: hostRef.current, onNotice: (t) => { if (live.current.onNotice) live.current.onNotice(t); } });
       // Curved undo / redo (NEW-2, B2574353): toolbar glyphs resolve by name through Univer's IconManager (not the facade's
       // registerComponent, which is a different registry). Replace the built-in ones; the toolbar draws them on its next render.
@@ -127,7 +153,11 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
 
       const load = (wb) => {
         const migrated = migrateWorkbook(wb);
-        const { data, sidecar } = workbookToUniver(migrated);
+        // NEW-1 (one formula engine): [Column] names, interleaved XIRR/XNPV pairs and `=-Name` are rewritten to the spelling Univer's
+        // engine calculates, with a visible note — and SAVED that way (the baseline stays the stored text, so the first flush after
+        // this load sees a difference and commits the rewrite as one ordinary edit).
+        const { workbook: forUniver, rewritten } = migratePlanyrSyntaxInWorkbook(migrated);
+        const { data, sidecar } = workbookToUniver(forUniver);
         const defs = projectNamesToDefinedNames(live.current.projectNames);
         if (Object.keys(defs).length) {
           const res = data.resources.find((r) => r.name === "SHEET_DEFINED_NAME_PLUGIN");
@@ -140,6 +170,11 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
         L.projectDefs = defs;
         const fWb = univerAPI.createWorkbook(data);
         L.unitId = fWb.getId();
+        if (rewritten.length) {
+          L.save.schedule();
+          const note = planyrSyntaxNote(rewritten);
+          if (note && L.onNotice) L.onNotice(note);
+        }
         const active = migrated.sheets.find((s) => s.id === migrated.activeSheetId);
         if (active) { try { fWb.setActiveSheet(fWb.getSheetBySheetId(active.id)); } catch (_) { /* first sheet stays active */ } }
         if (L.tools) L.tools.attachUnit(L.unitId);                  // a rebuilt workbook is a NEW unit: its sheet component needs the trace layer again
@@ -309,6 +344,15 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       const mq = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
       if (mq && mq.addEventListener) mq.addEventListener("change", applyTheme);
       L.mq = mq; L.applyTheme = applyTheme;
+      // The app's floating Help "?" lives in the bottom-right corner of every route and clears whatever marks itself `data-canvas-corner`
+      // (src/shared/ui/cornerClearance.js). Univer's footer — sheet tabs, the zoom slider and "100%" — runs along that whole edge, so the
+      // button sat ON the zoom readout and the footer's menu (measured on phone widths, 2026-10-31). Stamp the footer, and again if Univer
+      // re-renders it, so the button rests above it instead.
+      const stampFooter = () => { const f = hostRef.current && hostRef.current.querySelector("footer"); if (f && !f.hasAttribute("data-canvas-corner")) f.setAttribute("data-canvas-corner", "univer-footer"); };
+      stampFooter();
+      const moFooter = new MutationObserver(stampFooter);
+      moFooter.observe(hostRef.current, { childList: true, subtree: true });
+      L.moFooter = moFooter;
 
       // The page may be going away: URGENT, so the host persists synchronously instead of waiting for a render that may never come.
       // beforeunload covers a tab close / reload; pagehide covers the cases that never fire it (mobile, back-forward cache).
@@ -351,8 +395,11 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       try { L.onReady && L.onReady(null); } catch (_) {}
       try { L.off && L.off.dispose && L.off.dispose(); } catch (_) {}
       try { L.mo && L.mo.disconnect(); } catch (_) {}
+      try { L.moFooter && L.moFooter.disconnect(); } catch (_) {}
       try { L.mq && L.mq.removeEventListener && L.mq.removeEventListener("change", L.applyTheme); } catch (_) {}
       try { L.detach && L.detach(); } catch (_) {}
+      try { L.formulaGuard && L.formulaGuard(); } catch (_) {}
+      try { L.circularSub && L.circularSub.dispose(); } catch (_) {}
       try { L.excelKeys && L.excelKeys.dispose(); } catch (_) {}
       try { L.indent && L.indent.dispose(); } catch (_) {}
       try { L.tools && L.tools.dispose(); } catch (_) {}

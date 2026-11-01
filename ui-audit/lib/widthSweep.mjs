@@ -74,12 +74,20 @@ export function collectSnapshot() {
         }
       }
       const ex = el.closest("[data-sweep-exempt]");
+      // NEW-2: the Univer grid's OWN <header> (its toolbar strip, [data-u-comp="headerbar"]) is a <header> element but not the app shell: it has no
+      // data-header-row, so legacyRow() used to file its controls under "row 1 / row 2" of the APP header and the sweep reported two-line rows that
+      // are really two different strips. Its controls are collected flagged `univer` and judged by their own rules in auditSnapshot (one strip, flat,
+      // edge to edge, nothing past the window, no half-cut button) instead of the shell's row model.
+      // (Univer also wraps its formula bar in an unnamed <header> — name box, formula editor — so the whole grid host counts, not just the toolbar strip.)
+      const inUniver = !!el.closest('[data-testid="univer-grid"]');
+      const inUniverToolbar = !!el.closest('[data-u-comp="headerbar"]');
       controls.push({
         label: labelOf(el), tag: el.tagName.toLowerCase(),
         itemId: attrOf(el.closest("[data-toolbar-item-id]"), "data-toolbar-item-id"),
         box, eff,
         exempt: ex ? ex.getAttribute("data-sweep-exempt") : null,
-        row: attrOf(el.closest("[data-header-row]"), "data-header-row") || legacyRow(el),
+        univer: inUniver, univerToolbar: inUniverToolbar,
+        row: inUniver ? null : (attrOf(el.closest("[data-header-row]"), "data-header-row") || legacyRow(el)),
       });
     }
   }
@@ -101,7 +109,10 @@ export function collectSnapshot() {
     barIds: [...e.querySelectorAll("[data-toolbar-bar] [data-toolbar-item-id]")].filter((i) => i.getBoundingClientRect().width > 0).map((i) => i.getAttribute("data-toolbar-item-id")),
     hasMore: !!e.querySelector("[data-toolbar-more]"),
   }));
+  const uh = document.querySelector('[data-u-comp="headerbar"]');
+  const univerHeader = uh && uh.getBoundingClientRect().height > 0 ? rectOf(uh.getBoundingClientRect()) : null;
   return {
+    univerHeader,
     vw, vh, dpr: window.devicePixelRatio,
     docScrollW: de.scrollWidth, docClientW: de.clientWidth, docScrollH: de.scrollHeight, docClientH: de.clientHeight,
     bodyScrollW: body.scrollWidth, bodyClientW: body.clientWidth, bodyScrollH: body.scrollHeight, bodyClientH: body.clientHeight,
@@ -142,7 +153,40 @@ export function auditSnapshot(s) {
   // An exemption with no stated reason is itself a violation: it cannot be added silently.
   for (const reason of s.exemptions || []) if (!String(reason).trim()) v.push({ kind: "exemption-without-reason", detail: "data-sweep-exempt must name why the strip may scroll/clip" });
 
-  const live = s.controls.filter((c) => !c.exempt);
+  const live = s.controls.filter((c) => !c.exempt && !c.univer);
+  // 1b. THE UNIVER GRID'S OWN TOOLBAR STRIP (NEW-2) — a third-party widget with its own overflow ("⋮"), judged by what the owner asked of it
+  //     (docs: one flat strip, edge to edge) rather than the shell's row model. It is NOT exempt: it must be one row, span the window, keep every
+  //     control on screen, never hide HALF of a button, and never let two controls collide. The ONE thing not asserted here is the `clipped`
+  //     rule for its text <input>s: Univer's font-name combobox draws a 181px <input> inside a 128px `univer-truncate` wrapper on purpose (the
+  //     overflow is text that is truncated, measured at 800 and 1440 alike) — buttons and links, which have no such design, are still held to it.
+  if (s.univerHeader) {
+    const h = s.univerHeader;
+    if (h.h > TOL.rowMax) v.push({ kind: "univer-header-wrapped", detail: `the Univer toolbar strip is ${h.h.toFixed(0)}px tall (one tool row is ~40px) — it wrapped or went two-strip` });
+    if (Math.abs(h.x) > TOL.outside || Math.abs(h.w - s.vw) > TOL.outside) v.push({ kind: "univer-header-inset", detail: `the Univer toolbar strip is ${fmt(h)} in a ${s.vw}px window — it must run edge to edge` });
+  }
+  const U = s.controls.filter((c) => c.univer && !c.exempt);
+  for (const c of U) {
+    const b = c.box;
+    const off = Math.max(-b.x, -b.y, b.x + b.w - s.vw, b.y + b.h - s.vh);
+    if (off > TOL.outside) v.push({ kind: "outside-viewport", detail: `Univer toolbar: "${c.label}" sticks out of the viewport by ${off.toFixed(1)}px (box ${fmt(b)})` });
+    const cutW = b.w - c.eff.w, cutH = b.h - c.eff.h;
+    if (c.tag !== "input" && area(b) - area(c.eff) > 0 && Math.max(cutW, cutH) > TOL.clip) v.push({ kind: "clipped", detail: `Univer toolbar: "${c.label}" is cut off by an ancestor (${cutW.toFixed(1)}px wide, ${cutH.toFixed(1)}px tall hidden)` });
+  }
+  for (let i = 0; i < U.length; i++) {
+    for (let j = i + 1; j < U.length; j++) {
+      const a = U[i].eff, b = U[j].eff;
+      if (area(a) === 0 || area(b) === 0) continue;
+      if (contains(a, b) || contains(b, a)) continue;
+      const x = inter(a, b);
+      if (x.w > TOL.overlap && x.h > TOL.overlap) v.push({ kind: "overlap", detail: `Univer toolbar: "${U[i].label}" and "${U[j].label}" overlap by ${x.w.toFixed(1)}×${x.h.toFixed(1)}px` });
+    }
+  }
+  const seen = U.filter((c) => c.univerToolbar && area(c.eff) > 0);   // the toolbar strip only — the formula bar under it is its own strip
+  if (seen.length > 1) {
+    const mids = seen.map((c) => c.eff.y + c.eff.h / 2);
+    const spread = Math.max(...mids) - Math.min(...mids);
+    if (spread > TOL.bandSpread) v.push({ kind: "univer-two-lines", detail: `the Univer toolbar's controls sit on more than one line (centre-lines ${spread.toFixed(0)}px apart)` });
+  }
   // 2. EVERY CHROME CONTROL FULLY ON SCREEN AND NOT CLIPPED.
   for (const c of live) {
     const b = c.box;

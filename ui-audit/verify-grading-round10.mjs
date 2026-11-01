@@ -34,7 +34,7 @@ try {
     await page.goto(`${BASE}/ui-audit/harness/grading-harness.html${qs}`);
     await assertMeasurable(page, "verify-grading-round10");
     await page.waitForFunction(() => window.__ready, null, { timeout: 60000 });
-    await page.waitForFunction(() => { const a = document.querySelector("[data-ffe-value]"); return a && /\d/.test(a.textContent); }, null, { timeout: 120000 });
+    await page.waitForFunction(() => { const a = document.querySelector("[data-ffe-value]"); return a && /\d/.test(a.value || a.textContent); }, null, { timeout: 120000 });
     await page.waitForFunction(() => { const e = document.querySelector("[data-grading-earthwork]"); return e && e.getAttribute("data-grading-earthwork") !== "pending"; }, null, { timeout: 120000 });
     await page.waitForSelector('[data-layer="contours"] path', { state: "attached", timeout: 120000 });
     await page.waitForSelector("[data-band-tint]", { state: "attached", timeout: 60000 });

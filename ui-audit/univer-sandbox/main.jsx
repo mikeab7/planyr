@@ -12,6 +12,8 @@ window.__PLANYR_E2E = true;
 window.__saved = [];
 // Planyr's OWN formula engine, in the same page, so the measurement script times both engines in one Chromium.
 window.__oldEngine = { evaluateWorkbook, migrateWorkbook };
+// NEW-1 (V2034432): the headless evaluator the Excel/CSV export uses, loaded lazily exactly as ModelApp does — run it in THIS page while the grid is mounted.
+window.__evaluateForExport = (wb, projectNames) => import("../../src/workspaces/model/lib/univerEval.js").then((m) => m.evaluateForExport(wb, { projectNames }));
 
 // NEW-2 — this host plays ModelApp's part of the save contract: an URGENT save (page hide / unload / unmount / export) is
 // persisted SYNCHRONOUSLY into localStorage ("what the regular write-through would have stored"), a normal one is only recorded.
