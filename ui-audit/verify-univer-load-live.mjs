@@ -73,6 +73,11 @@ try {
   }, [PROJECT, fixtureWorkbook()]);
   if (seeded) { voided = true; throw new Error("VOID — could not seed the 1,000-row workbook: " + seeded); }
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
+  if (process.env.DIAG) await page.addInitScript(() => {
+    window.__idbLog = [];
+    for (const m of ["put", "delete", "clear"]) { const o = IDBObjectStore.prototype[m]; IDBObjectStore.prototype[m] = function (...x) { try { const k = m === "put" ? x[1] : x[0]; if (m === "clear" || String(k).startsWith("model:calc:")) window.__idbLog.push(m + " " + String(k).slice(0, 60) + " " + Math.round(performance.now())); } catch (_) {} return o.apply(this, x); }; }
+  });
+  if (process.env.DIAG) page.on("console", (m) => { if (/error|calc/i.test(m.text())) console.log("   [console]", m.text().slice(0, 200)); });
   let hits = 0;
   await page.route("**/rest/v1/rpc/is_admin*", (route) => { hits++; route.fulfill({ status: 200, contentType: "application/json", body: "true" }); });
   const sheetUrl = () => `${BASE}/?cb=${Date.now()}#/project/${PROJECT}/spreadsheet`;
@@ -92,12 +97,12 @@ try {
   const calcInfo = () => page.evaluate(() => window.__planyrUniverRead.calc());
 
   // ── A. cold, Univer vs the regular grid ──────────────────────────────────────────────────────────────────────
-  const uni = [], old = [], uniBytes = [], langs = [], workers = [], gridAt = [];
+  const uni = [], old = [], uniBytes = [], langs = [], workers = [], gridAt = [], sums = [];
   let firstFiles = [];
   for (let i = 0; i < RUNS + 1; i++) {                    // run 0 only establishes that the account's data is in place; it is not counted
     await setSwitch(true); await page.goto("about:blank"); await cold();
     const t0 = Date.now(); await page.goto(sheetUrl(), { waitUntil: "commit" });
-    await univerPainted(); const ms = Date.now() - t0; await page.waitForTimeout(800);
+    await univerPainted(); const ms = Date.now() - t0; sums.push(await lastSum()); await page.waitForTimeout(800);
     if (i > 0) { const g = jsFiles().find((r) => /\/assets\/UniverSheet-/.test(r.url)); const first0 = jsFiles().reduce((m, r) => Math.min(m, r.t), Infinity); gridAt.push(g ? g.t - first0 : null); }
     if (i > 0) { uni.push(ms); uniBytes.push(univerFiles().reduce((a, r) => a + r.bytes, 0)); langs.push(univerFiles().filter((r) => isLangFile(r.url)).length); workers.push(univerFiles().filter((r) => /univerFormulaWorker-/.test(r.url)).length); if (i === 1) firstFiles = univerFiles().map((r) => `${r.url.split("/").pop().split("?")[0]} ${/univerFormulaWorker-/.test(r.url) ? "(size not visible to the page: worker traffic)" : kbs(r.bytes)}`); }
     await setSwitch(false); await page.goto("about:blank"); await cold();
@@ -113,7 +118,7 @@ try {
   ok("A2 NO hyphenation language file was requested on this English sheet", langs.every((n) => n === 0), langs.join(", "));
   ok("A3 the formula engine ran in its worker (its file was requested)", workers.every((n) => n >= 1), workers.join(", "));
   ok(`A4 the Univer chunk was REQUESTED within ${PRELOAD_MS} ms of the page's first request (the t=0 preload; it used to start three hops later)`, gridAt.every((x) => x !== null && x <= PRELOAD_MS), `${gridAt.map((x) => (x === null ? "never" : Math.round(x))).join(", ")} ms`);
-  ok("A5 the numbers are right (the last SUM equals an independent sum)", Math.abs((await lastSum()) - rowSum(ROWS - 1)) < 1e-6, `${await lastSum()}`);
+  ok("A5 the numbers are right (the last SUM equals an independent sum, read in the Univer arm of every run)", sums.length > 0 && sums.every((v) => Math.abs(v - rowSum(ROWS - 1)) < 1e-6), sums.join(", "));
   log.cold = { uni, old, uniBytes, firstFiles, ratio: mu / mo, gridAt };
 
   // ── B. hover warms the chunk before the click ────────────────────────────────────────────────────────────────
@@ -131,7 +136,20 @@ try {
   const adopted = await page.locator('[data-testid="univer-grid"] [data-univer-prewarm]').count();
   ok("B2 the click ADOPTED that grid (it now sits inside the grid host) and painted", adopted === 1 && (await calcInfo()).prewarmed === true, `${clickMs} ms`);
   log.hover = { warmedBytes: warmed[0] && warmed[0].bytes, clickMs };
-  await page.waitForTimeout(3500);                              // let the calculation settle and its results be remembered on this device
+  if (process.env.DIAG) {
+    await page.evaluate(() => { window.__ce = []; const fw = window.__planyrUniverRead.api().getFormula(); fw.calculationStart(() => window.__ce.push("start " + Math.round(performance.now()))); fw.calculationEnd((st) => window.__ce.push("end " + st + " " + Math.round(performance.now()))); });
+    await page.evaluate(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 0).setValue(7));
+    await page.waitForTimeout(4000);
+    console.log("   after an edit: calc events", JSON.stringify(await page.evaluate(() => window.__ce)), "idb", JSON.stringify(await page.evaluate(() => window.__idbLog)), "pending", await page.evaluate(() => window.__planyrUniverRead.pending()));
+    await page.evaluate(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 0).setValue(0.5));
+  }
+  for (let i = 0; i < 12; i++) {                                // let the calculation settle and its results be remembered on this device (polled, with what is pending)
+    await page.waitForTimeout(1000);
+    const st = await page.evaluate(() => new Promise((res) => { const pend = window.__planyrUniverRead.pending(); try { const rq = indexedDB.open("planyr"); rq.onsuccess = () => { const q = rq.result.transaction("kv", "readonly").objectStore("kv").getAllKeys(); q.onsuccess = () => res({ pend, keys: q.result.filter((k) => String(k).startsWith("model:calc:")).length }); }; rq.onerror = () => res({ pend, keys: "err" }); } catch (e) { res({ pend, keys: String(e) }); } }));
+    if (process.env.DIAG && i === 11) console.log('   idbLog', JSON.stringify(await page.evaluate(() => window.__idbLog)));
+    if (process.env.DIAG) console.log(`   t+${i + 1}s pending=${st.pend} calc keys=${st.keys}`);
+    if (st.keys === 1) break;
+  }
 
   // ── B". RETURN: the workbook was opened on this device before ─────────────────────────────────────────────────────────
   await page.goto("about:blank"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: false }); net = new Map();
@@ -140,6 +158,10 @@ try {
   const t3 = Date.now(); await tab.click(); await univerPainted(); const retMs = Date.now() - t3;
   const info = await calcInfo();
   console.log(`   RETURN (workbook opened on this device before), tab click → painted: ${retMs} ms; formula cells seeded from the cache: ${info.seeded}`);
+  if (info.seeded !== ROWS) {   // diagnostic: what the device actually holds, so a miss can be told apart (no entry / wrong key / wrong hash)
+    const dump = await page.evaluate(() => new Promise((res) => { try { const rq = indexedDB.open("planyr"); rq.onsuccess = () => { const st = rq.result.transaction("kv", "readonly").objectStore("kv"); const ks = st.getAllKeys(); ks.onsuccess = () => { const keys = ks.result.filter((k) => String(k).startsWith("model:calc:")); Promise.all(keys.map((k) => new Promise((r2) => { const g = st.get(k); g.onsuccess = () => r2([String(k), g.result && { h: g.result.h, at: g.result.at, n: g.result.v && Object.keys(g.result.v).length }]); g.onerror = () => r2([String(k), "err"]); }))).then(res); }; }; rq.onerror = () => res("idb err"); } catch (e) { res(String(e)); } }));
+    console.log("   DIAG calc cache on this device:", JSON.stringify(dump), " grid hash:", info.hash, " url:", page.url());
+  }
   ok("B3 the grid took its formula results from the device's cache", info.seeded === ROWS, `seeded ${info.seeded} of ${ROWS}`);
   ok("B4 …and the numbers are still right", Math.abs((await lastSum()) - rowSum(ROWS - 1)) < 1e-6, `${await lastSum()}`);
   await page.evaluate(() => window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(0, 0).setValue(1000));

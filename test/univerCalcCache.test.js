@@ -2,7 +2,7 @@
  * exact workbook + names it was made from, never for a volatile or spilling formula, and what it seeds is only ever a formula cell. */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { calcHash, cacheUnsafe, collectValues, seedValues, entryFits, cyrb53 } from "../src/workspaces/model/lib/univerCalcCache.js";
+import { calcHash, cacheUnsafe, collectValues, seedValues, entryFits, cyrb53, countValues } from "../src/workspaces/model/lib/univerCalcCache.js";
 import { createWorkbook, setRaw, canonicalJson, migrateWorkbook } from "../src/workspaces/model/lib/sheetModel.js";
 import { workbookToUniver } from "../src/workspaces/model/lib/univerBridge.js";
 
@@ -85,5 +85,18 @@ describe("wiring", () => {
   it("the saved workbook never carries the cache (a derived value beside its source would break sync)", () => {
     const m = read("src/workspaces/model/lib/sheetModel.js");
     expect(m).not.toMatch(/calcCache|\.calc\b/);
+  });
+});
+
+describe("countValues — a fuller answer replaces a partial one", () => {
+  it("counts every remembered formula cell across sheets, and nothing for no entry", () => {
+    expect(countValues(null)).toBe(0);
+    expect(countValues({})).toBe(0);
+    expect(countValues({ s1: { "0:2": [5, null], "1:2": [12, null] }, s2: { "0:0": [1, null] } })).toBe(3);
+  });
+  it("UniverSheet writes on a NOT_EXECUTED end too, and again after a load (measured live: the first calculation does not always end SUCCESS)", () => {
+    const src = readFileSync(new URL("../src/workspaces/model/components/UniverSheet.jsx", import.meta.url), "utf8");
+    expect(src).toMatch(/state !== 3[^\n]*&& state !== 2/);
+    expect(src).toMatch(/L\.scheduleCalcWrite\(\)/);
   });
 });
