@@ -151,3 +151,49 @@ describe("__plannerPerf — the pure half", () => {
     expect(LONG_FRAME_MS).toBe(200);
   });
 });
+
+/* (3) THE DIAGNOSTIC MADE THE READING. viewChangeRecorder's frame-gap watch was a perpetual requestAnimationFrame loop: on a tab
+ * armed with ?planyrDiag=1 (the owner's 2026-10-31 tab was, for __plannerGradeReadout) the page asked for a frame EVERY frame
+ * forever, so an idle graded plan never stopped rendering — on a slow-drawing machine, ~1 s frames back to back with the code idle.
+ * Measured on the preview before this fix: 333 rAF calls in 5 idle seconds from that one loop. Red on main: the first test. */
+import { attachTimeline, createViewChangeRecorder, watchFrames, FRAME_WATCH_MS } from "../src/workspaces/site-planner/lib/viewChangeRecorder.js";
+
+function rafWin() {
+  let clock = 0, cb = null, requests = 0;
+  const win = {
+    performance: { now: () => clock },
+    requestAnimationFrame: (f) => { requests++; cb = f; return requests; },
+    cancelAnimationFrame: () => { cb = null; },
+    addEventListener() {}, removeEventListener() {},
+    document: { visibilityState: "visible", addEventListener() {}, removeEventListener() {} },
+    PerformanceObserver: class { observe() {} disconnect() {} },
+  };
+  const runFrames = (ms, step = 16) => { const end = clock + ms; while (clock < end) { clock += step; const f = cb; cb = null; if (f) f(clock); } };
+  return { win, runFrames, requests: () => requests, pending: () => !!cb };
+}
+
+describe("(3) the armed view recorder never keeps the page rendering on its own", () => {
+  it("RED ON MAIN: attached and then left idle, it stops asking for frames once the watch window has passed", () => {
+    const w = rafWin();
+    const detach = attachTimeline(w.win, createViewChangeRecorder({ now: () => 0 }));
+    w.runFrames(60_000);
+    const atOneMinute = w.requests();
+    w.runFrames(60_000);
+    expect(w.requests()).toBe(atOneMinute);             // nothing more in the second idle minute
+    expect(atOneMinute).toBeLessThan(FRAME_WATCH_MS / 16 + 5);
+    expect(w.pending()).toBe(false);
+    detach();
+  });
+
+  it("a kick runs the watch again, and a gap INSIDE a run is still reported", () => {
+    const w = rafWin(); const gaps = [];
+    const f = watchFrames(w.win, (ms) => gaps.push(ms));
+    f.kick(); w.runFrames(100);
+    w.runFrames(900, 900);                               // one 900 ms frame inside the run (a stall)
+    expect(gaps.some((g) => g >= 900)).toBe(true);
+    w.runFrames(10_000); const n = w.requests();
+    w.runFrames(10_000); expect(w.requests()).toBe(n);   // stopped again
+    f.kick(); expect(w.pending()).toBe(true);
+    f.stop(); expect(w.pending()).toBe(false);
+  });
+});

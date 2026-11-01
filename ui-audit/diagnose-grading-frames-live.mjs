@@ -125,7 +125,9 @@ try {
   await context.route(/\/rest\/v1\/rpc\/is_admin/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "true" }));
   const cdp = await context.newCDPSession(page);
   if (throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
-  await page.goto(`${base}/#/project/${SITE.id}/site`, { waitUntil: "load" });
+  // Arm the read-only diagnostics for this tab (diagArm: `?planyrDiag=1` latches into sessionStorage), so the run ends with the
+  // app's own `window.__plannerPerf()` answer beside this harness's census.
+  await page.goto(`${base}/?planyrDiag=1#/project/${SITE.id}/site`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
   await page.getByTestId("planner-canvas").waitFor({ timeout: 90000 });
   // the graded picture: the band painted
@@ -149,7 +151,8 @@ try {
   }, { sampleFrames: true }));
   results.push(await window_(page, cdp, "idle 5 s after the gestures", () => page.waitForTimeout(5000)));
   const perf = await page.evaluate(() => (typeof window.__plannerPerf === "function" ? window.__plannerPerf() : null));
-  if (perf) { console.log("\n__plannerPerf():", JSON.stringify(perf.summary || perf).slice(0, 1500)); results.push({ label: "__plannerPerf", perf }); }
+  if (!perf) console.log("\n__plannerPerf(): NOT AVAILABLE (null or not installed) — the instrument did not answer");
+  if (perf) { console.log("\n__plannerPerf():", JSON.stringify({ verdict: perf.verdict, observing: perf.observing, summary: perf.summary, recorder: perf.recorder, topScripts: (perf.topScripts || []).slice(0, 3), busyTimers: (perf.busyTimers || []).slice(0, 3), gradingLayersNow: perf.gradingLayersNow, planner: perf.planner }).slice(0, 2500)); results.push({ label: "__plannerPerf", perf }); }
 } finally {
   try {
     await page.goto(`${base}/#/`, { waitUntil: "load" }); await page.waitForTimeout(2000);
