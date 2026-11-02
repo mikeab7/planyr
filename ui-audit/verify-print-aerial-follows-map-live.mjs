@@ -9,7 +9,7 @@
  * Download PDF and rasterises the real downloaded file. Both plans are deleted (and verified gone) in `finally` (constraint #15).
  *
  * THE PDF PROOF is pixels, not strings: the page picture is rasterised with pdftoppm and the share of non-paper pixels in the PLAN
- * area is measured. Aerial imagery covers the plan area (≥ 0.5 of it); an aerial-less sheet is paper with a few drawn lines (< 0.2).
+ * area is measured. Aerial imagery covers the plan area (≥ 0.5 of the strip); an aerial-less sheet is paper there (< 0.2).
  * KNOWN-GOOD ARM (CLAUDE.md DRIVER-SCROLL §6): the aerial-showing PDF must read "photographic" and the aerial-hidden one "paper" — if
  * the showing one does not (e.g. imagery unreachable from this network) the run is VOID, never scored green. */
 import { execFileSync } from "node:child_process";
@@ -41,7 +41,8 @@ const check = (cond, pass, bad) => (cond ? ok.push(pass) : fail.push(bad || pass
 let page, closeAll, served = null;
 const work = mkdtempSync(join(tmpdir(), "print-aerial-"));
 
-/* share of non-paper pixels in the central plan area of page 1 of a PDF (white / near-white = paper). */
+/* share of non-paper pixels in the MARGIN strip left of the parcel on page 1 of a PDF (white / near-white = paper). The first cut sampled the whole
+ * plan area and was swamped by the parcel's tan fill (hidden-aerial read 0.96), so it samples only where aerial or paper can show. */
 function planInk(pdfPath, tag) {
   const prefix = join(work, tag);
   execFileSync("pdftoppm", ["-r", "50", "-png", "-f", "1", "-l", "1", pdfPath, prefix]);
@@ -52,7 +53,7 @@ from PIL import Image
 import numpy as np
 im = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(int)
 h, w, _ = im.shape
-a = im[int(h*0.18):int(h*0.62), int(w*0.18):int(w*0.82)]
+a = im[int(h*0.20):int(h*0.80), int(w*0.03):int(w*0.09)]  # the strip between the sheet border and the parcel: aerial or paper, never parcel fill / building / labels
 nonpaper = ((a < 235).any(axis=2)).mean()
 # photographic = colour spread (aerial is green/brown/grey; paper+lines is white and thin dark strokes)
 spread = (a.max(axis=2) - a.min(axis=2)).mean()
