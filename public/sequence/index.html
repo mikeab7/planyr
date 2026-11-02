@@ -3548,6 +3548,10 @@ const escapeHtml = s => String(s == null ? "" : s)
   .replace(/"/g, "&quot;")
   .replace(/'/g, "&#39;");
 
+// NEW-1 — the ONE rule for how a frozen (pinned) grid cell stacks its fills. `fills` is bottom → top (the
+// row's colour, then the cell's own range tint / per-cell fill); CSS lists the TOP layer first, so reverse.
+// A solid fill each (no opacity), laid over --bg by the caller, so scrolled content never shows through.
+const pinnedFillLayers = (fills) => [...fills.filter(Boolean)].reverse().map(f => `linear-gradient(${f},${f})`).join(",");
 // isValidColor: rowColor is placed into CSS background via inline styles.
 // Restrict to hex colors from the ROW_COLORS palette or null to prevent CSS injection.
 const SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
@@ -14564,9 +14568,14 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const pinCls = (k) => (k === pinL[pinL.length - 1] ? `pin-edge-l${scrollSide.l ? " pin-on" : ""}` : k === pinR[0] ? `pin-edge-r${scrollSide.r ? " pin-on" : ""}` : "");
   // `fill` = the cell's own opaque look (row colour / header surface); layered over --bg so even a
   // translucent row colour is opaque once pinned and scrolled content never shows through.
+  // NEW-1 (row highlight reaches ID + Task) — `fills` is listed BOTTOM → TOP (row colour first, then the
+  // cell's own range tint / per-cell fill). CSS paints the FIRST background-image layer on TOP, so the
+  // stack is reversed (`pinnedFillLayers`): the old code listed the row colour first and it painted over
+  // the tint and the fill, which is why a selection or a cell fill showed from START rightward and
+  // stopped short of the frozen ID / Task cells.
   const pinStyle = (k, fills, z) => {
     if (!pinL.includes(k) && !pinR.includes(k)) return null;
-    const layers = [...fills.filter(Boolean)].map(f => `linear-gradient(${f},${f})`).join(",");
+    const layers = pinnedFillLayers(fills);
     return { position: "sticky", zIndex: z, ...(pinL.includes(k) ? { left: pinLeftOff(k) } : { right: pinRightOff(k) }),
       backgroundColor: "var(--bg)", ...(layers ? { backgroundImage: layers } : {}) };
   };
@@ -14865,6 +14874,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                 const selected = inRange(ri, ci);
                 const tinted = selected && hasRange && !activeInMulti;
                 const cfmt = task.cellFmt?.[c.k]; // per-cell format (bold/italic/fill/underline/color/size)
+                const cellOverlay = tinted ? "#dbeafe" : (cfmt?.fill || null);   // NEW-1 — the cell's own fill over the row colour; ONE value, read by the cell AND by its pinned layer stack
                 // Predecessor editor shows a live hint below the input — let it escape the clipped 24px cell.
                 const predEditing = c.k==="predecessors" && edit?.taskId===task.id && edit?.col===c.k;
                 return (
@@ -14874,7 +14884,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     height:ROW_H,
                     position:"relative",
                     zIndex: predEditing ? 30 : (active ? 2 : "auto"),
-                    background: tinted ? "#dbeafe" : (cfmt?.fill || "transparent"),
+                    backgroundColor: cellOverlay || "transparent",   // longhand only: a `background` shorthand here resets the pinned cells' own layers on a re-render
                     fontWeight: cfmt?.bold ? 700 : undefined,
                     fontStyle: cfmt?.italic ? "italic" : undefined,
                     textDecoration: cfmt?.underline ? "underline" : undefined,
@@ -14885,7 +14895,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     userSelect: isDraggingCells.current ? "none" : "auto",
                     cursor: (c.k === "id" && !review && idPressMovesRows(selRange, ri, allCols.length)) ? "grab" : "default",   // the range-select drag's own `cell` cursor is pinned by the gesture (cellDragPin), never read from a ref here; an ID cell inside a multi-row selection is a pick-up handle (B2445008 ×2)
                     // NEW-1 — a pinned cell paints its own opaque look (row colour, then any range / cell fill on top)
-                    ...(pinStyle(c.k, [rowBg, tinted ? "#dbeafe" : cfmt?.fill], 5) || {})
+                    ...(pinStyle(c.k, [rowBg, cellOverlay], 5) || {})
                   }}
                     onMouseDown={e => cellMouseDown(e, task, ri, c, ci)}
                     onClick={() => { if (skipColClickRef.current) { skipColClickRef.current = false; return; } setSelectedColIdx(ci); }}
