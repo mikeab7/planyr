@@ -161,7 +161,7 @@ function WaitingInviteCard({ count, address, sentTo, onResend }) {
   );
 }
 
-export default function AccountControl({ user, authKnown = true, profileApi, onOpenAuth, onOpenAccount }) {
+export default function AccountControl({ user, authKnown = true, reconnecting = false, profileApi, onOpenAuth, onOpenAccount }) {
   const [acctOpen, setAcctOpen] = useState(false);  // account dropdown (signed-in pill, B298)
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
   const acctAnchor = useRef(null);
@@ -264,6 +264,17 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
           </>
         )}
       </div>
+    );
+  }
+
+  if (!authKnown && reconnecting) {
+    // NEW-1 point 4 (follow-up to B2619760) — a stored session is waiting on the network (nothing is known yet, so
+    // this is NOT "Sign in"), but a placeholder nobody can press is a dead end if the network stays away: after a
+    // while it says what it is doing and, pressed, opens the sign-in panel (whose own network message has Try again).
+    return (
+      <MenuTrigger onClick={onOpenAuth} title="Still reconnecting to your account — press to sign in again" caret={false} leading={<span style={avatar(false)}>…</span>} data-testid="account-reconnecting">
+        Reconnecting…
+      </MenuTrigger>
     );
   }
 

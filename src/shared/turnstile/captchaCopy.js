@@ -5,7 +5,8 @@
  *   "captcha protection: request disallowed (no captcha_token found)".
  * That string is jargon the person cannot act on, and it must never reach the screen in ANY
  * mode (sign in, sign up, forgot password). `auth.js` runs every error through
- * `friendlyAuthError`, so there is ONE place that decides it, not a check per mode.
+ * `friendlyAuthError` (shared/auth/authErrors.js — which owns the mapping for ALL auth errors since
+ * NEW-1 follow-up; this file keeps only the captcha copy and the detector it builds on).
  *
  * The copy deliberately does not contain the word "captcha". */
 
@@ -21,11 +22,4 @@ export function isCaptchaError(err) {
   if (code === "captcha_failed") return true;
   const text = typeof err === "string" ? err : String((err && err.message) || "");
   return /captcha/i.test(text);
-}
-
-/** The text to show for an auth error: plain words for a captcha refusal, the original otherwise. */
-export function friendlyAuthError(err) {
-  if (!err) return null;
-  if (isCaptchaError(err)) return CAPTCHA_FAILED_COPY;
-  return (typeof err === "string" ? err : err.message) || null;
 }

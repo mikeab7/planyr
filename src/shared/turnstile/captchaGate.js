@@ -12,7 +12,12 @@
  *   - never a dead end: if the check never returns (`waitMs`), or the widget reports an error, the gate
  *     enters a `failure` ("timeout" | "error") with a working `retry()`; it never waits forever.
  *     While a visible challenge is on screen (`interactive`) the person is doing the work, so the
- *     timer does not run — Cloudflare's own `timeout-callback` ends that case.
+ *     timer does not run — Cloudflare's own `timeout-callback` ends that case, and it leaves the
+ *     widget in the `error` state (NEW-1 point 7: it used to stay `interactive`, so the NEXT press
+ *     waited with no clock at all);
+ *   - "Try again" finishes what the person asked for (NEW-1 point 7): a press that failed on the check
+ *     is remembered (`wanted`), and when the retried widget hands over a token the submit goes by
+ *     itself — the person does not have to find and press the button a second time.
  *
  * `run(token)` is the form's own submit (it reads the latest field values itself) and resolves when
  * the attempt is over. `onChange()` tells the host to re-render. */
@@ -28,6 +33,7 @@ export function createCaptchaGate({ run, reset = () => {}, remount = () => {}, o
   let timer = null;
   let destroyed = false;
   let needsToken = true;
+  let wanted = false;           // a press failed or is waiting on the check: Try again should finish it
 
   const emit = () => { if (!destroyed) onChange(); };
   const stopTimer = () => { if (timer != null) { clearTimer(timer); timer = null; } };
@@ -44,7 +50,7 @@ export function createCaptchaGate({ run, reset = () => {}, remount = () => {}, o
 
   async function fire() {
     const t = token;
-    token = ""; pending = false; inflight = true; failure = null;
+    token = ""; pending = false; wanted = false; inflight = true; failure = null;
     stopTimer(); emit();
     try { await run(t); }
     catch (e) { try { onError(e); } catch (_) {} }   // loud, but never an unhandled rejection that wedges the gate
@@ -63,7 +69,8 @@ export function createCaptchaGate({ run, reset = () => {}, remount = () => {}, o
       needsToken = need;
       if (!need) { fire(); return "sent"; }
       if (token) { fire(); return "sent"; }
-      if (widget === "error") { failure = "error"; emit(); return "failed"; }
+      wanted = true;
+      if (widget === "error") { failure = failure || "error"; emit(); return "failed"; }
       pending = true; failure = null; startTimer(); emit();
       return "pending";
     },
@@ -90,23 +97,26 @@ export function createCaptchaGate({ run, reset = () => {}, remount = () => {}, o
     /** Cloudflare's own interactive-challenge timeout. */
     widgetTimedOut() {
       token = "";
-      if (pending) { pending = false; stopTimer(); failure = "timeout"; }
+      widget = "error";                       // the challenge is over: never leave it `interactive` with no clock
+      pending = false; stopTimer(); failure = "timeout";
       emit();
     },
     /** A mode switch: drop a waiting submit and any shown failure, KEEP the token (the widget is still
      * the same live one and will not call back again). Never touches inflight. */
     cancelPending() {
-      pending = false; failure = null; stopTimer();
+      pending = false; wanted = false; failure = null; stopTimer();
       emit();
     },
     /** Panel close / unmount: drop everything, including the token. Never touches inflight. */
     cancel() {
-      pending = false; failure = null; token = ""; stopTimer();
+      pending = false; wanted = false; failure = null; token = ""; stopTimer();
       emit();
     },
     /** "Try again" after a failure: clear it and re-render the widget from scratch. */
     retry() {
-      pending = false; failure = null; token = ""; widget = "loading"; stopTimer();
+      failure = null; token = ""; widget = "loading"; stopTimer();
+      pending = wanted && !inflight;          // the press that failed is still wanted: send it when the new token lands
+      if (pending) startTimer();
       try { remount(); } catch (_) {}
       emit();
     },

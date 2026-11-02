@@ -9,8 +9,9 @@
  * An answer with neither an error nor a session is NEVER read as "signed in" — claiming a login
  * that did not happen is the worse failure — so it falls to the check-your-email state. */
 import { AUTH_SENDER_LABEL } from "./authMail.js";
-
-export const MIN_PASSWORD_LENGTH = 6;
+// One home for the minimum (shared/auth/authErrors.js owns the copy that quotes it); re-exported for the panel.
+import { MIN_PASSWORD_LENGTH } from "../../../shared/auth/authErrors.js";
+export { MIN_PASSWORD_LENGTH };
 export const PASSWORD_MIN_HINT = `Min ${MIN_PASSWORD_LENGTH} characters`;
 
 export function signupOutcome(res) {

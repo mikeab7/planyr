@@ -1,7 +1,7 @@
 /* verify-drive-in-ramp-live — NEW-1…NEW-3 (owner 2026-10-30): drive-in ramps on dock walls, on a THROWAWAY plan with the REAL tools.
  *
- *   1  draw + select a building       → the small ramp "+" sits beside the dock-wall pair and each purple corner "+"; no two discs on the building overlap
- *   2  press a wall's ramp "+"        → ONE ramp child: 16 ft wide, 8 %, straight-in, 50 ft long; Properties open; the door belt lost the doors under it
+ *   1  draw + select a building       → the small ramp "+" sits beside each purple corner "+" and none at a wall's middle; no two discs on the building overlap
+ *   2  press a corner ramp "+"         → ONE ramp child: 16 ft wide, 8 %, straight-in, 50 ft long; Properties open; the door belt lost the doors under it
  *   3  Along the wall                 → the footprint is 50 along × 16 out and lies ON the wall (no "runs past the end" flag)
  *   4  grade 12 %                     → the amber flag; 8 % clears it
  *   5  Delete, then Ctrl+Z            → the doors come back; undo restores the ramp
@@ -122,7 +122,8 @@ try {
   // ---- 1 · the buttons ---------------------------------------------------------------------------------------------------------------
   const btns = await page.evaluate(() => [...document.querySelectorAll('[data-ramp-add="1"]')].map((g) => { const r = g.querySelector("circle").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, title: (g.querySelector("title") || {}).textContent || "" }; }));
   const dockWalls = bl.dock === "cross" ? 2 : bl.dock === "none" ? 0 : 1;
-  ok(`exactly ${3 * dockWalls} ramp '+' buttons: one per dock wall (${dockWalls}) and one beside each of its two purple corner '+' (${2 * dockWalls}) — none on any other wall`, btns.length === 3 * dockWalls && btns.every((b) => b.title === "Add drive-in ramp"), `${btns.length} · dock "${bl.dock}" · ` + btns.map((b) => b.title).join(" | "));
+  ok(`exactly ${2 * dockWalls} ramp '+' buttons: one beside each of the two purple corner '+' of each dock wall (${dockWalls}) — none at a wall's middle, none on any other wall`, btns.length === 2 * dockWalls && btns.every((b) => b.title === "Add drive-in ramp"), `${btns.length} · dock "${bl.dock}" · ` + btns.map((b) => b.title).join(" | "));
+  ok("no ramp button sits at a wall's middle by the + / − pair", btns.filter((b) => Math.abs(b.x - mid.x) < 60).length === 0, btns.map((b) => `${Math.round(b.x - mid.x)}`).join(", "));
   const discs = await page.evaluate(() => [...document.querySelectorAll('[data-testid="feature-edit-nodes"] g[data-el-action="1"]')].map((g) => { const r = g.querySelector("circle").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, r: r.width / 2 }; }));
   let overlap = 0;
   for (let i = 0; i < discs.length; i++) for (let j = i + 1; j < discs.length; j++) if (Math.hypot(discs[i].x - discs[j].x, discs[i].y - discs[j].y) < discs[i].r + discs[j].r - 0.5) overlap++;
@@ -132,8 +133,8 @@ try {
   ok("no two buttons on the building overlap", overlap === 0, `${overlap} overlapping pair(s) of ${discs.length}`);
   await shot("1-buttons");
 
-  // ---- 2 · add a straight-in ramp mid-wall ----------------------------------------------------------------------------------------------
-  const wallBtn = btns.filter((b) => Math.abs(b.x - mid.x) < 60).sort((a, b) => b.y - a.y)[0];
+  // ---- 2 · add a straight-in ramp from a corner button ----------------------------------------------------------------------------------------------
+  const wallBtn = btns.filter((b) => Math.abs(b.x - mid.x) > 100).sort((a, b) => b.y - a.y || a.x - b.x)[0];
   await page.mouse.click(wallBtn.x, wallBtn.y);
   await sleep(1200);
   const ramps = async () => (await planEls()).filter((e) => e.type === "driveInRamp");

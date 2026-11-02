@@ -7,13 +7,13 @@
 
 _Last updated: 2026-11-02._
 
-## 🚨 Turn the sign-in alarm on: one database script, and (if not done) the Gmail setup (B2631296 / V2075968)
+## 🚨 One decision on the sign-in alarm: keep the "I can't confirm the real sign-in" email? (B2631296 / V2075968)
 
-> **What changed:** an hourly check now looks at planyr.io's sign-in from the outside and emails you once if it breaks (and once more when it clears), so you never find an outage on your phone again. It is built and shipped, but it **cannot store anything or email you** until the two steps below are done. Until then it says so loudly (a warning on each hourly run) and does nothing else.
+> **Status:** the sign-in alarm is live and tested. Your database script is in and the alarm email works — the test sent you exactly two emails (an alert, then an all-clear), labelled **[TEST]**; you can delete them.
 >
-> - [ ] **Run one database script.** I'll hand you the file (`signin_health.sql`). Supabase project → SQL Editor → paste → Run. It only adds two empty tables, one helper, and a limit on how fast a script can flood the error log; touches no existing data; safe to run twice. (I tried to run it myself; the approval prompt went unanswered, so I did not run it another way.)
-> - [ ] **Only if you haven't already:** the Gmail setup in the "Make team invites send email" item below (a Google service account, then two Cloudflare settings). The alarm email uses the same pair as invite emails. Until it exists, a break reaches you as a GitHub issue that mentions you instead of an email.
-> - Then tell me (or any session) to run **Sign-in health → drill** once: it sends you two clearly-labelled **[TEST]** emails (one alert, one all-clear) and fails if it ever sends the wrong number.
+> **What I found:** every hour the check tries a real sign-in as the test account. GitHub's computers get a "prove you're human" box from Cloudflare there, so that one step can't finish — it's recorded as "unknown", never as a pass. The other checks (site key, bot-check setting agrees, form opens) work and would have caught the October outage.
+>
+> - [ ] **Decide (one word):** after about a day of "unknown", the alarm is built to send you **one** email saying it can't confirm the real sign-in. **"keep"** (you get that one email tomorrow evening) or **"quiet"** (I make that step silent and leave it to the daily sweep).
 
 ## 🖱 A ten-second look: does the Layers panel still tremble when you slide the pointer down its left list? (B2559953 / V2010721)
 - [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
