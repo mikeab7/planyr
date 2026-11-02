@@ -11,6 +11,8 @@ import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT } from "../../../shared/auth/rateLimitCopy.js";
 import { friendlyAuthError } from "../../../shared/turnstile/captchaCopy.js";
 import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
+// NEW-1 (B2619760 follow-up): every gated call reports its outcome through ONE helper — see authTelemetry.js.
+import { observeAuthCall } from "../../../shared/auth/authTelemetry.js";
 
 // Where Supabase sends the user back after email confirmation / password reset.
 // Must be allow-listed in Supabase → Auth → URL Configuration → Redirect URLs.
@@ -44,7 +46,7 @@ export async function signUp(email, password, profile = {}, captchaToken) {
   if (profile.org) meta.org = profile.org;
   const options = { emailRedirectTo: redirectTo, data: meta };
   if (captchaToken) options.captchaToken = captchaToken;
-  const { data, error } = await supabase.auth.signUp({ email, password, options });
+  const { data, error } = await observeAuthCall("signup", email, () => supabase.auth.signUp({ email, password, options }));
   const msg = errMsg(error);
   // Best-effort visibility only (B1160721, NEW-2) — the Postgres trigger is the real
   // enforcement and cannot be bypassed by skipping this call entirely (a raw API request
@@ -69,7 +71,7 @@ export async function signIn(email, password, captchaToken) {
   if (!supabase) return { error: "Cloud not configured." };
   const creds = { email, password };
   if (captchaToken) creds.options = { captchaToken };
-  const { error } = await supabase.auth.signInWithPassword(creds);
+  const { error } = await observeAuthCall("signin", email, () => supabase.auth.signInWithPassword(creds));
   return { error: errMsg(error) };
 }
 

@@ -653,7 +653,7 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
     // "a predecessor is late" health condition can resolve predecessor tasks — was
     // `dispOf(t, !isLeaf, rolled)`, no third arg, before that condition existed.
     expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled, byId\)/);
-    expect(src).toMatch(/\}, \[data\.projects, masterHealthFilter, data\.settings, NOW\]\);/);
+    expect(src).toMatch(/\}, \[data\.projects, statusKeys, data\.settings, NOW\]\);/);
     expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks, data\.settings\) : \{\}/);
   });
   // NEW-schedule-health: the fixed 3-toggle cfRules (completeGreen/overdueRed/dueSoonYellow) was
