@@ -3,9 +3,11 @@
  * Some sandboxes deny challenges.cloudflare.com (egress policy), so the real widget cannot load and the real
  * check cannot be passed. This is NOT a stand-in for that check (V2064432 stays owed on a real browser): it
  * serves a FAKE Turnstile script that issues an obviously invalid token, then drives the REAL panel against the
- * REAL Supabase and proves (a) the token now travels on /token and /recover (before: none → "no captcha_token
- * found"), (b) GoTrue's answer to an invalid token is turned into plain words, never raw, in sign in and forgot
- * password. We never solve, forge or route around Cloudflare: the token is deliberately invalid. */
+ * REAL Supabase and proves (a) the token now travels on /token (before: none → "no captcha_token
+ * found"), (b) GoTrue's answer to an invalid token is turned into plain words, never raw, in sign in.
+ * (Forgot password is NOT checked here any more: since B2626128 it no longer calls Supabase's /recover at all — it asks
+ * Planyr's own /api/auth/email-link route, which a made-up token cannot exercise and which would send real mail to a real
+ * address; its live gate is ui-audit/verify-email-link-live.mjs.) We never solve, forge or route around Cloudflare: the token is deliberately invalid. */
 import { chromium } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -32,14 +34,6 @@ let t = await dlg.innerText();
 ok(wire.some((w) => w.path === "/auth/v1/token" && w.sentToken), "sign in: the token is on the /token request");
 ok(!/captcha_token found/.test(JSON.stringify(wire.filter((w) => w.path === "/auth/v1/token"))), "sign in: the server no longer says 'no captcha_token found'");
 ok(!/captcha|disallowed|token/i.test(t) && /couldn't verify this browser/i.test(t), "sign in: the screen shows plain words, no raw captcha text");
-await dlg.getByText("Forgot password?").click();
-await dlg.getByLabel("Email").fill(email);
-await page.waitForTimeout(500);
-await page.getByTestId("auth-submit").click();
-await page.waitForTimeout(4000);
-t = await dlg.innerText();
-ok(wire.some((w) => w.path === "/auth/v1/recover" && w.sentToken), "forgot password: the token is on the /recover request");
-ok(!/captcha|disallowed|captcha_token/i.test(t) && /couldn't verify this browser/i.test(t), "forgot password: plain words, no raw captcha text");
 console.log("wire:", JSON.stringify(wire.map((w) => ({ path: w.path, status: w.status, sentToken: w.sentToken, body: w.body.slice(0, 110) }))));
 await b.close();
 process.exit(bad ? 1 : 0);
