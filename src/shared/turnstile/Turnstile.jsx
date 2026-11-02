@@ -16,6 +16,8 @@
  * Tokens are single-use: `reset()` (via ref) asks Cloudflare for a fresh one. */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { TURNSTILE_SITE_KEY } from "./turnstileConfig.js";
+// NEW-1 (B2619760 follow-up): a blocked script / widget error / timeout is reported, so a broken bot check is not silent.
+import { reportAuthEvent, AUTH_EVENT } from "../auth/authTelemetry.js";
 
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 let scriptPromise = null;
@@ -55,6 +57,7 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
   const cb = useRef({});
   cb.current = { onToken, onStateChange, onTimeout };
   const [state, setState] = useState("loading");
+  const [errorCode, setErrorCode] = useState("");   // Cloudflare's own error code (or "script") — readable by the outside-in check
 
   const report = (s) => { setState(s); cb.current.onStateChange && cb.current.onStateChange(s); };
 
@@ -77,14 +80,30 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
           "refresh-expired": "auto",
           callback: (token) => { cb.current.onToken && cb.current.onToken(token); report("ready"); },
           "expired-callback": () => { cb.current.onToken && cb.current.onToken(""); }, // Turnstile refreshes it itself
-          "error-callback": () => { cb.current.onToken && cb.current.onToken(""); report("error"); },
-          "timeout-callback": () => { cb.current.onToken && cb.current.onToken(""); cb.current.onTimeout && cb.current.onTimeout(); },
+          "error-callback": (code) => {
+            cb.current.onToken && cb.current.onToken("");
+            setErrorCode(String(code == null ? "" : code).slice(0, 20));
+            reportAuthEvent(AUTH_EVENT.CAPTCHA_WIDGET_ERROR, { code: String(code == null ? "" : code) });
+            report("error");
+          },
+          "timeout-callback": () => {
+            cb.current.onToken && cb.current.onToken("");
+            reportAuthEvent(AUTH_EVENT.CAPTCHA_TIMEOUT, { reason: "challenge" });
+            cb.current.onTimeout && cb.current.onTimeout();
+          },
           "before-interactive-callback": () => report("interactive"),
           "after-interactive-callback": () => report("ready"),
         });
         report("ready");
       })
-      .catch(() => { if (!cancelled) report("error"); });
+      .catch((e) => {
+        if (cancelled) return;
+        // "timed out" = the script hung; anything else = it was blocked / failed / loaded without window.turnstile.
+        const timedOut = /timed out/i.test(String((e && e.message) || ""));
+        setErrorCode("script");
+        reportAuthEvent(timedOut ? AUTH_EVENT.CAPTCHA_TIMEOUT : AUTH_EVENT.CAPTCHA_BLOCKED, { reason: timedOut ? "script" : "script-blocked" });
+        report("error");
+      });
     return () => {
       cancelled = true;
       try { widgetIdRef.current != null && window.turnstile && window.turnstile.remove(widgetIdRef.current); } catch (_) {}
@@ -93,7 +112,7 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
     };
   }, [appearance]);
 
-  return <div ref={hostRef} data-testid="turnstile-widget" data-turnstile-state={state} data-turnstile-appearance={appearance} />;
+  return <div ref={hostRef} data-testid="turnstile-widget" data-turnstile-state={state} data-turnstile-error={errorCode || undefined} data-turnstile-appearance={appearance} />;
 });
 
 export default Turnstile;
