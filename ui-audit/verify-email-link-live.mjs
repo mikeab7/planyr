@@ -10,7 +10,7 @@
  * locked set-new-password form after a real reset, the mail itself arriving from no-reply@planyr.io. A session with a
  * mailbox it can read runs those by hand (V2070800 steps 17–20).
  *
- * MAIL SENT BY A RUN: at most ONE real send attempt, to the test account's address (it bounces — the domain is .test) in step 1;
+ * MAIL SENT BY A RUN: at most ONE real send attempt, to the test account's address (it bounces — the domain is .test) in step 1 and writes ONE mailbox_proofs row for the test account in step 16c (cleared by the running session);
  * every other send is to a made-up address, which the route answers identically and mails nothing. The served build
  * (/version.json) is read in the SAME call as every page. Creates nothing; the cap rows it makes expire in a day. */
 import { chromium, webkit, devices } from "@playwright/test";
@@ -134,6 +134,17 @@ if (engine === "chromium") {
     await p.getByTestId("auth-link-stay").click();
     const still = await p.evaluate(async () => (await window.pfSupabase.auth.getUser()).data?.user?.email);
     note("15 …Stay keeps the session untouched", still === TEST_ACCOUNT_EMAIL ? "PASS" : "FAIL", String(still));
+    // ── the mailbox proof (prove_mailbox) ───────────────────────────────────────────────────────────────────────────
+    // The test account's session is minted by redeeming an admin-made magiclink token — the SAME mechanism an emailed link uses, so its
+    // access token carries amr [{method:"otp"}] and the route must accept it. WRITES ONE mailbox_proofs row for the test account
+    // (via 'emailed_link'); the session that runs this deletes it afterwards (test artifacts are always cleared).
+    const tok = await p.evaluate(async () => (await window.pfSupabase.auth.getSession()).data?.session?.access_token || "");
+    const proof = (headers) => p.evaluate(async (h) => { const r = await fetch("/api/auth/mailbox-proof", { method: "POST", headers: { "content-type": "application/json", ...h }, body: "{}" }); return { status: r.status, body: await r.json().catch(() => null), cors: [...r.headers.keys()].filter((k) => k.startsWith("access-control-")) }; }, headers);
+    const noBearer = await proof({});
+    const bogus = await proof({ authorization: "Bearer not.a.jwt" });
+    note("16b mailbox-proof: no bearer → 401, a made-up token → 401 (nothing recorded)", noBearer.status === 401 && bogus.status === 401 && !noBearer.cors.length ? "PASS" : "FAIL", `${noBearer.status} / ${bogus.status}`);
+    const ok = await proof({ authorization: `Bearer ${tok}` });
+    note("16c mailbox-proof: a session made by redeeming an emailed-style token → 200 {ok:true} (a row is written for the test account)", ok.status === 200 && ok.body && ok.body.ok === true ? "PASS" : "FAIL", `${ok.status} ${JSON.stringify(ok.body)}`);
     const mine = await accountHint(TEST_ACCOUNT_EMAIL);
     await p.goto(`${base}/?app&authlink=${TOKEN}&kind=signin&h=${mine}`, { waitUntil: "domcontentloaded" });
     const same = await p.getByTestId("auth-link-state-same-account").waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false);

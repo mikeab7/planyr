@@ -7,12 +7,30 @@
  * link never reaches it). */
 import { supabase } from "./supabase.js";
 import { classifyVerifyFailure } from "../../../shared/auth/authLink.js";
+// NEW-1 (sign-in alarm): every auth path reports its outcome through ONE helper — authTelemetry.js.
+import { observeAuthCall } from "../../../shared/auth/authTelemetry.js";
 
 const ENDPOINT = "/api/auth/email-link";
 const LAST_EMAIL_KEY = "planyr:auth:lastLinkEmail";
 
-/** → { ok:true, retryAfterSeconds, expiresMinutes } | { ok:false, reason, retryAfterSeconds? } */
+/* The route's outcome as the error shape the alarm's classifier already understands. A throttle or a bad address is the
+ * person's (counted, never an alarm); a network failure is auth-network; a down / failing route is auth-unexpected + its status. */
+function outcomeAsAuthError(r) {
+  if (r.ok) return null;
+  if (r.reason === "throttled") return { code: "over_email_send_rate_limit", status: 429, message: "email link throttled" };
+  if (r.reason === "bad_request") return { code: "validation_failed", status: 400, message: "email link: bad address" };
+  if (r.reason === "network") return { name: "AuthRetryableFetchError", status: 0, message: "email link: network" };
+  return { code: String(r.reason || "unavailable"), status: r.status || 503, message: "email link: " + String(r.reason || "unavailable") };
+}
+
+/** → { ok:true, retryAfterSeconds, expiresMinutes } | { ok:false, reason, retryAfterSeconds? } — reported once through observeAuthCall("email-link"). */
 export async function requestEmailLink({ email, purpose, next, fetchImpl = (typeof fetch === "function" ? fetch : null) }) {
+  let out = { ok: false, reason: "network" };
+  await observeAuthCall("email-link", email, async () => { out = await sendEmailLinkRequest({ email, purpose, next, fetchImpl }); return { error: outcomeAsAuthError(out) }; });
+  return out;
+}
+
+async function sendEmailLinkRequest({ email, purpose, next, fetchImpl }) {
   if (!fetchImpl) return { ok: false, reason: "network" };
   let res;
   try {
@@ -23,8 +41,8 @@ export async function requestEmailLink({ email, purpose, next, fetchImpl = (type
     rememberLinkEmail(email);
     return { ok: true, retryAfterSeconds: Number(j.retryAfterSeconds) || 60, expiresMinutes: Number(j.expiresMinutes) || 60 };
   }
-  if (j && typeof j.reason === "string") return { ok: false, reason: j.reason, ...(j.retryAfterSeconds ? { retryAfterSeconds: Number(j.retryAfterSeconds) } : {}) };
-  return { ok: false, reason: res.status >= 500 || res.status === 404 ? "unavailable" : "network" };
+  if (j && typeof j.reason === "string") return { ok: false, reason: j.reason, status: res.status, ...(j.retryAfterSeconds ? { retryAfterSeconds: Number(j.retryAfterSeconds) } : {}) };
+  return { ok: false, reason: res.status >= 500 || res.status === 404 ? "unavailable" : "network", status: res.status };
 }
 
 /** Spend the link: → { ok:true, user, accessToken } | { ok:false, kind: "expired"|"rate"|"network"|"other" } */
