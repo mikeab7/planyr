@@ -22,7 +22,7 @@ import { RADIUS } from "../shared/ui/radius.js";
 import { MenuTrigger, Button } from "../shared/ui/controls.jsx";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
 import { useTeamInvites } from "./teamInvites.js";
-import { inviteLine, badgeLabel } from "../shared/teams/teamInviteModel.js";
+import { inviteLine, badgeLabel, waitingLine } from "../shared/teams/teamInviteModel.js";
 import { supabase, supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
 import { useIsAdmin } from "../workspaces/admin/lib/useIsAdmin.js";
@@ -125,13 +125,49 @@ function InviteCard({ invite, onAnswer }) {
   );
 }
 
+// NEW-1 (2026-11-02) — invitations the account cannot answer yet because its mailbox isn't proven (email confirmation
+// is off, so an address match proves nothing). It is told ONLY that one is waiting — never which team, who invited it
+// or the role. Accept emails the invitation again (the link in it proves the mailbox); then the card says where it went,
+// with Resend (the server throttles). Module scope so the sent/busy state survives the parent's re-renders.
+function WaitingInviteCard({ count, address, sentTo, onResend }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null); // { ok, text } of the LAST resend, shown under the buttons when it failed
+  const go = async () => {
+    setBusy(true);
+    const r = await onResend();
+    setNote(r.ok ? null : { ok: false, text: r.text });
+    setBusy(false);
+  };
+  const sent = !!sentTo;
+  return (
+    <div style={inviteCard} data-testid="account-invite-waiting" data-count={count}>
+      <div style={{ fontWeight: 700, fontSize: FONT_SIZE.emphasis, overflowWrap: "anywhere" }}>{waitingLine(count)}</div>
+      {sent ? (
+        <div role="status" data-testid="account-invite-sent" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflowWrap: "anywhere", margin: "4px 0 7px" }}>
+          We sent a confirmation to {sentTo || address}. Open the link in it to accept.
+        </div>
+      ) : (
+        <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", overflowWrap: "anywhere", marginBottom: 7 }}>
+          Accept to confirm it's you — we'll email {address || "you"} a link.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6 }}>
+        {sent
+          ? <Button size="sm" variant="ghost" data-testid="account-invite-resend" disabled={busy} onClick={go}>{busy ? "Sending…" : "Resend"}</Button>
+          : <Button size="sm" data-testid="account-invite-accept-waiting" disabled={busy} onClick={go}>{busy ? "Sending…" : "Accept"}</Button>}
+      </div>
+      {note && <div role="alert" style={{ marginTop: 6, fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>{note.text}</div>}
+    </div>
+  );
+}
+
 export default function AccountControl({ user, authKnown = true, profileApi, onOpenAuth, onOpenAccount }) {
   const [acctOpen, setAcctOpen] = useState(false);  // account dropdown (signed-in pill, B298)
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
   const acctAnchor = useRef(null);
   const who = profileApi?.displayName;
   // NEW-1 (invite inbox) — pending team invitations addressed to this account's email.
-  const { invites, count: inviteCount, status: inviteStatus, refresh: refreshInvites, answer: answerInvite } = useTeamInvites(user);
+  const { invites, waiting: waitingCount, count: inviteCount, status: inviteStatus, sentTo: inviteSentTo, refresh: refreshInvites, answer: answerInvite, resend: resendInvite } = useTeamInvites(user);
   const [inviteNote, setInviteNote] = useState(""); // "You joined USEC." — shown until the menu closes
   useEffect(() => { if (acctOpen) refreshInvites(); else setInviteNote(""); }, [acctOpen, refreshInvites]);
   const answerAndNote = async (invite, accept) => {
@@ -316,6 +352,7 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
             <div style={inviteSectionLabel}>Team invitations</div>
             {inviteNote && <div role="status" style={{ padding: "4px 9px", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{inviteNote}</div>}
             {invites.map((inv) => <InviteCard key={inv.id} invite={inv} onAnswer={answerAndNote} />)}
+            {waitingCount > 0 && <WaitingInviteCard count={waitingCount} address={user?.email || ""} sentTo={inviteSentTo} onResend={resendInvite} />}
             {inviteStatus === "error" && (
               <div role="alert" style={{ padding: "4px 9px", fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>
                 Couldn't check for team invitations.{" "}

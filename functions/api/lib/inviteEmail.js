@@ -28,18 +28,20 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":
 const roleLabel = (r) => (r === "admin" ? "an admin" : "a member");
 
 // One button to planyr.io carrying the invite's own opaque id (a random uuid) — never the email. The app
-// resolves the id (rpc invite_preview) to pre-fill the sign-in / sign-up screen (Shell + InviteLanding).
+// resolves the id (rpc invite_preview) to pre-fill the sign-in / sign-up screen (Shell + InviteLanding). NEW-1
+// (2026-11-02): this link IS the proof that the person owns the mailbox — nobody joins by address match alone.
 export function inviteLink(appUrl, inviteId) {
   const base = String(appUrl || DEFAULT_APP_URL).replace(/\/+$/, "");
   return inviteId ? `${base}/?app&invite=${encodeURIComponent(inviteId)}` : `${base}/?app`;
 }
 
 /* What the email says depends on whether the address already has a Planyr account (claim_invite_send's
- * has_account): true → accept it; false → create the account and you're added at signup; anything else
+ * has_account): true → accept it from the button; false → create the account from the button and you're added;
+ * anything else
  * (an older database without the key) → the neutral wording that is true either way. */
 export function inviteCopy(hasAccount) {
-  if (hasAccount === true) return { button: "Accept invitation", note: "Open Planyr and accept from your account menu." };
-  if (hasAccount === false) return { button: "Join team", note: "Create your Planyr account to join \u2014 you'll be added to the team as soon as you sign up." };
+  if (hasAccount === true) return { button: "Accept invitation", note: "Open the button to accept \u2014 it also confirms this email address is yours." };
+  if (hasAccount === false) return { button: "Join team", note: "Create your Planyr account from the button to join \u2014 you'll be added to the team as soon as you finish." };
   return { button: "Open Planyr", note: "Sign in or create your Planyr account to join." };
 }
 

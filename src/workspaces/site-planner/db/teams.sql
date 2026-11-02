@@ -106,23 +106,12 @@ create policy "members read roster" on public.team_members
   for select to authenticated using (public.is_team_member(team_id));
 create policy "admins add members" on public.team_members
   for insert to authenticated with check (public.is_team_admin(team_id));
--- A user may insert THEIR OWN membership only into a team that has an UNCLAIMED invite for their
--- verified email AT THE SAME ROLE they're inserting — never an arbitrary team or an escalated role.
--- (The normal join path is claim_team_invites / handle_new_user, which run SECURITY DEFINER and
--- bypass RLS; this policy is the narrow client-side backstop. The "invitee reads own" SELECT policy
--- on team_invites makes the EXISTS visible to the invitee.) Replaces the old "self add via claim",
--- which checked only user_id = auth.uid() and so allowed self-join to any team at any role.
-create policy "self join via invite" on public.team_members
-  for insert to authenticated with check (
-    user_id = (select auth.uid())
-    and exists (
-      select 1 from public.team_invites i
-      where i.team_id = team_members.team_id
-        and lower(i.email) = lower((select auth.email()))
-        and i.claimed_at is null
-        and i.role = team_members.role
-    )
-  );
+-- NEW-1 (2026-11-02): there is deliberately NO client self-join policy any more. The old
+-- "self join via invite" (an INSERT allowed when the caller's address matched an open invite) treated
+-- the address as proof of the mailbox, and with email confirmation OFF anyone can sign up with any
+-- address — so a stranger could put themselves on a team. Joining is done only by the SECURITY DEFINER
+-- functions redeem_invite_link / respond_to_invite (db/team_invite_proof.sql), which require the emailed
+-- link or an already-proven mailbox. Admins still add members directly ("admins add members").
 create policy "admins update roles" on public.team_members
   for update to authenticated using (public.is_team_admin(team_id)) with check (public.is_team_admin(team_id));
 create policy "admins remove members" on public.team_members
@@ -133,41 +122,27 @@ create policy "self leave" on public.team_members
 -- 7) RLS — team_invites ------------------------------------------------------
 alter table public.team_invites enable row level security;
 drop policy if exists "admins read invites"  on public.team_invites;
-drop policy if exists "invitee reads own"     on public.team_invites;
+drop policy if exists "invitee reads own"     on public.team_invites;  -- NEW-1: stays dropped
 drop policy if exists "admins create invites" on public.team_invites;
 drop policy if exists "admins delete invites" on public.team_invites;
 create policy "admins read invites" on public.team_invites
   for select to authenticated using (public.is_team_admin(team_id));
--- an invitee may see invites addressed to their own verified email (auth.email() = JWT claim)
-create policy "invitee reads own" on public.team_invites
-  for select to authenticated using (lower(email) = lower(auth.email()));
+-- NEW-1 (2026-11-02): no "invitee reads own" policy any more — with confirmation OFF the address is not proof,
+-- and the row carries the invite id (the bearer secret in the emailed link). An invitee reads their
+-- invitations through list_my_invites(), which withholds everything until the mailbox is proven.
 create policy "admins create invites" on public.team_invites
   for insert to authenticated with check (public.is_team_admin(team_id));
 create policy "admins delete invites" on public.team_invites
   for delete to authenticated using (public.is_team_admin(team_id));
 
--- 8) Claim invites for the CURRENT user (existing account invited later) ------
--- SECURITY DEFINER so it can write team_members + mark invites claimed regardless of RLS.
--- Acts ONLY on invites whose email matches the caller's verified auth email. Idempotent.
--- Returns the number of NEW memberships created.
+-- 8) claim_team_invites — a NO-OP since NEW-1 (2026-11-02). It used to add the caller to every team whose open
+-- invite matched their address; with email confirmation OFF the address is not proof of the mailbox, so
+-- that was a way onto a team for anyone who could type an address. Kept (and granted) so a cached older
+-- client that still calls it on load gets 0 instead of an error. Joining is db/team_invite_proof.sql.
 create or replace function public.claim_team_invites()
 returns integer language plpgsql security definer set search_path = public as $$
-declare
-  v_email text;
-  v_count integer := 0;
 begin
-  select lower(email) into v_email from auth.users where id = auth.uid();
-  if v_email is null then return 0; end if;
-  insert into public.team_members (team_id, user_id, role, added_by)
-    select i.team_id, auth.uid(), i.role, i.invited_by
-    from public.team_invites i
-    where lower(i.email) = v_email and i.claimed_at is null
-    on conflict (team_id, user_id) do nothing;
-  get diagnostics v_count = row_count;
-  update public.team_invites
-    set claimed_at = now()
-    where lower(email) = v_email and claimed_at is null;
-  return v_count;
+  return 0;
 end;
 $$;
 grant execute on function public.claim_team_invites() to authenticated;
@@ -224,9 +199,8 @@ $$;
 revoke all on function public.create_team(text) from public;
 grant execute on function public.create_team(text) to authenticated;
 
--- 10) Auto-claim invites on signup — extend handle_new_user (from db/profiles.sql) --
--- Re-created here (AFTER the team tables exist) so a brand-new user lands on any team they
--- were invited to the instant they confirm. The profile insert is unchanged from profiles.sql.
+-- 10) handle_new_user (from db/profiles.sql), re-created AFTER the team tables exist. NEW-1 (2026-11-02): it no
+-- longer joins anyone to a team (see the comment in the body). The profile insert is unchanged from profiles.sql.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -240,13 +214,9 @@ begin
   )
   on conflict (id) do update set email = excluded.email;
 
-  insert into public.team_members (team_id, user_id, role, added_by)
-    select i.team_id, new.id, i.role, i.invited_by
-    from public.team_invites i
-    where lower(i.email) = lower(new.email) and i.claimed_at is null
-    on conflict (team_id, user_id) do nothing;
-  update public.team_invites set claimed_at = now()
-    where lower(email) = lower(new.email) and claimed_at is null;
+  -- NEW-1 (2026-11-02): a new account is NOT added to any team here. This used to join every team whose open
+  -- invite matched the new address — but email confirmation is off, so nobody has proven they own that
+  -- address. The emailed link (redeem_invite_link) or an already-proven mailbox is the only way in.
   return new;
 end;
 $$;
