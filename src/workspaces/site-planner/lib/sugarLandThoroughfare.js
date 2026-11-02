@@ -32,7 +32,6 @@ export const THOROUGHFARE_ORDER = Object.keys(THOROUGHFARE_CLASSES);
 export const THOROUGHFARE_WHERE = `FUNCTIONAL_CLASS IN (${THOROUGHFARE_ORDER.map((k) => `'${k}'`).join(",")}) AND (LIFE_CYCLE IS NULL OR LIFE_CYCLE <> 'Retired')`;
 
 const str = (v) => (v == null ? "" : String(v).trim());
-const has = (v) => { const t = str(v); return !!t && !/^(null|none|n\/a|<null>)$/i.test(t); };
 export const classKey = (props) => str(props && props.FUNCTIONAL_CLASS).toUpperCase().replace(/\s+/g, " ");
 export const classInfo = (props) => THOROUGHFARE_CLASSES[classKey(props)] || null;
 

@@ -95,6 +95,9 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/floridaLayers.js", // B2452976 — registry rows of the same kind as layers.js: map ink for drawn hazard / jurisdiction layers
   "src/workspaces/site-planner/lib/oklahomaLayers.js", // NEW-1 (Oklahoma screening) — registry rows of the same kind as layers.js: map ink for drawn wells, cleanup sites, dams, tribal areas and protected waters
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
+  "src/workspaces/site-planner/lib/sugarLandLayers.js", // NEW-1 (City of Sugar Land) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn washes, lines and points (the legend colours), not chrome
+  "src/workspaces/site-planner/lib/sugarLandZoning.js", // NEW-1 (City of Sugar Land) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js
+  "src/workspaces/site-planner/lib/sugarLandThoroughfare.js", // NEW-1 (City of Sugar Land) — the thoroughfare-class line ink (map ink and legend read one table), not chrome
   "src/workspaces/site-planner/lib/mississippiLayers.js", // B2539744 — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn points, lines and washes (the legend colours), not chrome
   "src/workspaces/site-planner/lib/tennesseeLayers.js", // B2521584 — registry rows of the same kind as layers.js: map ink for drawn Tennessee layers
   "src/workspaces/site-planner/lib/tennesseeStreamBuffers.js", // B2521584 — the drawn buffer-band ink, not chrome
