@@ -52,6 +52,27 @@ describe("the set-new-password form cannot be dismissed", () => {
   });
 });
 
+describe("redeeming an emailed link records the mailbox as proven (prove_mailbox)", () => {
+  it("the landing page calls it exactly once, only after a SUCCESSFUL redemption, and never in front of the sign-in", () => {
+    expect(landing.match(/recordProof\(/g)).toHaveLength(2);                // the helper + its single call site
+    const spend = landing.slice(landing.indexOf("const spend = async"));
+    expect(spend.indexOf("if (!r.ok)")).toBeLessThan(spend.indexOf("recordProof(r.accessToken)"));
+    expect(spend).not.toMatch(/await recordProof/);
+    expect(landing).toMatch(/reportClientEvent\("mailbox-proof-failed"/);   // a failure is reported, not swallowed
+  });
+  it("nothing else in the app calls the route — a password sign-in cannot claim a mailbox from the client either", () => {
+    const hits = walk("src").filter((f) => read(f).includes("/api/auth/mailbox-proof"));
+    expect(hits.sort()).toEqual(["src/workspaces/site-planner/lib/emailLinkClient.js"]);
+  });
+  it("the route is the only caller of prove_mailbox, uses the service key server-side only, and takes the user from the verified token", () => {
+    const hits = walk("functions").filter((f) => /prove_mailbox/.test(read(f)));
+    expect(hits).toEqual(["functions/api/auth/mailbox-proof.js"]);
+    const proof = read("functions/api/auth/mailbox-proof.js");
+    expect(proof).toContain("p_user: v.user.id");
+    expect(proof).not.toMatch(/request\.json\(|request\.text\(/);        // the body is never read
+  });
+});
+
 describe("forgot password and the sign-in link do not depend on Cloudflare", () => {
   it("reset mode mounts no Turnstile and the request carries no captcha token", () => {
     expect(panel).toMatch(/mode !== "recovery" && mode !== "reset"/);

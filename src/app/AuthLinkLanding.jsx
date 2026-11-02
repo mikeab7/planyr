@@ -24,7 +24,8 @@ import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
 import { parseAuthLinkSearch, stripAuthLinkParams, accountHint, landingPlan, SUPPORT_EMAIL } from "../shared/auth/authLink.js";
 import { markRecoveryPending } from "../shared/auth/recoveryPending.js";
-import { verifyAuthLink, requestEmailLink, recallLinkEmail } from "../workspaces/site-planner/lib/emailLinkClient.js";
+import { verifyAuthLink, requestEmailLink, recallLinkEmail, recordMailboxProof } from "../workspaces/site-planner/lib/emailLinkClient.js";
+import { reportClientEvent } from "../shared/telemetry/clientErrors.js";
 import { failureCopy, SUPPORT_MAILTO } from "../workspaces/site-planner/lib/emailLinkCopy.js";
 import EmailLinkSent from "../workspaces/site-planner/components/EmailLinkSent.jsx";
 
@@ -38,6 +39,14 @@ function stripUrl() {
     const search = stripAuthLinkParams(window.location.search);
     window.history.replaceState(window.history.state, "", window.location.pathname + search + window.location.hash);
   } catch (_) { /* history unavailable — the params just stay in the bar */ }
+}
+
+/* Redeeming an emailed link proves the mailbox, so the server records it (prove_mailbox — consumed by the team-invite functions).
+ * Runs beside the sign-in, never in front of it: a failure is reported (LOUD-FAILURE) but never blocks getting in. */
+function recordProof(accessToken) {
+  recordMailboxProof(accessToken).then((p) => {
+    if (!p.ok) reportClientEvent("mailbox-proof-failed", "an emailed link was redeemed but the mailbox proof was not recorded", { reason: p.reason });
+  });
 }
 
 function Shell({ title, children }) {
@@ -130,6 +139,7 @@ export default function AuthLinkLanding({ user, authKnown, onOpenSignIn, onRecov
     verifying.current = false;
     if (!r.ok) { setPhase({ name: "failed", kind: r.kind }); return; }
     stripUrl();
+    recordProof(r.accessToken);
     const was = previous.current;
     if (link.kind === "reset") {
       markRecoveryPending();

@@ -210,3 +210,19 @@ describe("email-link — a failure is reported as a failure", () => {
     log.mockRestore();
   });
 });
+
+/* The browser half of the mailbox proof (lib/emailLinkClient.js). */
+import { recordMailboxProof } from "../src/workspaces/site-planner/lib/emailLinkClient.js";
+describe("recordMailboxProof — the browser's call after an emailed link is redeemed", () => {
+  const fx = (res) => vi.fn(async () => res);
+  it("sends the fresh session as a bearer token and reports ok only on the route's ok:true", async () => {
+    const f = fx(Response.json({ ok: true })); expect(await recordMailboxProof("TOKEN", f)).toEqual({ ok: true });
+    expect(f.mock.calls[0][0]).toBe("/api/auth/mailbox-proof"); expect(f.mock.calls[0][1].headers.authorization).toBe("Bearer TOKEN"); expect(f.mock.calls[0][1].method).toBe("POST");
+  });
+  it("every failure is reported with a reason, never thrown", async () => {
+    expect(await recordMailboxProof("T", fx(Response.json({ ok: false, reason: "address_mismatch" }, { status: 409 })))).toEqual({ ok: false, reason: "address_mismatch" });
+    expect(await recordMailboxProof("T", fx(new Response("<html>", { status: 404 })))).toEqual({ ok: false, reason: "http_404" });
+    expect(await recordMailboxProof("T", vi.fn(async () => { throw new TypeError("net"); }))).toEqual({ ok: false, reason: "network" });
+    expect(await recordMailboxProof("", fx(Response.json({ ok: true })))).toEqual({ ok: false, reason: "no_session" });
+  });
+});

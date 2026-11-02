@@ -27,7 +27,7 @@ export async function requestEmailLink({ email, purpose, next, fetchImpl = (type
   return { ok: false, reason: res.status >= 500 || res.status === 404 ? "unavailable" : "network" };
 }
 
-/** Spend the link: → { ok:true, user } | { ok:false, kind: "expired"|"rate"|"network"|"other" } */
+/** Spend the link: → { ok:true, user, accessToken } | { ok:false, kind: "expired"|"rate"|"network"|"other" } */
 export async function verifyAuthLink({ token, kind }) {
   if (!supabase) return { ok: false, kind: "other" };
   try {
@@ -35,7 +35,7 @@ export async function verifyAuthLink({ token, kind }) {
     if (error) return { ok: false, kind: classifyVerifyFailure(error) };
     const user = data && data.user;
     if (!user || !(data && data.session)) return { ok: false, kind: "other" };
-    return { ok: true, user };
+    return { ok: true, user, accessToken: data.session.access_token };
   } catch (e) { return { ok: false, kind: classifyVerifyFailure(e) }; }
 }
 
@@ -43,3 +43,16 @@ export async function verifyAuthLink({ token, kind }) {
  * the address ever being in the link. A different device simply has none and shows an empty field. */
 export function rememberLinkEmail(email) { try { localStorage.setItem(LAST_EMAIL_KEY, String(email || "").trim().toLowerCase()); } catch (_) { /* blocked */ } }
 export function recallLinkEmail() { try { return localStorage.getItem(LAST_EMAIL_KEY) || ""; } catch (_) { return ""; } }
+
+/* Right after an emailed link is redeemed, tell the server so the mailbox is recorded as proven (public.prove_mailbox — service
+ * role only, so a server must write it; functions/api/auth/mailbox-proof.js checks the session really came from an emailed token).
+ * → { ok:true } | { ok:false, reason }. Never throws; the caller reports a failure to telemetry and never blocks the sign-in on it. */
+export async function recordMailboxProof(accessToken, fetchImpl = (typeof fetch === "function" ? fetch : null)) {
+  if (!accessToken || !fetchImpl) return { ok: false, reason: "no_session" };
+  try {
+    const res = await fetchImpl("/api/auth/mailbox-proof", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: "{}" });
+    let j = null; try { j = await res.json(); } catch (_) { /* not JSON */ }
+    if (res.ok && j && j.ok === true) return { ok: true };
+    return { ok: false, reason: (j && typeof j.reason === "string" && j.reason) || `http_${res.status}` };
+  } catch (_) { return { ok: false, reason: "network" }; }
+}

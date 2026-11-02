@@ -39,6 +39,11 @@ async function mock(page, world) {
       const r = world.link ? world.link(body) : { status: 200, body: { ok: true, retryAfterSeconds: 60, expiresMinutes: 60 } };
       return json(r.body, r.status);
     }
+    if (u.pathname === "/api/auth/mailbox-proof") {   // the server records "this mailbox is proven" after a redeemed emailed link
+      world.calls.push({ path: u.pathname, auth: route.request().headers()["authorization"] || "" });
+      const r = world.proof ? world.proof() : { status: 200, body: { ok: true } };
+      return json(r.body, r.status);
+    }
     if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return route.continue();
     if (u.hostname === "challenges.cloudflare.com") {
       if (world.blockTurnstile) return route.abort();
@@ -62,6 +67,7 @@ async function mock(page, world) {
   });
 }
 const verifyCalls = (w) => w.calls.filter((c) => c.path === "/auth/v1/verify");
+const proofCalls = (w) => w.calls.filter((c) => c.path === "/api/auth/mailbox-proof");
 const dlg = (page) => page.getByRole("dialog");
 const landing = (page) => page.getByTestId("auth-link-landing");
 const seed = (page, u) => page.addInitScript(([k, s]) => { try { localStorage.setItem(k, JSON.stringify(s)); } catch (_) {} }, [STORAGE_KEY, session(u)]);
@@ -135,6 +141,17 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
     await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/library");
     await expect.poll(() => page.evaluate((k) => !!localStorage.getItem(k), STORAGE_KEY)).toBe(true);
     expect(await page.evaluate(() => window.location.search)).not.toContain("authlink");
+    await expect.poll(() => proofCalls(w).length).toBe(1);                 // redeeming the emailed link proves the mailbox — once
+    expect(proofCalls(w)[0].auth).toMatch(/^Bearer ey/);                    // with the session it just got, not anything typed
+  });
+
+  test("4b a mailbox-proof failure never blocks getting in (it is reported, not shown)", async ({ page }) => {
+    const w = { proof: () => ({ status: 502, body: { ok: false, reason: "unavailable" } }) }; await mock(page, w);
+    await page.goto(await linkUrl("signin", ME));
+    await page.getByTestId("auth-link-continue").click();
+    await expect(landing(page)).toHaveCount(0);
+    await expect.poll(() => proofCalls(w).length).toBe(1);
+    await expect.poll(() => page.evaluate((k) => !!localStorage.getItem(k), STORAGE_KEY)).toBe(true);   // still signed in
   });
 
   test("5 reset link: the button, then the set-new-password form opens BY ITSELF and cannot be dismissed; a reload brings it back; done closes it", async ({ page }) => {
@@ -144,6 +161,7 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
     await page.getByTestId("auth-link-continue").click();
     await expect(verifyCalls(w)[0].body).toMatchObject({ token_hash: TOKEN, type: "recovery" });
     await expect(page.getByTestId("recovery-form")).toBeVisible();
+    await expect.poll(() => proofCalls(w).length).toBe(1);                 // a reset link proves the mailbox too
     // not dismissable: Escape, a click outside, and there is no Close button
     await page.keyboard.press("Escape");
     await page.mouse.click(5, 5);
@@ -177,6 +195,7 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
     await page.goto(await linkUrl("signin", ME));
     await page.getByTestId("auth-link-continue").click();
     await expect(page.getByTestId("auth-link-title")).toContainText("expired or was already used");
+    expect(proofCalls(w)).toHaveLength(0);                                   // a refused link proves nothing
     await page.getByTestId("auth-link-resend").click();
     await expect(page.getByTestId("auth-link-email")).toHaveValue("me@example.com");
     expect(page.url()).not.toContain("me%40"); expect(page.url()).not.toContain("me@");
@@ -217,6 +236,7 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
     await page.getByTestId("auth-link-retry").click();
     await expect(landing(page)).toHaveCount(0);
     expect(verifyCalls(w)).toHaveLength(2);
+    await expect.poll(() => proofCalls(w).length).toBe(1);                   // only the successful redemption proves the mailbox
   });
 
   test("9 verify rate limit: asks them to wait, keeps the link, Try again works", async ({ page }) => {

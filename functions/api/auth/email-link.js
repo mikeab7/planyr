@@ -54,7 +54,7 @@ const log = (evt, request) => {
   try { console.log(JSON.stringify({ evt: "email-link", ...evt, ts: new Date().toISOString() })); } catch (_) { /* logging must never break the route */ }
 };
 
-function originAllowed(request, env) {
+export function originAllowed(request, env) {
   const origin = request.headers.get("origin");
   if (!origin) return true; // same-origin fetches from some browsers, curl, server-side callers: no browser cross-site risk
   let host; try { host = new URL(origin).host; } catch (_) { return false; }
