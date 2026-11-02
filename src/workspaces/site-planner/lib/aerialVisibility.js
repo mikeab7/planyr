@@ -49,3 +49,11 @@ export function isAerialTileActive(basemapOn, aerialVisible) {
 export function wantBasemapSrc(basemapOn, aerialVisible, basemapSrc) {
   return isAerialTileActive(basemapOn, aerialVisible) ? basemapSrc : null;
 }
+
+// B2589680 — the printed / exported sheet carries the aerial exactly when the MAP is showing it (the plan-level toggle above).
+// There is no print-only aerial switch: the print panel's old "Aerial" checkbox only ever wrote this same plan-level value, and the export
+// used to ignore it ("always include the aerial, even if hidden on screen"), so hiding the aerial on the map never reached the PDF.
+// A missing value reads as shown, so a caller that does not pass it keeps the old behaviour.
+export function aerialWantedOnSheet(showAerial) {
+  return showAerial !== false;
+}

@@ -26,9 +26,9 @@ const expectSha = arg("--expect-sha", null);
 const RUN = Math.random().toString(36).slice(2, 6);
 const RECT = [[-900, -700], [900, -700], [900, 700], [-900, 700]].map(([x, y]) => ({ x, y }));
 const mk = (suffix, settings) => {
-  const id = `zz-printaerial-${suffix}-${RUN}`;
+  const id = `zz-printpa-${suffix}-${RUN}`; // NB: no "aerial" in the plan name — the title block prints it and the panel is searched for that word
   return {
-    id, groupId: id, site: `zz print aerial ${suffix} ${RUN}`, name: "Concept A", origin: { lat: 33.2458963792457, lon: -84.16362918465775 }, county: "ga_spalding",
+    id, groupId: id, site: `zz print pa-${suffix} ${RUN}`, name: "Concept A", origin: { lat: 33.2458963792457, lon: -84.16362918465775 }, county: "ga_spalding",
     parcels: [{ id: "pc1", active: true, locked: false, points: RECT, setbacks: RECT.map(() => 25) }],
     els: [{ id: "b1", type: "building", cx: 0, cy: 0, w: 500, h: 300, rot: 0, dock: "cross" }],
     measures: [], callouts: [], markups: [], settings: { setback: 25, ...settings }, underlay: null, updatedAt: Date.now(), status: "active",
