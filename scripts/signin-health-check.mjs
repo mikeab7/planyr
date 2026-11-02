@@ -141,6 +141,12 @@ export function channelVerdict(resp) {
   return { status: "ok", code: 0, detail: `delivery: ${d}` };
 }
 
+/* The drill's exit code for a channel verdict. "Not armed" (the SQL has not been run) gets its OWN code, 5: a manual drill that
+ * could not run must still end RED so the person who ran it sees that, but it is a SETUP state, not a broken alarm channel — the
+ * workflow raises no "alarm channel is not delivering" issue for it (found live 2026-11-02: the first drill opened one). */
+export const DRILL_NOT_ARMED = 5;
+export const drillExitCode = (v) => (v && v.status === "not-armed" ? DRILL_NOT_ARMED : (v && v.code) || 1);
+
 /* ── The alarm drill: proves, live, "one incident sends ONE email, and a recovery note when it clears" ───────────── */
 async function drill() {
   const step = (name, status) => ({ checks: [{ name, status, detail: "alarm drill (synthetic)" }] });
@@ -149,7 +155,7 @@ async function drill() {
   const expect = (label, got, want) => { const ok = want.includes(got); log.push({ label, got, want, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${label}: delivery=${got} (expected ${want.join(" or ")})`); return ok; };
   let bad = false;
   const reset = await send([step("server-gate", "pass")]);              // start from a clean synthetic lane
-  if (!reset.ok) { const v = channelVerdict(reset); console.log("drill cannot reach the route:", v.detail); writeFileSync(OUT, JSON.stringify({ drill: true, channel: v, log }, null, 1)); return v.code || 1; }
+  if (!reset.ok) { const v = channelVerdict(reset); console.log("drill cannot reach the route:", v.detail); writeFileSync(OUT, JSON.stringify({ drill: true, channel: v, log }, null, 1)); return drillExitCode(v); }
   console.log("0 reset →", reset.body.delivery);
   const a = await send([step("server-gate", "fail"), step("server-gate", "fail")]);   // two failures in a row → ONE alert
   if (!a.ok) { const v = channelVerdict(a); console.log(v.detail); writeFileSync(OUT, JSON.stringify({ drill: true, channel: v, log }, null, 1)); return v.code; }
