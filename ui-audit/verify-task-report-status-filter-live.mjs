@@ -150,7 +150,7 @@ try {
   await press(frame, "red");    await verify("both → only In Progress", IP, ["yellow"]);
   await press(frame, "red");    await verify("both again", BOTH, ["yellow", "red"]);
   await press(frame, "all");    await verify("All", EVERY, ["all"]);
-  let sel = new Set(), seed = 11, walkOk = true, detail = ""; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  let sel = new Set(), rseed = 11, walkOk = true, detail = ""; const rnd = () => (rseed = (rseed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   for (let i = 0; i < 14 && walkOk; i++) {
     const k = ["yellow", "red", "all"][Math.floor(rnd() * 3)]; await press(frame, k);
     if (k === "all") sel = new Set(); else sel.has(k) ? sel.delete(k) : sel.add(k);
