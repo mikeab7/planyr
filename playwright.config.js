@@ -69,7 +69,7 @@ export default defineConfig({
       // set per-describe in the spec). Not part of the default `npm run e2e` set: it needs WebKit
       // installed (`npx playwright install --with-deps webkit`) — run with PW_WEBKIT_PHONE=1 --project=webkit-phone.
       name: "webkit-phone",
-      testMatch: /food-(first-visit|rating-slider)-phone\.spec\.js/,
+      testMatch: /(food-(first-visit|rating-slider)-phone|auth-captcha)\.spec\.js/, // auth-captcha also runs in the chromium project above
       use: { ...devices["iPhone 15"] },
       dependencies: ["setup"],
     }] : []),

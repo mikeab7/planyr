@@ -1,6 +1,6 @@
 /* POST /api/auth/e2e-session — sign-in route for the automated e2e TEST ACCOUNT ONLY (NEW-1).
  *
- * WHY: Supabase Turnstile captcha gates password sign-in, so a headless session cannot sign in as
+ * WHY: Supabase Turnstile captcha gates password sign-in (the app's own panel sends a token — NEW-1), so a headless session cannot be relied on to sign in as
  * e2e@planyr.test. Captcha stays ON for everyone; this is a separate door that can only ever open
  * onto that one account. (Owner decision 2026-10-04.)
  *

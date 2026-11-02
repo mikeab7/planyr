@@ -13,12 +13,13 @@ import { signIn, signUp, signOut, signOutEverywhere, resetPassword, updatePasswo
 // messages are generated from the one sender constant in lib/authMail.js.
 import { PASSWORD_RESET_MSG } from "../lib/authMail.js";
 import { MIN_PASSWORD_LENGTH, PASSWORD_MIN_HINT, signupOutcome, passwordHintVisible, checkEmailCopy } from "../lib/signupOutcome.js";
-// Cloudflare Turnstile (B1160720, NEW-1) — config-gated bot check on sign-up only. Not lazy:
-// this component and its config are both dependency-free (no external script loads until
-// mode === "signup" actually mounts the widget), so there's no bundle cost to keep it a
-// plain import the way the Team panel below is deliberately lazy.
+// Cloudflare Turnstile (B1160720; widened to sign-in + forgot-password by NEW-1): ONE widget, ONE token,
+// ONE gate for every logged-out mode. No external script loads until this form actually mounts the
+// widget, so a plain import costs nothing here (unlike the Team panel below, which is lazy).
 import Turnstile from "../../../shared/turnstile/Turnstile.jsx";
 import { turnstileEnabled } from "../../../shared/turnstile/turnstileConfig.js";
+import { useCaptchaGate } from "../../../shared/turnstile/useCaptchaGate.js";
+import { CAPTCHA_UNAVAILABLE_COPY } from "../../../shared/turnstile/captchaCopy.js";
 /* LAZY (B1064 tranche a). This file is reached from the Shell, so it lands in the shared ENTRY
  * chunk — the one chunk EVERY route downloads, planner or not. The Team tab is signed-in-only
  * and opens on an explicit click (the default tab is Profile), so nothing about it belongs on
@@ -39,6 +40,26 @@ const linkBtn = { border: "none", background: "transparent", color: PAL.accent, 
 // opened — initial focus goes to the dialog container (keeps the trap + screen-reader announcement).
 function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFirstInput = true, back = null, closeIcon = false }) {
   const panelRef = useRef(null);
+  // The focus effect below must run ONCE per mount: `onClose` is an inline function in the Shell, so its
+  // identity changes on every Shell re-render, and listing it as a dependency re-ran the effect mid-typing
+  // (cleanup refocused the opener, setup refocused the panel) — a field being filled lost focus and its
+  // value (measured: a password fill dropped ~1 run in 3 in mobile WebKit right after the panel opened).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // NEW-1 (phone): iOS Safari's on-screen keyboard overlays the page without resizing the fixed overlay,
+  // so a panel sized to the full height sits half behind it and the submit button is buried. Track the
+  // VISIBLE area (visualViewport) and size the overlay to it: the panel shrinks to what is above the
+  // keyboard and scrolls inside. Skipped while pinch-zoomed (scale ≠ 1) and where the API is missing —
+  // desktop is unchanged because the visual viewport equals the window there.
+  const [vv, setVv] = useState(null);
+  useEffect(() => {
+    const v = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!v) return undefined;
+    const read = () => setVv(Math.abs(v.scale - 1) < 0.01 && v.height < window.innerHeight - 1 ? { h: v.height, top: v.offsetTop } : null);
+    read();
+    v.addEventListener("resize", read); v.addEventListener("scroll", read);
+    return () => { v.removeEventListener("resize", read); v.removeEventListener("scroll", read); };
+  }, []);
   // Modal a11y (B530 + focus management): Escape-to-close, AND — because role=dialog /
   // aria-modal do NOT actually trap focus in browsers — move focus INTO the dialog on
   // open, TRAP Tab/Shift+Tab inside it, and RESTORE focus to the opener (the Sign-in
@@ -55,7 +76,7 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
     const wantInput = focusFirstInput && !isCoarsePointer();
     (wantInput ? (init.find((el) => el.tagName === "INPUT") || init[0] || panel) : panel)?.focus();
     const onKey = (e) => {
-      if (e.key === "Escape") { onClose && onClose(); return; }
+      if (e.key === "Escape") { onCloseRef.current && onCloseRef.current(); return; }
       if (e.key !== "Tab" || !panel) return;
       const els = getFocusable();
       if (!els.length) { e.preventDefault(); panel.focus(); return; }
@@ -68,10 +89,10 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
       document.removeEventListener("keydown", onKey, true);
       try { opener && opener.focus && opener.focus(); } catch (_) { /* opener gone — fine */ }
     };
-  }, [onClose, focusFirstInput]);
+  }, [focusFirstInput]);
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center", ...(vv ? { top: vv.top, bottom: "auto", height: vv.h } : null) }}>
+      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: vv ? Math.max(200, Math.floor(vv.h * 0.94)) : "88vh", overflowY: "auto", WebkitOverflowScrolling: "touch", outline: "none" }}>
         {back ? (
           /* Drilled-in section page (phone Settings): "‹ Settings" back link left, section title centred.
              Equal-width side slots keep the title optically centred; a long title truncates. */
@@ -424,40 +445,30 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   const [pwFocus, setPwFocus] = useState(false);
   // Set once a sign-up with confirmation ON succeeds: { email } replaces the whole form.
   const [done, setDone] = useState(null);
-  // Turnstile (B1160720): "loading" until the widget paints, "ready" once it can be solved,
-  // "error" if the script or Cloudflare itself failed — Submit stays disabled through both
-  // "loading" and "error" so a slow/unreachable Cloudflare degrades to "can't submit yet"
-  // rather than a blank or broken form.
-  const [captchaToken, setCaptchaToken] = useState("");
-  const [captchaState, setCaptchaState] = useState("loading");
-  const turnstileRef = useRef(null);
+  // Turnstile gate (NEW-1): decides WHEN a submit may send — see shared/turnstile/captchaGate.js.
+  // `perform` is the form's real submit; the gate calls it with the (single-use) token.
+  const { gate, view: cv, widgetKey, widgetRef } = useCaptchaGate((token) => perform(token));
+  const captchaOn = turnstileEnabled() && mode !== "recovery";
 
   // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
   // while this panel is already open, sync into recovery mode so the set-password form
   // shows (never resets a user's signin↔signup choice — only acts when recovery is true).
   useEffect(() => { if (recovery) setMode("recovery"); }, [recovery]);
-  // A stale token from a previous mount of the widget (e.g. signup → signin → signup)
-  // must never re-arm Submit before the freshly-remounted widget reports its own state.
-  useEffect(() => { if (mode !== "signup") setCaptchaToken(""); }, [mode]);
+  // Leaving a mode drops a submit that was still waiting for its token (the token itself stays: it is
+  // the same live widget). A recovery/done view unmounts the widget, which clears its own token.
+  useEffect(() => { gate.cancelPending(); }, [mode, gate]);
 
-  const submit = async () => {
+  const perform = async (token) => {
     if (submitting.current) return;
     submitting.current = true;
     setBusy(true); setMsg(null);
     try {
       if (mode === "signin") {
-        const { error } = await signIn(email.trim(), pw);
+        const { error } = await signIn(email.trim(), pw, token || undefined);
         error ? setMsg({ type: "err", text: error }) : onClose();
       } else if (mode === "signup") {
-        if (!first.trim() || !last.trim()) { setMsg({ type: "err", text: "First and last name are required." }); return; }
-        const needsCaptcha = turnstileEnabled();
-        if (needsCaptcha && !captchaToken) { setMsg({ type: "err", text: "Please complete the verification check." }); return; }
-        const res = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() }, captchaToken || undefined);
-        // A Turnstile token is single-use — whether the signup succeeded or the server
-        // rejected it (a stale/expired token reads as a captcha failure server-side too),
-        // the widget must reset so the NEXT attempt (retry, or the panel reopening) never
-        // resubmits a dead token and gets stuck failing silently.
-        if (needsCaptcha) { turnstileRef.current?.reset(); setCaptchaToken(""); }
+        const res = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() }, token || undefined);
+        // (The single-use token is spent and the widget reset by the gate after EVERY attempt, pass or fail.)
         const outcome = signupOutcome(res);
         if (outcome === "error") setMsg({ type: "err", text: res.error });
         else {
@@ -466,7 +477,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           else setDone({ email: email.trim() });
         }
       } else if (mode === "reset") {
-        const { error } = await resetPassword(email.trim());
+        const { error } = await resetPassword(email.trim(), token || undefined);
         setMsg(error ? { type: "err", text: error } : { type: "ok", text: PASSWORD_RESET_MSG });
       } else if (mode === "recovery") {
         const { error } = await updatePassword(pw);
@@ -474,6 +485,14 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
         else { setMsg({ type: "ok", text: "Password updated." }); setTimeout(onClose, 900); }
       }
     } finally { submitting.current = false; setBusy(false); }
+  };
+  // Every press of the button / Enter goes through here: validate what needs no token first (so a
+  // missing name never makes anyone wait on Cloudflare), then let the gate send now or when the
+  // token lands. A second press while waiting or sending is ignored by the gate.
+  const submit = () => {
+    if (mode === "signup" && (!first.trim() || !last.trim())) { setMsg({ type: "err", text: "First and last name are required." }); return; }
+    setMsg(null);
+    gate.submit({ needsToken: captchaOn });
   };
 
   // Signed-in account view (Profile + Settings) — not while completing a recovery.
@@ -523,7 +542,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company" value={org} onChange={(e) => setOrg(e.target.value)} style={field} />
         </>
       )}
-      <input aria-label="Email" type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
+      <input aria-label="Email" type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && mode === "reset") submit(); }} />
       {mode !== "reset" && (
         <input aria-label="Password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
           aria-describedby={mode === "signup" ? "auth-pw-hint" : undefined} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} />
@@ -531,16 +550,22 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
       {mode === "signup" && passwordHintVisible(pwFocus, pw) && (
         <div id="auth-pw-hint" data-testid="password-hint" style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 4 }}>{PASSWORD_MIN_HINT}</div>
       )}
-      {mode === "signup" && turnstileEnabled() && (
-        <div style={{ marginTop: 10 }}>
-          <Turnstile ref={turnstileRef} onToken={setCaptchaToken} onStateChange={setCaptchaState} />
-          {captchaState === "loading" && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Loading verification…</div>}
-          {captchaState === "error" && <div style={{ fontSize: 10.5, color: "var(--danger-text)", marginTop: 4 }}>Couldn't load verification — check your connection and try again.</div>}
+      {captchaOn && (
+        <div style={{ marginTop: mode === "signup" || cv.widget === "interactive" ? 10 : 0 }}>
+          <Turnstile key={widgetKey} ref={widgetRef} appearance={mode === "signup" ? "always" : "interaction-only"}
+            onToken={gate.setToken} onStateChange={gate.setWidgetState} onTimeout={gate.widgetTimedOut} />
+          {cv.widget === "interactive" && !cv.failure && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Finish the quick check to continue.</div>}
+          {(cv.widget === "error" || cv.failure) && (
+            <div role="alert" data-testid="captcha-unavailable" style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 6 }}>
+              {CAPTCHA_UNAVAILABLE_COPY}{" "}
+              <button data-testid="captcha-retry" style={linkBtn} onClick={() => gate.retry()}>Try again</button>
+            </div>
+          )}
         </div>
       )}
       <button data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }}
-        disabled={busy || !email || (mode !== "reset" && pw.length < MIN_PASSWORD_LENGTH) || (mode === "signup" && turnstileEnabled() && (captchaState !== "ready" || !captchaToken))}
-        onClick={submit}>{busy ? (mode === "signup" ? "Creating account…" : "…") : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
+        disabled={busy || cv.pending || !email || (mode !== "reset" && pw.length < MIN_PASSWORD_LENGTH)}
+        onClick={submit}>{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
       {mode !== "signup" && (
         <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
           {mode === "reset"

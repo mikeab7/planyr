@@ -3,7 +3,8 @@ import { expect } from "@playwright/test";
 
 export const E2E_EMAIL = process.env.E2E_EMAIL || "";
 export const E2E_PASSWORD = process.env.E2E_PASSWORD || "";
-/* NEW-1: when set, sign-in goes through /api/auth/e2e-session (captcha blocks password sign-in). */
+/* NEW-1: when set, sign-in goes through /api/auth/e2e-session — a headless browser cannot pass Cloudflare's Turnstile
+ * check the app's own sign-in panel now sends (the panel works for real users; only automation needs this door). */
 export const E2E_LOGIN_KEY = process.env.E2E_LOGIN_KEY || "";
 export const hasAccount = !!(E2E_LOGIN_KEY || (E2E_EMAIL && E2E_PASSWORD));
 

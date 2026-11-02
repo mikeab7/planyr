@@ -95,7 +95,8 @@ describe("NEW-3 — controls are scoped to their tab", () => {
       expect(si).not.toContain(label);
     }
   });
-  it("the Turnstile widget is gated on the signup tab", () => {
-    expect(src).toMatch(/mode === "signup" && turnstileEnabled\(\)/);
+  it("the Turnstile widget is shared by every logged-out tab, never recovery (NEW-1 — see authPanelTurnstile)", () => {
+    expect(src).toMatch(/turnstileEnabled\(\) && mode !== "recovery"/);
+    expect(src).not.toMatch(/mode === "signup" && turnstileEnabled\(\)/);
   });
 });
