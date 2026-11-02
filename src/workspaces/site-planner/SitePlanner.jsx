@@ -1483,7 +1483,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Landscape/Portrait control so that explicit choice sticks for the rest of THIS compose.
   const orientTouchedRef = useRef(false);
   const composePreviewUrlRef = useRef(null);
-  const preCanvasDisplayRef = useRef(null); // showDims/showAreas/showAerial as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
+  const preCanvasDisplayRef = useRef(null); // showDims/showAreas as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   /* B1469872 — this project's own "Recently deleted" plans: siblings soft-deleted from THIS group
@@ -17827,7 +17827,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
     setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
     setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
-    preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false, showAerial };
+    preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false };
     setPrintMode(true); setComposeMode(false); setExportMenu(false); setSel(null);
     import("./components/PrintCompose.jsx").catch(() => {}); // warm the compose chunk while the frame is being positioned — Continue shouldn't wait on a cold fetch
   };
@@ -17835,7 +17835,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
   // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
   const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
-  const aerialAvailable = !!(origin && basemapOn) || !!mapRef; // B765985 — gates the compose screen's "Aerial imagery" toggle
   const buildingsTablePrintable = els.some(isBuilding); // B1934529 — no dead "Buildings table" control on a plan with nothing to list
   const startPrintMove = (e) => {
     e.stopPropagation();
@@ -17965,7 +17964,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pre = preCanvasDisplayRef.current;
     if (pre) {
       setSettings((s) => (s.showDims === pre.showDims && s.showAreas === pre.showAreas) ? s : { ...s, showDims: pre.showDims, showAreas: pre.showAreas });
-      if (showAerial !== pre.showAerial) setShowAerial(pre.showAerial);
       preCanvasDisplayRef.current = null;
     }
   };
@@ -26715,7 +26713,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 preparedBy={settings.printPreparedBy || ""} onPreparedBy={(v) => setSettings((s) => ({ ...s, printPreparedBy: v }))}
                 showDims={settings.showDims !== false} onToggleDims={(v) => setSettings((s) => ({ ...s, showDims: v }))}
                 showAreas={settings.showAreas !== false} onToggleAreas={(v) => setSettings((s) => ({ ...s, showAreas: v }))}
-                aerialAvailable={aerialAvailable} showAerial={showAerial} onToggleAerial={setShowAerial}
                 overlayPrintable={overlayPrintable} printOverlay={printOverlay} onTogglePrintOverlay={setPrintOverlay}
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
