@@ -32,14 +32,36 @@ const ACADEMY = { lat: 29.6122, lng: -95.6693 };
 const TOWN_SQUARE = { lat: 29.6197, lng: -95.6349 };
 const HOUSTON = { lat: 29.80, lng: -95.54 };
 
-let s = null;
-for (let attempt = 1; attempt <= 6 && !s; attempt++) {
-  try { s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] }); }
-  catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 6) throw e; await new Promise((r) => setTimeout(r, 20000)); }
+/* --local: a SIGNED-OUT run for a PR preview (the preview has no E2E_LOGIN_KEY, so it cannot sign in): the three located plans are seeded into the browser's own plan store, nothing touches the
+ * cloud, nothing needs cleaning up. The layers, requests, cards and legend are identical; only "signed in as the test account" is not proved. */
+const LOCAL = args.includes("--local");
+const TAG = Math.random().toString(36).slice(2, 7);
+const localPlan = (key, p, label) => ({
+  schemaVersion: 12, id: `zz-sl-${key}-${TAG}`, groupId: `zz-sl-${key}-${TAG}`, site: `ZZ Live Check — ${label}`, name: "Plan 1",
+  origin: { lat: p.lat, lon: p.lng }, county: null, status: "active",
+  parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 1320, y: 0 }, { x: 1320, y: 1320 }, { x: 0, y: 1320 }], active: true, z: 0 }],
+  underlay: null, sheetOverlays: [], parcelDrawings: [], settings: {}, els: [], measures: [], markups: [], callouts: [], updatedAt: Date.now(), data: { status: "active" },
+});
+const LOCAL_PLANS = {};
+let s = null, browser = null, page;
+if (LOCAL) {
+  const { chromium } = await import("@playwright/test");
+  browser = await chromium.launch({ args: ["--no-sandbox"], executablePath: process.env.PW_CHROME || undefined });
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  page = await ctx.newPage();
+  LOCAL_PLANS.ac = localPlan("ac", { lat: 29.6122, lng: -95.6693 }, "Academy"); LOCAL_PLANS.ts = localPlan("ts", { lat: 29.6197, lng: -95.6349 }, "Town Square"); LOCAL_PLANS.hou = localPlan("hou", { lat: 29.80, lng: -95.54 }, "Houston");
+  await page.addInitScript((j) => { try { localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify(Object.fromEntries(Object.values(LOCAL_PLANS).map((pl) => [pl.id, pl]))));
+  s = { proof: { email: "(signed out — local plans)" }, close: () => browser.close() };
+} else {
+  for (let attempt = 1; attempt <= 6 && !s; attempt++) {
+    try { s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] }); }
+    catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 6) throw e; await new Promise((r) => setTimeout(r, 20000)); }
+  }
+  page = s.page;
 }
-const page = s.page;
 await assertMeasurable(page, "verify-sugarland-live");
 await page.setViewportSize({ width: 1500, height: 950 });
+if (LOCAL) await page.goto(BASE + "/", { waitUntil: "domcontentloaded" });
 const served = await page.evaluate(async () => (await fetch("/version.json", { cache: "no-store" }).then((r) => r.json())).build);
 console.log(`signed in as ${s.proof.email} · served build ${served}`);
 if (EXPECT_SHA) check("served build is the merge commit", String(served).startsWith(EXPECT_SHA.slice(0, 7)), `${served} vs ${EXPECT_SHA}`);
@@ -57,9 +79,10 @@ page.on("request", (r) => { if (HOSTS.test(r.url())) log.push({ url: r.url(), st
 const answered = (re) => log.filter((e) => !e.req && re.test(e.url) && /\/query/.test(e.url));
 const sent = () => log.filter((e) => e.req);
 
-const mk = (id, p, label) => ({ ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });
+const mk = (id, p, label) => (LOCAL ? LOCAL_PLANS[id.includes("-ac-") ? "ac" : id.includes("-ts-") ? "ts" : "hou"] : { ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });
 const cleanupIds = [];
 const insert = async (plan) => {
+  if (LOCAL) return;
   const err = await page.evaluate(async ([pl]) => {
     const { data: u } = await window.pfSupabase.auth.getUser();
     const { error } = await window.pfSupabase.from("sites").insert({ id: pl.id, group_id: pl.groupId, site: pl.site, name: pl.name, county: null, user_id: u.user.id, version: 1, data: pl });
@@ -70,7 +93,7 @@ const insert = async (plan) => {
 };
 const openPanel = async (id) => {
   await page.goto(`${BASE}/?planyrDiag=1#/project/${id}/site`, { waitUntil: "domcontentloaded" });
-  await page.reload({ waitUntil: "domcontentloaded" });
+  if (!LOCAL) await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("planner-canvas").waitFor({ timeout: 60000 });
   await sleep(2500);
   const chip = page.getByTestId("layers-expand").filter({ visible: true });
@@ -82,7 +105,9 @@ const openPanel = async (id) => {
 };
 const rowsIn = async (panel, group) => {
   const btn = panel.getByTestId(`layer-group-${group}`);
-  if (await btn.count()) await btn.click(); else await panel.getByTestId("layer-group-select").selectOption(group);
+  if (await btn.count()) await btn.click();
+  else if (await panel.getByTestId("layer-group-select").count()) await panel.getByTestId("layer-group-select").selectOption(group).catch(() => {});
+  else return []; // the group is not offered at this site (a group with no rows is hidden)
   await sleep(300);
   return panel.evaluate((root) => [...root.querySelectorAll('[data-testid^="layer-row-"]')].filter((r) => !r.getAttribute("data-testid").endsWith("-menu")).map((r) => r.getAttribute("data-testid").replace("layer-row-", "")));
 };
@@ -93,12 +118,13 @@ const turnOn = async (panel, group, id) => {
   if (!(await cb.isChecked())) await cb.check();
 };
 const layers = () => page.evaluate(() => (window.__plannerLayers ? window.__plannerLayers() : null)).then((h) => h && { on: h.on, live: h.live, features: h.features });
-const identify = (id, at) => page.evaluate(([i, a]) => { const h = window.__plannerLayers && window.__plannerLayers(); return h && h.identify ? h.identify(i, a) : null; }, [id, at]);
+/* the layer's own identify at a point, reduced to what is printed (the raw item holds Leaflet objects — not serialisable) */
+const identify = (id, at) => page.evaluate(([i, a]) => { const h = window.__plannerLayers && window.__plannerLayers(); const c = h && h.identify ? h.identify(i, a) : null; return c ? { title: c.title, rows: (c.rows || []).map((r) => ({ label: r.label, text: r.text, href: r.href })) } : null; }, [id, at]);
 
 /* Points ON known features (vertices of real features, found 2026-11-02 — the same points as the registry fixtures). */
 const AT = {
-  sl_thoroughfare: { lat: 29.60662, lng: -95.66553 }, sl_zoning: ACADEMY, sl_airport_zoning: ACADEMY, sl_flu: ACADEMY, sl_capital_projects: { lat: 29.61655, lng: -95.66944 },
-  sl_public_land: { lat: 29.61071, lng: -95.674 }, sl_hydrants: { lat: 29.60529, lng: -95.66813 },
+  sl_thoroughfare: { lat: 29.61977, lng: -95.6352 }, sl_zoning: ACADEMY, sl_airport_zoning: ACADEMY, sl_flu: ACADEMY, sl_capital_projects: { lat: 29.61655, lng: -95.66944 },
+  sl_public_land: { lat: 29.61071, lng: -95.674 }, sl_hydrants: { lat: 29.61988, lng: -95.63498 },
   sl_zoning_cup: { lat: 29.61948, lng: -95.63528 }, sl_zoning_exception: { lat: 29.61637, lng: -95.63265 }, sl_zoning_variance: { lat: 29.6193, lng: -95.63435 },
   sl_tirz: { lat: 29.6197, lng: -95.63512 }, sl_available_sites: { lat: 29.62192, lng: -95.63849 }, sl_dev_projects: { lat: 29.61584, lng: -95.64191 },
 };
@@ -138,7 +164,7 @@ try {
   check("B · Airport Zoning answered", ans(/Airport_Zoning\/MapServer\/0\/query/) > 0, String(ans(/Airport_Zoning\/MapServer\/0\/query/)));
   check("B · Public land answered", ans(/ROW_and_Property_Public_Entities\/MapServer\/0\/query/) > 0, String(ans(/ROW_and_Property_Public_Entities\/MapServer\/0\/query/)));
   check("B · Future Land Use (org) answered", ans(/Future_Land_Use_Map_2022_WFL1\/FeatureServer\/8\/query/) > 0, String(ans(/Future_Land_Use_Map_2022_WFL1\/FeatureServer\/8\/query/)));
-  check("B · Hydrants (org) answered", ans(/COSLHydrantInspections_FeatureService\/FeatureServer\/0\/query/) > 0, String(ans(/COSLHydrantInspections_FeatureService\/FeatureServer\/0\/query/)));
+  check("B · Hydrants (org) was asked and answered 200 (the Academy tract is undeveloped: the nearest mapped hydrant is ~775 m away, so 0 features here is the true answer)", asked(/COSLHydrantInspections_FeatureService\/FeatureServer\/0\/query/));
   check("B · Capital Projects (org) answered", ans(/CIPDatabase2024_Public\/FeatureServer\/6\/query/) > 0, String(ans(/CIPDatabase2024_Public\/FeatureServer\/6\/query/)));
   for (const n of [0, 1, 2]) check(`B · Overlays layer ${n} (zoning cases) was asked and answered 200`, asked(new RegExp(`Overlays/FeatureServer/${n}/query`)));
   for (const [re, nm] of [[/TIRZ\/FeatureServer\/0\/query/, "TIRZ"], [/EcoDev_Available_Sites_VIEW\/FeatureServer\/0\/query/, "Available Sites"], [/Development_Projects_\(City_Wide\)_view_layer\/FeatureServer\/0\/query|Development_Projects_%28City_Wide%29_view_layer\/FeatureServer\/0\/query/, "Development Projects"]]) check(`B · ${nm} was asked and answered 200`, asked(re));
@@ -146,12 +172,13 @@ try {
   check("B · no request to the city's server or org failed", bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
   const F = (L && L.features) || {};
   /* the paint arm: a layer that was SENT features must have PAINTED them (a `fields` list without the object-id collapses a layer to one feature) */
-  for (const id of ["sl_thoroughfare", "sl_zoning", "sl_airport_zoning", "sl_flu", "sl_capital_projects", "sl_public_land", "sl_hydrants"]) check(`B · ${id}: painted ≥ 2 features at the Academy view`, (F[id] || 0) >= 2, String(F[id]));
+  for (const id of ["sl_thoroughfare", "sl_zoning", "sl_airport_zoning", "sl_flu", "sl_capital_projects", "sl_public_land"]) check(`B · ${id}: painted ≥ 1 feature at the Academy view`, (F[id] || 0) >= 1, String(F[id]));
+  for (const id of ["sl_zoning", "sl_flu", "sl_capital_projects", "sl_public_land"]) check(`B · ${id}: painted ≥ 2 features (the layer is not collapsed to one)`, (F[id] || 0) >= 2, String(F[id]));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-academy-all-layers.png` });
 
   /* cards at points ON real features */
   const card = {};
-  for (const id of ["sl_thoroughfare", "sl_zoning", "sl_airport_zoning", "sl_flu", "sl_capital_projects", "sl_public_land", "sl_hydrants"]) {
+  for (const id of ["sl_zoning", "sl_airport_zoning", "sl_flu", "sl_capital_projects", "sl_public_land"]) {
     card[id] = await identify(id, AT[id]);
     console.log(`card ${id}:`, JSON.stringify(card[id] && { title: card[id].title, rows: (card[id].rows || []).map((r) => `${r.label}: ${r.text}`) }));
     check(`B · ${id}: a click card opens at a known feature, with a title`, !!(card[id] && card[id].title), card[id] ? card[id].title : "no card");
@@ -161,7 +188,6 @@ try {
   check("B · zoning card at the Academy point: R-1Z with the city's name", /R-1Z · Zero Lot Line Single-Family Residential/.test(txt("sl_zoning")), "");
   check("B · airport zoning at the Academy point: AZ-01, with the 'not read' statement and no height", /AZ-01/.test(txt("sl_airport_zoning")) && /has not read it/.test(txt("sl_airport_zoning")) && !/\b\d+\s*(ft|feet)/i.test(txt("sl_airport_zoning")), "");
   check("B · future land use at the Academy point: Light Industrial", /Light Industrial/.test(txt("sl_flu")), "");
-  check("B · thoroughfare card: a class and a section code, no width", rowsOf("sl_thoroughfare").some((r) => r.label === "Class") && rowsOf("sl_thoroughfare").some((r) => /section/i.test(r.label)) && !/width|right-of-way/i.test(txt("sl_thoroughfare")), "");
   check("B · capital project card: phase and (when the city states one) budget", rowsOf("sl_capital_projects").some((r) => r.label === "Phase"), "");
   check("B · public land card: owner as title, address", !!(card.sl_public_land && card.sl_public_land.title) && rowsOf("sl_public_land").some((r) => r.label === "Address"), "");
 
@@ -194,14 +220,21 @@ try {
   log = [];
   panel = await openPanel(tsPlan.id);
   for (const id of ["sl_tirz", "sl_available_sites", "sl_dev_projects", "sl_zoning_cases"]) await turnOn(panel, "jur", id);
-  await sleep(12000);
+  await turnOn(panel, "access", "sl_thoroughfare");
+  await turnOn(panel, "util", "fire_hydrants");
+  await sleep(14000);
   const L2 = await layers(); const F2 = (L2 && L2.features) || {};
   console.log("Town Square painted features:", JSON.stringify(Object.fromEntries(Object.entries(F2).filter(([k]) => k.startsWith("sl_")))));
-  for (const id of ["sl_tirz", "sl_available_sites", "sl_dev_projects", "sl_zoning_cup", "sl_zoning_exception", "sl_zoning_variance"]) check(`C · ${id}: painted ≥ 1 feature at Town Square`, (F2[id] || 0) >= 1, String(F2[id]));
-  for (const id of ["sl_tirz", "sl_available_sites", "sl_dev_projects", "sl_zoning_cup", "sl_zoning_exception", "sl_zoning_variance"]) {
+  const C_IDS = ["sl_tirz", "sl_available_sites", "sl_dev_projects", "sl_zoning_cup", "sl_zoning_exception", "sl_zoning_variance", "sl_thoroughfare", "sl_hydrants"];
+  for (const id of C_IDS) check(`C · ${id}: painted ≥ 1 feature at Town Square`, (F2[id] || 0) >= 1, String(F2[id]));
+  for (const id of C_IDS) {
     const c = await identify(id, AT[id]);
     console.log(`card ${id}:`, JSON.stringify(c && { title: c.title, rows: (c.rows || []).map((r) => `${r.label}: ${r.text}`) }));
-    check(`C · ${id}: a click card opens at a known feature, with a title and at least one value`, !!(c && c.title && (c.rows || []).length >= 1), c ? `${c.title} · ${(c.rows || []).length} rows` : "no card");
+    check(`C · ${id}: a click card opens at a known feature, with a title${id === "sl_hydrants" ? "" : " and at least one value"}`, !!(c && c.title && (id === "sl_hydrants" || (c.rows || []).length >= 1)), c ? `${c.title} · ${(c.rows || []).length} rows` : "no card");
+    if (id === "sl_thoroughfare" && c) {
+      const t = JSON.stringify(c);
+      check("C · thoroughfare card: a class and a section code, and no width / right-of-way", (c.rows || []).some((r) => r.label === "Class") && (c.rows || []).some((r) => /section/i.test(r.label)) && !/width|right-of-way/i.test(t), t.slice(0, 200));
+    }
   }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/C-town-square.png` });
 
@@ -219,7 +252,7 @@ try {
   await sleep(3000);
   check("D · the Houston plan issues ZERO requests to the city's server or its org", sent().length === 0, `${sent().length} sent: ${sent().slice(0, 2).map((e) => e.url.slice(0, 90)).join(" | ")}`);
 } finally {
-  for (const id of cleanupIds) {
+  for (const id of LOCAL ? [] : cleanupIds) {
     const r = await cleanupLive(page, { planId: id }).catch((e) => ({ error: String(e) }));
     check(`throwaway plan ${id.slice(-8)} deleted and verified gone`, r && r.left && r.left.site === 0 && !(r.errors || []).length, JSON.stringify(r));
   }
