@@ -2,8 +2,8 @@
  *   E2E_EMAIL=… E2E_PASSWORD=… node ui-audit/verify-auth-captcha-live.mjs [https://planyr.io] [chromium|webkit]
  * webkit = Playwright WebKit with the iPhone 15 descriptor (docs/PHONE-TESTING.md: say "WebKit", never "iPhone").
  * Steps: panel opens quiet · wrong password → plain message · right password signs in · forgot password confirms ·
- * sign-up renders its check. Each step prints PASS / FAIL / REFUSED. REFUSED means Cloudflare itself withheld a
- * token from this headless browser — that is NOT a pass (the live check on a real browser stays owed) and we do
+ * sign-up renders its check. Each step prints PASS / FAIL / REFUSED. REFUSED means NO token was produced (Cloudflare withheld it, or the environment's egress policy denies
+ * challenges.cloudflare.com — `curl` it first) — that is NOT a pass (the live check on a real browser stays owed) and we do
  * not route around it. The served build (/version.json) and chunk hashes are read in the SAME call as every
  * assertion's page. Creates nothing: sign-up is opened, never submitted; the only mail is one reset for the test account. */
 import { chromium, webkit, devices } from "@playwright/test";
@@ -60,7 +60,7 @@ try {
   const t2 = await dlg.innerText();
   if (/captcha|disallowed|captcha_token/i.test(t2)) note("2 wrong password → plain message", "FAIL", "raw captcha wording on screen: " + t2.slice(-120));
   else if (/Invalid login credentials/i.test(t2)) note("2 wrong password → plain message", "PASS", "Invalid login credentials");
-  else if (/couldn't verify this browser|couldn't run the browser check/i.test(t2) || refusedFor("/auth/v1/token").length) note("2 wrong password → plain message", "REFUSED", "Cloudflare/Supabase withheld the check from this headless browser; screen said: " + t2.split("\n").slice(-2).join(" | "));
+  else if (/couldn't verify this browser|couldn't run the browser check/i.test(t2) || refusedFor("/auth/v1/token").length) note("2 wrong password → plain message", "REFUSED", "no token was produced (widget state: " + wState + " — Cloudflare withholding the check, OR this environment denying challenges.cloudflare.com); screen said: " + t2.split("\n").slice(-2).join(" | "));
   else note("2 wrong password → plain message", "FAIL", t2.slice(-120));
 
   await dlg.getByLabel("Password").fill(goodPw);
