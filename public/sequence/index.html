@@ -17973,6 +17973,38 @@ const DEFAULT_MASTER_WIDTHS = {
   predecessors:180, successors:180, notes:80,
 };
 
+// ── Task Report status filter (NEW-1) ─────────────────────────────────────────────────────────
+// The Task Report used to carry ONE chip, "In Progress + Needs Attn." (`masterHealthFilter: true`) that
+// toggled with "All Statuses" (`false`) — a lump the owner could only clear whole. It is now a real
+// two-option status filter: In Progress and Needs Attention are independently selectable.
+//   · stored value  — `masterHealthFilter` stays the one saved key. Legacy `true` (the old default, and what an
+//     account that never touched the chip holds) = BOTH on; legacy `false` = NEITHER = every status. A new
+//     value is an array of the selected keys. Anything unreadable falls back to the default (both on), never to
+//     a silent "nothing matches".
+//   · NONE selected means ALL statuses (the old "All Statuses" state) — so clearing never dead-ends, and
+//     Not Started / Complete / Paused / a custom status all stay reachable there (they were only ever reachable
+//     through that state; they are deliberately NOT filter options of their own).
+//   · ONE classification — a row passes on its DISPLAYED status (`_disp`: rolled for a parent, rule-computed for a
+//     leaf), the same value that paints the row's status pill and orders the Status sort. Never a second copy.
+const REPORT_STATUS_OPTIONS = [{ k: "yellow", label: "In Progress" }, { k: "red", label: "Needs Attention" }];
+const REPORT_STATUS_DEFAULT = ["yellow", "red"];
+function reportStatusKeys(v) {
+  if (v === false) return [];
+  if (!Array.isArray(v)) return REPORT_STATUS_DEFAULT.slice();
+  const ks = REPORT_STATUS_OPTIONS.map(o => o.k).filter(k => v.includes(k));   // canonical order, unknown keys dropped
+  return ks;
+}
+function reportStatusToggle(keys, k) {
+  const has = keys.includes(k);
+  return REPORT_STATUS_OPTIONS.map(o => o.k).filter(x => (x === k ? !has : keys.includes(x)));
+}
+function reportStatusPasses(keys, disp) { return keys.length === 0 || keys.includes(disp); }
+function reportStatusPhrase(keys, nameOf) {
+  const names = REPORT_STATUS_OPTIONS.filter(o => keys.includes(o.k)).map(o => nameOf(o));
+  return names.length === 0 ? "" : names.join(" or ");
+}
+// ── end Task Report status filter ──────────────────────────────────────────────────────────────
+
 // B1873360 — MasterView's "Group by project" sections, keyed and ordered so two schedules that
 // happen to share a bare name (the owner's live account has two schedules both named "Master
 // Schedule", one under Goose Creek and one under Grand Port) can never merge into one section.
@@ -18159,8 +18191,11 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const setLvlFilter = f => setData(d => ({...d, masterLevelFilter: f}));
   const lvlActive = lvlFilter.leafOnly || lvlFilter.depths.length < 4;
 
-  const masterHealthFilter = data.masterHealthFilter ?? true; // true = active only (red+yellow), false = all
-  const setHealthFilter = v => setData(d => ({...d, masterHealthFilter: v}));
+  // NEW-1 — the Task Report's status filter (see reportStatusKeys): the selected statuses, [] = every status.
+  const statusKeys = useMemo(() => reportStatusKeys(data.masterHealthFilter), [data.masterHealthFilter]);
+  const setStatusKeys = keys => setData(d => ({...d, masterHealthFilter: keys}));
+  const statusName = o => (data.settings?.healthLabelOverrides?.[o.k]) || o.label;   // a renamed built-in status reads as renamed
+  const totalTaskCount = useMemo(() => Object.values(data.projects).reduce((s, p) => s + p.tasks.length, 0), [data.projects]);
 
   // Per-project rolled status, so a PARENT row shows the worst-of-its-children status (matching
   // the grid/Gantt) instead of its own stale `health`. Recomputes when projects/settings/today
@@ -18179,7 +18214,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       const _own = ownerOf(p); // NEW-1 — the project (group) this schedule belongs to; null for an org-owned one
       const projSiteId = _own.kind === OWNER_KIND_SITE ? _own.siteId : null;
       return p.tasks
-        .filter(t => !masterHealthFilter || (h => h==="red" || h==="yellow")(dispOf(t, childIds.has(t.id), rolled, byId)))
+        .filter(t => reportStatusPasses(statusKeys, dispOf(t, childIds.has(t.id), rolled, byId)))
         .map(t => {
           let depth = 0, cur = t;
           while (cur && cur.parentId !== null) {
@@ -18190,7 +18225,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           return {...t, projName: p.name, projId: p.id, projSiteId, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks)};
         });
     });
-  }, [data.projects, masterHealthFilter, data.settings, NOW]);
+  }, [data.projects, statusKeys, data.settings, NOW]);
 
   const filteredRows = useMemo(() => {
     if (lvlFilter.leafOnly) return rows.filter(r => r.isLeaf);
@@ -18650,20 +18685,27 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         <span style={{color:"var(--amber)",fontWeight:600,fontSize:13,letterSpacing:".08em"}}>TASK REPORT</span>
         <span style={{background:"#dbeafe",color:"#1d4ed8",borderRadius:8,padding:"1px 8px",fontSize:10}}>{filteredRows.length}</span>
 
-        {/* Health filter pill */}
-        <button onClick={()=>setHealthFilter(!masterHealthFilter)}
-          style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:12,
-            fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:500,transition:"all .12s",
-            border: masterHealthFilter?"1px solid #f59e0b":"1px solid var(--bd2)",
-            background: masterHealthFilter?"#fef3c7":"var(--surf)",
-            color: masterHealthFilter?"#92400e":"var(--mut)"}}>
-          <span style={{width:6,height:6,borderRadius:"50%",background:masterHealthFilter?"#f59e0b":"var(--bd2)",flexShrink:0}} />
-          {masterHealthFilter ? "In Progress + Needs Attn." : "All Statuses"}
-          <svg width="8" height="8" viewBox="0 0 10 10" style={{marginLeft:1,opacity:.6}}>
-            <line x1="2" y1="2" x2="8" y2="8" stroke="currentColor" strokeWidth="1.5"/>
-            <line x1="8" y1="2" x2="2" y2="8" stroke="currentColor" strokeWidth="1.5"/>
-          </svg>
-        </button>
+        {/* Status filter (NEW-1) — In Progress and Needs Attention are independent toggles; "All" = neither
+            selected = every status (the old "All Statuses"). Same segmented look as Group by. */}
+        <div role="group" aria-label="Filter by status" data-status-filter style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+          <span style={{fontSize:10,color:"var(--mut)",fontWeight:500,letterSpacing:".04em",whiteSpace:"nowrap"}}>Status</span>
+          <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:5,overflow:"hidden"}}>
+            {[{k:"all",l:"All",on:statusKeys.length===0,dot:null,title:"Show every status",fn:()=>setStatusKeys([])},
+              ...REPORT_STATUS_OPTIONS.map(o => ({k:o.k,l:statusName(o),on:statusKeys.includes(o.k),dot:(HEALTH[o.k]||{}).dot,
+                title:(statusKeys.includes(o.k)?"Hide ":"Show ")+statusName(o)+" tasks",fn:()=>setStatusKeys(reportStatusToggle(statusKeys,o.k))}))
+            ].map(seg=>(
+              <button key={seg.k} type="button" data-status-seg={seg.k} aria-pressed={seg.on} title={seg.title} onClick={seg.fn}
+                style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",
+                  border:"none",fontFamily:"inherit",
+                  background:seg.on?"var(--amber)":"transparent",
+                  color:seg.on?"#fff":"var(--mut)",
+                  transition:"background .12s,color .12s",fontWeight:seg.on?600:400}}>
+                {seg.dot && <span style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:seg.on?"#fff":seg.dot}} />}
+                {seg.l}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Group by */}
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,marginRight:6,flexShrink:0}}>
@@ -18901,7 +18943,11 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           ))}
           {sortedRows.length===0 && (
             <tr><td colSpan={displayCols.length + 2} style={{padding:40,textAlign:"center",color:"var(--mut)",fontSize:12,borderBottom:"1px solid var(--bd)"}}>
-              {filteredRows.length===0&&rows.length>0?"No tasks match the current filter.":"No tasks in this project yet."}
+              {totalTaskCount===0 ? "No tasks in this project yet."
+                : rows.length===0 && statusKeys.length>0
+                  ? <span data-status-empty>No tasks are {reportStatusPhrase(statusKeys, statusName)}. <button type="button" onClick={()=>setStatusKeys([])}
+                      style={{border:"none",background:"none",padding:0,font:"inherit",color:"var(--blue)",textDecoration:"underline",cursor:"pointer"}}>Show all statuses</button></span>
+                  : "No tasks match the current filter."}
             </td></tr>
           )}
         </tbody>
