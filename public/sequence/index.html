@@ -11776,7 +11776,13 @@ function App() {
           <span style={{fontSize:14,flexShrink:0}}>🔒</span>
           <span style={{flex:1}}>
             <strong>Sign in to see this schedule.</strong>{" "}
-            Showing a blank starter copy — sign in above, then reload.
+            Showing a blank starter copy —{" "}
+            {window.self === window.top
+              /* Standalone /sequence/ has no sign-in form of its own (NEW-1): the link opens Planyr's sign-in panel on the
+                 Schedule tab. Embedded in Planyr, the header's Sign in button (top right) is the way. */
+              ? <a data-testid="sequence-signin-link" href="/?app&auth=signin#/schedule" style={{color:"inherit",fontWeight:700}}>sign in to Planyr</a>
+              : <>use Sign in at the top right of Planyr</>}
+            , then reload.
           </span>
         </div>
       )}

@@ -30,16 +30,18 @@ describe("AuthPanel — one shared Turnstile widget (NEW-1)", () => {
   });
 
   it("the token is forwarded into signIn(), resetPassword() AND signUp() — from the gate, not a stand-in", () => {
-    expect(panelSrc).toContain("signIn(email.trim(), pw, token || undefined)");
-    expect(panelSrc).toContain("resetPassword(email.trim(), token || undefined)");
+    expect(panelSrc).toContain("signIn(v.email.trim(), v.pw, token || undefined)");
+    expect(panelSrc).toContain("resetPassword(v.email.trim(), token || undefined)");
     expect(panelSrc).toContain("token || undefined);"); // signUp's last argument
   });
 
   it("the submit button is NOT disabled while the token loads, and says Verifying… once pressed", () => {
-    const btn = panelSrc.slice(panelSrc.indexOf('data-testid="auth-submit"'));
-    const disabled = btn.slice(btn.indexOf("disabled={"), btn.indexOf("onClick={submit}"));
+    const btn = panelSrc.slice(panelSrc.lastIndexOf('data-testid="auth-submit"'));   // the logged-out form's button
+    const disabled = btn.slice(btn.indexOf("disabled={"), btn.indexOf(">{busy"));
     expect(disabled).not.toMatch(/captcha|Turnstile|token|widget/i);
     expect(disabled).toContain("cv.pending");
+    // NEW-1 point 3: never greyed for a MISSING FIELD either — Submit says what is missing instead.
+    expect(disabled).not.toMatch(/email|pw|password|first|last|MIN_PASSWORD/);
     expect(btn).toContain('"Verifying…"');
   });
 
@@ -73,5 +75,32 @@ describe("auth.js — one place turns a captcha refusal into plain words (NEW-1)
   it("signIn and resetPassword forward the token (omit-when-empty), like signUp", () => {
     expect(authSrc).toMatch(/signIn\(email, password, captchaToken\)/);
     expect(authSrc).toMatch(/resetPassword\(email, captchaToken\)/);
+  });
+});
+
+/* NEW-1 (follow-up to B2619760) — structural guards for the panel's no-dead-end rules. The behaviour is proven in
+ * e2e/auth-dead-ends.spec.js (real browser); these catch the shape coming back. */
+describe("AuthPanel — no dead ends (NEW-1 follow-up)", () => {
+  it("the logged-out view is ONE real <form> with a submit button and a submit handler (password managers, Enter from any field)", () => {
+    const main = panelSrc.slice(panelSrc.lastIndexOf("// Logged-out forms: signin / signup / reset."));
+    expect(main).toMatch(/<form ref=\{formRef\} noValidate onSubmit=\{onFormSubmit\}>/);
+    expect(main).toMatch(/type="submit" data-testid="auth-submit"/);
+    expect(main).not.toMatch(/onKeyDown=\{\(e\) => \{ if \(e\.key === "Enter"/);   // Enter is the form's job now
+    expect(main).not.toMatch(/onClick=\{submit\}/);
+  });
+  it("fields are read from the DOM at submit and again when a deferred submit fires", () => {
+    expect(panelSrc).toContain("const readDom = () =>");
+    expect(panelSrc).toMatch(/const v = readDom\(\);\s*\n\s*setBusy\(true\)/);   // perform() reads the DOM, not stale state
+    expect(panelSrc).toMatch(/validateAuthFields\(\{ mode, email: v\.email/);
+  });
+  it("the set-new-password view cannot be dismissed", () => {
+    expect(panelSrc).toMatch(/title="Set a new password" dismissable=\{false\}/);
+    expect(panelSrc).toContain("dismissRef.current");
+    expect(panelSrc).toMatch(/onClick=\{dismissable \? onClose : undefined\}/);
+  });
+  it("a failure's next step is offered, and the minimum length has one home", () => {
+    for (const label of ["Try again", "Sign in instead", "Reset your password", "Send a new link"]) expect(panelSrc).toContain(label);
+    expect(panelSrc).not.toMatch(/pw\.length (>=|<) 6/);
+    expect(panelSrc).not.toContain("min 6 characters");
   });
 });

@@ -74,11 +74,14 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
         widgetIdRef.current = turnstile.render(hostRef.current, {
           sitekey: TURNSTILE_SITE_KEY,
           appearance,
+          // "flexible" (NEW-1 point 7): the visible challenge shrinks to the container instead of a fixed
+          // 300 px box that overflows a narrow phone; it still renders at full size where there is room.
+          size: "flexible",
           "refresh-expired": "auto",
           callback: (token) => { cb.current.onToken && cb.current.onToken(token); report("ready"); },
           "expired-callback": () => { cb.current.onToken && cb.current.onToken(""); }, // Turnstile refreshes it itself
           "error-callback": () => { cb.current.onToken && cb.current.onToken(""); report("error"); },
-          "timeout-callback": () => { cb.current.onToken && cb.current.onToken(""); cb.current.onTimeout && cb.current.onTimeout(); },
+          "timeout-callback": () => { cb.current.onToken && cb.current.onToken(""); cb.current.onTimeout && cb.current.onTimeout(); report("error"); },
           "before-interactive-callback": () => report("interactive"),
           "after-interactive-callback": () => report("ready"),
         });

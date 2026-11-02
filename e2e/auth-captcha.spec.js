@@ -93,7 +93,7 @@ test.describe("auth panel — captcha on sign in, forgot password and sign up", 
     await page.goto("/?app&auth=signin");
     await fillSignIn(page, "wrong-password");
     await submit(page).click();
-    await expect(dlg(page)).toContainText("Invalid login credentials");
+    await expect(dlg(page)).toContainText("That email and password don't match.");   // plain words (NEW-1 point 2), never the server's "Invalid login credentials"
     await expect(dlg(page)).not.toContainText(/captcha/i);
     await dlg(page).getByLabel("Password").fill("right-password");
     await submit(page).click();
@@ -204,10 +204,9 @@ test.describe("auth panel — captcha on sign in, forgot password and sign up", 
     await page.unroute("**/*");
     await mock(page, { calls });
     await page.getByTestId("captcha-retry").click();
-    await expect(page.getByTestId("captcha-unavailable")).toHaveCount(0);
-    await page.waitForTimeout(150);
-    await submit(page).click();
+    // NEW-1 point 7: Try again finishes the press that failed — no second press needed.
     await expect(dlg(page)).toHaveCount(0);
+    expect(calls.filter((c) => c.path === "/auth/v1/token")).toHaveLength(1);
   });
 
   test("a check that never returns stops waiting and says so, with a working Try again", async ({ page }) => {
@@ -223,9 +222,8 @@ test.describe("auth panel — captcha on sign in, forgot password and sign up", 
     await expect(submit(page)).not.toHaveText("Verifying…");
     expect(calls).toHaveLength(0);
     await page.evaluate(() => { window.__tsNoToken = false; });
-    await page.getByTestId("captcha-retry").click();           // re-renders the widget
+    await page.getByTestId("captcha-retry").click();           // re-renders the widget and finishes the press by itself (NEW-1 point 7)
     await page.clock.runFor(200);
-    await submit(page).click();
     await expect(dlg(page)).toHaveCount(0);
   });
 
