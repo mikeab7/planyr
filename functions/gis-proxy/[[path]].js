@@ -37,6 +37,10 @@ export const ALLOWED_HOSTS = new Set([
   "gis.deq.ms.gov", // MDEQ Office of Land and Water Resources + Office of Geology
   "opcgis.deq.state.ms.us", // MDEQ Office of Pollution Control (MUSTER tanks, GARD sites, 303(d) list)
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
+  /* NEW-1 (Sugar Land city layers, 2026-11-02) — the City of Sugar Land's own ArcGIS Server 10.91 (thoroughfare plan, zoning, airport zoning, water-system areas, districts, public land).
+   * It sends no CORS header and the build sandbox's egress refuses it, so every layer on it is read through this relay and was MEASURED on the PR preview. Login-gated folders
+   * (PW_Utilities, CIP, CityHall, CWOL_Services, GTG) are never read. */
+  "interactivemaps.sugarlandtx.gov",
   /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
    * Integrity GIS runs five Geocortex pools; a county's public site lives on exactly one of them. */
   "adairgis.integritygis.com", "audraingis.integritygis.com", "barrygis.integritygis.com", "bartongis.integritygis.com", "bentongis.integritygis.com",
