@@ -16,6 +16,11 @@
  *
  *   node ui-audit/verify-row-highlight-continuous.mjs             [PW_CHROME=<chrome>]
  *   HTML=<path to an older index.html> node …                      (red-proof against the pre-fix source)
+ *
+ * LIVE MODE (V2063568): `E2E_LOGIN_KEY=… PLANYR_URL=https://planyr.io EXPECT_BUILD=<sha> node ui-audit/verify-row-highlight-continuous.mjs`
+ * signs in as the test account (ui-audit/lib/signedInSession.mjs), seeds ONE throwaway cloud schedule from this fixture (the pattern of
+ * verify-grid-strip.mjs), drives the DEPLOYED /sequence/ page with the same checks, reads /version.json in the same run, and soft-deletes
+ * every schedule row it created (owner constraint 15). Never touches a real schedule.
  */
 import { chromium } from "playwright";
 import { createServer } from "node:http";
@@ -73,19 +78,62 @@ const fixture = view => ({ aPid: 1, nPid: 2, nTid: 1000, view, section: "project
 const results = []; let voided = false;
 const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); console.log(`${cond ? "PASS ✅" : "FAIL ❌"} — ${name}${extra ? "  ::  " + extra : ""}`); };
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+const LIVE = process.env.PLANYR_URL || null;
+let browser = null, liveSession = null, liveBefore = null, liveId = null, liveBuild = null;
+const liveIds = () => liveSession.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id").is("deleted_at", null); if (q.error) throw new Error(q.error.message); return q.data.map(r => r.id); });
+if (LIVE) {
+  const { openSignedIn } = await import("./lib/signedInSession.mjs");
+  liveSession = await openSignedIn({ base: LIVE, viewport: { width: 1280, height: 900 } });
+  ok("[known-good] signed in as the test account", liveSession.proof.email === "e2e@planyr.test", liveSession.proof.email);
+  liveBefore = new Set(await liveIds());
+  // a first visit to /sequence/ creates ONE throwaway cloud row; overwrite it with the fixture
+  const seedPage = await liveSession.page.context().newPage(); await seedPage.setViewportSize({ width: 1600, height: 950 });
+  await seedPage.goto(LIVE + "/sequence/", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await seedPage.waitForSelector('[data-testid="open-history-desktop"], button:has-text("New schedule")', { timeout: 40000 });
+  if (!(await seedPage.locator('[data-testid="open-history-desktop"]').count())) { await seedPage.getByRole("button", { name: "New schedule" }).click(); await pacedWait(seedPage, 3000); }
+  await pacedWait(seedPage, 3000); await seedPage.close();
+  const ids = (await liveIds()).filter(i => !liveBefore.has(i));
+  if (ids.length !== 1) { console.log("expected exactly one throwaway schedule row, found " + JSON.stringify(ids)); process.exit(1); }
+  liveId = ids[0];
+  const seedErr = await liveSession.page.evaluate(async ({ id, fx }) => {
+    const r = await window.pfSupabase.from("schedules").select("rev").eq("id", id).single();
+    if (r.error) return r.error.message;
+    const u = await window.pfSupabase.from("schedules").update({ name: fx.name, data: { ...fx, id }, rev: (r.data.rev || 0) + 1 }).eq("id", id).select("id");
+    return u.error ? u.error.message : (u.data && u.data.length ? null : "update matched no row"); }, { id: liveId, fx: fixture("grid").projects[1] });
+  if (seedErr) { console.log("could not seed the throwaway row: " + seedErr); process.exit(1); }
+} else {
+  browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+}
+async function finish() {
+  if (LIVE) {
+    const created = (await liveIds()).filter(i => !liveBefore.has(i));
+    const err = await liveSession.page.evaluate(async (ids) => { for (const i of ids) { const u = await window.pfSupabase.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", i); if (u.error) return u.error.message; } return null; }, created);
+    const left = (await liveIds()).filter(i => !liveBefore.has(i));
+    ok(`cleanup: the ${created.length} throwaway schedule row(s) this run created are deleted and none remains live`, !err && left.length === 0, JSON.stringify({ created, err, left }));
+    await liveSession.close();
+  } else { await browser.close(); server.close(); }
+}
 
 async function openGrid(view, w, h) {
-  const page = await browser.newPage({ viewport: { width: w, height: h } });
+  const page = LIVE ? await liveSession.page.context().newPage() : await browser.newPage({ viewport: { width: w, height: h } });
+  if (LIVE) await page.setViewportSize({ width: w, height: h });
   page.on("dialog", d => d.accept());      // the import asks "replace?" — dismissing it silently keeps the starter project
-  await page.goto(URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
+  page.on("pageerror", e => console.log("  [pageerror]", e.message.slice(0, 160)));
+  await page.goto(LIVE ? LIVE + "/sequence/" : URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForSelector("[data-task-row]", { timeout: 40000 });
   await assertMeasurable(page, "verify-row-highlight-continuous");
-  await page.locator('[data-testid="open-history-desktop"]').click(); await pacedWait(page, 250);
-  await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(fixture(view))) });
-  await pacedWait(page, 700);
-  await page.locator('[data-testid="history-panel"] button:has-text("Close")').click(); await pacedWait(page, 1500);
-  await page.locator(`.hdr-view button:has-text("${view === "grid" ? "Grid" : "Split"}")`).click(); await pacedWait(page, 600);
+  if (LIVE) {
+    await pacedWait(page, 1800);
+    liveBuild = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then(r => r.json()).then(j => j.build).catch(() => "unreadable"));
+    if (process.env.EXPECT_BUILD && !String(liveBuild).startsWith(process.env.EXPECT_BUILD.slice(0, 7))) throw new Error(`served build ${liveBuild} is not the expected ${process.env.EXPECT_BUILD} — void, not scored`);
+    await page.locator(`.hdr-view button:has-text("${view === "grid" ? "Grid" : "Split"}")`).click(); await pacedWait(page, 900);
+  } else {
+    await page.locator('[data-testid="open-history-desktop"]').click(); await pacedWait(page, 250);
+    await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(fixture(view))) });
+    await pacedWait(page, 700);
+    await page.locator('[data-testid="history-panel"] button:has-text("Close")').click(); await pacedWait(page, 1500);
+    await page.locator(`.hdr-view button:has-text("${view === "grid" ? "Grid" : "Split"}")`).click(); await pacedWait(page, 600);
+  }
   await page.waitForSelector('[data-grid-scroll="1"]');
   const names = await page.evaluate(() => [...document.querySelectorAll("[data-task-row] [data-col-key=name]")].map(n => n.innerText.trim().split("\n")[0]));
   if (!names.some(n => n.includes("child red"))) throw new Error("fixture did not load (starter project is showing) — void: " + names.slice(0, 3).join(" | "));
@@ -137,7 +185,7 @@ const resting = await readRows(page);
 const byName = n => resting.find(r => r.name === n);
 const expectColour = { "child red": "rgb(255,223,223)", "child yellow": "rgb(255,247,185)", "grandchild green": "rgb(214,250,226)", "green": "rgb(214,250,226)", "paused": "rgb(243,244,246)", "row colour": "rgb(253,230,138)" };
 for (const [n, want] of Object.entries(expectColour)) { const r = byName(n); if (!r || r.id !== want) { voided = true; ok(`KNOWN-GOOD · "${n}" ID cell paints its own health/row colour`, false, `want ${want} got ${r && r.id}`); } }
-if (voided) { console.log("RUN VOID — the known-good arm did not report its known colours; no score printed."); await browser.close(); server.close(); process.exit(2); }
+if (voided) { console.log("RUN VOID — the known-good arm did not report its known colours; no score printed."); await finish(); process.exit(2); }
 ok("KNOWN-GOOD · the plain health / row-colour rows paint their known colours on the ID cell", true);
 // the filled row is the one that is allowed to differ from its health colour (it is pink on every filled cell)
 verdict("grid 1280 · resting (no selection)", resting);
@@ -184,7 +232,8 @@ page = await openGrid("split", 1280, 900);
 verdict("split 1280 · grid side", await readRows(page));
 await page.close();
 
-await browser.close(); server.close();
+if (LIVE) console.log("served build", liveBuild);
+await finish();
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 process.exit(failed.length ? 1 : 0);
