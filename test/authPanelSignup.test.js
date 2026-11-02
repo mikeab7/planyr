@@ -9,7 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import AuthPanel from "../src/workspaces/site-planner/components/AuthPanel.jsx";
 import { signupOutcome, passwordHintVisible, checkEmailCopy, PASSWORD_MIN_HINT } from "../src/workspaces/site-planner/lib/signupOutcome.js";
-import { AUTH_SENDER_LABEL } from "../src/workspaces/site-planner/lib/authMail.js";
+import { SIGNUP_CONFIRM_SENDER_LABEL } from "../src/workspaces/site-planner/lib/authMail.js";
 
 const src = readFileSync(new URL("../src/workspaces/site-planner/components/AuthPanel.jsx", import.meta.url), "utf8");
 const authSrc = readFileSync(new URL("../src/workspaces/site-planner/lib/auth.js", import.meta.url), "utf8");
@@ -32,7 +32,7 @@ describe("NEW-1 — signup outcome branches on the response, not a flag", () => 
   it("the success copy names the address and the real sender", () => {
     const c = checkEmailCopy("a@b.co");
     expect(c.sent).toContain("a@b.co");
-    expect(c.sender).toContain(AUTH_SENDER_LABEL);
+    expect(c.sender).toContain(SIGNUP_CONFIRM_SENDER_LABEL); // the sender of THIS mail (Supabase); links come from Planyr
   });
   it("signUp() reports session presence from the response itself", () => {
     expect(authSrc).toMatch(/signedIn: !!\(data && data\.session\)/);

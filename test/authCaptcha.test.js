@@ -1,4 +1,4 @@
-/* auth.js signUp() / signIn() / resetPassword() forward a Turnstile captchaToken to Supabase but never fabricates one
+/* auth.js signUp() / signIn() forward a Turnstile captchaToken to Supabase but never fabricates one
  * (B1160720, NEW-1). Supabase Auth (GoTrue) is the one that actually VERIFIES the token —
  * server-side, against Cloudflare, using the secret key in the Supabase dashboard — so the
  * only thing this repo's code can be responsible for, and the only thing worth unit-testing,
@@ -28,7 +28,7 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   supabaseConfigured: () => true,
 }));
 
-import { signUp, signIn, resetPassword } from "../src/workspaces/site-planner/lib/auth.js";
+import { signUp, signIn } from "../src/workspaces/site-planner/lib/auth.js";
 import { CAPTCHA_FAILED_COPY, isCaptchaError } from "../src/shared/turnstile/captchaCopy.js";
 
 describe("signUp() — Turnstile captchaToken forwarding (B1160720, NEW-1)", () => {
@@ -79,23 +79,6 @@ describe("signIn() — Turnstile captchaToken forwarding (NEW-1)", () => {
   });
 });
 
-describe("resetPassword() — Turnstile captchaToken forwarding (NEW-1)", () => {
-  it("passes captchaToken alongside redirectTo", async () => {
-    h.calls.length = 0;
-    await resetPassword("a@example.com", "the-token");
-    expect(h.calls[0].email).toBe("a@example.com");
-    expect(h.calls[0].options.captchaToken).toBe("the-token");
-    expect("redirectTo" in h.calls[0].options).toBe(true);
-  });
-  it("omits captchaToken when there is none or it is empty", async () => {
-    for (const tok of [undefined, ""]) {
-      h.calls.length = 0;
-      await resetPassword("a@example.com", tok);
-      expect("captchaToken" in h.calls[0].options).toBe(false);
-    }
-  });
-});
-
 describe("a captcha refusal never reaches the screen as the server's raw words (NEW-1)", () => {
   const RAW = "captcha protection: request disallowed (no captcha_token found)";
   const refusals = [
@@ -105,12 +88,11 @@ describe("a captcha refusal never reaches the screen as the server's raw words (
     { name: "verification failed wording", err: { message: "captcha verification process failed" } },
   ];
   for (const { name, err } of refusals) {
-    it(`signIn / resetPassword / signUp all say it in plain words — ${name}`, async () => {
+    it(`signIn / signUp both say it in plain words — ${name}`, async () => {
       h.reply = () => ({ data: { user: null, session: null }, error: err });
       h.signUpFail = err;
       const results = [
         (await signIn("a@example.com", "pw123456")).error,
-        (await resetPassword("a@example.com")).error,
         (await signUp("a@example.com", "pw123456", {})).error,
       ];
       for (const text of results) {

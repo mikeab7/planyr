@@ -8,7 +8,7 @@
  *   - session absent (no error)  → confirmation ON: replace the form with "check your email"
  * An answer with neither an error nor a session is NEVER read as "signed in" — claiming a login
  * that did not happen is the worse failure — so it falls to the check-your-email state. */
-import { AUTH_SENDER_LABEL } from "./authMail.js";
+import { SIGNUP_CONFIRM_SENDER_LABEL } from "./authMail.js";
 
 export const MIN_PASSWORD_LENGTH = 6;
 export const PASSWORD_MIN_HINT = `Min ${MIN_PASSWORD_LENGTH} characters`;
@@ -26,13 +26,13 @@ export function passwordHintVisible(focused, value) {
 }
 
 // Copy for the check-your-email state. The sender is named because it currently reads as
-// Supabase, which looks like spam to anyone not expecting it; built from the one sender
-// constant so it cannot drift from what actually sends (see authMail.js).
+// Supabase (the sender of THIS mail — sign-in and reset links come from Planyr), which looks like
+// spam to anyone not expecting it; built from the one sender constant (see authMail.js).
 export function checkEmailCopy(email) {
   return {
     heading: "Check your email",
     sent: `We sent a confirmation link to ${email}.`,
-    sender: `It comes from ${AUTH_SENDER_LABEL} — that is Planyr’s mail service, so the name may look unfamiliar. Check spam if it isn’t there in a minute or two.`,
+    sender: `It comes from ${SIGNUP_CONFIRM_SENDER_LABEL} — that is Planyr’s mail service, so the name may look unfamiliar. Check spam if it isn’t there in a minute or two.`,
     next: "Open the link to confirm, then sign in.",
   };
 }

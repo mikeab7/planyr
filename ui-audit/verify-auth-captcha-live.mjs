@@ -1,11 +1,11 @@
 /* B2619760 / V2064432 — the REAL sign-in panel on a real deploy, behind the real Turnstile + Supabase captcha.
  *   E2E_EMAIL=… E2E_PASSWORD=… node ui-audit/verify-auth-captcha-live.mjs [https://planyr.io] [chromium|webkit]
  * webkit = Playwright WebKit with the iPhone 15 descriptor (docs/PHONE-TESTING.md: say "WebKit", never "iPhone").
- * Steps: panel opens quiet · wrong password → plain message · right password signs in · forgot password confirms ·
+ * Steps: panel opens quiet · wrong password → plain message · right password signs in · forgot password (Planyr's own route) ·
  * sign-up renders its check. Each step prints PASS / FAIL / REFUSED. REFUSED means NO token was produced (Cloudflare withheld it, or the environment's egress policy denies
  * challenges.cloudflare.com — `curl` it first) — that is NOT a pass (the live check on a real browser stays owed) and we do
  * not route around it. The served build (/version.json) and chunk hashes are read in the SAME call as every
- * assertion's page. Creates nothing: sign-up is opened, never submitted; the only mail is one reset for the test account. */
+ * assertion's page. Creates nothing: sign-up is opened, never submitted; forgot password uses an unknown address, so no mail is sent. */
 import { chromium, webkit, devices } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -87,20 +87,21 @@ try {
   note("4 fill and tap at once signs in (Verifying… then through)", closed4 ? "PASS" : /couldn't verify|couldn't run/i.test(t4) ? "REFUSED" : "FAIL", t4.split("\n").slice(-2).join(" | "));
   await page.evaluate(() => window.pfSupabase.auth.signOut()).catch(() => {});
 
-  // 5: forgot password
+  // 5: forgot password — NEW-1 (2026-11-02): it no longer touches Turnstile or Supabase's mailer; it asks Planyr's own
+  // /api/auth/email-link route, which mails from no-reply@planyr.io. (Its full live gate is verify-email-link-live.mjs.)
+  // An UNKNOWN address is used so no real mail goes out: the route answers the same 200 and sends nothing.
   await openPanel("signin");
-  await tokenReady();
   await dlg.getByText("Forgot password?").click();
-  await dlg.getByLabel("Email").fill(email);
-  await tokenReady();
+  await dlg.getByLabel("Email").fill(`nobody-${Date.now().toString(36)}@planyr.test`);
+  const routeSeen = page.waitForResponse((r) => r.url().includes("/api/auth/email-link"), { timeout: 20000 }).catch(() => null);
   await page.getByTestId("auth-submit").click();
-  await page.waitForTimeout(6000);
+  const rr = await routeSeen;
+  await page.waitForTimeout(1500);
   const t5 = await dlg.innerText();
-  const rec = wire.filter((w) => w.path === "/auth/v1/recover");
-  console.log("   /recover:", JSON.stringify(rec.map((w) => ({ status: w.status, reqHasToken: w.reqHasToken, body: w.body.slice(0, 80) }))));
-  if (/captcha|disallowed/i.test(t5)) note("5 forgot password confirms", "FAIL", t5.slice(-120));
-  else if (rec.some((w) => w.status === 200) && /reset|email/i.test(t5)) note("5 forgot password confirms", "PASS", t5.split("\n").slice(-1)[0].slice(0, 100));
-  else note("5 forgot password confirms", /couldn't verify|couldn't run/i.test(t5) ? "REFUSED" : "FAIL", t5.split("\n").slice(-2).join(" | "));
+  const noTs = (await page.getByTestId("turnstile-widget").count()) === 0;
+  if (/captcha|disallowed/i.test(t5)) note("5 forgot password confirms (Planyr's own route, no Turnstile)", "FAIL", t5.slice(-120));
+  else if (rr && rr.status() === 200 && noTs && /Check your inbox at .*It comes from Planyr \(no-reply@planyr\.io\)/s.test(t5)) note("5 forgot password confirms (Planyr's own route, no Turnstile)", "PASS", t5.split("\n").find((l) => /Check your inbox/.test(l)).slice(0, 110));
+  else note("5 forgot password confirms (Planyr's own route, no Turnstile)", "FAIL", `route=${rr && rr.status()} noWidget=${noTs} ` + t5.split("\n").slice(-2).join(" | "));
 
   // 6: sign up still renders (never submitted)
   await openPanel("signup");

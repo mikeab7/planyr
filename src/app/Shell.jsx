@@ -10,6 +10,7 @@ import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
 // genuinely tiny leaf (no siteModel.js/cloudSync.js imports), so it's a plain static import —
 // see the note beside its call site below for what this replaced and why.
 import { setActiveUser } from "../workspaces/site-planner/lib/activeUser.js";
+import { markRecoveryPending, isRecoveryPending } from "../shared/auth/recoveryPending.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -41,6 +42,8 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
 // Invite-email link (NEW-2): loaded only when the address carries ?invite=, so no other visit pays for it.
 const InviteLanding = lazy(() => import("./InviteLanding.jsx"));
+// Emailed sign-in / password-reset link (NEW-1): loaded only when the address carries ?authlink=, so no other visit pays for it.
+const AuthLinkLanding = lazy(() => import("./AuthLinkLanding.jsx"));
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
@@ -270,6 +273,7 @@ export default function Shell() {
   // stable-width placeholder until the real state is in, instead of asserting "Sign in" first.
   const [authKnown, setAuthKnown] = useState(false);
   const [hasInviteLink] = useState(() => typeof window !== "undefined" && /[?&]invite=/.test(window.location.search || "")); // captured before InviteLanding strips it
+  const [hasAuthLink] = useState(() => typeof window !== "undefined" && /[?&]authlink=/.test(window.location.search || "")); // captured before AuthLinkLanding strips it
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
@@ -443,9 +447,16 @@ export default function Shell() {
       try { setActiveUser((u && u.id) || null); } catch (_) {}
       setUser(u);
       setAuthKnown(true);
-      if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
+      if (event === "PASSWORD_RECOVERY") { markRecoveryPending(); setRecovery(true); setAuthOpen(true); }
     });
   }, []);
+
+  /* A reset link was honoured but the new password was never set (the form was reloaded away, the tab closed):
+   * the browser holds a real session, so reopen the non-dismissable form until it is done (NEW-1, recoveryPending.js). */
+  useEffect(() => {
+    if (!authKnown || !user) return;
+    if (isRecoveryPending()) { setRecovery(true); setAuthOpen(true); }
+  }, [authKnown, user && user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* FIRST-TIME LANDING (NEW-1) — a genuine first boot (BOOT_WAS_ROUTELESS) redirects from the
    * Dashboard to the Map the instant we know the account/browser has never had a project (see
@@ -788,6 +799,7 @@ export default function Shell() {
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
       {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} /></Suspense>}
+      {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} /></Suspense>}
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}

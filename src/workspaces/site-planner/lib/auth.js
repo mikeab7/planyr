@@ -10,6 +10,7 @@ import { supabase } from "./supabase.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT } from "../../../shared/auth/rateLimitCopy.js";
 import { friendlyAuthError } from "../../../shared/turnstile/captchaCopy.js";
+import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 
 // Where Supabase sends the user back after email confirmation / password reset.
 // Must be allow-listed in Supabase → Auth → URL Configuration → Redirect URLs.
@@ -60,9 +61,10 @@ export async function signUp(email, password, profile = {}, captchaToken) {
   return { error: msg, needsConfirm: !!(data && data.user && !data.session), signedIn: !!(data && data.session) };
 }
 
-// Sign in and Forgot password are captcha-gated server-side exactly like sign-up (NEW-1, amends
-// B1160720 — which only wired sign-up, leaving every signed-out user unable to get back in). Same
-// omit-when-empty rule as signUp(): a present-but-empty token is a failed challenge to GoTrue.
+// Sign in is captcha-gated server-side exactly like sign-up (NEW-1, amends B1160720 — which only wired
+// sign-up, leaving every signed-out user unable to get back in). Same omit-when-empty rule as signUp(): a
+// present-but-empty token is a failed challenge to GoTrue. (Forgot password is NOT gated: it no longer touches
+// Supabase's mailer at all — see below.)
 export async function signIn(email, password, captchaToken) {
   if (!supabase) return { error: "Cloud not configured." };
   const creds = { email, password };
@@ -72,6 +74,7 @@ export async function signIn(email, password, captchaToken) {
 }
 
 export async function signOut() {
+  clearRecoveryPending(); // signing out leaves the password unchanged — nothing is pending any more (NEW-1)
   if (!supabase) return;
   try { await supabase.auth.signOut(); } catch (_) {}
 }
@@ -84,6 +87,7 @@ export async function signOut() {
  * There is deliberately NO "active sessions" list beside it — enumerating sessions needs the
  * service-role admin API, which may never reach the browser (/CLAUDE.md → KEY DECISIONS). */
 export async function signOutEverywhere() {
+  clearRecoveryPending();
   if (!supabase) return { error: "Cloud not configured." };
   try {
     const { error } = await supabase.auth.signOut({ scope: "global" });
@@ -93,13 +97,9 @@ export async function signOutEverywhere() {
   }
 }
 
-export async function resetPassword(email, captchaToken) {
-  if (!supabase) return { error: "Cloud not configured." };
-  const options = { redirectTo };
-  if (captchaToken) options.captchaToken = captchaToken;
-  const { error } = await supabase.auth.resetPasswordForEmail(email, options);
-  return { error: errMsg(error) };
-}
+/* Forgot password has NO Supabase-mailer wrapper here on purpose (NEW-1): it goes through Planyr's own
+ * /api/auth/email-link route (lib/emailLinkClient.js), because Supabase's built-in mailer is limited to 2 emails
+ * an hour for the whole project and sits behind a captcha a corporate network can block. */
 
 export async function updatePassword(password) {
   if (!supabase) return { error: "Cloud not configured." };

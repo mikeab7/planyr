@@ -18,9 +18,10 @@ describe("AuthPanel — one shared Turnstile widget (NEW-1)", () => {
     expect(panelSrc).toContain('from "../../../shared/turnstile/useCaptchaGate.js"');
   });
 
-  it("mounts exactly ONE <Turnstile> for every mode except recovery, gated on turnstileEnabled()", () => {
+  it("mounts exactly ONE <Turnstile> for every mode except recovery and reset, gated on turnstileEnabled()", () => {
     expect(panelSrc.match(/<Turnstile\b/g)).toHaveLength(1);
-    expect(panelSrc).toMatch(/const captchaOn = turnstileEnabled\(\) && mode !== "recovery"/);
+    // Forgot password (reset) goes through Planyr's own mail route and needs no browser check (NEW-1).
+    expect(panelSrc).toMatch(/const captchaOn = turnstileEnabled\(\) && mode !== "recovery" && mode !== "reset"/);
     expect(panelSrc).not.toMatch(/mode === "signup" && turnstileEnabled\(\)/);
     expect(panelSrc).toMatch(/\{captchaOn && \(/);
   });
@@ -29,9 +30,9 @@ describe("AuthPanel — one shared Turnstile widget (NEW-1)", () => {
     expect(panelSrc).toMatch(/appearance=\{mode === "signup" \? "always" : "interaction-only"\}/);
   });
 
-  it("the token is forwarded into signIn(), resetPassword() AND signUp() — from the gate, not a stand-in", () => {
+  it("the token is forwarded into signIn() AND signUp() — from the gate, not a stand-in; reset sends none", () => {
     expect(panelSrc).toContain("signIn(email.trim(), pw, token || undefined)");
-    expect(panelSrc).toContain("resetPassword(email.trim(), token || undefined)");
+    expect(panelSrc).not.toContain("resetPassword(");
     expect(panelSrc).toContain("token || undefined);"); // signUp's last argument
   });
 
@@ -70,8 +71,8 @@ describe("auth.js — one place turns a captcha refusal into plain words (NEW-1)
     expect(authSrc).toMatch(/const errMsg = \(e\) => friendlyAuthError\(e\)/);
     expect(authSrc).not.toMatch(/\(e && e\.message\) \|\| null/);
   });
-  it("signIn and resetPassword forward the token (omit-when-empty), like signUp", () => {
+  it("signIn forwards the token (omit-when-empty), like signUp; there is no Supabase-mailer resetPassword any more", () => {
     expect(authSrc).toMatch(/signIn\(email, password, captchaToken\)/);
-    expect(authSrc).toMatch(/resetPassword\(email, captchaToken\)/);
+    expect(authSrc).not.toMatch(/resetPasswordForEmail/);
   });
 });
