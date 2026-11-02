@@ -17634,6 +17634,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
     hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
+    showAerial, // B2589680 — the sheet carries the aerial exactly when the map shows it
     basemapOn, basemapSrc, overlays: overlaysDrawn, layerStatus, // NEW-1 (Imagery & Layers) — the sheet carries what the map shows (PDF-PARITY)
     PAL, f0,
     siteName, siteLabel, planLabel, printFrame,

@@ -22,7 +22,9 @@ describe("Schedule grid — the right-edge strip reads as the row continuing (NE
   it("every row type (data, review-proposal, empty/new-task) ends with a flex-filling strip carrying the cell line", () => {
     const strips = grid.match(/<div data-grid-strip/g) || [];
     expect(strips.length).toBe(3);
-    expect(grid).toMatch(/data-grid-strip style=\{\{flex:"1 1 0", minWidth:0, height:ROW_H, borderBottom:GRID_LINE\}\}/);
+    // NEW-1 (filler-row marker): the review + blank strips are also position:"relative" so the hover/selected line
+    // is boxed by the strip itself, not the whole row (see test/scheduleRowMarkerFillerRows.test.js)
+    expect((grid.match(/data-grid-strip style=\{\{flex:"1 1 0", minWidth:0, height:ROW_H, position:"relative", borderBottom:GRID_LINE\}\}/g) || []).length).toBe(2);
   });
   it("the data-row strip takes the range fill, the range line colour and the outline from the same rules as the cells", () => {
     expect(grid).toMatch(/background: \(stripJoinsRange && inRange\(ri, stripCi\)\) \? "#dbeafe" : "transparent"/);
