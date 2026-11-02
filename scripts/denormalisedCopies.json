@@ -410,6 +410,11 @@
     }
   ],
   "ownedColumns": {
+    "signin_incidents": [
+      "kind",
+      "alert_emailed_at",
+      "recovery_emailed_at"
+    ],
     "recovery_20261008_parcel_account_snapshot": [
       "site_id"
     ],
