@@ -28,6 +28,7 @@ import L from "leaflet";
 import { visibleEls, visibleParcels } from "./contentVisibility.js";
 import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
+import { aerialWantedOnSheet } from "./aerialVisibility.js";
 import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
@@ -84,6 +85,7 @@ export function createExportSheet(ctx) {
     svgRef, stateRef, overlayRefs, geoMapRef,
     // --- map + layer state ------------------------------------------------------
     basemapOn, basemapSrc, overlays, layerStatus,
+    showAerial = true, // B2589680 — the PLAN-LEVEL aerial toggle (map View ▾ / Overlays): the sheet carries the aerial exactly when the map shows it
     // --- presentation -----------------------------------------------------------
     PAL, f0,
     // --- sheet content (built in SitePlanner so screen + sheet share one source) --
@@ -260,8 +262,8 @@ export function createExportSheet(ctx) {
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     root.insertBefore(bg, root.firstChild);
-    // Always include the aerial (even if it's hidden on screen), placed beneath everything
-    // but the paper, so prints/exports keep the satellite. Two sources (B735): when the LIVE
+    // Include the aerial exactly when the map is showing it (B2589680 — it used to be "always, even if hidden on screen"),
+    // placed beneath everything but the paper. Two sources (B735): when the LIVE
     // basemap is on, the on-screen aerial is a Leaflet tile <div> the SVG clone can't capture
     // (it's a sibling of the exported <svg>, tagged data-export="skip"), so the caller passes
     // `exportAerial` — a frame-exact snapshot synthesized from the SAME source's `export`
@@ -275,7 +277,9 @@ export function createExportSheet(ctx) {
     // draw that underlay UNDERNEATH the live aerial. If the live fetch is dropped, the underlay
     // still shows real imagery instead of white; if it succeeds it fully covers the underlay.
     const aerials = [];
-    if (exportAerial) {
+    if (!aerialWantedOnSheet(showAerial)) {
+      // B2589680 — the map is NOT showing the aerial, so neither does the sheet (the exhibit follows the map; there is no print-only switch)
+    } else if (exportAerial) {
       if (underlay && typeof underlay.src === "string" && underlay.src.startsWith("data:")) aerials.push({ a: underlay, tag: false }); // reliable fallback, bottom
       aerials.push({ a: exportAerial, tag: true }); // live view, on top (the LOUD-FAILURE marker)
     } else if (underlay) {
@@ -768,7 +772,7 @@ export function createExportSheet(ctx) {
   // silent white sheet — LOUD-FAILURE). Returns null when there's no live basemap to capture (then
   // buildExportSvg falls back to any dropped/from-map underlay). Async (B839 tile fetches).
   const exportAerialForFrame = async (frame) => {
-    if (!origin || !basemapOn) return null;
+    if (!origin || !basemapOn || !aerialWantedOnSheet(showAerial)) return null; // B2589680 — no fetch/stitch for an aerial the map is not showing
     const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
     // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
     // site (deed imported, no massing yet) over the live basemap still gets its aerial — the old
