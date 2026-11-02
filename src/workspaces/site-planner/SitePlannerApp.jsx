@@ -36,7 +36,7 @@ import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeChangeNeedsDefer } from "./lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeChangeNeedsDefer, userLeftOnSignOut } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 // NEW-2(b) — a SECOND "open where I left off" pointer, entirely separate from `currentSite`
 // above: the Shell's own `planyr:lastRoute:v1` (src/app/lastRoute.js), which is what a
@@ -156,6 +156,8 @@ export default function App({
    * meant to authorise has already been skipped. `routeMissing` is the honest answer when the
    * URL names a project this device genuinely does not have. */
   const userLeftProjectRef = useRef(false);
+  // NEW-1 point 5 — the session ended without the person asking; the route is kept and the Shell says why.
+  const sessionLostRef = useRef(false);
   // B1865936 — what effect (2) below last asked the URL to become, or `NO_PENDING_ROUTE_WRITE`
   // once that write has round-tripped back as a fresh `projectId` prop. Lets effect (1) tell its
   // own not-yet-landed write apart from the URL genuinely naming something else. See effect (1)'s
@@ -304,7 +306,7 @@ export default function App({
   // sites into their local cache and make that the active store (cloud is home);
   // logged out → back to the legacy localStorage store. Reset the view on a real
   // switch so we never show one account's pointer against another's data.
-  const applyUser = async (u, event) => {
+  const applyUser = async (u, event, meta) => {
     const uid = (u && u.id) || null;
     // supabase-js re-emits SIGNED_IN on tab focus / token refresh. When it's the SAME
     // user already active, nothing actually changed — skip the re-pull + view reset that
@@ -324,6 +326,7 @@ export default function App({
      * Setting it now closes that window; the `seq` guard below still supersedes a genuinely
      * newer event before this one reaches the resume step. */
     prevUid.current = uid;
+    sessionLostRef.current = !uid && !!(meta && meta.lost); // NEW-1 pt 5: died ≠ pressed Sign out — keep the route (Shell says why)
     const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     setActiveUser(uid);
     setSignedInUid(uid);     // null when logged out → the on-device-sites prompt only shows when signed in
@@ -387,7 +390,7 @@ export default function App({
       // that user is active (logged out, the app reads the legacy store), so leaving it is
       // not a leak — and it's preserved if the "sign-out" was a momentary refresh blip.
       setCloudError("");
-      if (event === "SIGNED_OUT") { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
+      if (event === "SIGNED_OUT") { if (userLeftOnSignOut(meta)) userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
       refreshSites();
       refreshParcelSummary(null);
       refreshElementRecency(null);
@@ -424,10 +427,13 @@ export default function App({
   const applyUserRef = useRef(applyUser); applyUserRef.current = applyUser;
   useEffect(() => {
     if (!supabaseConfigured()) return;
-    return onAuthChange((event, u) => {
-      // Recovery UI + token refresh don't change which data store is active.
-      if (event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
-      applyUserRef.current(u, event); // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT
+    return onAuthChange((event, u, meta) => {
+      // Recovery UI + a profile edit don't change which data store is active. TOKEN_REFRESHED DOES reach applyUser
+      // (NEW-1 point 4): after a boot with an expired token and no network, supabase-js reports "no session" first
+      // and delivers the user later as TOKEN_REFRESHED — ignoring it left Site on the signed-out store until a
+      // refocus or reload. For a user already active, applyUser's same-user check makes it a no-op.
+      if (event === "PASSWORD_RECOVERY" || event === "USER_UPDATED") return;
+      applyUserRef.current(u, event, meta); // INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT
     });
     // No exhaustive-deps suppression needed: the only component-scope value this effect reads is
     // applyUserRef.current, a ref read at call time — the whole point of NEW-2(c) above.
@@ -867,7 +873,10 @@ export default function App({
             // Either not signed in (no cloud to check), or already retried once and it's still
             // absent — say so out loud and drop to the map. Never leave the OLD project on screen
             // under a URL naming a different one (that is what made repro B invisible).
-            setRouteMissing(projectId); setActiveSiteId(null); setMode("map");
+            // (A session that just died is neither of those: the route stays, the Shell says "You were signed out",
+            // and signing back in reopens this plan — NEW-1 point 5.)
+            if (sessionLostRef.current) { setActiveSiteId(null); setMode("map"); }
+            else { setRouteMissing(projectId); setActiveSiteId(null); setMode("map"); }
           }
         }
       } else { setRouteMissing(null); routeMissingRetryRef.current.delete(projectId); if (mode !== "plan") setMode("plan"); }

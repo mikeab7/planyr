@@ -104,9 +104,11 @@ describe("a captcha refusal never reaches the screen as the server's raw words (
       h.signUpFail = null;
     });
   }
-  it("leaves every other error text alone", async () => {
+  it("every other error gets its own plain words too (NEW-1 point 2 — the server's text is never shown)", async () => {
     h.reply = () => ({ data: {}, error: { message: "Invalid login credentials", code: "invalid_credentials" } });
-    expect((await signIn("a@example.com", "x")).error).toBe("Invalid login credentials");
+    const r = await signIn("a@example.com", "x");
+    expect(r.error).toBe("That email and password don't match.");
+    expect(r.errorKind).toBe("invalid_credentials");
     h.reply = () => ({ data: {}, error: null });
   });
   it("isCaptchaError reads both the code and the text", () => {

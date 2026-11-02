@@ -35,11 +35,12 @@ describe("the link is spent only by the button press", () => {
 });
 
 describe("the set-new-password form cannot be dismissed", () => {
-  it("recovery mode renders a LOCKED Wrap, and a locked Wrap ignores Escape, the backdrop and has no Close button", () => {
-    expect(panel).toMatch(/title="Set a new password" locked>/);
-    expect(panel).toMatch(/onCloseRef\.current = locked \? null : onClose;/);
-    expect(panel).toMatch(/onClick=\{locked \? undefined : onClose\}/);
-    expect(panel).toMatch(/\{!locked && <button onClick=\{onClose\} aria-label="Close"/);
+  it("recovery mode renders a non-dismissable Wrap: it ignores Escape and the backdrop and has no Close button", () => {
+    expect(panel).toMatch(/title="Set a new password" dismissable=\{false\}>/);
+    expect(panel).toMatch(/onClick=\{dismissable \? onClose : undefined\}/);
+    expect(panel).toMatch(/\{dismissable && <button onClick=\{onClose\} aria-label="Close"/);
+    // …and its own way out leaves the password unchanged
+    expect(panel).toMatch(/data-testid="recovery-signout"/);
   });
   it("the pending flag is set on PASSWORD_RECOVERY and on the landing's own success, cleared on success and on sign-out", () => {
     expect(shell).toMatch(/PASSWORD_RECOVERY"\) \{ markRecoveryPending\(\)/);
@@ -85,8 +86,10 @@ describe("forgot password and the sign-in link do not depend on Cloudflare", () 
     expect(panel).toMatch(/btn\(!captchaBlocked\)/);
   });
   it("a failed request shows failureCopy, and 'sent' is shown only from an ok result", () => {
-    expect(panel).toMatch(/if \(r\.ok\) \{[^}]*setSent\(/);
-    expect(panel).toMatch(/else setMsg\(\{ type: "err", text: failureCopy\(r\) \}\)/);
+    expect(panel).toMatch(/if \(r\.ok\) \{ setPw\(""\); setSent\(/);
+    expect(panel).toMatch(/text: failureCopy\(r\)/);
+    // a missing address is said, never a greyed button (the merged panel's own rule)
+    expect(panel).toMatch(/validateAuthFields\(\{ mode: "reset", email: v\.email \}\)/);
   });
 });
 

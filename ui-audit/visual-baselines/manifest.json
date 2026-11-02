@@ -72,24 +72,24 @@
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "dark": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       }
     }
   }

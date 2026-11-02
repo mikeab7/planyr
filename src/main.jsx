@@ -1,3 +1,5 @@
+// FIRST, before anything can touch the URL: what an e-mail link (reset / confirm) just said — see shared/auth/authReturn.js.
+import "./shared/auth/authReturn.js";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Shell from "./app/Shell.jsx";

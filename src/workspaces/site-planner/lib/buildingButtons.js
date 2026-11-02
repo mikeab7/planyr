@@ -8,9 +8,10 @@
  * ONE ROW PER WALL, in this order along the wall (a button is dropped, never moved, when it would touch one already placed):
  *   1  the "+ / −" pair, centred on the wall's middle (both halves reserved, whichever are drawn)
  *   2  the purple corner "+" at each end of a DOCK wall (the bump-out toggle)
- *   3  ONE grey ramp "+" per dock wall, beside the pair
- *   4  ONE grey ramp "+" per corner "+", beside it, toward the middle
- * A non-dock wall carries only its pair: a drive-in ramp is a dock-wall feature, so there is no ramp button on a short end wall.
+ *   3  ONE grey ramp "+" per corner "+", beside it, toward the middle
+ * There is NO ramp button at a wall's middle (owner 2026-11-02: "remove the ramp addition options from the center of the building") — the middle holds
+ * the "+ / −" pair alone; a ramp is added from a corner. A non-dock wall carries only its pair: a drive-in ramp is a dock-wall feature, so there is no
+ * ramp button on a short end wall.
  *
  * Pure, screen px, no React. `wall.out` is the unit vector from the building's centre toward the wall; `tan = (−out.y, out.x)` runs along it (the same
  * direction the pair's "+" / "−" have always been laid out in).
@@ -40,7 +41,7 @@ const touches = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < a.r + b.r + BTN_GAP
  * @param {{name:string, mid:{x,y}, out:{x,y}, dock:boolean, corners?:{sign:number, pt:{x,y}}[]}[]} walls
  *   `corners` (dock walls only): the wall's two ends, `sign` −1 / +1 as `dogEar.sign` reads them, `pt` the corner in screen px.
  * @returns {Map<string, object>} id → placement. ids: `pair:<wall>` { pos, tan, discs:[{x,y,r}×2] } · `corner:<wall>:<sign>` { x, y, r } ·
- *   `ramp:<wall>` { x, y, r } · `ramp:<wall>:<sign>` { x, y, r }. A button that does not fit is simply absent.
+ *   `ramp:<wall>:<sign>` { x, y, r }. A button that does not fit is simply absent.
  */
 export function layoutBuildingButtons(walls) {
   const out = new Map(), placed = [];
@@ -66,12 +67,7 @@ export function layoutBuildingButtons(walls) {
     const { tc } = cornerT(g, c), d = g.at(tc, FEAT_CTRL_R);
     if (free(d)) put(`corner:${g.w.name}:${c.sign}`, { x: d.x, y: d.y, r: d.r }, [d]);
   }
-  // 3 — one grey ramp "+" per dock wall, beside the pair (on its +tan side)
-  for (const g of geo) if (g.w.dock) {
-    const d = g.at(SIDE_PAIR_GAP + RAMP_STEP_PX, RAMP_BTN_R);
-    if (free(d)) put(`ramp:${g.w.name}`, { x: d.x, y: d.y, r: d.r }, [d]);
-  }
-  // 4 — one grey ramp "+" per corner "+", beside it, toward the wall's middle
+  // 3 — one grey ramp "+" per corner "+", beside it, toward the wall's middle
   for (const g of geo) if (g.w.dock) for (const c of g.w.corners || []) {
     if (!out.has(`corner:${g.w.name}:${c.sign}`)) continue;
     const { t, tc } = cornerT(g, c), d = g.at(tc - Math.sign(t || 1) * RAMP_STEP_PX, RAMP_BTN_R);

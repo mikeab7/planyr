@@ -3,6 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- www.planyr.io serves this same app (NEW-1 point 9, follow-up to B2619760): measured 2026-11-02, a plain 200 with no
+         redirect. Turnstile only renders on the hostnames its site key lists, and Supabase only returns e-mail links to
+         allow-listed origins — a visitor typing "www." could be refused by one or the other and have no way in. Send them to
+         the one address everything is set up for BEFORE any other script or app work runs, keeping path, query and hash
+         (a reset link's #access_token survives). location.replace so Back cannot loop. -->
+    <script>
+      (function () {
+        // www redirect
+        try {
+          if (location.hostname === "www.planyr.io") location.replace("https://planyr.io" + location.pathname + location.search + location.hash);
+        } catch (e) { /* never block app boot */ }
+      })();
+    </script>
     <!-- Front door (marketing landing): a BRAND-NEW visitor who lands on "/" with no app
          data, no signed-in session, no deep-link hash, and no explicit ?app intent is sent
          to the marketing page at /landing/. Returning users (any planyr/supabase data in
@@ -17,11 +30,11 @@
           var h = window.location.hash || "";
           if ((h && h !== "#") || /[?&]app\b/.test(window.location.search)) return; // explicit app entry
           // Supabase auth callbacks (email confirmation, password recovery, magic link, OAuth,
-          // and error returns) come back to "/" with params on the QUERY string under the PKCE
-          // flow (?code=…, ?error=…&error_description=…); a brand-new user confirming their email
-          // has NO session yet, so without this they'd be bounced to /landing/ and the token lost.
-          // (Hash-based implicit callbacks like #access_token=… are already covered above.) Let the
-          // app boot so supabase-js can complete the exchange.
+          // and error returns). The client uses the IMPLICIT flow (supabase-js's default; no flowType is set in
+          // lib/supabase.js), so the normal answer arrives in the URL HASH (#access_token=…, or #error=…&error_code=…)
+          // and the hash check above already lets it through. The QUERY-string forms (?code=…, ?error=…) are the PKCE
+          // shape — not what this client asks for, kept so a link minted by a project set to PKCE still boots the app
+          // instead of bouncing a brand-new user (no session yet) to /landing/ with the token lost.
           var qs = window.location.search || "";
           if (/[?&](code|access_token|refresh_token|provider_token|error|error_code|error_description)=/.test(qs)
               || /[?&]type=(recovery|signup|magiclink|invite|email_change)\b/.test(qs)) return;

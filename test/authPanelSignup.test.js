@@ -62,7 +62,7 @@ describe("NEW-2 — the minimum-length hint sits under the password field, signu
   it("is rendered directly after the password input and before the submit button", () => {
     const m = src.indexOf('aria-label="Password"');
     const hint = src.indexOf('data-testid="password-hint"');
-    const submit = src.indexOf('data-testid="auth-submit"');
+    const submit = src.lastIndexOf('data-testid="auth-submit"');   // the logged-out form's button (the recovery form's comes earlier in the file)
     expect(m).toBeGreaterThan(0);
     expect(hint).toBeGreaterThan(m);
     expect(hint).toBeLessThan(submit);

@@ -171,7 +171,7 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
     await page.reload();
     await expect(page.getByTestId("recovery-form")).toBeVisible();
     await dlg(page).getByLabel("New password").fill("a-brand-new-password");
-    await page.getByTestId("recovery-submit").click();
+    await page.getByTestId("auth-submit").click();
     await expect(dlg(page)).toHaveCount(0, { timeout: 5000 });
     expect(w.calls.some((c) => c.path === "/auth/v1/user" && c.method === "PUT" && c.body.password === "a-brand-new-password")).toBe(true);
     await page.reload();

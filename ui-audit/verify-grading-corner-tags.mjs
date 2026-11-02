@@ -74,8 +74,8 @@ try {
     check(`${name}: any tag away from its corner is tied to it by a leader`, m.tags.every((t) => { const c = m.quad[t.idx]; if (!c) return true; const d = Math.hypot(Math.max(t.x - c.x, 0, c.x - (t.x + t.w)), Math.max(t.y - c.y, 0, c.y - (t.y + t.h))); return d <= 8.5 || t.leader; }));
     if (name === "whole building") {
       const ids = m.discs.map((d) => d.id);
-      check("whole building: exactly one grey ramp button per dock wall and one per corner button, none on the short end walls",
-        ids.filter((i) => /^ramp:(top|bottom)$/.test(i)).length === 2 && ids.filter((i) => /^ramp:(top|bottom):-?1$/.test(i)).length === 4 && !ids.some((i) => /^ramp:(left|right)/.test(i)), ids.filter((i) => i.startsWith("ramp:")).join(" "));
+      check("whole building: one grey ramp button per corner button, NONE at a wall's middle, none on the short end walls",
+        ids.filter((i) => /^ramp:(top|bottom)$/.test(i)).length === 0 && ids.filter((i) => /^ramp:(top|bottom):-?1$/.test(i)).length === 4 && !ids.some((i) => /^ramp:(left|right)/.test(i)), ids.filter((i) => i.startsWith("ramp:")).join(" "));
     }
     check(`${name}: tags are pointer-events none (they can never take a press from a button)`, await page.evaluate(() => [...document.querySelectorAll("[data-pad-corner]")].every((g) => getComputedStyle(g).pointerEvents === "none")));
     // every button answers a hit-test at its own centre (scrolled into view first: elementFromPoint is null off-screen)

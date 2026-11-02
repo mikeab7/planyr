@@ -8,14 +8,17 @@ import { lazy, useCallback, useEffect, useId, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { signIn, signUp, signOut, signOutEverywhere, updatePassword } from "../lib/auth.js";
-// The sign-up confirmation copy NAMES the address its email arrives from (NEW-2), generated from the one
-// sender constant in lib/signupOutcome.js / authMail.js. Forgot password and the sign-in link (NEW-1) go
-// through Planyr's own /api/auth/email-link route — no Turnstile, no Supabase mailer — and show the shared
-// EmailLinkSent view (lazy: only ever rendered after a send).
+// The sign-up confirmation copy NAMES the address its email arrives from (NEW-2), generated from the one sender
+// constant in lib/signupOutcome.js / authMail.js. Forgot password and the sign-in link (NEW-1, B2626128) go through
+// Planyr's own /api/auth/email-link route — no Turnstile, no Supabase mailer — and show the shared EmailLinkSent view
+// (lazy: only ever rendered after a send).
 import { requestEmailLink } from "../lib/emailLinkClient.js";
 import { failureCopy, BLOCKED_CHECK_COPY } from "../lib/emailLinkCopy.js";
 import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 import { MIN_PASSWORD_LENGTH, PASSWORD_MIN_HINT, signupOutcome, passwordHintVisible, checkEmailCopy } from "../lib/signupOutcome.js";
+// NEW-1 (follow-up to B2619760): every failure reads as plain words with a next step; what is missing is said at
+// submit (never by greying the button); the set-new-password view cannot be dismissed.
+import { authErrorAction, validateAuthFields, recoveryErrorText } from "../../../shared/auth/authErrors.js";
 // Cloudflare Turnstile (B1160720; widened to sign-in + forgot-password by NEW-1): ONE widget, ONE token,
 // ONE gate for every logged-out mode. No external script loads until this form actually mounts the
 // widget, so a plain import costs nothing here (unlike the Team panel below, which is lazy).
@@ -42,16 +45,17 @@ const linkBtn = { border: "none", background: "transparent", color: PAL.accent, 
 
 // NEW-1 (touch keyboard): on a coarse pointer a text field never takes focus just because a panel
 // opened — initial focus goes to the dialog container (keeps the trap + screen-reader announcement).
-function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFirstInput = true, back = null, closeIcon = false, locked = false }) {
+function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFirstInput = true, back = null, closeIcon = false, dismissable = true }) {
   const panelRef = useRef(null);
   // The focus effect below must run ONCE per mount: `onClose` is an inline function in the Shell, so its
   // identity changes on every Shell re-render, and listing it as a dependency re-ran the effect mid-typing
   // (cleanup refocused the opener, setup refocused the panel) — a field being filled lost focus and its
   // value (measured: a password fill dropped ~1 run in 3 in mobile WebKit right after the panel opened).
   const onCloseRef = useRef(onClose);
-  // `locked` (NEW-1, the set-a-new-password form): nothing dismisses it — not Escape, not a click outside, no
-  // Close button — until the password has actually been changed (or the person signs out from inside it).
-  onCloseRef.current = locked ? null : onClose;
+  onCloseRef.current = onClose;
+  // A view that must be finished (set-new-password) ignores Escape and the backdrop and has no Close button.
+  const dismissRef = useRef(dismissable);
+  dismissRef.current = dismissable;
   // NEW-1 (phone): iOS Safari's on-screen keyboard overlays the page without resizing the fixed overlay,
   // so a panel sized to the full height sits half behind it and the submit button is buried. Track the
   // VISIBLE area (visualViewport) and size the overlay to it: the panel shrinks to what is above the
@@ -82,7 +86,7 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
     const wantInput = focusFirstInput && !isCoarsePointer();
     (wantInput ? (init.find((el) => el.tagName === "INPUT") || init[0] || panel) : panel)?.focus();
     const onKey = (e) => {
-      if (e.key === "Escape") { onCloseRef.current && onCloseRef.current(); return; }
+      if (e.key === "Escape") { if (dismissRef.current && onCloseRef.current) onCloseRef.current(); return; }
       if (e.key !== "Tab" || !panel) return;
       const els = getFocusable();
       if (!els.length) { e.preventDefault(); panel.focus(); return; }
@@ -97,7 +101,7 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
     };
   }, [focusFirstInput]);
   return (
-    <div onClick={locked ? undefined : onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center", ...(vv ? { top: vv.top, bottom: "auto", height: vv.h } : null) }}>
+    <div onClick={dismissable ? onClose : undefined} data-auth-backdrop style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center", ...(vv ? { top: vv.top, bottom: "auto", height: vv.h } : null) }}>
       <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: vv ? Math.max(200, Math.floor(vv.h * 0.94)) : "88vh", overflowY: "auto", WebkitOverflowScrolling: "touch", outline: "none" }}>
         {back ? (
           /* Drilled-in section page (phone Settings): "‹ Settings" back link left, section title centred.
@@ -112,11 +116,21 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
         ) : (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
             <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>{title}</h2>
-            {!locked && <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close <span aria-hidden="true">✕</span></button>}
+            {dismissable && <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close <span aria-hidden="true">✕</span></button>}
           </div>
         )}
         {children}
-        {msg && <div role="alert" aria-live="assertive" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45, color: msg.type === "err" ? "var(--danger-text)" : "var(--success-text)" }}>{msg.text}</div>}
+        {msg && (
+          <div role="alert" aria-live="assertive" data-testid="auth-msg" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45, color: msg.type === "err" ? "var(--danger-text)" : "var(--success-text)" }}>
+            {msg.text}
+            {/* The one-tap next step for this failure (Try again · Sign in instead · Reset your password · Send a new link). */}
+            {msg.actions && msg.actions.length > 0 && (
+              <div style={{ marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {msg.actions.map((a) => <button key={a.label} type="button" data-testid="auth-msg-action" style={{ ...linkBtn, fontWeight: 600, padding: "4px 0" }} onClick={a.onClick}>{a.label}</button>)}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -360,8 +374,8 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
     <div data-settings-panel="security">
       {sectionHead("Account & security")}
       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Change password</div>
-      <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password (min 6 characters)" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= 6) changePassword(); }} />
-      <button style={{ ...btn(true), width: "100%", marginTop: 10 }} disabled={busy || pw.length < 6} onClick={changePassword}>{busy ? "…" : "Update password"}</button>
+      <input aria-label="New password" type="password" autoComplete="new-password" placeholder={`New password (min ${MIN_PASSWORD_LENGTH} characters)`} value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= MIN_PASSWORD_LENGTH) changePassword(); }} />
+      <button style={{ ...btn(true), width: "100%", marginTop: 10 }} disabled={busy || pw.length < MIN_PASSWORD_LENGTH} onClick={changePassword}>{busy ? "…" : "Update password"}</button>
       <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Signed in elsewhere?</div>
       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45, margin: "3px 0 9px" }}>
@@ -436,18 +450,19 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
 // page both re-validate it — shared/auth/authLink.js safeNextRoute). A reset link has nothing to return to.
 const currentRoute = () => { try { return window.location.hash || undefined; } catch (_) { return undefined; } };
 
-export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, initialEmail, onClose }) {
+export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, initialEmail, initialNotice, onLeaveRecovery, onClose }) {
   // initialMode (B1315632 — landing page deep link): "signup" lands the signed-out
   // visitor straight on the create-account tab instead of the sign-in default, so the
   // landing page's "Create an account" button actually means something distinct from
-  // "Open Planyr". Anything else (including undefined) keeps the historical default.
-  const [mode, setMode] = useState(recovery ? "recovery" : (initialMode === "signup" ? "signup" : "signin")); // signin | signup | reset | recovery
+  // "Open Planyr". "reset" (NEW-1: a reset link that had expired or been used) lands on Forgot password
+  // with `initialNotice` saying why. Anything else (including undefined) keeps the historical default.
+  const [mode, setMode] = useState(recovery ? "recovery" : (initialMode === "signup" ? "signup" : initialMode === "reset" ? "reset" : "signin")); // signin | signup | reset | recovery
   const [email, setEmail] = useState((user && user.email) || initialEmail || "");
   const [pw, setPw] = useState("");
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [org, setOrg] = useState("");
-  const [msg, setMsg] = useState(null); // { type: 'err'|'ok', text }
+  const [msg, setMsg] = useState(initialNotice ? { type: "err", text: initialNotice } : null); // { type: 'err'|'ok', text, actions? }
   const [busy, setBusy] = useState(false);
   // Synchronous double-submit guard (NEW-1): `busy` only lands on the next render, and the
   // password field's Enter key bypasses the button's disabled state entirely.
@@ -457,12 +472,14 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   const [done, setDone] = useState(null);
   // Set once Planyr has emailed a sign-in / reset link: { email, purpose, seconds } replaces the form (NEW-1).
   const [sent, setSent] = useState(null);
+  const formRef = useRef(null);
+  const submitRef = useRef(null);
   // Turnstile gate (NEW-1): decides WHEN a submit may send — see shared/turnstile/captchaGate.js.
   // `perform` is the form's real submit; the gate calls it with the (single-use) token.
   const { gate, view: cv, widgetKey, widgetRef } = useCaptchaGate((token) => perform(token));
   const captchaOn = turnstileEnabled() && mode !== "recovery" && mode !== "reset"; // reset goes through Planyr's own mail route (NEW-1) — no Turnstile, so it cannot depend on Cloudflare
-  // The browser check could not run on this network (script blocked, timed out, errored): the sign-in link is
-  // then the real way in, so it is promoted to the main action (NEW-1). A pending or passed check is not "blocked".
+  // The browser check could not run on this network (script blocked, timed out, errored): the sign-in link is then the real
+  // way in, so it is promoted to the main action (NEW-1). A pending or passed check is not "blocked".
   const captchaBlocked = captchaOn && mode === "signin" && (cv.widget === "error" || !!cv.failure);
 
   // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
@@ -472,73 +489,146 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   // Leaving a mode drops a submit that was still waiting for its token (the token itself stays: it is
   // the same live widget). A recovery/done view unmounts the widget, which clears its own token.
   useEffect(() => { gate.cancelPending(); }, [mode, gate]);
+  // A visible challenge (the person must tick a box) grows the form; on a short screen with the keyboard up that
+  // pushed Sign in out of sight (NEW-1 point 7). Bring the button back into the panel's visible area, once now and
+  // once more after the challenge frame has settled to its real height.
+  useEffect(() => {
+    if (cv.widget !== "interactive") return undefined;
+    const bring = () => { try { submitRef.current && submitRef.current.scrollIntoView({ block: "nearest" }); } catch (_) { /* old engine */ } };
+    bring();
+    const t = setTimeout(bring, 350);
+    return () => clearTimeout(t);
+  }, [cv.widget]);
 
-  // NEW-1 — ask Planyr to email a link (Forgot password and "Email me a sign-in link"). Not captcha-gated by
-  // design (see functions/api/auth/email-link.js). Never claims an email went out unless the route said so.
-  const sendLink = async (purpose) => {
+  // What the fields hold RIGHT NOW. A password manager / autofill can set a field without React ever seeing an
+  // input event (NEW-1 point 3), so the DOM is read at submit — and again when a deferred submit finally fires —
+  // rather than trusting state. Falls back to state where the field is not on screen (e.g. no password in Forgot).
+  const readDom = () => {
+    const f = formRef.current;
+    const get = (name, cur) => { const el = f && f.elements ? f.elements.namedItem(name) : null; return el && typeof el.value === "string" ? el.value : cur; };
+    return { email: get("email", email), pw: get("password", pw), first: get("first", first), last: get("last", last), org: get("org", org) };
+  };
+  const syncState = (v) => { if (v.email !== email) setEmail(v.email); if (v.pw !== pw) setPw(v.pw); if (v.first !== first) setFirst(v.first); if (v.last !== last) setLast(v.last); if (v.org !== org) setOrg(v.org); };
+
+  // One failure → the message plus its one-tap next step. Never the server's own text (auth.js maps it).
+  const failMsg = (res, retry) => {
+    const kind = res.errorKind;
+    const text = mode === "recovery" ? recoveryErrorText(kind) : res.error;
+    const action = mode === "recovery" && kind === "session_missing" ? "newlink" : authErrorAction(kind);
+    const actions = [];
+    if (action === "retry" && retry) actions.push({ label: "Try again", onClick: retry });
+    if (action === "signin") actions.push({ label: "Sign in instead", onClick: () => { setMode("signin"); setMsg(null); } });
+    if (action === "reset") actions.push({ label: "Reset your password", onClick: () => { setMode("reset"); setMsg(null); } });
+    if (action === "newlink") actions.push({ label: "Send a new link", onClick: sendNewLink });
+    return { type: "err", text, actions };
+  };
+  // The reset link is dead: end the half-made recovery session and go to Forgot password with the address kept.
+  const sendNewLink = async () => {
+    await signOut();
+    onLeaveRecovery && onLeaveRecovery();
+    setPw(""); setMode("reset"); setMsg(null);
+  };
+
+  // NEW-1 (B2626128) — ask Planyr to email a link (Forgot password and "Email me a sign-in link"). Not captcha-gated by design
+  // (see functions/api/auth/email-link.js). Never claims an email went out unless the route said so; a failure says nothing was
+  // sent and offers a retry (support is named in the words themselves).
+  const askLink = async (purpose, addr) => {
+    const r = await requestEmailLink({ email: addr, purpose, next: purpose === "signin" ? currentRoute() : undefined });
+    if (r.ok) { setPw(""); setSent({ email: addr, purpose, seconds: r.retryAfterSeconds }); return; }
+    const retryable = r.reason !== "throttled" && r.reason !== "bad_request";
+    setMsg({ type: "err", text: failureCopy(r), actions: retryable ? [{ label: "Try again", onClick: () => retryLink(purpose, addr) }] : [] });
+  };
+  const retryLink = async (purpose, addr) => {
     if (submitting.current) return;
-    submitting.current = true;
-    setBusy(true); setMsg(null);
-    try {
-      const r = await requestEmailLink({ email: email.trim(), purpose, next: purpose === "signin" ? currentRoute() : undefined });
-      if (r.ok) { setPw(""); setSent({ email: email.trim(), purpose, seconds: r.retryAfterSeconds }); }
-      else setMsg({ type: "err", text: failureCopy(r) });
-    } finally { submitting.current = false; setBusy(false); }
+    submitting.current = true; setBusy(true); setMsg(null);
+    try { await askLink(purpose, addr); } finally { submitting.current = false; setBusy(false); }
   };
   const resendLink = () => requestEmailLink({ email: sent.email, purpose: sent.purpose, next: sent.purpose === "signin" ? currentRoute() : undefined });
+  // The Sign in form's "Email me a sign-in link": only the address is needed, and a missing one is SAID, never a dead button.
+  const onEmailLink = () => {
+    const v = readDom();
+    syncState(v);
+    const problem = validateAuthFields({ mode: "reset", email: v.email });
+    if (problem) {
+      setMsg({ type: "err", text: problem });
+      try { const f = formRef.current; const el = f && f.elements ? f.elements.namedItem("email") : null; el && el.focus && el.focus(); } catch (_) { /* focus is a courtesy */ }
+      return;
+    }
+    retryLink("signin", v.email.trim());
+  };
 
-  const perform = async (token) => {
+  function perform(token) {
+    return performAsync(token);
+  }
+  const performAsync = async (token) => {
     if (submitting.current) return;
     submitting.current = true;
+    const v = readDom();
     setBusy(true); setMsg(null);
+    const again = () => submit();
     try {
       if (mode === "signin") {
-        const { error } = await signIn(email.trim(), pw, token || undefined);
-        error ? setMsg({ type: "err", text: error }) : onClose();
+        const res = await signIn(v.email.trim(), v.pw, token || undefined);
+        res.error ? setMsg(failMsg(res, again)) : onClose();
       } else if (mode === "signup") {
-        const res = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() }, token || undefined);
+        const res = await signUp(v.email.trim(), v.pw, { firstName: v.first.trim(), lastName: v.last.trim(), org: v.org.trim() }, token || undefined);
         // (The single-use token is spent and the widget reset by the gate after EVERY attempt, pass or fail.)
         const outcome = signupOutcome(res);
-        if (outcome === "error") setMsg({ type: "err", text: res.error });
+        if (outcome === "error") setMsg(failMsg(res, again));
         else {
           setPw(""); // never leave the typed password sitting in a live field behind the result
           if (outcome === "signed-in") onClose();
-          else setDone({ email: email.trim() });
+          else setDone({ email: v.email.trim() });
         }
       } else if (mode === "reset") {
-        submitting.current = false; // sendLink takes the guard itself
-        await sendLink("reset");
-        return;
+        await askLink("reset", v.email.trim());
       } else if (mode === "recovery") {
-        const { error } = await updatePassword(pw);
-        if (error) setMsg({ type: "err", text: error });
+        const res = await updatePassword(v.pw);
+        if (res.error) setMsg(failMsg(res, null));
         else { clearRecoveryPending(); setMsg({ type: "ok", text: "Password updated." }); setTimeout(onClose, 900); }
       }
     } finally { submitting.current = false; setBusy(false); }
   };
-  // Every press of the button / Enter goes through here: validate what needs no token first (so a
-  // missing name never makes anyone wait on Cloudflare), then let the gate send now or when the
-  // token lands. A second press while waiting or sending is ignored by the gate.
+  // Every press of the button / Enter (the form's submit) goes through here: say what is missing (so a missing
+  // field never means a silent dead button), validate what needs no token first (so a missing name never makes
+  // anyone wait on Cloudflare), then let the gate send now or when the token lands. A second press while waiting
+  // or sending is ignored by the gate.
   const submit = () => {
-    if (mode === "signup" && (!first.trim() || !last.trim())) { setMsg({ type: "err", text: "First and last name are required." }); return; }
+    const v = readDom();
+    syncState(v);
+    const problem = validateAuthFields({ mode, email: v.email, pw: v.pw, first: v.first, last: v.last });
+    if (problem) {
+      setMsg({ type: "err", text: problem });
+      try { const f = formRef.current; const target = f && f.elements ? (problem.includes("email") ? f.elements.namedItem("email") : problem.includes("name") ? f.elements.namedItem("first") : f.elements.namedItem("password")) : null; target && target.focus && target.focus(); } catch (_) { /* focus is a courtesy */ }
+      return;
+    }
     setMsg(null);
     gate.submit({ needsToken: captchaOn });
   };
+  const onFormSubmit = (e) => { e.preventDefault(); submit(); };
 
   // Signed-in account view (Profile + Settings) — not while completing a recovery.
   if (user && !recovery) {
     return <AccountView user={user} profileApi={profileApi} initialTab={initialTab} onClose={onClose} />;
   }
 
-  // Set-new-password (arrived from a reset link).
+  // Set-new-password (arrived from a reset link). NOT dismissable (NEW-1 point 6): Escape and a backdrop tap used to
+  // close it for good, leaving a signed-in-by-link person with no way back to it. The way out is "Send a new link".
   if (mode === "recovery") {
     return (
-      <Wrap onClose={onClose} msg={msg} title="Set a new password" locked>
-        <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }} data-testid="recovery-form">Choose a new password for your account.</div>
-        <input aria-label="New password" type="password" autoComplete="new-password" placeholder={`New password (min ${MIN_PASSWORD_LENGTH} characters)`} value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= MIN_PASSWORD_LENGTH) submit(); }} />
-        <button data-testid="recovery-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || pw.length < MIN_PASSWORD_LENGTH} onClick={submit}>{busy ? "…" : "Update password"}</button>
-        {/* The form cannot be dismissed, so it needs its own way out: signing out leaves the password unchanged. */}
-        <div style={{ marginTop: 10, fontSize: 12 }}><button data-testid="recovery-signout" style={linkBtn} onClick={async () => { clearRecoveryPending(); await signOut(); onClose(); }}>Sign out instead</button></div>
+      <Wrap onClose={onClose} msg={msg} title="Set a new password" dismissable={false}>
+        <form ref={formRef} noValidate onSubmit={onFormSubmit}>
+          <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }} data-testid="recovery-form">Set a new password</div>
+          <input aria-label="New password" name="password" type="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} />
+          <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy}>{busy ? "…" : "Update password"}</button>
+          <div style={{ marginTop: 10, fontSize: 12 }}>
+            <button type="button" style={linkBtn} onClick={sendNewLink}>Link not working? Send a new one</button>
+          </div>
+          {/* The form cannot be dismissed, so it needs its own way out that leaves the password unchanged (NEW-1, B2626128). */}
+          <div style={{ marginTop: 4, fontSize: 12 }}>
+            <button type="button" data-testid="recovery-signout" style={linkBtn} onClick={async () => { await signOut(); onClose(); }}>Sign out instead</button>
+          </div>
+        </form>
       </Wrap>
     );
   }
@@ -570,62 +660,66 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
     );
   }
 
-  // Logged-out forms: signin / signup / reset.
+  // Logged-out forms: signin / signup / reset. ONE real <form> (NEW-1 point 3): Enter works from any field, and a
+  // password manager sees a login form to fill and to offer to save. `noValidate` — our own messages say what is missing.
   return (
     <Wrap onClose={onClose} msg={msg} title={mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Reset password"}>
       <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-        <button style={{ ...btn(mode === "signin"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signin"); setMsg(null); }}>Sign in</button>
-        <button style={{ ...btn(mode === "signup"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signup"); setMsg(null); }}>Sign up</button>
+        <button type="button" style={{ ...btn(mode === "signin"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signin"); setMsg(null); }}>Sign in</button>
+        <button type="button" style={{ ...btn(mode === "signup"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signup"); setMsg(null); }}>Sign up</button>
       </div>
-      {mode === "signup" && (
-        <>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input aria-label="First name" autoComplete="given-name" placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} style={{ ...field, flex: 1 }} />
-            <input aria-label="Last name" autoComplete="family-name" placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} style={{ ...field, flex: 1 }} />
-          </div>
-          <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company" value={org} onChange={(e) => setOrg(e.target.value)} style={field} />
-        </>
-      )}
-      <input aria-label="Email" type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && mode === "reset") submit(); }} />
-      {mode !== "reset" && (
-        <input aria-label="Password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          aria-describedby={mode === "signup" ? "auth-pw-hint" : undefined} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} />
-      )}
-      {mode === "signup" && passwordHintVisible(pwFocus, pw) && (
-        <div id="auth-pw-hint" data-testid="password-hint" style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 4 }}>{PASSWORD_MIN_HINT}</div>
-      )}
-      {captchaOn && (
-        <div style={{ marginTop: mode === "signup" || cv.widget === "interactive" ? 10 : 0 }}>
-          <Turnstile key={widgetKey} ref={widgetRef} appearance={mode === "signup" ? "always" : "interaction-only"}
-            onToken={gate.setToken} onStateChange={gate.setWidgetState} onTimeout={gate.widgetTimedOut} />
-          {cv.widget === "interactive" && !cv.failure && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Finish the quick check to continue.</div>}
-          {(cv.widget === "error" || cv.failure) && (
-            <div role="alert" data-testid="captcha-unavailable" style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 6 }}>
-              {CAPTCHA_UNAVAILABLE_COPY}{" "}
-              <button data-testid="captcha-retry" style={linkBtn} onClick={() => gate.retry()}>Try again</button>
+      <form ref={formRef} noValidate onSubmit={onFormSubmit}>
+        {mode === "signup" && (
+          <>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input aria-label="First name" name="first" autoComplete="given-name" placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} style={{ ...field, flex: 1 }} />
+              <input aria-label="Last name" name="last" autoComplete="family-name" placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} style={{ ...field, flex: 1 }} />
             </div>
-          )}
-        </div>
-      )}
-      <button data-testid="auth-submit" style={{ ...btn(!captchaBlocked), width: "100%", marginTop: 12 }}
-        disabled={busy || cv.pending || !email || (mode !== "reset" && pw.length < MIN_PASSWORD_LENGTH)}
-        onClick={submit}>{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
-      {mode === "signin" && (
-        <>
-          {captchaBlocked && <div data-testid="captcha-blocked-note" style={{ fontSize: FONT_SIZE.label, color: PAL.ink, marginTop: 10, lineHeight: 1.45 }}>{BLOCKED_CHECK_COPY}</div>}
-          <button data-testid="email-link-signin" disabled={busy || !email.trim()} onClick={() => sendLink("signin")}
-            style={{ ...btn(captchaBlocked), width: "100%", marginTop: 8, opacity: busy || !email.trim() ? 0.6 : 1 }}>
-            {busy ? "…" : "Email me a sign-in link"}
-          </button>
-        </>
-      )}
-      {mode !== "signup" && (
-        <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-          {mode === "reset"
-            ? <button style={linkBtn} onClick={() => { setMode("signin"); setMsg(null); }}>← Back to sign in</button>
-            : <button style={linkBtn} onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>}
-        </div>
-      )}
+            <input aria-label="Organization or company" name="org" autoComplete="organization" placeholder="Organization / company" value={org} onChange={(e) => setOrg(e.target.value)} style={field} />
+          </>
+        )}
+        <input aria-label="Email" name="email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
+        {mode !== "reset" && (
+          <input aria-label="Password" name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field}
+            aria-describedby={mode === "signup" ? "auth-pw-hint" : undefined} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} />
+        )}
+        {mode === "signup" && passwordHintVisible(pwFocus, pw) && (
+          <div id="auth-pw-hint" data-testid="password-hint" style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 4 }}>{PASSWORD_MIN_HINT}</div>
+        )}
+        {captchaOn && (
+          <div style={{ marginTop: mode === "signup" || cv.widget === "interactive" ? 10 : 0 }}>
+            <Turnstile key={widgetKey} ref={widgetRef} appearance={mode === "signup" ? "always" : "interaction-only"}
+              onToken={gate.setToken} onStateChange={gate.setWidgetState} onTimeout={gate.widgetTimedOut} />
+            {cv.widget === "interactive" && !cv.failure && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Finish the quick check to continue.</div>}
+            {(cv.widget === "error" || cv.failure) && (
+              <div role="alert" data-testid="captcha-unavailable" style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 6 }}>
+                {CAPTCHA_UNAVAILABLE_COPY}{" "}
+                <button type="button" data-testid="captcha-retry" style={linkBtn} onClick={() => gate.retry()}>Try again</button>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Never greyed for a missing field — Submit says what is missing. Off only while the request is out / waiting on the check. */}
+        <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(!captchaBlocked), width: "100%", marginTop: 12, scrollMarginBottom: 12 }}
+          disabled={busy || cv.pending}
+        >{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
+        {mode === "signin" && (
+          <>
+            {captchaBlocked && <div data-testid="captcha-blocked-note" style={{ fontSize: FONT_SIZE.label, color: PAL.ink, marginTop: 10, lineHeight: 1.45 }}>{BLOCKED_CHECK_COPY}</div>}
+            <button type="button" data-testid="email-link-signin" disabled={busy} onClick={onEmailLink}
+              style={{ ...btn(captchaBlocked), width: "100%", marginTop: 8, opacity: busy ? 0.6 : 1 }}>
+              {busy ? "…" : "Email me a sign-in link"}
+            </button>
+          </>
+        )}
+        {mode !== "signup" && (
+          <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+            {mode === "reset"
+              ? <button type="button" style={linkBtn} onClick={() => { setMode("signin"); setMsg(null); }}>← Back to sign in</button>
+              : <button type="button" style={linkBtn} onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>}
+          </div>
+        )}
+      </form>
     </Wrap>
   );
 }
