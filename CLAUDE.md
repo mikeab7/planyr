@@ -410,8 +410,9 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > user sees (the account email + its `e2e-fixture-site` row). **THE ONE SHARED HELPER is
 > `ui-audit/lib/signedInSession.mjs` (`openSignedIn({ base })`) — never write a second sign-in.** It uses the
 > `E2E_LOGIN_KEY` env var (set in this environment; never print it) against `POST /api/auth/e2e-session`, a
-> route that can only ever mint a session for the test account. Password sign-in is refused by Supabase's
-> Turnstile captcha on purpose and **turning captcha off is ruled out**. **Trust:** the environment setup
+> route that can only ever mint a session for the test account. The app's own sign-in
+> panel sends a real Turnstile token (sign in, sign up and forgot password all do — B2619760), but a headless browser is not expected
+> to pass Cloudflare's check, so sessions use this route; **turning captcha off is ruled out**. **Trust:** the environment setup
 > script imports the sandbox proxy's CA into Chromium's NSS store, so HTTPS just works — **NEVER reach for
 > `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out). The test account is `authenticated`
 > only: no admin row, no team memberships, owns two fixture sites.

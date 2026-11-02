@@ -4,13 +4,15 @@
  * Owner decision 2026-10-04: a session's own live signed-in check on the test account COUNTS as
  * verified. `Blocker: auth` no longer parks a check.
  *
- * HOW IT SIGNS IN (NEW-1): Supabase Turnstile captcha blocks password sign-in headlessly, so when
+ * HOW IT SIGNS IN (NEW-1): Supabase's Turnstile captcha gates sign in, sign up AND forgot password (the app's own
+ * panel sends a real token since B2619760), but a HEADLESS browser cannot be expected to pass Cloudflare's
+ * check, so when
  * E2E_LOGIN_KEY is set this POSTs it (header, never URL) to the deploy's own /api/auth/e2e-session
  * — a route that can only ever mint a session for the test account (functions/api/auth/e2e-session.js)
  * — and hands the returned tokens to the page's Supabase client (`window.pfSupabase.auth.setSession`).
  * The fetch runs INSIDE the page (same-origin), so it uses Chromium's trust store, not Node's.
  * A route that answers 404 means E2E_LOGIN_KEY is not set on that deploy (or is wrong) — reported as such.
- * Without E2E_LOGIN_KEY it falls back to E2E_EMAIL/E2E_PASSWORD (which captcha will currently refuse).
+ * Without E2E_LOGIN_KEY it falls back to E2E_EMAIL/E2E_PASSWORD (which Cloudflare's check may refuse headless — that is not a pass; use E2E_LOGIN_KEY).
  *
  * SIGNED-IN PROOF is never "the module tabs are visible" (they show signed out too): it is the
  * Supabase user's email === the test account AND the fixture site row (e2e-fixture-site), which RLS

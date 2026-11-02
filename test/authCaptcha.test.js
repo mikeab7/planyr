@@ -1,4 +1,4 @@
-/* auth.js signUp() forwards a Turnstile captchaToken to Supabase but never fabricates one
+/* auth.js signUp() / signIn() / resetPassword() forward a Turnstile captchaToken to Supabase but never fabricates one
  * (B1160720, NEW-1). Supabase Auth (GoTrue) is the one that actually VERIFIES the token —
  * server-side, against Cloudflare, using the secret key in the Supabase dashboard — so the
  * only thing this repo's code can be responsible for, and the only thing worth unit-testing,
@@ -11,13 +11,16 @@
  * a genuine account-creation call against production auth.users on every test run. */
 import { describe, it, expect, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ calls: [] }));
+const h = vi.hoisted(() => ({ calls: [], signUpFail: null, reply: () => ({ data: {}, error: null }) }));
 
 vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   supabase: {
     auth: {
+      signInWithPassword: async (args) => { h.calls.push(args); return h.reply("signIn", args); },
+      resetPasswordForEmail: async (email, options) => { h.calls.push({ email, options }); return h.reply("reset", { email, options }); },
       signUp: async (args) => {
         h.calls.push(args);
+        if (h.signUpFail) return { data: { user: null, session: null }, error: h.signUpFail };
         return { data: { user: { id: "u1" }, session: { access_token: "t" } }, error: null };
       },
     },
@@ -25,7 +28,8 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   supabaseConfigured: () => true,
 }));
 
-import { signUp } from "../src/workspaces/site-planner/lib/auth.js";
+import { signUp, signIn, resetPassword } from "../src/workspaces/site-planner/lib/auth.js";
+import { CAPTCHA_FAILED_COPY, isCaptchaError } from "../src/shared/turnstile/captchaCopy.js";
 
 describe("signUp() — Turnstile captchaToken forwarding (B1160720, NEW-1)", () => {
   it("passes options.captchaToken through unmodified when the caller supplies one", async () => {
@@ -54,5 +58,79 @@ describe("signUp() — Turnstile captchaToken forwarding (B1160720, NEW-1)", () 
     const call = h.calls[0];
     expect(call.options.data).toEqual({ first_name: "A", last_name: "B", org: "C" });
     expect(call.options.captchaToken).toBe("tok");
+  });
+});
+
+describe("signIn() — Turnstile captchaToken forwarding (NEW-1)", () => {
+  it("passes options.captchaToken to signInWithPassword", async () => {
+    h.calls.length = 0;
+    await signIn("a@example.com", "pw123456", "the-token");
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].email).toBe("a@example.com");
+    expect(h.calls[0].password).toBe("pw123456");
+    expect(h.calls[0].options.captchaToken).toBe("the-token");
+  });
+  it("omits options/captchaToken when there is none or it is empty (never an empty string)", async () => {
+    for (const tok of [undefined, ""]) {
+      h.calls.length = 0;
+      await signIn("a@example.com", "pw123456", tok);
+      expect("options" in h.calls[0]).toBe(false);
+    }
+  });
+});
+
+describe("resetPassword() — Turnstile captchaToken forwarding (NEW-1)", () => {
+  it("passes captchaToken alongside redirectTo", async () => {
+    h.calls.length = 0;
+    await resetPassword("a@example.com", "the-token");
+    expect(h.calls[0].email).toBe("a@example.com");
+    expect(h.calls[0].options.captchaToken).toBe("the-token");
+    expect("redirectTo" in h.calls[0].options).toBe(true);
+  });
+  it("omits captchaToken when there is none or it is empty", async () => {
+    for (const tok of [undefined, ""]) {
+      h.calls.length = 0;
+      await resetPassword("a@example.com", tok);
+      expect("captchaToken" in h.calls[0].options).toBe(false);
+    }
+  });
+});
+
+describe("a captcha refusal never reaches the screen as the server's raw words (NEW-1)", () => {
+  const RAW = "captcha protection: request disallowed (no captcha_token found)";
+  const refusals = [
+    { name: "AuthError with code", err: { message: RAW, code: "captcha_failed", status: 400 } },
+    { name: "message only", err: { message: RAW } },
+    { name: "code only, odd wording", err: { message: "request disallowed", code: "captcha_failed" } },
+    { name: "verification failed wording", err: { message: "captcha verification process failed" } },
+  ];
+  for (const { name, err } of refusals) {
+    it(`signIn / resetPassword / signUp all say it in plain words — ${name}`, async () => {
+      h.reply = () => ({ data: { user: null, session: null }, error: err });
+      h.signUpFail = err;
+      const results = [
+        (await signIn("a@example.com", "pw123456")).error,
+        (await resetPassword("a@example.com")).error,
+        (await signUp("a@example.com", "pw123456", {})).error,
+      ];
+      for (const text of results) {
+        expect(text).toBe(CAPTCHA_FAILED_COPY);
+        expect(text).not.toMatch(/captcha/i);
+        expect(text).not.toMatch(/disallowed|token/i);
+      }
+      h.reply = () => ({ data: {}, error: null });
+      h.signUpFail = null;
+    });
+  }
+  it("leaves every other error text alone", async () => {
+    h.reply = () => ({ data: {}, error: { message: "Invalid login credentials", code: "invalid_credentials" } });
+    expect((await signIn("a@example.com", "x")).error).toBe("Invalid login credentials");
+    h.reply = () => ({ data: {}, error: null });
+  });
+  it("isCaptchaError reads both the code and the text", () => {
+    expect(isCaptchaError({ code: "captcha_failed", message: "x" })).toBe(true);
+    expect(isCaptchaError("captcha protection: nope")).toBe(true);
+    expect(isCaptchaError({ message: "Invalid login credentials" })).toBe(false);
+    expect(isCaptchaError(null)).toBe(false);
   });
 });

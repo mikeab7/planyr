@@ -9,6 +9,7 @@
 import { supabase } from "./supabase.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT } from "../../../shared/auth/rateLimitCopy.js";
+import { friendlyAuthError } from "../../../shared/turnstile/captchaCopy.js";
 
 // Where Supabase sends the user back after email confirmation / password reset.
 // Must be allow-listed in Supabase → Auth → URL Configuration → Redirect URLs.
@@ -20,7 +21,10 @@ const redirectTo = (() => {
   try { return window.location.origin + "/"; } catch (_) { return undefined; }
 })();
 
-const errMsg = (e) => (e && e.message) || null;
+// Every auth error reaches the screen through here, so a captcha refusal ("captcha protection:
+// request disallowed (no captcha_token found)", error_code captcha_failed) is turned into plain
+// words ONCE, for sign in, sign up, forgot password and the rest — never a copy per mode.
+const errMsg = (e) => friendlyAuthError(e);
 
 // `captchaToken` (B1160720, NEW-1) is a Cloudflare Turnstile token, opaque to us — we only
 // forward it. Supabase Auth (GoTrue) is the one that verifies it, server-side, against
@@ -56,9 +60,14 @@ export async function signUp(email, password, profile = {}, captchaToken) {
   return { error: msg, needsConfirm: !!(data && data.user && !data.session), signedIn: !!(data && data.session) };
 }
 
-export async function signIn(email, password) {
+// Sign in and Forgot password are captcha-gated server-side exactly like sign-up (NEW-1, amends
+// B1160720 — which only wired sign-up, leaving every signed-out user unable to get back in). Same
+// omit-when-empty rule as signUp(): a present-but-empty token is a failed challenge to GoTrue.
+export async function signIn(email, password, captchaToken) {
   if (!supabase) return { error: "Cloud not configured." };
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const creds = { email, password };
+  if (captchaToken) creds.options = { captchaToken };
+  const { error } = await supabase.auth.signInWithPassword(creds);
   return { error: errMsg(error) };
 }
 
@@ -84,9 +93,11 @@ export async function signOutEverywhere() {
   }
 }
 
-export async function resetPassword(email) {
+export async function resetPassword(email, captchaToken) {
   if (!supabase) return { error: "Cloud not configured." };
-  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  const options = { redirectTo };
+  if (captchaToken) options.captchaToken = captchaToken;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, options);
   return { error: errMsg(error) };
 }
 

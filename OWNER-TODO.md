@@ -254,6 +254,8 @@ Everything else is built and live. Two things only you can do (the files are att
 
 ## ✅ DONE 2026-10-04 — Signup bot check turned on, nothing for you here (B1160720/B1160723)
 
+> **UPDATE 2026-11-02 (B2619760):** the check turned out to guard Sign in and Forgot password too, and the app only sent it for Sign up — so nobody signed out could get back in. Fixed in code (nothing for you to do); all three now send it. Email confirmation is already OFF (`mailer_autoconfirm` is true), so step 2 below is done — only the optional tidy-up of the unused "check your email" wording is left, and it is deliberately not being removed.
+>
 > **✅ DONE 2026-10-04 — both steps below were completed by you:** Cloudflare Turnstile widget created, `VITE_TURNSTILE_SITE_KEY` set in Cloudflare Pages Production, the Turnstile secret pasted into Supabase (Attack Protection, provider Turnstile by Cloudflare) and captcha protection switched ON. Verified live: a real production signup created the `auth.users` row for mik@live.com at 2026-10-04 16:15:35 UTC, which can only exist if Supabase accepted the Turnstile token. "Confirm email" was then switched OFF in Supabase (Sign In / Providers); PR #1971 shipped the sign-up success state. The original text is kept below as history.
 
 
