@@ -7,6 +7,12 @@
  *   node scripts/ops-snapshot.mjs --push   → send both payloads to the Ops page (B2159504). Run by the Build
  *                                            workflow's `ops-digest` job after every merge to main.
  *   … --push --dry-run                     → build + validate + print the request, send nothing (a CI gate).
+ *   node scripts/ops-snapshot.mjs --signin → SIGN-IN HEALTH (NEW-1, 2026-11-02, after B2619760) for the daily data-risk sweep: prints the
+ *                                            ready-to-run read-only SQL, or — with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in the
+ *                                            environment — fetches the `signin` snapshot and prints the VERDICT; exit 1 unless it is "ok".
+ *   … --signin --stdin                     → read a `{ "payload": …, "updated_at": … }` row on stdin (what the SQL returns) and print the verdict.
+ *   The verdict logic is src/shared/auth/signinHealth.js `snapshotHealth` — the same function the admin Ops card uses, so the
+ *   page and the sweep can never disagree. A snapshot older than ~2.5 h reads STOPPED: the check itself has stopped running.
  * --push needs VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY and OPS_INGEST_TOKEN (the GitHub Actions secret whose
  * SHA-256 is in public.ops_ingest_tokens — src/workspaces/admin/db/admin_ops_ingest.sql). The token is only ever
  * sent as an RPC argument over HTTPS and is never printed. Without the token the push says so loudly and exits 0
@@ -15,6 +21,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { snapshotHealth, sweepLine } from "../src/shared/auth/signinHealth.js";
 
 const heading = (dir, file) => {
   const first = readFileSync(join(dir, file), "utf8").split("\n", 1)[0];
@@ -107,7 +114,38 @@ export async function runPush({ env = process.env, dryRun = false, fetchImpl = g
   return { code: 0, sent: true };
 }
 
-if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--push")) {
+/* ── Sign-in health for the sweep (NEW-1) ─────────────────────────────────────────────────────────────────────────── */
+export const SIGNIN_SQL = "select updated_at, payload from public.ops_snapshots where key = 'signin';";
+
+/** row = { payload, updated_at } | null (no row = the check has NEVER reported). → { state, line, ok } */
+export function signinVerdict(row, now = Date.now()) {
+  const snap = row && row.payload ? row.payload : null;
+  const h = snapshotHealth(snap, now);
+  return { state: h.state, line: sweepLine(snap, now), ok: h.state === "ok" };
+}
+
+export async function runSignin({ env = process.env, argv = process.argv, fetchImpl = globalThis.fetch, readStdin = async () => { let t = ""; for await (const c of process.stdin) t += c; return t; }, log = console.log, now = Date.now() } = {}) {
+  let row;
+  if (argv.includes("--stdin")) {
+    const raw = (await readStdin()).trim();
+    try { const j = raw ? JSON.parse(raw) : null; row = Array.isArray(j) ? j[0] || null : j; } catch (e) { log("signin: stdin is not JSON — " + e.message); return 2; }
+  } else if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
+    const res = await fetchImpl(`${String(env.SUPABASE_URL).replace(/\/+$/, "")}/rest/v1/ops_snapshots?select=updated_at,payload&key=eq.signin`, { headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` } });
+    if (!res.ok) { log(`signin: the read failed (HTTP ${res.status})`); return 2; }
+    row = (await res.json())[0] || null;
+  } else {
+    log("-- READ-ONLY. Run this against the production database (Supabase SQL editor / MCP execute_sql), then pipe the row into `node scripts/ops-snapshot.mjs --signin --stdin`:\n" + SIGNIN_SQL);
+    log("-- STOPPED if updated_at / payload.lastCheckAt is older than 150 minutes; no row at all = the hourly check has never reported.");
+    return 0;
+  }
+  const v = signinVerdict(row, now);
+  log(`sign-in health: ${v.state.toUpperCase()} — ${v.line}`);
+  return v.ok ? 0 : 1;
+}
+
+if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--signin")) {
+  runSignin().then((c) => { process.exitCode = c; });
+} else if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--push")) {
   runPush({ dryRun: process.argv.includes("--dry-run") }).then((r) => { process.exitCode = r.code; });
 } else if (import.meta.url === `file://${process.argv[1]}`) {
   const s = buildSnapshots();

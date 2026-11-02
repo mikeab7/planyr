@@ -244,3 +244,49 @@ test.describe("auth panel — captcha on sign in, forgot password and sign up", 
     expect(await panel.evaluate((el) => el.scrollHeight > el.clientHeight || getComputedStyle(el).overflowY === "auto")).toBe(true);
   });
 });
+
+/* NEW-1 (2026-11-02, after B2619760) — the break is REPORTED. Reads the page's own telemetry ring (window.pfTelemetry.recent()):
+ * automated runs never write to production (B270912), but every row is built and kept locally, so this proves what the app
+ * WOULD send. Nothing here may contain a password or a full email address. */
+test.describe("auth telemetry — a broken sign-in reports itself", () => {
+  test.skip(!HOST || !SITE_KEY, "needs VITE_SUPABASE_URL + VITE_TURNSTILE_SITE_KEY baked into the build (see the header)");
+  const rows = (page) => page.evaluate(() => window.pfTelemetry.recent().map((r) => ({ source: r.source, message: r.message })));
+  const sources = async (page) => (await rows(page)).map((r) => r.source);
+
+  test("a blocked bot-check script → auth-captcha-blocked, and the widget publishes why", async ({ page }) => {
+    await mock(page, { calls: [], scriptOk: false });
+    await page.goto("/?app&auth=signin");
+    await expect(page.getByTestId("captcha-unavailable")).toBeVisible();
+    await expect(page.getByTestId("turnstile-widget")).toHaveAttribute("data-turnstile-error", "script");
+    expect(await sources(page)).toContain("event:auth-captcha-blocked");
+  });
+
+  test("wrong password then right password → a wrong-password count and an ok count; domain only, never the password", async ({ page }) => {
+    await mock(page, { calls: [] });
+    await page.goto("/?app&auth=signin");
+    await page.waitForTimeout(150);
+    await fillSignIn(page, "typed-bad-pw-123");          // anything but the mock's right password; distinct from the event NAMES
+    await submit(page).click();
+    await expect(dlg(page)).toContainText("Invalid login credentials");
+    await dlg(page).getByLabel("Password").fill("right-password");
+    await submit(page).click();
+    await expect(dlg(page)).toHaveCount(0);
+    const r = await rows(page);
+    expect(r.map((x) => x.source)).toEqual(expect.arrayContaining(["event:auth-wrong-password", "event:auth-ok"]));
+    const blob = JSON.stringify(r);
+    expect(blob).not.toContain("typed-bad-pw-123");            // the typed (wrong) password
+    expect(blob).not.toContain("right-password");
+    expect(blob).not.toContain("a@example.com");               // the full address
+    expect(blob).toContain("example.com");                     // the domain is there
+  });
+
+  test("a server refusal of the bot-check token → auth-captcha-refused (the one event that can alarm)", async ({ page }) => {
+    await mock(page, { calls: [], rawOnly: true });
+    await page.goto("/?app&auth=signin");
+    await page.waitForTimeout(150);
+    await fillSignIn(page, "right-password");
+    await submit(page).click();
+    await expect(dlg(page)).toContainText("We couldn't verify this browser. Try again.");
+    expect(await sources(page)).toContain("event:auth-captcha-refused");
+  });
+});
