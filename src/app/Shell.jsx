@@ -21,7 +21,7 @@ import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
@@ -770,6 +770,15 @@ export default function Shell() {
   useEffect(() => { setOrgName(profileApi.org); }, [profileApi.org]);
 
   const openAuth    = () => { setRecovery(false); setAuthOpen(true); };
+  // A sign-in link carries the in-app route the person started from (already validated by safeNextRoute); land them there
+  // through the router's own navigate() — the one writer of the hash. The Dashboard / admin / design pages have no navigate()
+  // form (they all parse to the default route), so those are left to the normal boot, which resumes where they were.
+  const goToLinkRoute = useCallback((next) => {
+    const h = "#" + next;
+    if (isAdminRoute(h) || isDesignRoute(h) || isDashboardRoute(h)) return;
+    const r = parseRoute(h);
+    navigate({ module: r.module, projectId: r.projectId, cross: r.cross, org: r.org });
+  }, [navigate]);
   // Invite link (NEW-2): a signed-out visitor opens the auth screen on the right tab with the invited address filled in.
   const openAuthForInvite = useCallback(({ email, mode }) => {
     setRecovery(false);
@@ -799,7 +808,7 @@ export default function Shell() {
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
       {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} /></Suspense>}
-      {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} /></Suspense>}
+      {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} onGoTo={goToLinkRoute} /></Suspense>}
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}

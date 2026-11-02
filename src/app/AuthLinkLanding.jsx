@@ -29,8 +29,8 @@ import { failureCopy, SUPPORT_MAILTO } from "../workspaces/site-planner/lib/emai
 import EmailLinkSent from "../workspaces/site-planner/components/EmailLinkSent.jsx";
 
 const AUTH_WAIT_MS = 4000;
-const overlay = { position: "fixed", inset: 0, zIndex: 5100, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center", padding: 16 };
-const card = { background: "var(--surface-raised)", color: "var(--text-primary)", borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 380, maxWidth: "100%", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" };
+const overlay = { position: "fixed", inset: 0, zIndex: 5100, background: "var(--modal-scrim)", display: "grid", placeItems: "center", padding: 16 };
+const card = { background: "var(--surface-raised)", color: "var(--text-primary)", borderRadius: RADIUS.lg, boxShadow: "var(--modal-shadow)", padding: 22, width: 380, maxWidth: "100%", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: FONT_SIZE.emphasis, border: "1px solid var(--border-default)", borderRadius: RADIUS.md, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", marginTop: 8 };
 
 function stripUrl() {
@@ -92,8 +92,9 @@ function ResendPanel({ kind, onBackToSignIn }) {
   );
 }
 
-/** Props: user (Supabase user or null), authKnown, onOpenSignIn(), onRecovery() — the Shell opens the set-new-password form. */
-export default function AuthLinkLanding({ user, authKnown, onOpenSignIn, onRecovery }) {
+/** Props: user (Supabase user or null), authKnown, onOpenSignIn(), onRecovery() — the Shell opens the set-new-password form —
+ *  and onGoTo(route) — the Shell's own router `navigate()`; this page never writes the address hash itself (routeSingleWriter). */
+export default function AuthLinkLanding({ user, authKnown, onOpenSignIn, onRecovery, onGoTo }) {
   const [link] = useState(() => (typeof window === "undefined" ? { present: false } : parseAuthLinkSearch(window.location.search)));
   const [phase, setPhase] = useState({ name: "idle" });
   const [hidden, setHidden] = useState(false);
@@ -136,7 +137,7 @@ export default function AuthLinkLanding({ user, authKnown, onOpenSignIn, onRecov
       if (onRecovery) onRecovery();
       return;
     }
-    if (link.next) { try { window.location.hash = "#" + link.next; } catch (_) { /* leave them where they are */ } }
+    if (link.next && onGoTo) onGoTo(link.next);
     if (was && was.id !== r.user.id && !isSwitch) { setSwapNotice({ was: was.email, now: r.user.email }); setPhase({ name: "idle" }); return; }
     setHidden(true);
   };
