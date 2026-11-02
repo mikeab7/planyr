@@ -747,7 +747,7 @@ export default function FileBrowser({
   // ---- empty / no-project states ------------------------------------------
   if (!signedIn) {
     return <>{dropNoticeNode}<Centered title="Sign in to see your files"
-      body="Document files live in your account (sign in from the Site Planner). Until then, open a PDF directly to mark it up." /></>;
+      body="Document files live in your account — use Sign in at the top right. Until then, open a PDF directly to mark it up." /></>;
   }
   if (!projectId && !cross && !orgScope) {
     return <>{dropNoticeNode}<Centered title="Pick a project to see its files"
