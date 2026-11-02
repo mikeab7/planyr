@@ -336,10 +336,17 @@ select.ei { cursor: pointer; }
    scroll container the moment a navigation key is pressed and clears it on the next REAL pointer move, so a
    parked mouse can never keep a second row lit while the arrow keys walk the blue box down the list. (The
    selected-row outline below is not hover and is unaffected.) The filler strip [data-grid-strip] at each row's
-   right edge (NEW-1) carries the same outline so the line runs edge to edge. */
+   right edge (NEW-1) carries the same outline so the line runs edge to edge.
+   NEW-1 (filler rows) — EVERY child of a row that carries the line says so: task cells by [data-col-key], the
+   filler strip by [data-grid-strip], and the cells of the blank / "+ New task" / review rows by [data-row-line].
+   Each must also be `position: relative` (or sticky) so its ::before is boxed by ITS OWN cell: the filler strip
+   and the blank-row cells used to be un-positioned, which let the line anchor to the whole row — painted over
+   the ordinary cells but UNDER the opaque frozen ID / Task cells, so it started at START and stopped short. */
 [data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-col-key]::before,
+[data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-row-line]::before,
 [data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-grid-strip]::before,
-.drow[data-row-sel] > [data-col-key]::before, .drow[data-row-sel] > [data-grid-strip]::before {
+.drow[data-row-sel] > [data-col-key]::before, .drow[data-row-sel] > [data-grid-strip]::before,
+.drow[data-new-task-row="sel"] > [data-row-line]::before, .drow[data-new-task-row="sel"] > [data-grid-strip]::before {
   content:""; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:1;
   border-top:1px solid #94a3b8; border-bottom:1px solid #94a3b8; }
 /* A full-cell hover-revealed overlay does NOT work here: :hover is true for the ENTIRE mousedown
@@ -14842,9 +14849,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     : <span style={{...cs, color: rv.propOwner ? "var(--txt)" : "var(--mut)", cursor:"text"}} title="Click to edit" onClick={()=>setRvEdit("owner")}>{rv.propOwner||""}</span>;
                   const wrap = {width:w, flexShrink:0, height:ROW_H, position:"relative", overflow: c.k==="health" ? "visible" : "hidden", borderRight:GRID_LINE, borderBottom:GRID_LINE,
                     ...(pinStyle(c.k, [creating ? "#ecfdf3" : "#f3f0ff"], 5) || {})};
-                  return <div key={c.k} className={pinCls(c.k) || undefined} style={wrap}>{inner}</div>;
+                  return <div key={c.k} data-row-line className={pinCls(c.k) || undefined} style={wrap}>{inner}</div>;
                 })}
-                <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, borderBottom:GRID_LINE}} />
+                <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, position:"relative", borderBottom:GRID_LINE}} />
               </div>
             );
           }
@@ -14950,7 +14957,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                 background: isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)"),
                 cursor:ri===tasks.length?"pointer":"default"}}>
               {orderedCols.map(c => (
-                <div key={c.k} className={pinCls(c.k) || undefined} style={{width:dispW[c.k],flexShrink:0,borderRight:GRID_LINE,borderBottom:GRID_LINE,height:ROW_H,
+                <div key={c.k} data-row-line className={pinCls(c.k) || undefined} style={{width:dispW[c.k],flexShrink:0,borderRight:GRID_LINE,borderBottom:GRID_LINE,height:ROW_H,position:"relative",
                   ...(pinStyle(c.k, [isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)")], 5) || {}),
                   ...(ri===tasks.length && c.k==="name" ? {
                     color: isNewTaskFocused ? "var(--blue)" : "var(--mut)",
@@ -14960,7 +14967,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                   {ri===tasks.length && c.k==="name" ? "+ New task" : ""}
                 </div>
               ))}
-              <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, borderBottom:GRID_LINE}} />
+              <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, position:"relative", borderBottom:GRID_LINE}} />
             </div>
           );
         })}
