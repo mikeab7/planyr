@@ -62,12 +62,12 @@ function ContentToggle({ label, title, checked, onChange }) {
 
 /* A "Sheet" card: the whole card is the click target (it is one <label>), checkbox at the left, bold title,
  * one plain description line, and a small page icon at the right showing where the piece sits on the sheet. */
-function SheetCard({ title, description, tinted, checked, onChange, icon }) {
+function SheetCard({ title, description, checked, onChange, icon }) {
   return (
     <label style={{
       display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 8, cursor: "pointer", userSelect: "none",
-      borderRadius: CONTROL_RADIUS.control, border: `1px solid ${tinted ? "var(--accent)" : "var(--border-default)"}`,
-      background: tinted ? "color-mix(in srgb, var(--accent) 10%, var(--surface-raised))" : "var(--surface-raised)",
+      borderRadius: CONTROL_RADIUS.control, border: "1px solid var(--border-default)",
+      background: "var(--surface-raised)",
     }}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ cursor: "pointer", margin: 0, flex: "none" }} />
       <span style={{ flex: 1, minWidth: 0 }}>
@@ -99,7 +99,6 @@ export default function PrintCompose({
   preparedBy, onPreparedBy,
   showDims, onToggleDims,
   showAreas, onToggleAreas,
-  aerialAvailable, showAerial, onToggleAerial,
   overlayPrintable, printOverlay, onTogglePrintOverlay,
   mapLayersPrintable, printMapLayers, onToggleMapLayers,
   showMetricsBand, onToggleMetricsBand,
@@ -188,7 +187,7 @@ export default function PrintCompose({
           </Section>
 
           <Section title="Sheet" accent="var(--accent)">
-            <SheetCard tinted title="Site summary strip" description="Detention required vs. provided, site totals, screening note. Runs across the bottom of the sheet."
+            <SheetCard title="Site summary strip" description="Detention required vs. provided, site totals, screening note. Runs across the bottom of the sheet."
               checked={showMetricsBand} onChange={onToggleMetricsBand} icon={<StripIcon />} />
             {buildingsTablePrintable && (
               <SheetCard title="Buildings table" description="Each building's name and square feet, with a total. Sits in a corner of the plan."
@@ -200,7 +199,6 @@ export default function PrintCompose({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12 }}>
               <ContentToggle label="Dimensions" checked={showDims} onChange={onToggleDims} />
               <ContentToggle label="Square feet labels" checked={showAreas} onChange={onToggleAreas} />
-              {aerialAvailable && <ContentToggle label="Aerial" checked={showAerial} onChange={onToggleAerial} />}
               {mapLayersPrintable && <ContentToggle label="Map layers" checked={printMapLayers} onChange={onToggleMapLayers} />}
               {overlayPrintable && <ContentToggle label="Overlay" checked={printOverlay} onChange={onTogglePrintOverlay} />}
             </div>

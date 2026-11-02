@@ -3,6 +3,7 @@
  * pick rules (the part that needs "clicking") live in pure `paperPick` / `paperChoice`, driven here the
  * same way the component drives them. */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import PrintCompose from "../src/workspaces/site-planner/components/PrintCompose.jsx";
@@ -14,7 +15,7 @@ const props = (o = {}) => ({
   scaleFtPerIn: null, onScale: noop, fitWarning: null, previewSrc: null, previewLoading: false, pageAspect: 11 / 8.5,
   siteLabel: "Goose Creek", planLabel: "Concept A", dateStr: "Oct 30, 2026", preparedBy: "", onPreparedBy: noop,
   showDims: true, onToggleDims: noop, showAreas: true, onToggleAreas: noop,
-  aerialAvailable: true, showAerial: true, onToggleAerial: noop, overlayPrintable: true, printOverlay: true, onTogglePrintOverlay: noop,
+  overlayPrintable: true, printOverlay: true, onTogglePrintOverlay: noop,
   mapLayersPrintable: true, printMapLayers: true, onToggleMapLayers: noop, showMetricsBand: true, onToggleMetricsBand: noop,
   buildingsTablePrintable: true, showBuildingsTable: true, onToggleBuildingsTable: noop, flattenMarkups: false, onToggleFlattenMarkups: noop,
   onReposition: noop, onCancel: noop, onDownload: noop, downloading: false, ...o,
@@ -71,7 +72,7 @@ describe("(b) Custom (match my frame) is the fit-to-frame page", () => {
 describe("(c) labels", () => {
   const h = render();
   it("new labels render", () => {
-    for (const s of ["Site summary strip", "Scale to fit (NTS)", "Flatten markups (unrecoverable)", "Buildings table", "Square feet labels", "Map layers", "Overlay", "Aerial", "Dimensions", "Paper", "On the plan", "Markups", "Landscape", "Portrait"]) expect(h).toContain(s);
+    for (const s of ["Site summary strip", "Scale to fit (NTS)", "Flatten markups (unrecoverable)", "Buildings table", "Square feet labels", "Map layers", "Overlay", "Dimensions", "Paper", "On the plan", "Markups", "Landscape", "Portrait"]) expect(h).toContain(s);
     expect(h).toContain("Goose Creek · Concept A · Oct 30, 2026");
   });
   it("old labels and tool names are gone", () => {
@@ -82,9 +83,28 @@ describe("(c) labels", () => {
     for (const title of ["Site summary strip", "Buildings table"]) expect(h).toMatch(new RegExp(`<label[^>]*><input type="checkbox"[^>]*/><span[^>]*><span[^>]*>${title}</span>`));
   });
   it("conditional rows follow their availability", () => {
-    const h2 = render({ aerialAvailable: false, overlayPrintable: false, mapLayersPrintable: false, buildingsTablePrintable: false });
-    for (const s of ["Aerial", "Overlay", "Map layers", "Buildings table"]) expect(h2).not.toContain(s);
+    const h2 = render({ overlayPrintable: false, mapLayersPrintable: false, buildingsTablePrintable: false });
+    for (const s of ["Overlay", "Map layers", "Buildings table"]) expect(h2).not.toContain(s);
     expect(h2).toContain("Site summary strip");
+  });
+  it("NEW-1 — there is no Aerial row at all: the exhibit follows the map (the aerial is the map's own toggle)", () => {
+    expect(h).not.toContain("Aerial");
+    expect(render({ overlayPrintable: false, mapLayersPrintable: false, buildingsTablePrintable: false })).not.toContain("Aerial");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/components/PrintCompose.jsx", import.meta.url), "utf8");
+    expect(src).not.toMatch(/aerialAvailable|onToggleAerial|showAerial/);
+  });
+  it("NEW-2 — the Site summary strip and Buildings table cards have the identical border and background, and no tinted branch exists", () => {
+    const cards = [...h.matchAll(/<label style="([^"]*)"[^>]*><input type="checkbox"[^>]*\/><span[^>]*><span[^>]*>(Site summary strip|Buildings table)<\/span>/g)];
+    expect(cards.map((m) => m[2])).toEqual(["Site summary strip", "Buildings table"]);
+    const decl = (style, prop) => (style.match(new RegExp(`(?:^|;)${prop}:([^;]*)`)) || [])[1];
+    const [a, b] = cards.map((m) => m[1]);
+    expect(decl(a, "border")).toBe("1px solid var(--border-default)");
+    expect(decl(a, "border")).toBe(decl(b, "border"));
+    expect(decl(a, "background")).toBe("var(--surface-raised)");
+    expect(decl(a, "background")).toBe(decl(b, "background"));
+    expect(h).not.toContain("color-mix");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/components/PrintCompose.jsx", import.meta.url), "utf8");
+    expect(src).not.toMatch(/tinted/);
   });
   it("one text size: no inline font size other than the panel's", () => {
     const scroll = h.slice(h.indexOf("Paper"), h.indexOf("Download PDF"));
