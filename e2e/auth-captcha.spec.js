@@ -267,7 +267,7 @@ test.describe("auth telemetry — a broken sign-in reports itself", () => {
     await page.waitForTimeout(150);
     await fillSignIn(page, "typed-bad-pw-123");          // anything but the mock's right password; distinct from the event NAMES
     await submit(page).click();
-    await expect(dlg(page)).toContainText("Invalid login credentials");
+    await expect(dlg(page)).toContainText("That email and password don't match.");
     await dlg(page).getByLabel("Password").fill("right-password");
     await submit(page).click();
     await expect(dlg(page)).toHaveCount(0);
