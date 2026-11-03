@@ -222,6 +222,10 @@ try {
   for (const id of ["sl_tirz", "sl_available_sites", "sl_dev_projects", "sl_zoning_cases"]) await turnOn(panel, "jur", id);
   await turnOn(panel, "access", "sl_thoroughfare");
   await turnOn(panel, "util", "fire_hydrants");
+  await page.getByTestId("layers-collapse").click().catch(() => {});
+  // the throwaway plan frames a small area (its parcel is small); the nearest tracked development project is ~600 m from Town Square, so zoom out three notches (each layer is re-asked for the larger view)
+  const cbox = await page.getByTestId("planner-canvas").boundingBox();
+  for (let i = 0; i < 3; i++) { await page.mouse.move(cbox.x + cbox.width / 2, cbox.y + cbox.height / 2); await page.mouse.wheel(0, 400); await sleep(700); }
   await sleep(14000);
   const L2 = await layers(); const F2 = (L2 && L2.features) || {};
   console.log("Town Square painted features:", JSON.stringify(Object.fromEntries(Object.entries(F2).filter(([k]) => k.startsWith("sl_")))));
