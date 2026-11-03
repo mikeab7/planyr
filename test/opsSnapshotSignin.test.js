@@ -37,3 +37,21 @@ describe("runSignin", () => {
     expect(r.code).toBe(2);
   });
 });
+
+describe("the daily sweep states the coverage gap every day (owner decision 2026-11-03)", () => {
+  const gapRow = (minsAgo) => row(minsAgo, { overall: "pass", checks: [{ name: "server-gate", status: "pass", detail: "" }, { name: "real-sign-in", status: "unknown", uncovered: true, detail: "challenge" }] });
+  it("a healthy check WITH the gap is ok (exit 0) but the verdict carries the gap and the line says it", () => {
+    const v = signinVerdict(gapRow(10), NOW);
+    expect(v).toMatchObject({ state: "ok", ok: true });
+    expect(v.gaps).toEqual([expect.objectContaining({ name: "real-sign-in" })]);
+    expect(v.line).toMatch(/Coverage gap: Real sign-in through the panel is NOT covered from GitHub's runner/);
+  });
+  it("the command prints a dedicated 'coverage gap' line and still exits 0", async () => {
+    const r = await run(["--signin", "--stdin"], { readStdin: async () => JSON.stringify(gapRow(10)) });
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/coverage gap \[real-sign-in\]: Real sign-in through the panel is NOT covered from GitHub's runner/);
+  });
+  it("a stale snapshot still reads STALE even with a gap on it — the gap never masks a stopped check", () => {
+    expect(signinVerdict(gapRow(500), NOW)).toMatchObject({ state: "stale", ok: false });
+  });
+});

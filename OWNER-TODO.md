@@ -5,15 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-11-02._
-
-## 🚨 One decision on the sign-in alarm: keep the "I can't confirm the real sign-in" email? (B2631296 / V2075968)
-
-> **Status:** the sign-in alarm is live and tested. Your database script is in and the alarm email works — the test sent you exactly two emails (an alert, then an all-clear), labelled **[TEST]**; you can delete them.
->
-> **What I found:** every hour the check tries a real sign-in as the test account. GitHub's computers get a "prove you're human" box from Cloudflare there, so that one step can't finish — it's recorded as "unknown", never as a pass. The other checks (site key, bot-check setting agrees, form opens) work and would have caught the October outage.
->
-> - [ ] **Decide (one word):** after about a day of "unknown", the alarm is built to send you **one** email saying it can't confirm the real sign-in. **"keep"** (you get that one email tomorrow evening) or **"quiet"** (I make that step silent and leave it to the daily sweep).
+_Last updated: 2026-11-03._
 
 ## 🖱 A ten-second look: does the Layers panel still tremble when you slide the pointer down its left list? (B2559953 / V2010721)
 - [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
