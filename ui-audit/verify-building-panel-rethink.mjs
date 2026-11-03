@@ -9,6 +9,7 @@
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=… node ui-audit/verify-building-panel-rethink.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -67,7 +68,7 @@ try {
     await rot.fill("45"); await rot.press("Enter");
     await waitFor(async () => Math.round((await bldg())?.rot || 0) === 45);
     ok(`[${scheme}] picker labels at rot 45: top NE, bottom SW`, (await wall("top").getAttribute("data-compass")) === "NE" && (await wall("bottom").getAttribute("data-compass")) === "SW");
-    { const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first(); await dock.getByTestId("wall-add").click(); await T("wall-add-court").click(); await sleep(500); }   // Building panel v2: a court on both linked walls
+    { const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first(); await addWallLayer(page, dock, "court", 500); }   // Building panel v2: a court on both linked walls
     ok(`[${scheme}] canvas aprons NE + SW agree with the picker (cross-dock)`, JSON.stringify(await apronCompass()) === JSON.stringify(["NE", "SW"]), JSON.stringify(await apronCompass()));
     await wall("bottom").click(); await sleep(600);
     ok(`[${scheme}] click SW wall → single-load NE; picker says NE is the loaded wall`, JSON.stringify(await page.locator('[data-testid="loading-wall-picker"] [data-loaded="1"]').evaluateAll((n) => n.map((g) => g.getAttribute("data-compass")))) === '["NE"]' && (await bldg()).dock === "single");
@@ -75,7 +76,7 @@ try {
     await wall("bottom").click(); await sleep(600);
     ok(`[${scheme}] second wall click re-loads opposite wall → cross-dock`, (await bldg()).dock === "cross" || (await T("loading-type").innerText()) === "Cross-dock");
     // parking rows 8
-    { const rear = page.locator('[data-testid="wall-row"][data-role="ends"]').first(); await rear.getByTestId("wall-add").click(); await T("wall-add-parking").click(); }
+    { const rear = page.locator('[data-testid="wall-row"][data-role="ends"]').first(); await addWallLayer(page, rear, "parking"); }
     const rows = page.getByLabel("Parking rows");
     await rows.fill("8"); await rows.press("Enter"); await sleep(800);
     await rows.evaluate((el) => el.blur());

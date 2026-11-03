@@ -17,6 +17,7 @@
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=… [SHOTS_DIR=/path] node ui-audit/verify-building-panel-v3.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -53,7 +54,7 @@ const bldg = async () => (await els()).find((e) => e.id === "bz1");
 const kids = async () => (await els()).filter((e) => e.attachedTo === "bz1");
 const T = (id) => page.getByTestId(id);
 const rowByRole = (role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await T(`wall-add-${key}`).click(); await sleep(450); };
+const addLayer = (r, key) => addWallLayer(page, r, key);
 async function waitFor(fn, ms = 10000) { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) return v; await sleep(150); } }
 const fillOf = (id) => page.evaluate((i) => { const g = document.querySelector(`[data-el-id="${i}"]`); const r = g && g.querySelector("rect, path, polygon"); return r ? (r.getAttribute("fill") || "").toLowerCase() : null; }, id);
 

@@ -16,6 +16,7 @@
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=… [SHOTS_DIR=/path] node ui-audit/verify-dock-layer-panel.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -65,7 +66,7 @@ try {
   await T("building-header").waitFor({ timeout: 10000 });
   const dockRows = page.locator('[data-testid="wall-row"][data-role="dock"]');
   if ((await dockRows.count()) !== 2) throw new Error("VOID run — expected two dock rows on the cross-dock building");
-  for (const row of [0, 1]) for (const key of ["court", "trailer", "buffer"]) { await dockRows.nth(row).getByTestId("wall-add").click(); await T(`wall-add-${key}`).click(); await sleep(450); }
+  for (const row of [0, 1]) for (const key of ["court", "trailer", "buffer"]) await addWallLayer(page, dockRows.nth(row), key);
   await waitFor(async () => { const k = await kids(); return k.filter((e) => e.truckCourt).length === 2 && k.filter((e) => e.forCourt).length === 2 && k.filter((e) => e.buffer).length === 2; });
   const k0 = await kids();
   const [court, court2] = k0.filter((e) => e.truckCourt);

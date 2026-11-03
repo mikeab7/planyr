@@ -9,7 +9,7 @@
  *
  * Run: PW_CHROME=/opt/pw-browsers/chromium npx playwright test e2e/drive-follows-parking.spec.js --project=chromium */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks, roadNetwork } from "./helpers.js";
+import { armPlannerHooks, roadNetwork, addWallLayer } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const PPF = 1.5;                                   // px per foot of the fixed view (world 0,0 is the canvas centre)
@@ -65,11 +65,9 @@ async function setup(page) {
   await page.getByRole("button", { name: /^Properties$/ }).click();
   // one wall: Add → Sidewalk, then Add → Parking (the field rides the sidewalk, which rides the building)
   const row = page.locator('[data-testid="wall-row"]:not([data-role="dock"])').first();
-  await row.getByTestId("wall-add").click();
-  await page.getByTestId("wall-add-sidewalk").click();
+  await addWallLayer(row, "sidewalk");
   await page.waitForTimeout(300);
-  await row.getByTestId("wall-add").click();
-  await page.getByTestId("wall-add-parking").click();
+  await addWallLayer(row, "parking");
   await settle(page);
   const all = await els(page);
   const building = all.find((e) => e.type === "building" && !e.attachedTo), field = all.find((e) => e.type === "parking" && e.attachedTo === building.id);

@@ -251,9 +251,12 @@ async function runDpr(dpr) {
   await page.__done();
 }
 
-for (const dpr of DPRS) await runDpr(dpr);
+// ANY error (a build mismatch, a page that did not load, a timeout) must still delete the throwaway schedule the live run seeded
+// (owner constraint 15) — it did not, once: a voided run left its "Marker Fixture" row behind.
+let crashed = null;
+try { for (const dpr of DPRS) await runDpr(dpr); } catch (e) { crashed = e; console.log("RUN ABORTED (not scored): " + (e && e.message || e)); }
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) console.log("FAILED:\n" + failed.map(f => " - " + f.name).join("\n"));
 await finish();
-process.exit(failed.length ? 1 : 0);
+process.exit(crashed ? 2 : failed.length ? 1 : 0);

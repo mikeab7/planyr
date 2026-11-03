@@ -15,6 +15,7 @@ import { chromium } from "@playwright/test";
 import { existsSync, mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -107,8 +108,8 @@ try {
   await page.mouse.up();
   await page.getByRole("button", { name: /^Properties$/ }).click();
   const row = page.locator('[data-testid="wall-row"]:not([data-role="dock"])').first();
-  await row.getByTestId("wall-add").click(); await page.getByTestId("wall-add-sidewalk").click(); await sleep(300);
-  await row.getByTestId("wall-add").click(); await page.getByTestId("wall-add-parking").click();
+  await addWallLayer(page, row, "sidewalk", 300);
+  await addWallLayer(page, row, "parking", 0);
   await sleep(900);
   const all0 = await planEls();
   const building = all0.find((e) => e.type === "building" && !e.attachedTo);

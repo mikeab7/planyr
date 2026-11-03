@@ -74,8 +74,9 @@ export function bumpSummary(n, along, proj) {
 /* ------------------------------------------------------------------ strip (Building panel v3) */
 
 /** Every wall is ONE strip: a bar of pieces, building at the left, layers outward left → right. All
- *  widths are layout guidance in CSS px (never shown to the user). */
-export const STRIP = { FULL: 156, FLOOR: 48, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
+ *  widths are layout guidance in CSS px (never shown to the user). FULL was 156 until the named add button (NEW-1, 2026-11-03)
+ *  took its place at the end of the row: head 58 + strip + the widest button ("+ Parking ▾") must fit the 290-wide panel (and the ~266-wide phone sheet) on ONE line. */
+export const STRIP = { FULL: 118, FLOOR: 48, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
 /** Legend / kind order. */
 export const KIND_ORDER = ["court", "trailer", "buffer", "sidewalk", "parking", "road"];
 
@@ -176,6 +177,38 @@ export function addOptions(isDock, layers) {
   out.push(opt("buffer"), opt("road"));
   return out;
 }
+
+/** The order the likely NEXT layer follows on each kind of wall (NEW-1, owner-approved 2026-11-03): a dock wall reads
+ *  court → trailer → buffer → walk (→ road); any other wall reads walk → parking → buffer (→ trailer → road). */
+const NEXT_ORDER_DOCK = ["court", "trailer", "buffer", "sidewalk", "road"];
+const NEXT_ORDER_OTHER = ["sidewalk", "parking", "buffer", "road", "trailer"];
+
+/**
+ * `addOptions`, ordered: the FIRST entry is the next layer the person most likely wants (the named button on the
+ * wall's row); the rest are the ▾ menu's. Exactly the set `addOptions` allows — never anything it forbids, nothing
+ * added, nothing dropped — so a wall ending in a Road still offers nothing.
+ * The "next" layer follows the wall's OUTERMOST layer through a fixed sequence: dock wall court → trailer → buffer →
+ * walk → road; any other wall walk → parking → buffer → road → trailer. So an empty dock wall leads with Truck
+ * court, after a court Trailer, after a trailer Buffer, after a buffer Walk; off a dock wall Walk, then Parking,
+ * then Buffer. Kinds ranked AFTER the outermost layer come first (in sequence order), the rest follow — which is how
+ * a second trailer piece lands in the ▾ rather than on the button. A dock wall whose court was binned leads with the
+ * court (it goes back inboard of everything).
+ */
+export function orderedAddOptions(isDock, layers) {
+  const allowed = addOptions(isDock, layers);
+  if (allowed.length < 2) return allowed;
+  const order = isDock ? NEXT_ORDER_DOCK : NEXT_ORDER_OTHER;
+  const rank = (k) => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+  const kinds = (layers || []).map((l) => l.kind);
+  if (isDock && kinds.length && !kinds.includes("court")) return allowed;       // addOptions already leads with the court
+  const last = kinds.length ? rank(kinds[kinds.length - 1]) : -1;
+  const idx = new Map(allowed.map((o, i) => [o.key, i]));
+  const key = (o) => [rank(o.key) > last ? 0 : 1, rank(o.key), idx.get(o.key)];
+  return allowed.slice().sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+}
+
+/** The short name on the named add button (`+ Truck court`, `+ Trailer`, `+ Buffer`, `+ Walk`, `+ Parking`, `+ Road`). */
+export const ADD_BUTTON_NAME = { court: "Truck court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Walk", parking: "Parking", road: "Road" };
 
 /**
  * How many layers a Remove takes. v3: ONLY the piece itself on every wall — dock walls included — and the

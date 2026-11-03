@@ -61,7 +61,7 @@ if (card) {
 const id = `${LIVE_PREFIX}zn-pdf-${Date.now().toString(36)}`;
 try {
   const plan = { ...throwawayPlan(id), origin: { lat: OB.lat, lon: OB.lng }, site: "ZZ Live Check — Zoning PDF" };
-  plan.parcels[0].points = [{ x: -2600, y: -2000 }, { x: 2600, y: -2000 }, { x: 2600, y: 2000 }, { x: -2600, y: 2000 }]; plan.els[0] = { ...plan.els[0], w: 200, h: 120 };
+  plan.parcels[0].points = [{ x: -2700, y: -1700 }, { x: -2300, y: -1700 }, { x: -2300, y: -1300 }, { x: -2700, y: -1300 }]; plan.els[0] = { ...plan.els[0], cx: -2500, cy: -1500, w: 200, h: 120 }; plan.els.push({ ...plan.els[0], id: "b2", cx: 2500, cy: 1500 });   // two small buildings far apart: the sheet's frame covers a wide stretch of open aerial and zoning, so the zone codes sit INSIDE it
   const err = await page.evaluate(async ([pl]) => {
     const { data: u } = await window.pfSupabase.auth.getUser();
     const { error } = await window.pfSupabase.from("sites").insert({ id: pl.id, group_id: pl.groupId, site: pl.site, name: pl.name, county: null, user_id: u.user.id, version: 1, data: pl });

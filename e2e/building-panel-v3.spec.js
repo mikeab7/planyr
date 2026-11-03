@@ -4,7 +4,7 @@
  * default colours — in light AND dark. Measured on the canvas model, not just the panel.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-v3.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
@@ -35,7 +35,7 @@ const rotate = async (page, deg) => {
   await f.fill(String(deg)); await f.press("Enter");
 };
 const rowByRole = (page, role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 async function boot(page, deg = 315) {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
@@ -311,10 +311,11 @@ for (const scheme of ["light", "dark"]) {
       await d.evaluate((el) => el.blur());
       // the Add menu offers the court back at the head, buffer / walk / road — never trailer parking
       await page.keyboard.press("Escape");
+      // NEW-1 (2026-11-03): the wall ends in a Road, so the court (inboard of everything) is the ONLY thing on offer: it is the named
+      // button, there is no ▾, and trailer parking is never offered.
+      await expect(dock.getByTestId("wall-add")).toHaveAttribute("data-kind", "court");
+      await expect(dock.getByTestId("wall-add-more")).toHaveCount(0);
       await dock.getByTestId("wall-add").click();
-      await expect(page.getByTestId("wall-add-court")).toBeVisible();
-      await expect(page.getByTestId("wall-add-trailer")).toHaveCount(0);
-      await page.getByTestId("wall-add-court").click();
       await expect(dock.getByTestId("wall-piece").first()).toHaveAttribute("data-kind", "court");
       // …and a reload keeps every layer in place (the load-time heal finds nothing to repair)
       const snap = async () => (await kidsOf(page, b.id)).map((k) => [k.id, Math.round(k.cx), Math.round(k.cy)]).sort();

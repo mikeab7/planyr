@@ -102,14 +102,10 @@ try {
       throw e;
     });
     // show every status so the seeded tasks are listed whatever the filter pill defaulted to, and group by project
-    await frame.evaluate(() => {
-      const pill = [...document.querySelectorAll("button")].find((b) => /In Progress/.test(b.textContent)); void pill;
-      const m = [...document.querySelectorAll("span")].find((x) => x.textContent.trim() === "Group by");
-      const seg = m && [...m.parentElement.querySelectorAll("span")].find((x) => x.textContent.trim() === "Project");
-      if (seg) seg.click();
-    });
+    await frame.locator('[data-tr-btn="group"]').click();   // NEW-1 — Group by is a dropdown now (None / Project)
+    await frame.locator('[data-group-opt="project"]').click();
     await frame.waitForSelector("tr[data-grp-site]", { timeout: 30000 }).catch(async (e) => {
-      console.log("no group headers; report page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 400)), "| groupBy buttons:", JSON.stringify(await frame.evaluate(() => [...document.querySelectorAll("span")].filter((x) => ["None", "Project"].includes(x.textContent.trim())).map((x) => x.textContent.trim() + ":" + getComputedStyle(x).backgroundColor))));
+      console.log("no group headers; report page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 400)), "| group button:", JSON.stringify(await frame.evaluate(() => (document.querySelector('[data-tr-btn="group"]') || {}).textContent || null)));
       throw e;
     });
     await pacedWait(page, 1500);

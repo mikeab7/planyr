@@ -4,7 +4,7 @@
  * "Line weight" with no unit. Measured on the canvas, not just the panel.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-v2.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
@@ -46,7 +46,7 @@ async function boot(page, bump = {}) {
   await openProps(page, b.id);
   return b;
 }
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 
 test.beforeEach(async ({ page }) => { await armPlannerHooks(page); });
 
