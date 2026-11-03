@@ -144,7 +144,7 @@ describe("PDF-PARITY: an esriFeature row's line labels print", () => {
   it("exportSheet places each esriFeature label in sheet pixels before handing it over", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
-    expect(src).toMatch(/for \(const lb of esriLineLabels\(gj, cfg\)\) \{ const q = projLLtoPx\(\[lb\.lng, lb\.lat\]\); labels\.push\(\{ x: q\.x, y: q\.y, text: lb\.text \}\); \}/);
+    expect(src).toMatch(/for \(const lb of esriLineLabels\(gj, cfg\)\) \{ const q = projLLtoPx\(\[lb\.lng, lb\.lat\]\); labels\.push\(\{ x: q\.x, y: q\.y, text: lb\.text, rank \}\); \}/); // B2589346: `rank` (polygon area) rides along only so the sheet can declutter like the screen; it is stripped before the fragment writer
     expect(src).not.toMatch(/labels\.push\(\.\.\.esriLineLabels\(gj, cfg\)\)/);
   });
 });
