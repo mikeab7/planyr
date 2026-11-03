@@ -425,6 +425,9 @@
     "signup_attempts_log": [
       "email_domain"
     ],
+    "auth_email_link_log": [
+      "email_key"
+    ],
     "cad_taxunit_shards": ["county"],
     "comp_import_drafts": [
       "raw_name",

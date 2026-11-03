@@ -12,6 +12,7 @@ import SignedOutNotice from "./SignedOutNotice.jsx";
 // genuinely tiny leaf (no siteModel.js/cloudSync.js imports), so it's a plain static import —
 // see the note beside its call site below for what this replaced and why.
 import { setActiveUser } from "../workspaces/site-planner/lib/activeUser.js";
+import { markRecoveryPending, isRecoveryPending } from "../shared/auth/recoveryPending.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -22,7 +23,7 @@ import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
@@ -43,6 +44,8 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
 // Invite-email link (NEW-2): loaded only when the address carries ?invite=, so no other visit pays for it.
 const InviteLanding = lazy(() => import("./InviteLanding.jsx"));
+// Emailed sign-in / password-reset link (NEW-1): loaded only when the address carries ?authlink=, so no other visit pays for it.
+const AuthLinkLanding = lazy(() => import("./AuthLinkLanding.jsx"));
 const WaitingInviteNotice = lazy(() => import("./WaitingInviteNotice.jsx")); // NEW-1 (2026-11-02): "an invitation is waiting" after a no-link sign-up
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
@@ -273,6 +276,7 @@ export default function Shell() {
   // stable-width placeholder until the real state is in, instead of asserting "Sign in" first.
   const [authKnown, setAuthKnown] = useState(false);
   const [hasInviteLink] = useState(() => typeof window !== "undefined" && /[?&]invite=/.test(window.location.search || "")); // captured before InviteLanding strips it
+  const [hasAuthLink] = useState(() => typeof window !== "undefined" && /[?&]authlink=/.test(window.location.search || "")); // captured before AuthLinkLanding strips it
   // NEW-1 (follow-up to B2619760): the e-mail link the person just followed was read from the URL at module load
   // (shared/auth/authReturn.js), BEFORE anything could erase it — a reset link opens the set-new-password form
   // even if PASSWORD_RECOVERY fired before this component subscribed, and a dead link (expired / already used)
@@ -460,7 +464,7 @@ export default function Shell() {
       setUser(u);
       setAuthKnown(true);
       if (u) setSignedOutNotice(false); else if (meta && meta.lost) setSignedOutNotice(true);
-      if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
+      if (event === "PASSWORD_RECOVERY") { markRecoveryPending(); setRecovery(true); setAuthOpen(true); }
     });
   }, []);
   // A dead-link notice is for someone who is signed out. If the session turns out to be live (a used link followed
@@ -478,6 +482,15 @@ export default function Shell() {
     window.addEventListener("online", ask);
     return () => { clearInterval(iv); clearTimeout(wait); setReconnecting(false); window.removeEventListener("online", ask); };
   }, [authPending]);
+
+  /* A reset link was honoured but the new password was never set (the form was reloaded away, the tab closed):
+   * the browser holds a real session, so reopen the non-dismissable form until it is done (NEW-1, recoveryPending.js). */
+  // A native Supabase reset link read at module load (authReturn) also counts: PASSWORD_RECOVERY may have fired before we subscribed.
+  useEffect(() => { if (linkReturn.recovery) markRecoveryPending(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!authKnown || !user) return;
+    if (isRecoveryPending()) { setRecovery(true); setAuthOpen(true); }
+  }, [authKnown, user && user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* FIRST-TIME LANDING (NEW-1) — a genuine first boot (BOOT_WAS_ROUTELESS) redirects from the
    * Dashboard to the Map the instant we know the account/browser has never had a project (see
@@ -791,6 +804,15 @@ export default function Shell() {
   useEffect(() => { setOrgName(profileApi.org); }, [profileApi.org]);
 
   const openAuth    = () => { setRecovery(false); setAuthNotice(""); setAuthOpen(true); };
+  // A sign-in link carries the in-app route the person started from (already validated by safeNextRoute); land them there
+  // through the router's own navigate() — the one writer of the hash. The Dashboard / admin / design pages have no navigate()
+  // form (they all parse to the default route), so those are left to the normal boot, which resumes where they were.
+  const goToLinkRoute = useCallback((next) => {
+    const h = "#" + next;
+    if (isAdminRoute(h) || isDesignRoute(h) || isDashboardRoute(h)) return;
+    const r = parseRoute(h);
+    navigate({ module: r.module, projectId: r.projectId, cross: r.cross, org: r.org });
+  }, [navigate]);
   // Invite link (NEW-2): a signed-out visitor opens the auth screen on the right tab with the invited address filled in.
   const openAuthForInvite = useCallback(({ email, mode }) => {
     setRecovery(false);
@@ -821,6 +843,7 @@ export default function Shell() {
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
       {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} onOpenWork={goDashboard} onOpenTeam={() => openAccount("team")} /></Suspense>}
+      {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} onGoTo={goToLinkRoute} /></Suspense>}
       {/* Item 6 (NEW-1, 2026-11-02): signed up with an invited address but without the link → tell them an invitation is waiting. */}
       {user && authKnown && !hasInviteLink && <Suspense fallback={null}><WaitingInviteNotice user={user} /></Suspense>}
       <UpdateBanner
