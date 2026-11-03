@@ -12,7 +12,7 @@
  *   inherit    — a new layer after a shortened one takes the shorter length and its position; reload keeps all of it;
  *   fit        — every row stays one line at the desktop panel width AND a phone width (the strip is not squeezed).
  * KNOWN-GOOD ARM: VOID unless the wall list is dock · rear · ends · ends and the header reads "Building 1".
- * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=... node ui-audit/verify-wall-add-control-live.mjs */
+ * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=... [ROT=0|315] node ui-audit/verify-wall-add-control-live.mjs   (run each rotation as its own invocation) */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { addWallLayer, dragWallLayerEnd, alongOf } from "./lib/wallLayerDrive.mjs";
@@ -116,10 +116,11 @@ async function judgeShorten(tag, side, kind, end, feet) {
 
 try {
   const seeded = {};
-  for (const [tag, rot] of [["r0", 0], ["r315", 315]]) { const id = idOf(tag); ALL_IDS.push(id); seeded[id] = mkSite(id, siteName(tag), { dock: "single", dockAxis: "x", dockSide: "bottom", rot }); }
+  const ROTS = (process.env.ROT ? [Number(process.env.ROT)] : [0, 315]).map((r) => [`r${r}`, r]);   // one rotation per run avoids a reload dropping the other rotation's unsynced seed
+  for (const [tag, rot] of ROTS) { const id = idOf(tag); ALL_IDS.push(id); seeded[id] = mkSite(id, siteName(tag), { dock: "single", dockAxis: "x", dockSide: "bottom", rot }); }
   await page.evaluate(([uid, all]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(all)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]); }, [UID, seeded]);
 
-  for (const [tag, rot] of [["r0", 0], ["r315", 315]]) {
+  for (const [tag, rot] of ROTS) {
     console.log(`\n=== rot ${rot} ===`);
     await openScenario(tag);
     const roles = await page.locator('[data-testid="wall-row"]').evaluateAll((n) => n.map((r) => r.getAttribute("data-role")));
@@ -246,6 +247,11 @@ try {
   ok("no page errors", errors.length === 0, errors.join(" | "));
 } catch (e) {
   console.error("HARNESS ERROR:", e.message); ok("harness ran to completion", false, e.message);
+  try {
+    const dump = await page.evaluate(() => ({ header: !!document.querySelector('[data-testid="building-header"]'), rows: [...document.querySelectorAll('[data-testid="wall-row"]')].map((r) => [r.getAttribute("data-role"), r.getAttribute("data-sides"), [...r.querySelectorAll('[data-testid="wall-piece"]')].map((p) => p.getAttribute("data-kind")).join(",")]) }));
+    console.error("STATE AT FAILURE:", JSON.stringify(dump), JSON.stringify((await els()).filter((x) => x.attachedTo === "bz1").map((x) => [x.type, x.stackSide || x.sidewalkSide || x.sideParkSide || "", Math.round(x.w), Math.round(x.h)])));
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/wall-add-control-failure.png` });
+  } catch (e2) { console.error("could not dump state:", e2.message); }
 } finally {
   const gone = await page.evaluate(async ([ids, uid]) => {
     let all = true;
