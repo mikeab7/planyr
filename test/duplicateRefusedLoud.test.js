@@ -46,9 +46,16 @@ beforeEach(() => {
   LS = makeLS(); globalThis.localStorage = LS;
   globalThis.__PLANYR_LEGACY_MIRROR = "idle";
   planStore._resetForTest(); planStore._resetRoomForTest(); _resetHistoryForTest();
+  /* The REAL make-room hook (storage.js's IndexedDB relocation) is async: a refusal in one test would otherwise finish during a LATER test on a slow
+   * runner and add its own plan-store-write-room event (CI saw 3 where 1 was expected). Every test starts with no hook; the ones that care install theirs. */
+  planStore.configure({ makeRoom: null });
   reportClientEvent.mockClear();
 });
-afterEach(() => { delete globalThis.__PLANYR_LS_CAP; delete globalThis.__PLANYR_LEGACY_MIRROR; });
+afterEach(async () => {
+  await new Promise((r) => setTimeout(r, 25));                       // let any in-flight make-room chain settle before the next test's counts
+  planStore.configure({ makeRoom: null });
+  delete globalThis.__PLANYR_LS_CAP; delete globalThis.__PLANYR_LEGACY_MIRROR;
+});
 
 /* Seed the library, then shrink the quota so the next write cannot fit. */
 function fillTo(freeChars) {
