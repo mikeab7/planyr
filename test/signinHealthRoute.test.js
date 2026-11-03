@@ -169,6 +169,35 @@ describe("the alarm drill lane", () => {
   });
 });
 
+describe("coverage gaps through the route (owner decision 2026-11-03)", () => {
+  const runWithGap = (rs = "unknown") => ({ attempts: [{ checks: [check("pass", "site-key-in-bundle"), check("pass", "server-gate"), check("pass", "panel-renders"), { name: "real-sign-in", status: rs, uncovered: true, detail: "Cloudflare challenge" }, { name: "email-link", status: "skipped", detail: "" }] }], runUrl: "https://github.com/mikeab7/planyr/actions/runs/9" });
+  it("an uncovered real sign-in is stored, the overall is PASS, and the snapshot lists the gap", async () => {
+    const h = harness();
+    const r = await h.post(runWithGap());
+    expect(r.json).toMatchObject({ ok: true, overall: "pass", delivery: "not-needed", unknownStreak: 0 });
+    expect(h.store.snaps.signin.gaps).toEqual([expect.objectContaining({ name: "real-sign-in" })]);
+    expect(h.store.snaps.signin.checks.find((c) => c.name === "real-sign-in")).toMatchObject({ status: "unknown", uncovered: true });
+  });
+  it("two days of hourly runs with the gap send NO email and open NO incident", async () => {
+    const h = harness();
+    for (let i = 0; i < 48; i++) await h.post(runWithGap());
+    expect(h.sent).toHaveLength(0);
+    expect(h.store.incidents).toHaveLength(0);
+  });
+  it("the flag is honoured ONLY on an unknown step — a client cannot hide a fail or a pass behind it", () => {
+    const n = normaliseAttempts({ attempts: [{ checks: [{ name: "real-sign-in", status: "fail", uncovered: true }, { name: "server-gate", status: "pass", uncovered: true }, { name: "panel-renders", status: "unknown", uncovered: true }] }] });
+    expect(n.attempts[0].checks.map((c) => c.uncovered)).toEqual([undefined, undefined, true]);
+    expect(n.attempts[0].overall).toBe("fail");
+  });
+  it("a day of GENUINELY unknown runs still sends the one blind email (the alarm for a check that cannot confirm sign-in)", async () => {
+    const h = harness();
+    let last;
+    for (let i = 0; i < 24; i++) last = await h.post({ attempts: [{ checks: [check("unknown", "server-gate")] }] });
+    expect(last.json).toMatchObject({ delivery: "sent", decision: { kind: "blind", action: "open" } });
+    expect(h.sent).toHaveLength(1);
+  });
+});
+
 describe("snapshot", () => {
   it("every real report refreshes the 'signin' snapshot with lastCheckAt (the dead-man's-switch input) and prunes", async () => {
     const h = harness();

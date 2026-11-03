@@ -31,8 +31,10 @@ test.describe("auth panel — no dead ends (NEW-1)", () => {
     await dlg(page).getByLabel("Email").fill("a@example.com");
     await page.waitForTimeout(150);
     await submit(page).click();
-    await expect(dlg(page)).toContainText("reset");
-    expect(m.calls.filter((c) => c.path === "/auth/v1/recover")).toHaveLength(1);
+    // Forgot password asks Planyr's own mail route now (B2626128), never Supabase's mailer / Turnstile.
+    await expect(dlg(page).getByTestId("email-link-inbox")).toContainText("Check your inbox at a@example.com");
+    expect(m.calls.filter((c) => c.path === "/api/auth/email-link")).toHaveLength(1);
+    expect(m.calls.filter((c) => c.path === "/auth/v1/recover")).toHaveLength(0);
   });
 
   test("1b. a different link error still lands somewhere with a next step (and the query-string form too)", async ({ page }) => {
@@ -80,9 +82,10 @@ test.describe("auth panel — no dead ends (NEW-1)", () => {
     await noRaw(page);
     await dlg(page).getByRole("button", { name: "Reset your password" }).click();
     await expect(dlg(page).getByLabel("Email")).toHaveValue("a@example.com");   // the address is kept
-    answer(429, { code: 429, error_code: "over_email_send_rate_limit", msg: "email rate limit exceeded" });
+    // Forgot password no longer goes through Supabase's 2-an-hour mailer (B2626128): Planyr's own route's cap is the one a person meets.
+    m.cfg.link = () => ({ status: 429, body: { ok: false, reason: "throttled", retryAfterSeconds: 2400 } });
     await press();
-    await expect(dlg(page)).toContainText("several emails");
+    await expect(dlg(page)).toContainText("ask for another in about 40 minutes");
     await noRaw(page);
 
     await dlg(page).getByRole("button", { name: "← Back to sign in" }).click();

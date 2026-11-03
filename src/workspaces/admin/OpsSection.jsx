@@ -32,11 +32,16 @@ function SigninHealth({ snap }) {
             Last hour from browsers: {e.ok || 0} signed in · {e.wrongPassword || 0} wrong passwords · {e.refused || 0} refused by the bot check · {e.blocked || 0} blocked scripts · {e.widgetError || 0} widget errors · {e.timeout || 0} timeouts · {e.network || 0} network failures
             {snap.lastCheckAt ? <> · last outside check {ago(snap.lastCheckAt)}</> : null}
           </div>
+          {h.gaps.length > 0 && (
+            <div data-testid="signin-coverage-gap" style={{ fontSize: FONT_SIZE.control, marginTop: 6 }}>
+              <Chip tone="warn">Coverage gap</Chip> {h.gaps.map((g) => g.text).join(" ")}
+            </div>
+          )}
           {Array.isArray(snap.checks) && snap.checks.length > 0 && (
             <div style={{ marginTop: 6 }}>
               {snap.checks.map((c) => (
                 <div key={c.name} style={{ fontSize: FONT_SIZE.control, padding: "1px 0" }}>
-                  <strong>{c.status === "pass" ? "✓" : c.status === "fail" ? "✗" : c.status === "skipped" ? "–" : "?"}</strong> {CHECK_LABELS[c.name] || c.name}{c.detail ? <span style={{ color: "var(--text-secondary)" }}> — {c.detail}</span> : null}
+                  <strong>{c.status === "pass" ? "✓" : c.status === "fail" ? "✗" : c.status === "skipped" ? "–" : c.uncovered ? "∅" : "?"}</strong> {CHECK_LABELS[c.name] || c.name}{c.detail ? <span style={{ color: "var(--text-secondary)" }}> — {c.detail}</span> : null}
                 </div>
               ))}
             </div>

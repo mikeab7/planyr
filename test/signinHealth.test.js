@@ -3,6 +3,7 @@
 import { describe, it, expect } from "vitest";
 import {
   THRESHOLDS, overallOf, summariseEvents, rateAlarm, failStreak, unknownStreak, decide, buildSnapshot, snapshotHealth, sweepLine,
+  coverageGaps, isUncovered,
 } from "../src/shared/auth/signinHealth.js";
 
 const NOW = "2026-11-02T12:00:00.000Z";
@@ -115,5 +116,52 @@ describe("snapshotHealth — read-time state (the dead-man's switch)", () => {
   it("buildSnapshot keeps detail short and records the thresholds it used", () => {
     const s = buildSnapshot({ now: NOW, latestChecks: [{ name: "a", status: "pass", detail: "x".repeat(900) }], latestOverall: "pass", latestAt: NOW, history: ["pass"], events: ev(), incident: null });
     expect(s.checks[0].detail.length).toBe(200); expect(s.thresholds).toEqual(THRESHOLDS);
+  });
+});
+
+describe("coverage gaps — a step the runner cannot run is reported, never counted (owner decision 2026-11-03)", () => {
+  const chk = (name, status, extra = {}) => ({ name, status, detail: "", ...extra });
+  const gapRun = [chk("site-key-in-bundle", "pass"), chk("server-gate", "pass"), chk("panel-renders", "pass"), chk("real-sign-in", "unknown", { uncovered: true }), chk("email-link", "skipped")];
+
+  it("an uncovered real-sign-in does not make the run 'unknown' — the other steps decide", () => {
+    expect(overallOf(gapRun)).toBe("pass");
+  });
+  it("…but any OTHER unknown still does (unknown is never a pass)", () => {
+    expect(overallOf([...gapRun.slice(0, 2), chk("panel-renders", "unknown"), gapRun[3]])).toBe("unknown");
+  });
+  it("only an unknown step can be uncovered: the flag never discounts a pass or a fail", () => {
+    expect(isUncovered(chk("real-sign-in", "fail", { uncovered: true }))).toBe(false);
+    expect(isUncovered(chk("real-sign-in", "pass", { uncovered: true }))).toBe(false);
+    expect(overallOf([chk("server-gate", "pass"), chk("real-sign-in", "fail", { uncovered: true })])).toBe("fail");
+  });
+  it("if EVERY counted step is uncovered/skipped, nothing was verified: unknown, not pass", () => {
+    expect(overallOf([chk("real-sign-in", "unknown", { uncovered: true }), chk("email-link", "skipped")])).toBe("unknown");
+  });
+  it("a real sign-in that is uncovered for MANY days never opens the blind incident or sends an email", () => {
+    const history = Array(24 * 14).fill(overallOf(gapRun));                       // two weeks of hourly runs
+    expect(history.every((o) => o === "pass")).toBe(true);
+    expect(unknownStreak(history)).toBe(0);
+    expect(decide({ history, events: ev(), incident: null, lastAlertAt: null, now: NOW })).toMatchObject({ action: "none", email: null });
+  });
+  it("the blind email STAYS for what it was for: a day of genuinely unknown runs still opens it", () => {
+    const stuck = [chk("site-key-in-bundle", "unknown"), chk("server-gate", "unknown"), chk("panel-renders", "unknown"), chk("real-sign-in", "unknown", { uncovered: true })];
+    expect(overallOf(stuck)).toBe("unknown");
+    expect(decide({ history: Array(THRESHOLDS.blindStreak).fill("unknown"), events: ev(), incident: null, lastAlertAt: null, now: NOW })).toMatchObject({ action: "open", kind: "blind", email: "alert" });
+  });
+  it("the snapshot keeps the flag and lists the gap in plain words", () => {
+    const snap = buildSnapshot({ now: NOW, latestChecks: gapRun, latestOverall: "pass", latestAt: NOW, history: ["pass"], events: ev(), incident: null });
+    expect(snap.checks.find((c) => c.name === "real-sign-in")).toMatchObject({ status: "unknown", uncovered: true });
+    expect(snap.gaps).toEqual([expect.objectContaining({ name: "real-sign-in", text: expect.stringMatching(/NOT covered from GitHub's runner/) })]);
+    expect(coverageGaps(gapRun)).toHaveLength(1);
+  });
+  it("a healthy snapshot is OK and still carries the gap; the sweep line states it every time", () => {
+    const snap = buildSnapshot({ now: NOW, latestChecks: gapRun, latestOverall: "pass", latestAt: NOW, history: ["pass"], events: ev({ ok: 2 }), incident: null });
+    const h = snapshotHealth(snap, NOW);
+    expect(h.state).toBe("ok"); expect(h.gaps).toHaveLength(1);
+    expect(sweepLine(snap, NOW)).toMatch(/Coverage gap: Real sign-in through the panel is NOT covered from GitHub's runner/);
+  });
+  it("no gap → no 'Coverage gap' text", () => {
+    const snap = buildSnapshot({ now: NOW, latestChecks: gapRun.map((c) => ({ ...c, uncovered: undefined, status: c.status === "unknown" ? "pass" : c.status })), latestOverall: "pass", latestAt: NOW, history: ["pass"], events: ev(), incident: null });
+    expect(sweepLine(snap, NOW)).not.toMatch(/Coverage gap/);
   });
 });

@@ -29,6 +29,7 @@
 
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
+import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
 export const NON_PRODUCTION_URL_PATTERNS = [
@@ -3619,6 +3620,7 @@ export const GIS_SOURCES = {
     // Live 2026-10-29 (through the relay): Aurora box 511.
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
 };
 
 /* NEW-2 — WHICH STATES A ROW CAN ANSWER IN.
@@ -3915,6 +3917,7 @@ export const SOURCE_FIXTURE_REACH = {
   auroraBuckleyApz: ["local", "Buckley SFB's runway-end zones — a few km across."],
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
 };
 
 /* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.

@@ -44,12 +44,12 @@ import { buildingSfRows } from "./buildingSfTable.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
-import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity } from "./exportStyle.js";
+import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity, overlayLabelFontSize, overlayLabelHalo } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
-import { labelAnchors, placeLabels } from "./boundaryLabels.js";
+import { labelAnchors, placeLabels, declutterBoxes } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
 import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
@@ -496,6 +496,10 @@ export function createExportSheet(ctx) {
         // dark aerial — drawn on screen, invisible on paper.
         if (typeof node.closest === "function" && node.closest("[data-export-vector]")) {
           const tag = node.tagName && node.tagName.toLowerCase();
+          if (tag === "text") { // B2589346: layer labels print at a physical size (7 pt + halo), never "11 clone units" (a zone code once printed a fifth of the sheet tall on a tight frame)
+            node.setAttribute("font-size", r6(overlayLabelFontSize(sheetScale)));
+            node.setAttribute("stroke-width", r6(overlayLabelHalo(sheetScale)));
+          }
           if (tag === "path" || tag === "circle") {
             const authored = parseFloat(node.getAttribute("stroke-width"));
             const isCase = node.hasAttribute("data-vcase");
@@ -875,9 +879,19 @@ export function createExportSheet(ctx) {
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
         // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY). The fragment writer takes labels ALREADY PLACED in sheet pixels ({x,y,text}),
         // like the terrain contour labels below — a bare {lng,lat,text} was dropped silently, so no pipe size ever reached the sheet (V1956865 step 6, 2026-10-30).
-        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text }); }
+        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+          const bb = l.getBounds && l.getBounds();
+          const rank = bb ? Math.abs((bb.getNorth() - bb.getSouth()) * (bb.getEast() - bb.getWest())) : 0;
+          for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text, rank }); }
+        }
       });
-      return { features, labels };
+      /* B2589346 — a row that declutters on screen (`lineLabel.declutter`: DeSoto zoning, whose polygons are small and dense) declutters the SAME way on the sheet (PDF-PARITY): the larger polygon keeps its code, a label that
+       * would sit on top of one already kept is dropped — never a pile of overlapping codes in the PDF. Box = the on-screen label's footprint (text width ≈ 7 px a character + padding, 14 px tall) in the same map pixels. */
+      if (cfg.lineLabel && cfg.lineLabel.declutter && labels.length > 1) {
+        const keep = new Set(declutterBoxes(labels.map((lb) => ({ x: lb.x, y: lb.y, w: String(lb.text).length * 7 + 8, h: 14, rank: lb.rank || 0 }))));
+        return { features, labels: labels.filter((_lb, i) => keep.has(i)).map(({ rank: _r, ...rest }) => rest) };
+      }
+      return { features, labels: labels.map(({ rank: _r, ...rest }) => rest) };
     }
     if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)
       if (typeof ref.getExportMode === "function" && ref.getExportMode() !== "vector") return { features: [] }; // image mode → Class A raster handles it

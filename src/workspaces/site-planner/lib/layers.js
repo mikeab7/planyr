@@ -17,6 +17,7 @@ import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
@@ -128,6 +129,7 @@ export const MERGE_GROUPS = {
     note: "Best-available hydrant locations from every source that reaches this area. Overlapping points from different sources are shown as each source reports them — not yet merged into one marker (follow-up: NEW-2, needs coh_hydrants converted from a raster export to a queryable vector layer before points can be compared).",
   },
   ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
+  ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
   ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
 };
 
@@ -1321,7 +1323,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1413,6 +1415,7 @@ export const LAYER_VINTAGE = {
   coh_water: "City of Houston GIS (test host) — current edition",
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...SUGARLAND_VINTAGE,
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
@@ -1615,11 +1618,15 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
-  // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
-  lyr.on("overbudget", (e) => {
+  /* B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
+   * NEW-2 (B2507064 ×2, owner 2026-11-03): the refusal must never CONTRADICT THE MAP. A layer that already has polygons on the map for this view (`__pfDrawnVertices`, set by
+   * `buildFeatureLayer`) keeps reading "loaded" — a red "too detailed" line over drawn polygons was the owner's complaint; only a layer with NOTHING drawn says anything, and
+   * it says it in plain words (no point counts, no units): "Zoom in to see Zoning here." A row's own `overbudgetMsg` still wins (the close-end refusals). */
+  lyr.on("overbudget", () => {
+    const drawn = typeof lyr.__pfDrawnVertices === "function" ? lyr.__pfDrawnVertices() : 0;
+    if (drawn > 0) { onStatus && onStatus(k, "loaded", null); return; }
     refused = true;
-    // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
-    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `Zoom in to see ${(cfg && cfg.label) || "this layer"} here.`);
   });
   lyr.on("requesterror", (e) => {
     cycleErr = true; clearTimeout(resetTimer);   // this cycle failed: no `load` of it may reset the count
@@ -1727,6 +1734,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       return origCreate.call(this, features);
     };
     lyr.on("remove", () => { drawn = 0; held.clear(); offMap.clear(); });
+    lyr.__pfDrawnVertices = heldSum;   // NEW-2 (B2507064 ×2): what is on the map right now — attachFeatureRetry reads it so a refusal never contradicts drawn polygons
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;

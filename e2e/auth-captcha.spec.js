@@ -1,4 +1,5 @@
-/* NEW-1 (amends B1160720) — Sign in, Sign up and Forgot password all carry the Turnstile token, and a
+/* NEW-1 (amends B1160720) — Sign in and Sign up carry the Turnstile token (Forgot password no longer does: it goes
+ * through Planyr's own mail route, e2e/auth-email-link.spec.js), and a
  * captcha refusal never reaches the screen as jargon. Drives the real built app with BOTH
  * Supabase's auth endpoints and Cloudflare's Turnstile script MOCKED, so it needs a build with dummy
  * Supabase + Turnstile config baked in:
@@ -50,6 +51,10 @@ async function mock(page, { calls, rawOnly = false, scriptOk = true }) {
   await page.routeWebSocket(/.*/, (ws) => { try { ws.close(); } catch (_) {} });
   await page.route("**/*", async (route) => {
     let u; try { u = new URL(route.request().url()); } catch (_) { return route.continue(); }
+    if (u.pathname === "/api/auth/email-link") {   // Planyr's own mail route (NEW-1) — Forgot password no longer touches Supabase or Turnstile
+      calls.push({ path: u.pathname, body: (() => { try { return JSON.parse(route.request().postData() || "{}"); } catch (_) { return {}; } })() });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, retryAfterSeconds: 60, expiresMinutes: 60 }) });
+    }
     if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return route.continue();
     if (u.hostname === "challenges.cloudflare.com") {
       if (!scriptOk) return route.abort();
@@ -137,33 +142,29 @@ test.describe("auth panel — captcha on sign in, forgot password and sign up", 
     expect(calls[0].tok).toBe("tok-late");
   });
 
-  test("forgot password sends the token and shows the normal confirmation", async ({ page }) => {
+  test("forgot password goes through Planyr's own mail route: no Turnstile, no Supabase /recover (NEW-1)", async ({ page }) => {
     const calls = []; await mock(page, { calls });
     await page.goto("/?app&auth=signin");
     await dlg(page).getByText("Forgot password?").click();
+    await expect(page.getByTestId("turnstile-widget")).toHaveCount(0);   // nothing for Cloudflare to block
     await dlg(page).getByLabel("Email").fill("a@example.com");
-    await page.waitForTimeout(150);
     await submit(page).click();
-    await expect(dlg(page)).toContainText("reset");          // PASSWORD_RESET_MSG
+    await expect(dlg(page).getByTestId("email-link-inbox")).toContainText("Check your inbox at a@example.com. It comes from Planyr (no-reply@planyr.io).");
     await expect(dlg(page)).not.toContainText(/captcha/i);
-    const rec = calls.filter((c) => c.path === "/auth/v1/recover");
-    expect(rec).toHaveLength(1);
-    expect(rec[0].tok).toBeTruthy();
+    expect(calls.filter((c) => c.path === "/auth/v1/recover")).toHaveLength(0);
+    const sent = calls.filter((c) => c.path === "/api/auth/email-link");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body).toMatchObject({ email: "a@example.com", purpose: "reset" });
   });
 
-  test("the raw refusal never reaches the screen — sign in, forgot password and sign up", async ({ page }) => {
+  test("the raw refusal never reaches the screen — sign in and sign up", async ({ page }) => {
     const calls = []; await mock(page, { calls, rawOnly: true });
     await page.goto("/?app&auth=signin");
     await page.waitForTimeout(150);
     await fillSignIn(page, "right-password");
     await submit(page).click();
     await expect(dlg(page)).toContainText("We couldn't verify this browser. Try again.");
-    await dlg(page).getByText("Forgot password?").click();
-    await dlg(page).getByLabel("Email").fill("a@example.com");
-    await page.waitForTimeout(150);
-    await submit(page).click();
-    await expect(dlg(page)).toContainText("We couldn't verify this browser. Try again.");
-    await dlg(page).getByRole("button", { name: "← Back to sign in" }).click();
+    // (Forgot password is not captcha-gated any more — NEW-1 — so there is no refusal to show there.)
     await dlg(page).getByRole("button", { name: "Sign up", exact: true }).click();
     await dlg(page).getByLabel("First name").fill("N"); await dlg(page).getByLabel("Last name").fill("U");
     await fillSignIn(page, "secret123");

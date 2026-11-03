@@ -12,7 +12,7 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":
 const KIND_TITLE = {
   "outside-in": "Sign-in looks broken from the outside",
   "client-rate": "Real browsers are being refused at sign-in",
-  blind: "The sign-in check can no longer confirm the real sign-in",
+  blind: "The sign-in check can no longer confirm sign-in",
 };
 
 export function buildAlertEmail({ kind, reason, since, checks, events, runUrl, synthetic, mailNote }) {

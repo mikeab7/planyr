@@ -7,11 +7,14 @@
 import { lazy, useCallback, useEffect, useId, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
-import { signIn, signUp, signOut, signOutEverywhere, resetPassword, updatePassword } from "../lib/auth.js";
-// The confirmation / reset copy NAMES the address the email arrives from (NEW-2) — a user
-// watching for "planyr.io" never finds it otherwise and assumes the signup failed. Both
-// messages are generated from the one sender constant in lib/authMail.js.
-import { PASSWORD_RESET_MSG } from "../lib/authMail.js";
+import { signIn, signUp, signOut, signOutEverywhere, updatePassword } from "../lib/auth.js";
+// The sign-up confirmation copy NAMES the address its email arrives from (NEW-2), generated from the one sender
+// constant in lib/signupOutcome.js / authMail.js. Forgot password and the sign-in link (NEW-1, B2626128) go through
+// Planyr's own /api/auth/email-link route — no Turnstile, no Supabase mailer — and show the shared EmailLinkSent view
+// (lazy: only ever rendered after a send).
+import { requestEmailLink } from "../lib/emailLinkClient.js";
+import { failureCopy, BLOCKED_CHECK_COPY } from "../lib/emailLinkCopy.js";
+import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 import { MIN_PASSWORD_LENGTH, PASSWORD_MIN_HINT, signupOutcome, passwordHintVisible, checkEmailCopy } from "../lib/signupOutcome.js";
 // NEW-1 (follow-up to B2619760): every failure reads as plain words with a next step; what is missing is said at
 // submit (never by greying the button); the set-new-password view cannot be dismissed.
@@ -29,6 +32,7 @@ import { CAPTCHA_UNAVAILABLE_COPY } from "../../../shared/turnstile/captchaCopy.
  * a first paint of any workspace. Moving it out is the one panel in this tranche whose saving
  * lands on all four routes rather than only the Site route. */
 const TeamPanel = lazy(() => import("./TeamPanel.jsx"));
+const EmailLinkSent = lazy(() => import("./EmailLinkSent.jsx"));
 import LazyPanel from "./LazyPanel.jsx";
 import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
@@ -442,6 +446,10 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   );
 }
 
+// The in-app route the person is on, carried in a SIGN-IN link so it lands them back there (the server and the landing
+// page both re-validate it — shared/auth/authLink.js safeNextRoute). A reset link has nothing to return to.
+const currentRoute = () => { try { return window.location.hash || undefined; } catch (_) { return undefined; } };
+
 export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, initialEmail, initialNotice, onLeaveRecovery, onClose }) {
   // initialMode (B1315632 — landing page deep link): "signup" lands the signed-out
   // visitor straight on the create-account tab instead of the sign-in default, so the
@@ -462,12 +470,17 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   const [pwFocus, setPwFocus] = useState(false);
   // Set once a sign-up with confirmation ON succeeds: { email } replaces the whole form.
   const [done, setDone] = useState(null);
+  // Set once Planyr has emailed a sign-in / reset link: { email, purpose, seconds } replaces the form (NEW-1).
+  const [sent, setSent] = useState(null);
   const formRef = useRef(null);
   const submitRef = useRef(null);
   // Turnstile gate (NEW-1): decides WHEN a submit may send — see shared/turnstile/captchaGate.js.
   // `perform` is the form's real submit; the gate calls it with the (single-use) token.
   const { gate, view: cv, widgetKey, widgetRef } = useCaptchaGate((token) => perform(token));
-  const captchaOn = turnstileEnabled() && mode !== "recovery";
+  const captchaOn = turnstileEnabled() && mode !== "recovery" && mode !== "reset"; // reset goes through Planyr's own mail route (NEW-1) — no Turnstile, so it cannot depend on Cloudflare
+  // The browser check could not run on this network (script blocked, timed out, errored): the sign-in link is then the real
+  // way in, so it is promoted to the main action (NEW-1). A pending or passed check is not "blocked".
+  const captchaBlocked = captchaOn && mode === "signin" && (cv.widget === "error" || !!cv.failure);
 
   // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
   // while this panel is already open, sync into recovery mode so the set-password form
@@ -516,6 +529,34 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
     setPw(""); setMode("reset"); setMsg(null);
   };
 
+  // NEW-1 (B2626128) — ask Planyr to email a link (Forgot password and "Email me a sign-in link"). Not captcha-gated by design
+  // (see functions/api/auth/email-link.js). Never claims an email went out unless the route said so; a failure says nothing was
+  // sent and offers a retry (support is named in the words themselves).
+  const askLink = async (purpose, addr) => {
+    const r = await requestEmailLink({ email: addr, purpose, next: purpose === "signin" ? currentRoute() : undefined });
+    if (r.ok) { setPw(""); setSent({ email: addr, purpose, seconds: r.retryAfterSeconds }); return; }
+    const retryable = r.reason !== "throttled" && r.reason !== "bad_request";
+    setMsg({ type: "err", text: failureCopy(r), actions: retryable ? [{ label: "Try again", onClick: () => retryLink(purpose, addr) }] : [] });
+  };
+  const retryLink = async (purpose, addr) => {
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true); setMsg(null);
+    try { await askLink(purpose, addr); } finally { submitting.current = false; setBusy(false); }
+  };
+  const resendLink = () => requestEmailLink({ email: sent.email, purpose: sent.purpose, next: sent.purpose === "signin" ? currentRoute() : undefined });
+  // The Sign in form's "Email me a sign-in link": only the address is needed, and a missing one is SAID, never a dead button.
+  const onEmailLink = () => {
+    const v = readDom();
+    syncState(v);
+    const problem = validateAuthFields({ mode: "reset", email: v.email });
+    if (problem) {
+      setMsg({ type: "err", text: problem });
+      try { const f = formRef.current; const el = f && f.elements ? f.elements.namedItem("email") : null; el && el.focus && el.focus(); } catch (_) { /* focus is a courtesy */ }
+      return;
+    }
+    retryLink("signin", v.email.trim());
+  };
+
   function perform(token) {
     return performAsync(token);
   }
@@ -540,12 +581,11 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           else setDone({ email: v.email.trim() });
         }
       } else if (mode === "reset") {
-        const res = await resetPassword(v.email.trim(), token || undefined);
-        setMsg(res.error ? failMsg(res, again) : { type: "ok", text: PASSWORD_RESET_MSG });
+        await askLink("reset", v.email.trim());
       } else if (mode === "recovery") {
         const res = await updatePassword(v.pw);
         if (res.error) setMsg(failMsg(res, null));
-        else { setMsg({ type: "ok", text: "Password updated." }); setTimeout(onClose, 900); }
+        else { clearRecoveryPending(); setMsg({ type: "ok", text: "Password updated." }); setTimeout(onClose, 900); }
       }
     } finally { submitting.current = false; setBusy(false); }
   };
@@ -578,13 +618,29 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
     return (
       <Wrap onClose={onClose} msg={msg} title="Set a new password" dismissable={false}>
         <form ref={formRef} noValidate onSubmit={onFormSubmit}>
-          <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }}>Set a new password</div>
+          <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }} data-testid="recovery-form">Set a new password</div>
           <input aria-label="New password" name="password" type="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} />
           <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy}>{busy ? "…" : "Update password"}</button>
           <div style={{ marginTop: 10, fontSize: 12 }}>
             <button type="button" style={linkBtn} onClick={sendNewLink}>Link not working? Send a new one</button>
           </div>
+          {/* The form cannot be dismissed, so it needs its own way out that leaves the password unchanged (NEW-1, B2626128). */}
+          <div style={{ marginTop: 4, fontSize: 12 }}>
+            <button type="button" data-testid="recovery-signout" style={linkBtn} onClick={async () => { await signOut(); onClose(); }}>Sign out instead</button>
+          </div>
         </form>
+      </Wrap>
+    );
+  }
+
+  // A sign-in / reset link was emailed (NEW-1): the form is gone; what is left is where to look and a Send again.
+  if (sent) {
+    return (
+      <Wrap onClose={onClose} msg={null} title={sent.purpose === "reset" ? "Reset password" : "Sign in"}>
+        <LazyPanel name="The sent-email view" minHeight={160} label="Loading…">
+          <EmailLinkSent email={sent.email} purpose={sent.purpose} initialSeconds={sent.seconds} onResend={resendLink}
+            onBack={() => { setSent(null); setMode("signin"); setMsg(null); }} />
+        </LazyPanel>
       </Wrap>
     );
   }
@@ -644,9 +700,18 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           </div>
         )}
         {/* Never greyed for a missing field — Submit says what is missing. Off only while the request is out / waiting on the check. */}
-        <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12, scrollMarginBottom: 12 }}
+        <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(!captchaBlocked), width: "100%", marginTop: 12, scrollMarginBottom: 12 }}
           disabled={busy || cv.pending}
         >{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
+        {mode === "signin" && (
+          <>
+            {captchaBlocked && <div data-testid="captcha-blocked-note" style={{ fontSize: FONT_SIZE.label, color: PAL.ink, marginTop: 10, lineHeight: 1.45 }}>{BLOCKED_CHECK_COPY}</div>}
+            <button type="button" data-testid="email-link-signin" disabled={busy} onClick={onEmailLink}
+              style={{ ...btn(captchaBlocked), width: "100%", marginTop: 8, opacity: busy ? 0.6 : 1 }}>
+              {busy ? "…" : "Email me a sign-in link"}
+            </button>
+          </>
+        )}
         {mode !== "signup" && (
           <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
             {mode === "reset"

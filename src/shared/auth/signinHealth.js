@@ -23,7 +23,8 @@
  *   windowMin 60  — long enough to see a quiet hour's few attempts, short enough that recovery clears it by itself.
  *   staleMin 150  — the check runs hourly; 2.5 hours with no report means the CHECK stopped (the dead-man's switch the
  *                   daily sweep reads).
- *   blindStreak 24 — a full day of `unknown` means the sign-in step has been unverifiable for a day: said once.
+ *   blindStreak 24 — a full day of `unknown` (every counted step, or any counted step stuck unknown) means the check cannot confirm
+ *                   sign-in: said once. A runner-refused real sign-in is NOT counted here (see COVERAGE_GAP_TEXT) — it is a gap the sweep reports.
  *   cooldownMin 60 — a flapping break does not send a second alert inside an hour of the last one.
  * One email per incident, ever: an incident that persists sends nothing more; recovery sends one note. */
 
@@ -48,9 +49,26 @@ export const CHECK_LABELS = Object.freeze({
   "email-link": "The sign-in email route answers",
 });
 
-/** The overall verdict of one run of the checks. skipped counts as nothing; unknown can never become pass. */
+/* ── Coverage gaps (owner decision 2026-11-03, V2075968) ───────────────────────────────────────────────────────────
+ * A step that CANNOT run from GitHub's runner — the real sign-in through the panel, which Cloudflare answers with a visible
+ * challenge for a datacenter browser — is not an outage and not "the check is blind": it is a standing GAP IN COVERAGE. It is
+ * flagged `uncovered: true` on the check, left OUT of the overall verdict (so it can never feed the 24-unknown blind email, an
+ * alarm that fires because a check can never run is noise) and REPORTED in the daily sweep and the Ops card every day, so it is
+ * never mistaken for a pass. The blind email stays for what it was for: the check itself not running, or every counted step
+ * unknown. Only an `unknown` step may be uncovered — a pass or a fail is evidence and is never discounted. */
+export const COVERAGE_GAP_TEXT = Object.freeze({
+  "real-sign-in": "Real sign-in through the panel is NOT covered from GitHub's runner: Cloudflare shows the datacenter browser a challenge it cannot finish. The other checks still run; this one step is not verified.",
+});
+export const isUncovered = (c) => !!(c && c.uncovered === true && c.status === "unknown");
+
+/** The standing coverage gaps in one run's checks: [{ name, text }]. */
+export function coverageGaps(checks) {
+  return (Array.isArray(checks) ? checks : []).filter(isUncovered).map((c) => ({ name: c.name, text: COVERAGE_GAP_TEXT[c.name] || `${CHECK_LABELS[c.name] || c.name} is not covered from this runner.` }));
+}
+
+/** The overall verdict of one run of the checks. skipped and uncovered count as nothing; any other unknown can never become pass. */
 export function overallOf(checks) {
-  const list = (Array.isArray(checks) ? checks : []).filter((c) => c && c.status !== "skipped");
+  const list = (Array.isArray(checks) ? checks : []).filter((c) => c && c.status !== "skipped" && !isUncovered(c));
   if (list.some((c) => c.status === "fail")) return "fail";
   if (list.length === 0) return "unknown";
   if (list.some((c) => c.status !== "pass")) return "unknown";
@@ -157,7 +175,8 @@ export function buildSnapshot({ now, latestChecks, latestOverall, latestAt, runU
     updatedAt: now,
     lastCheckAt: latestAt || null,
     overall: latestOverall || null,
-    checks: (latestChecks || []).map((c) => ({ name: c.name, status: c.status, detail: String(c.detail || "").slice(0, 200) })),
+    checks: (latestChecks || []).map((c) => ({ name: c.name, status: c.status, ...(isUncovered(c) ? { uncovered: true } : {}), detail: String(c.detail || "").slice(0, 200) })),
+    gaps: coverageGaps(latestChecks),
     runUrl: runUrl || null,
     failStreak: failStreak(history),
     unknownStreak: unknownStreak(history),
@@ -175,6 +194,12 @@ export function buildSnapshot({ now, latestChecks, latestOverall, latestAt, runU
  * → { state: "none"|"ok"|"broken"|"blind"|"stale", line }
  */
 export function snapshotHealth(snap, now = Date.now(), t = THRESHOLDS) {
+  const r = snapshotState(snap, now, t);
+  // The standing coverage gaps ride on EVERY state (a healthy "ok" still has one): they are what the daily sweep reports.
+  return { ...r, gaps: snap && Array.isArray(snap.checks) ? coverageGaps(snap.checks) : [] };
+}
+
+function snapshotState(snap, now, t) {
   if (!snap || !snap.lastCheckAt) return { state: "none", line: "No sign-in check has ever reported. The hourly check is not running, or its first run has not landed." };
   const ageMin = (new Date(now).getTime() - new Date(snap.lastCheckAt).getTime()) / 60000;
   if (ageMin > t.staleMin) {
@@ -184,9 +209,9 @@ export function snapshotHealth(snap, now = Date.now(), t = THRESHOLDS) {
   if (snap.incident && snap.incident.kind !== "blind") {
     return { state: "broken", line: `Sign-in is flagged BROKEN (${snap.incident.kind === "client-rate" ? "browsers are being refused" : "the hourly check is failing"})${snap.incident.emailedAt ? "; you were emailed" : "; the email has NOT gone out"}.` };
   }
-  if (snap.incident && snap.incident.kind === "blind") return { state: "blind", line: "The outside check cannot confirm the real sign-in step (it has been unverifiable for a day or more); everything else it can see is fine." };
+  if (snap.incident && snap.incident.kind === "blind") return { state: "blind", line: "The outside check has been unable to confirm sign-in for a day or more (its counted steps are unknown, or the check itself is not running properly)." };
   if (snap.overall === "fail") return { state: "broken", line: `The latest outside check failed (${snap.failStreak} in a row); an email goes out at ${t.failStreak}.` };
-  if (snap.overall === "unknown") return { state: "blind", line: "The latest outside check could not confirm the real sign-in step (unknown, not a pass)." };
+  if (snap.overall === "unknown") return { state: "blind", line: "The latest outside check could not confirm one or more of its steps (unknown, not a pass)." };
   return { state: "ok", line: "Sign-in checked from outside within the last hour; nothing is wrong." };
 }
 
@@ -195,5 +220,7 @@ export function sweepLine(snap, now = Date.now()) {
   const h = snapshotHealth(snap, now);
   const e = (snap && snap.events) || {};
   const counts = snap ? ` Last hour from browsers: ${e.ok || 0} signed in, ${e.wrongPassword || 0} wrong passwords, ${e.refused || 0} refused by the bot check, ${e.blocked || 0} blocked scripts, ${e.widgetError || 0} widget errors, ${e.network || 0} network failures.` : "";
-  return h.line + counts;
+  // The coverage gap is reported EVERY day, in words — never left to be inferred from a green state.
+  const gap = h.gaps && h.gaps.length ? " Coverage gap: " + h.gaps.map((g) => g.text).join(" ") : "";
+  return h.line + counts + gap;
 }
