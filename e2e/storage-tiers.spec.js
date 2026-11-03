@@ -53,11 +53,11 @@ const census = (page) => page.evaluate((ns) => {
   let total = 0, cacheBytes = 0, cacheKeys = 0;
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    const v = localStorage.getItem(k) || "";
+    const v = (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "";
     total += v.length + k.length;
     if (k.indexOf(ns) === 0) { cacheBytes += v.length + k.length; cacheKeys++; }
   }
-  return { total, cacheBytes, cacheKeys, plans: localStorage.getItem("planarfit:sites:v1"), history: localStorage.getItem("planarfit:sites:history:v1") };
+  return { total, cacheBytes, cacheKeys, plans: (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"), history: localStorage.getItem("planarfit:sites:history:v1") };
 }, LEGACY_NS);
 
 test.describe("storage tiers (logged out)", () => {

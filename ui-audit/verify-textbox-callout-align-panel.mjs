@@ -89,7 +89,7 @@ const parallelTo = (a, b, tolDeg = 1.0) => {
 
 async function readModel(page) {
   return page.evaluate(() => {
-    const site = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = Object.values(site)[0] || {};
     return { els: s.els || [], callouts: s.callouts || [] };
   });

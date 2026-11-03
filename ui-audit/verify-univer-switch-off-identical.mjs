@@ -72,7 +72,7 @@ try {
   // 3 a device with the OLD switch set either way
   for (const v of ["1", "0"]) {
     const b = await visit(LEGACY, v);
-    const gone = await (async () => { for (let i = 0; i < 20; i++) { if ((await b.page.evaluate((k) => localStorage.getItem(k), LEGACY)) === null) return true; await b.page.waitForTimeout(250); } return false; })();
+    const gone = await (async () => { for (let i = 0; i < 20; i++) { if ((await b.page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), LEGACY)) === null) return true; await b.page.waitForTimeout(250); } return false; })();
     ok(`3 a device that had the OLD switch at "${v}" lands on Univer, and the retired key is removed`, (await b.page.locator(CANVAS).count()) === 1 && (await b.page.locator(OLD_GRID).count()) === 0 && gone);
     await b.ctx.close();
   }

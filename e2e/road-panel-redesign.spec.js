@@ -52,7 +52,7 @@ async function openRoadPanel(page) {
   await expect(page.getByTestId("road-header")).toBeVisible({ timeout: 10_000 });
 }
 const roads = (page) => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road");
 });

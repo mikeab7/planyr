@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
 import { canvas, startBlank, selectTool, drawBuilding, plans } from "./drawKinds.js";
 
 const overlays = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return Object.values(map).flatMap((r) => (r && r.sheetOverlays) || []).map((o) => ({
     name: o.name, imgW: o.imgW, imgH: o.imgH, scaled: !!(o.scaleSet || o.scaleMode || o.calibrated), rotation: o.rotation,
   }));

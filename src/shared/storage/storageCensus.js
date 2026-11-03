@@ -54,6 +54,22 @@ export const LOCAL_CLASSES = [
     match: (k) => has(k, "planarfit:sites:history"),
   },
   {
+    /* B2200384 — the device copy of the plans is one entry per plan (`<store>:p:<planId>`), a tiny index (`<store>:idx`) and — only on a device not yet
+     * moved, or transiently while an older tab is open — the old whole-library entry. Each is its own class so the storage panel and the abort events say
+     * what is taking the room. The per-plan entries are the only copy of the work: never reclaimable. The old entry is a DUPLICATE of them once they verify,
+     * but it is removed only by `planStore.retireLegacy` (read back and counted first), never by the bulk reclaim — so it is `reclaimable: false` too. */
+    id: "plan-entries", label: "Saved plans (one slot per plan)", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => /^planarfit:sites:(v1|cloud:[^:]+):p:/.test(k),
+  },
+  {
+    id: "plan-index", label: "Saved-plan index", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => /^planarfit:sites:(v1|cloud:[^:]+):idx$/.test(k),
+  },
+  {
+    id: "legacy-plans", label: "Old whole-library copy", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => /^planarfit:sites:(v1|cloud:[^:]+)(:led)?$/.test(k),
+  },
+  {
     id: "plans", label: "Saved plans", rebuild: REBUILD.NONE, reclaimable: false,
     match: (k) => has(k, "planarfit:sites", "planarfit:autosave", "planarfit:currentSite", "planarfit:sitesGroups", "planarfit:scenario", "scenario:"),
   },

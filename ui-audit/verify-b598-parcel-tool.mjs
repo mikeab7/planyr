@@ -42,7 +42,7 @@ const expect = (label, cond) => { if (!cond) failures++; console.log(`  [${ok(co
 
 const persisted = (page) => page.evaluate(() => {
   try {
-    const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").s_b598;
+    const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").s_b598;
     return s ? { parcels: (s.parcels || []).map((p) => p.id), deletedIds: s.deletedIds || [] } : null;
   } catch (e) { return null; }
 });

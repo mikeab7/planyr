@@ -230,7 +230,7 @@ async function run() {
     await page.locator('svg[aria-label="Site plan canvas"]').waitFor({ timeout: 12000 }).catch(() => {});
     await page.waitForTimeout(2500); // give the non-blocking heal + flush a beat
     const storedCounty = await page.evaluate(() => {
-      try { return JSON.parse(localStorage.getItem("planarfit:sites:v1"))?.s_b788?.county ?? null; } catch { return null; }
+      try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))?.s_b788?.county ?? null; } catch { return null; }
     });
     expect("B792: the persisted site row healed waller → fortbend", storedCounty === "fortbend", `stored: ${storedCounty}`);
     expect("B792: the heal announced itself (console line, never silent)",

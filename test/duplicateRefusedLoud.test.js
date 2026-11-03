@@ -44,7 +44,6 @@ const SRC = { id: "src1", groupId: "g1", site: "Goose Creek", name: "Concept A",
 let LS;
 beforeEach(() => {
   LS = makeLS(); globalThis.localStorage = LS;
-  globalThis.__PLANYR_LEGACY_MIRROR = "idle";
   planStore._resetForTest(); planStore._resetRoomForTest(); _resetHistoryForTest();
   /* The REAL make-room hook (storage.js's IndexedDB relocation) is async: a refusal in one test would otherwise finish during a LATER test on a slow
    * runner and add its own plan-store-write-room event (CI saw 3 where 1 was expected). Every test starts with no hook; the ones that care install theirs. */
@@ -54,7 +53,7 @@ beforeEach(() => {
 afterEach(async () => {
   await new Promise((r) => setTimeout(r, 25));                       // let any in-flight make-room chain settle before the next test's counts
   planStore.configure({ makeRoom: null });
-  delete globalThis.__PLANYR_LS_CAP; delete globalThis.__PLANYR_LEGACY_MIRROR;
+  delete globalThis.__PLANYR_LS_CAP; delete globalThis.__PLANYR_PLANSTORE_UNSPLIT;
 });
 
 /* Seed the library, then shrink the quota so the next write cannot fit. */
@@ -93,7 +92,7 @@ describe("planStore / saveSite report a refused device write", () => {
 
   it("blob mode (a device that could not split) reports the same refusal", () => {
     globalThis.localStorage = LS = makeLS({ quota: 400 }); planStore._resetForTest();
-    LS.setItem("planarfit:planStore:layout", "blob");
+    globalThis.__PLANYR_PLANSTORE_UNSPLIT = true; planStore._resetForTest();   // B2200384: the kill switch is gone; the harness lever reaches the un-split path
     expect(saveSite({ ...SRC, id: "b1" })).toBe(false);
     const a = events("plan-store-write-refused");
     expect(a.length).toBe(1);

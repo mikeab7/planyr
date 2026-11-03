@@ -58,7 +58,7 @@ async function triggerSaveFailedBanner(viewport, label) {
   await page.evaluate((key) => {
     const orig = Storage.prototype.setItem;
     Storage.prototype.setItem = function (k, v) {
-      if (k === key) throw new DOMException("Quota exceeded (test)", "QuotaExceededError");
+      if (k === key || (typeof k === "string" && k.startsWith(key + ":p:"))) throw new DOMException("Quota exceeded (test)", "QuotaExceededError");   // B2200384: the plan lives in a per-plan entry now
       return orig.call(this, k, v);
     };
   }, SITES_KEY);

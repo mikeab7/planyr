@@ -62,7 +62,7 @@ const openPlan = async () => {
 };
 const expandRow = async (name) => { if (await page.locator('[data-testid^="overlay-crop-switch-"]').count()) return; await page.locator('[data-testid^="reference-open-"]', { hasText: name }).first().click(); await page.waitForTimeout(400); };
 const stored = (id) => page.evaluate((id) => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === id);
   return o ? { crop: o.crop ?? null, locked: !!o.locked, rotation: o.rotation || 0, opacity: o.opacity } : null;
 }, id);
@@ -311,7 +311,7 @@ await openPlan();
   await page.locator('[data-testid="overlay-file-input"]').setInputFiles(p);
   await page.waitForTimeout(4000);
   const dx = await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const o = raw.C1.sheetOverlays.find((x) => x.kind === "dxf");
     return o ? { id: o.id, name: o.name } : null;
   });
@@ -343,7 +343,7 @@ await openPlan();
     await page.screenshot({ path: OUT + "site-crop-dxf-dialog.png" });
     await d.locator("button", { hasText: "Done" }).click();
     const sd = await page.waitForFunction((id) => {
-      const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const o = raw.C1.sheetOverlays.find((x) => x.id === id);
       return o && o.crop ? o.crop : null;
     }, dx.id, { timeout: 4000 }).then((h) => h.jsonValue()).catch(() => null);
@@ -356,7 +356,7 @@ await openPlan();
   const pdf = new URL("../test/fixtures/site-plan-crop/e-size-title-block.pdf", import.meta.url).pathname;
   await page.locator('[data-testid="left-menu-panel"] input[type="file"][accept="application/pdf,image/*,.dxf,.dwg"]').setInputFiles(pdf);
   const pd = await page.waitForFunction(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const o = raw.C1.sheetOverlays.find((x) => /title-block/.test(x.name || ""));
     return o && o.imgW ? { id: o.id, name: o.name } : null;
   }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
@@ -368,7 +368,7 @@ await openPlan();
     await openCropEditor(row); await page.waitForTimeout(500);
     await dragEdgeIn(page.locator('[data-testid="overlay-crop-dialog"]'), "b", 0, -40);
     await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Done" }).click();
-    const cropOf = () => page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop || null, ko: o.knockout, srcLen: (o.src || "").length } : null; }, pd.id);
+    const cropOf = () => page.evaluate((id) => { const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop || null, ko: o.knockout, srcLen: (o.src || "").length } : null; }, pd.id);
     const t0 = Date.now(); let c0; while (Date.now() - t0 < 4000) { c0 = await cropOf(); if (c0 && c0.crop) break; await page.waitForTimeout(150); }
     check("PDF overlay: an edge-grip crop is stored", !!(c0 && c0.crop && c0.crop.kind === "rect"), JSON.stringify(c0 && c0.crop));
     await page.waitForTimeout(300);

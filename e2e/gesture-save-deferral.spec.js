@@ -23,7 +23,7 @@ const SITES_KEY = "planarfit:sites:v1";
 const arm = (page) => page.evaluate((key) => {
   window.__storeWrites = 0;
   const orig = Storage.prototype.setItem;
-  Storage.prototype.setItem = function (k, v) { if (k === key) window.__storeWrites++; return orig.call(this, k, v); };
+  Storage.prototype.setItem = function (k, v) { if (k === key || (typeof k === "string" && k.startsWith(key + ":p:"))) window.__storeWrites++; return orig.call(this, k, v); };
   window.__storeWritesRead = () => window.__storeWrites;
 }, SITES_KEY);
 const writes = (page) => page.evaluate(() => window.__storeWrites);
@@ -49,7 +49,7 @@ const pointOnBuilding = async (page) => {
   });
 };
 const buildingOnDisk = (page) => page.evaluate((key) => {
-  const map = JSON.parse(localStorage.getItem(key) || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
   for (const rec of Object.values(map)) for (const e of rec.els || []) if (e.type === "building" && !e.attachedTo) return { cx: Math.round(e.cx), cy: Math.round(e.cy) };
   return null;
 }, SITES_KEY);

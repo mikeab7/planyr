@@ -28,7 +28,7 @@ const HOSTS = ["e1454629danlgq", "e1454729ykduhm"];
 
 /* The persisted plan, straight off the device. On-disk truth, not pixels — see the header. */
 const readEls = (page) => page.evaluate((key) => {
-  const map = JSON.parse(localStorage.getItem(key) || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
   const id = Object.keys(map)[0];
   return (map[id] || {}).els || [];
 }, SITE_KEY);
@@ -71,7 +71,7 @@ async function plantAndReload(page, els) {
          on each reload and "does re-opening change anything?" can never be asked. Plant ONCE, and
          leave the marker in the STORE (not on `window`, which a reload wipes). */
       if (localStorage.getItem(key + ":planted")) { window.__planted = true; return; }
-      const map = JSON.parse(localStorage.getItem(key) || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
       const id = Object.keys(map)[0];
       if (!map[id]) return;
       map[id] = { ...map[id], els: rows };

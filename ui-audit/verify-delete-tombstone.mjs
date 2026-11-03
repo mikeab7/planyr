@@ -62,7 +62,7 @@ const canvas = page.locator('svg[aria-label="Site plan canvas"]');
 await canvas.waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
 await page.waitForTimeout(2500);
 
-const readSite = () => page.evaluate((k) => { try { return JSON.parse(localStorage.getItem(k)).s1; } catch (e) { return null; } }, SITES_KEY);
+const readSite = () => page.evaluate((k) => { try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)).s1; } catch (e) { return null; } }, SITES_KEY);
 const before = await readSite();
 check("seed loaded: building + bonded child present", !!before && (before.els || []).length === 2, `els=${before ? (before.els || []).length : "?"}`);
 

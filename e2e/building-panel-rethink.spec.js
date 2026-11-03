@@ -8,12 +8,12 @@ import { armPlannerHooks, panelPlus, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const buildings = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).filter((e) => e.type === "building" && !e.dogEar);
 });
 const kids = (page, id) => page.evaluate((hid) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).filter((e) => e.attachedTo === hid);
 }, id);
@@ -170,7 +170,7 @@ test("rear wall: typing 8 parking rows lays out 8 rows in one commit; Remove cle
   const park = async () => (await kids(page, b.id)).filter((k) => k.type === "parking" && k.sideParkSide);
   await expect.poll(async () => (await park()).length).toBeGreaterThan(0);
   // 8 rows: 8 stall rows + ceil(8/2) aisles (poll — the add lands one row first, the typed 8 replaces it)
-  const cfg = await page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
+  const cfg = await page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
   const sd = cfg.stallDepth ?? 18, ai = cfg.aisle ?? 24;
   await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * sd + 4 * ai);
   // one commit: a single undo takes all of it back (blur the field first — Enter keeps focus, and a focused field owns Ctrl+Z)

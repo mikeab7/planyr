@@ -63,7 +63,7 @@ page.on("pageerror", (e) => { if (!/infinite number of tiles/.test(String(e))) e
 await page.route("**/*.jpg", (r) => r.abort());
 const T = (id) => page.getByTestId(id);
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
-const storedLocal = () => page.evaluate(([id, uid]) => { const keys = uid ? ["planarfit:sites:cloud:" + uid] : ["planarfit:sites:v1"]; for (const k of keys) { const m = JSON.parse(localStorage.getItem(k) || "{}"); if (m[id]) return m[id].parcels || []; } return []; }, [SITE_ID, UID]);
+const storedLocal = () => page.evaluate(([id, uid]) => { const keys = uid ? ["planarfit:sites:cloud:" + uid] : ["planarfit:sites:v1"]; for (const k of keys) { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); if (m[id]) return m[id].parcels || []; } return []; }, [SITE_ID, UID]);
 /* the CLOUD copy of a plan's parcels is its live `site_elements` rows (kind 'parcel', not tombstoned) — the plan row's own `data.parcels` is slimmed to [] once elements are in rows */
 const storedCloud = () => page.evaluate(async (id) => { const r = await window.pfSupabase.from("site_elements").select("id,data").eq("site_id", id).eq("kind", "parcel").is("deleted_at", null); return r.data ? r.data.map((x) => ({ ...(x.data || {}), id: x.id })) : null; }, SITE_ID);
 const stored = storedLocal; // the app's own immediate write; the CLOUD row is polled explicitly where persistence matters (cloudSettles)
@@ -265,7 +265,7 @@ try {
       try {
         for (const k of Object.keys(localStorage)) {
           if (!/^planarfit:sites:/.test(k)) continue;
-          try { const m = JSON.parse(localStorage.getItem(k) || "{}"); if (m && m[id]) { delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } } catch (_) {}
+          try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); if (m && m[id]) { delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } } catch (_) {}
         }
         await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
         await window.pfSupabase.from("sites").delete().eq("id", id);

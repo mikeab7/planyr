@@ -235,7 +235,7 @@ for (const theme of ["light", "dark"]) {
     await page.waitForTimeout(400);
     const after = await readField(page, "Depth (ft)");
     const model = await page.evaluate((id) => {
-      const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const site = m[Object.keys(m)[0]] || {};
       const e = (site.els || []).find((x) => x.id === id);
       return e ? e.h : null;
