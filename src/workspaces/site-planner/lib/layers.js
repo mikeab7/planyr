@@ -1618,11 +1618,15 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
-  // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
-  lyr.on("overbudget", (e) => {
+  /* B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
+   * NEW-2 (B2507064 ×2, owner 2026-11-03): the refusal must never CONTRADICT THE MAP. A layer that already has polygons on the map for this view (`__pfDrawnVertices`, set by
+   * `buildFeatureLayer`) keeps reading "loaded" — a red "too detailed" line over drawn polygons was the owner's complaint; only a layer with NOTHING drawn says anything, and
+   * it says it in plain words (no point counts, no units): "Zoom in to see Zoning here." A row's own `overbudgetMsg` still wins (the close-end refusals). */
+  lyr.on("overbudget", () => {
+    const drawn = typeof lyr.__pfDrawnVertices === "function" ? lyr.__pfDrawnVertices() : 0;
+    if (drawn > 0) { onStatus && onStatus(k, "loaded", null); return; }
     refused = true;
-    // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
-    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `${cfg.label}: too detailed to draw at this zoom${e && e.vertices ? ` (${Math.round(e.vertices / 1000)}k points)` : ""} — zoom in, or ask for a simpler copy of this layer.`);
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `Zoom in to see ${(cfg && cfg.label) || "this layer"} here.`);
   });
   lyr.on("requesterror", (e) => {
     cycleErr = true; clearTimeout(resetTimer);   // this cycle failed: no `load` of it may reset the count
@@ -1730,6 +1734,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
       return origCreate.call(this, features);
     };
     lyr.on("remove", () => { drawn = 0; held.clear(); offMap.clear(); });
+    lyr.__pfDrawnVertices = heldSum;   // NEW-2 (B2507064 ×2): what is on the map right now — attachFeatureRetry reads it so a refusal never contradicts drawn polygons
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;

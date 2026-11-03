@@ -17,19 +17,26 @@
  *     Art. III list), desotocountyms.gov DocumentCenter/View/8541.
  * Two version risks to keep in mind: the county has a newer ordinance signed 3/17/2026, and Olive Branch published a May 2024 draft rewrite with a different district
  * structure — re-check a name against the ordinance version that governs a polygon (its ORDINANCE field says which) if either is adopted.
- * Hernando, Southaven, Horn Lake and Walls are NOT sourced: their codes show as written.
+ *   Southaven — Code of Ordinances, Title XIII Zoning Regulations, Chapter 12 District Regulations, Charts 3 and 4 and Secs. 13-12(b)-(m), library.municode.com/ms/southaven
+ *     (read by the dispatching chat 2026-11-03; the build sandbox cannot reach it). Left bare ON PURPOSE: C-2 (Ch. 12 has no definition for it, only a row in a dimensions chart) and the
+ *     codes the data carries that the chart does not list (ER, PO, RM-6, the "… OVERLAY" values). "RO" is Southaven's "Residential Office" (the chart writes R-O and RO); in the
+ *     unincorporated county "RO" is "Residential Overlay" — which is why names are keyed by jurisdiction.
+ * Hernando, Horn Lake and Walls are NOT sourced (their ordinances could not be read — municode / the cities' sites are outside the sandbox's network): their codes show as written.
  *
  * Pure: no network, no React. */
 
 const OB_SRC = "https://library.municode.com/ms/olive_branch";
 const CO_SRC = "https://www.desotocountyms.gov/DocumentCenter/View/8541";
+const SH_SRC = "https://library.municode.com/ms/southaven/codes/code_of_ordinances?nodeId=CO_TITXIIIZORE_CH12DIRE";
 const ob = (name) => ({ name, source: OB_SRC });
 const co = (name) => ({ name, source: CO_SRC });
+const sh = (name) => ({ name, source: SH_SRC });
 
 /* The ordinance behind each jurisdiction's names — shown behind the (i). */
 export const ZONING_CITATIONS = {
   "Olive Branch": "Olive Branch Code of Ordinances, Appendix A Zoning Ordinance, Art. III Districts and Boundaries (library.municode.com/ms/olive_branch)",
   "Unincorporated DeSoto County": "DeSoto County Zoning Ordinance (current as of 3-8-2024), Art. III Sec. 1; C-4 from Art. IX (desotocountyms.gov, Document Center item 8541)",
+  Southaven: "Southaven Code of Ordinances, Title XIII Zoning Regulations, Ch. 12 District Regulations, Charts 3 and 4 and Secs. 13-12(b)-(m) (library.municode.com/ms/southaven)",
 };
 
 /* { [jurisdiction]: { [ZONE code, upper-case]: { name, source } } } */
@@ -53,7 +60,16 @@ export const ZONING_NAMES = {
     F: co("Flood Control"), AHR: co("Airport Height Use Regulation"),
   },
   Hernando: {},
-  Southaven: {},
+  Southaven: {
+    A: sh("Agricultural"), "A/ER": sh("Agricultural/Estate Residential"),
+    "R-30": sh("Single-Family Residential"), "R-20": sh("Single-Family Residential"), "R-15": sh("Single-Family Residential"), "R-12": sh("Single-Family Residential"),
+    "R-10": sh("Single-Family Residential"), "R-9": sh("Single-Family Residential"), "R-8": sh("Single-Family Residential"), "R-6": sh("Single-Family Residential"),
+    "RM-8": sh("Multi-Family Residential"),
+    O: sh("Office"), "R-O": sh("Residential Office"), RO: sh("Residential Office"),
+    "C-1": sh("Neighborhood Commercial"), "C-3": sh("General Commercial"), "C-4": sh("Planned Commercial"), PBP: sh("Planned Business Park"),
+    "M-1": sh("Light Industrial"), "M-2": sh("Heavy Industrial"),
+    PUD: sh("Planned Unit Development"),
+  },
   "Horn Lake": {},
   Walls: {},
 };
@@ -82,9 +98,14 @@ export const zoneWithName = (code, jurisdiction, table) => {
   return n ? `${c} · ${n}` : c;
 };
 
-/* The legend for the zones in view: one entry per (jurisdiction, code), grouped by jurisdiction, sorted. `items` = [{ code, jurisdiction|null, color }].
- * Entries from a jurisdiction that is not known yet (limits still loading) are listed by code alone. When more than one jurisdiction is in view the label carries
- * the jurisdiction only if the SAME code appears in both (so "C-2" in two governments is never merged into one line). Pure. */
+/* The order the governments are listed in the legend: the cities first, the county last. A government not named here sorts after these, by name. */
+const JURISDICTION_ORDER = ["Olive Branch", "Southaven", "Horn Lake", "Hernando", "Walls", "Unincorporated DeSoto County"];
+const jurisdictionRank = (j) => { const i = JURISDICTION_ORDER.indexOf(j); return i < 0 ? JURISDICTION_ORDER.length : i; };
+
+/* The legend for the zones in view, in the headed shape the Zoning dropdown renders (the same shape as Sugar Land's — owner constraint #50): for every government in view
+ * ONE heading naming it ("Olive Branch", "Southaven", "Unincorporated DeSoto County"…), then ONE row per code, "R-20 · Residential Single-Family (Low Density)" — the
+ * government is NEVER a suffix on a row, and a code that two governments share simply appears under each heading. `items` = [{ code, jurisdiction|null, color }]; duplicates
+ * fold. Codes from a government not known yet (the city limits are still loading) are listed by code alone, with no heading, after the headed groups. Pure. */
 export function zoningLegend(items, table = ZONING_NAMES) {
   const seen = new Map();
   for (const it of items || []) {
@@ -94,15 +115,19 @@ export function zoningLegend(items, table = ZONING_NAMES) {
     const key = `${j || ""}|${norm(code)}`;
     if (!seen.has(key)) seen.set(key, { code, jurisdiction: j, color: it.color });
   }
-  const list = [...seen.values()];
-  const jurisdictionsByCode = new Map();
-  for (const e of list) { const k = norm(e.code); const s = jurisdictionsByCode.get(k) || new Set(); s.add(e.jurisdiction || ""); jurisdictionsByCode.set(k, s); }
-  list.sort((a, b) => String(a.jurisdiction || "").localeCompare(String(b.jurisdiction || "")) || a.code.localeCompare(b.code, undefined, { numeric: true }));
-  return list.map((e) => {
-    const name = zoneName(e.code, e.jurisdiction, table);
-    const clash = (jurisdictionsByCode.get(norm(e.code)) || new Set()).size > 1;
-    const shown = displayCode(e.code);
-    const base = name ? `${shown} · ${name}` : shown;
-    return { label: clash && e.jurisdiction ? `${base} (${e.jurisdiction})` : base, color: e.color };
-  });
+  const groups = new Map();
+  for (const e of seen.values()) { const k = e.jurisdiction || ""; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); }
+  const names = [...groups.keys()].filter(Boolean).sort((a, b) => jurisdictionRank(a) - jurisdictionRank(b) || a.localeCompare(b));
+  if (groups.has("")) names.push("");
+  const out = [];
+  for (const j of names) {
+    const rows = groups.get(j).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+    if (j) out.push({ heading: true, label: j });
+    for (const e of rows) {
+      const name = zoneName(e.code, e.jurisdiction, table);
+      const shown = displayCode(e.code);
+      out.push({ label: name ? `${shown} · ${name}` : shown, color: e.color, row: true });
+    }
+  }
+  return out;
 }
