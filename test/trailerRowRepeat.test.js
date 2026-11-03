@@ -1,7 +1,7 @@
 /* NEW-1 — a wall takes a second (and further) row of trailer parking; every NEW layer takes its LENGTH and POSITION
  * along the wall from the layer immediately before it (never its depth — a new layer's depth is its own default). Pure rules (lib/wallRows.js `planTrailerRowAdd` / `nextTrailerRowDepth` / `addOptions`) driven through
  * the SAME layout, stripe and removal code the canvas uses, so panel, canvas and stall count cannot disagree.
- * The live panel is driven by ui-audit/verify-trailer-row-repeat.mjs. */
+ * The live panel is driven by ui-audit/verify-wall-add-control-live.mjs. */
 import { describe, it, expect } from "vitest";
 import {
   addOptions, planTrailerRowAdd, inheritExtentFields, resolveLayerExtent, layerExtentPatch, stripPlan, planDockPieceRemoval, applyDockPieceRemoval,

@@ -243,23 +243,75 @@ export const ringArea = (r) => Math.abs(r.reduce((s, p, i) => { const q = r[(i +
  * `panelPlus(page, label).click()` gives specs that only need "a building with bonded children" the same
  * three one-step additions in the new UI — a truck court (then trailer parking), a sidewalk on every
  * non-dock wall (then parking), and a corner bump-out from the wall picker. */
+/* Add ONE layer to a wall row through the NEW-1 (2026-11-03) control: the named button adds the NEXT layer (its `data-kind`
+ * says which); anything else is in the ▾ list under its full name. `row` is the `wall-row` locator. */
+export async function addWallLayer(row, key) {
+  const btn = row.getByTestId("wall-add");
+  if ((await btn.getAttribute("data-kind")) === key) { await btn.click(); return; }
+  await row.getByTestId("wall-add-more").click();
+  await row.page().getByTestId(`wall-add-${key}`).click();
+}
 export function panelPlus(page, label) {
   return {
     click: async () => {
       if (label === "Dock zones") {
-        await page.locator('[data-testid="wall-row"][data-role="dock"]').first().getByTestId("wall-add").click();
-        const court = page.getByTestId("wall-add-court");
-        if (await court.count()) await court.click(); else await page.getByTestId("wall-add-trailer").click();
+        const row = page.locator('[data-testid="wall-row"][data-role="dock"]').first();
+        await addWallLayer(row, (await row.getByTestId("wall-add").getAttribute("data-kind")) === "court" ? "court" : "trailer");
       } else if (label === "Car parking") {
         const rows = page.locator('[data-testid="wall-row"]:not([data-role="dock"])');
         for (let i = 0, n = await rows.count(); i < n; i++) {
-          await rows.nth(i).getByTestId("wall-add").click();
-          const sw = page.getByTestId("wall-add-sidewalk"), pk = page.getByTestId("wall-add-parking");
-          if (await sw.count()) await sw.click(); else if (await pk.count()) await pk.click(); else await rows.nth(i).getByTestId("wall-add").click();
+          const row = rows.nth(i);
+          if (!(await row.getByTestId("wall-add").count())) continue;
+          await addWallLayer(row, (await row.getByTestId("wall-add").getAttribute("data-kind")) === "sidewalk" ? "sidewalk" : "parking");
         }
       } else if (label === "Bump-outs") {
         await page.getByTestId("picker-corner-add").first().click({ force: true });
       }
     },
   };
+}
+
+// a layer's length + centre ALONG its wall, in the host's frame
+export const alongOf = (host, side, k) => {
+  const r = (host.rot * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  const dx = k.cx - host.cx, dy = k.cy - host.cy, lx = dx * c + dy * s, ly = -dx * s + dy * c;
+  const rel = (((k.rot - host.rot) % 360) + 360) % 360, cross = Math.min(Math.abs(rel - 90), Math.abs(rel - 270)) < 45;
+  const bx = cross ? k.h : k.w, by = cross ? k.w : k.h, horiz = side === "top" || side === "bottom";
+  return { len: horiz ? bx : by, centre: horiz ? lx : ly };
+};
+/* Select the layer on the map and drag its along-wall grip on the chosen end ("plus" = the end toward +x / +y of the wall's own
+ * frame) inward by `feet`. The view is centred on THAT END first (a 5-ft Walk is under 2 px tall at the default zoom, where a
+ * click selects the building — the owner works zoomed in), and the layer is picked a few feet inboard of the end. */
+export async function dragWallLayerEnd(page, host, side, el, end, feet) {
+  const rot = (host.rot * Math.PI) / 180;
+  const horiz = side === "top" || side === "bottom";
+  const uw = horiz ? { x: Math.cos(rot), y: Math.sin(rot) } : { x: -Math.sin(rot), y: Math.cos(rot) };   // along-wall unit (world feet = screen directions)
+  const sgn = end === "plus" ? 1 : -1, len = alongOf(host, side, el).len, PPF = 2.5;
+  await page.evaluate(([x, y, p]) => window.__plannerView.centerOn(x, y, p), [el.cx + sgn * uw.x * len / 2, el.cy + sgn * uw.y * len / 2, PPF]);
+  await page.waitForTimeout(250);
+  const box = await page.getByTestId("planner-canvas").boundingBox(), c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.click(c.x - sgn * uw.x * 5 * PPF, c.y - sgn * uw.y * 5 * PPF);
+  // A road wears an END circle at each end of its w-axis AND two squares on its h-axis (which the code calls "width grips" but which
+  // are the along-wall ends on an end wall); every other layer wears four edge squares. Take whichever sits at this end of the wall.
+  const isRoad = el.type === "road";
+  const grips = isRoad ? page.locator('[data-handle-layer="1"] circle, [data-handle-layer="1"] rect') : page.locator('rect[data-handle="edge"]');
+  await expect(grips).not.toHaveCount(0, { timeout: 1500 });
+  const pos = await grips.evaluateAll((n) => n.map((g) => { const r = g.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }));
+  const near = pos.map((p) => ({ p, d: Math.hypot(p.x - c.x, p.y - c.y) })).sort((a, b) => a.d - b.d)[0];
+  if (near.d > 12) throw new Error(`no grip at the ${end} end (nearest ${Math.round(near.d)}px)`);
+  const to = { x: near.p.x - sgn * uw.x * feet * PPF, y: near.p.y - sgn * uw.y * feet * PPF };
+  await page.mouse.move(near.p.x, near.p.y); await page.mouse.down();
+  await page.mouse.move((near.p.x + to.x) / 2, (near.p.y + to.y) / 2, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 }); await page.mouse.up();
+}
+
+
+/* After dragging a wall layer's handle the side panel is that LAYER's Properties; bring the building's own panel (Docks & walls)
+ * back: centre the view on the building at the app's working scale and double-click it. */
+export async function reopenBuildingPanel(page, host) {
+  await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 0.3), [host.cx, host.cy]);
+  await page.waitForTimeout(300);
+  const box = await page.getByTestId("planner-canvas").boundingBox();
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByTestId("building-header")).toBeVisible();
 }

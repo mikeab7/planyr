@@ -7,6 +7,7 @@
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=... node ui-audit/verify-wall-layers-render.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -36,7 +37,7 @@ const kids = async () => ((await model())?.els || []).filter((e) => e.attachedTo
 const T = (id) => page.getByTestId(id);
 const wall = (side) => page.locator(`[data-testid="loading-wall-picker"] [data-wall="${side}"]`);
 const rowByRole = (role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await T(`wall-add-${key}`).click(); await sleep(450); };
+const addLayer = (r, key) => addWallLayer(page, r, key);
 async function waitFor(fn, ms = 10000) { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) return v; await sleep(150); } }
 const summary = async () => { const t = await T("building-summary").innerText(); return { sf: Number((t.match(/([\d,]+) SF/) || [])[1]?.replace(/,/g, "")), doors: Number((t.match(/(\d+) doors?/) || [])[1]), text: t }; };
 
