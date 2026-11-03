@@ -32,7 +32,7 @@ const ACADEMY = { lat: 29.6122, lng: -95.6693 };
 const TOWN_SQUARE = { lat: 29.6197, lng: -95.6349 };
 const HOUSTON = { lat: 29.80, lng: -95.54 };
 const AZ02 = { lat: 29.61, lng: -95.6554 };    // inside the AZ-02 polygon (the city's service answers AZ-02 alone here)
-const ANID = { lat: 29.645, lng: -95.655 };    // inside the ANID polygon (ANID alone)
+const ANID = { lat: 29.635, lng: -95.668 };    // inside the ANID polygon and inside the city+ETJ area (ANID alone; the ANID north of ~29.64 lies outside the area, so the layer is not offered there)
 
 /* --local: a SIGNED-OUT run for a PR preview (the preview has no E2E_LOGIN_KEY, so it cannot sign in): the three located plans are seeded into the browser's own plan store, nothing touches the
  * cloud, nothing needs cleaning up. The layers, requests, cards and legend are identical; only "signed in as the test account" is not proved. */
@@ -52,7 +52,7 @@ if (LOCAL) {
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
   page = await ctx.newPage();
   LOCAL_PLANS.ac = localPlan("ac", { lat: 29.6122, lng: -95.6693 }, "Academy"); LOCAL_PLANS.ts = localPlan("ts", { lat: 29.6197, lng: -95.6349 }, "Town Square"); LOCAL_PLANS.hou = localPlan("hou", { lat: 29.80, lng: -95.54 }, "Houston");
-  LOCAL_PLANS.az02 = localPlan("az02", { lat: 29.61, lng: -95.6554 }, "AZ-02"); LOCAL_PLANS.anid = localPlan("anid", { lat: 29.645, lng: -95.655 }, "ANID");
+  LOCAL_PLANS.az02 = localPlan("az02", { lat: 29.61, lng: -95.6554 }, "AZ-02"); LOCAL_PLANS.anid = localPlan("anid", { lat: 29.635, lng: -95.668 }, "ANID");
   await page.addInitScript((j) => { try { localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify(Object.fromEntries(Object.values(LOCAL_PLANS).map((pl) => [pl.id, pl]))));
   s = { proof: { email: "(signed out — local plans)" }, close: () => browser.close() };
 } else {
