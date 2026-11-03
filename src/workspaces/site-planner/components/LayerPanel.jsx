@@ -57,9 +57,10 @@ import { PinIcon } from "./icons.jsx";
 import {
   PANEL_GROUPS, groupEntriesFor, availableEntries, dropdownPlan, rowSwatch, rampGradient, legendFor,
   CONTOUR_INTERVALS, contourIntervalLabel, contourRowValue, CORRIDOR_WIDTH_CHOICES, corridorWidthOptions,
-  opacityFromPercent, percentOf, OPACITY_MIN, OPACITY_MAX, pickGroup,
+  opacityFromPercent, percentOf, OPACITY_MIN, OPACITY_MAX, pickGroup, inRegion,
 } from "../lib/layerPanelModel.js";
 import { useServiceAreas } from "../lib/useServiceAreas.js";
+import { sugarLandGroupNote } from "../lib/sugarLandLayers.js"; // NEW-1: the Utilities honesty line on a Sugar Land site
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
 import { useViewLegends } from "../lib/viewLegendStore.js";
@@ -149,12 +150,15 @@ function Legend({ items }) {
   if (!items || !items.length) return null;
   return (
     <div data-part="legend" style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
-      {items.map((lg) => (
-        <span key={lg.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: INK }}>
+      {items.map((lg) => (lg.heading ? (
+        /* NEW-1 (Sugar Land): a legend can be HEADED by its jurisdiction ("Sugar Land") instead of repeating it on every row; `row` puts one entry per line. */
+        <span key={`h:${lg.label}`} data-part="legend-heading" style={{ flexBasis: "100%", color: MUTED, fontWeight: 700 }}>{lg.label}</span>
+      ) : (
+        <span key={lg.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: INK, ...(lg.row ? { flexBasis: "100%" } : {}) }}>
           <span aria-hidden="true" style={{ width: 16, height: 0, flex: "none", borderTop: `${lg.weight ? Math.max(1.5, lg.weight / 1.4) : 3}px ${lg.dash ? "dashed" : "solid"} ${lg.color}` }} />
           {lg.label}
         </span>
-      ))}
+      )))}
     </div>
   );
 }
@@ -303,6 +307,17 @@ function SimpleCheckRow({ id, label, checked, onChange, testId }) {
         <input type="checkbox" data-testid={testId} checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} style={CHECKBOX_RESET} />
         <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
       </label>
+    </div>
+  );
+}
+
+/* A short note at the head of a panel group's rows (NEW-1, Sugar Land): why a kind of data is absent here, and the route to get it. Muted body text, one link. */
+function GroupNote({ note }) {
+  if (!note) return null;
+  return (
+    <div data-testid="layer-group-note" style={{ color: MUTED, lineHeight: 1.4, margin: "0 0 6px" }}>
+      {note.text}{" "}
+      <a href={note.href} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", fontWeight: 600 }}>{note.linkText}</a>.
     </div>
   );
 }
@@ -715,7 +730,7 @@ export default function LayerPanel({
   const bodyFor = (key) => {
     if (key === "base") return baseBody;
     if (key === "flood") return floodBody;
-    return <>{groupRows(entriesFor(key))}{key === "topo" && gradingBody}</>;
+    return <>{key === "util" && <GroupNote note={sugarLandGroupNote("util", inRegion("sugarland", siteLocation) === true && (scope.state == null || scope.state === "TX"))} />}{groupRows(entriesFor(key))}{key === "topo" && gradingBody}</>;
   };
 
   /* ── header actions ── */

@@ -54,7 +54,7 @@ export function sessionFor(user = USER, { expiresAt = Math.floor(Date.now() / 10
   return { access_token: "tok", token_type: "bearer", expires_in: 3600, expires_at: expiresAt, refresh_token: refresh, user };
 }
 
-/** Installs the mock. Returns { calls, rest, cfg } — `calls` is every gated auth POST, `rest` every /rest/v1 request. */
+/** Installs the mock. Returns { calls, rest, cfg } — `calls` is every gated auth POST (plus Planyr's own /api/auth/email-link, with `cfg.link(body)` to override its answer), `rest` every /rest/v1 request. */
 export async function mockAuth(page, { rawOnly = false, scriptOk = true, cfg: extra = {} } = {}) {
   const calls = [];
   const rest = [];
@@ -63,6 +63,12 @@ export async function mockAuth(page, { rawOnly = false, scriptOk = true, cfg: ex
   await page.routeWebSocket(/.*/, (ws) => { try { ws.close(); } catch (_) {} });
   await page.route("**/*", async (route) => {
     let u; try { u = new URL(route.request().url()); } catch (_) { return route.continue(); }
+    if (u.pathname === "/api/auth/email-link") {   // Planyr's own mail route (NEW-1, B2626128): Forgot password / "Email me a sign-in link" no longer touch Supabase's /recover
+      const sent = (() => { try { return JSON.parse(route.request().postData() || "{}"); } catch (_) { return {}; } })();
+      calls.push({ path: u.pathname, body: sent });
+      const r = cfg.link ? cfg.link(sent) : { status: 200, body: { ok: true, retryAfterSeconds: 60, expiresMinutes: 60 } };
+      return route.fulfill({ status: r.status, contentType: "application/json", body: JSON.stringify(r.body) });
+    }
     if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return route.continue();
     if (u.hostname === "challenges.cloudflare.com") {
       if (!scriptOk) return route.abort();
