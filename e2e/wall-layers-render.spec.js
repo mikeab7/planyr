@@ -5,7 +5,7 @@
  * Red on main: the rear buffer sat on top of the rear walk.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/wall-layers-render.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
@@ -32,7 +32,7 @@ async function openProps(page, id) {
   await expect(page.getByTestId("building-header")).toBeVisible();
 }
 const rowBy = (page, sel) => page.locator(`[data-testid="wall-row"]${sel}`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 
 const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
 // [inner, outer] feet from the wall face, along the wall's outward normal, for a kid on `side`.

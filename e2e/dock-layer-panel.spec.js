@@ -3,7 +3,7 @@
  * band notice, the editable Length with "Full wall", and the ONE remove path (inline confirm → Removed note → Undo).
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/dock-layer-panel.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
@@ -47,8 +47,7 @@ async function build(page) {
   await expect.poll(async () => (await zones(page)).b.dock).toBe("cross");
   // each dock wall is its own row in "Docks & walls": give BOTH a court → trailer parking → buffer
   for (const row of [0, 1]) for (const key of ["court", "trailer", "buffer"]) {
-    await page.locator('[data-testid="wall-row"][data-role="dock"]').nth(row).getByTestId("wall-add").click();
-    await page.getByTestId(`wall-add-${key}`).click();
+    await addWallLayer(page.locator('[data-testid="wall-row"][data-role="dock"]').nth(row), key);
     await page.waitForTimeout(200);
   }
   await expect.poll(async () => { const z = await zones(page); return [z.court.length, z.trailer.length, z.buffer.length].join(","); }).toBe("2,2,2");
