@@ -100,13 +100,13 @@ await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(e 
 const booted = await page.waitForSelector("[data-task-row]", { timeout: 30000 }).then(() => true).catch(() => false);
 ok("board boots with the multi-schedule fixture", booted);
 
-const clickGroupBySegment = label => page.evaluate((label) => {
-  const spans = [...document.querySelectorAll("span")];
-  const marker = spans.find(s => s.textContent.trim() === "Group by");
-  const seg = marker && [...marker.parentElement.querySelectorAll("span")].find(s => s.textContent.trim() === label);
-  if (seg) { seg.click(); return true; }
-  return false;
-}, label);
+// NEW-1 — Group by is a dropdown now ("Group by: None ▾" opens a None / Project list), no longer two segments.
+const clickGroupBySegment = async label => {
+  if (!(await page.$('[data-tr-btn="group"]'))) return false;
+  await page.click('[data-tr-btn="group"]'); await page.waitForSelector("[data-group-opt]");
+  await page.click(`[data-group-opt="${label === "Project" ? "project" : "none"}"]`); await page.waitForTimeout(200);
+  return true;
+};
 const groupHeaderTexts = () => page.evaluate(() => [...document.querySelectorAll("td[colspan]")].map(td => td.textContent.trim()));
 
 if (booted) {

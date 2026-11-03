@@ -1,4 +1,4 @@
-/* NEW-1 — LIVE acceptance for the Task Report's status filter (In Progress / Needs Attention, independently selectable).
+/* NEW-1 — LIVE acceptance for the Task Report's standard Filter dropdown (Status + Project checkboxes with counts, beside Group by / Show / Columns).
  * Signed in as the TEST account on THROWAWAY projects + schedules it creates and removes:
  *   E2E_LOGIN_KEY=… node ui-audit/verify-task-report-status-filter-live.mjs [https://planyr.io] [<expected commit prefix>] [--webkit-phone]
  * Never opens or edits a real project; touches only the "ZZ StatusFilter …" projects it seeds and removes them (and puts the
@@ -96,7 +96,7 @@ try {
       console.log("no TASK REPORT; page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 600)));
       throw e;
     });
-    await frame.evaluate(() => { const m = [...document.querySelectorAll("span")].find((x) => x.textContent.trim() === "Group by"); const seg = m && [...m.parentElement.querySelectorAll("span")].find((x) => x.textContent.trim() === "Project"); if (seg) seg.click(); });
+    await frame.locator('[data-tr-btn="group"]').click(); await frame.locator('[data-group-opt="project"]').click();   // Group by is a dropdown now
     await frame.waitForSelector("tr[data-grp-site]", { timeout: 30000 });
     await pacedWait(page, 1500);
     await assertMeasurable(page, "verify-task-report-status-filter-live");
@@ -112,71 +112,126 @@ try {
       const tds = tr.querySelectorAll("td");
       if (tr.hasAttribute("data-grp-site")) { const num = [...tds[0].querySelectorAll("span")].map((p) => p.textContent.trim()).filter((t) => /^\d+$/.test(t)); cur = { label: tds[0].textContent.replace(/[⠿⋯]/g, "").trim(), pill: Number(num[num.length - 1]), rows: 0 }; groups.push(cur); return; }
       if (tds.length < 4) return;
-      rows.push({ name: tds[ti].textContent.trim(), status: tds[si].textContent.trim() }); if (cur) cur.rows++;
+      rows.push({ name: tds[ti].textContent.trim(), status: tds[si].textContent.trim(), grp: cur ? cur.label : "" }); if (cur) cur.rows++;
     });
-    const segs = Object.fromEntries([...document.querySelectorAll("[data-status-seg]")].map((b) => [b.dataset.statusSeg, b.getAttribute("aria-pressed") === "true"]));
-    return { headerPill, groups, rows, segs, empty: document.querySelector("[data-status-empty]")?.textContent.trim() || null };
+    const badge = document.querySelector("[data-filter-badge]");
+    const fb = document.querySelector('[data-tr-btn="filter"]');
+    const st = {}, pr = {};
+    document.querySelectorAll("[data-filter-status]").forEach((i) => { st[i.dataset.filterStatus] = { on: i.checked, n: Number(i.closest("label").querySelector("[data-filter-count]").textContent) }; });
+    document.querySelectorAll("[data-filter-project]").forEach((i) => { pr[i.dataset.filterProject] = { on: i.checked, n: Number(i.closest("label").querySelector("[data-filter-count]").textContent), label: i.closest("label").textContent }; });
+    return { headerPill, groups, rows, badge: badge ? badge.textContent.trim() : null, on: !!fb && fb.getAttribute("data-active") === "1", st, pr,
+      groupBtn: (document.querySelector('[data-tr-btn="group"]') || {}).textContent || null, empty: document.querySelector("[data-filter-empty]") ? document.querySelector("[data-filter-empty]").textContent : null,
+      oldControl: !!document.querySelector("[data-status-seg]") };
   });
-  const press = async (frame, seg) => {
-    const loc = frame.locator(`[data-status-seg="${seg}"]`);
-    await loc.evaluate((el) => el.scrollIntoView({ block: "center" })); // page-JS scroll, never the driver's
-    if (phone) await loc.tap(); else await loc.click();
-    await pacedWait(page, 350);
-  };
+  const tap = async (frame, sel) => { const loc = frame.locator(sel); await loc.evaluate((el) => el.scrollIntoView({ block: "center" })); if (phone) await loc.tap(); else await loc.click(); await pacedWait(page, 350); };
+  const openF = async (frame) => { if (!(await frame.locator('[data-tr-panel="filter"]').count())) await tap(frame, '[data-tr-btn="filter"]'); };
+  const clearAll = async (frame) => { await openF(frame); await tap(frame, "[data-filter-clear]"); };
 
   let frame = await openReport();
+  await openF(frame);
   const first = await snap(frame);
-  if (!check(Object.keys(first.segs).length === 3, `the Status control is on the page (segments: ${Object.keys(first.segs).join(", ") || "none"})`)) throw new Error("no Status control on this build — VOID");
-  check(first.segs.yellow && first.segs.red && !first.segs.all, `a saved legacy "both" opens as In Progress + Needs Attention on (${JSON.stringify(first.segs)})`);
-  await press(frame, "all");
+  if (!check(!first.oldControl && Object.keys(first.st).length >= 5 && !!first.groupBtn, `the Filter dropdown is on the page, the old Status segments are gone (statuses: ${Object.keys(first.st).join(", ") || "none"}; ${first.groupBtn && first.groupBtn.replace(/\s+/g, " ")})`)) throw new Error("no Filter control on this build — VOID");
+  check(first.st.yellow.on && first.st.red.on && !first.st.gray.on && !first.st.green.on && !first.st.paused.on && first.badge === "1" && first.on, `a saved legacy "both" opens as In Progress + Needs Attention checked, badge 1 (${JSON.stringify(Object.fromEntries(Object.entries(first.st).map(([k, v]) => [k, v.on])))})`);
+  await clearAll(frame);
   const all = await snap(frame);
   const zzRows = (sn) => sn.rows.filter((r) => r.name.startsWith("ZZ StatusFilter"));
-  const truth = Object.fromEntries(zzRows(all).map((r) => [r.name, r.status]));
+  const truth = Object.fromEntries(zzRows(all).map((r) => [r.name, { status: r.status, proj: (r.grp.match(/ZZ StatusFilter (\w+)/) || [])[1] }]));
   const SEEDED = PROJECTS.flatMap(([n, hs]) => hs.map((h, k) => `${n} #${k + 1} ${h}`));
-  if (!check(sameSet(Object.keys(truth), SEEDED) && all.segs.all, `known-good arm: "All" lists all ${SEEDED.length} seeded tasks (${Object.keys(truth).length} read) and All is pressed`)) throw new Error("VACUOUS run — seeded tasks not all on the report");
-  const LABEL = { yellow: "In Progress", red: "Needs Attn." };
-  const EVERY = new Set(Object.values(truth));
-  const verify = async (label, wantSet, sel) => {
+  if (!check(sameSet(Object.keys(truth), SEEDED) && all.badge === null && !all.on, `known-good arm: Clear all lists all ${SEEDED.length} seeded tasks (${Object.keys(truth).length} read) and the badge is gone`)) throw new Error("VACUOUS run — seeded tasks not all on the report");
+  const PILL = { gray: "Not Started", yellow: "In Progress", red: "Needs Attn.", green: "Complete", paused: "Paused" };
+  const keyOf = (n) => Object.keys(PILL).find((k) => PILL[k] === truth[n].status);
+  const projKey = {}; Object.entries(all.pr).forEach(([id, v]) => { const m = v.label.match(/ZZ StatusFilter (\w+)/); if (m) projKey[m[1]] = id; });
+  check(Object.keys(projKey).length === 3, `the three ZZ projects are in the Project list (${Object.keys(projKey).join(", ")})`);
+  let sS = new Set(), pS = new Set();
+  const verify = async (label) => {
+    await openF(frame);
     const sn = await snap(frame);
-    const wantNames = SEEDED.filter((n) => wantSet.has(truth[n]));
-    const total = sn.rows.length;
-    const gz = sn.groups.filter((g) => g.label.startsWith("ZZ StatusFilter"));
-    check(sameSet(zzRows(sn).map((r) => r.name), wantNames), `${label}: seeded rows = exactly the tasks whose pill matches (${wantNames.length})`);
-    check(sn.headerPill === total && sn.groups.every((g) => g.pill === g.rows && g.rows > 0) && sn.groups.reduce((n, g) => n + g.pill, 0) === total, `${label}: header pill ${sn.headerPill} = rows ${total}; each group pill = its rows; no empty group header`);
-    check(sameSet(Object.entries(sn.segs).filter(([, v]) => v).map(([k]) => k), sel), `${label}: pressed = ${JSON.stringify(sel)}`);
-    return { sn, gz };
+    const want = SEEDED.filter((n) => (sS.size === 0 || sS.has(keyOf(n))) && (pS.size === 0 || pS.has(truth[n].proj)));
+    check(sameSet(zzRows(sn).map((r) => r.name), want), `${label}: seeded rows = exactly the matching tasks (${want.length})`);
+    check(sn.headerPill === sn.rows.length && sn.groups.every((g) => g.pill === g.rows && g.rows > 0) && sn.groups.reduce((n, g) => n + g.pill, 0) === sn.rows.length, `${label}: header pill ${sn.headerPill} = rows ${sn.rows.length}; each group pill = its rows; no empty group header`);
+    const wantBadge = (sS.size ? 1 : 0) + (pS.size ? 1 : 0);
+    check((sn.badge === null ? 0 : Number(sn.badge)) === wantBadge && sn.on === (wantBadge > 0), `${label}: badge ${wantBadge || "absent"}`);
+    const stOk = ["gray", "yellow", "red", "green", "paused"].every((k) => sn.st[k].on === sS.has(k));
+    const cStatus = Object.keys(PILL).every((k) => sn.st[k].n >= SEEDED.filter((n) => keyOf(n) === k && (pS.size === 0 || pS.has(truth[n].proj))).length);   // the account may hold other schedules; ZZ rows are a lower bound
+    const cProj = Object.entries(projKey).every(([nm, id]) => sn.pr[id].on === pS.has(nm) && sn.pr[id].n === SEEDED.filter((n) => truth[n].proj === nm && (sS.size === 0 || sS.has(keyOf(n)))).length);
+    check(stOk && cStatus && cProj, `${label}: ticked boxes = the selection; the ZZ project counts equal the rows they would show`);
+    return sn;
   };
-  const IP = new Set(["In Progress"]), NA = new Set(["Needs Attn."]), BOTH = new Set(["In Progress", "Needs Attn."]);
+  const tS = async (k) => { await openF(frame); await tap(frame, `[data-filter-status="${k}"]`); sS.has(k) ? sS.delete(k) : sS.add(k); };
+  const tP = async (nm) => { await openF(frame); await tap(frame, `[data-filter-project="${projKey[nm]}"]`); pS.has(nm) ? pS.delete(nm) : pS.add(nm); };
 
-  await press(frame, "yellow"); await verify("only In Progress", IP, ["yellow"]);
-  await press(frame, "yellow"); await verify("In Progress off → All (no dead end)", EVERY, ["all"]);
-  await press(frame, "red");    const na = await verify("only Needs Attention", NA, ["red"]);
-  check(!na.gz.some((g) => /Charlie/.test(g.label)) && !na.gz.some((g) => /Bravo/.test(g.label)), "a group with no matching task disappears (Bravo has only In Progress, Charlie only Complete/Not Started)");
-  await press(frame, "yellow"); await verify("both", BOTH, ["yellow", "red"]);
-  await press(frame, "red");    await verify("both → only In Progress", IP, ["yellow"]);
-  await press(frame, "red");    await verify("both again", BOTH, ["yellow", "red"]);
-  await press(frame, "all");    await verify("All", EVERY, ["all"]);
-  let sel = new Set(), rseed = 11, walkOk = true, detail = ""; const rnd = () => (rseed = (rseed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-  for (let i = 0; i < 14 && walkOk; i++) {
-    const k = ["yellow", "red", "all"][Math.floor(rnd() * 3)]; await press(frame, k);
-    if (k === "all") sel = new Set(); else sel.has(k) ? sel.delete(k) : sel.add(k);
-    const w = sel.size ? new Set([...sel].map((x) => LABEL[x])) : EVERY; const sn = await snap(frame);
-    const wn = SEEDED.filter((n) => w.has(truth[n]));
-    if (!(sameSet(zzRows(sn).map((r) => r.name), wn) && sn.headerPill === sn.rows.length && sn.groups.every((g) => g.pill === g.rows && g.rows > 0))) { walkOk = false; detail = `step ${i} (${k})`; }
-  }
-  check(walkOk, `14 random switches in a row stay consistent ${detail}`);
+  await verify("nothing checked");
+  for (const k of ["gray", "yellow", "red", "green", "paused"]) { await tS(k); await verify(`status alone: ${PILL[k]}`); await tS(k); }
+  await tS("yellow"); await tS("red"); await verify("several statuses: In Progress + Needs Attention");
+  await tS("green"); await verify("three statuses");
+  await clearAll(frame); sS = new Set(); await verify("Clear all");
+  for (const nm of ["Alpha", "Bravo", "Charlie"]) { await tP(nm); await verify(`project alone: ${nm}`); await tP(nm); }
+  await tS("yellow"); await tS("red"); await tP("Bravo"); const sp = await verify("Status (In Progress + Needs Attention) + Project (Bravo)");
+  check(sp.badge === "2", "Status + Project: badge is 2");
+  await tP("Bravo"); await tS("yellow"); const na = await verify("only Needs Attention");
+  check(!na.groups.some((g) => /Bravo|Charlie/.test(g.label)), "a group with no matching task disappears (Bravo has only In Progress, Charlie only Complete/Not Started)");
+  await tS("yellow"); await tP("Charlie"); const none = await verify("Needs Attention + In Progress in Charlie (matches nothing)");
+  check(!!none.empty && /No tasks match the filter/.test(none.empty) && /Charlie/.test(none.empty), `nothing matches → the empty state names the filter (${none.empty})`);
+  await frame.locator("[data-filter-empty-clear]").evaluate((el) => el.click()); await pacedWait(page, 350);
+  const afterClear = await snap(frame);
+  check(afterClear.badge === null && zzRows(afterClear).length === SEEDED.length, `"Clear filter" in the empty state brings every task back (${zzRows(afterClear).length})`);
+  sS = new Set(); pS = new Set();
 
-  // reload keeps the selection (saved view preference)
-  await press(frame, "all"); await press(frame, "red");
-  frame = await openReport();
+  // Group by None / Project with filters on
+  await tS("red"); await tP("Alpha");
+  await tap(frame, '[data-tr-btn="group"]'); await tap(frame, '[data-group-opt="none"]');
+  let g = await snap(frame);
+  check(g.groups.length === 0 && /Group by:\s*None/.test(g.groupBtn) && sameSet(zzRows(g).map((r) => r.name), SEEDED.filter((n) => keyOf(n) === "red" && truth[n].proj === "Alpha")), `Group by: None with Status + Project on → a flat list of the matching rows (${g.groupBtn.replace(/\s+/g, " ")})`);
+  await tap(frame, '[data-tr-btn="group"]'); await tap(frame, '[data-group-opt="project"]');
+  g = await snap(frame);
+  check(g.groups.filter((x) => /ZZ StatusFilter/.test(x.label)).length === 1 && g.groups.every((x) => x.pill === x.rows), "Group by: Project with the same filters → one ZZ group, pill = rows");
+
+  // dropdown mechanics: one closes another; Esc; outside press
+  await openF(frame);
+  await tap(frame, '[data-tr-btn="show"]');
+  check(!(await frame.locator('[data-tr-panel="filter"]').count()) && (await frame.locator('[data-tr-panel="show"]').count()) === 1, "opening Show closes Filter, in one click");
+  await tap(frame, '[data-tr-btn="columns"]');
+  check(!(await frame.locator('[data-tr-panel="show"]').count()) && (await frame.locator('[data-tr-panel="columns"]').count()) === 1, "opening Columns closes Show");
+  const colText = await frame.locator('[data-tr-panel="columns"]').innerText();
+  check(/Show \/ Hide Columns/i.test(colText) && /Reset to default/.test(colText), "Columns keeps its contents");
+  await page.keyboard.press("Escape"); await frame.locator("body").evaluate((b) => b.focus && 0); await pacedWait(page, 250);
+  if (await frame.locator('[data-tr-panel="columns"]').count()) { await frame.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))); await pacedWait(page, 250); }
+  check(!(await frame.locator('[data-tr-panel]').count()), "Esc closes the open dropdown");
+  await openF(frame); await frame.locator("thead th").first().evaluate((el) => el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await pacedWait(page, 250);
+  check(!(await frame.locator('[data-tr-panel]').count()), "a press outside closes the dropdown");
+  await tap(frame, '[data-tr-btn="show"]');
+  await frame.evaluate(() => [...document.querySelectorAll('[data-tr-panel="show"] label')].find((l) => /Action items only/.test(l.textContent)).querySelector("input").click()); await pacedWait(page, 350);
+  const sh = await snap(frame);
+  check(sh.headerPill === sh.rows.length, `Show › Action items only still works with the Filter on (header pill ${sh.headerPill} = rows ${sh.rows.length})`);
+  await frame.evaluate(() => [...document.querySelectorAll('[data-tr-panel="show"] span')].find((l) => l.textContent.trim() === "Show all").click()); await pacedWait(page, 250);
+  await frame.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))); await pacedWait(page, 200);
+
+  // reload keeps the selection; and what the OLD control saved (a bare ['red'] in the saved view prefs) opens as its checkbox
+  await clearAll(frame); await tS("red"); sS = new Set(["red"]); pS = new Set(); await tP("Alpha");
+  frame = await openReport(); await openF(frame);
   const rl = await snap(frame);
-  check(sameSet(Object.entries(rl.segs).filter(([, v]) => v).map(([k]) => k), ["red"]) && zzRows(rl).every((r) => r.status === "Needs Attn."), `a cache-busted reload keeps "only Needs Attention" (${JSON.stringify(rl.segs)})`);
+  check(rl.st.red.on && !rl.st.yellow.on && rl.pr[projKey.Alpha] && rl.pr[projKey.Alpha].on && rl.badge === "2", `a cache-busted reload keeps Needs Attention + Alpha (badge ${rl.badge})`);
+  await page.evaluate(() => { const k = "planar:viewPrefs:v1"; const o = JSON.parse(localStorage.getItem(k) || "{}"); o.masterHealthFilter = ["red"]; delete o.masterProjectFilter; localStorage.setItem(k, JSON.stringify(o)); });
+  frame = await openReport(); await openF(frame);
+  const mg = await snap(frame);
+  check(mg.st.red.on && !mg.st.yellow.on && !mg.st.gray.on && !mg.st.green.on && !mg.st.paused.on && Object.values(mg.pr).every((p) => !p.on) && mg.badge === "1", "migration: the old control's saved ['red'] opens as only Needs Attention checked, no project, badge 1");
+  await page.evaluate(() => { const k = "planar:viewPrefs:v1"; const o = JSON.parse(localStorage.getItem(k) || "{}"); o.masterHealthFilter = false; localStorage.setItem(k, JSON.stringify(o)); });
+  frame = await openReport(); await openF(frame);
+  const mg2 = await snap(frame);
+  check(Object.values(mg2.st).every((v) => !v.on) && mg2.badge === null && zzRows(mg2).length === SEEDED.length, "migration: the old 'All Statuses' (saved false) opens with nothing checked and every task listed");
 
-  // phone layout: the control sits inside the screen and overlaps nothing in the header
-  const geo = await frame.evaluate(() => { const el = document.querySelector("[data-status-filter]"); const r = el.getBoundingClientRect(); const sibs = [...el.parentElement.children].filter((c) => c !== el).map((c) => c.getBoundingClientRect()).filter((b) => b.width > 0);
-    return { left: r.left, right: r.right, vw: innerWidth, overlap: sibs.some((b) => !(b.right <= r.left + 0.5 || b.left >= r.right - 0.5 || b.bottom <= r.top + 0.5 || b.top >= r.bottom - 0.5)), sideways: document.documentElement.scrollWidth > innerWidth + 1 }; });
-  check(geo.left >= 0 && geo.right <= geo.vw + 0.5 && !geo.overlap && !geo.sideways, `the control fits the header at this width without overlap or sideways scroll (${JSON.stringify(geo)})`);
-  await page.screenshot({ path: `/tmp/task-report-status-live-${phone ? "phone" : "desktop"}.png` });
+  // phone layout: four buttons fit inside the screen, none overlapping, the panel inside the screen, no sideways scroll
+  await frame.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))); await pacedWait(page, 200);
+  const geo = await frame.evaluate(() => { const bs = [...document.querySelectorAll("[data-tr-btn]")].map((b) => { const r = b.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; });
+    const hit = (a, c) => !(a.r <= c.l + 0.5 || a.l >= c.r - 0.5 || a.b <= c.t + 0.5 || a.t >= c.b - 0.5); let overlap = false; bs.forEach((a, i) => bs.forEach((c, j) => { if (i < j && hit(a, c)) overlap = true; }));
+    const t = [...document.querySelectorAll("span")].find((x) => x.textContent.trim() === "TASK REPORT"); const tr = t.getBoundingClientRect(), pr = t.nextElementSibling.getBoundingClientRect();
+    const crowd = bs.some((b) => hit(b, { l: tr.left, r: tr.right, t: tr.top, b: tr.bottom }) || hit(b, { l: pr.left, r: pr.right, t: pr.top, b: pr.bottom }));
+    return { n: bs.length, inside: bs.every((b) => b.l >= 0 && b.r <= innerWidth + 0.5), overlap, crowd, sideways: document.documentElement.scrollWidth > innerWidth + 1 }; });
+  check(geo.n === 4 && geo.inside && !geo.overlap && !geo.crowd && !geo.sideways, `the four buttons fit at this width without overlap, crowding the title, or sideways scroll (${JSON.stringify(geo)})`);
+  await openF(frame);
+  const pin = await frame.evaluate(() => { const r = document.querySelector('[data-tr-panel="filter"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5; });
+  check(pin, "the open Filter panel stays inside the window");
+  await page.screenshot({ path: `/tmp/task-report-filter-live-${phone ? "phone" : "desktop"}.png` });
 } catch (e) { console.error("ERROR", e.message); failed = true; }
 finally {
   if (s) {
