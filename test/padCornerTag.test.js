@@ -95,13 +95,13 @@ describe("every edit button sits OUTSIDE the footprint; every corner tag sits IN
   });
 });
 
-describe("the button row: one pair per wall, one ramp per dock wall, one per corner button — no extras", () => {
+describe("the button row: one pair per wall, one ramp per corner button, NONE at a wall's middle — no extras", () => {
   const ids = (layout) => [...layout.keys()];
-  it("a cross-dock building: 4 pairs, 4 purple corners, 2 wall ramps (dock walls only), 4 corner ramps", () => {
+  it("a cross-dock building: 4 pairs, 4 purple corners, 4 corner ramps, and NO ramp button at a wall's middle (owner 2026-11-02)", () => {
     const { layout } = layoutFor(1000, 400, 0, 0.8, ["top", "bottom"]);
     expect(ids(layout).filter((k) => k.startsWith("pair:")).sort()).toEqual(["pair:bottom", "pair:left", "pair:right", "pair:top"]);
     expect(ids(layout).filter((k) => /^corner:/.test(k))).toHaveLength(4);
-    expect(ids(layout).filter((k) => /^ramp:[a-z]+$/.test(k)).sort()).toEqual(["ramp:bottom", "ramp:top"]);
+    expect(ids(layout).filter((k) => /^ramp:[a-z]+$/.test(k))).toEqual([]);                 // no `ramp:<wall>` id at all
     expect(ids(layout).filter((k) => /^ramp:[a-z]+:-?1$/.test(k))).toHaveLength(4);
   });
   it("no ramp button on a short, non-dock end wall — ever", () => {
@@ -110,11 +110,11 @@ describe("the button row: one pair per wall, one ramp per dock wall, one per cor
       expect(ids(layout).some((k) => k === "ramp:left" || k === "ramp:right" || /^ramp:(left|right):/.test(k))).toBe(false);
     }
   });
-  it("the ramp count never exceeds (dock walls + corner buttons) at any zoom, and no two discs touch", () => {
+  it("no `ramp:<wall>` id at any size, rotation, zoom or dock arrangement; the corner ramps never exceed the corner buttons; no two discs touch", () => {
     for (const [w, h] of BUILDINGS) for (const rot of ROTS) for (const ppf of PPFS) for (const docks of DOCKS) {
       const { layout } = layoutFor(w, h, rot, ppf, docks), k = ids(layout);
       const ramps = k.filter((x) => x.startsWith("ramp:")), corners = k.filter((x) => x.startsWith("corner:"));
-      expect(ramps.filter((x) => /^ramp:[a-z]+$/.test(x)).length).toBeLessThanOrEqual(docks.length);
+      expect(ramps.filter((x) => /^ramp:[a-z]+$/.test(x))).toEqual([]);
       expect(ramps.filter((x) => /:-?1$/.test(x)).length).toBeLessThanOrEqual(corners.length);
       const d = layoutDiscs(layout);
       for (let i = 0; i < d.length; i++) for (let j = i + 1; j < d.length; j++) {
@@ -124,7 +124,7 @@ describe("the button row: one pair per wall, one ramp per dock wall, one per cor
   });
   it("at working zoom on the owner's building every one of them is present (nothing dropped for room)", () => {
     const { layout } = layoutFor(1566, 650, 0, 0.4, ["top", "bottom"]);
-    expect(ids(layout).filter((k) => k.startsWith("ramp:")).length).toBe(2 + 4);
+    expect(ids(layout).filter((k) => k.startsWith("ramp:")).length).toBe(4);
     expect(ids(layout).filter((k) => k.startsWith("corner:")).length).toBe(4);
   });
   it("a button that would touch one already placed is DROPPED, never moved onto it (the pair and the purple corner outrank the ramp)", () => {
@@ -184,8 +184,9 @@ describe("the planner draws what the layout hands it", () => {
     expect(src).not.toMatch(/ms\.x - ux \* 24/);
     expect(src).not.toMatch(/cs\.x - dx \* 20/);
   });
-  it("exactly one ramp glyph is drawn per layout entry: the wall one and the corner one, and the non-dock branch draws none", () => {
-    expect(src).toMatch(/layout\.get\(`ramp:\$\{name\}`\)/);
+  it("exactly one ramp glyph is drawn per layout entry: the corner one only — the wall-middle one is gone — and the non-dock branch draws none", () => {
+    expect(src).not.toMatch(/layout\.get\(`ramp:\$\{name\}`\)/);
+    expect(src).not.toMatch(/rampw\$\{name\}/);
     expect(src).toMatch(/layout\.get\(`ramp:\$\{name\}:\$\{sign\}`\)/);
     const nonDock = src.slice(src.indexOf("// non-dock side (a short end"), src.indexOf("// dog-ear bumps") > 0 ? src.indexOf("// dog-ear bumps") : src.indexOf("walls.flatMap((w) => w.corners.map"));
     expect(nonDock).not.toMatch(/rampGlyph/);

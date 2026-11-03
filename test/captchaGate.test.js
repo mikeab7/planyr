@@ -167,4 +167,64 @@ describe("captchaGate", () => {
     expect(log.runs).toEqual([""]);
     expect(log.resets).toBe(0);
   });
+
+  /* NEW-1 (follow-up to B2619760) point 7 */
+  it("AFTER CLOUDFLARE'S OWN TIMEOUT the next press does not wait with no clock — it fails fast with the way out", () => {
+    const { gate, log } = rig();
+    gate.setWidgetState("interactive");
+    gate.widgetTimedOut();                           // timeout-callback with NO press pending
+    expect(gate.view().widget).toBe("error");
+    expect(gate.view().failure).toBe("timeout");
+    expect(gate.submit()).toBe("failed");            // before the fix: "pending" forever (interactive = no timer)
+    expect(gate.view().pending).toBe(false);
+    expect(log.runs).toEqual([]);
+  });
+
+  it("TRY AGAIN FINISHES THE PRESS: a submit that failed on the check is sent by itself when the retried widget hands over a token", async () => {
+    const { gate, log } = rig();
+    gate.submit();
+    vi.advanceTimersByTime(DEFAULT_WAIT_MS + 1);     // failed: timeout
+    expect(gate.view().failure).toBe("timeout");
+    gate.retry();
+    expect(log.remounts).toBe(1);
+    expect(gate.view().pending).toBe(true);          // "Verifying…" again, the message does not just vanish
+    expect(log.runs).toEqual([]);
+    gate.setWidgetState("ready");
+    gate.setToken("fresh");
+    await vi.runAllTimersAsync();
+    expect(log.runs).toEqual(["fresh"]);             // sent without a second press
+    expect(gate.view().pending).toBe(false);
+  });
+
+  it("Try again after a widget error that no press caused (script blocked on open) does NOT submit by itself", async () => {
+    const { gate, log } = rig();
+    gate.setWidgetState("error");                    // nobody pressed anything
+    gate.retry();
+    expect(gate.view().pending).toBe(false);
+    gate.setToken("fresh");
+    await vi.runAllTimersAsync();
+    expect(log.runs).toEqual([]);
+  });
+
+  it("a retried widget that fails again ends in a failure again, never an endless wait", () => {
+    const { gate } = rig();
+    gate.submit();
+    gate.setWidgetState("error");
+    gate.retry();
+    expect(gate.view().pending).toBe(true);
+    gate.setWidgetState("error");
+    expect(gate.view().pending).toBe(false);
+    expect(gate.view().failure).toBe("error");
+  });
+
+  it("a mode switch forgets the wanted press (no surprise send after Try again in another form)", async () => {
+    const { gate, log } = rig();
+    gate.submit();
+    vi.advanceTimersByTime(DEFAULT_WAIT_MS + 1);
+    gate.cancelPending();
+    gate.retry();
+    gate.setToken("fresh");
+    await vi.runAllTimersAsync();
+    expect(log.runs).toEqual([]);
+  });
 });
