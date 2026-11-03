@@ -24,7 +24,7 @@ phone. Nothing in the repo noticed. This is the system that would have.
 1. **site-key-in-bundle** — the live JS carries a real Turnstile site key (not a Cloudflare always-pass TEST key).
 2. **server-gate** — Supabase's token endpoint, asked with **no** token, answers `captcha_failed`; that must **agree** with check 1. The four combinations: on+key = healthy · on+no key = **the B2619760 outage** · off+key = settings changed · off+no key = unprotected. Either direction is a `fail`.
 3. **panel-renders** — a real browser opens `/?app&auth=signin`; fields + button present and usable (the button is disabled until both fields have content, so it is judged after typing a throwaway pair; nothing is submitted); no raw error text; the widget did not report a configuration error (Cloudflare codes 110100/110110/110200/400020).
-4. **real-sign-in** — a real sign-in as the test account through the panel (needs `E2E_EMAIL` + `E2E_PASSWORD`; **skipped** cleanly if absent). Cloudflare withholding the check from a datacenter browser → **unknown**, not a pass and not a break.
+4. **real-sign-in** — a real sign-in as the test account through the panel (needs `E2E_EMAIL` + `E2E_PASSWORD`; **skipped** cleanly if absent). **Known coverage gap — see below: from GitHub's runner this step cannot finish, because Cloudflare shows the datacenter browser a challenge. It is then recorded as `unknown` + `uncovered`: never a pass, never a break, and not counted toward the blind email.** A rejected test-account password (the bot check passed, the credentials did not) is a different `unknown` and IS counted.
 5. **email-link** — `/api/auth/email-link` answers JSON without sending mail. **Skipped** while the route does not exist (a POST to a path with no Function behind it gets a bare 405, so "JSON content-type" is the existence test).
 
 A failed attempt is re-checked ~4 minutes later in the same run (a blip never alarms).
@@ -34,7 +34,7 @@ A failed attempt is re-checked ~4 minutes later in the same run (a blip never al
 - **Outside-in: 2 failed attempts in a row.** With the in-run re-check that is reached ~5 minutes after the first failing hourly run — not two hours.
 - **Browsers: ≥ 3 server captcha refusals in an hour AND refusals > successful sign-ins.** About 15 accounts → 0–5 sign-ins an hour; a total break refuses every attempt. One person fat-fingering is a count, not an email. Bias is toward alerting.
 - **Only `auth-captcha-refused` can alarm from client events.** Wrong passwords, blocked scripts, widget errors, timeouts and network failures are **counts in the sweep**, never an email.
-- **24 consecutive `unknown`** → one "the check is blind" email (e.g. the test account's password was rotated, or Cloudflare refuses the runner for good).
+- **24 consecutive `unknown` runs** (every counted step unknown, or any counted step stuck unknown — e.g. the test account's password was rotated) → one "the check can no longer confirm sign-in" email. **A real sign-in that is `uncovered` is NOT counted here** (owner decision 2026-11-03: an alarm that fires because a check can never run is noise); it is reported in the daily sweep instead.
 - **1 email per incident; 1 recovery note; 60-minute cooldown** between alerts. The database refuses a second open incident per lane.
 
 ## Adversarial table — every way sign-in can break → which check catches it → how fast → how the owner hears
@@ -57,6 +57,10 @@ A failed attempt is re-checked ~4 minutes later in the same run (a blip never al
 | Cloudflare refuses the datacenter runner for the real sign-in | `real-sign-in` = **unknown** (never a pass); all other checks still run | n/a | counted in the sweep; one "blind" email after 24 unknown runs |
 | Test account's password rotated | `real-sign-in` = unknown (bot check passed, credentials rejected) | n/a | same as above |
 | Someone floods `client_errors` with fake auth events | fail-open DB cap (60 / source / minute); the outside-in check is unaffected. Client-reported rates are advisory and spoofable (insert-only, signed out by design) | — | a spoofed rate could send one false email; it cannot hide a real outage from the outside-in check |
+
+## Known coverage gap — real sign-in through the panel is NOT covered from GitHub's runner
+
+Measured 2026-11-02 (runs 41541689588 / 41541968581): Cloudflare's bot check shows GitHub's datacenter browser a visible challenge (widget state `interactive`), so the form never submits a sign-in. **Nothing in this system proves that a person can type a password into the panel and get in.** What does cover the October failure class from the outside: the site key is in the live bundle, Supabase's bot check agrees with it, the form renders with its fields and button, and no raw error shows. What covers the rest: browsers' own `auth-captcha-refused` / `auth-ok` counts (a real person failing to sign in raises the refusal alarm), the guard that fails CI when a gated call lacks a token, and the owner's own use. The gap is reported in the daily sweep and the Ops card every day; it never sends an email and never counts toward the blind email. Closing it would need a runner Cloudflare lets through (a self-hosted or residential one) — a decision, not a bug.
 
 ## Owner steps
 

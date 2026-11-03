@@ -192,6 +192,9 @@ export function classifySignIn({ signedIn, tokenSeen, tokenResponse, widgetState
   if (widgetState === "error" && CONFIG_ERROR_CODES.has(String(widgetError))) return { name, status: "fail", detail: `Cloudflare rejected our bot-check configuration (error ${widgetError})` };
   if (widgetState === "error" && widgetError === "script") return { name, status: "fail", detail: scriptReachable === false ? "the bot-check script did not load and Cloudflare's bot-check host is unreachable from the runner" : "the Cloudflare bot-check script did not load" };
   if (r && String(r.errorCode).toLowerCase() === "invalid_credentials") return { name, status: "unknown", detail: "the bot check passed but the test account's password was rejected — the check's own credentials need refreshing" };
-  if (!r) return { name, status: "unknown", detail: `no sign-in request was made (widget: ${widgetState || "?"}${widgetError ? " " + widgetError : ""}); Cloudflare may be withholding the check from a datacenter browser — not a pass, not read as a break` };
+  // No sign-in request was made: the bot check never produced a token for this browser (Cloudflare put up a challenge a datacenter
+  // browser cannot finish). That is a standing COVERAGE GAP, not an outage and not "the check is blind" — flagged `uncovered` so it is
+  // left out of the overall verdict (it never feeds the blind email) and reported in the daily sweep instead. Never a pass.
+  if (!r) return { name, status: "unknown", uncovered: true, detail: `no sign-in request was made (widget: ${widgetState || "?"}${widgetError ? " " + widgetError : ""}); Cloudflare withholds the bot check from GitHub's datacenter browser — real sign-in is NOT covered from this runner (not a pass, not a break)` };
   return { name, status: "unknown", detail: `sign-in did not complete (HTTP ${r.status} ${r.errorCode || ""})`.trim() };
 }

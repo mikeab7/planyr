@@ -38,7 +38,8 @@ export function normaliseAttempts(body) {
     for (const c of list) {
       if (!c || typeof c.name !== "string" || !/^[a-z0-9-]{1,40}$/.test(c.name)) return { error: "bad check name" };
       if (!STATUSES.includes(c.status)) return { error: `bad status for ${c.name}` };
-      checks.push({ name: c.name, status: c.status, detail: String(c.detail == null ? "" : c.detail).replace(/[\r\n]+/g, " ").slice(0, 300) });
+      // `uncovered` is honoured ONLY on an unknown step (a coverage gap); anywhere else it is dropped, so it can never discount evidence.
+      checks.push({ name: c.name, status: c.status, ...(c.uncovered === true && c.status === "unknown" ? { uncovered: true } : {}), detail: String(c.detail == null ? "" : c.detail).replace(/[\r\n]+/g, " ").slice(0, 300) });
     }
     out.push({ checks, overall: overallOf(checks) });
   }

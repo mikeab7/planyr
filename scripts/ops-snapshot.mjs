@@ -121,7 +121,7 @@ export const SIGNIN_SQL = "select updated_at, payload from public.ops_snapshots 
 export function signinVerdict(row, now = Date.now()) {
   const snap = row && row.payload ? row.payload : null;
   const h = snapshotHealth(snap, now);
-  return { state: h.state, line: sweepLine(snap, now), ok: h.state === "ok" };
+  return { state: h.state, line: sweepLine(snap, now), ok: h.state === "ok", gaps: h.gaps || [] };
 }
 
 export async function runSignin({ env = process.env, argv = process.argv, fetchImpl = globalThis.fetch, readStdin = async () => { let t = ""; for await (const c of process.stdin) t += c; return t; }, log = console.log, now = Date.now() } = {}) {
@@ -140,6 +140,9 @@ export async function runSignin({ env = process.env, argv = process.argv, fetchI
   }
   const v = signinVerdict(row, now);
   log(`sign-in health: ${v.state.toUpperCase()} — ${v.line}`);
+  // Owner decision 2026-11-03: a step the runner cannot run is a COVERAGE GAP the sweep states every day on its own line — it never
+  // changes the exit code (the alarm is fine) and is never left to be inferred from a green state.
+  for (const g of v.gaps) log(`coverage gap [${g.name}]: ${g.text}`);
   return v.ok ? 0 : 1;
 }
 

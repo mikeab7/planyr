@@ -123,8 +123,17 @@ describe("panel", () => {
 
 describe("real sign-in — Cloudflare refusing a datacenter is UNKNOWN, a broken gate is FAIL", () => {
   it("signed in → pass", () => { expect(classifySignIn({ signedIn: true }).status).toBe("pass"); });
-  it("no request ever made (no token from the widget) → unknown", () => {
-    expect(classifySignIn({ signedIn: false, tokenResponse: null, widgetState: "interactive" })).toMatchObject({ status: "unknown", detail: expect.stringMatching(/not a pass/) });
+  it("no request ever made (no token from the widget) → unknown, flagged as a COVERAGE GAP (never a pass, never counted toward the blind email)", () => {
+    const r = classifySignIn({ signedIn: false, tokenResponse: null, widgetState: "interactive" });
+    expect(r).toMatchObject({ status: "unknown", uncovered: true, detail: expect.stringMatching(/NOT covered from this runner/) });
+    expect(r.detail).toMatch(/not a pass/);
+  });
+  it("every OTHER non-pass outcome is NOT a coverage gap: a rejected password, a 5xx, a refused token stay counted", () => {
+    expect(classifySignIn({ signedIn: false, tokenSeen: true, tokenResponse: { status: 400, errorCode: "invalid_credentials" } }).uncovered).toBeUndefined();
+    expect(classifySignIn({ signedIn: false, tokenResponse: { status: 502, errorCode: "" } }).uncovered).toBeUndefined();
+    expect(classifySignIn({ signedIn: false, tokenSeen: true, tokenResponse: { status: 400, errorCode: "captcha_failed" } }).uncovered).toBeUndefined();
+    expect(classifySignIn({ signedIn: false, tokenResponse: null, widgetState: "error", widgetError: "110200" }).uncovered).toBeUndefined();
+    expect(classifySignIn({ signedIn: true }).uncovered).toBeUndefined();
   });
   it("Supabase refused a token the real widget produced → FAIL", () => {
     expect(classifySignIn({ signedIn: false, tokenSeen: true, tokenResponse: { status: 400, errorCode: "captcha_failed" } }).status).toBe("fail");
