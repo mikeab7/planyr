@@ -18355,25 +18355,16 @@ function ReportMenu({id, openMenu, setOpenMenu, label, active, minWidth, footer,
   const open = openMenu === id;
   const btnRef = useRef(null);
   const panelRef = useRef(null);
-  const [pos, setPos] = useState(null);
-  React.useLayoutEffect(() => {
-    if (!open) { setPos(null); return; }
-    const place = () => {
-      const b = btnRef.current, p = panelRef.current;
-      if (!b || !p) return;
-      const r = b.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight, pad = 8;
-      const w = p.offsetWidth;
-      const left = Math.max(pad, Math.min(r.left, vw - pad - w));
-      // Anchor below the WHOLE toolbar, not just this button: at phone width the buttons wrap onto a second row, and a panel hung
-      // under its own button would cover the other buttons, so a second dropdown could not be opened in one tap.
-      const bar = b.closest("[data-report-toolbar]");
-      const top = (bar ? bar.getBoundingClientRect().bottom : r.bottom) + 4;
-      setPos({left, top, maxH: Math.max(140, vh - top - pad)});
-    };
-    place();
-    window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
-  }, [open]);
+  // The shared anchored-popover hook (NEW-1 / B2465520): re-reads the anchor every frame and closes the panel (no commit) the moment
+  // the anchor leaves view, so a panel can never be stranded away from its button. It is hung under the WHOLE toolbar, not its own
+  // button: at phone width the buttons wrap onto a second row, and a panel under its own button would cover the others.
+  const pos = useAnchoredPopover(open, btnRef, r => {
+    const bar = btnRef.current && btnRef.current.closest("[data-report-toolbar]");
+    const p = panelRef.current, vw = document.documentElement.clientWidth, vh = window.innerHeight, pad = 8;
+    const w = p ? p.offsetWidth : minWidth;
+    const top = (bar ? bar.getBoundingClientRect().bottom : r.bottom) + 4;
+    return {left: Math.max(pad, Math.min(r.left, vw - pad - w)), top, maxH: Math.max(140, vh - top - pad)};
+  }, () => setOpenMenu(cur => (cur === id ? null : cur)));
   return (
     <div data-tr-menu={id} style={{position:"relative"}}>
       <button ref={btnRef} type="button" className={"btn"+(open||active?" act":"")} data-tr-btn={id} data-active={active?"1":undefined} aria-haspopup="true" aria-expanded={open}
