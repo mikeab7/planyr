@@ -129,6 +129,9 @@ try {
       const s = await seed(pg, "6 unproven-menu", TEAMMATE);
       const listed = await rpc(mp, "list_my_invites");
       check("6: UNPROVEN — the server answers only that one is waiting (null id/team/inviter/role)", !listed.error && listed.data.length >= 1 && listed.data.every((r) => r.proven === false && r.invite_id === null && r.team_name === null && r.invited_by_name === null && r.role === null), JSON.stringify(listed.error || listed.data));
+      const refused = await rpc(mp, "respond_to_invite", { p_invite: s.inviteId, p_accept: true });
+      const refusedNo = await rpc(mp, "respond_to_invite", { p_invite: s.inviteId, p_accept: false });
+      check("6: even holding the id, an UNPROVEN account can neither accept NOR decline (server answers 'unproven')", refused.data && refused.data.reason === "unproven" && refusedNo.data && refusedNo.data.reason === "unproven", JSON.stringify([refused, refusedNo]));
       const direct = await mp.evaluate(async () => { const r = await window.pfSupabase.from("team_invites").select("id"); return r.error ? { error: r.error.message } : { n: r.data.length }; });
       check("6: the invite row itself is unreadable to the invitee (0 rows)", direct.n === 0, JSON.stringify(direct));
       await mp.reload({ waitUntil: "domcontentloaded" });
@@ -157,7 +160,6 @@ try {
       await mp.waitForTimeout(2500);
       check("6: Resend inside the window is throttled by the server (200 then 429), not a second email", calls.join(",") === "200,429", calls.join(","));
       await mp.screenshot({ path: `${SHOTS}/stage6-waiting.png` });
-      void s;
     }
 
     if (stages.has(2)) {
