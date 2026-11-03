@@ -149,7 +149,7 @@ await page.mouse.down();
 await page.mouse.move(trailerBox.x + 120, trailerBox.y + 80, { steps: 6 });
 await page.mouse.up();
 const trailerCount = await page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = map[Object.keys(map)[0]] || {};
   return (s.els || []).filter((e) => e.type === "trailer").length;
 });

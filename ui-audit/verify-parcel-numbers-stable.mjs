@@ -45,8 +45,8 @@ const names = () => page.locator('[data-testid^="parcel-row-name-"]').evaluateAl
 const stored = () => page.evaluate(([id, uid]) => {
   // a per-plan slot (planStore) or the legacy whole-library entry — read whichever holds the plan
   const direct = Object.keys(localStorage).filter((k) => /:p:/.test(k) && k.endsWith(":" + id) && (uid ? k.includes("cloud:" + uid) : !k.includes("cloud:")));
-  for (const k of direct) { try { const p = JSON.parse(localStorage.getItem(k)); if (p && p.parcels) return p.parcels; } catch (_) {} }
-  const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}");
+  for (const k of direct) { try { const p = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)); if (p && p.parcels) return p.parcels; } catch (_) {} }
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}");
   return (m[id] && m[id].parcels) || [];
 }, [SITE_ID, UID]);
 const openPanel = async () => {

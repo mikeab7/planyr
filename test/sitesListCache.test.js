@@ -158,7 +158,9 @@ describe("(6) the cross-load clean proof", () => {
 });
 
 describe("(7) B2236000 round 6b — the whole-library layout (a device that could not be split)", () => {
-  const blobMode = () => { localStorage.setItem("planarfit:planStore:layout", "blob"); planStore._resetForTest(); };
+  // B2200384: the localStorage kill switch is gone; the un-split ("blob") path is reached by the harness red-proof lever only.
+  const blobMode = () => { globalThis.__PLANYR_PLANSTORE_UNSPLIT = true; planStore._resetForTest(); };
+  afterEach(() => { delete globalThis.__PLANYR_PLANSTORE_UNSPLIT; });
   it("a write of unchanged content keeps every shared object and does not rewrite the library", () => {
     blobMode(); seed(4);
     const base = "planarfit:sites:v1";

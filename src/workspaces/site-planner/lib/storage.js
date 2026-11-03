@@ -1116,8 +1116,18 @@ export async function backupNowVerified(id) {
   try { return writeHistoryAll(historyMem) === true; } catch (_) { return false; }
 }
 /** planStore's make-room hook (B2200385): free localStorage that is PROVEN safe to free, in order, only as far as needed. Resolves { freedChars, steps }. */
-export async function makeRoomForPlanStore({ reason, shortBy } = {}) {
+export async function makeRoomForPlanStore({ base, reason, shortBy } = {}) {
   const steps = []; let freed = 0;
+  /* B2200384 — FIRST: the whole-library entry, if one is still on the device and every plan in it verifies as its own entry. It is by far the biggest thing
+   * that can be freed and the only one that is a duplicate of what the entries already hold. */
+  if (base) {
+    try { const r = planStore.retireLegacy(base); steps.push("legacy:" + r.reason + ":" + r.freedChars); freed += r.freedChars || 0; }
+    catch (e) { steps.push("legacy:error"); }
+  }
+  if (freed >= (shortBy || 0) && freed > 0) {
+    reportClientEvent("plan-store-room-made", "freed localStorage that is safely duplicated or re-fetchable, to make room for the per-plan move", { reason, shortByBefore: shortBy, freedChars: freed, enough: true, steps: steps.join(" · ") });
+    return { freedChars: freed, steps };
+  }
   const h = await relocateHistoryToIdb();
   steps.push("history:" + (h.ok ? "moved" : h.reason) + ":" + h.freedChars); freed += h.freedChars || 0;
   if (freed < (shortBy || 0)) {                       // still short → re-fetchable caches (rebuild source declared in the storage census)
@@ -1203,8 +1213,15 @@ export function sitesWriteStillCurrent(stamp) { return planStore.writeStillCurre
 const writeSites = (map) => planStore.writeMap(sitesKey(), map);
 const writeSite = (id, rec) => planStore.writeOne(sitesKey(), id, rec);
 const removeSite = (id) => planStore.removeOne(sitesKey(), id);
+/** A durable tombstone (signed-in stores) says this plan was deleted on this device — a legacy whole-library entry may never resurrect it (B2200384). */
+function planStoreIsDeleted(base, id) {
+  const pre = "planarfit:sites:cloud:";
+  if (!base || !base.startsWith(pre)) return false;
+  return id in readSiteTombs(base.slice(pre.length));
+}
 planStore.configure({
   makeRoom: (a) => makeRoomForPlanStore(a),
+  isDeleted: planStoreIsDeleted,
   persistForm: dropIdbBackedSrc,
   slim: stripDataUrls,
   merge: (mine, theirs) => {

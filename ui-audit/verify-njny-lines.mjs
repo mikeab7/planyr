@@ -48,7 +48,7 @@ const check = (name, ok, extra = "") => { console.log(`  ${ok ? "✓" : "✗"} $
 
 async function open(siteId, hosts, settleMs) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  await ctx.addInitScript(`(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
+  await ctx.addInitScript(`(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-njny-lines");
   const seen = {};

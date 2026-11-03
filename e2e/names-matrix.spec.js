@@ -22,7 +22,7 @@ const seed = (page) => page.addInitScript(([gid, name, plan]) => {
 }, [GID, OLD, PLAN_OLD]);
 
 const stored = (page) => page.evaluate((gid) => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const r = Object.values(m).find((x) => x.groupId === gid);
   return r ? { site: r.site, name: r.name } : null;
 }, GID);
@@ -197,7 +197,7 @@ async function newProjectFromSwitcher(page) {
   return page.evaluate(() => (location.hash.match(/project\/([^/]+)/) || [])[1]);
 }
 const storedNew = (page, gid) => page.evaluate((g) => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const r = Object.values(m).find((x) => (x.groupId || x.id) === g);
   return r ? r.site : null;
 }, gid);
@@ -277,7 +277,7 @@ test("NEW-1 — the Schedule tab is handed the project's LIVE name and re-sent i
   await expect.poll(lastNames, { timeout: 30_000 }).toBe("Papadopoulos");
   // a rename made elsewhere (the local store + the app's one "list moved" signal) reaches the open tab
   await page.evaluate(() => {
-    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
     m.p1.site = "Renamed Again"; m.p1.siteRenamedAt = Date.now() + 1000;
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(m));
     window.dispatchEvent(new StorageEvent("storage", { key: "planarfit:sites:v1" }));

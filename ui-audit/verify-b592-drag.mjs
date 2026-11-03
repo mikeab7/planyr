@@ -51,7 +51,7 @@ const find = () => page.evaluate(() => {
   return { fp, dl };
 });
 const offsetOf = () => page.evaluate(() => {
-  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1"))["b592-drag"]; return s.els.find((e) => e.id === "b1").dimOffset; } catch (e) { return null; }
+  try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))["b592-drag"]; return s.els.find((e) => e.id === "b1").dimOffset; } catch (e) { return null; }
 });
 
 const { fp, dl } = await find();

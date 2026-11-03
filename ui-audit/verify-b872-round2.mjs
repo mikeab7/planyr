@@ -62,7 +62,7 @@ await page.waitForTimeout(700);
 
 let fail = 0;
 const log = (ok, m) => { console.log((ok ? "✓ " : "✗ ") + m); if (!ok) fail++; };
-const readEls = async () => page.evaluate((id) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; }, DEMO_ID);
+const readEls = async () => page.evaluate((id) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; }, DEMO_ID);
 const bumpsOf = (els, id) => els.filter((x) => x.attachedTo === id && x.dogEar);
 const toastState = () => page.evaluate(() => {
   const cands = [...document.querySelectorAll("div")].filter((d) => (d.textContent || "").trim().length && getComputedStyle(d).position === "fixed" && getComputedStyle(d).borderRadius && parseInt(getComputedStyle(d).borderRadius) > 40);

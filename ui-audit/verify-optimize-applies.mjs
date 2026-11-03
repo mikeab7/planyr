@@ -77,7 +77,7 @@ const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) f
 
 const readTob = () => page.evaluate(() => {
   try {
-    const sites = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const sites = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = sites.s_opt; const p = (s.els || []).find((e) => e.id === "p1");
     return p && p.det ? (p.det.tobElev ?? null) : null;
   } catch (_) { return null; }

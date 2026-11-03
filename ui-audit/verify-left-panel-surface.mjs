@@ -23,7 +23,7 @@ const browser = await chromium.launch({ executablePath: EXEC });
 for (const theme of ["light", "dark"]) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.addInitScript(`(() => { try { window.__PLANYR_E2E = true; localStorage.setItem('planyr.theme', '${theme}');
-    if (!localStorage.getItem('planarfit:sites:v1')) { localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE.id]: rec }))}); localStorage.setItem('planarfit:currentSite:v1', '${SITE.id}'); } } catch (e) {} })();`);
+    if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) { localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE.id]: rec }))}); localStorage.setItem('planarfit:currentSite:v1', '${SITE.id}'); } } catch (e) {} })();`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-left-panel-surface");
   await page.route(/^https?:\/\/(?!localhost)/, (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"features":[]}' }));

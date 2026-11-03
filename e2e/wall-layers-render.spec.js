@@ -9,7 +9,7 @@ import { armPlannerHooks } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return site.els || [];
 });
@@ -139,7 +139,7 @@ test("a plan saved by the old code (rear buffer on top of the rear walk) heals o
   await expect.poll(async () => (await kidsOf(page, b.id)).length).toBe(2);
   // rewrite the stored plan the way the old code left it: the buffer flush against the wall, over the walk
   await page.evaluate((hostId) => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
     const key = Object.keys(map)[0];
     const els = map[key].els;
     const host = els.find((e) => e.id === hostId);

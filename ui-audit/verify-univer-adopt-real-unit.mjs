@@ -45,7 +45,7 @@ try {
     const site = { id: pid, groupId: pid, site: "ZZ adopt", name: "ZZ adopt", origin: null, county: "harris", parcels: [], els: [], markups: [], measures: [] };
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const key = `planyr:model:sheet:v1:local:${pid}`;
-    await ctx.addInitScript(([sid, rec, k, w]) => { window.__PLANYR_E2E = true; try { if (!localStorage.getItem("planarfit:sites:v1")) localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: rec })); if (w && !localStorage.getItem(k)) localStorage.setItem(k, JSON.stringify(w)); } catch (_) { /* */ } }, [pid, site, key, wb]);
+    await ctx.addInitScript(([sid, rec, k, w]) => { window.__PLANYR_E2E = true; try { if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")) localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: rec })); if (w && !(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)) localStorage.setItem(k, JSON.stringify(w)); } catch (_) { /* */ } }, [pid, site, key, wb]);
     const page = await ctx.newPage(); await page.goto("about:blank"); await assertMeasurable(page, "verify-univer-adopt-real-unit");
     await page.goto(`${BASE}/#/project/${pid}`, { waitUntil: "load" });
     const tab = page.locator('[data-testid="module-tab-model"]').first(); await tab.waitFor({ timeout: 60000 });
@@ -56,7 +56,7 @@ try {
     const cell = (r, c) => page.evaluate(([row, col]) => { try { return window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(row, col).getValue(); } catch (_) { return null; } }, [r, c]);
     const waitNum = (r, c, want) => page.waitForFunction(([row, col, w]) => { try { return Math.abs(Number(window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet().getRange(row, col).getValue()) - w) < 1e-6; } catch (_) { return false; } }, [r, c, want], { timeout: 20000, polling: 25 });
     const calc = () => page.evaluate(() => window.__planyrUniverRead.calc());
-    const stored = () => page.evaluate((k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; } }, key);
+    const stored = () => page.evaluate((k) => { try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)); } catch (_) { return null; } }, key);
     return { ctx, page, tab, key, waiting, open, cell, waitNum, calc, stored };
   }
 

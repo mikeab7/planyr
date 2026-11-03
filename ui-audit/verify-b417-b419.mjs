@@ -35,7 +35,7 @@ const seedScript = `(() => { try {
 
 const readEls = (page) => page.evaluate((id) => {
   try {
-    const sites = JSON.parse(localStorage.getItem('planarfit:sites:v1') || '{}');
+    const sites = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1') || '{}');
     const s = sites[id];
     return (s && s.els) ? s.els.map((e) => ({ id: e.id, cx: e.cx, cy: e.cy })) : [];
   } catch (e) { return []; }

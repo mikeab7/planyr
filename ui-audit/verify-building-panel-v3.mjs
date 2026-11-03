@@ -47,7 +47,7 @@ console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.bu
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 await page.addInitScript(() => { window.__PLANYR_E2E = true; });      // arms window.__plannerExportSvg (read-only) on the next load
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [CUR, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [CUR, UID]);
 const els = async () => (await model())?.els || [];
 const bldg = async () => (await els()).find((e) => e.id === "bz1");
 const kids = async () => (await els()).filter((e) => e.attachedTo === "bz1");
@@ -204,7 +204,7 @@ try {
       const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
       if (q.error || (q.data || []).length) all = false;
     }
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); ids.forEach((id) => delete m[id]); localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); ids.forEach((id) => delete m[id]); localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return all;
   }, [ALL_IDS, UID]).catch(() => false);
   ok("throwaway sites deleted and confirmed gone from the cloud", gone);

@@ -29,7 +29,7 @@ const mkSite = (id) => ({
 const store = { S1: mkSite("S1"), S3: mkSite("S3") };
 // SEED ONCE: addInitScript re-runs on every navigation, so guard on an existing store — otherwise a
 // reload would re-seed the pristine sites and clobber exactly the toggle we're trying to verify persists.
-const seed = `(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(store)}));localStorage.setItem('planarfit:currentSite:v1','S1');}}catch(e){}})();`;
+const seed = `(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(store)}));localStorage.setItem('planarfit:currentSite:v1','S1');}}catch(e){}})();`;
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
@@ -61,7 +61,7 @@ async function femaCheckbox() {
   return label.locator('input[type="checkbox"]').first();
 }
 const femaSavedOn = () => page.evaluate(() => {
-  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1")); return !!(s && s.S1 && s.S1.layerOverrides && s.S1.layerOverrides.fema === true); } catch (_) { return null; }
+  try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")); return !!(s && s.S1 && s.S1.layerOverrides && s.S1.layerOverrides.fema === true); } catch (_) { return null; }
 });
 
 // ---- 1) fresh site → FEMA off (defaults) ----

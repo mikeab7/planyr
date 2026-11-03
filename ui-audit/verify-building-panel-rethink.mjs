@@ -27,7 +27,7 @@ const { browser, context, page } = s;
 console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [SITE_ID, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [SITE_ID, UID]);
 const bldg = async () => ((await model())?.els || []).find((e) => e.id === "bz1");
 const kids = async () => ((await model())?.els || []).filter((e) => e.attachedTo === "bz1");
 const wall = (side) => page.locator(`[data-testid="loading-wall-picker"] [data-wall="${side}"]`);
@@ -93,7 +93,7 @@ try {
     const attrs = await page.evaluate(() => { const r = document.querySelector('[data-el-id="bz1"] rect'); return { w: r.getAttribute("stroke-width"), o: r.getAttribute("stroke-opacity") }; });
     ok(`[${scheme}] outline width 4 / opacity 0.5 drawn on the canvas`, attrs.w === "4" && attrs.o === "0.5", JSON.stringify(attrs));
     // reset for the next theme pass
-    await page.evaluate(([id, uid]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); if (m[id]) { m[id].els = m[id].els.filter((e) => e.id === "bz1").map((e) => { const { strokeWidth, strokeOpacity, ...r } = e; return { ...r, rot: 0, dock: "cross", dockAxis: "x" }; }); localStorage.setItem(k, JSON.stringify(m)); } }, [SITE_ID, UID]);
+    await page.evaluate(([id, uid]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); if (m[id]) { m[id].els = m[id].els.filter((e) => e.id === "bz1").map((e) => { const { strokeWidth, strokeOpacity, ...r } = e; return { ...r, rot: 0, dock: "cross", dockAxis: "x" }; }); localStorage.setItem(k, JSON.stringify(m)); } }, [SITE_ID, UID]);
   }
   ok("no page errors", errors.length === 0, errors.join(" | "));
 } catch (e) {
@@ -105,7 +105,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && (q.data || []).length === 0;
   }, [SITE_ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

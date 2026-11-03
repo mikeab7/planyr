@@ -80,12 +80,12 @@ test.describe("instant cross-tab sync (same browser)", () => {
     await drawBuilding(a, await canvas(a).boundingBox(), { expect: 1 });
     await expect.poll(() => featureCount(b), LIVE).toBe(1);
     const readSetback = (page) => page.evaluate(() => {
-      const r = JSON.parse(localStorage.getItem("planarfit:sites:v1")).p1;
+      const r = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")).p1;
       return r.settings ? r.settings.setback : undefined;
     });
     // A writes through the SAME storage funnel its own saves use (the transport B listens on).
     await a.evaluate(() => {
-      const m = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+      const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
       m.p1 = { ...m.p1, settings: { ...(m.p1.settings || {}), setback: 37 }, updatedAt: Date.now() + 5 };
       localStorage.setItem("planarfit:sites:v1", JSON.stringify(m));
     });

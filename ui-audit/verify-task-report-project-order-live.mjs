@@ -213,7 +213,7 @@ finally {
         const p = { ...((r.data && r.data.prefs) || {}) };
         if (orig === null || orig === undefined) delete p.dashboardProjectOrder; else p.dashboardProjectOrder = orig;
         await sb.from("profiles").upsert({ id: u.user.id, prefs: p, updated_at: new Date().toISOString() }, { onConflict: "id" });
-        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); idList.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); idList.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const q = await sb.from("sites").select("id").in("id", idList);
         const live = await sb.from("schedules").select("id").in("linked_site_id", idList).is("deleted_at", null);

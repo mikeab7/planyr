@@ -45,7 +45,7 @@ async function startBlank(page) {
  * click must not touch. */
 function buildings(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.els || []).filter((e) => e.type === "building")
       .map((e) => ({ id: e.id, cx: e.cx, cy: e.cy, w: e.w, h: e.h, key: JSON.stringify([e.cx, e.cy, e.w, e.h, e.rot || 0]) }));

@@ -87,7 +87,7 @@ async function openPlan(page, rec) {
     }, rec);
     check(!err, `throwaway plan ${rec.name} written to the test account${err ? " — " + err : ""}`);
   } else {
-    await page.evaluate((r) => { const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
+    await page.evaluate((r) => { const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
   }
   await page.goto(`${BASE}/#/project/${rec.id}/site`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
@@ -136,10 +136,10 @@ try {
     const ids = [recs.full.id, recs.blank.id];
     const gone = await page.evaluate(async (ids) => {
       try {
-        const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); ids.forEach((id) => { delete all[id]; }); localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+        const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); ids.forEach((id) => { delete all[id]; }); localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
         for (const id of ids) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); }
         const q = await window.pfSupabase.from("sites").select("id").in("id", ids);
-        const left = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+        const left = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
         return { cloud: !(q.data && q.data.length), local: !ids.some((id) => left[id]) };
       } catch (e) { return { error: String(e) }; }
     }, ids).catch((e) => ({ error: String(e) }));

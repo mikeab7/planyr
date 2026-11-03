@@ -140,7 +140,7 @@ export function authSessionSeed({ ref, url, ...opts } = {}) {
  */
 export function cloudCacheSeed() {
   return `(() => { try {
-    var raw = localStorage.getItem('planarfit:sites:v1');
+    var raw = (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1');
     if (raw) localStorage.setItem('planarfit:sites:cloud:' + ${JSON.stringify(AUTH_FIXTURE.uid)}, raw);
   } catch (e) {} })();`;
 }

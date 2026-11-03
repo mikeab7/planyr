@@ -61,7 +61,7 @@ if (!SB) { console.error("perf-plan-open: the build carries no Supabase host (bu
 
 /* ---- in-page instrument (a FUNCTION, injected before any app code) ---- */
 const INSTRUMENT = () => {
-  window.__PLANYR_LEGACY_MIRROR = "idle";   // measure the PRODUCTION policy: the legacy whole-library mirror refresh is off the save path (the automation default is "sync")
+
   window.__gaps = []; window.__loaf = []; window.__hb = { last: performance.now(), n: 0 };
   const ch = new MessageChannel();
   ch.port1.onmessage = () => { const t = performance.now(), g = t - window.__hb.last; window.__hb.n++; if (g > 30) window.__gaps.push([Math.round(window.__hb.last), Math.round(t), Math.round(g)]); window.__hb.last = t; ch.port2.postMessage(0); };
@@ -258,7 +258,7 @@ const SCEN = {
     await page.reload({ waitUntil: "load" });
     await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
     const sc = await score(page, 0, "reload onto a plan (app opened fresh)", "bolt-on"); await traceStop(tr); sc.profile = await profStop(pc);
-    if (process.env.DUMP_STORAGE) process.stderr.write(JSON.stringify(await page.evaluate(() => Object.keys(localStorage).map((k) => [k, localStorage.getItem(k).length]).sort((a, b) => b[1] - a[1]).slice(0, 25))) + "\n");
+    if (process.env.DUMP_STORAGE) process.stderr.write(JSON.stringify(await page.evaluate(() => Object.keys(localStorage).map((k) => [k, (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k).length]).sort((a, b) => b[1] - a[1]).slice(0, 25))) + "\n");
     sc.selfTestMs = await selfTest(page); await ctx.close(); return [sc];
   },
   /* B2233521 round 5 — THE PRICE OF BUILDING THE MAP WHEN IT IS FIRST SHOWN: the app opened fresh on a plan (reload), then the Map crumb is clicked. Before round 5 the map was built
@@ -343,7 +343,7 @@ const SCEN = {
     t0 = await h.evaluate((el) => { window.__rb = window.__roadNetStats ? window.__roadNetStats() : null; const t = performance.now(); el.click(); return t; });
     await chip(page, "Grand Port").waitFor({ timeout: 60000 });
     sc = await score(page, t0, "Richfield → Grand Port (back)", "bolt-on"); sc.profile = await profStop(pc); out.push(sc);
-    if (process.env.CAPTURE_STORAGE) writeFileSync(process.env.CAPTURE_STORAGE, JSON.stringify(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])))));
+    if (process.env.CAPTURE_STORAGE) writeFileSync(process.env.CAPTURE_STORAGE, JSON.stringify(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)])))));
     out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;
   },
 };

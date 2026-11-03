@@ -35,7 +35,7 @@ const { browser, page } = s;
 console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [ID, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [ID, UID]);
 const kids = async () => ((await model())?.els || []).filter((e) => e.attachedTo === "dlb1" && !e.dogEar);
 const T = (id) => page.getByTestId(id);
 const stepper = (id, which) => T(id).locator("xpath=ancestor::*[@data-numbox][1]").getByRole("button", { name: which });
@@ -154,7 +154,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && !(q.data || []).length;
   }, [ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

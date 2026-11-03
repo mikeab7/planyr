@@ -169,7 +169,7 @@ test.describe("reference overlays: handle layer + z-order (NEW-1 / NEW-2)", () =
     // overwrite the saved plan with the fixture, hiding the very thing under test.)
     await page.waitForTimeout(1500); // autosave settle
     const saved = await page.evaluate((id) => {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const ov = (all[id]?.sheetOverlays || []).find((o) => o.id === "ov1");
       return ov ? { aboveParcel: ov.aboveParcel } : null;
     }, SITE.id);

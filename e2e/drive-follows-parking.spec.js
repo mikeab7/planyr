@@ -36,7 +36,7 @@ async function at(page, fx, fy) {
 }
 const click = async (page, fx, fy) => { const p = await at(page, fx, fy); await page.mouse.click(p.x, p.y); };
 const els = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return (map[Object.keys(map)[0]] || {}).els || [];
 });
 const settle = (page) => page.waitForTimeout(900);          // let the device mirror write settle

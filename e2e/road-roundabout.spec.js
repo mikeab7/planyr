@@ -33,7 +33,7 @@ async function pickRoadPreset(page) {
   await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 }
 const storedRoad = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).find((e) => e.type === "road" && Array.isArray(e.pts) && e.pts.length >= 2) || null;
 });

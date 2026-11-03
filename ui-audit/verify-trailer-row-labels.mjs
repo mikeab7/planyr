@@ -34,7 +34,7 @@ const { browser, page } = s;
 console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [SITE_ID, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [SITE_ID, UID]);
 const row = async (id) => ((await model())?.els || []).find((e) => e.id === id);
 const dbRow = (id) => page.evaluate(async ([sid, eid]) => { const q = await window.pfSupabase.from("site_elements").select("id,data,deleted_at").eq("site_id", sid).eq("id", eid); return q.error ? { error: String(q.error.message) } : (q.data || [])[0] || null; }, [SITE_ID, id]);
 const labelText = (id) => page.locator(`[data-label-for="${id}"]`).allTextContents().then((a) => a.join("|"));
@@ -121,7 +121,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && (q.data || []).length === 0;
   }, [SITE_ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

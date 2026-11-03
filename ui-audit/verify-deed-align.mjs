@@ -78,7 +78,7 @@ const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log
 
 const persistedMarkups = (page) => page.evaluate(() => {
   try {
-    const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").s_deed;
+    const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").s_deed;
     return (s && s.markups) || [];
   } catch (e) { return []; }
 });

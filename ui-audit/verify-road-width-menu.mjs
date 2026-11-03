@@ -105,7 +105,7 @@ await page.waitForTimeout(500);
 await page.screenshot({ path: OUT + "road-width-custom-drawn.png" });
 
 const roads = await page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road").map((e) => ({ pts: (e.pts || []).length, w: e.travelW, curb: e.curb, poly: !!e.points }));
 });
@@ -116,7 +116,7 @@ check(roads[0] && Math.abs(roads[0].w - 28) < 0.001, "NEW-3 the typed custom wid
 // The two inner curb stripes are the centerline offset by ±travelW/2, so the clear pavement between
 // the curb FACES = travelW exactly; the curb rides OUTSIDE it (outer ring = travelW + 2·curb).
 const bboxCross = await page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   const r = (s.els || []).find((e) => e.type === "road");
   return r ? { h: r.h, w: r.w, travelW: r.travelW, curb: r.curb } : null;
@@ -142,7 +142,7 @@ await page.screenshot({ path: OUT + "road-properties.png" });
 // on it, and prove both still read back, render, and select. Removing the menu entry must orphan
 // neither. (Seeded through an init script on a fresh page: writing localStorage under the live page
 // and reloading loses the seed — the app flushes its in-memory plan back over it on unload.)
-const siteJson = await page.evaluate(() => localStorage.getItem("planarfit:sites:v1"));
+const siteJson = await page.evaluate(() => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
 const sites = JSON.parse(siteJson || "{}");
 const siteKey = Object.keys(sites)[0];
 const seedSite = sites[siteKey];
@@ -163,7 +163,7 @@ await page2.waitForTimeout(1200);
 await page2.screenshot({ path: OUT + "legacy-free-draw-roads.png" });
 
 const legacy = await page2.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   const by = Object.fromEntries((s.els || []).map((e) => [e.id, e]));
   return {

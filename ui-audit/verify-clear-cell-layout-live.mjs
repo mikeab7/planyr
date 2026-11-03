@@ -140,7 +140,7 @@ try {
       await window.pfSupabase.from("sites").delete().eq("id", id);
       const q1 = await window.pfSupabase.from("sites").select("id").eq("id", id);
       const q2 = await window.pfSupabase.from("model_sheets").select("id").eq("id", id);
-      try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) { /* best effort */ }
+      try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) { /* best effort */ }
       return !q1.error && !q2.error && (q1.data || []).length === 0 && (q2.data || []).length === 0;
     }, [SITE_ID, UID]).catch(() => false);
     ok("throwaway project (site row + model_sheets row) deleted and confirmed gone from the cloud", gone);

@@ -54,6 +54,6 @@ test("canvas clicks pick locked parcels in merge-pick mode, and the merge comple
   await expect(page.getByText(/2 parcels picked/)).toBeVisible();
 
   await page.getByRole("button", { name: /Merge parcels ⏎/i }).click();
-  await expect.poll(async () => (await page.evaluate((sid) => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[sid]?.parcels?.length, ID))).toBe(1);
+  await expect.poll(async () => (await page.evaluate((sid) => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")[sid]?.parcels?.length, ID))).toBe(1);
   expect(errors, errors.join("\n")).toEqual([]);
 });

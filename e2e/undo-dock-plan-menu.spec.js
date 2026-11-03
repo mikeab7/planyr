@@ -35,7 +35,7 @@ async function drawWideBuilding(page) {
 }
 
 const buildings = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).filter((e) => e.type === "building" && !e.dogEar);
 });
@@ -137,7 +137,7 @@ test.describe("B385041 — a resize never moves a building's dock walls", () => 
   }, id);
 
   const stored = (page, id) => page.evaluate((elId) => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const el = (site.els || []).find((e) => e.id === elId);
     return el ? { w: el.w, h: el.h, dockAxis: el.dockAxis, dockSide: el.dockSide } : null;
