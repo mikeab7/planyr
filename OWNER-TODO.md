@@ -11,6 +11,9 @@ _Last updated: 2026-11-03._
 - [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
 
 
+## 🖱 A ten-second look: does the line around a selected Schedule row now look like one continuous line? (B2584496 / V2033552)
+- [ ] **Open Schedule > Grid on a plan, click a cell in a Needs Attn. row (the Dur cell, like before), and look at the thin line above and below that row — does it read as one continuous line, the same across the ID and Task columns as across the dates?** It was built and checked live on a test plan across browser zoom levels, but only on my side's rendering, not your screen. If you still see the Task column's line looking different, a screenshot at your current browser zoom is all I need.
+
 ## 📱 Two-minute check on your iPhone: does a pasted-table picture show straight away? (B2515969 / V1960400)
 - [ ] **In Notes on your iPhone, paste a few rows from a spreadsheet, tap the little "(Ctrl) ▾" tab, then the last picture icon.** The table should turn into a picture of itself within about a second. In the phone test I can run here, the picture sometimes shows only as a small "Pasted table" label until you tap the page once — that test uses a stand-in for Safari, so I can't tell whether your phone does it. If yours shows the label, tell me; if it just shows the picture, say so and I'll close it. (The tab itself is now thumb-sized — that was fixed.)
 
