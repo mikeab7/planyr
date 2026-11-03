@@ -150,11 +150,11 @@ function Legend({ items }) {
   if (!items || !items.length) return null;
   return (
     <div data-part="legend" style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
-      {items.map((lg) => (lg.heading ? (
+      {items.map((lg, i) => (lg.heading ? (
         /* NEW-1 (Sugar Land): a legend can be HEADED by its jurisdiction ("Sugar Land") instead of repeating it on every row; `row` puts one entry per line. */
-        <span key={`h:${lg.label}`} data-part="legend-heading" style={{ flexBasis: "100%", color: MUTED, fontWeight: 700 }}>{lg.label}</span>
+        <span key={`h:${i}:${lg.label}`} data-part="legend-heading" style={{ flexBasis: "100%", color: MUTED, fontWeight: 700 }}>{lg.label}</span>
       ) : (
-        <span key={lg.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: INK, ...(lg.row ? { flexBasis: "100%" } : {}) }}>
+        <span key={`${i}:${lg.label}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: INK, ...(lg.row ? { flexBasis: "100%" } : {}) }}>
           <span aria-hidden="true" style={{ width: 16, height: 0, flex: "none", borderTop: `${lg.weight ? Math.max(1.5, lg.weight / 1.4) : 3}px ${lg.dash ? "dashed" : "solid"} ${lg.color}` }} />
           {lg.label}
         </span>

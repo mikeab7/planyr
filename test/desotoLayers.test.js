@@ -220,3 +220,44 @@ describe("identifyOverlaysAt — several layers answering with the same card col
     expect(identifyOverlaysAt(refs, overlays, { lat: 34.96, lng: -89.83 })).toHaveLength(2);
   });
 });
+
+describe("NEW-2 / NEW-1 (B2507064 ×2, B2507063 ×2, 2026-11-03) — the Zoning row fits the draw budget and publishes a headed legend", () => {
+  const z = DESOTO_LAYERS.ms_desoto_zoning;
+  it("asks the server for a simplified copy and follows every page — the measured table (2,551 polygons, 658 k vertices in the first 2,000) otherwise busts the 300 k layer budget at wide zoom", () => {
+    expect(z.simplifyFactor).toBeGreaterThan(0);
+    expect(z.fetchAll).toBe(true);
+    expect(z.vertexBudget).toBeUndefined();   // the default budget stands — the fix is in the request, not a raised ceiling
+  });
+  it("prints the code on the polygons from the same zoom as Sugar Land's zoning (14)", () => {
+    expect(z.lineLabel.minZoom).toBe(14);
+    expect(z.lineLabel.declutter).toBe(true);   // dense small polygons: codes never pile up (screen and PDF share the rule)
+  });
+  it("its viewLegend is HEADED by government, one code per row, never a suffix — and Southaven's rows carry Southaven's names", async () => {
+    const { _setMunicipalities } = await import("../src/workspaces/site-planner/lib/desotoJurisdiction.js");
+    const box = (w, s, e, n) => ({ type: "Polygon", coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] });
+    _setMunicipalities({ type: "FeatureCollection", features: [
+      { type: "Feature", properties: { NAME: "OLIVE BRANCH" }, geometry: box(-89.9, 34.9, -89.7, 35.0) },
+      { type: "Feature", properties: { NAME: "SOUTHAVEN" }, geometry: box(-90.2, 34.9, -90.0, 35.0) },
+    ] });
+    try {
+      const tri = (lng, lat, ZONE) => ({ type: "Feature", properties: { ZONE }, geometry: { type: "Polygon", coordinates: [[[lng, lat], [lng + 0.001, lat], [lng + 0.001, lat + 0.001], [lng, lat]]] } });
+      const out = z.viewLegend([tri(-89.83, 34.96, "R-20"), tri(-89.83, 34.95, "C-1"), tri(-90.1, 34.95, "R-20"), tri(-90.1, 34.96, "C-1"), tri(-89.69, 34.8, "R-20")]);
+      expect(out.map((e) => (e.heading ? `# ${e.label}` : e.label))).toEqual([
+        "# Olive Branch", "C-1 · Neighborhood Commercial", "R-20",
+        "# Southaven", "C-1 · Neighborhood Commercial", "R-20 · Single-Family Residential",
+        "# Unincorporated DeSoto County", "R-20 · Residential Single-Family (Low Density)",
+      ]);
+      expect(out.some((e) => /\((Olive Branch|Southaven|Unincorporated)/.test(e.label))).toBe(false);
+    } finally { _setMunicipalities(null); }
+  });
+});
+
+describe("B2589346 — the printed sheet declutters zoning codes exactly like the screen (PDF-PARITY)", () => {
+  it("exportSheet's esriFeature branch runs `declutterBoxes` for a row whose lineLabel declutters, ranked by polygon area", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
+    expect(src).toMatch(/import \{[^}]*declutterBoxes[^}]*\} from "\.\/boundaryLabels\.js"/);
+    expect(src).toMatch(/cfg\.lineLabel\.declutter && labels\.length > 1/);
+    expect(src).toMatch(/rank = bb \? Math\.abs\(/);
+  });
+});

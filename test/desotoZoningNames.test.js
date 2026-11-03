@@ -34,7 +34,7 @@ describe("zoneName / zoneWithName", () => {
     expect(zoneWithName("M-3", "Olive Branch", T)).toBe("M-3");
     expect(zoneWithName("M-1", "Southaven", T)).toBe("M-1");
     expect(zoneWithName("M-1", null, T)).toBe("M-1");
-    expect(zoneWithName("M-1", "Southaven")).toBe("M-1"); // a government whose ordinance is not sourced — nothing is guessed
+    expect(zoneWithName("M-1", "Hernando")).toBe("M-1"); // a government whose ordinance is not sourced — nothing is guessed
   });
 });
 
@@ -74,8 +74,37 @@ describe("the ordinance lists, exactly as the dispatching chat read them (2026-1
     expect(zoneWithName("HISTORIC DISTRICT OVERLAY", "Olive Branch")).toBe("Historic District Overlay");
     expect(displayCode("A-R")).toBe("A-R");
   });
-  it("the other governments are not sourced: their codes are never named", () => {
-    for (const j of ["Hernando", "Southaven", "Horn Lake", "Walls"]) expect(Object.keys(ZONING_NAMES[j])).toEqual([]);
+  it("Hernando, Horn Lake and Walls are not sourced (their ordinances could not be read): their codes are never named", () => {
+    for (const j of ["Hernando", "Horn Lake", "Walls"]) expect(Object.keys(ZONING_NAMES[j])).toEqual([]);
+  });
+  it("Southaven (B2589344): the names from Title XIII Ch. 12, exactly as read 2026-11-03 — and nothing borrowed from another government", () => {
+    const S = (c) => zoneName(c, "Southaven");
+    expect(S("A")).toBe("Agricultural");
+    expect(S("A/ER")).toBe("Agricultural/Estate Residential");
+    for (const c of ["R-30", "R-20", "R-15", "R-12", "R-10", "R-9", "R-8", "R-6"]) expect(S(c), c).toBe("Single-Family Residential");
+    expect(S("RM-8")).toBe("Multi-Family Residential");
+    expect(S("O")).toBe("Office");
+    expect(S("R-O")).toBe("Residential Office");
+    expect(S("RO")).toBe("Residential Office");     // the chart writes both; the DATA writes RO
+    expect(S("C-1")).toBe("Neighborhood Commercial");
+    expect(S("C-3")).toBe("General Commercial");
+    expect(S("C-4")).toBe("Planned Commercial");
+    expect(S("PBP")).toBe("Planned Business Park");
+    expect(S("M-1")).toBe("Light Industrial");
+    expect(S("M-2")).toBe("Heavy Industrial");
+    expect(S("PUD")).toBe("Planned Unit Development");
+    expect(Object.keys(ZONING_NAMES.Southaven).sort()).toEqual(["A", "A/ER", "C-1", "C-3", "C-4", "M-1", "M-2", "O", "PBP", "PUD", "R-10", "R-12", "R-15", "R-20", "R-30", "R-6", "R-8", "R-9", "R-O", "RM-8", "RO"].sort());
+  });
+  it("Southaven's traps: C-2 has no Ch. 12 definition and stays bare; RO is 'Residential Office' only in Southaven (the county's RO is 'Residential Overlay'); codes the chart does not list stay bare", () => {
+    expect(zoneName("C-2", "Southaven")).toBeNull();
+    expect(zoneName("RO", "Southaven")).toBe("Residential Office");
+    expect(zoneName("RO", "Unincorporated DeSoto County")).toBe("Residential Overlay");
+    for (const c of ["ER", "PO", "RM-6", "CM OVERLAY", "R-6 OVERLAY", "R-15 OVERLAY"]) expect(zoneName(c, "Southaven"), c).toBeNull();
+    // Olive Branch's R-3 / C-5 / M-3 and the county's C-R / PO are not Southaven's — nothing is borrowed across governments
+    for (const c of ["R-1", "R-2", "R-3", "R-4", "C-5", "M-3", "C-R", "F", "AHR"]) expect(zoneName(c, "Southaven"), c).toBeNull();
+  });
+  it("Southaven's ordinance is cited behind the (i)", () => {
+    expect(ZONING_CITATIONS.Southaven).toMatch(/Title XIII.*Ch\. 12/);
   });
   it("every sourced jurisdiction has the ordinance it cites for the (i)", () => {
     for (const j of ["Olive Branch", "Unincorporated DeSoto County"]) expect(ZONING_CITATIONS[j]).toMatch(/ordinance/i);
@@ -84,17 +113,39 @@ describe("the ordinance lists, exactly as the dispatching chat read them (2026-1
   });
 });
 
-describe("zoningLegend", () => {
-  it("lists each code once per jurisdiction, grouped and sorted, with sourced names", () => {
+describe("zoningLegend — HEADED by the government, one code per row, never a suffix (owner constraint #50)", () => {
+  const rowsOf = (out) => out.filter((e) => !e.heading).map((e) => e.label);
+  it("a heading per government in view (cities first, the county last), then its codes — one per row, sorted", () => {
     const items = [
       { code: "M-1", jurisdiction: "Olive Branch", color: "#7c3aed" }, { code: "M-1", jurisdiction: "Olive Branch", color: "#7c3aed" },
       { code: "C-2", jurisdiction: "Olive Branch", color: "#ea580c" }, { code: "C-2", jurisdiction: "Unincorporated DeSoto County", color: "#ea580c" },
       { code: "R-10", jurisdiction: "Olive Branch", color: "#ca8a04" }, { code: "R-2", jurisdiction: "Olive Branch", color: "#ca8a04" },
     ];
     const out = zoningLegend(items, T);
-    expect(out.map((e) => e.label)).toEqual(["C-2 · Highway Commercial (Olive Branch)", "M-1 · Light Industrial", "R-2", "R-10", "C-2 · General Commercial (Unincorporated DeSoto County)"]);
+    expect(out.map((e) => (e.heading ? `# ${e.label}` : e.label))).toEqual([
+      "# Olive Branch", "C-2 · Highway Commercial", "M-1 · Light Industrial", "R-2", "R-10",
+      "# Unincorporated DeSoto County", "C-2 · General Commercial",
+    ]);
+    expect(out.filter((e) => !e.heading).every((e) => e.row === true && !!e.color)).toBe(true);
   });
-  it("a code from a jurisdiction not known yet is listed by its code alone; an empty / junk input gives an empty legend", () => {
+  it("NO row carries the government as a suffix, even when the same code is in several places", () => {
+    const items = ["Olive Branch", "Southaven", "Horn Lake", "Hernando", "Walls", "Unincorporated DeSoto County"].map((j) => ({ code: "R-20", jurisdiction: j, color: "#ca8a04" }));
+    const out = zoningLegend(items);
+    expect(out.filter((e) => e.heading).map((e) => e.label)).toEqual(["Olive Branch", "Southaven", "Horn Lake", "Hernando", "Walls", "Unincorporated DeSoto County"]);
+    for (const l of rowsOf(out)) expect(l, l).not.toMatch(/\((Olive Branch|Southaven|Horn Lake|Hernando|Walls|Unincorporated)/);
+    expect(rowsOf(out)).toHaveLength(6);
+  });
+  it("the Southaven rows read their own names, the county's the county's, Olive Branch's Olive Branch's — for the same code", () => {
+    const items = [
+      { code: "R-20", jurisdiction: "Southaven", color: "#1" }, { code: "R-20", jurisdiction: "Unincorporated DeSoto County", color: "#1" }, { code: "R-20", jurisdiction: "Olive Branch", color: "#1" },
+      { code: "C-2", jurisdiction: "Southaven", color: "#2" },
+    ];
+    const out = zoningLegend(items);
+    expect(out.map((e) => (e.heading ? `# ${e.label}` : e.label))).toEqual([
+      "# Olive Branch", "R-20", "# Southaven", "C-2", "R-20 · Single-Family Residential", "# Unincorporated DeSoto County", "R-20 · Residential Single-Family (Low Density)",
+    ]);
+  });
+  it("a code from a government not known yet is listed by its code alone, with no heading; an empty / junk input gives an empty legend", () => {
     expect(zoningLegend([{ code: "M-1", jurisdiction: null, color: "#000" }], T).map((e) => e.label)).toEqual(["M-1"]);
     expect(zoningLegend([], T)).toEqual([]);
     expect(zoningLegend([{ code: "", jurisdiction: "Olive Branch" }, null], T)).toEqual([]);
