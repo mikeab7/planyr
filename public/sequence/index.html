@@ -8761,7 +8761,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
 // edit flag.
 const VIEW_TAB_KEYS  = ["aPid", "view", "section"];
 const VIEW_PREF_KEYS = ["gridZoom", "gridColWidths", "masterSort", "masterCols", "masterColWidths",
-                         "masterGroupBy", "masterLevelFilter", "masterHealthFilter", "healthColStyle"];
+                         "masterGroupBy", "masterLevelFilter", "masterHealthFilter", "masterProjectFilter", "healthColStyle"];
 const VIEW_TRANSIENT_KEYS = ["editProjId"];
 const VIEW_STATE_KEYS = new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
 const VIEW_TAB_STORAGE_KEY   = "planar:tabView:v1";
@@ -17992,37 +17992,70 @@ const DEFAULT_MASTER_WIDTHS = {
   predecessors:180, successors:180, notes:80,
 };
 
-// ── Task Report status filter (NEW-1) ─────────────────────────────────────────────────────────
-// The Task Report used to carry ONE chip, "In Progress + Needs Attn." (`masterHealthFilter: true`) that
-// toggled with "All Statuses" (`false`) — a lump the owner could only clear whole. It is now a real
-// two-option status filter: In Progress and Needs Attention are independently selectable.
-//   · stored value  — `masterHealthFilter` stays the one saved key. Legacy `true` (the old default, and what an
-//     account that never touched the chip holds) = BOTH on; legacy `false` = NEITHER = every status. A new
-//     value is an array of the selected keys. Anything unreadable falls back to the default (both on), never to
-//     a silent "nothing matches".
-//   · NONE selected means ALL statuses (the old "All Statuses" state) — so clearing never dead-ends, and
-//     Not Started / Complete / Paused / a custom status all stay reachable there (they were only ever reachable
-//     through that state; they are deliberately NOT filter options of their own).
-//   · ONE classification — a row passes on its DISPLAYED status (`_disp`: rolled for a parent, rule-computed for a
-//     leaf), the same value that paints the row's status pill and orders the Status sort. Never a second copy.
-const REPORT_STATUS_OPTIONS = [{ k: "yellow", label: "In Progress" }, { k: "red", label: "Needs Attention" }];
+// ── Task Report filter (NEW-1) ─────────────────────────────────────────────────────────────────
+// The Task Report's ONE Filter dropdown (Status + Project) beside Group by / Show / Columns. It amends the
+// Status segmented control (B2631584), which replaced the old "In Progress + Needs Attn." chip.
+//   · STATUS — a checkbox for every status (the five built-ins in this order, then any custom ones). The saved key is
+//     still `masterHealthFilter`: legacy `true` (the old chip's default) = In Progress + Needs Attention; legacy
+//     `false` = nothing checked; an array of keys is each saved status's checkbox. Anything unreadable falls back to the
+//     default (In Progress + Needs Attention), never to a silent "nothing matches". A key for a status that no longer
+//     exists (a deleted custom one) is dropped.
+//   · PROJECT — a checkbox per schedule in the report, saved in `masterProjectFilter` (an array of schedule ids; none
+//     checked by default). A stale id (a deleted schedule) is dropped.
+//   · NOTHING checked in a section = that section does not narrow anything (so "Clear all" shows every task). Both
+//     sections combine: a row must match Status AND Project.
+//   · ONE classification — a row passes on its DISPLAYED status (`_disp`: rolled for a parent, rule-computed for a leaf),
+//     the same value that paints the row's status pill and orders the Status sort. Never a second copy.
+const REPORT_STATUS_BASE = [{ k: "gray", label: "Not Started" }, { k: "yellow", label: "In Progress" }, { k: "red", label: "Needs Attention" },
+  { k: "paused", label: "Paused" }, { k: "green", label: "Complete" }];
 const REPORT_STATUS_DEFAULT = ["yellow", "red"];
-function reportStatusKeys(v) {
+function reportStatusOptions(customHealth) {
+  const custom = (Array.isArray(customHealth) ? customHealth : [])
+    .filter(c => c && typeof c === "object" && c.k != null && !REPORT_STATUS_BASE.some(o => o.k === c.k))
+    .map(c => ({ k: c.k, label: c.label != null && String(c.label).trim() ? String(c.label) : String(c.k) }));
+  return [...REPORT_STATUS_BASE, ...custom];
+}
+function reportStatusKeys(v, options) {
+  const opts = options || REPORT_STATUS_BASE;
   if (v === false) return [];
   if (!Array.isArray(v)) return REPORT_STATUS_DEFAULT.slice();
-  const ks = REPORT_STATUS_OPTIONS.map(o => o.k).filter(k => v.includes(k));   // canonical order, unknown keys dropped
-  return ks;
+  return opts.map(o => o.k).filter(k => v.includes(k));   // canonical order, unknown keys dropped
 }
-function reportStatusToggle(keys, k) {
-  const has = keys.includes(k);
-  return REPORT_STATUS_OPTIONS.map(o => o.k).filter(x => (x === k ? !has : keys.includes(x)));
+function reportStatusToggle(keys, k, options) {
+  const opts = options || REPORT_STATUS_BASE, has = keys.includes(k);
+  return opts.map(o => o.k).filter(x => (x === k ? !has : keys.includes(x)));
 }
 function reportStatusPasses(keys, disp) { return keys.length === 0 || keys.includes(disp); }
-function reportStatusPhrase(keys, nameOf) {
-  const names = REPORT_STATUS_OPTIONS.filter(o => keys.includes(o.k)).map(o => nameOf(o));
-  return names.length === 0 ? "" : names.join(" or ");
+function reportProjectKeys(v, validIds) {
+  if (!Array.isArray(v)) return [];
+  const want = new Set(v.map(String));
+  return (validIds || []).map(String).filter(id => want.has(id));
 }
-// ── end Task Report status filter ──────────────────────────────────────────────────────────────
+function reportProjectToggle(keys, id, validIds) {
+  const has = keys.includes(String(id));
+  return (validIds || []).map(String).filter(x => (x === String(id) ? !has : keys.includes(x)));
+}
+function reportProjectPasses(keys, projId) { return keys.length === 0 || keys.includes(String(projId)); }
+// The number on the Filter button's badge: how many filter TYPES are in use (Status plus Project = 2).
+function reportFilterCount(statusKeys, projectKeys) { return (statusKeys.length > 0 ? 1 : 0) + (projectKeys.length > 0 ? 1 : 0); }
+// The count beside each checkbox: the rows you would see with only that box ticked in its own section, given what the OTHER
+// section currently narrows to — so a count always equals the rows that box would show.
+function reportFacetCounts(rows, statusKeys, projectKeys) {
+  const status = {}, project = {};
+  rows.forEach(r => {
+    if (reportProjectPasses(projectKeys, r.projId)) status[r._disp] = (status[r._disp] || 0) + 1;
+    if (reportStatusPasses(statusKeys, r._disp)) project[String(r.projId)] = (project[String(r.projId)] || 0) + 1;
+  });
+  return { status, project };
+}
+function reportFilterPhrase(statusNames, projectNames) {
+  const some = (names) => names.length > 2 ? names.slice(0, 2).join(", ") + ", +" + (names.length - 2) + " more" : names.join(" or ");
+  const parts = [];
+  if (statusNames.length) parts.push(some(statusNames));
+  if (projectNames.length) parts.push(some(projectNames));
+  return parts.join(" \u00b7 ");
+}
+// ── end Task Report filter ─────────────────────────────────────────────────────────────────────
 
 // B1873360 — MasterView's "Group by project" sections, keyed and ordered so two schedules that
 // happen to share a bare name (the owner's live account has two schedules both named "Master
@@ -18153,6 +18186,54 @@ function GroupOrderMenu({label, isFirst, isLast, onPick}) {
   );
 }
 
+// The Task Report toolbar's dropdowns (NEW-1). MODULE SCOPE on purpose (MODULE-SCOPE-COMPONENTS): defined inside MasterView
+// it would remount every render and drop the open panel on each tick of a checkbox. Four buttons share ONE open slot
+// (`openMenu`), so opening one closes any other. The panel is `position:fixed`, placed from the button's own box and clamped
+// inside the iframe — the table card and the header would clip an absolutely-positioned one — and scrolls inside when long
+// (many projects), with an optional footer that stays pinned.
+const REPORT_MENU_SECTION = {fontSize:9,fontWeight:700,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase",padding:"6px 10px 4px"};
+const REPORT_MENU_ROW = {display:"flex",alignItems:"center",gap:8,padding:"5px 10px",cursor:"pointer",borderRadius:4,transition:"background .1s"};
+const REPORT_MENU_COUNT = {fontSize:11,color:"var(--mut)",fontVariantNumeric:"tabular-nums",marginLeft:"auto",paddingLeft:10,flexShrink:0};
+function ReportMenu({id, openMenu, setOpenMenu, label, active, minWidth, footer, children}) {
+  const open = openMenu === id;
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+  const [pos, setPos] = useState(null);
+  React.useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const place = () => {
+      const b = btnRef.current, p = panelRef.current;
+      if (!b || !p) return;
+      const r = b.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight, pad = 8;
+      const w = p.offsetWidth;
+      const left = Math.max(pad, Math.min(r.left, vw - pad - w));
+      const top = r.bottom + 4;
+      setPos({left, top, maxH: Math.max(140, vh - top - pad)});
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
+  return (
+    <div data-tr-menu={id} style={{position:"relative"}}>
+      <button ref={btnRef} type="button" className={"btn"+(open||active?" act":"")} data-tr-btn={id} data-active={active?"1":undefined} aria-haspopup="true" aria-expanded={open}
+        onClick={()=>setOpenMenu(open ? null : id)}
+        style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:11}}>
+        {label} <span style={{fontSize:8,opacity:.7}}>{"\u25be"}</span>
+      </button>
+      {open && (
+        <div ref={panelRef} data-tr-panel={id}
+          style={{position:"fixed",left:pos?pos.left:0,top:pos?pos.top:0,visibility:pos?"visible":"hidden",zIndex:99,
+            display:"flex",flexDirection:"column",maxHeight:pos?pos.maxH:"60vh",minWidth,maxWidth:"calc(100vw - 16px)",boxSizing:"border-box",
+            background:"#fff",border:"1px solid var(--bd2)",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,.12)"}}>
+          <div data-tr-panel-body style={{overflowY:"auto",minHeight:0,padding:"8px 4px"}}>{children}</div>
+          {footer && <div style={{borderTop:"1px solid var(--bd)",padding:"6px 14px",flexShrink:0}}>{footer}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const [localEdit, setLocalEdit] = useState(null);
   const [selCell, setSelCell] = useState(null); // {ri, ci}
@@ -18166,8 +18247,18 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   // the table instead (measured live: MasterView's Owner AND Name columns both did this, unrelated
   // to which column — the timer, not the editor, was always the bug). Cancel it before opening.
   const openEdit = payload => { clearTimeout(cellFocusTimer.current); setLocalEdit(payload); };
-  const [colPickerOpen, setColPickerOpen] = useState(false);
-  const [lvlOpen, setLvlOpen] = useState(false);
+  // The toolbar's four dropdowns (filter | group | show | columns) share ONE open slot, so opening one closes any other.
+  const [openMenu, setOpenMenu] = useState(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    const down = e => { if (!(e.target && e.target.closest && e.target.closest("[data-tr-menu]"))) setOpenMenu(null); };   // outside click (a press on another button just switches menus)
+    const key = e => { if (e.key === "Escape") { e.stopPropagation(); setOpenMenu(null); } };
+    const away = () => setOpenMenu(null);   // the shell around this iframe took focus
+    document.addEventListener("pointerdown", down, true);
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("blur", away);
+    return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("keydown", key, true); window.removeEventListener("blur", away); };
+  }, [openMenu]);
 
   const masterSort = data.masterSort || {col:"health", dir:"asc"};
   const setSort = (col) => {
@@ -18210,9 +18301,15 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const setLvlFilter = f => setData(d => ({...d, masterLevelFilter: f}));
   const lvlActive = lvlFilter.leafOnly || lvlFilter.depths.length < 4;
 
-  // NEW-1 — the Task Report's status filter (see reportStatusKeys): the selected statuses, [] = every status.
-  const statusKeys = useMemo(() => reportStatusKeys(data.masterHealthFilter), [data.masterHealthFilter]);
+  // NEW-1 — the Task Report's Filter (see "Task Report filter" above): checked statuses and checked projects, [] = no narrowing.
+  const statusOptions = useMemo(() => reportStatusOptions(data.settings?.customHealth), [data.settings?.customHealth]);
+  const statusKeys = useMemo(() => reportStatusKeys(data.masterHealthFilter, statusOptions), [data.masterHealthFilter, statusOptions]);
   const setStatusKeys = keys => setData(d => ({...d, masterHealthFilter: keys}));
+  const projectIds = useMemo(() => Object.values(data.projects).map(p => String(p.id)), [data.projects]);
+  const projectKeys = useMemo(() => reportProjectKeys(data.masterProjectFilter, projectIds), [data.masterProjectFilter, projectIds]);
+  const setProjectKeys = keys => setData(d => ({...d, masterProjectFilter: keys}));
+  const clearFilters = () => setData(d => ({...d, masterHealthFilter: [], masterProjectFilter: []}));
+  const filterCount = reportFilterCount(statusKeys, projectKeys);
   const statusName = o => (data.settings?.healthLabelOverrides?.[o.k]) || o.label;   // a renamed built-in status reads as renamed
   const totalTaskCount = useMemo(() => Object.values(data.projects).reduce((s, p) => s + p.tasks.length, 0), [data.projects]);
 
@@ -18233,7 +18330,6 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       const _own = ownerOf(p); // NEW-1 — the project (group) this schedule belongs to; null for an org-owned one
       const projSiteId = _own.kind === OWNER_KIND_SITE ? _own.siteId : null;
       return p.tasks
-        .filter(t => reportStatusPasses(statusKeys, dispOf(t, childIds.has(t.id), rolled, byId)))
         .map(t => {
           let depth = 0, cur = t;
           while (cur && cur.parentId !== null) {
@@ -18244,12 +18340,25 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           return {...t, projName: p.name, projId: p.id, projSiteId, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks)};
         });
     });
-  }, [data.projects, statusKeys, data.settings, NOW]);
+  }, [data.projects, data.settings, NOW]);
 
-  const filteredRows = useMemo(() => {
+  // "Show" (outline level) first, then the Filter — the dropdown's counts are taken from the Show-narrowed rows so every count
+  // equals the rows that box would show.
+  const levelRows = useMemo(() => {
     if (lvlFilter.leafOnly) return rows.filter(r => r.isLeaf);
     return rows.filter(r => lvlFilter.depths.includes(Math.min(r.depth, 3)));
   }, [rows, lvlFilter]);
+  const facets = useMemo(() => reportFacetCounts(levelRows, statusKeys, projectKeys), [levelRows, statusKeys, projectKeys]);
+  // ONE classification: a row passes on its DISPLAYED status (_disp — the value that paints its status pill and orders the
+  // Status sort) and on its project. The header pill, every group pill and the rows all derive from this one list.
+  const filteredRows = useMemo(
+    () => levelRows.filter(r => reportStatusPasses(statusKeys, r._disp) && reportProjectPasses(projectKeys, r.projId)),
+    [levelRows, statusKeys, projectKeys]);
+  const projOrder = useProjectOrder();   // the owner's project order (the shell's push) — orders the groups AND the Filter's project list
+  // The Filter's project list, in the order the grouped report uses.
+  const projectChoices = useMemo(() => groupRowsByProject(
+    Object.values(data.projects).map(p => ({ projId: String(p.id), projSiteId: (ownerOf(p).kind === OWNER_KIND_SITE ? ownerOf(p).siteId : null), projOwnerLabel: scheduleLabelParts(p).ownerLabel, projName: p.name, projLabel: crossScheduleLabel(p) })),
+    projOrder.ids), [data.projects, projOrder.ids]);
 
   const getParentName = (t) => {
     if (!t.parentId) return "—";
@@ -18351,7 +18460,6 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
 
   // NEW-1 (2026-10-08) — project groups follow the owner's project order (the shell's push). The column
   // sort above orders the rows WITHIN a group and never reaches this.
-  const projOrder = useProjectOrder();
   const groupedRows = useMemo(
     () => masterGroupBy === "project" ? groupRowsByProject(sortedRows, projOrder.ids) : null,
     [masterGroupBy, sortedRows, projOrder.ids]);
@@ -18704,56 +18812,65 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         <span style={{color:"var(--amber)",fontWeight:600,fontSize:13,letterSpacing:".08em"}}>TASK REPORT</span>
         <span style={{background:"#dbeafe",color:"#1d4ed8",borderRadius:8,padding:"1px 8px",fontSize:10}}>{filteredRows.length}</span>
 
-        {/* Status filter (NEW-1) — In Progress and Needs Attention are independent toggles; "All" = neither
-            selected = every status (the old "All Statuses"). Same segmented look as Group by. */}
-        <div role="group" aria-label="Filter by status" data-status-filter style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-          <span style={{fontSize:10,color:"var(--mut)",fontWeight:500,letterSpacing:".04em",whiteSpace:"nowrap"}}>Status</span>
-          <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:5,overflow:"hidden"}}>
-            {[{k:"all",l:"All",on:statusKeys.length===0,dot:null,title:"Show every status",fn:()=>setStatusKeys([])},
-              ...REPORT_STATUS_OPTIONS.map(o => ({k:o.k,l:statusName(o),on:statusKeys.includes(o.k),dot:(HEALTH[o.k]||{}).dot,
-                title:(statusKeys.includes(o.k)?"Hide ":"Show ")+statusName(o)+" tasks",fn:()=>setStatusKeys(reportStatusToggle(statusKeys,o.k))}))
-            ].map(seg=>(
-              <button key={seg.k} type="button" data-status-seg={seg.k} aria-pressed={seg.on} title={seg.title} onClick={seg.fn}
-                style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",
-                  border:"none",fontFamily:"inherit",
-                  background:seg.on?"var(--amber)":"transparent",
-                  color:seg.on?"#fff":"var(--mut)",
-                  transition:"background .12s,color .12s",fontWeight:seg.on?600:400}}>
-                {seg.dot && <span style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:seg.on?"#fff":seg.dot}} />}
-                {seg.l}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Toolbar (NEW-1): Filter · Group by · Show · Columns, one matching button style, one shared open slot.
+            Filter = Status + Project checkboxes with counts, filtering immediately; the panel stays open while ticking. */}
+        <div data-report-toolbar style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          <ReportMenu id="filter" openMenu={openMenu} setOpenMenu={setOpenMenu} active={filterCount>0} minWidth={250}
+            label={<>
+              <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true" style={{flexShrink:0}}><path d="M1.5 2.5h13L9.5 8.6v4.6l-3 1.5V8.6z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
+              Filter
+              {filterCount>0 && <span data-filter-badge style={{background:"var(--amber)",color:"#fff",borderRadius:8,minWidth:15,height:15,padding:"0 4px",fontSize:10,fontWeight:700,lineHeight:"15px",textAlign:"center",boxSizing:"border-box"}}>{filterCount}</span>}
+            </>}
+            footer={<span role="button" tabIndex={0} data-filter-clear style={{fontSize:10,color:"var(--mut)",cursor:"pointer",textDecoration:"underline"}}
+              onClick={clearFilters} onKeyDown={e=>{ if (e.key==="Enter"||e.key===" ") { e.preventDefault(); clearFilters(); } }}>Clear all</span>}>
+            <div style={REPORT_MENU_SECTION}>Status</div>
+            {statusOptions.map(o => {
+              const on = statusKeys.includes(o.k), h = HEALTH[o.k] || {};
+              return (
+                <label key={o.k} data-filter-row="status" style={REPORT_MENU_ROW}
+                  onMouseEnter={e=>e.currentTarget.style.background="var(--surf)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <input type="checkbox" data-filter-status={o.k} checked={on} onChange={()=>setStatusKeys(reportStatusToggle(statusKeys,o.k,statusOptions))}
+                    style={{accentColor:"var(--amber)",width:12,height:12,flexShrink:0}} />
+                  <span style={{width:7,height:7,borderRadius:"50%",flexShrink:0,background:h.dot||"#d1d5db",border:h.border&&h.border!=="none"?h.border:"none",boxSizing:"border-box"}} />
+                  <span style={{fontSize:12,color:"var(--txt)",flex:1,minWidth:0}}>{statusName(o)}</span>
+                  <span data-filter-count style={REPORT_MENU_COUNT}>{facets.status[o.k]||0}</span>
+                </label>
+              );
+            })}
+            <div style={{height:1,background:"var(--bd)",margin:"6px 0 2px"}} />
+            <div style={REPORT_MENU_SECTION}>Project</div>
+            {projectChoices.map(g => {
+              const on = projectKeys.includes(String(g.projId));
+              return (
+                <label key={g.projId} data-filter-row="project" style={REPORT_MENU_ROW}
+                  onMouseEnter={e=>e.currentTarget.style.background="var(--surf)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <input type="checkbox" data-filter-project={g.projId} checked={on} onChange={()=>setProjectKeys(reportProjectToggle(projectKeys,g.projId,projectIds))}
+                    style={{accentColor:"var(--amber)",width:12,height:12,flexShrink:0}} />
+                  <span style={{fontSize:12,color:"var(--txt)",flex:1,minWidth:0,overflowWrap:"anywhere"}}>{g.label}</span>
+                  <span data-filter-count style={REPORT_MENU_COUNT}>{facets.project[String(g.projId)]||0}</span>
+                </label>
+              );
+            })}
+          </ReportMenu>
 
-        {/* Group by */}
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,marginRight:6,flexShrink:0}}>
-          <span style={{fontSize:10,color:"var(--mut)",fontWeight:500,letterSpacing:".04em",whiteSpace:"nowrap"}}>Group by</span>
-          <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:5,overflow:"hidden"}}>
-          {[{v:null,l:"None"},{v:"project",l:"Project"}].map(opt=>(
-            <span key={String(opt.v)} onClick={()=>setGroupBy(opt.v)}
-              style={{padding:"3px 10px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",
-                background:masterGroupBy===opt.v?"var(--amber)":"transparent",
-                color:masterGroupBy===opt.v?"#fff":"var(--mut)",
-                transition:"background .12s,color .12s",fontWeight:masterGroupBy===opt.v?600:400}}>
-              {opt.l}
-            </span>
-          ))}
-          </div>
-        </div>
+          <ReportMenu id="group" openMenu={openMenu} setOpenMenu={setOpenMenu} minWidth={150}
+            label={<>Group by: <span data-group-current>{masterGroupBy==="project"?"Project":"None"}</span></>}>
+            {[{v:null,l:"None"},{v:"project",l:"Project"}].map(opt=>{
+              const on = masterGroupBy===opt.v;
+              return (
+                <button key={String(opt.v)} type="button" role="menuitemradio" aria-checked={on} data-group-opt={opt.v||"none"}
+                  onClick={()=>{ setGroupBy(opt.v); setOpenMenu(null); }}
+                  onMouseEnter={e=>e.currentTarget.style.background="var(--surf)"} onMouseLeave={e=>e.currentTarget.style.background=on?"#eef2ff":"transparent"}
+                  style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"6px 10px",border:"none",borderRadius:4,cursor:"pointer",textAlign:"left",
+                    background:on?"#eef2ff":"transparent",fontFamily:"inherit",fontSize:12,color:"var(--txt)",fontWeight:on?600:400}}>
+                  <span style={{width:12,flexShrink:0,color:"var(--amber)",fontSize:11}}>{on?"\u2713":""}</span>{opt.l}
+                </button>
+              );
+            })}
+          </ReportMenu>
 
-        {/* Level filter */}
-        <div style={{position:"relative",marginRight:6}}>
-          {lvlOpen && <div style={{position:"fixed",inset:0,zIndex:98}} onClick={()=>setLvlOpen(false)} />}
-          <button className={"btn"+(lvlOpen?" act":lvlActive?" act":"")} onClick={()=>setLvlOpen(o=>!o)}
-            style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
-            Show {lvlActive && <span style={{width:5,height:5,borderRadius:"50%",background:"var(--amber)",flexShrink:0}} />}
-            <span style={{fontSize:8,opacity:.7}}>▾</span>
-          </button>
-          {lvlOpen && (
-            <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,background:"#fff",border:"1px solid var(--bd2)",
-              borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,.12)",zIndex:99,padding:"8px 4px",minWidth:176}}
-              onClick={e=>e.stopPropagation()}>
+          <ReportMenu id="show" openMenu={openMenu} setOpenMenu={setOpenMenu} active={lvlActive} minWidth={176}
+            label={<>Show {lvlActive && <span style={{width:5,height:5,borderRadius:"50%",background:"var(--amber)",flexShrink:0}} />}</>}>
               <div style={{fontSize:9,fontWeight:700,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase",padding:"0 10px 6px",borderBottom:"1px solid var(--bd)",marginBottom:4}}>Which tasks to show</div>
 
               {/* Leaf only quick toggle */}
@@ -18799,21 +18916,9 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
                 <span style={{fontSize:10,color:"var(--mut)",cursor:"pointer",textDecoration:"underline"}}
                   onClick={()=>setLvlFilter({...DEFAULT_LVL})}>Show all</span>
               </div>
-            </div>
-          )}
-        </div>
+          </ReportMenu>
 
-        {/* Column picker */}
-        <div style={{position:"relative"}}>
-          {colPickerOpen && <div style={{position:"fixed",inset:0,zIndex:98}} onClick={()=>setColPickerOpen(false)} />}
-          <button className={"btn"+(colPickerOpen?" act":"")} onClick={()=>setColPickerOpen(o=>!o)}
-            style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
-            Columns <span style={{fontSize:8,opacity:.7}}>▾</span>
-          </button>
-          {colPickerOpen && (
-            <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,background:"#fff",border:"1px solid var(--bd2)",
-              borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,.12)",zIndex:99,padding:"8px 4px",minWidth:168}}
-              onClick={e=>e.stopPropagation()}>
+          <ReportMenu id="columns" openMenu={openMenu} setOpenMenu={setOpenMenu} minWidth={168} label="Columns">
               <div style={{fontSize:9,fontWeight:700,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase",padding:"0 10px 6px",borderBottom:"1px solid var(--bd)",marginBottom:4}}>Show / Hide Columns</div>
               {MASTER_COL_DEFS.map(col => {
                 const on = visCols.includes(col.k);
@@ -18832,8 +18937,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
                 <span style={{fontSize:10,color:"var(--mut)",cursor:"pointer",textDecoration:"underline"}}
                   onClick={()=>setVisCols([...DEFAULT_MASTER_COLS])}>Reset to default</span>
               </div>
-            </div>
-          )}
+          </ReportMenu>
         </div>
       </div>
 
@@ -18963,10 +19067,11 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           {sortedRows.length===0 && (
             <tr><td colSpan={displayCols.length + 2} style={{padding:40,textAlign:"center",color:"var(--mut)",fontSize:12,borderBottom:"1px solid var(--bd)"}}>
               {totalTaskCount===0 ? "No tasks in this project yet."
-                : rows.length===0 && statusKeys.length>0
-                  ? <span data-status-empty>No tasks are {reportStatusPhrase(statusKeys, statusName)}. <button type="button" onClick={()=>setStatusKeys([])}
-                      style={{border:"none",background:"none",padding:0,font:"inherit",color:"var(--blue)",textDecoration:"underline",cursor:"pointer"}}>Show all statuses</button></span>
-                  : "No tasks match the current filter."}
+                : levelRows.length>0 && filterCount>0
+                  ? <span data-filter-empty>No tasks match the filter ({reportFilterPhrase(statusKeys.map(k=>statusName(statusOptions.find(o=>o.k===k))), projectKeys.map(id=>(projectChoices.find(g=>String(g.projId)===id)||{}).label||id))}). <button type="button" data-filter-empty-clear onClick={clearFilters}
+                      style={{border:"none",background:"none",padding:0,font:"inherit",color:"var(--blue)",textDecoration:"underline",cursor:"pointer"}}>Clear filter</button></span>
+                  : <span data-show-empty>No tasks match the Show setting. <button type="button" onClick={()=>setLvlFilter({...DEFAULT_LVL})}
+                      style={{border:"none",background:"none",padding:0,font:"inherit",color:"var(--blue)",textDecoration:"underline",cursor:"pointer"}}>Show all</button></span>}
             </td></tr>
           )}
         </tbody>
