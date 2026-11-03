@@ -14,20 +14,20 @@ const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", 
 const css = src.slice(src.indexOf(".drow { display: flex;"), src.indexOf("/* A full-cell hover-revealed overlay"));
 const sel = (name) => css.includes(name);
 
-describe("Schedule grid — the row marker rule covers every kind of row child (NEW-1)", () => {
-  it("hover rule matches task cells, blank/new/review cells and the filler strip", () => {
-    expect(sel(".drow:hover > [data-col-key]::before")).toBe(true);
-    expect(sel(".drow:hover > [data-row-line]::before")).toBe(true);
-    expect(sel(".drow:hover > [data-grid-strip]::before")).toBe(true);
+describe("Schedule grid — ONE row-level marker covers every kind of row (NEW-1, B2584496)", () => {
+  it("hover rule and selected rules are on the ROW's ::after, which therefore reaches task cells, blank / new / review cells and the filler strip alike", () => {
+    expect(sel(".drow:hover::after")).toBe(true);
+    expect(sel(".drow[data-row-sel]::after")).toBe(true);
+    expect(sel('.drow[data-new-task-row="sel"]::after')).toBe(true);
   });
-  it('selected rule matches task rows and the focused "+ New task" row', () => {
-    expect(sel(".drow[data-row-sel] > [data-col-key]::before")).toBe(true);
-    expect(sel('.drow[data-new-task-row="sel"] > [data-row-line]::before')).toBe(true);
-    expect(sel('.drow[data-new-task-row="sel"] > [data-grid-strip]::before')).toBe(true);
+  it("no per-cell marker rule remains (a ::before in each cell is what let a frozen cell paint the line differently from a plain one)", () => {
+    expect(css).not.toMatch(/> \[data-col-key\]::before/);
+    expect(css).not.toMatch(/> \[data-row-line\]::before/);
+    expect(css).not.toMatch(/> \[data-grid-strip\]::before/);
   });
 });
 
-describe("Schedule grid — a child that carries the marker is positioned, so its line stays inside its own cell (NEW-1)", () => {
+describe("Schedule grid — the filler strip and blank-row cells stay positioned (kept from B2623536; harmless now that the line is row-level)", () => {
   // every `<div data-grid-strip …/>` in the row renderers
   const strips = [...src.matchAll(/<div data-grid-strip\b[\s\S]{0,900}?(?:\/>|>\s*<\/div>)/g)].map(m => m[0]);
   it("finds the three row strips (task row, review row, blank row)", () => { expect(strips.length).toBeGreaterThanOrEqual(3); });

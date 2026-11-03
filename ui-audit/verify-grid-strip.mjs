@@ -277,8 +277,9 @@ ok("N1a every rendered row carries a filler strip", stripCount === ids.length, `
 // ── N3 — keyboard navigation drops the hover outline of a parked pointer ────────────────────────────────────
 await page.evaluate(sel => { document.querySelector(sel).scrollTop = 0; }, G);
 await pacedWait(page, 300);
-const lit = id => page.evaluate(i => { const r = document.querySelector(`[data-task-row="${i}"]`); if (!r) return null; const c = r.querySelector('[data-col-key="name"]'); const ct = getComputedStyle(c, "::before").content; return ct && ct !== "none" && ct !== "normal"; }, id);
-const litRows = () => page.evaluate(() => [...document.querySelectorAll("[data-task-row]")].filter(r => { const ct = getComputedStyle(r.querySelector('[data-col-key="name"]'), "::before").content; return ct && ct !== "none" && ct !== "normal"; }).map(r => r.getAttribute("data-task-row")));
+// B2584496: the row marker is ONE ::after on the ROW (it used to be a ::before inside each cell)
+const lit = id => page.evaluate(i => { const r = document.querySelector(`[data-task-row="${i}"]`); if (!r) return null; const ct = getComputedStyle(r, "::after").content; return ct && ct !== "none" && ct !== "normal"; }, id);
+const litRows = () => page.evaluate(() => [...document.querySelectorAll("[data-task-row]")].filter(r => { const ct = getComputedStyle(r, "::after").content; return ct && ct !== "none" && ct !== "normal"; }).map(r => r.getAttribute("data-task-row")));
 const centre = async id => { const nb = await cellBox(id, "cost"); return { x: nb.x + nb.w / 2, y: nb.y + nb.h / 2 }; };
 {
   const c12 = await centre(12);

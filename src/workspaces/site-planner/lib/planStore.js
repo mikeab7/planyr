@@ -323,7 +323,7 @@ function blobShared(base) {
   rememberSnapshot(base, raw, obj);
   return { ...obj };
 }
-function blobWrite(base, obj) {
+function blobWrite(base, obj, ctxId = null) {
   /* B2236000 (round 6) — a device that could not be split (the owner's: 76 plans, 2.29M characters — `plan-store-migration-aborted`, reason headroom, on
    * every load) writes the WHOLE library on every write. Two things no longer happen when nothing changed: (1) a plan whose content equals what the
    * current snapshot already holds keeps that SAME object (so everything keyed on it — the list read's model memory — still recognises it), and
@@ -341,14 +341,14 @@ function blobWrite(base, obj) {
     const str = plansToJson(persist);
     let cur = null; try { cur = lsNow().getItem(base); } catch (_) { /* unreadable: write */ }
     if (cur !== str) set(base, str);
-    rememberSnapshot(base, str, persist); return true;
+    rememberSnapshot(base, str, persist); pendingRetry.clear(); return true;
   }
   catch (_) {
     try {
       const slim = {};
       for (const [id, x] of Object.entries(persist)) slim[id] = cfg.slim(x);
-      const str = JSON.stringify(slim); set(base, str); rememberSnapshot(base, str, slim); return true;
-    } catch (_2) { clearSnapshot(); return false; }
+      const str = JSON.stringify(slim); set(base, str); rememberSnapshot(base, str, slim); pendingRetry.clear(); return true;
+    } catch (err) { clearSnapshot(); refuseWrite({ base, id: ctxId, rec: ctxId ? obj[ctxId] : null, frag: null, rawChars: 0, err, mode: "blob", plans: Object.keys(obj).length, existed: !!(ctxId && prevObj && prevObj[ctxId]) }); return false; }
   }
 }
 
@@ -402,19 +402,82 @@ export function writeStillCurrent(base, stamp) {
   return stamp.base === base && !!stamp.raw && get(idxKeyOf(base)) === stamp.raw;
 }
 
+/* ⛔ NEW-1 (2026-11-03) — A REFUSED DEVICE WRITE IS REPORTED, NEVER RETURNED SILENTLY (LOUD-FAILURE; docs/DATA.md §5).
+ * `writeEntry` / `blobWrite` used to `return false` on the second (slimmed) failure with no telemetry, and `duplicatePlan` ignored the boolean: a
+ * teammate's copy was written nowhere, the app said "saved on this device", navigated into it, and a reload said "This project doesn't exist".
+ * Now: (1) the refusal is an event (`plan-store-write-refused`) carrying the reason and the same inventory the migration abort uses; (2) the FIRST
+ * refusal of a page load asks `cfg.makeRoom` (history ring → IndexedDB, rebuildable caches) once, and — when room was freed — re-attempts the write of
+ * an EXISTING plan (an edit, never a brand-new record: a new record's caller decides, so no ghost plan can appear later); (3) `lastRefusal(id)` lets
+ * `saveSite` and the mint flows say WHY. The function still returns false when it really cannot write. */
+let lastRefusalInfo = null;
+export function lastRefusal(id) { return lastRefusalInfo && (id == null || lastRefusalInfo.id === id) ? lastRefusalInfo : null; }
+const isQuotaError = (e) => !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22 || e.code === 1014 || /quota/i.test(String(e.message || "")));
+export const refusalReason = (e) => (!lsNow() ? "unavailable" : isQuotaError(e) ? "quota" : String((e && e.name) || "error").slice(0, 40));
+
+const roomState = { promise: null, done: false };
+const pendingRetry = new Map();     // plan id → { base, rec } — an EXISTING plan whose edit was refused; re-attempted once if room is made
+let inRetry = false;
+function runRoom({ base, reason, shortBy }) {
+  roomState.done = false;
+  roomState.promise = Promise.resolve().then(() => cfg.makeRoom({ base, reason, shortBy })).then((res) => {
+    const freedChars = (res && res.freedChars) || 0;
+    reportClientEvent("plan-store-write-room", freedChars > 0 ? "made room after a refused device write" : "no room could be made after a refused device write", { reason, shortBy, freedChars, ...(res && res.steps ? { steps: res.steps } : {}) });
+    if (freedChars > 0 && pendingRetry.size) {
+      const todo = [...pendingRetry]; pendingRetry.clear(); inRetry = true;
+      try { for (const [id, p] of todo) { let ok = false; try { ok = writeOne(p.base, id, p.rec); } catch (_) { ok = false; } reportClientEvent("plan-store-write-retried", "re-attempted a refused plan write after making room", { id, ok }); } }
+      finally { inRetry = false; }
+    }
+    roomState.done = true;
+    return { freedChars, steps: (res && res.steps) || "" };
+  }).catch((e) => {
+    roomState.done = true;
+    reportClientEvent("plan-store-write-room-failed", "making room after a refused device write failed — nothing was changed", { error: String((e && e.message) || e).slice(0, 120) });
+    return { freedChars: 0, error: true };
+  });
+  return roomState.promise;
+}
+/** Ask for room: shares the in-flight (or already-run) attempt — `makeRoom` runs ONCE per page load — unless `force` (an explicit user Retry). */
+export function requestRoom({ base = null, reason = "quota", shortBy = 0, force = false } = {}) {
+  if (!cfg.makeRoom) return Promise.resolve({ freedChars: 0, skipped: "no-hook" });
+  if (roomState.promise && (!roomState.done || !force)) return roomState.promise;
+  return runRoom({ base, reason, shortBy });
+}
+export function _resetRoomForTest() { roomState.promise = null; roomState.done = false; pendingRetry.clear(); lastRefusalInfo = null; inRetry = false; }
+
+function refuseWrite({ base, id, rec, frag, rawChars, err, mode, plans, existed }) {
+  try {
+    const reason = refusalReason(err);
+    const used = lsUsedChars(), cap = Math.min(lsCapChars(), learnedCapHi);
+    const need = (frag ? frag.length : 0) + base.length + PFX.length + String(id).length;
+    const shortBy = Number.isFinite(cap) ? Math.max(need - Math.max(0, cap - used), 0) || need : need;
+    lastRefusalInfo = { reason, id, mode, shortBy, at: Date.now() };
+    reportClientEvent("plan-store-write-refused", "the device refused to store a plan — nothing was written", {
+      reason, error: String((err && err.name) || "").slice(0, 40), id, mode, fragChars: frag ? frag.length : 0, rawChars, usedChars: used,
+      capChars: Number.isFinite(cap) ? cap : null, shortBy, plans, existed: !!existed, ...lsInventory(),
+    });
+    if (!inRetry) {
+      if (existed && rec) pendingRetry.set(id, { base, rec });
+      if (!roomState.promise && cfg.makeRoom) runRoom({ base, reason, shortBy });
+    }
+  } catch (_) { /* reporting a refusal must never throw into the save path */ }
+}
+
 function writeEntry(base, s, id, rec) {
   let form = cfg.persistForm(rec), frag = JSON.stringify(form);
+  const rawChars = frag.length;
   try { set(pkey(base, id), frag); }
   catch (_) {                                                   // over quota — shed every inline raster (geometry still persists), as the blob always did
-    try { form = cfg.slim(form); frag = JSON.stringify(form); set(pkey(base, id), frag); } catch (_2) { return false; }
+    try { form = cfg.slim(form); frag = JSON.stringify(form); set(pkey(base, id), frag); }
+    catch (err) { refuseWrite({ base, id, rec, frag, rawChars, err, mode: "plan", plans: s.plans.size, existed: s.plans.has(id) }); return false; }
   }
+  pendingRetry.delete(id);
   s.plans.set(id, { raw: frag, obj: form }); s.shared = null;
   return true;
 }
 /** Persist ONE plan. Plan mode: one small entry + the ~60-byte index. Returns false only if the device refused it. */
 export function writeOne(base, id, rec) {
   const s = ensureMode(base);
-  if (s.mode === "blob") { const all = blobShared(base); all[id] = rec; return blobWrite(base, all); }
+  if (s.mode === "blob") { const all = blobShared(base); all[id] = rec; return blobWrite(base, all, id); }
   loadPlans(base, s);
   if (!writeEntry(base, s, id, rec)) return false;
   touchIdx(base, s);
