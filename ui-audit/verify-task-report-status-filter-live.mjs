@@ -87,9 +87,15 @@ try {
   const openReport = async () => {
     await gotoSafe(page, `${base}/?cb=${Date.now()}#/schedule`);
     const frame = await frameOf();
-    await frame.waitForFunction(() => !!document.body && /TASK|Group by/i.test(document.body.innerText), null, { timeout: 60000 });
+    await frame.waitForFunction(() => !!document.body && /TASK|Group by/i.test(document.body.innerText), null, { timeout: 60000, polling: 250 }).catch(async (e) => {
+      console.log("report page text after open:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 600)), "| url:", page.url());
+      throw e;
+    });
     await page.evaluate(() => { const f = document.querySelector("iframe"); f.contentWindow.postMessage({ source: "planar-shell", type: "planar:nav-dashboard" }, location.origin); });
-    await frame.waitForFunction(() => /TASK REPORT/.test(document.body.innerText), null, { timeout: 30000 });
+    await frame.waitForFunction(() => /TASK REPORT/.test(document.body.innerText), null, { timeout: 30000, polling: 250 }).catch(async (e) => {
+      console.log("no TASK REPORT; page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 600)));
+      throw e;
+    });
     await frame.evaluate(() => { const m = [...document.querySelectorAll("span")].find((x) => x.textContent.trim() === "Group by"); const seg = m && [...m.parentElement.querySelectorAll("span")].find((x) => x.textContent.trim() === "Project"); if (seg) seg.click(); });
     await frame.waitForSelector("tr[data-grp-site]", { timeout: 30000 });
     await pacedWait(page, 1500);
@@ -175,7 +181,7 @@ try {
 finally {
   if (s) {
     try {
-      await s.page.waitForLoadState("domcontentloaded").catch(() => {}); await s.page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 30000 }).catch(() => {});
+      await s.page.waitForLoadState("domcontentloaded").catch(() => {}); await s.page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 30000, polling: 250 }).catch(() => {});
       const left = await s.page.evaluate(async ([idList, schedList, origIdx]) => {
         const sb = window.pfSupabase; await sb.auth.getUser();
         try { localStorage.removeItem("planar:scheduleRowsRead"); localStorage.removeItem("planar:viewPrefs:v1"); } catch (_) {}

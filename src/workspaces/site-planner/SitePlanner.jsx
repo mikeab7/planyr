@@ -12380,8 +12380,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     placeDogEars(b, corners);
   };
   /* ---- Drive-in ramps (NEW-1 / NEW-2, 2026-10-30 — lib/driveInRamp.js owns every rule) -------------------------------------------------------
-   * One building-attached `driveInRamp` element per ramp. The "+" beside a dock wall's buttons drops one on the nearest free door module to the wall's
-   * middle; the one beside a corner "+" drops it at the end of the belt by that corner; both then open its Properties. A wall that is not a dock wall
+   * One building-attached `driveInRamp` element per ramp. The "+" beside a purple corner "+" drops one at the end of the belt by that corner (there is no
+   * ramp button at a wall's middle — owner 2026-11-02); it then opens the ramp's Properties. A wall that is not a dock wall
    * takes a door MARKER instead (no ramp: the floor is at grade there). The door run it reads is `dockDoorRun` WITHOUT ramps — the module grid is the
    * building's, not the ramps'. */
   const rampsOnHost = (arr, b) => arr.filter((x) => x.type === "driveInRamp" && x.attachedTo === b.id);
@@ -12398,14 +12398,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const run = isDock ? rampDoorRun(b, side) : null;
     const lo = run ? run.startF : 0, hi = run ? run.endF : f.L;
     const clear = (at) => at - W / 2 >= lo - 0.01 && at + W / 2 <= hi + 0.01 && taken.every((t) => at + W / 2 <= t.u0 + 0.01 || at - W / 2 >= t.u1 - 0.01);
-    const want = where === "start" ? lo + W / 2 : where === "end" ? hi - W / 2 : (lo + hi) / 2;
+    const want = where === "end" ? hi - W / 2 : lo + W / 2;   // "start" | "end" — the corner button it came from
     const stops = run ? moduleStops(run.doors) : [];
     const grid = [];
     for (let k = 0; k <= Math.ceil(f.L / 6); k++) { grid.push(want + k * 6); if (k) grid.push(want - k * 6); }
     const cands = [...stops.slice().sort((a, c) => Math.abs(a - want) - Math.abs(c - want)), ...(stops.length ? [] : grid)];
     return cands.find(clear) ?? null;
   };
-  const addRamp = (b, side, where = null) => {
+  const addRamp = (b, side, where) => {
     if (!b || b.type !== "building" || b.points || b.footEdit || !SIDE_N[side]) return;
     const at = planRampAt(b, side, where);
     if (at == null) { flashWarn("There is no free door module on that wall for a drive-in ramp.", 4000); return; }
@@ -18775,7 +18775,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      may fill, so a laptop does not have to give up half its canvas to reach the controls. Still
      site-size independent — nothing here reads the plan. */
   const featEditOpacity = featureEditOpacity(rppf, size.w);
-  /* NEW-2 (2026-10-30) — the small "drive-in ramp" button that sits beside the dock-wall "+ / −" pair and beside each purple corner "+": a wedge with an
+  /* NEW-2 (2026-10-30) — the small "drive-in ramp" button that sits beside each purple dock-wall corner "+" (none at a wall's middle — owner 2026-11-02): a wedge with an
      arrow, smaller than they are, slate (not purple / amber) so it reads as its own thing. Same press discipline as every on-building control
      (`data-el-action`, stop the press, swallow the double-click — CHROME-NEVER-EATS-A-PRESS). It is offset ALONG the wall from its neighbours so the
      two never overlap; the grading spot tags move out of the way of these buttons, never the reverse. */
@@ -18805,7 +18805,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const depths = zoneDepthDefaults(settings);
     /* NEW-5 (2026-10-30) — EVERY button sits OUTSIDE the footprint, in one row along its wall, offset into the court; the grading corner tags sit INSIDE
        it (lib/padCornerTag), so the two can never meet at any zoom. `layoutBuildingButtons` (lib/buildingButtons.js) decides every position — the pair on
-       each wall's middle, the purple "+" at each end of a dock wall, ONE grey ramp "+" per dock wall and one beside each purple "+", none on a short end
+       each wall's middle, the purple "+" at each end of a dock wall, one grey ramp "+" beside each purple "+" (none at a wall's middle), none on a short end
        wall — and drops (never moves) a button that would touch one already placed. This function only draws what it is handed. */
     const corner = (lx, ly) => { const o = rot2(lx, ly, el.rot); return f2p({ x: el.cx + o.x, y: el.cy + o.y }); };
     const quad = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
@@ -18826,7 +18826,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
             const n = stackCountIn(els, el, name);
             const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
-            const rp = layout.get(`ramp:${name}`);
             return (
               <g key={`dockw${name}`}>
                 {featPair(`dock${name}`, pos, tan, {
@@ -18836,7 +18835,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
                   onRemove: () => removeOuterZoneOnSide(el, name),
                 })}
-                {rp && rampGlyph(`rampw${name}`, rp.x, rp.y, "Add drive-in ramp", () => addRamp(el, name, null))}
               </g>
             );
           }

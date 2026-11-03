@@ -1,8 +1,8 @@
 /* NEW-1…NEW-3 (2026-10-30, owner: "add drive-in ramps … just add another little plus button close by") — driven with the REAL tools: draw a building, press the
  * small ramp "+" beside a dock wall's buttons, and watch the model, the canvas, the door belt and Properties agree.
  *
- *   1  select the building             → a small ramp "+" sits beside each dock wall's "+ / −" pair and beside each purple corner "+"; none overlap
- *   2  press the wall's ramp "+"       → ONE driveInRamp child (16 ft, 8 %, straight-in, 50 ft long), its Properties open, the belt loses the doors under it,
+ *   1  select the building             → a small ramp "+" sits beside each purple corner "+" and NONE at a wall's middle by the "+ / −" pair; none overlap
+ *   2  press a corner ramp "+"         → ONE driveInRamp child (16 ft, 8 %, straight-in, 50 ft long), its Properties open, the belt loses the doors under it,
  *                                        the building reads "· 1 drive-in"
  *   3  layout → along the wall         → the footprint hugs the face (50 ft along × 16 ft out)
  *   4  grade 12 %                      → the amber flag; 8 % clears it
@@ -87,9 +87,11 @@ test.describe("drive-in ramps on dock walls", () => {
 
     // 1 — the buttons: ramp "+" glyphs exist (wall + corner), and no two on-building discs overlap
     const btns = await rampButtons(page);
-    // NEW-5: exactly one ramp "+" per DOCK wall and one beside each of its two purple corner "+" — three per dock wall, none on the other walls
+    // NEW-1 (2026-11-02): one ramp "+" beside each of a DOCK wall's two purple corner "+" — two per dock wall — and NONE at the wall's middle by the pair
     const dockWalls = bl.dock === "cross" ? 2 : bl.dock === "none" ? 0 : 1;
-    expect(btns.map((b) => b.title)).toEqual(Array(3 * dockWalls).fill("Add drive-in ramp"));
+    expect(btns.map((b) => b.title)).toEqual(Array(2 * dockWalls).fill("Add drive-in ramp"));
+    const mid0 = await at(page, bl.cx, bl.cy);
+    expect(btns.filter((b) => Math.abs(b.x - mid0.x) < 60), "no ramp button at a wall's middle").toHaveLength(0);
     // …and every edit button sits OUTSIDE the building's footprint (the grading corner tags are inside it), clear of the wall by its own radius
     const rect = await page.evaluate((id) => { const r = document.querySelector(`[data-el-id="${id}"]`).getBoundingClientRect(); return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height }; }, bl.id);
     for (const d of await allButtonDiscs(page)) {
@@ -101,10 +103,10 @@ test.describe("drive-in ramps on dock walls", () => {
       expect(Math.hypot(discs[i].x - discs[j].x, discs[i].y - discs[j].y), `buttons ${i} and ${j} overlap`).toBeGreaterThanOrEqual(discs[i].r + discs[j].r - 0.5);
     }
 
-    // 2 — press the SOUTH-most wall button that sits near the wall's middle (a wall button, not a corner one)
+    // 2 — press the SOUTH-most corner ramp button (the only kind left)
     const mid = await at(page, bl.cx, bl.cy);
-    const wallBtn = btns.filter((b) => Math.abs(b.x - mid.x) < 60).sort((a, b) => b.y - a.y)[0];
-    expect(wallBtn, "a wall-middle ramp button").toBeTruthy();
+    const wallBtn = btns.filter((b) => Math.abs(b.x - mid.x) > 100).sort((a, b) => b.y - a.y || a.x - b.x)[0];
+    expect(wallBtn, "a corner ramp button").toBeTruthy();
     await page.mouse.click(wallBtn.x, wallBtn.y);
     await settle(page);
     const ramps = await rampsOf(page);
@@ -165,7 +167,11 @@ test.describe("drive-in ramps on dock walls", () => {
 
     // the Delete key removes a selected ramp, as for any element
     const rr = (await rampsOf(page))[0];
-    const rp = await at(page, rr.cx, rr.cy);
+    await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 3), [rr.cx, rr.cy]);   // the belt-end ramp can sit under the docked panel
+    await page.waitForTimeout(400);
+    // press the ramp's FAR end (out in the court): its middle now lies right where the corner buttons are, and a press there would be theirs
+    const outward = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] }[rr.ramp.side], len = (rr.ramp.side === "top" || rr.ramp.side === "bottom" ? rr.h : rr.w) * 0.4;
+    const rp = await at(page, rr.cx + outward[0] * len, rr.cy + outward[1] * len);
     await page.mouse.click(rp.x, rp.y);
     await page.keyboard.press("Delete");
     await settle(page);
@@ -199,20 +205,20 @@ test.describe("drive-in ramps on dock walls", () => {
     expect(Math.abs((moved.cx - nb.cx) - (before.cx - bl.cx)) + Math.abs((moved.cy - nb.cy) - (before.cy - bl.cy))).toBeLessThan(0.01 + (nb.rot === bl.rot ? 0 : 1e6)); // same offset from its building
   });
 
-  test("pictures: a straight-in ramp mid-wall and an along-the-wall ramp at a corner, at the close-in view", async ({ page }) => {
+  test("pictures: a straight-in ramp at a corner and an along-the-wall ramp at a corner, at the close-in view", async ({ page }) => {
     fs.mkdirSync(SHOTS, { recursive: true });
     await open(page);
     const bl = await drawAndSelectBuilding(page);
     const mid = await at(page, bl.cx, bl.cy);
     let btns = await rampButtons(page);
-    const wallBtn = btns.filter((b) => Math.abs(b.x - mid.x) < 60).sort((a, b) => b.y - a.y)[0];
+    const wallBtn = btns.filter((b) => Math.abs(b.x - mid.x) > 100).sort((a, b) => b.y - a.y || a.x - b.x)[0];
     await page.mouse.click(wallBtn.x, wallBtn.y);
     await settle(page);
     const r = (await rampsOf(page))[0];
     // frame the ramp at ≈8 px per ft (the 50-ft view): the whole ramp plus the wall around it
     await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 8), [r.cx, r.cy]);
     await page.waitForTimeout(500);
-    await page.screenshot({ path: `${SHOTS}/straight-in-mid-wall.png` });
+    await page.screenshot({ path: `${SHOTS}/straight-in-corner.png` });
     // second picture: delete it, add a corner ramp and turn it along the wall
     await page.getByTestId("ramp-delete").click();
     await page.evaluate(() => window.__plannerView.centerOn(0, 0, 3));
@@ -238,6 +244,6 @@ test.describe("drive-in ramps on dock walls", () => {
     await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 8), [r2.cx, r2.cy]);
     await page.waitForTimeout(500);
     await page.screenshot({ path: `${SHOTS}/along-the-wall-at-corner.png` });
-    expect(fs.statSync(`${SHOTS}/straight-in-mid-wall.png`).size).toBeGreaterThan(5000);
+    expect(fs.statSync(`${SHOTS}/straight-in-corner.png`).size).toBeGreaterThan(5000);
   });
 });

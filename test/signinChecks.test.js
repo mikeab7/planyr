@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   scanForSiteKey, extractSupabaseConfig, canReachTurnstile, classifyGateAnswer, combineGate, checkSiteKey, checkGate, checkEmailLink, classifyPanel, classifySignIn,
 } from "../scripts/lib/signinChecks.mjs";
-import { channelVerdict } from "../scripts/signin-health-check.mjs";
+import { channelVerdict, drillExitCode, DRILL_NOT_ARMED } from "../scripts/signin-health-check.mjs";
 
 const KEY = "0x4AAAAAAAFFjERHSPvI4t-dJ";
 const page = (body, ct = "application/javascript") => new Response(body, { status: 200, headers: { "content-type": ct } });
@@ -168,5 +168,21 @@ describe("canReachTurnstile", () => {
     expect(await canReachTurnstile(async () => new Response("x", { status: 200 }))).toBe(true);
     expect(await canReachTurnstile(async () => new Response("x", { status: 403 }))).toBe(false);
     expect(await canReachTurnstile(async () => { throw new Error("ECONNREFUSED"); })).toBe(false);
+  });
+});
+
+describe("drill exit codes (found live 2026-11-02: the first drill raised a false 'alarm channel is not delivering' issue)", () => {
+  it("'not armed' (SQL not run) has its own code, distinct from a broken channel, so the workflow raises no issue for it", () => {
+    expect(drillExitCode(channelVerdict({ ok: false, status: 503, body: { reason: "not_migrated", error: "run the sql" } }))).toBe(DRILL_NOT_ARMED);
+    expect(DRILL_NOT_ARMED).toBe(5);
+  });
+  it("a genuinely broken channel keeps its code; a verdict with no code still ends non-zero", () => {
+    expect(drillExitCode(channelVerdict({ ok: false, status: 401, error: "not authorized" }))).toBe(3);
+    expect(drillExitCode({ status: "mail-failed", code: 4 })).toBe(4);
+    expect(drillExitCode({ status: "ok", code: 0 })).toBe(1);
+  });
+  it("the workflow's issue step excludes exactly that code", () => {
+    const wf = require("node:fs").readFileSync(new URL("../.github/workflows/signin-health.yml", import.meta.url), "utf8");
+    expect(wf).toMatch(/steps\.check\.outputs\.code != '0' && steps\.check\.outputs\.code != '5'/);
   });
 });
