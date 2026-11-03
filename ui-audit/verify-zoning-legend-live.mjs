@@ -32,7 +32,7 @@ if (args.includes("--anon")) {
 } else s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
 const page = s.page;
 await assertMeasurable(page, "verify-zoning-legend-live");
-await page.setViewportSize({ width: 1400, height: 900 });
+await page.setViewportSize({ width: Number(flag("--width", "1400")), height: 900 });
 const served = await page.evaluate(async () => (await fetch("/version.json", { cache: "no-store" }).then((r) => r.json())).build);
 console.log(`signed in as ${s.proof.email} · served build ${served}`);
 if (EXPECT_SHA) check("served build is the merge commit", String(served).startsWith(EXPECT_SHA.slice(0, 7)), `${served} vs ${EXPECT_SHA}`);
@@ -42,7 +42,10 @@ const shot = async (name) => { if (SHOTS) await page.screenshot({ path: `${SHOTS
 const panel = () => page.locator('[data-testid="layer-panel"][data-surface="finder"]').first();
 await page.goto(BASE + "/?planyrDiag=1#/site", { waitUntil: "domcontentloaded" });
 await page.reload({ waitUntil: "domcontentloaded" });
-await page.waitForFunction(() => !!window.__mapFinderMap && !!document.querySelector('[data-testid="layer-panel"][data-surface="finder"]'), null, { timeout: 60000 });
+await page.waitForFunction(() => !!window.__mapFinderMap, null, { timeout: 60000 });
+await sleep(1500);
+{ const chip = page.getByTestId("finder-layers-expand").filter({ visible: true }); if (!(await page.locator('[data-testid="layer-panel"][data-surface="finder"]').count()) && (await chip.count())) await chip.first().click(); }   // a narrow window keeps the panel behind its chip
+await page.waitForFunction(() => !!document.querySelector('[data-testid="layer-panel"][data-surface="finder"]'), null, { timeout: 60000 });
 await sleep(1500);
 const setView = (lat, lng, z) => page.evaluate(([a, b, c]) => window.__mapFinderMap.setView([a, b], c, { animate: false }), [lat, lng, z]);
 await setView(34.9618, -89.8295, 13);
@@ -72,10 +75,11 @@ const read = () => page.evaluate(() => {
 });
 const fmt = (r) => r.items.map((i) => (i.heading ? `# ${i.text}` : `   ${i.text}`)).join("\n");
 
-async function view(name, lat, lng, z) {
+async function view(name, lat, lng, z, focus = null) {
   await setView(lat, lng, z);
   await sleep(9000);
   const r = await read();
+  if (focus) { await page.evaluate((f) => { const h = [...document.querySelectorAll('[data-part="legend-heading"]')].find((e) => e.textContent.trim() === f); if (h) h.scrollIntoView({ block: "start" }); }, focus); await sleep(400); }
   console.log(`\n── ${name} (${lat}, ${lng}, z${z})\n${fmt(r) || "(empty legend)"}\nstatus: ${r.status} · warning: ${r.warn}`);
   await shot(name);
   check(`${name}: no suffix on any row`, !r.items.some((i) => !i.heading && /\((Olive Branch|Southaven|Horn Lake|Hernando|Walls|Unincorporated)/.test(i.text)));
@@ -88,7 +92,7 @@ check("KNOWN-GOOD: the Olive Branch view lists the 2026-10-29 sourced name 'M-1 
 if (!ob.items.some((i) => /^M-1 · Light Industrial$/.test(i.text))) voided++;
 check("Olive Branch view: a heading 'Olive Branch' leads", ob.items[0] && ob.items[0].heading && /Olive Branch/.test(ob.items[0].text), ob.items[0] && ob.items[0].text);
 
-const sh = await view("southaven-z13", 34.9889, -90.0126, 13);
+const sh = await view("southaven-z13", 34.9889, -90.0126, 13, "Southaven");
 const shIdx = sh.items.findIndex((i) => i.heading && i.text === "Southaven");
 check("Southaven view: a 'Southaven' heading", shIdx >= 0);
 const shRows = shIdx >= 0 ? sh.items.slice(shIdx + 1, (sh.items.slice(shIdx + 1).findIndex((i) => i.heading) + 1 + shIdx) || undefined).filter((i) => !i.heading) : [];
@@ -96,12 +100,12 @@ check("Southaven rows carry Southaven's names (e.g. 'C-3 · General Commercial' 
 
 /* B2589345 (V2038401): Horn Lake and Hernando rows carry their ordinance names, each government its OWN (Horn Lake's R-6 is High Density, Hernando's Medium). */
 const sectionRows = (r, name) => { const i = r.items.findIndex((x) => x.heading && x.text === name); if (i < 0) return null; const rest = r.items.slice(i + 1); const j = rest.findIndex((x) => x.heading); return (j < 0 ? rest : rest.slice(0, j)).map((x) => x.text); };
-const hl = await view("horn-lake-z13", 34.9553, -90.0348, 13);
+const hl = await view("horn-lake-z13", 34.9553, -90.0348, 13, "Horn Lake");
 const hlRows = sectionRows(hl, "Horn Lake");
 check("Horn Lake view: a 'Horn Lake' heading", !!hlRows);
 check("Horn Lake rows carry Horn Lake's words (General Commercial / Residential (Medium Density) / Planned Business Park …)", !!hlRows && hlRows.some((t) => / · (General Commercial|Residential \((Medium|High|Low) Density\)|Planned Business Park|Planned Commercial|Light Industrial)$/.test(t)), (hlRows || []).slice(0, 10).join(" | "));
 if (hlRows && hlRows.some((t) => /^R-6( ·|$)/.test(t))) check("Horn Lake's R-6 reads 'High Density'", hlRows.some((t) => t === "R-6 · Residential (High Density)"), hlRows.find((t) => /^R-6( ·|$)/.test(t)));
-const he = await view("hernando-z13", 34.8240, -89.9937, 13);
+const he = await view("hernando-z13", 34.8240, -89.9937, 13, "Hernando");
 const heRows = sectionRows(he, "Hernando");
 check("Hernando view: a 'Hernando' heading", !!heRows);
 check("Hernando rows carry Hernando's words (Highway Commercial / Residential Single-Family (Medium Density) / Planned Corporate Office Park …)", !!heRows && heRows.some((t) => / · (Highway Commercial|General Commercial|Residential Single-Family \((Medium|Low) Density\)|Planned Corporate Office Park|Light Industrial)$/.test(t)), (heRows || []).slice(0, 10).join(" | "));
