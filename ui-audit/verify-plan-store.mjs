@@ -25,6 +25,7 @@ const LIVE = argOf("--live", "");
 const RETIRE = process.argv.includes("--retire"), TIGHT = process.argv.includes("--tight");
 const BASE = (LIVE || process.env.BASE_URL || "http://localhost:4173").replace(/\/$/, "");
 const N = Number(argOf("--plans", 60));
+const RUN = "zzpsv" + Date.now().toString(36);   // fresh ids every run: a signed-in cloud keeps rows by id, and a reused id merges with a stale row (rows are canonical)
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const results = [];
 const step = (name, ok, detail) => { results.push({ name, ok }); console.log(`${ok === null ? "VOID" : ok ? "PASS" : "FAIL"}  ${name}${detail ? "  —  " + detail : ""}`); };
@@ -32,11 +33,11 @@ const step = (name, ok, detail) => { results.push({ name, ok }); console.log(`${
 /* Page-side helper: read the store the way an OLD build or a human would — from raw localStorage. */
 const snapshot = (page) => page.evaluate(() => {
   let base = "planarfit:sites:v1";
-  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length))) base = k; }
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); const m = k && /^(planarfit:sites:cloud:[^:]+)(:p:.*|:idx|:led)?$/.exec(k); if (m) base = m[1]; }   // B2200384: a retired device has no bare store key — any of its keys names it
   const entries = {};
-  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) entries[k.slice((base + ":p:").length)] = (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k); }
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) entries[k.slice((base + ":p:").length)] = localStorage.getItem(k); }
   let idx = null; try { idx = JSON.parse(localStorage.getItem(base + ":idx")); } catch (_) {}
-  const legacyRaw = (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(base);
+  const legacyRaw = localStorage.getItem(base);
   const ledgerRaw = localStorage.getItem(base + ":led");
   let fillerLen = (localStorage.getItem("planarfit:settings:other") || "").length;
   let legacy = null; try { legacy = JSON.parse(legacyRaw); } catch (_) {}
@@ -50,7 +51,7 @@ const makeLibrary = (n) => {
   for (let i = 0; i < n; i++) {
     const big = i % 20 === 0;
     const els = []; for (let k = 0; k < (big ? 400 : 3); k++) els.push({ id: `e${i}-${k}`, type: "building", cx: k * 40, cy: i * 3, w: 120, h: 60, rot: 0 });
-    lib[`zzpsv-${i}`] = { id: `zzpsv-${i}`, groupId: `zzpsv-g${i % 9}`, site: `ZZ PSV project ${i % 9}`, name: `Plan ${i}`, status: "pursuit", role: "pursuit", origin: null, updatedAt: now - 100000 + i, parcels: [], els, measures: [], callouts: [], markups: [], settings: {} };
+    lib[`${RUN}-${i}`] = { id: `${RUN}-${i}`, groupId: `${RUN}-g${i % 9}`, site: `ZZ PSV project ${i % 9}`, name: `Plan ${i}`, status: "pursuit", role: "pursuit", origin: null, updatedAt: now - 100000 + i, parcels: [], els, measures: [], callouts: [], markups: [], settings: {} };
   }
   return lib;
 };
@@ -83,6 +84,7 @@ try {
     cap += extra; localStorage.clear(); return cap;
   });
   let seeded, cap = null, maxEntry = 0, filler = 0;
+  if (LIVE) await page.waitForFunction(() => { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && /^planarfit:sites:cloud:[^:]+(:p:|:idx|:led|$)/.test(k)) return true; } return false; }, null, { timeout: 60000 });   // signed in: the account's own store must exist before we seed it (else the seed lands on the signed-out store)
   if (TIGHT) {
     /* A REAL filled localStorage: the whole library as one entry (~2.0M characters, like the owner's device), then filler up to within ~1.3 plan entries of this
      * browser's measured cap. The all-at-once split of B2165120 needed the library's size AGAIN beside the original and was refused on every load here. */
@@ -107,12 +109,12 @@ try {
     seeded = await page.evaluate(({ BASEKEY, text, cap, maxEntry }) => {
       localStorage.clear();
       localStorage.setItem(BASEKEY, text);
-      let used = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); used += k.length + (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k).length; }
+      let used = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); used += k.length + localStorage.getItem(k).length; }
       const want = cap - used - Math.floor(maxEntry * 1.3);
       const key = "planarfit:settings:other";
       if (want > key.length) localStorage.setItem(key, "z".repeat(want - key.length));
-      used = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); used += k.length + (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k).length; }
-      return { base: BASEKEY, plans: Object.keys(JSON.parse(text)).length, len: text.length, text, used, fillerLen: ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "").length };
+      used = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); used += k.length + localStorage.getItem(k).length; }
+      return { base: BASEKEY, plans: Object.keys(JSON.parse(text)).length, len: text.length, text, used, fillerLen: (localStorage.getItem(key) || "").length };
     }, { BASEKEY, text, cap, maxEntry });
     filler = seeded.fillerLen;
     const oldNeed = seeded.len + seeded.plans * (BASEKEY.length + 12) + 600 + 250000;
@@ -133,11 +135,11 @@ try {
   } else {
     seeded = await page.evaluate((library) => {
       let base = "planarfit:sites:v1";
-      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length))) base = k; }
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); const m = k && /^(planarfit:sites:cloud:[^:]+)(:p:.*|:idx|:led)?$/.exec(k); if (m) base = m[1]; }   // B2200384: a retired device has no bare store key — any of its keys names it
       const existing = {};
       const keys = []; for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
-      for (const k of keys) if (k && k.startsWith(base + ":p:")) { try { existing[k.slice((base + ":p:").length)] = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)); } catch (_) {} }
-      try { Object.assign(existing, JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(base) || "{}")); } catch (_) {}
+      for (const k of keys) if (k && k.startsWith(base + ":p:")) { try { existing[k.slice((base + ":p:").length)] = JSON.parse(localStorage.getItem(k)); } catch (_) {} }
+      try { Object.assign(existing, JSON.parse(localStorage.getItem(base) || "{}")); } catch (_) {}
       const whole = { ...existing, ...library };
       for (const k of keys) if (k && (k.startsWith(base + ":p:") || k === base + ":idx" || k === base + ":led")) localStorage.removeItem(k);
       const text = JSON.stringify(whole);
@@ -149,7 +151,7 @@ try {
 
   /* ── 1. first load of the new build ──────────────────────────────────────────────────────────────────────────────────────────── */
   const t0 = Date.now();
-  await page.goto(BASE + "/#/project/" + (LIVE ? "e2e-fixture-site" : "zzpsv-g1") + "/site", { waitUntil: "load" });
+  await page.goto(BASE + "/#/project/" + (LIVE ? "e2e-fixture" : `${RUN}-g1`) + "/site", { waitUntil: "load" });
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   // the move may run in slices on a tight device: wait for it to finish (the legacy entry disappearing is its last act)
   let s1 = await snapshot(page);
@@ -157,10 +159,11 @@ try {
   const ids1 = Object.keys(s1.entries);
   step("every plan has its own entry and the index says the legacy entry is retired", !!(s1.idx && s1.idx.v === 1 && s1.idx.ok && s1.idx.legacyRetired && !s1.idx.migrating) && ids1.length >= seeded.plans, `index ${JSON.stringify(s1.idx && { mig: s1.idx.mig, legacyRetired: s1.idx.legacyRetired, migrating: s1.idx.migrating })}, ${ids1.length} entries for ${seeded.plans} plans, ${Date.now() - t0} ms`);
   step("THE WHOLE-LIBRARY ENTRY IS GONE (and its ledger)", s1.legacyRaw === null && s1.ledgerRaw === null, `legacy ${s1.legacyRaw === null ? "absent" : s1.legacyLen + " chars"}; ledger ${s1.ledgerRaw === null ? "absent" : "present"}`);
-  const lossless = Object.keys(lib).every((id) => { try { return JSON.stringify(JSON.parse(s1.entries[id])) === JSON.stringify(lib[id]); } catch (_) { return false; } });
-  step("lossless: every seeded plan's entry equals the plan that was seeded", lossless);
+  const sameContent = (a, b) => { const ids = (x) => (x.els || []).map((e) => e.id).sort().join(","); return a.id === b.id && a.name === b.name && a.site === b.site && a.groupId === b.groupId && ids(a) === ids(b); };
+  const lossless = Object.keys(lib).every((id) => { try { const stored = JSON.parse(s1.entries[id]); return LIVE ? sameContent(stored, lib[id]) : JSON.stringify(stored) === JSON.stringify(lib[id]); } catch (_) { return false; } });
+  step(LIVE ? "lossless: every seeded plan kept its name, project, group and every element (the signed-in app adds its own normalisation fields)" : "lossless: every seeded plan's entry equals the plan that was seeded", lossless);
   if (TIGHT) {
-    const free = await page.evaluate(() => { let used = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); used += k.length + (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k).length; } return used; });
+    const free = await page.evaluate(() => { let used = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); used += k.length + localStorage.getItem(k).length; } return used; });
     // A plan-by-plan move cannot CREATE room (entries hold the same text the legacy entry did); what matters is it needed none and lost none beyond the entries' own key names.
     step("tight: the filler on the device was not touched, and the move cost the device no room beyond the entries' key names", s1.fillerLen === filler && (cap - seeded.used) - (cap - free) < 12000, `free before ${cap - seeded.used}, after ${cap - free}`);
   }
@@ -185,8 +188,18 @@ try {
   step("exactly ONE plan's entry changed", changed.length === 1, `changed: ${changed.join(", ") || "none"}`);
   const biggest = Math.max(0, ...writes.map(([, n]) => n));
   const libChars = Object.values(after.entries).reduce((n, t) => n + t.length, 0);
-  step("the edit never wrote the whole library — no write to the legacy key at all", biggest < 0.6 * libChars && !writes.some(([k]) => k === before.base), `${writes.length} writes to ${planKeys.map((k) => k.replace(before.base, "<store>")).join(" · ")}; largest ${(biggest / 1000).toFixed(1)} KB vs a ${(libChars / 1000).toFixed(0)} KB library`);
+  step("the edit never wrote the whole library — no write to the legacy key at all", biggest <= ((after.entries[changed[0]] || "").length + 2000) && !writes.some(([k]) => k === before.base), `${writes.length} writes to ${planKeys.map((k) => k.replace(before.base, "<store>")).join(" · ")}; largest ${(biggest / 1000).toFixed(1)} KB (that plan's own entry is ${(((after.entries[changed[0]] || "").length) / 1000).toFixed(1)} KB; the library is ${(libChars / 1000).toFixed(0)} KB)`);
   step("no legacy entry exists after the edit", after.legacyRaw === null);
+  const elCountOf = (raw) => { try { return (JSON.parse(raw).els || []).length; } catch (_) { return -1; } };
+  let undone = null;
+  if (LIVE) {
+    /* The edit landed on the STANDING fixture plan (a local-only seeded plan cannot be opened signed in): undo it with a real Ctrl+Z so the fixture is left as found. */
+    const eid = Object.keys(after.entries).find((id) => after.entries[id] !== before.entries[id]);
+    await page.keyboard.press("Control+z"); await page.waitForTimeout(2500);
+    const undoneSnap = await snapshot(page);
+    undone = { eid, ok: !!eid && elCountOf(undoneSnap.entries[eid]) === elCountOf(before.entries[eid]) };
+    step("live: the edit on the standing fixture was undone — the fixture is left as found", undone.ok, `${eid}: elements ${eid ? elCountOf(before.entries[eid]) : "?"} → ${eid ? elCountOf(after.entries[eid]) : "?"} → (undone) ${eid ? elCountOf(undoneSnap.entries[eid]) : "?"}`);
+  }
 
   /* ── 3. reload: the edit persisted ──────────────────────────────────────────────────────────────────────────────────────────── */
   const editedId = changed[0];
@@ -196,9 +209,9 @@ try {
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForTimeout(2500);
   const s3 = await snapshot(page);
-  step("reload: the edit is still in that plan's entry", editedId && elCount(s3.entries[editedId]) === newCount && newCount > oldCount, `elements ${oldCount} → ${newCount} → (after reload) ${editedId ? elCount(s3.entries[editedId]) : "?"}`);
+  step(LIVE ? "reload: the last write (the undo) is what that plan's entry holds" : "reload: the edit is still in that plan's entry", editedId && (LIVE ? elCount(s3.entries[editedId]) === oldCount : elCount(s3.entries[editedId]) === newCount && newCount > oldCount), `elements ${oldCount} → ${newCount} → (after reload) ${editedId ? elCount(s3.entries[editedId]) : "?"}`);
   const featuresOnCanvas = await page.evaluate(() => new Set([...document.querySelectorAll('[data-feature^="el:"]')].map((n) => n.getAttribute("data-feature"))).size);
-  step("reload: the canvas shows the elements", featuresOnCanvas > 0, `${featuresOnCanvas} elements on the canvas`);
+  step("reload: the canvas shows exactly the elements the plan's entry holds", featuresOnCanvas === (LIVE ? oldCount : newCount), `${featuresOnCanvas} on the canvas, entry holds ${LIVE ? oldCount : newCount}`);
 
   /* ── 4. leaving the tab writes nothing to the legacy key (there is no mirror any more) ──────────────────────────────────────── */
   await page.goto(BASE + "/version.json", { waitUntil: "load" });         // pagehide on the app page
@@ -209,24 +222,24 @@ try {
   if (TIGHT) step("mixed builds (not exercised on the tight device)", null, "an older tab's multi-MB write has nowhere to go on a device with ~100 KB free");
   else {
   /* an OLDER build's write (whole legacy entry, while no new-build tab is open) is folded in per plan on the next load, then removed ─ */
-  const victim = `zzpsv-${Math.min(5, N - 1)}`;
-  await page.evaluate(({ victim }) => {
+  const victim = `${RUN}-${Math.min(5, N - 1)}`;
+  await page.evaluate(({ victim, RUN }) => {
     let base = "planarfit:sites:v1";
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length))) base = k; }
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); const m = k && /^(planarfit:sites:cloud:[^:]+)(:p:.*|:idx|:led)?$/.exec(k); if (m) base = m[1]; }   // B2200384: a retired device has no bare store key — any of its keys names it
     const all = {};
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) { try { all[k.slice((base + ":p:").length)] = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)); } catch (_) {} } }
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) { try { all[k.slice((base + ":p:").length)] = JSON.parse(localStorage.getItem(k)); } catch (_) {} } }
     all[victim] = { ...all[victim], name: "renamed by an OLD build", updatedAt: Date.now() + 10000 };
-    all["zzpsv-from-old-build"] = { id: "zzpsv-from-old-build", groupId: "zzpsv-from-old-build", site: "ZZ PSV old-build project", name: "Created by an old build", updatedAt: Date.now(), els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {} };
+    all[RUN + "-from-old-build"] = { id: RUN + "-from-old-build", groupId: RUN + "-from-old-build", site: "ZZ PSV old-build project", name: "Created by an old build", updatedAt: Date.now(), els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {} };
     localStorage.setItem(base, JSON.stringify(all));
-  }, { victim });
-  await page.goto(BASE + "/#/project/" + (LIVE ? "e2e-fixture-site" : "zzpsv-g1") + "/site", { waitUntil: "load" });
+  }, { victim, RUN });
+  await page.goto(BASE + "/#/project/" + (LIVE ? "e2e-fixture" : `${RUN}-g1`) + "/site", { waitUntil: "load" });
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForTimeout(2500);
   const s5 = await snapshot(page);
   const nameOf = (raw) => { try { return JSON.parse(raw).name; } catch (_) { return null; } };
   step("mixed builds: the older build's rename was adopted", nameOf(s5.entries[victim]) === "renamed by an OLD build", `${victim}: "${nameOf(s5.entries[victim])}"`);
-  step("mixed builds: the plan the older build created was adopted", !!s5.entries["zzpsv-from-old-build"]);
-  step("mixed builds: this build's earlier edit was NOT reverted", editedId && elCount(s5.entries[editedId]) === newCount, `${editedId}: ${editedId ? elCount(s5.entries[editedId]) : "?"} elements`);
+  step("mixed builds: the plan the older build created was adopted", !!s5.entries[RUN + "-from-old-build"]);
+  step("mixed builds: this build's last write was NOT reverted", editedId && elCount(s5.entries[editedId]) === (LIVE ? oldCount : newCount), `${editedId}: ${editedId ? elCount(s5.entries[editedId]) : "?"} elements`);
   step("mixed builds: the older build's whole-library entry was folded in and removed again", s5.legacyRaw === null);
   }
 
@@ -236,7 +249,7 @@ try {
   /* ── 7. two tabs of one browser (signed out only: a signed-in tab converges through the element rows instead) ────────────────── */
   if (!LIVE && !TIGHT) {
     const b = await context.newPage();
-    await b.goto(BASE + "/#/project/zzpsv-g1/site", { waitUntil: "load" });
+    await b.goto(BASE + `/#/project/${RUN}-g1/site`, { waitUntil: "load" });
     await b.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
     await b.waitForTimeout(1500);
     const bBefore = await b.evaluate(() => new Set([...document.querySelectorAll('[data-feature^="el:"]')].map((n) => n.getAttribute("data-feature"))).size);
@@ -249,7 +262,7 @@ try {
     for (let i = 0; i < 16 && bAfter === bBefore; i++) { await b.waitForTimeout(250); bAfter = await b.evaluate(() => new Set([...document.querySelectorAll('[data-feature^="el:"]')].map((n) => n.getAttribute("data-feature"))).size); }
     step("two tabs: an edit in tab A reaches tab B live through the per-plan entry's storage event", bAfter > bBefore, `tab B elements ${bBefore} → ${bAfter}`);
     /* …and an OLDER build's whole-entry write in one tab is folded in by the other through the REAL storage event (no reload, no focus). */
-    const victimB = "zzpsv-" + Math.min(7, N - 1);
+    const victimB = `${RUN}-` + Math.min(7, N - 1);
     await page.evaluate((v) => { const all = JSON.parse(globalThis.__planyrSitesRaw("planarfit:sites:v1")); all[v] = { ...all[v], name: "renamed by an OLD build in the other tab", updatedAt: Date.now() + 20000 }; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, victimB);
     let seen = null;
     for (let i = 0; i < 20 && seen !== "renamed by an OLD build in the other tab"; i++) { await b.waitForTimeout(250); seen = await b.evaluate((v) => { try { return JSON.parse(localStorage.getItem("planarfit:sites:v1:p:" + v)).name; } catch (_) { return null; } }, victimB); }
@@ -257,9 +270,10 @@ try {
     await b.close();
   } else step("two tabs (signed-out, non-tight only)", null, "a signed-in tab converges through the element rows — not exercised here");
 
-  console.log(`\nseeded plan ids to delete from the test account: zzpsv-0 … zzpsv-${N - 1}, zzpsv-from-old-build`);
+  console.log(`\nseeded plan ids to delete from the test account: ${RUN}-0 … ${RUN}-${N - 1}, ${RUN}-from-old-build`);
 } catch (e) {
   step("script ran to completion", false, String(e && e.stack || e).split("\n").slice(0, 4).join(" | "));
+  try { console.log("  page at failure:", page.url(), "|", (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ").slice(0, 260)); } catch (_) {}
 } finally { if (browser) await browser.close(); }
 const bad = results.filter((r) => r.ok === false).length;
 console.log(`\n${results.length} checks, ${bad} failed, ${results.filter((r) => r.ok === null).length} void`);
