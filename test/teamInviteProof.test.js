@@ -71,6 +71,7 @@ async function fresh() {
   await d.exec("grant usage on schema public, auth to authenticated, anon, service_role; grant all on all tables in schema public to authenticated, service_role; grant select on auth.users to authenticated, service_role;");
   await d.exec("alter default privileges in schema public grant all on tables to anon, authenticated, service_role; alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;");
   await d.exec(read("team_invite_proof.sql"));
+  await d.exec(read("team_invite_orphan_guard.sql"));
   await d.exec("grant all on public.mailbox_proofs, public.invite_signup_attempts to service_role;"); // the server role writes these through its functions; harmless to the client checks
   return d;
 }
@@ -355,5 +356,40 @@ describe("the audit query is read-only and counts address-match joins", () => {
     const out = rows.find((r) => r.metric === "claimed_never_emailed");
     expect(Number(out.n)).toBe(1);
     expect(JSON.stringify(rows)).not.toMatch(/@/);
+  });
+});
+
+describe("team deleted — PRODUCTION HAS NO FOREIGN KEY from team_invites/team_members to teams (measured 2026-11-03), so a deleted team leaves its invite OPEN", () => {
+  const ghost = async () => {
+    // Reproduce production: the repo's teams.sql declares team_id → teams ON DELETE CASCADE, the live database does not.
+    await db.exec(`do $$ declare r record; begin
+      for r in select conrelid::regclass::text as t, conname from pg_constraint
+               where contype = 'f' and confrelid = 'public.teams'::regclass and conrelid in ('public.team_invites'::regclass, 'public.team_members'::regclass)
+      loop execute format('alter table %s drop constraint %I', r.t, r.conname); end loop; end $$;`);
+    const id = await invite(USEC, "paul.reinke@hillwood.com");
+    await db.query("delete from public.teams where id = $1", [USEC]);
+    expect(await q("select 1 from public.team_invites where id = $1", [id])).toHaveLength(1); // the orphan really is there
+    return id;
+  };
+  it("the link preview says it is gone (never an open invite to 'the team')", async () => {
+    const id = await ghost();
+    expect((await q("select public.invite_preview($1) as r", [id]))[0].r).toMatchObject({ ok: false, reason: "not_found" });
+  });
+  it("redeem / respond / link sign-up all answer not_found and add NO membership to a team that does not exist", async () => {
+    const id = await ghost();
+    expect(await redeem(PAUL, id)).toMatchObject({ ok: false, reason: "not_found" });
+    expect(await q("select 1 from public.team_members where team_id = $1 and user_id = $2", [USEC, PAUL])).toHaveLength(0);
+    expect(await respond(PAUL, id, true)).toMatchObject({ ok: false, reason: "not_found" });
+    await svc("select public.prove_mailbox($1, 'paul.reinke@hillwood.com', 'x')", [PAUL]);
+    expect(await respond(PAUL, id, true)).toMatchObject({ ok: false, reason: "not_found" });
+    expect(await q("select 1 from public.team_members where team_id = $1 and user_id = $2", [USEC, PAUL])).toHaveLength(0);
+    const fresh1 = await invite(OTHER, "zz-orphan@hillwood.com");
+    await db.query("delete from public.teams where id = $1", [OTHER]);
+    expect((await svc("select public.invite_signup_begin($1) as r", [fresh1]))[0].r).toMatchObject({ ok: false, reason: "not_found" });
+  });
+  it("the menu and the resend email never list it", async () => {
+    await ghost();
+    expect(await myInvites(PAUL)).toEqual([]);
+    expect((await svc("select public.claim_invite_resend_for($1) as r", [PAUL]))[0].r).toMatchObject({ ok: false, reason: "no_invites" });
   });
 });

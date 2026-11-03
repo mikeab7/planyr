@@ -111,6 +111,10 @@ describe("wiring", () => {
     const n = src("../src/app/WaitingInviteNotice.jsx");
     expect(n).not.toMatch(/teamName|team_name/);
     expect(n).toMatch(/sessionStorage/);
+    // 2026-11-03 regression: the show-decision must be HELD in state, not recomputed from sessionStorage on every render
+    // (the effect that marks it seen flipped `!seen(uid)` and the notice vanished on its own re-render).
+    expect(n).toMatch(/const \[shownFor, setShownFor\] = useState\(null\)/);
+    expect(n.slice(n.indexOf("const show ="), n.indexOf("if (!show)"))).not.toMatch(/seen\(/);
     expect(src("../src/app/Shell.jsx")).toMatch(/lazy\(\(\) => import\("\.\/WaitingInviteNotice\.jsx"\)\)/);
   });
   it("the email never puts the address in the URL", () => {

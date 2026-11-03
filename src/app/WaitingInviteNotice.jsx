@@ -25,9 +25,14 @@ export default function WaitingInviteNotice({ user }) {
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const show = !!uid && !hidden && status === "ok" && waiting > 0 && !seen(uid);
-  // Record that it was shown, so a reload in the same session does not nag again.
-  useEffect(() => { if (show) markSeen(uid); }, [show, uid]);
+  // The decision to show is made ONCE per account per session and then HELD in state. (It used to be recomputed on every
+  // render as `!seen(uid)` while an effect set the flag — so the first re-render read "already seen" and the notice
+  // vanished the moment it appeared. Caught live on planyr.io, 2026-11-03.)
+  const [shownFor, setShownFor] = useState(null);
+  useEffect(() => {
+    if (uid && shownFor !== uid && status === "ok" && waiting > 0 && !seen(uid)) { markSeen(uid); setShownFor(uid); }
+  }, [uid, shownFor, status, waiting]);
+  const show = !!uid && shownFor === uid && !hidden && waiting > 0;
   if (!show) return null;
   const address = user.email || "your email";
   const go = async () => { setBusy(true); setErr(""); const r = await resend(); setBusy(false); if (!r.ok) setErr(r.text); };
