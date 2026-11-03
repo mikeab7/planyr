@@ -1,7 +1,7 @@
 /* City of Sugar Land Master Thoroughfare Plan (NEW-1, 2026-11-02) — the class filter, the paint, and the card, over real values. */
 import { describe, it, expect } from "vitest";
 import {
-  THOROUGHFARE_CLASSES, THOROUGHFARE_ORDER, THOROUGHFARE_WHERE, thoroughfareStyle, thoroughfareCard, thoroughfareLegend, plannedSectionDiffers, hasPlannedSectionOnly, streetName, sectionCode, classKey,
+  THOROUGHFARE_CLASSES, THOROUGHFARE_ORDER, THOROUGHFARE_WHERE, thoroughfareStyle, thoroughfareCard, thoroughfareLegend, SECTION_CLASSIFICATION, sectionClassification, sectionWithClass, plannedSectionDiffers, hasPlannedSectionOnly, streetName, sectionCode, classKey,
 } from "../src/workspaces/site-planner/lib/sugarLandThoroughfare.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 
@@ -47,8 +47,8 @@ describe("the card — what the city says, and nothing it does not", () => {
     const get = (l) => (c.rows.find((r) => r.label === l) || {}).text;
     expect(get("Class")).toBe("Arterial");
     expect(get("Current section")).toBe("C4D");
-    expect(get("Plan's recommended section")).toBe("P6D");
-    expect(get("2035 section")).toBe("P6D");
+    expect(get("Plan's recommended section")).toBe("P6D · Arterial / State Hwy");
+    expect(get("2035 section")).toBe("P6D · Arterial / State Hwy");
     expect(get("Lanes (city's count)")).toBe("2");
   });
   it("a road whose plan section differs from its current one is flagged, without a verdict", () => {
@@ -68,6 +68,33 @@ describe("the card — what the city says, and nothing it does not", () => {
     expect(text).not.toContain("50");
     expect(text).not.toContain("25");
     expect(text).not.toContain("40");
+  });
+  it("a code that is a row of the 2020 legend shows that classification; C4D (not on the legend) shows bare", () => {
+    const get = (c, l) => (thoroughfareCard(c).rows.find((r) => r.label === l) || {}).text;
+    expect(get({ SECTION_TYPE: "P4D" }, "Current section")).toBe("P4D · Arterial");
+    expect(get({ SECTION_TYPE: "C4D" }, "Current section")).toBe("C4D");
+    expect(get({ SECTION_TYPE: "C4U-P" }, "Current section")).toBe("C4U-P · Major Collector");
+    expect(get({ RECOMMENDED_SECTION: " p8d " }, "Plan's recommended section")).toBe("P8D · Arterial / State Hwy");
+  });
+  it("the table is exactly the legend's thirteen rows", () => {
+    expect(Object.keys(SECTION_CLASSIFICATION)).toHaveLength(13);
+    expect(sectionClassification("L2U")).toBe("None, Minor Collector");
+    expect(sectionClassification("R2U")).toBe("Minor & Major Collector / Arterial / State Hwy");
+    expect(sectionClassification("C2U")).toBe("Minor & Major Collector");
+    expect(sectionClassification("C4U")).toBe("Major Collector");
+    expect(sectionClassification("C4U - B")).toBe("Major Collector");
+    expect(sectionClassification("P4D - B")).toBe("Arterial");
+    expect(sectionClassification("P6D")).toBe("Arterial / State Hwy");
+    expect(sectionClassification("C2U (40') - Bike or Parking")).toBe("Major Collector");
+    expect(sectionClassification("C2U (40') - 10' Lanes")).toBe("Minor & Major Collector");
+    expect(sectionClassification("C2U - Bike")).toBe("Minor & Major Collector");
+  });
+  it("layer spellings that are not an exact legend row get NO gloss (no letter is expanded to match)", () => {
+    for (const c of ["C4D", "C2U-B", "C2U-40-P", "C2U-40-B", "P6D-B", "C4D-P", "C4D-B", "CSD", "CD4", "U2", "R2", "L4U", "C6D", "R2U-M", "C4U-P2"]) expect(sectionClassification(c), c).toBeNull();
+    expect(sectionWithClass("C2U-B")).toBe("C2U-B");
+  });
+  it("the gloss never adds a width or expands the letters", () => {
+    for (const c of Object.keys(SECTION_CLASSIFICATION)) { const t = SECTION_CLASSIFICATION[c]; expect(t).not.toMatch(/width|right-of-way|\bROW\b|divided|undivided|lane count/i); }
   });
   it("section codes are shown as written — never decoded", () => {
     const text = JSON.stringify(thoroughfareCard({ ...p, SECTION_TYPE: "C2U-40-P" })).toLowerCase();

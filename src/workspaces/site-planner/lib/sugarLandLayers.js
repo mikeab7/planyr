@@ -93,27 +93,54 @@ export const AIRPORT_AREAS = Object.freeze({
   "AZ-01": { label: "AZ-01", color: "#ebebb5" },
   "AZ-02": { label: "AZ-02", color: "#de8585" },
 });
-export const AIRPORT_CODE_URL = "https://library.municode.com/tx/sugar_land/codes/land_development_code";
+export const AIRPORT_CODE_URL = "https://library.municode.com/tx/sugar_land/codes/land_development_code?nodeId=CH9SULAREAIZORE";
 const airportKey = (p) => str(p && p.TYPE).toUpperCase();
 export function airportStyle(props, opacity) {
   const a = AIRPORT_AREAS[airportKey(props)];
   const c = a ? a.color : "#9ca3af";
   return { color: "#6e6e6e", weight: 1.2, opacity, fill: true, fillColor: c, fillOpacity: Math.min(0.5, opacity * 0.6) };
 }
-/* The plain meaning of an area. "Airport property" and "Avigation easement" are ordinary words; AZ-01, AZ-02 and ANID are defined in the Sugar Land Development Code (Chapter 9, Sugar Land Regional
- * Airport Zoning Regulations), which this build could NOT read (the city's code host is not reachable from the build environment) — so those three show the code and SAY so; no height or use limit is
- * ever printed (a height limit is a legal number, never inferred). */
+/* The card text for each airport area, from the Sugar Land Land Development Code, Chapter 9 (Sugar Land Regional Airport Zoning Regulations), read on Municode 2026-11-02 by the owner:
+ *   · AZ-01 = Airport Zoning District 1, AZ-02 = Airport Zoning District 2 (Sec. 9-14, Table 9-14.1). They are LAND USE districts (Art. III), NOT height zones, and "establish additional regulations to
+ *     the underlying zoning districts established in Chapter 2" — so the base zoning AND the AZ district both apply.
+ *   · Permitted Uses Schedule, Table 9-17.1 (Sec. 9-17, Ord. 2149, 2-19-2019). AZ-01 permits Warehouse and Distribution Facility; Manufacturing, Light; Manufacturing, Heavy; Mini-Warehouse and Self-Storage; wholesale
+ *     uses; Railroad Freight Yard. AZ-02 permits Municipal Airport, Railroad Freight Yard and Utilities among the rows read; Warehouse and Distribution, manufacturing and wholesale are blank (prohibited) in AZ-02. Only the
+ *     industrial rows and part of the rest were read, so NO full AZ-02 list is written — the card points at the table for the rest.
+ *   · Sec. 9-16 plat note for AZ-01 and AZ-02: all residential uses and some nonresidential uses are prohibited.
+ *   · ANID = Airport Noise Impact District (Sec. 9-15): no land use restrictions are imposed in it; landowners should consider the noise impact; Sec. 9-16 requires a plat statement.
+ *   · AVIGATION EASEMENT and AIRPORT PROPERTY: labels only — no code text was read, so none is claimed.
+ * HEIGHT LIMITS ARE NOT HERE and are never shown: they are a separate thing (Art. II, Secs. 9-7 and 9-8 — approach, transitional, horizontal and conical zones on the Airport Height Hazard Zoning Map), and that map is not in this layer. */
+const AIRPORT_RESIDENTIAL = { label: "Residential", text: "Prohibited — the Sec. 9-16 plat note: all residential uses and some nonresidential uses." };
+const AIRPORT_DISTRICT = (n, name) => ({ label: "What this is", text: `${name} (Sec. 9-14). It adds regulations to the underlying zoning (Chapter 2): both the base zoning and ${n} apply.` });
+const AIRPORT_TABLE = { label: "Permitted uses", text: "Open the code", href: AIRPORT_CODE_URL };
 export function airportCard(props) {
   const k = airportKey(props);
   const a = AIRPORT_AREAS[k];
-  const rows = [];
-  if (k === "AIRPORT PROPERTY") rows.push({ label: "Meaning", text: "Land owned by the Sugar Land Regional Airport." });
-  else if (k === "AVIGATION EASEMENT") rows.push({ label: "Meaning", text: "The city maps this area as an avigation easement — a recorded right for aircraft to fly over the land. The easement terms are in the recorded instrument." });
-  else if (k === "AZ-01" || k === "AZ-02" || k === "ANID") {
-    rows.push({ label: "Meaning", text: `${k} is defined in the Sugar Land Development Code, Chapter 9 (Sugar Land Regional Airport Zoning Regulations). Planyr has not read it, so no height or use limit is shown here — read the code before relying on this area.` });
-    rows.push({ label: "Development Code", text: "Open", href: AIRPORT_CODE_URL });
-  }
-  return { title: a ? `Airport zoning · ${a.label}` : "Airport zoning", rows: a ? rows : [{ label: "Area", text: soft(props && props.TYPE) || "Not named" }] };
+  let rows;
+  if (k === "AZ-01") {
+    rows = [
+      { label: "Warehouse & distribution", text: "Permitted here, subject to the base zoning (Sec. 9-17, Table 9-17.1)." },
+      { label: "Also permitted", text: "Light manufacturing, heavy manufacturing, mini-warehouse and self-storage, wholesale uses, railroad freight yard (the industrial rows of Table 9-17.1)." },
+      AIRPORT_RESIDENTIAL, AIRPORT_DISTRICT("AZ-01", "Airport Zoning District 1"), AIRPORT_TABLE,
+    ];
+  } else if (k === "AZ-02") {
+    rows = [
+      { label: "Warehouse & distribution", text: "Not permitted here (Sec. 9-17, Table 9-17.1)." },
+      { label: "Also not permitted", text: "Light and heavy manufacturing and wholesale uses (blank in Table 9-17.1)." },
+      { label: "Permitted", text: "Includes municipal airport, railroad freight yard and utilities. Table 9-17.1 has the full schedule." },
+      AIRPORT_RESIDENTIAL, AIRPORT_DISTRICT("AZ-02", "Airport Zoning District 2"), AIRPORT_TABLE,
+    ];
+  } else if (k === "ANID") {
+    rows = [
+      { label: "What this is", text: "Airport Noise Impact District (Sec. 9-15)." },
+      { label: "Land use", text: "No land use restrictions are imposed in it. Landowners should consider the noise impact." },
+      { label: "Plat", text: "Sec. 9-16 requires a statement on the plat." },
+      { label: "Development Code", text: "Open", href: AIRPORT_CODE_URL },
+    ];
+  } else if (a) {
+    rows = [{ label: "Meaning", text: "Label only — the code text for this area was not read." }, { label: "Development Code", text: "Open", href: AIRPORT_CODE_URL }];
+  } else rows = [{ label: "Area", text: soft(props && props.TYPE) || "Not named" }];
+  return { title: a ? `Airport zoning · ${a.label}` : "Airport zoning", rows };
 }
 
 /* ───────────────────────── Future land use ───────────────────────── */
@@ -230,7 +257,7 @@ export const SUGARLAND_LAYERS = {
     fields: ["OBJECTID", "FULL_STREET_NAME", "FUNCTIONAL_CLASS", "SECTION_TYPE", "RECOMMENDED_SECTION", "SECTION_2035", "LANE_NUMBER", "LIFE_CYCLE"],
     styleFn: thoroughfareStyle, legend: thoroughfareLegend(), identifyCard: thoroughfareCard,
     note: "The City of Sugar Land's Master Thoroughfare Plan: freeways, state highways, arterials, major and minor collectors. Click a road for its class, current section, the plan's section and the 2035 section.",
-    infoCaveat: "Section codes (P4D, C4D, L2U…) are shown as the city writes them — they are defined on the plan's legend (Ordinance 2167). The plan's table gives no right-of-way width, so none is shown. The lane count is the city's per-line figure and reads 2 on most divided four- and six-lane roads — read the section code, not that number. The layer holds almost no not-yet-built roads (3,285 of 3,286 mapped segments lie on an existing street), but the adopted plan draws future roadways as their own lines — use the plan PDF for them.",
+    infoCaveat: "Section codes are the city's cross-section names. Where the plan's 2020 legend lists a code, the card adds its classification (the legend gives classification only — no right-of-way and no definition of the letters); a code not on it, like C4D (the most common here), shows as written. No width is shown. The lane count is the city's per-line figure and reads 2 on most divided four- and six-lane roads. The layer holds almost no not-yet-built roads (3,285 of 3,286 mapped segments lie on an existing street), but the adopted plan draws future roadways as their own lines — use the plan PDF for them.",
   }),
   sl_capital_projects: feature("slCip", {
     label: "Capital Projects", role: "area", group: "access", order: 31, minZoom: 12, source: "City of Sugar Land — Capital Improvement Program",
@@ -250,8 +277,8 @@ export const SUGARLAND_LAYERS = {
   sl_airport_zoning: feature("slAirportZoning", {
     label: "Airport Zoning", role: "area", group: "jurisdiction", order: 31, minZoom: 11, source: "City of Sugar Land — Airport Zoning",
     styleFn: airportStyle, legend: Object.values(AIRPORT_AREAS).map((a) => ({ label: a.label, color: a.color })), identifyCard: airportCard,
-    note: "The Sugar Land Regional Airport's zoning areas — AZ-01, AZ-02, ANID, the avigation easement and the airport property — in the city's own colours. These affect building height near the airport.",
-    infoCaveat: "AZ-01, AZ-02 and ANID are defined in the Development Code, Chapter 9; Planyr shows the code and does not state any height or use limit. Read the code and confirm with the airport before designing near it.",
+    note: "The Sugar Land Regional Airport's zoning areas in the city's own colours: AZ-01 and AZ-02 (land use districts), ANID (noise impact district), the avigation easement and the airport property. Click for what each allows.",
+    infoCaveat: "The Land Development Code, Chapter 9 governs; this summarises Secs. 9-14 to 9-17 (Table 9-17.1, Ord. 2149, 2019). Height limits are on a separate city map (the Airport Height Hazard Zoning Map, Secs. 9-7 and 9-8) that is not in this layer. The avigation easement and airport property are labels only.",
   }),
   sl_flu: feature("slFlu", {
     label: "Future Land Use", role: "area", group: "jurisdiction", order: 32, minZoom: 10, source: "City of Sugar Land — Future Land Use Map (2022)",
