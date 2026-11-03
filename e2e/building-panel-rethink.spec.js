@@ -4,7 +4,7 @@
  * typed in bulk, Structure folding, and the new outline width/opacity (drawn, persisted, exported).
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-rethink.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks, panelPlus } from "./helpers.js";
+import { armPlannerHooks, panelPlus, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const buildings = (page) => page.evaluate(() => {
@@ -140,10 +140,10 @@ test("dock row: add layers with the +, edit a trailer row's depth in the piece's
   const [b] = await buildings(page);
   await openProps(page, b.id);
   const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first();
-  for (const key of ["court", "trailer", "buffer"]) { await dock.getByTestId("wall-add").click(); await page.getByTestId(`wall-add-${key}`).click(); }
+  for (const key of ["court", "trailer", "buffer"]) await addWallLayer(dock, key);
   await expect(dock.getByTestId("wall-piece")).toHaveCount(3);
   await dock.getByTestId("wall-piece").nth(1).click();                       // the trailer piece opens its edit box
-  const depth = page.getByLabel("Trailer row 1 depth");
+  const depth = page.getByLabel("Trailer depth");
   await depth.fill("70"); await depth.press("Enter");
   await expect.poll(async () => (await kids(page, b.id)).find((k) => k.type === "trailer")?.zd).toBe(70);
   await page.getByTestId("wall-piece-remove").click();                       // ONLY the trailer: the buffer keeps its depth and moves in
@@ -163,7 +163,7 @@ test("rear wall: typing 8 parking rows lays out 8 rows in one commit; Remove cle
   const [b] = await buildings(page);
   await openProps(page, b.id);
   const rear = page.locator('[data-testid="wall-row"][data-role="rear"]');
-  await rear.getByTestId("wall-add").click(); await page.getByTestId("wall-add-parking").click();
+  await addWallLayer(rear, "parking");
   const rows = page.getByLabel("Parking rows");
   await rows.fill("8"); await rows.press("Enter");
   await expect(rows).toHaveValue("8");
