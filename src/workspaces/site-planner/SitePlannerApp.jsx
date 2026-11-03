@@ -18,7 +18,7 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
  * Site route's own tier (`SitePlanner.jsx` imports userPrefs statically), so these are plain
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, scheduleHistoryHydration, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, scheduleHistoryHydration, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, siteExistsLocally, lastSaveRefusal, requestPlanStoreRoom, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
 import { summarizeParcelRowsAsync } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs, pickRepresentativePlan } from "./lib/siteRecency.js";
@@ -33,8 +33,9 @@ import { idbPersist } from "./lib/localDb.js";
  * mapped to a default for React.lazy. */
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
+import { runMint, describePushFailure, saveRefusedMessage, PUSH_MISSING } from "./lib/planMint.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
+import { recordCloudWriteFailure, clearCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeChangeNeedsDefer, userLeftOnSignOut } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -270,7 +271,12 @@ export default function App({
   // never got to show — this is what makes "the page reloaded mid-write" recoverable instead of
   // silently losing the notice.
   useEffect(() => {
-    const pending = readCloudWriteFailures();
+    /* NEW-1 (2026-11-03) — a log entry whose error is exactly "missing" was recorded by a build that pushed a plan the DEVICE never stored (a refused
+     * duplicate): there is no local record, so no replay can ever succeed and the banner would come back on every load. Forget those, and say so. */
+    const all = readCloudWriteFailures();
+    const dead = all.filter((e) => e && e.error === PUSH_MISSING);
+    if (dead.length) { dead.forEach((e) => clearCloudWriteFailure(e.id)); reportClientEvent("write-failure-pruned-missing", "dropped logged cloud-write failures for plans that were never stored on this device", { count: dead.length }); }
+    const pending = all.filter((e) => !(e && e.error === PUSH_MISSING));
     if (pending.length) raisePendingWriteFailureBanner(pending);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
@@ -606,6 +612,18 @@ export default function App({
     return () => window.removeEventListener(TEAMS_CHANGED_EVENT, onTeamsChanged);
   }, [signedInUid]);
   const goPlan = (id) => { startTransition(() => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); }); };
+  /* NEW-1 (2026-11-03) — never navigate into an id with no record. The three mint sites (duplicate / new plan on the same parcel / new site from the map)
+   * use this; `newBlankSite` deliberately keeps plain `goPlan` (a lazy blank has no record by design — constraint #5). Same check `openSite` makes. */
+  const goPlanChecked = (id, entry) => {
+    if (!id || !siteExistsLocally(id)) { reportClientEvent("goplan-refused-missing", "refused to open a plan that has no record on this device", { id, entry }); return false; }
+    goPlan(id); return true;
+  };
+  /* NEW-1 — the one place a refused mint is refused OUT LOUD: the existing cloud-write failure banner (✕ forgets the log, Retry does not — constraint #6),
+   * honest words, and a Retry that makes room (forced: the user asked) and redoes the WHOLE create with a fresh id. No half-state: no push, no list churn. */
+  const raiseMintRefused = (message, redo) => {
+    setPushErrorWithRetry(message, async () => { try { await requestPlanStoreRoom({ force: true }); } catch (_) { /* reported by the store */ } redo(); });
+  };
+  const mintSave = (id, noun, what, save) => runMint({ id, noun, what, save, exists: () => siteExistsLocally(id), makeRoom: () => requestPlanStoreRoom(), refusal: () => lastSaveRefusal(id), report: reportClientEvent });
   /* NEW-5 — the ONE way to leave a project, and the ONE place the intent is recorded.
    *
    * The URL writer refuses to clear a route-named project unless it is told the user meant to
@@ -642,12 +660,19 @@ export default function App({
       if (r && r.ok === false) throw new Error(r.error || "push failed");
       return true;
     } catch (e) {
+      /* NEW-1 (2026-11-03) — "missing" is pushSiteToCloud saying the LOCAL record is not there: a device refusal, not a cloud failure. Nothing to retry,
+       * nothing to log for replay, and never the words "saved on this device". Telemetry names it for what it is. */
+      const why = describePushFailure(what, e && e.message);
+      if (why.kind === "missing") {
+        setPushErrorWithRetry(why.text, null);
+        reportClientEvent("push-missing-local", `${what} was not on this device when the cloud push ran`, { id, reason: (lastSaveRefusal(id) || {}).reason || "unknown" });
+        return false;
+      }
       // NEW-1 — persist BEFORE anything else: a lazy-chunk failure here can also trigger
       // chunkReload's auto-reload, which may navigate away before this banner ever paints. The
       // durable log (shared/cloud/writeFailureLog.js) is what makes that recoverable.
       recordCloudWriteFailure({ what, siteId: id, error: (e && e.message) || "" });
-      setPushErrorWithRetry(`${what} is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.`,
-        () => pushLoud(id, what));
+      setPushErrorWithRetry(why.text, () => pushLoud(id, what));
       reportClientEvent("cloud-push-failed", `background push failed (${what})`, { id, error: (e && e.message) || "" });
       return false;
     }
@@ -676,7 +701,8 @@ export default function App({
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
     const { teamId } = await defaultShareTeam(signedInUid, SHARE_LOADERS);
-    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null, teamId });
+    const mint = await mintSave(id, "site", "The new site", () => saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null, teamId }));
+    if (!mint.ok) { raiseMintRefused(mint.message, () => newSiteFromMap(payload)); return false; }   // NEW-1: nothing saved → no push, no refresh, no navigation
     pushLoud(id, "The new site"); // mirror to cloud when logged in (no-op otherwise); loud on failure (NEW-F6)
     // Seed this new project's standard folder tree + mirror it to Google Drive (B650). Idempotent
     // and graceful (no-op signed-out / Drive off); a dynamic import keeps the folder code off the
@@ -689,7 +715,7 @@ export default function App({
       .then((m) => m.ensureSeeded(id).then((r) => { if (r && r.ok && r.seeded) m.syncFoldersToDrive(id); }))
       .catch((e) => reportClientEvent("cloud-write-failed", "folder-tree seed didn't reach the cloud (self-heals on next Library visit)", { id, error: (e && e.message) || "" }));
     refreshSites();
-    goPlan(id);
+    goPlanChecked(id, "newSiteFromMap");
   };
 
   /* "Open blank planner" → a new empty site. We do NOT write a record yet: a blank site that's
@@ -960,7 +986,7 @@ export default function App({
   // New plan on the SAME site: keep the location (parcel, origin, aerial) but
   // start the layout fresh. This is the iteration workflow — explore another
   // layout without leaving the parcel.
-  const newPlanSameParcel = (srcId) => {
+  const newPlanSameParcel = async (srcId) => {
     const src = loadSite(srcId);
     if (!src) return;
     const group = groupOf(src);
@@ -974,16 +1000,17 @@ export default function App({
     // site-plan overlays that are specific to the SOURCE layout — deliberately does NOT carry
     // over, matching the pre-B848736 behavior (only `underlay` ever crossed this boundary).
     const srcMapRef = (src.sheetOverlays || []).find(isPinnedMapReference) || null;
-    saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
+    const mint = await mintSave(id, "plan", "The new plan", () => saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
       origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {},
-      sheetOverlays: srcMapRef ? [srcMapRef] : [], teamId });
+      sheetOverlays: srcMapRef ? [srcMapRef] : [], teamId }));
+    if (!mint.ok) { raiseMintRefused(mint.message, () => newPlanSameParcel(srcId)); return false; }   // NEW-1: nothing saved → no push, no refresh, no navigation
     pushLoud(id, "The new plan"); // NEW-F6
     refreshSites();
-    goPlan(id);
+    return goPlanChecked(id, "newPlanSameParcel");
   };
 
   // Duplicate this plan (layout and all) as another plan of the same site.
-  const duplicatePlan = (srcId) => {
+  const duplicatePlan = async (srcId) => {
     const src = loadSite(srcId);
     if (!src) return;
     const group = groupOf(src);
@@ -991,11 +1018,14 @@ export default function App({
     // Inherit from the PROJECT (not from `src`, whose in-memory copy can predate a share/unshare).
     // A copy is also a fresh plan, so it must never carry the source's lock — the owner locks a
     // specific plan, not a lineage.
-    saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)`,
-      teamId: resolveNewPlanTeam(loadPlansOfGroup(group)).teamId, shareLocked: false });
+    const mint = await mintSave(id, "copy", "The duplicated plan", () => saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)`,
+      teamId: resolveNewPlanTeam(loadPlansOfGroup(group)).teamId, shareLocked: false }));
+    // NEW-1 (2026-11-03): a refused copy exists nowhere. No cloud push ("saved on this device" would be a lie), no list churn, and no navigation into an
+    // id with no record (that id used to reach the URL as the PROJECT id, and a reload said "This project doesn't exist"). The original plan stays open.
+    if (!mint.ok) { raiseMintRefused(mint.message, () => duplicatePlan(srcId)); return false; }
     pushLoud(id, "The duplicated plan"); // NEW-F6
     refreshSites();
-    goPlan(id);
+    return goPlanChecked(id, "duplicatePlan");
   };
 
   // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
@@ -1049,7 +1079,12 @@ export default function App({
       return res;
     });
   };
-  const renamePlan = (id, name) => { saveSite({ id, name }); pushLoud(id, "The plan rename"); refreshSites(); }; // NEW-F6
+  const renamePlan = (id, name) => { // NEW-F6
+    /* NEW-1 (2026-11-03): a rename the device refused is not "saved on this device" — say so and push nothing. A false from the resurrection guard (a
+     * deleted plan) carries no refusal and keeps the old quiet path. */
+    if (!saveSite({ id, name }) && lastSaveRefusal(id)) { raiseMintRefused(saveRefusedMessage("The plan rename", lastSaveRefusal(id).reason), () => renamePlan(id, name)); refreshSites(); return; }
+    pushLoud(id, "The plan rename"); refreshSites();
+  };
 
   // The planner dropped a blank, unedited site (never saved). Forget it.
   const handleSiteDropped = (id) => { if (id === activeSiteId) setActiveSiteId(null); refreshSites(); };
@@ -1108,7 +1143,8 @@ export default function App({
     // NEW-F6 — save every plan locally first, then aggregate the pushes to ONE banner.
     const groupId = groupOf(rec);
     const plans = loadPlansOfGroup(groupId);
-    plans.forEach((s) => saveSite({ id: s.id, status }));
+    const refusedPlan = plans.filter((s) => !saveSite({ id: s.id, status }) && lastSaveRefusal(s.id))[0];   // filter, not find: every plan must still be attempted   // NEW-1 (2026-11-03): a refused device write is said, not pushed as "saved on this device"
+    if (refusedPlan) raiseMintRefused(saveRefusedMessage("The status change", lastSaveRefusal(refusedPlan.id).reason), () => setSiteStatus(id, status));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
       .then((oks) => {
         if (oks.some((ok) => !ok)) {
@@ -1144,7 +1180,8 @@ export default function App({
     const rec = loadSite(id); if (!rec) return;
     const groupId = groupOf(rec);
     const plans = loadPlansOfGroup(groupId);
-    plans.forEach((s) => saveSite({ id: s.id, ...patch }));
+    const refusedPlan = plans.filter((s) => !saveSite({ id: s.id, ...patch }) && lastSaveRefusal(s.id))[0];   // NEW-1 (2026-11-03)
+    if (refusedPlan) raiseMintRefused(saveRefusedMessage("The deal-date change", lastSaveRefusal(refusedPlan.id).reason), () => setSiteDates(id, patch));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
       .then((oks) => {
         if (oks.some((ok) => !ok)) {
