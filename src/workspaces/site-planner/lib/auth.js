@@ -11,6 +11,7 @@ import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT } from "../../../shared/auth/rateLimitCopy.js";
 import { friendlyAuthError, classifyAuthError } from "../../../shared/auth/authErrors.js";
 import { markDeliberateSignOut, currentAuthEventMeta } from "../../../shared/auth/sessionIntent.js";
+import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 // NEW-1 (B2619760 follow-up): every gated call reports its outcome through ONE helper — see authTelemetry.js.
 import { observeAuthCall } from "../../../shared/auth/authTelemetry.js";
 
@@ -75,9 +76,10 @@ export async function signUp(email, password, profile = {}, captchaToken) {
   return { error: msg, errorKind, needsConfirm: !!(data && data.user && !data.session), signedIn: !!(data && data.session) };
 }
 
-// Sign in and Forgot password are captcha-gated server-side exactly like sign-up (NEW-1, amends
-// B1160720 — which only wired sign-up, leaving every signed-out user unable to get back in). Same
-// omit-when-empty rule as signUp(): a present-but-empty token is a failed challenge to GoTrue.
+// Sign in is captcha-gated server-side exactly like sign-up (NEW-1, amends B1160720 — which only wired
+// sign-up, leaving every signed-out user unable to get back in). Same omit-when-empty rule as signUp(): a
+// present-but-empty token is a failed challenge to GoTrue. (Forgot password is NOT gated: it no longer touches
+// Supabase's mailer at all — see below.)
 export async function signIn(email, password, captchaToken) {
   if (!supabase) return { error: "Cloud not configured." };
   const creds = { email, password };
@@ -87,6 +89,7 @@ export async function signIn(email, password, captchaToken) {
 }
 
 export async function signOut() {
+  clearRecoveryPending(); // signing out leaves the password unchanged — nothing is pending any more (NEW-1)
   if (!supabase) return;
   markDeliberateSignOut();      // the person pressed it: the SIGNED_OUT that follows is not "you were signed out"
   try { await supabase.auth.signOut(); } catch (_) {}
@@ -100,6 +103,7 @@ export async function signOut() {
  * There is deliberately NO "active sessions" list beside it — enumerating sessions needs the
  * service-role admin API, which may never reach the browser (/CLAUDE.md → KEY DECISIONS). */
 export async function signOutEverywhere() {
+  clearRecoveryPending();
   if (!supabase) return { error: "Cloud not configured." };
   markDeliberateSignOut();
   try {
@@ -110,13 +114,9 @@ export async function signOutEverywhere() {
   }
 }
 
-export async function resetPassword(email, captchaToken) {
-  if (!supabase) return { error: "Cloud not configured." };
-  const options = { redirectTo };
-  if (captchaToken) options.captchaToken = captchaToken;
-  const { error } = await observeAuthCall("reset", email, () => supabase.auth.resetPasswordForEmail(email, options));
-  return failure(error);
-}
+/* Forgot password has NO Supabase-mailer wrapper here on purpose (NEW-1): it goes through Planyr's own
+ * /api/auth/email-link route (lib/emailLinkClient.js), because Supabase's built-in mailer is limited to 2 emails
+ * an hour for the whole project and sits behind a captcha a corporate network can block. */
 
 export async function updatePassword(password) {
   if (!supabase) return { error: "Cloud not configured." };

@@ -11,7 +11,8 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => {
 });
 
 import { classifyAuthError, observeAuthCall, reportAuthOutcome, cleanExtra, emailDomain, AUTH_EVENT } from "../src/shared/auth/authTelemetry.js";
-import { signIn, signUp, resetPassword } from "../src/workspaces/site-planner/lib/auth.js";
+import { signIn, signUp } from "../src/workspaces/site-planner/lib/auth.js";
+import { requestEmailLink } from "../src/workspaces/site-planner/lib/emailLinkClient.js";
 
 beforeEach(() => { h.events.length = 0; h.next = null; });
 
@@ -86,10 +87,31 @@ describe("the real auth.js wrappers report through the helper", () => {
     expect(r.error).not.toMatch(/captcha/i); // the screen copy is unchanged: plain words
     expect(h.events.every((e) => e.extra.mode === "signin" && e.extra.domain === "b.co")).toBe(true);
   });
-  it("signUp and resetPassword report with their own mode", async () => {
+  it("signUp reports with its own mode", async () => {
     h.next = { data: { user: {}, session: null }, error: null }; await signUp("a@b.co", "pw", {}, "tok");
-    h.next = { error: { code: "captcha_failed", message: "x" } }; await resetPassword("a@b.co");
-    expect(h.events.map((e) => [e.kind, e.extra.mode])).toEqual([["auth-ok", "signup"], ["auth-captcha-refused", "reset"]]);
+    h.next = { data: { user: null, session: null }, error: { code: "captcha_failed", message: "x" } }; await signUp("a@b.co", "pw", {}, "tok");
+    expect(h.events.map((e) => [e.kind, e.extra.mode])).toEqual([["auth-ok", "signup"], ["auth-captcha-refused", "signup"]]);
+  });
+  // NEW-1 (B2626128): Forgot password / "Email me a sign-in link" go through Planyr's own route and report through the SAME helper,
+  // mode "email-link" — a dead mail route is then counted like any other sign-in failure. Only a captcha refusal can alarm, and this
+  // route has no captcha, so these are counts for the daily sweep, never pages. Only the address's DOMAIN is ever sent.
+  describe("email-link requests", () => {
+    const fx = (res) => async () => res;
+    const kinds = async (fetchImpl) => { h.events.length = 0; await requestEmailLink({ email: "me@b.co", purpose: "reset", fetchImpl }); return h.events.map((e) => [e.kind, e.extra.mode, e.extra.domain, e.extra.status ?? null]); };
+    it("sent → auth-ok", async () => { expect(await kinds(fx(Response.json({ ok: true, retryAfterSeconds: 60 })))).toEqual([["auth-ok", "email-link", "b.co", null]]); });
+    it("throttled / bad address are the person's (counted, never an alarm)", async () => {
+      expect((await kinds(fx(Response.json({ ok: false, reason: "throttled", retryAfterSeconds: 30 }, { status: 429 }))))[0][0]).toBe("auth-user-error");
+      expect((await kinds(fx(Response.json({ ok: false, reason: "bad_request" }, { status: 400 }))))[0][0]).toBe("auth-user-error");
+    });
+    it("a network failure is auth-network; a down / failing route is auth-unexpected with its status", async () => {
+      expect((await kinds(async () => { throw new TypeError("Failed to fetch"); }))[0][0]).toBe("auth-network");
+      expect(await kinds(fx(Response.json({ ok: false, reason: "unavailable" }, { status: 503 })))).toEqual([["auth-unexpected", "email-link", "b.co", 503]]);
+      expect((await kinds(fx(new Response("<html>", { status: 404 }))))[0][0]).toBe("auth-unexpected");
+    });
+    it("never sends the address itself", async () => {
+      await kinds(fx(Response.json({ ok: true })));
+      expect(JSON.stringify(h.events)).not.toContain("me@b.co");
+    });
   });
   it("a thrown network error from supabase-js is reported and still thrown to the caller", async () => {
     h.next = new Error("Failed to fetch");

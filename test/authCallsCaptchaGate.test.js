@@ -99,12 +99,20 @@ describe("every Supabase auth call behind the captcha gate carries a bot-check t
     expect(unknown).toEqual([]);
   });
 
-  it("the guard actually SEES the product's real gated calls (not vacuously green): sign in, sign up, reset", () => {
+  it("the guard actually SEES the product's real gated calls (not vacuously green): sign in, sign up", () => {
     const kinds = new Set(scanned.flatMap((s) => s.calls.map((c) => c.kind)));
-    for (const k of ["signInWithPassword", "signUp", "resetPasswordForEmail"]) expect(kinds.has(k), k).toBe(true);
+    for (const k of ["signInWithPassword", "signUp"]) expect(kinds.has(k), k).toBe(true);
     const all = scanned.flatMap((s) => s.calls);
-    expect(all.length).toBeGreaterThanOrEqual(3);
+    expect(all.length).toBeGreaterThanOrEqual(2);
     expect(all.every((c) => c.hasToken)).toBe(true);
+  });
+  // NEW-1 (B2626128): Forgot password no longer touches Supabase's mailer — it goes through Planyr's own
+  // /api/auth/email-link route (no Turnstile by design; reasoning in functions/api/auth/email-link.js). So the product makes NO
+  // resetPasswordForEmail call; if one ever comes back it is a gated call and the scan above fails it without a token.
+  it("the product makes no Supabase-mailer reset call any more (Forgot password uses Planyr's own route)", () => {
+    const kinds = new Set(scanned.flatMap((s) => s.calls.map((c) => c.kind)));
+    expect(kinds.has("resetPasswordForEmail")).toBe(false);
+    expect(kinds.has("signInWithOtp")).toBe(false);
   });
 
   it("the server routes that call GoTrue directly use only ungated paths (verify / admin / user)", () => {
