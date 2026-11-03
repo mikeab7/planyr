@@ -12,49 +12,24 @@
 --                                     stamps THAT invite claimed) or decline (stamps declined_at).
 --                                     Per-invite, never claim-all. Another person's invite id
 --                                     answers 'not_found' — it cannot be read or answered.
---   4) claim_team_invites() and the "self join via invite" policy now skip a DECLINED invite, so
---      declining cannot be undone by a stale client or a raw insert.
--- handle_new_user() is deliberately untouched: a brand-new signup still lands on the teams that
--- invited them with no extra clicks (the trigger runs at signup; a brand-new user has no declined
--- invites). The inbox is for people who already had an account.
+--   4) claim_team_invites() is a no-op and the "self join via invite" policy is gone (NEW-1, 2026-11-02): an
+--      address match is not proof of the mailbox while email confirmation is off. handle_new_user() no
+--      longer joins anyone either. See db/team_invite_proof.sql for how an invitee proves it (the emailed
+--      link) — the functions below are re-created there with that rule.
 -- team_invites still has no UPDATE policy: these SECURITY DEFINER functions are the only writers.
 
 alter table public.team_invites add column if not exists declined_at timestamptz;
 
--- 4a) the client-side backstop policy: an open invite means neither claimed NOR declined.
+-- 4a) NEW-1 (2026-11-02): no client self-join policy (see db/team_invite_proof.sql). Dropped, never re-created.
 drop policy if exists "self join via invite" on public.team_members;
-create policy "self join via invite" on public.team_members
-  for insert to authenticated with check (
-    user_id = (select auth.uid())
-    and exists (
-      select 1 from public.team_invites i
-      where i.team_id = team_members.team_id
-        and lower(i.email) = lower((select auth.email()))
-        and i.claimed_at is null
-        and i.declined_at is null
-        and i.role = team_members.role
-    )
-  );
 
--- 4b) claim-all (still granted; no client calls it on load any more) skips declined invites.
+-- 4b) claim-all is a NO-OP (NEW-1, 2026-11-02): it used to add the caller to every team whose open invite matched
+-- their address, which is not proof of the mailbox while email confirmation is off. Kept (granted, returns 0)
+-- so an older cached client calling it on load does not error.
 create or replace function public.claim_team_invites()
 returns integer language plpgsql security definer set search_path = public as $$
-declare
-  v_email text;
-  v_count integer := 0;
 begin
-  select lower(trim(email)) into v_email from auth.users where id = auth.uid();
-  if v_email is null then return 0; end if;
-  insert into public.team_members (team_id, user_id, role, added_by)
-    select i.team_id, auth.uid(), i.role, i.invited_by
-    from public.team_invites i
-    where lower(trim(i.email)) = v_email and i.claimed_at is null and i.declined_at is null
-    on conflict (team_id, user_id) do nothing;
-  get diagnostics v_count = row_count;
-  update public.team_invites
-    set claimed_at = now()
-    where lower(trim(email)) = v_email and claimed_at is null and declined_at is null;
-  return v_count;
+  return 0;
 end;
 $$;
 
