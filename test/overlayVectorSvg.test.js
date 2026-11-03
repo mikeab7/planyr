@@ -148,3 +148,23 @@ describe("PDF-PARITY: an esriFeature row's line labels print", () => {
     expect(src).not.toMatch(/labels\.push\(\.\.\.esriLineLabels\(gj, cfg\)\)/);
   });
 });
+
+describe("B2589346 — GIS layer labels print at a PHYSICAL size, not 11 clone units", () => {
+  it("overlayLabelFontSize / overlayLabelHalo are points on paper: 7 pt text, ~1.8 pt halo, whatever the sheet scale", async () => {
+    const { overlayLabelFontSize, overlayLabelHalo, PT_PER_CENTI_INCH } = await import("../src/workspaces/site-planner/lib/exportStyle.js");
+    for (const sheetScale of [0.05, 0.5, 5, 50]) {
+      // units × scale × 0.72 pt per centi-inch = points
+      expect(overlayLabelFontSize(sheetScale) * sheetScale * PT_PER_CENTI_INCH).toBeCloseTo(7, 5);
+      expect(overlayLabelHalo(sheetScale) * sheetScale * PT_PER_CENTI_INCH).toBeCloseTo(1.8, 5);
+    }
+    // a tight frame (large sheet scale) must give SMALL clone-unit sizes — the bug was one fixed number
+    expect(overlayLabelFontSize(50)).toBeLessThan(overlayLabelFontSize(0.5));
+    expect(overlayLabelFontSize(0)).toBe(11);   // no scale known: the authored size, never NaN
+  });
+  it("exportSheet retargets every <text> inside a [data-export-vector] group through them", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
+    expect(src).toMatch(/tag === "text"[^\n]*\n\s*node\.setAttribute\("font-size", r6\(overlayLabelFontSize\(sheetScale\)\)\)/);
+    expect(src).toMatch(/overlayLabelHalo\(sheetScale\)/);
+  });
+});
