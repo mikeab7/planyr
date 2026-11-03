@@ -308,6 +308,12 @@ no swallowed `catch` that reads as success. Concretely, in the sync engine:
   `assembly-tear-detected`/`-healed`/`-persisted` with ids and the delta — its own header states
   this was learned the hard way, after "eight merged PRs each closed one interleaving" with no
   observer, so nobody but the owner noticed a ninth recurrence.
+- **A refused DEVICE write is reported, never returned silently (2026-11-03, B2639168).** `planStore.writeEntry`/`blobWrite` used to `return false` on a
+  quota refusal with no telemetry, and `duplicatePlan` ignored the boolean — the copy existed nowhere, the app said "saved on this device" and opened it.
+  Now every refused write is `plan-store-write-refused` (reason + sizes + inventory) and `site-save-refused`; a create that is refused is
+  `site-mint-refused`, shown through the cloud-write failure banner with honest words, and never pushed, listed or navigated into (`lib/planMint.js`
+  `runMint`; `goPlanChecked`). `pushSiteToCloud`'s `"missing"` means "no local record" — not a cloud failure, nothing to retry. Proof:
+  `test/duplicateRefusedLoud.test.js`, `e2e/duplicate-refused-loud.spec.js`.
 - **Closing a plan DRAINS its element writes; it never hard-stops them (2026-10-06).** A plan switch
   unmounts SitePlanner (it is keyed by plan id), and its teardown used to call a bare `stop()`,
   silently dropping whatever was not yet on the wire — a debounced update, a backoff retry, and (the
