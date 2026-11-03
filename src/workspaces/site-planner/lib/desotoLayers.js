@@ -314,7 +314,7 @@ Object.assign(DESOTO_LAYERS, {
 });
 
 Object.assign(DESOTO_VINTAGE, {
-  ms_desoto_zoning: `DeSoto County zoning table — records through the most recent case approvals (latest seen 2026-08-18); updated by the planning departments. District names — Olive Branch: ${ZONING_CITATIONS["Olive Branch"]}. Unincorporated DeSoto County: ${ZONING_CITATIONS["Unincorporated DeSoto County"]}. Southaven: ${ZONING_CITATIONS.Southaven}. A code not in its jurisdiction\'s ordinance list is shown as written.`,
+  ms_desoto_zoning: `DeSoto County zoning table — records through the most recent case approvals (latest seen 2026-08-18); updated by the planning departments. District names — Olive Branch: ${ZONING_CITATIONS["Olive Branch"]}. Unincorporated DeSoto County: ${ZONING_CITATIONS["Unincorporated DeSoto County"]}. Southaven: ${ZONING_CITATIONS.Southaven}. Horn Lake: ${ZONING_CITATIONS["Horn Lake"]}. Hernando: ${ZONING_CITATIONS.Hernando}. Walls has no ordinance online, so its codes are shown as written. A code not in its jurisdiction\'s ordinance list is shown as written.`,
   ms_desoto_city: "DeSoto County GIS municipal limits — current edition",
   ms_psc_electric: "Mississippi Public Service Commission certificated areas, as republished by DeSoto County GIS — edition date not published",
   ms_psc_gas: "Mississippi Public Service Commission certificated areas, as republished by DeSoto County GIS — edition date not published",

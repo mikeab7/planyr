@@ -44,7 +44,7 @@ import { buildingSfRows } from "./buildingSfTable.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
-import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity } from "./exportStyle.js";
+import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity, overlayLabelFontSize, overlayLabelHalo } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
@@ -496,6 +496,10 @@ export function createExportSheet(ctx) {
         // dark aerial — drawn on screen, invisible on paper.
         if (typeof node.closest === "function" && node.closest("[data-export-vector]")) {
           const tag = node.tagName && node.tagName.toLowerCase();
+          if (tag === "text") { // B2589346: layer labels print at a physical size (7 pt + halo), never "11 clone units" (a zone code once printed a fifth of the sheet tall on a tight frame)
+            node.setAttribute("font-size", r6(overlayLabelFontSize(sheetScale)));
+            node.setAttribute("stroke-width", r6(overlayLabelHalo(sheetScale)));
+          }
           if (tag === "path" || tag === "circle") {
             const authored = parseFloat(node.getAttribute("stroke-width"));
             const isCase = node.hasAttribute("data-vcase");

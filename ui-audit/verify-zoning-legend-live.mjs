@@ -94,6 +94,19 @@ check("Southaven view: a 'Southaven' heading", shIdx >= 0);
 const shRows = shIdx >= 0 ? sh.items.slice(shIdx + 1, (sh.items.slice(shIdx + 1).findIndex((i) => i.heading) + 1 + shIdx) || undefined).filter((i) => !i.heading) : [];
 check("Southaven rows carry Southaven's names (e.g. 'C-3 · General Commercial' / 'R-… · Single-Family Residential' / 'PUD · Planned Unit Development')", shRows.some((i) => / · (General Commercial|Single-Family Residential|Planned Unit Development|Planned Commercial)$/.test(i.text)), shRows.slice(0, 8).map((i) => i.text).join(" | "));
 
+/* B2589345 (V2038401): Horn Lake and Hernando rows carry their ordinance names, each government its OWN (Horn Lake's R-6 is High Density, Hernando's Medium). */
+const sectionRows = (r, name) => { const i = r.items.findIndex((x) => x.heading && x.text === name); if (i < 0) return null; const rest = r.items.slice(i + 1); const j = rest.findIndex((x) => x.heading); return (j < 0 ? rest : rest.slice(0, j)).map((x) => x.text); };
+const hl = await view("horn-lake-z13", 34.9553, -90.0348, 13);
+const hlRows = sectionRows(hl, "Horn Lake");
+check("Horn Lake view: a 'Horn Lake' heading", !!hlRows);
+check("Horn Lake rows carry Horn Lake's words (General Commercial / Residential (Medium Density) / Planned Business Park …)", !!hlRows && hlRows.some((t) => / · (General Commercial|Residential \((Medium|High|Low) Density\)|Planned Business Park|Planned Commercial|Light Industrial)$/.test(t)), (hlRows || []).slice(0, 10).join(" | "));
+if (hlRows && hlRows.some((t) => /^R-6( ·|$)/.test(t))) check("Horn Lake's R-6 reads 'High Density'", hlRows.some((t) => t === "R-6 · Residential (High Density)"), hlRows.find((t) => /^R-6( ·|$)/.test(t)));
+const he = await view("hernando-z13", 34.8240, -89.9937, 13);
+const heRows = sectionRows(he, "Hernando");
+check("Hernando view: a 'Hernando' heading", !!heRows);
+check("Hernando rows carry Hernando's words (Highway Commercial / Residential Single-Family (Medium Density) / Planned Corporate Office Park …)", !!heRows && heRows.some((t) => / · (Highway Commercial|General Commercial|Residential Single-Family \((Medium|Low) Density\)|Planned Corporate Office Park|Light Industrial)$/.test(t)), (heRows || []).slice(0, 10).join(" | "));
+if (heRows && heRows.some((t) => /^R-6( ·|$)/.test(t))) check("Hernando's R-6 reads 'Medium Density'", heRows.some((t) => t === "R-6 · Residential Single-Family (Medium Density)"), heRows.find((t) => /^R-6( ·|$)/.test(t)));
+
 await view("unincorporated-z13", 34.80, -89.76, 13);
 const several = await view("several-places-z11", 34.93, -89.9, 11);
 check("several places in view: more than one heading", several.items.filter((i) => i.heading).length > 1, several.items.filter((i) => i.heading).map((i) => i.text).join(", "));
