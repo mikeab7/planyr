@@ -96,6 +96,22 @@ if (want("olivebranch")) {
   const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
   areas.olivebranch = { label: "Olive Branch, MS and its utility service area", source: "Union of the data extents of the City of Olive Branch ArcGIS Online utility, planning-area and annexation layers (services9.arcgis.com/VGtdH6iTQlVulSnr), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
+if (want("sugarland")) {
+  /* NEW-1 (Sugar Land city layers, 2026-11-02): the City of Sugar Land's limits (layer 0, one polygon) ∪ its ETJ (layer 1, 14 polygons), from the city's own CityLimits_ETJ map service.
+   * The city's ArcGIS Server is not reachable from a build sandbox, so it is read through planyr.io's same-origin relay (a browser-style User-Agent is needed: Cloudflare refuses a bare
+   * script one); PLANYR_RELAY_BASE points this at a branch preview before the relay host is on the apex. Esri JSON, every ring its own polygon (a hole is filled — an area may only err toward SHOWING a layer). */
+  const base = process.env.PLANYR_RELAY_BASE || "https://planyr.io";
+  const SL = `${base}/gis-proxy/interactivemaps.sugarlandtx.gov/512/rest/services/AGO_ServiceLayers/CityLimits_ETJ/MapServer`;
+  const polys = [];
+  for (const layer of [0, 1]) {
+    const u = new URL(`${SL}/${layer}/query`);
+    for (const [k, v] of Object.entries({ f: "json", where: "1=1", outSR: 4326, returnGeometry: "true", maxAllowableOffset: 0.0004 })) u.searchParams.set(k, v);
+    const r = await fetch(u, { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } }); if (!r.ok) throw new Error(`${u} → ${r.status}`);
+    const j = await r.json(); if (j.error || !j.features || !j.features.length) throw new Error(`${u} → ${JSON.stringify(j.error || "no features")}`);
+    for (const f of j.features) for (const ring of f.geometry.rings) polys.push([ring.map(([x, y]) => [round(x), round(y)])]);
+  }
+  areas.sugarland = { label: "City of Sugar Land limits and ETJ", source: "City of Sugar Land AGO_ServiceLayers/CityLimits_ETJ layers 0 (City_Limits) and 1 (ETJ)", polys };
+}
 /* NEW-1 (Colorado due-diligence layers, B2528688): the county / city areas the Weld, Adams and Aurora rows are declared for.
  *   co_weld, co_adams   the county, from the SAME bundled county polygons as `harris` (no network).
  *   co_aurora           the union of the data extents of the City of Aurora's airport-noise, Buckley APZ, zoning and city-limits layers (ags.auroragov.org/aurora/rest/services/OpenData/MapServer
