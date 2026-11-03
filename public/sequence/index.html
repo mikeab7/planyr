@@ -329,26 +329,45 @@ select.ei { cursor: pointer; }
 .pin-edge-r.pin-on::after { left:0;  background:linear-gradient(to right, var(--bd2), transparent); }
 .drow { display: flex; border-bottom: 1px solid var(--bd); border-left: 2px solid transparent;
   position: absolute; left: 0; right: 0; }
-/* NEW-1 (selected/hovered row outline) — the top + bottom line is drawn ON EACH CELL (a ::before inside
-   it), not as a row-level inset shadow: the pinned ID / TASK cells paint an opaque background over the row's
-   own shadow, so the old line started at START and stopped short of the frozen columns. */
-/* NEW-3 — the HOVER outline only paints while the pointer is the thing driving: the grid sets data-kbnav on its
-   scroll container the moment a navigation key is pressed and clears it on the next REAL pointer move, so a
-   parked mouse can never keep a second row lit while the arrow keys walk the blue box down the list. (The
-   selected-row outline below is not hover and is unaffected.) The filler strip [data-grid-strip] at each row's
-   right edge (NEW-1) carries the same outline so the line runs edge to edge.
-   NEW-1 (filler rows) — EVERY child of a row that carries the line says so: task cells by [data-col-key], the
-   filler strip by [data-grid-strip], and the cells of the blank / "+ New task" / review rows by [data-row-line].
-   Each must also be `position: relative` (or sticky) so its ::before is boxed by ITS OWN cell: the filler strip
-   and the blank-row cells used to be un-positioned, which let the line anchor to the whole row — painted over
-   the ordinary cells but UNDER the opaque frozen ID / Task cells, so it started at START and stopped short. */
-[data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-col-key]::before,
-[data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-row-line]::before,
-[data-grid-scroll]:not([data-kbnav]) .drow:hover > [data-grid-strip]::before,
-.drow[data-row-sel] > [data-col-key]::before, .drow[data-row-sel] > [data-grid-strip]::before,
-.drow[data-new-task-row="sel"] > [data-row-line]::before, .drow[data-new-task-row="sel"] > [data-grid-strip]::before {
-  content:""; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:1;
-  border-top:1px solid #94a3b8; border-bottom:1px solid #94a3b8; }
+/* NEW-1 (row marker, ONE ELEMENT PER ROW — B2584496 amends B2279024 / B2623536) — the hovered / selected row's top + bottom line, AND
+   the two grid-line pixels beside it, are painted by ONE element on the ROW (`.drow::after`), above the frozen cells (z-index 6: over
+   the sticky ID / Task cells at 5, under the sticky header at 10 and the editors / popovers at 30). It used to be a ::before inside
+   each CELL.
+   WHY: the marker was already the same colour and position on every cell (measured), but the grid line beside it is each cell's OWN
+   border, and a frozen (sticky, opaque) cell rasterises that border differently from a plain one wherever the device pixel ratio is
+   fractional — browser zoom 125 / 150 / 175 %. ID and Task read thinner and greyer, Start onward heavier and bluer (owner, Grand Port /
+   Groundbreaking Path; ui-audit/verify-grid-row-marker-uniform.mjs measures it). At ratios 1 and 2 the row is already identical, so a
+   lower-zoom Chrome shows nothing. One element cannot differ from itself, so the box-shadow re-draws the cells' grid line (var(--bd), the
+   same colour) in the one pixel above and the one below the marker: those pixels now come from this element on every cell, frozen or not.
+   The marker keeps today's position exactly. It also reaches blank / "+ New task" / review rows and the filler strip without a
+   per-cell hook.
+   NEW-3 — the HOVER marker only paints while the pointer is the thing driving: the grid sets data-kbnav on its scroll
+   container the moment a navigation key is pressed and clears it on the next REAL pointer move, so a parked mouse can never
+   keep a second row lit while the arrow keys walk the blue box down the list. (The selected-row marker is not hover.) */
+[data-grid-scroll]:not([data-kbnav]) .drow:hover::after,
+.drow[data-row-sel]::after,
+.drow[data-new-task-row="sel"]::after {
+  content:""; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:6;
+  border-top:1px solid #94a3b8; border-bottom:1px solid #94a3b8;
+  box-shadow:0 -1px 0 0 var(--bd), 0 1px 0 0 var(--bd); }
+/* At a FRACTIONAL device pixel ratio (browser zoom 80 / 125 / 150 / 175 / 250 %) the neighbouring row's own fill edge lands on the pixel
+   just past that grid line and is rasterised differently under a frozen cell, so the same band is drawn two pixels deep there. Whole
+   ratios (1, 2, 3) keep the single pixel: nothing differs there, so nothing changes. */
+@media (max-resolution: 0.95dppx), (min-resolution: 1.05dppx) and (max-resolution: 1.95dppx), (min-resolution: 2.05dppx) and (max-resolution: 2.95dppx) {
+  [data-grid-scroll]:not([data-kbnav]) .drow:hover::after,
+  .drow[data-row-sel]::after,
+  .drow[data-new-task-row="sel"]::after { box-shadow:0 -2px 0 0 var(--bd), 0 2px 0 0 var(--bd); }
+}
+/* The band depth that clears the neighbouring fill edge is not one number for every ratio (measured, same single-pixel bar): 2px at 80 / 125 /
+   175 / 215 / 225 %, 2.5px at 150 % (Windows' own 150 % scaling) and 250 %. An empirical table, re-measured by the harness. */
+@media (min-resolution: 1.45dppx) and (max-resolution: 1.55dppx), (min-resolution: 2.45dppx) and (max-resolution: 2.55dppx) {
+  [data-grid-scroll]:not([data-kbnav]) .drow:hover::after,
+  .drow[data-row-sel]::after,
+  .drow[data-new-task-row="sel"]::after { box-shadow:0 -2.5px 0 0 var(--bd), 0 2.5px 0 0 var(--bd); }
+}
+/* …a row INSIDE a multi-row range keeps only the marker: there the neighbouring row edge is the range's own blue line, and a grid-colour
+   line drawn over it would turn it grey (ui-audit/verify-grid-full-lines "the shared row edge is one range-blue line"). */
+[data-grid-scroll] .drow:has(> [data-cell-in-range]):is(:hover, [data-row-sel])::after { box-shadow:none; }
 /* A full-cell hover-revealed overlay does NOT work here: :hover is true for the ENTIRE mousedown
    (the cursor always enters the row before it can press), so gating pointer-events on :hover still
    swallows every ordinary click on the ID cell — proved live: it silently broke the pre-existing

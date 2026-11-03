@@ -45,9 +45,9 @@ describe("Schedule grid — the right-edge strip reads as the row continuing (NE
     // …and the cells hold no second inline copy of the press logic
     expect(grid.match(/e\.shiftKey && selectedId !== null/g)?.length).toBe(1);
   });
-  it("the strip takes the same hover / selected-row outline as the cells", () => {
-    expect(seq).toMatch(/\.drow\[data-row-sel\] > \[data-grid-strip\]::before/);
-    expect(seq).toMatch(/\.drow:hover > \[data-grid-strip\]::before/);
+  it("the strip takes the same hover / selected-row outline as the cells — ONE row-level line covers both (B2584496)", () => {
+    expect(seq).toMatch(/\.drow\[data-row-sel\]::after/);
+    expect(seq).toMatch(/\.drow:hover::after/);
   });
 });
 
@@ -64,10 +64,10 @@ describe("Schedule grid — no size readout (NEW-2)", () => {
 
 describe("Schedule grid — keyboard navigation hands the highlight to the keyboard (NEW-3)", () => {
   it("the row-hover outline and grip only paint while the grid is not in keyboard-nav mode", () => {
-    expect(seq).toMatch(/\[data-grid-scroll\]:not\(\[data-kbnav\]\) \.drow:hover > \[data-col-key\]::before/);
+    expect(seq).toMatch(/\[data-grid-scroll\]:not\(\[data-kbnav\]\) \.drow:hover::after/);
     expect(seq).toMatch(/\[data-grid-scroll\]:not\(\[data-kbnav\]\) \.drow:hover \.rowgrip \{ opacity: 1; \}/);
     // the bare, ungated hover rule must not come back
-    expect(seq).not.toMatch(/(^|\n)\.drow:hover > \[data-col-key\]::before/);
+    expect(seq).not.toMatch(/(^|\n)\.drow:hover::after/);
     expect(seq).not.toMatch(/(^|\n)\.drow:hover \.rowgrip/);
   });
   it("a nav key sets data-kbnav; only a pointermove at DIFFERENT coordinates clears it (a synthesized same-spot move does not)", () => {
