@@ -81,7 +81,8 @@ export function zoningRows(props, jurisdiction) {
   const rows = [];
   const zone = zoneLabelText(p.ZONE);
   if (zone) rows.push({ label: "Zone", text: zoneWithName(zone, jurisdiction) }); // "M-1 · Light Industrial" when the ordinance name is sourced, else the bare code (B2507063)
-  rows.push({ label: "Jurisdiction", text: jurisdiction || "Checking city limits…" });
+  // the place is named ONCE, in the card's title ("Zoning · Olive Branch", constraint #50); the row exists only while the city limits are still loading, so the card says so instead of guessing
+  if (!jurisdiction) rows.push({ label: "Jurisdiction", text: "Checking city limits…" });
   const prev = zoneLabelText(p.PREV_ZONE);
   if (prev && prev !== zone) rows.push({ label: "Previously", text: displayCode(prev) });
   const cs = String(p.CASE_NO == null ? "" : p.CASE_NO).trim();

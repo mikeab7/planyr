@@ -1205,6 +1205,10 @@ function dropIdbBackedSrc(m) {
  * B217540's byte-exact whole-store snapshot still serves a store that could not be split (planStore "blob" mode). */
 /** Does this device hold a record for `id`? Identical truthiness to `!!loadSite(id)`, without the parse and the heal. */
 export function siteExistsLocally(id) { return planStore.has(sitesKey(), id); }
+/** Why the device last refused to store plan `id` ({ reason: "quota" | <error name> | "unavailable", … }), or null. NEW-1 (2026-11-03). */
+export function lastSaveRefusal(id) { return planStore.lastRefusal(id); }
+/** Make room in this device's plan storage ONCE per page load (shared with the automatic attempt); `force` = an explicit user Retry. */
+export function requestPlanStoreRoom({ force = false } = {}) { return planStore.requestRoom({ base: sitesKey(), reason: "quota", force }); }
 /** The stored record for `id` as the persistence verifier needs it (its drawn collections). */
 export function readBackSite(id) { return planStore.readBack(sitesKey(), id) || loadSite(id); }
 function readSharedStore() { return planStore.readShared(sitesKey()); }
@@ -2338,6 +2342,13 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   lastSeenAt[partial.id] = model.updatedAt;
   lastSeenHeader[partial.id] = headerSlice(model); // B1953797 — this tab's own write is its new base
   const ok = writeSite(partial.id, model);          // B2165120: this plan's entry only — never the library
+  if (!ok) {
+    /* ⛔ NEW-1 (2026-11-03) — A REFUSED DEVICE WRITE IS NEVER SILENT. `planStore` already reported WHY (`plan-store-write-refused`: reason, sizes, the cap
+     * inventory); this is the plan-level twin so a caller that ignores the boolean still leaves a trace naming the plan. Callers on a path the user
+     * watches (the three plan mints, rename, status/dates) read the boolean and say so — see lib/planMint.js. */
+    const why = planStore.lastRefusal(partial.id);
+    reportClientEvent("site-save-refused", "the device refused to store this plan — nothing was saved to this device", { id: partial.id, reason: (why && why.reason) || "unknown", existing: !!existing });
+  }
   if (ok) {
     notifySiteModelChanged(partial.id);
     // B1525088 (NEW-1) — announce an identity change (name/status/role/which group) on the

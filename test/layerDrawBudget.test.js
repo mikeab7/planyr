@@ -126,10 +126,43 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
     fire("loading"); fire("overbudget", { vertices: 523000 }); fire("load");
     expect(out.map((o) => o[1])).toEqual(["failed"]);                   // not "failed" then "empty"
-    expect(out[0][2]).toMatch(/too detailed to draw/);
+    expect(out[0][2]).toBe("Zoom in to see Layer here.");              // NEW-2 (B2507064 ×2): plain words — no point count, no units, not "too detailed" 
     fire("loading"); fire("load");                                      // the next cycle (a zoom) starts clean
     expect(out).toHaveLength(2);
     expect(out[1][1]).not.toBe("failed");                                // …and reports what it found, not the old refusal
+  });
+  it("NEW-2 (B2507064 ×2): a refusal NEVER contradicts the map — with polygons already drawn the row stays 'loaded' and says nothing; with nothing drawn it says 'Zoom in…' in plain words", async () => {
+    vi.resetModules(); mocks();
+    const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const run = (drawnVertices) => {
+      const handlers = {};
+      const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, eachLayer: () => {}, _layers: {}, __pfDrawnVertices: () => drawnVertices };
+      const out = [];
+      attachFeatureRetry(lyr, "k", { label: "Zoning" }, (...a) => out.push(a));
+      const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
+      fire("loading"); fire("overbudget", { vertices: 16000 }); fire("load");
+      return out;
+    };
+    const drawn = run(120000);
+    expect(drawn.map((o) => o[1])).not.toContain("failed");
+    expect(drawn.map((o) => o[1])).not.toContain("empty");
+    const none = run(0);
+    expect(none[0][1]).toBe("failed");
+    expect(none[0][2]).toBe("Zoom in to see Zoning here.");
+    for (const o of [...drawn, ...none]) expect(String(o[2] || "")).not.toMatch(/\d|points|too detailed|simpler copy/i);
+  });
+  it("NEW-2: buildFeatureLayer publishes what is on the map (`__pfDrawnVertices`) and it follows the draw/refuse cycle", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Zoning", color: "#000" }, 1, "pane");
+    expect(lyr.__pfDrawnVertices()).toBe(0);
+    lyr.createLayers([{ id: 1, ...poly(100000) }]);
+    expect(lyr.__pfDrawnVertices()).toBe(100000);
+    const refused = [];
+    lyr.on("overbudget", () => refused.push(1));
+    lyr.createLayers([{ id: 2, ...poly(130000) }]);                      // over the per-batch cap → refused, and the old geometry stays the only thing drawn
+    expect(refused).toHaveLength(1);
+    expect(lyr.__pfDrawnVertices()).toBe(100000);
   });
   it("attachFeatureRetry gives up on a persistently failing service — including a SLOW one (esri-leaflet fires `load` BEFORE `requesterror`, which used to wipe the retry count every cycle)", async () => {
     vi.resetModules(); mocks();
