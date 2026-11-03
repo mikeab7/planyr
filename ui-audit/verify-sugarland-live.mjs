@@ -31,6 +31,8 @@ const HOSTS = /interactivemaps\.sugarlandtx\.gov|SVtsrBXEiBhI5L5n/;
 const ACADEMY = { lat: 29.6122, lng: -95.6693 };
 const TOWN_SQUARE = { lat: 29.6197, lng: -95.6349 };
 const HOUSTON = { lat: 29.80, lng: -95.54 };
+const AZ02 = { lat: 29.61, lng: -95.6554 };    // inside the AZ-02 polygon (the city's service answers AZ-02 alone here)
+const ANID = { lat: 29.635, lng: -95.668 };    // inside the ANID polygon and inside the city+ETJ area (ANID alone; the ANID north of ~29.64 lies outside the area, so the layer is not offered there)
 
 /* --local: a SIGNED-OUT run for a PR preview (the preview has no E2E_LOGIN_KEY, so it cannot sign in): the three located plans are seeded into the browser's own plan store, nothing touches the
  * cloud, nothing needs cleaning up. The layers, requests, cards and legend are identical; only "signed in as the test account" is not proved. */
@@ -50,6 +52,7 @@ if (LOCAL) {
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
   page = await ctx.newPage();
   LOCAL_PLANS.ac = localPlan("ac", { lat: 29.6122, lng: -95.6693 }, "Academy"); LOCAL_PLANS.ts = localPlan("ts", { lat: 29.6197, lng: -95.6349 }, "Town Square"); LOCAL_PLANS.hou = localPlan("hou", { lat: 29.80, lng: -95.54 }, "Houston");
+  LOCAL_PLANS.az02 = localPlan("az02", { lat: 29.61, lng: -95.6554 }, "AZ-02"); LOCAL_PLANS.anid = localPlan("anid", { lat: 29.635, lng: -95.668 }, "ANID");
   await page.addInitScript((j) => { try { localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify(Object.fromEntries(Object.values(LOCAL_PLANS).map((pl) => [pl.id, pl]))));
   s = { proof: { email: "(signed out — local plans)" }, close: () => browser.close() };
 } else {
@@ -79,7 +82,7 @@ page.on("request", (r) => { if (HOSTS.test(r.url())) log.push({ url: r.url(), st
 const answered = (re) => log.filter((e) => !e.req && re.test(e.url) && /\/query/.test(e.url));
 const sent = () => log.filter((e) => e.req);
 
-const mk = (id, p, label) => (LOCAL ? LOCAL_PLANS[id.includes("-ac-") ? "ac" : id.includes("-ts-") ? "ts" : "hou"] : { ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });
+const mk = (id, p, label) => (LOCAL ? LOCAL_PLANS[id.includes("-ac-") ? "ac" : id.includes("-ts-") ? "ts" : id.includes("-az02-") ? "az02" : id.includes("-anid-") ? "anid" : "hou"] : { ...throwawayPlan(id), origin: { lat: p.lat, lon: p.lng }, site: `ZZ Live Check — ${label}` });
 const cleanupIds = [];
 const insert = async (plan) => {
   if (LOCAL) return;
@@ -186,7 +189,10 @@ try {
   const rowsOf = (id) => (card[id] && card[id].rows) || [];
   const txt = (id) => JSON.stringify(card[id] || {});
   check("B · zoning card at the Academy point: R-1Z with the city's name", /R-1Z · Zero Lot Line Single-Family Residential/.test(txt("sl_zoning")), "");
-  check("B · airport zoning at the Academy point: AZ-01, with the 'not read' statement and no height", /AZ-01/.test(txt("sl_airport_zoning")) && /has not read it/.test(txt("sl_airport_zoning")) && !/\b\d+\s*(ft|feet)/i.test(txt("sl_airport_zoning")), "");
+  const az1 = (card.sl_airport_zoning && card.sl_airport_zoning.rows) || [];
+  check("B · airport zoning at the Academy point is AZ-01 and LEADS with the industrial line (warehouse & distribution permitted, subject to the base zoning)", /AZ-01/.test(card.sl_airport_zoning && card.sl_airport_zoning.title) && az1[0] && az1[0].label === "Warehouse & distribution" && /Permitted here, subject to the base zoning \(Sec\. 9-17, Table 9-17\.1\)/.test(az1[0].text), JSON.stringify(az1[0]));
+  check("B · AZ-01 card: residential prohibited (Sec. 9-16), 'both the base zoning and AZ-01 apply', a link to the Municode Chapter 9 page", /Sec\. 9-16/.test(txt("sl_airport_zoning")) && /both the base zoning and AZ-01 apply/.test(txt("sl_airport_zoning")) && az1.some((r) => /municode\.com.*CH9SULAREAIZORE/.test(r.href || "")), "");
+  check("B · AZ-01 card states no height or distance, and no 'not read' hedge", !/\b\d+\s*(ft|feet)/i.test(txt("sl_airport_zoning")) && !/height limit|has not read/i.test(txt("sl_airport_zoning")), "");
   check("B · future land use at the Academy point: Light Industrial", /Light Industrial/.test(txt("sl_flu")), "");
   check("B · capital project card: phase and (when the city states one) budget", rowsOf("sl_capital_projects").some((r) => r.label === "Phase"), "");
   check("B · public land card: owner as title, address", !!(card.sl_public_land && card.sl_public_land.title) && rowsOf("sl_public_land").some((r) => r.label === "Address"), "");
@@ -222,6 +228,10 @@ try {
   for (const id of ["sl_tirz", "sl_available_sites", "sl_dev_projects", "sl_zoning_cases"]) await turnOn(panel, "jur", id);
   await turnOn(panel, "access", "sl_thoroughfare");
   await turnOn(panel, "util", "fire_hydrants");
+  await page.getByTestId("layers-collapse").click().catch(() => {});
+  // the throwaway plan frames a small area (its parcel is small); the nearest tracked development project is ~600 m from Town Square, so zoom out three notches (each layer is re-asked for the larger view)
+  const cbox = await page.getByTestId("planner-canvas").boundingBox();
+  for (let i = 0; i < 3; i++) { await page.mouse.move(cbox.x + cbox.width / 2, cbox.y + cbox.height / 2); await page.mouse.wheel(0, 400); await sleep(700); }
   await sleep(14000);
   const L2 = await layers(); const F2 = (L2 && L2.features) || {};
   console.log("Town Square painted features:", JSON.stringify(Object.fromEntries(Object.entries(F2).filter(([k]) => k.startsWith("sl_")))));
@@ -233,10 +243,29 @@ try {
     check(`C · ${id}: a click card opens at a known feature, with a title${id === "sl_hydrants" ? "" : " and at least one value"}`, !!(c && c.title && (id === "sl_hydrants" || (c.rows || []).length >= 1)), c ? `${c.title} · ${(c.rows || []).length} rows` : "no card");
     if (id === "sl_thoroughfare" && c) {
       const t = JSON.stringify(c);
+      const cur = (c.rows || []).find((r) => r.label === "Current section"), rec = (c.rows || []).find((r) => r.label === "Plan's recommended section");
+      check("C · section-code card: the legend's classification on a legend code (Brooks St C4U → Major Collector), and a code not on the legend (CSD) shown bare", !!cur && cur.text === "C4U · Major Collector" && !!rec && rec.text === "CSD", JSON.stringify([cur, rec]));
       check("C · thoroughfare card: a class and a section code, and no width / right-of-way", (c.rows || []).some((r) => r.label === "Class") && (c.rows || []).some((r) => /section/i.test(r.label)) && !/width|right-of-way/i.test(t), t.slice(0, 200));
     }
   }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/C-town-square.png` });
+
+  /* ── C2. AZ-02 and ANID cards (B2638209) — a throwaway plan at a point inside each ─────────────── */
+  for (const [key, pt, id] of [["az02", AZ02, "az02"], ["anid", ANID, "anid"]]) {
+    const pl = mk(`${LIVE_PREFIX}sugarland-${id}-${Date.now().toString(36)}`, pt, key.toUpperCase());
+    await insert(pl);
+    const pn = await openPanel(pl.id);
+    await turnOn(pn, "jur", "sl_airport_zoning");
+    await sleep(9000);
+    const c = await identify("sl_airport_zoning", pt);
+    console.log(`card ${key}:`, JSON.stringify(c));
+    if (key === "az02") {
+      check("C · AZ-02 card: warehouse & distribution NOT permitted (Sec. 9-17, Table 9-17.1), first row", !!c && /AZ-02/.test(c.title) && c.rows[0] && c.rows[0].label === "Warehouse & distribution" && /Not permitted here \(Sec\. 9-17, Table 9-17\.1\)/.test(c.rows[0].text), JSON.stringify(c && c.rows[0]));
+      check("C · AZ-02 card: manufacturing and wholesale not permitted; no full permitted list; no height", !!c && /Light and heavy manufacturing and wholesale/.test(JSON.stringify(c)) && /Table 9-17\.1 has the full schedule/.test(JSON.stringify(c)) && !/height limit|\b\d+\s*(ft|feet)/i.test(JSON.stringify(c)), "");
+    } else {
+      check("C · ANID card: Airport Noise Impact District (Sec. 9-15), no land use restrictions, consider the noise, Sec. 9-16 plat statement", !!c && /ANID/.test(c.title) && /Airport Noise Impact District \(Sec\. 9-15\)/.test(JSON.stringify(c)) && /No land use restrictions are imposed/.test(JSON.stringify(c)) && /Sec\. 9-16 requires a statement on the plat/.test(JSON.stringify(c)), "");
+    }
+  }
 
   /* ── D. Houston offers none of it ─────────────────────────────────────────────────────────── */
   log = [];

@@ -11,8 +11,8 @@
  * WHAT IS DELIBERATELY NOT SAID (the traps, each measured):
  *   · ROAD_WIDTH is a string ("50", "60"…) and nothing in the layer says whether it is pavement or right-of-way; RR_Wd_1 / RR_WD_2 are unexplained (a sample read 25 and 40). None is
  *     shown, none is called ROW. The SECTION codes are the city's cross-section names (P4D, C4D, L2U, C2U-B, C2U-40-P, CSD, CD4, U2 … 25 spellings); their meaning is on the plan's
- *     legend (the Master Thoroughfare Plan PDF, Ordinance 2167), which this build could not read (the city's document host is not reachable from the build environment), so
- *     they are shown AS THE CITY WRITES THEM and never decoded or turned into a right-of-way width.
+ *     legend (the Master Thoroughfare Plan PDF, Ordinance 2167, Feb 2020 print), which gives CLASSIFICATION only — no ROW, no definition of the letters. A code that is exactly a legend row shows its
+ *     classification (`SECTION_CLASSIFICATION`); every other code (C4D, the most common, is not on the 2020 legend) shows AS THE CITY WRITES IT. The letters are never expanded and no width is shown.
  *   · LANE_NUMBER is the city's per-line count: it reads 2 on 655 of 674 C4D segments and on all 48 P6D — it is NOT the road's total lane count. It is shown as "Lanes (city's
  *     count)" and the layer's note says to read the section code instead.
  *   · Whether the plan's section DIFFERS from the road's current section is shown as a card row (the two codes, side by side) — "findable, without a verdict".
@@ -54,6 +54,30 @@ export function streetName(raw) {
   }).replace(/\bMc([a-z])/g, (_m, c) => "Mc" + c.toUpperCase());
 }
 
+/* THE 2020 LEGEND'S CLASSIFICATION TABLE — Master Thoroughfare Plan legend (Ordinance 2167, Feb 2020 print), read by the owner. The legend gives CLASSIFICATION ONLY: no right-of-way, and no definition of the letters
+ * — so the letters are never expanded and no width is shown (the legend's "(40')" does not say pavement or ROW). Keys are compared with every space removed. A card glosses a code ONLY when the layer's code is exactly
+ * a legend row ("C4U-P" is the legend's "C4U - P"); the layer's spellings that are not a legend row (C2U-B, C2U-40-P, P6D-B, C4D-P …) and C4D — the most common code in the layer, NOT on the 2020 legend — show as written. */
+export const SECTION_CLASSIFICATION = Object.freeze({
+  "L2U": "None, Minor Collector",
+  "R2U": "Minor & Major Collector / Arterial / State Hwy",
+  "C2U": "Minor & Major Collector",
+  "C2U-BIKE": "Minor & Major Collector",
+  "C2U(40')-10'LANES": "Minor & Major Collector",
+  "C2U(40')-BIKEORPARKING": "Major Collector",
+  "C4U": "Major Collector",
+  "C4U-P": "Major Collector",
+  "C4U-B": "Major Collector",
+  "P4D": "Arterial",
+  "P4D-B": "Arterial",
+  "P6D": "Arterial / State Hwy",
+  "P8D": "Arterial / State Hwy",
+});
+const secKey = (code) => String(code == null ? "" : code).toUpperCase().replace(/\s+/g, "");
+/* The legend's classification for a section code, or null (never a guess). */
+export const sectionClassification = (code) => SECTION_CLASSIFICATION[secKey(code)] || null;
+/* "P4D · Arterial", or the bare code. */
+export const sectionWithClass = (code) => { const c = sectionClassification(code); return c ? `${code} · ${c}` : code; };
+
 /* Section codes as written; the "<Null>" string some rows carry is not a code. */
 export const sectionCode = (v) => { const t = str(v); return !t || /^<null>$/i.test(t) ? "" : t.toUpperCase(); };
 
@@ -73,9 +97,9 @@ export function thoroughfareCard(props) {
   const rows = [];
   if (c) rows.push({ label: "Class", text: c.label });
   const cur = sectionCode(p.SECTION_TYPE), rec = sectionCode(p.RECOMMENDED_SECTION), y35 = sectionCode(p.SECTION_2035);
-  if (cur) rows.push({ label: "Current section", text: cur });
-  if (rec) rows.push({ label: "Plan's recommended section", text: rec });
-  if (y35) rows.push({ label: "2035 section", text: y35 });
+  if (cur) rows.push({ label: "Current section", text: sectionWithClass(cur) });
+  if (rec) rows.push({ label: "Plan's recommended section", text: sectionWithClass(rec) });
+  if (y35) rows.push({ label: "2035 section", text: sectionWithClass(y35) });
   if (plannedSectionDiffers(p)) rows.push({ label: "Plan differs from current", text: `${cur} → ${rec}` });
   else if (hasPlannedSectionOnly(p)) rows.push({ label: "Plan differs from current", text: `no current section on file → ${rec}` });
   const ln = laneText(p.LANE_NUMBER);

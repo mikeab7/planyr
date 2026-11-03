@@ -27,7 +27,7 @@ import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import {
   SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, SUGARLAND_UTILITY_NOTE, UTILITY_MAP_REQUEST_URL, sugarLandGroupNote, relayed, SUGARLAND_RELAY, soft, money, cityHref,
-  airportCard, airportStyle, AIRPORT_AREAS, fluCard, fluLegend, hydrantCard, cupCard, exceptionCard, varianceCard, cipCard, CIP_WHERE, rowLandCard, tirzCard, availableSiteCard, devProjectCard,
+  airportCard, airportStyle, AIRPORT_AREAS, AIRPORT_CODE_URL, fluCard, fluLegend, hydrantCard, cupCard, exceptionCard, varianceCard, cipCard, CIP_WHERE, rowLandCard, tirzCard, availableSiteCard, devProjectCard,
 } from "../src/workspaces/site-planner/lib/sugarLandLayers.js";
 import { THOROUGHFARE_WHERE } from "../src/workspaces/site-planner/lib/sugarLandThoroughfare.js";
 
@@ -218,7 +218,9 @@ describe("requests actually issued — Sugar Land URLs fire inside the city and 
   });
 });
 
-describe("airport zoning — the city's colours; AZ-01 / AZ-02 / ANID are named, never given a height", () => {
+describe("airport zoning — the city's colours; the cards carry Chapter 9's land-use text and never a height", () => {
+  const text = (t) => JSON.stringify(airportCard({ TYPE: t }));
+  const row = (t, l) => (airportCard({ TYPE: t }).rows.find((r) => r.label === l) || {}).text;
   it("keeps the city's five colours", () => {
     expect(AIRPORT_AREAS["AZ-01"].color).toBe("#ebebb5");
     expect(AIRPORT_AREAS["AZ-02"].color).toBe("#de8585");
@@ -228,20 +230,43 @@ describe("airport zoning — the city's colours; AZ-01 / AZ-02 / ANID are named,
     expect(airportStyle({ TYPE: "AZ-02" }, 1).fillColor).toBe("#de8585");
     expect(new Set(Object.values(AIRPORT_AREAS).map((a) => a.color)).size).toBe(5);
   });
-  it.each(["AZ-01", "AZ-02", "ANID"])("%s: shows the code, says it is defined in the Development Code and was not read, links the code, and states NO limit", (t) => {
-    const c = airportCard({ TYPE: t });
-    expect(c.title).toBe(`Airport zoning · ${t}`);
-    const text = JSON.stringify(c);
-    expect(text).toMatch(/Chapter 9/);
-    expect(text).toMatch(/has not read it/);
-    expect(c.rows.some((r) => r.href && /municode/.test(r.href))).toBe(true);
-    expect(text).not.toMatch(/\b\d+\s*(ft|feet|foot|')/i);        // no height / distance limit
-    expect(text).not.toMatch(/AGL|MSL|maximum height|height limit of/i);
+  it("AZ-01: the industrial line comes FIRST — warehouse and distribution permitted, subject to the base zoning, Sec. 9-17 Table 9-17.1", () => {
+    const c = airportCard({ TYPE: "AZ-01" });
+    expect(c.title).toBe("Airport zoning · AZ-01");
+    expect(c.rows[0]).toEqual({ label: "Warehouse & distribution", text: "Permitted here, subject to the base zoning (Sec. 9-17, Table 9-17.1)." });
+    expect(c.rows[1].text).toMatch(/Light manufacturing, heavy manufacturing, mini-warehouse and self-storage, wholesale uses, railroad freight yard/);
+    expect(row("AZ-01", "Residential")).toMatch(/Prohibited.*Sec\. 9-16.*all residential uses and some nonresidential uses/);
+    expect(row("AZ-01", "What this is")).toMatch(/Airport Zoning District 1 \(Sec\. 9-14\).*both the base zoning and AZ-01 apply/);
+    expect(c.rows.some((r) => r.href === AIRPORT_CODE_URL)).toBe(true);
   });
-  it("airport property and the avigation easement use ordinary words and no invented terms", () => {
-    expect(JSON.stringify(airportCard({ TYPE: "AIRPORT PROPERTY" }))).toMatch(/owned by the Sugar Land Regional Airport/);
-    expect(JSON.stringify(airportCard({ TYPE: "AVIGATION EASEMENT" }))).toMatch(/fly over/);
+  it("AZ-02: warehouse and distribution NOT permitted; manufacturing and wholesale blank; only the rows that were read are listed as permitted", () => {
+    const c = airportCard({ TYPE: "AZ-02" });
+    expect(c.rows[0]).toEqual({ label: "Warehouse & distribution", text: "Not permitted here (Sec. 9-17, Table 9-17.1)." });
+    expect(row("AZ-02", "Also not permitted")).toMatch(/Light and heavy manufacturing and wholesale uses/);
+    expect(row("AZ-02", "Permitted")).toMatch(/Includes municipal airport, railroad freight yard and utilities\. Table 9-17\.1 has the full schedule/);
+    expect(row("AZ-02", "What this is")).toMatch(/Airport Zoning District 2 \(Sec\. 9-14\).*both the base zoning and AZ-02 apply/);
+    expect(row("AZ-02", "Residential")).toMatch(/Sec\. 9-16/);
+  });
+  it("ANID: Airport Noise Impact District, no land use restrictions, consider the noise, Sec. 9-16 plat statement", () => {
+    const c = airportCard({ TYPE: "ANID" });
+    expect(c.rows.map((r) => r.text)).toEqual(expect.arrayContaining(["Airport Noise Impact District (Sec. 9-15).", "No land use restrictions are imposed in it. Landowners should consider the noise impact.", "Sec. 9-16 requires a statement on the plat."]));
+  });
+  it("avigation easement and airport property are LABELS ONLY — no code text is claimed", () => {
+    for (const t of ["AVIGATION EASEMENT", "AIRPORT PROPERTY"]) expect(row(t, "Meaning")).toBe("Label only — the code text for this area was not read.");
     expect(airportCard({ TYPE: "SOMETHING NEW" }).rows[0].text).toMatch(/Something New/);
+  });
+  it("NO card states a height or a distance, and none claims a height zone", () => {
+    for (const t of Object.keys(AIRPORT_AREAS)) {
+      expect(text(t), t).not.toMatch(/\b\d+\s*(ft|feet|foot|')/i);
+      expect(text(t), t).not.toMatch(/AGL|MSL|maximum height|height limit|height zone|conical|transitional|horizontal/i);
+    }
+  });
+  it("the info line says the code governs and that height limits are on a separate city map", () => {
+    const i = ALL_LAYERS.sl_airport_zoning.infoCaveat;
+    expect(i).toMatch(/Chapter 9 governs/);
+    expect(i).toMatch(/Height limits are on a separate city map/);
+    expect(ALL_LAYERS.sl_airport_zoning.note).not.toMatch(/height/i);
+    expect(AIRPORT_CODE_URL).toBe("https://library.municode.com/tx/sugar_land/codes/land_development_code?nodeId=CH9SULAREAIZORE");
   });
 });
 
