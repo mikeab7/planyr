@@ -91,9 +91,9 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
 });
 
 describe("B898 — Fire hydrants consolidated to ONE layer", () => {
-  it("exactly the 4 hydrant-relevant adapters merge under fire_hydrants", () => {
+  it("exactly the 5 hydrant-relevant adapters merge under fire_hydrants", () => {
     const members = membersOf("fire_hydrants");
-    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "ms_ob_hydrants", "osm_hydrants"].sort()); // B2507057 — Olive Branch's own hydrants
+    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "ms_ob_hydrants", "osm_hydrants", "sl_hydrants"].sort()); // B2507057 — Olive Branch's own hydrants; NEW-1 — the City of Sugar Land's
   });
   it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire Hydrants'", () => {
     expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire Hydrants");

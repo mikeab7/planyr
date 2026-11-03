@@ -573,6 +573,9 @@
       "role",
       "team_id"
     ],
+    "mailbox_proofs": [
+      "email"
+    ],
     "jurisdictions": [
       "name"
     ],

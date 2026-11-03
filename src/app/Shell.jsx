@@ -46,6 +46,7 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 const InviteLanding = lazy(() => import("./InviteLanding.jsx"));
 // Emailed sign-in / password-reset link (NEW-1): loaded only when the address carries ?authlink=, so no other visit pays for it.
 const AuthLinkLanding = lazy(() => import("./AuthLinkLanding.jsx"));
+const WaitingInviteNotice = lazy(() => import("./WaitingInviteNotice.jsx")); // NEW-1 (2026-11-02): "an invitation is waiting" after a no-link sign-up
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
@@ -841,8 +842,10 @@ export default function Shell() {
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
-      {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} /></Suspense>}
+      {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} onOpenWork={goDashboard} onOpenTeam={() => openAccount("team")} /></Suspense>}
       {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} onGoTo={goToLinkRoute} /></Suspense>}
+      {/* Item 6 (NEW-1, 2026-11-02): signed up with an invited address but without the link → tell them an invitation is waiting. */}
+      {user && authKnown && !hasInviteLink && <Suspense fallback={null}><WaitingInviteNotice user={user} /></Suspense>}
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}
